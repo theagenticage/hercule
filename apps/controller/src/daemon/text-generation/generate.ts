@@ -418,7 +418,12 @@ const make = Effect.gen(function* () {
                       }
                       // A database failure ends the call like one in `prepare` above.
                       const unlisted = yield* Effect.orDie(
-                        unlistedModels.listUnlistedModels(providerAccountId, harnessId, runnerId),
+                        unlistedModels.listUnlistedModels(
+                          providerAccountId,
+                          harnessId,
+                          runnerId,
+                          model,
+                        ),
                       );
                       yield* Ref.set(requestSent, true);
                       return yield* connections.sendRequest(

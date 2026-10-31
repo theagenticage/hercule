@@ -149,10 +149,15 @@ describe("parseModelsBody", () => {
     ]);
   });
 
-  it("leaves out an item whose name is too long, and drops fields that are out of range", () => {
+  it("shows a model whose name is too long by its id", () => {
+    expect(parseModelsBody({ data: [{ id: "a/long", name: "x".repeat(513) }] })).toEqual([
+      { slug: "a/long", name: "a/long", imageInput: null, options: [] },
+    ]);
+  });
+
+  it("leaves out the fields that are out of range, and keeps the model", () => {
     const body = {
       data: [
-        { id: "a/long", name: "x".repeat(513) },
         {
           id: "a/odd",
           name: "Odd",
@@ -167,6 +172,61 @@ describe("parseModelsBody", () => {
     expect(parseModelsBody(body)).toEqual([
       { slug: "a/odd", name: "Odd", imageInput: null, options: [] },
     ]);
+  });
+
+  it("keeps a model whose creation time is sent in milliseconds, without its release date", () => {
+    // Read as seconds, this is the year 33658, which no timestamp can hold.
+    const models = parseModelsBody({ data: [{ id: "a/b", name: "B", created: 1761000000000 }] });
+
+    expect(models).toEqual([{ slug: "a/b", name: "B", imageInput: null, options: [] }]);
+  });
+
+  it("reads a price sent as a number or as a numeric string", () => {
+    const models = parseModelsBody({
+      data: [{ id: "a/b", pricing: { prompt: 0.0000008, completion: "0.0000032" } }],
+    });
+
+    expect(models[0]).toMatchObject({ inputPrice: 0.8, outputPrice: 3.2 });
+  });
+
+  it("drops only a field of the wrong type, and keeps the model and its other fields", () => {
+    const models = parseModelsBody({
+      data: [
+        {
+          id: "a/b",
+          name: "A: B",
+          context_length: "8192",
+          created: "yesterday",
+          architecture: "text",
+          pricing: { prompt: { usd: 1 }, completion: "0.000002" },
+          top_provider: null,
+          supported_parameters: ["tools", 7],
+        },
+      ],
+    });
+
+    expect(models).toEqual([
+      {
+        slug: "a/b",
+        name: "B",
+        maker: "A",
+        imageInput: null,
+        options: [],
+        outputPrice: 2,
+        tools: true,
+        reasoning: false,
+      },
+    ]);
+  });
+
+  it("throws, naming the count, when the list has items and none could be read", () => {
+    expect(() => parseModelsBody({ data: [{ name: "No id" }, { id: 7 }, null] })).toThrow(
+      "OpenRouter listed 3 models and none could be read",
+    );
+  });
+
+  it("returns no models for an empty list", () => {
+    expect(parseModelsBody({ data: [] })).toEqual([]);
   });
 
   it.each([null, [], "models", {}, { data: "models" }, { data: null }])(

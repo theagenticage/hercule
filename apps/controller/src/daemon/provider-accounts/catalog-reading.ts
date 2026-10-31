@@ -105,7 +105,7 @@ export const makeCatalogReading = (sendCatalogProbe: SendCatalogProbe) =>
      * models stay. Does nothing when the account was deleted meanwhile.
      */
     const recordUnservedRead = ({ providerAccountId, message }: UnservedRead) =>
-      probes.readProbeStamp(providerAccountId, false).pipe(
+      probes.buildReadStamp(providerAccountId).pipe(
         Effect.flatMap((stamp) =>
           catalogs.recordCatalogRead(providerAccountId, { _tag: "failed", message }, stamp),
         ),
@@ -120,7 +120,7 @@ export const makeCatalogReading = (sendCatalogProbe: SendCatalogProbe) =>
      * the account was deleted meanwhile.
      */
     const readFromApi = ({ providerAccountId }: ApiRead) =>
-      probes.readProbeStamp(providerAccountId, false).pipe(
+      probes.buildReadStamp(providerAccountId).pipe(
         Effect.flatMap((stamp) => providerAccounts.readCatalogWithKey(providerAccountId, stamp)),
         Effect.catchIf(
           (error): error is NotFound => error instanceof NotFound,

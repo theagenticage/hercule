@@ -481,7 +481,7 @@ describe("SessionService.claimStarts", () => {
     );
   });
 
-  it("puts the models the harness does not list on the frame, asking once for each account and harness", async () => {
+  it("puts the models the harness does not list on the frame, asking once for each account, harness and model", async () => {
     const unlisted: ReadonlyArray<CatalogModel> = [
       { slug: "api-only", name: "API only", imageInput: null, options: [], contextWindow: 200_000 },
     ];
@@ -491,9 +491,11 @@ describe("SessionService.claimStarts", () => {
         const providerAccountId = mintId();
         const runnerId = mintId();
         const spec = buildSpec(providerAccountId, "clever");
+        const otherSpec = buildSpec(providerAccountId, "other");
         yield* insertQueuedSession(runnerId, { providerAccountId, spec });
         yield* insertQueuedSession(runnerId, { providerAccountId, spec });
-        const claimed = yield* claimStarting(runnerId, 2, undefined, (...args) => {
+        yield* insertQueuedSession(runnerId, { providerAccountId, spec: otherSpec });
+        const claimed = yield* claimStarting(runnerId, 3, undefined, (...args) => {
           asked.push(args);
           return Effect.succeed(unlisted);
         });
@@ -501,8 +503,15 @@ describe("SessionService.claimStarts", () => {
       }),
     );
 
-    expect(result.claimed.map((claim) => claim.frame.unlistedModels)).toEqual([unlisted, unlisted]);
-    expect(asked).toEqual([[result.providerAccountId, HARNESS_ID, result.runnerId]]);
+    expect(result.claimed.map((claim) => claim.frame.unlistedModels)).toEqual([
+      unlisted,
+      unlisted,
+      unlisted,
+    ]);
+    expect(asked).toEqual([
+      [result.providerAccountId, HARNESS_ID, result.runnerId, "clever"],
+      [result.providerAccountId, HARNESS_ID, result.runnerId, "other"],
+    ]);
   });
 
   it("leaves unlistedModels off the frame when the harness is told about no model", async () => {

@@ -34,13 +34,7 @@ import { bounded, SecretValue } from "../strings";
 import { VersionVerdict } from "./harness";
 
 /** Re-exported rather than copied, so the public shape cannot drift from the wire shape. */
-export {
-  CatalogModel,
-  ModelDescriptor,
-  ModelDetails,
-  ModelOption,
-  SnapshotAuth,
-} from "@hercule/protocol";
+export { CatalogModel, ModelDescriptor, ModelOption, SnapshotAuth } from "@hercule/protocol";
 
 /** The longest label an account may carry. */
 export const MAX_PROVIDER_ACCOUNT_LABEL_LENGTH = 128;
@@ -88,7 +82,8 @@ export type AccountUsageReading = Schema.Schema.Type<typeof AccountUsageReading>
  * - `not-signed-in`: the account needs a login on that machine (or the login
  *   there belongs to someone else), or the vendor refused the stored key.
  * - `credential-missing`: the controller holds no key or token for the account.
- * - `token-expired`: the account's token has passed its expiry.
+ * - `token-expired`: the account's key or token has passed its expiry. The
+ *   name says token for historical reasons; it covers an expired key too.
  * - `harness-missing`: the harness is not installed on the runner.
  * - `harness-too-old`: the harness is installed but below the lowest version
  *   Hercule supports.

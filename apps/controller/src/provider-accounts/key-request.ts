@@ -36,6 +36,9 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 const API_KEY_PLACEHOLDER = "{apiKey}";
 
+/** The connection failed or closed while the response body was being read. */
+export class ResponseBodyUnreadable extends Data.TaggedError("ResponseBodyUnreadable") {}
+
 /** The request could not be completed: the provider was not reached, or did not answer in time. */
 export class KeyRequestUnreachable extends Data.TaggedError("KeyRequestUnreachable") {}
 
@@ -77,8 +80,9 @@ export const readRefusalMessage = (body: string, fallback: string): string => {
 
 /**
  * Reads at most `maxBytes` of the response body as text and ignores the rest.
- * Returns the text and whether the whole body fitted. Returns an empty,
- * complete body when the body cannot be read.
+ * Returns the text and whether the whole body fitted. Fails with
+ * `ResponseBodyUnreadable` when the connection fails or closes before the body
+ * ends (a body that does not end is not a body that is empty).
  *
  * It reads on until it has seen one byte more than `maxBytes`, so a body of
  * exactly `maxBytes` is complete and a longer one is told apart from it.
@@ -86,7 +90,7 @@ export const readRefusalMessage = (body: string, fallback: string): string => {
 export const readBodyWithin = (
   response: HttpClientResponse.HttpClientResponse,
   maxBytes: number,
-): Effect.Effect<{ readonly text: string; readonly complete: boolean }> =>
+): Effect.Effect<{ readonly text: string; readonly complete: boolean }, ResponseBodyUnreadable> =>
   Effect.gen(function* () {
     const chunks: Array<Uint8Array> = [];
     let size = 0;
@@ -101,7 +105,7 @@ export const readBodyWithin = (
       text: new TextDecoder().decode(Buffer.concat(chunks).subarray(0, maxBytes)),
       complete: size <= maxBytes,
     };
-  }).pipe(Effect.orElseSucceed(() => ({ text: "", complete: true })));
+  }).pipe(Effect.mapError(() => new ResponseBodyUnreadable()));
 
 /**
  * Reads at most 64 kB of the response body as text and ignores the rest. It is
@@ -111,7 +115,10 @@ export const readBodyWithin = (
 export const readBoundedBody = (
   response: HttpClientResponse.HttpClientResponse,
 ): Effect.Effect<string> =>
-  Effect.map(readBodyWithin(response, MAX_BODY_BYTES), ({ text }) => text);
+  readBodyWithin(response, MAX_BODY_BYTES).pipe(
+    Effect.map(({ text }) => text),
+    Effect.orElseSucceed(() => ""),
+  );
 
 /** Checks that the key holds only visible ASCII characters, which is all a header value may safely hold. */
 export const isHeaderSafe = (apiKey: string): boolean => !/[^!-~]/.test(apiKey);

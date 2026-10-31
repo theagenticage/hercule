@@ -413,6 +413,118 @@ describe("recording readings", () => {
   });
 });
 
+describe("an endpoint read's whole answer", () => {
+  const limitedCredit = (remaining: number, takenAt: string): UsageReading => ({
+    kind: "credit",
+    remaining,
+    limit: 100,
+    takenAt,
+  });
+
+  /** An endpoint read whose answer arrived at `takenAt`. */
+  const answerAt = (takenAt: string): UsageOrigin => ({ source: "read", wholeAnswerAt: takenAt });
+
+  it("removes the credit of a key whose limit was taken off, and announces the account", async () => {
+    const { run, announced } = setup();
+    let before = 0;
+    const outcome = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(
+          id,
+          [limitedCredit(50, minutesFromNow(-20))],
+          answerAt(minutesFromNow(-20)),
+        );
+        before = announced.length;
+        yield* TestClock.adjust(60_000);
+        const changed = yield* accountUsage.record(id, [], answerAt(minutesFromNow(1)));
+        return { id, changed, readings: yield* accountUsage.read(id) };
+      }),
+    );
+    expect(outcome.changed).toBe(true);
+    expect(outcome.readings).toEqual([]);
+    expect(announced.slice(before)).toEqual([
+      { _tag: "record", topic: "provider", id: outcome.id, kind: "updated" },
+    ]);
+  });
+
+  it("removes a window the answer no longer gives and keeps the ones it gives", async () => {
+    const { run } = setup();
+    const readings = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(
+          id,
+          [fiveHour(40, minutesFromNow(-20)), weekly(20, minutesFromNow(-20))],
+          answerAt(minutesFromNow(-20)),
+        );
+        yield* accountUsage.record(
+          id,
+          [fiveHour(41, minutesFromNow(-5))],
+          answerAt(minutesFromNow(-5)),
+        );
+        return yield* accountUsage.read(id);
+      }),
+    );
+    expect(readings).toMatchObject([{ kind: "window", window: "five-hour", usedPercent: 41 }]);
+  });
+
+  it("leaves a session's readings alone, because a session reports only what changed", async () => {
+    const { run } = setup();
+    const readings = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-20))], SESSION);
+        yield* accountUsage.record(id, [weekly(20, minutesFromNow(-15))], SESSION);
+        // A later session report of one window removes nothing of the other.
+        yield* accountUsage.record(id, [fiveHour(45, minutesFromNow(-10))], SESSION);
+        // And an endpoint read removes none of what sessions reported.
+        yield* accountUsage.record(id, [], answerAt(NOW));
+        return yield* accountUsage.read(id);
+      }),
+    );
+    expect(readings).toMatchObject([
+      { window: "five-hour", usedPercent: 45, source: "session" },
+      { window: "weekly", usedPercent: 20, source: "session" },
+    ]);
+  });
+
+  it("leaves the readings alone when it is not an endpoint read", async () => {
+    const { run } = setup();
+    const readings = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-20))], READ);
+        yield* accountUsage.record(id, [weekly(20, minutesFromNow(-5))], READ);
+        return yield* accountUsage.read(id);
+      }),
+    );
+    expect(readings).toMatchObject([{ window: "five-hour" }, { window: "weekly" }]);
+  });
+
+  it("does not let an older read remove a reading that was taken after it", async () => {
+    const { run, announced } = setup();
+    let before = 0;
+    const outcome = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [limitedCredit(50, minutesFromNow(-5))], answerAt(NOW));
+        before = announced.length;
+        const changed = yield* accountUsage.record(id, [], answerAt(minutesFromNow(-30)));
+        return { changed, readings: yield* accountUsage.read(id) };
+      }),
+    );
+    expect(outcome.changed).toBe(false);
+    expect(outcome.readings).toMatchObject([{ kind: "credit", remaining: 50 }]);
+    expect(announced.slice(before)).toEqual([]);
+  });
+});
+
 describe("clearing readings", () => {
   const { run } = setup();
 

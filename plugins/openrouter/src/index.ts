@@ -25,7 +25,11 @@ const OPENROUTER_MARK_PATH =
  * the models the key may use, so the catalog comes from OpenRouter's API and
  * not from a harness.
  *
- * What was checked live, and what still needs a real key: spec 16.
+ * What was checked live (2026-10-31): the key endpoint answers 401 for a bogus
+ * key, and the model list answers 200 for any key, so only the key endpoint
+ * tells a good key from a bad one. What still needs a real key: a 200 from the
+ * key endpoint, which the usage and expiry parsing is written from the
+ * documentation for. See spec 16 for the open items.
  */
 const definition: ProviderDefinition = {
   id: "openrouter",
@@ -80,7 +84,8 @@ export const openrouter: Plugin = {
       parseUsageBody: { "api-key": parseKeyBody },
       parseCatalogBody: parseModelsBody,
     }),
-  // Nothing runs on the controller for a provider yet: the definition above is
-  // everything the plugin contributes.
+  // Nothing runs on the controller for a provider: the definition and the two
+  // body parsers passed to `registerProvider` are everything the plugin
+  // contributes.
   activate: () => Effect.succeed(Effect.void),
 };

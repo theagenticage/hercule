@@ -237,7 +237,6 @@ export {
   ModelCatalog,
   ModelCatalogItem,
   ModelDescriptor,
-  ModelDetails,
   ModelOption,
   ProviderAccount,
   ProviderAccountCreateInput,

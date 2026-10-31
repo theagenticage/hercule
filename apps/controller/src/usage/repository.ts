@@ -110,6 +110,34 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Deletes the account's readings that an endpoint read stored
+     * (`source` is `read`), that were taken before `before`, and whose window
+     * (or credit) none of `reported` is a reading of. Returns whether any was deleted. A reading
+     * taken at `before` or later is never deleted, so an older read cannot
+     * remove what a newer one stored. Must run in a transaction.
+     */
+    deleteUnreportedReadings: (
+      providerAccountId: string,
+      reported: ReadonlyArray<UsageReading>,
+      before: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const kept = new Set(reported.map(identifyReading));
+        let deleted = false;
+        for (const identity of READING_ORDER) {
+          if (kept.has(identity)) continue;
+          const rows = yield* sql`
+            DELETE FROM account_usage_readings
+            WHERE provider_account_id = ${uuidFromString(providerAccountId)}
+              AND reading = ${identity} AND source = 'read' AND taken_at < ${before}
+            RETURNING 1 AS removed
+          `;
+          deleted ||= rows.length > 0;
+        }
+        return deleted;
+      }),
+
+    /**
      * Raises the time of the newest session report of the account to `at`.
      * An earlier `at` changes nothing. Does nothing for an account that does
      * not exist. Must run in a transaction.

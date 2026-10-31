@@ -61,7 +61,7 @@ const addCataloguedAccount = Effect.gen(function* () {
 const readFromApi = (accountId: string) =>
   Effect.gen(function* () {
     const probes = yield* ProviderAccountProbes;
-    const stamp = yield* probes.readProbeStamp(accountId, false);
+    const stamp = yield* probes.buildReadStamp(accountId);
     yield* withService((service) => service.readCatalogWithKey(accountId, stamp));
   });
 
@@ -195,6 +195,26 @@ describe("ProviderAccountService.readCatalogWithKey", () => {
     expect(account.failure).toBeNull();
   });
 
+  it("keeps the models, and does not call the answer not JSON, when the connection fails mid-body", async () => {
+    const droppedMidBody = () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"models":[{"id":'));
+            controller.error(new Error("connection reset"));
+          },
+        }),
+      );
+
+    const { catalog, account } = await readAfterGoodRead(droppedMidBody);
+
+    expect(slugsOf(catalog)).toEqual(["m1", "m2"]);
+    expect(catalog.error).toBe(
+      "The connection to Catalogued failed before the list of models ended.",
+    );
+    expect(account.failure).toBeNull();
+  });
+
   it("keeps the models when the provider does not answer within the timeout", async () => {
     const { catalog, account } = await readAfterGoodRead(() => "silent", {
       timeout: Duration.millis(20),
@@ -252,6 +272,45 @@ describe("ProviderAccountService.readCatalogWithKey", () => {
     expect(slugsOf(catalog)).toEqual(["m1", "m2"]);
     expect(catalog.error).toBe(
       "Catalogued lists 1,100 models, more than the 1,024 Hercule can keep.",
+    );
+  });
+
+  it("keeps the first model of each slug and logs how many it dropped", async () => {
+    const { steps, logged } = await readInSequence([
+      () =>
+        json({
+          models: [
+            { id: "a", name: "First a" },
+            { id: "b", name: "B" },
+            { id: "a", name: "Second a" },
+            { id: "a", name: "Third a" },
+          ],
+        }),
+    ]);
+
+    const { catalog } = steps[0]!;
+    expect(catalog.models.map((model) => [model.slug, model.name])).toEqual([
+      ["a", "First a"],
+      ["b", "B"],
+    ]);
+    expect(catalog.error).toBeNull();
+    expect(logged.join("\n")).toContain("2 models whose slug it had already listed");
+  });
+
+  it("keeps the models and says so when the list is over 1 MiB once encoded, though it has few enough models", async () => {
+    // 1,024 models of a 512-character slug and a 512-character name encode to over 1 MiB.
+    const { catalog } = await readAfterGoodRead(() =>
+      json({
+        models: Array.from({ length: 1024 }, (_, index) => ({
+          id: `${index}-`.padEnd(512, "x"),
+          name: `${index}-`.padEnd(512, "y"),
+        })),
+      }),
+    );
+
+    expect(slugsOf(catalog)).toEqual(["m1", "m2"]);
+    expect(catalog.error).toBe(
+      "The list of models Catalogued sent is larger than the 1 MiB Hercule keeps, so Hercule keeps the list it already has.",
     );
   });
 
@@ -343,7 +402,6 @@ describe("ProviderAccountService.readCatalogWithKey", () => {
         service.readCatalogWithKey("0199e0e7-9999-7000-8000-000000000000", {
           sentAt: "2026-10-31T10:00:00.000Z",
           credentialGeneration: 0,
-          readUsage: false,
         }),
       ),
       api.client,

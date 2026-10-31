@@ -100,9 +100,10 @@ const storeCatalog = (accountId: string, models: ReadonlyArray<CatalogModel>) =>
     );
   });
 
-const listUnlisted = (accountId: string, harnessId: string, runnerId: string) =>
+/** Lists the unlisted models for a frame that runs `model`, which only matters for a runner with no snapshot. */
+const listUnlisted = (accountId: string, harnessId: string, runnerId: string, model = "a") =>
   Effect.flatMap(UnlistedModels, (unlisted) =>
-    unlisted.listUnlistedModels(accountId, harnessId, runnerId),
+    unlisted.listUnlistedModels(accountId, harnessId, runnerId, model),
   );
 
 /** Runs `body` against an account of `apiprov`, running in `wide` by default, whose catalog holds `models`. */
@@ -150,28 +151,43 @@ describe("UnlistedModels.listUnlistedModels", () => {
     expect(unlisted.map((model) => model.slug)).toEqual(["b", "c"]);
   });
 
-  it("falls back to another runner's snapshot when the target runner has none", async () => {
+  it("returns only the model the frame runs for a runner with no snapshot, whatever another runner lists", async () => {
     const unlisted = await withApiAccount((accountId) =>
       Effect.gen(function* () {
         const target = yield* addRunner("target");
         const other = yield* addRunner("other");
         yield* addSnapshot(accountId, WIDE, other, listing("a", "b"));
-        return yield* listUnlisted(accountId, WIDE, target);
+        return yield* listUnlisted(accountId, WIDE, target, "c");
       }),
     );
 
-    expect(unlisted.map((model) => model.slug)).toEqual(["c"]);
+    expect(unlisted).toEqual([catalog[2]]);
   });
 
-  it("returns every catalog model when the harness has told us nothing", async () => {
+  it("returns nothing for a runner with no snapshot when the catalog lacks the model the frame runs", async () => {
     const unlisted = await withApiAccount((accountId) =>
       Effect.gen(function* () {
-        const runner = yield* addRunner("laptop");
-        return yield* listUnlisted(accountId, WIDE, runner);
+        const target = yield* addRunner("target");
+        return yield* listUnlisted(accountId, WIDE, target, "not-in-catalog");
       }),
     );
 
-    expect(unlisted).toEqual(catalog);
+    expect(unlisted).toEqual([]);
+  });
+
+  it("treats the snapshot of a signed-out probe as no snapshot", async () => {
+    const unlisted = await withApiAccount((accountId) =>
+      Effect.gen(function* () {
+        const target = yield* addRunner("target");
+        yield* addSnapshot(accountId, WIDE, target, {
+          ...listing("a", "b"),
+          auth: { status: "unauthenticated" },
+        });
+        return yield* listUnlisted(accountId, WIDE, target, "c");
+      }),
+    );
+
+    expect(unlisted).toEqual([catalog[2]]);
   });
 
   it("returns nothing for a harness that runs only the models it lists itself", async () => {
@@ -198,7 +214,7 @@ describe("UnlistedModels.listUnlistedModels", () => {
     expect(unlisted).toEqual([]);
   });
 
-  it("returns nothing for the harness the provider's catalog is read from, but the catalog for another harness that runs any model", async () => {
+  it("returns nothing for the harness the provider's catalog is read from, but the frame's model for another harness that runs any model", async () => {
     const { source, other } = await runWithAccounts(
       Effect.gen(function* () {
         const account = yield* addAccount({ providerId: PROBED_PROVIDER, defaultHarnessId: WIDE });
@@ -214,6 +230,6 @@ describe("UnlistedModels.listUnlistedModels", () => {
     );
 
     expect(source).toEqual([]);
-    expect(other).toEqual(catalog);
+    expect(other).toEqual([catalog[0]]);
   });
 });

@@ -644,7 +644,7 @@ describe("which catalog reads are due, and where they go", () => {
         yield* catalogs.recordCatalogRead(
           account.id,
           { _tag: "failed", message: chosen.unserved[0]!.message },
-          yield* probes.readProbeStamp(account.id, false),
+          yield* probes.buildReadStamp(account.id),
         );
         return { chosen, catalog: yield* readCatalog(account.id) };
       }),
@@ -703,7 +703,7 @@ describe("which catalog reads are due, and where they go", () => {
           yield* catalogs.recordCatalogRead(
             account.id,
             { _tag: "listed", models: [model("a")] },
-            yield* probes.readProbeStamp(account.id, false),
+            yield* probes.buildReadStamp(account.id),
           );
           const fresh = yield* choose();
           const forced = yield* choose({ force: true });
@@ -718,6 +718,40 @@ describe("which catalog reads are due, and where they go", () => {
       expect(outcome.fresh.apiReads).toEqual([]);
       expect(outcome.forced.apiReads).toHaveLength(1);
       expect(outcome.stale.apiReads).toHaveLength(1);
+    });
+
+    it("skips a due read of an account whose key the provider refused, until the read is forced", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const accounts = yield* providerAccountRepository;
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          const before = yield* choose();
+          yield* withTransaction(
+            sql,
+            accounts.markCredentialRefused(
+              account.id,
+              account.credentialGeneration,
+              "Key revoked",
+              "2026-10-31T10:00:00.000Z",
+            ),
+          );
+          return {
+            account,
+            before,
+            refused: yield* choose(),
+            forced: yield* choose({ force: true }),
+          };
+        }),
+      );
+
+      const read = [{ providerAccountId: outcome.account.id }];
+      expect(outcome.before.apiReads).toEqual(read);
+      expect(outcome.refused.apiReads).toEqual([]);
+      expect(outcome.forced.apiReads).toEqual(read);
     });
   });
 

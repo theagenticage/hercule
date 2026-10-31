@@ -13,7 +13,13 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createValidationError, type Validation } from "@hercule/contract";
 import { ATTACHMENTS_CAPABILITY, type ModelDescriptor } from "@hercule/protocol";
-import { findModels, providerAccountRepository } from "../provider-accounts";
+import { PluginHost } from "../plugins";
+import {
+  findModels,
+  findRunDescriptor,
+  modelCatalogRepository,
+  providerAccountRepository,
+} from "../provider-accounts";
 import { runnerRepository } from "../runners";
 
 /** What the controller knows about where a turn would run. */
@@ -22,10 +28,10 @@ export interface AttachmentRecipient {
   /** The capabilities the runner and the controller agreed on at its last hello. */
   readonly capabilities: ReadonlyArray<string>;
   /**
-   * The models the runner last reported for the session's provider account in
-   * the session's harness. Empty when it has reported none.
+   * What the session's harness runs the turn's model with (`findRunDescriptor`),
+   * or `undefined` when nothing says what the model is.
    */
-  readonly models: ReadonlyArray<ModelDescriptor>;
+  readonly modelDescriptor: ModelDescriptor | undefined;
   /** The slug of the model the turn runs on. */
   readonly model: string;
 }
@@ -67,7 +73,8 @@ const formatMegabytes = (bytes: number, round: (value: number) => number): strin
  *
  * - the runner did not agree to the attachments capability, so it runs an
  *   older build that would drop the images;
- * - the model is not among those the runner reported, so nothing says it
+ * - nothing says what the model is (it is neither in the runner's reported
+ *   models nor declared by the catalog the harness takes), so nothing says it
  *   takes images, and an unknown answer never counts as yes;
  * - the model reported that it takes no images;
  * - an image is larger than the model's own limit. The message names the
@@ -82,7 +89,7 @@ export const describeAttachmentRefusal = (
       `Runner \`${recipient.runnerName}\` runs an older Hercule that can't take images. ` +
       "Update the runner or send the prompt without images."
     );
-  const model = recipient.models.find((descriptor) => descriptor.slug === recipient.model);
+  const model = recipient.modelDescriptor;
   if (model === undefined)
     return (
       `\`${recipient.model}\` is not in the models runner \`${recipient.runnerName}\` reported, ` +
@@ -112,29 +119,43 @@ export const describeAttachmentRefusal = (
  * `undefined` when they can (`describeAttachmentRefusal`). A turn without
  * attachments reads nothing and is never refused.
  *
- * The runner's capabilities are the ones it agreed to at its last hello, and
- * its models are the ones it last reported for the session's provider
- * account in the session's harness, else the newest list any runner
- * reported (`findModels`). Both are read from the database, so the check also works while
- * the runner is offline. A snapshot that no longer decodes counts as no
- * models reported, so the turn is refused with the message for a model that
- * is not in the list: an unknown answer never counts as yes.
+ * The runner's capabilities are the ones it agreed to at its last hello. The
+ * model is described by `findRunDescriptor`: the model as the session's
+ * provider account lists it in the session's harness on the session's runner,
+ * else the newest list any runner reported (`findModels`), else the account's
+ * Model Catalog when the harness takes catalog declarations. All of it is read
+ * from the database, so the check also works while the runner is offline. A
+ * snapshot or catalog that no longer decodes counts as nothing reported, so
+ * the turn is refused with the message for a model that is not in the list:
+ * an unknown answer never counts as yes.
  */
 export const findAttachmentRefusal = (
   turn: AttachmentTurn,
-): Effect.Effect<string | undefined, SqlError, SqlClient.SqlClient> =>
+): Effect.Effect<string | undefined, SqlError, SqlClient.SqlClient | PluginHost> =>
   Effect.gen(function* () {
     if (turn.attachments.length === 0) return undefined;
     // A session's runner row is never deleted while the session exists.
     const runner = Option.getOrThrow(yield* (yield* runnerRepository).read(turn.runnerId));
-    const snapshots = yield* (yield* providerAccountRepository)
+    const accounts = yield* providerAccountRepository;
+    const snapshots = yield* accounts
       .listHarnessSnapshots(turn.providerAccountId, turn.harnessId)
       .pipe(Effect.catchTag("SchemaError", () => Effect.succeed([])));
+    const catalog = yield* (yield* modelCatalogRepository)
+      .readOne(turn.providerAccountId)
+      .pipe(Effect.catchTag("SchemaError", () => Effect.succeed(Option.none())));
+    const host = yield* PluginHost;
+    const account = Option.getOrUndefined(yield* accounts.one(turn.providerAccountId));
+    const modelDescriptor = findRunDescriptor(
+      (yield* host.providers()).find((one) => one.id === account?.providerId),
+      (yield* host.harnesses()).find((one) => one.id === turn.harnessId),
+      findModels(snapshots, turn.runnerId).find((one) => one.slug === turn.model),
+      Option.getOrUndefined(catalog)?.models.find((one) => one.slug === turn.model),
+    );
     return describeAttachmentRefusal(
       {
         runnerName: runner.name,
         capabilities: runner.negotiatedCapabilities ?? [],
-        models: findModels(snapshots, turn.runnerId),
+        modelDescriptor,
         model: turn.model,
       },
       turn.attachments,
@@ -148,7 +169,7 @@ export const findAttachmentRefusal = (
  */
 export const refuseUnacceptedAttachments = (
   turn: AttachmentTurn,
-): Effect.Effect<void, Validation | SqlError, SqlClient.SqlClient> =>
+): Effect.Effect<void, Validation | SqlError, SqlClient.SqlClient | PluginHost> =>
   Effect.flatMap(findAttachmentRefusal(turn), (refusal) =>
     refusal === undefined
       ? Effect.void

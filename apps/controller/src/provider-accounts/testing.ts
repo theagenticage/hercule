@@ -161,7 +161,8 @@ export const METERED: ProviderDefinition = {
 
 /**
  * Reads Metered's usage body: `{ "used": 40 }` is a five-hour reading of 40%,
- * `{ "refuse": "..." }` is a refusal, `{ "nothing": true }` makes the parser
+ * and `"weekly": 20` beside it adds a weekly reading of 20%. `{ "empty": true }`
+ * is an accepted answer with no readings. `{ "refuse": "..." }` is a refusal, `{ "nothing": true }` makes the parser
  * return nothing, and any other body is a defect the parser throws on. A
  * reading may also carry `"expires"`: a timestamp is the key's expiry, `null`
  * says the key does not expire, and leaving it out says nothing about expiry.
@@ -169,12 +170,15 @@ export const METERED: ProviderDefinition = {
 const parseMeteredUsageBody: ParseUsageBody = (body, takenAt) => {
   const answer = body as {
     used?: number;
+    weekly?: number;
+    empty?: boolean;
     refuse?: string;
     nothing?: boolean;
     expires?: string | null;
   };
   if (typeof answer.refuse === "string") return { refused: answer.refuse };
   if (answer.nothing === true) return undefined as never;
+  if (answer.empty === true) return { readings: [] };
   if (typeof answer.used !== "number") {
     throw new Error("not a Metered answer\nsecond line \u001b[31mred");
   }
@@ -188,6 +192,18 @@ const parseMeteredUsageBody: ParseUsageBody = (body, takenAt) => {
         hit: false,
         takenAt,
       },
+      ...(answer.weekly === undefined
+        ? []
+        : [
+            {
+              kind: "window" as const,
+              window: "weekly" as const,
+              usedPercent: answer.weekly,
+              resetsAt: null,
+              hit: false,
+              takenAt,
+            },
+          ]),
     ],
     ...(answer.expires === undefined ? {} : { expiresAt: answer.expires }),
   };
@@ -438,7 +454,7 @@ export const storeCredential = (
     );
   });
 
-/** Sets the time at which the account's token expires. */
+/** Sets the time at which the account's key or token expires. */
 export const setTokenExpiry = (
   accountId: string,
   expiresAt: string,

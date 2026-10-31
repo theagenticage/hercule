@@ -360,13 +360,14 @@ export interface StartNeeds {
   /**
    * Returns the models of the account's Model Catalog that the harness's own
    * list on the runner lacks, for the frame's `unlistedModels`
-   * (`UnlistedModels.listUnlistedModels`). Empty when the harness is told of
-   * none. A database read only.
+   * (`UnlistedModels.listUnlistedModels`), where `model` is the model the
+   * session runs. Empty when the harness is told of none. A database read only.
    */
   readonly listUnlistedModels: (
     providerAccountId: string,
     harnessId: string,
     runnerId: string,
+    model: string,
   ) => Effect.Effect<ReadonlyArray<CatalogModel>, SqlError>;
   /**
    * Builds the session's coordination paragraph (spec 19 section 7.1), or
@@ -794,6 +795,11 @@ const make = Effect.gen(function* () {
   // The attachment claim, the image check and the skills decision read
   // through this service's client.
   const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
+  // The attachment check also reads the plugin host, to tell which models a
+  // harness runs from the account's Model Catalog.
+  const provideAttachmentCheck = <A, E>(
+    check: Effect.Effect<A, E, SqlClient.SqlClient | PluginHost>,
+  ): Effect.Effect<A, E> => check.pipe(provideSql, Effect.provideService(PluginHost, host));
 
   /**
    * Each session's ingest state: its last sequence number and the delta text
@@ -913,7 +919,7 @@ const make = Effect.gen(function* () {
     turn: Omit<AttachmentTurn, "attachments">,
   ): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
-      const refusal = yield* provideSql(
+      const refusal = yield* provideAttachmentCheck(
         findAttachmentRefusal({ ...turn, attachments: input.attachments }),
       );
       if (refusal === undefined) return false;
@@ -2047,7 +2053,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const actor = yield* currentStamp;
         const references = yield* provideSql(readClaimableAttachments(open.attachments));
-        yield* provideSql(
+        yield* provideAttachmentCheck(
           refuseUnacceptedAttachments({
             runnerId: open.runnerId,
             providerAccountId: open.spec.providerAccountId,
@@ -2162,9 +2168,10 @@ const make = Effect.gen(function* () {
         // One answer per account and harness, because every queued session of
         // a pair gets the same one and the check reads the whole fleet.
         const runnableRefusals = new Map<string, string | null>();
-        // Likewise one list per account and harness: the catalog is large and
-        // the same for every session of the pair.
-        const unlistedModelsByPair = new Map<string, ReadonlyArray<CatalogModel>>();
+        // Likewise one list per account, harness and model: the catalog is
+        // large, and the list depends on the session's model when the runner
+        // has no list of its own yet.
+        const unlistedModelsByRun = new Map<string, ReadonlyArray<CatalogModel>>();
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
         // room is for sessions that can start, not for specs that cannot.
@@ -2309,14 +2316,16 @@ const make = Effect.gen(function* () {
             }
             // Decided at every start, so a resume or a fork sees the catalog as
             // it is now.
-            let unlistedModels = unlistedModelsByPair.get(pair);
+            const runKey = `${pair}/${row.modelSelection.model}`;
+            let unlistedModels = unlistedModelsByRun.get(runKey);
             if (unlistedModels === undefined) {
               unlistedModels = yield* needs.listUnlistedModels(
                 row.providerAccountId,
                 row.harnessId,
                 runnerId,
+                row.modelSelection.model,
               );
-              unlistedModelsByPair.set(pair, unlistedModels);
+              unlistedModelsByRun.set(runKey, unlistedModels);
             }
             // Saved so a client can read exactly the library skills this
             // session got. A runner that cannot load skills gets none, so
@@ -2775,7 +2784,7 @@ const make = Effect.gen(function* () {
         const references = yield* provideSql(readClaimableAttachments(taking.attachments));
         if (references.length > 0) {
           const session = Option.getOrThrow(yield* sessions.one(taking.sessionId));
-          yield* provideSql(
+          yield* provideAttachmentCheck(
             refuseUnacceptedAttachments({
               runnerId: session.runnerId,
               providerAccountId: session.providerAccountId,
@@ -3620,7 +3629,7 @@ const make = Effect.gen(function* () {
               readClaimableAttachments(attachments, row.attachments),
             );
             const session = yield* readSession(id);
-            yield* provideSql(
+            yield* provideAttachmentCheck(
               refuseUnacceptedAttachments({
                 runnerId: session.runnerId,
                 providerAccountId: session.providerAccountId,

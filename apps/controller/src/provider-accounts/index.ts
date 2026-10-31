@@ -46,6 +46,7 @@ export {
   type ProbeOutcome,
   type ProbePair,
   type ProbeStamp,
+  type ReadStamp,
 } from "./probes";
 export {
   providerAccountRepository,
@@ -53,6 +54,7 @@ export {
   type StoredSnapshot,
 } from "./repository";
 export { describeProviderAccount } from "./runnability";
+export { findRunDescriptor, takesCatalogDeclarations } from "./run-descriptor";
 export { UnlistedModels, UnlistedModelsLayer } from "./unlisted-models";
 export {
   ProviderAccountService,

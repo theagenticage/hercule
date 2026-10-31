@@ -2633,7 +2633,7 @@ export const CLI = {
   },
   "providerAccount.refresh": {
     command: "provider-account refresh",
-    help: "Reads the account's Model Catalog again. A provider's catalog is read either by probing the account on every runner where it can run, or by the controller from the provider's API with one request. It returns the account at once, before the reads end. The outcome arrives later: run `hercule provider-account read` to see the new model count, the time of the read, and the error of a failed read. A failed read keeps the last good catalog.",
+    help: "Reads the account's Model Catalog again. It makes one read, not a read on every runner: a probe of the account on one runner, for a provider whose catalog comes from a harness, or one request from the controller to the provider's API, for a provider whose catalog comes from there. It returns the account at once, before the reads end. The outcome arrives later: run `hercule provider-account read` to see the new model count, the time of the read, and the error of a failed read. A failed read keeps the last good catalog.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {

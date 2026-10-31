@@ -217,10 +217,15 @@ describe("ProviderAccountService.readUsageWithKey", () => {
     /**
      * Reads the usage of a Metered account whose provider answers `answer`
      * only after the key has been replaced. When `refuseNewKey` is true, the
-     * new key is read, and refused, before the first read ends. Returns the
+     * new key is read before the first read ends, and the provider answers
+     * that read with `newKeyAnswer`, a refusal unless given. Returns the
      * account as the user sees it afterwards.
      */
-    const readWhileKeyIsReplaced = (answer: () => Response, refuseNewKey: boolean) => {
+    const readWhileKeyIsReplaced = (
+      answer: () => Response,
+      refuseNewKey: boolean,
+      newKeyAnswer: () => Response = () => refusal("the new key is refused"),
+    ) => {
       const hook: { replaceKey: Effect.Effect<unknown> | undefined } = { replaceKey: undefined };
       let usageRequests = 0;
       const client = HttpClient.make((request) =>
@@ -231,7 +236,7 @@ describe("ProviderAccountService.readUsageWithKey", () => {
           usageRequests += 1;
           // The first usage request is the read in flight. A second one reads the new key.
           if (usageRequests > 1) {
-            return HttpClientResponse.fromWeb(request, refusal("the new key is refused"));
+            return HttpClientResponse.fromWeb(request, newKeyAnswer());
           }
           yield* hook.replaceKey ?? Effect.void;
           return HttpClientResponse.fromWeb(request, answer());
@@ -275,6 +280,18 @@ describe("ProviderAccountService.readUsageWithKey", () => {
 
       expect(account.usage).toEqual([]);
       expect(account.failure).toMatchObject({ message: "the new key is refused" });
+    });
+
+    it("removes none of the new key's readings when the old key's answer has none", async () => {
+      const account = await readWhileKeyIsReplaced(
+        () => json({ empty: true }),
+        true,
+        () => json({ used: 50 }),
+      );
+
+      expect(account.usage).toMatchObject([
+        { kind: "window", window: "five-hour", usedPercent: 50 },
+      ]);
     });
   });
 
@@ -354,6 +371,60 @@ describe("ProviderAccountService.readUsageWithKey", () => {
     );
 
     expect(api.requests).toEqual([]);
+  });
+});
+
+describe("the readings a usage read no longer reports", () => {
+  /**
+   * Reads the usage of a new Metered account once for each of `bodies`, with a
+   * short wait before each so every read is taken at a later time. Returns the
+   * account's readings after each read, and how often each read announced the
+   * account.
+   */
+  const readBodies = async (bodies: ReadonlyArray<unknown>) => {
+    let next = 0;
+    const api = buildFakeProviderApi(() => json(bodies[next++]));
+    const recorder = buildAnnouncementRecorder();
+    return runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addMeteredAccount;
+        const afterEach = [];
+        for (let read = 0; read < bodies.length; read++) {
+          yield* Effect.sleep("5 millis");
+          const before = recorder.announced.length;
+          yield* withService((service) => service.readUsageWithKey(added.id));
+          afterEach.push({
+            usage: (yield* withService((service) => service.read(added.id))).usage,
+            announced: recorder.announced
+              .slice(before)
+              .filter((change) => change._tag === "record" && change.id === added.id).length,
+          });
+        }
+        return afterEach;
+      }).pipe(Effect.provide(recorder.listener)),
+      api.client,
+      METERED_PLUGINS,
+    );
+  };
+
+  it("removes a window the provider stopped reporting, and announces the account", async () => {
+    const steps = await readBodies([{ used: 40, weekly: 20 }, { used: 40 }]);
+
+    expect(steps[0]!.usage.map((reading) => reading.kind === "window" && reading.window)).toEqual([
+      "five-hour",
+      "weekly",
+    ]);
+    expect(steps[1]!.usage).toMatchObject([{ kind: "window", window: "five-hour" }]);
+    expect(steps[1]!.announced).toBe(1);
+  });
+
+  it("removes every reading when the provider accepts the key and reports none", async () => {
+    const steps = await readBodies([{ used: 40, weekly: 20 }, { empty: true }, { used: 41 }]);
+
+    expect(steps[1]!.usage).toEqual([]);
+    expect(steps[1]!.announced).toBe(1);
+    // The provider reports a window again, and it is stored again.
+    expect(steps[2]!.usage).toMatchObject([{ window: "five-hour", usedPercent: 41 }]);
   });
 });
 

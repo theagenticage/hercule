@@ -73,7 +73,7 @@ import { ProviderKeyRequests } from "./provider-key-requests";
 import type { StoredModelCatalogSummary } from "./model-catalog-repository";
 import { ModelCatalogs } from "./model-catalogs";
 import { ModelProfileMembership } from "./model-profile-membership";
-import type { ProbeStamp } from "./probes";
+import type { ReadStamp } from "./probes";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
@@ -433,6 +433,30 @@ const make = Effect.gen(function* () {
       ? Effect.die(new Error(`the account kind ${kind.id} has no key field to check`))
       : keyRequests.check(provider, kind, Redacted.make(key));
   };
+
+  /**
+   * Returns the account's stored key, or `Option.none()` when the account has
+   * none or the stored key cannot be decrypted (the latter is logged as a
+   * warning that names `reading`, the thing the caller wanted to read with the
+   * key, such as "usage"). Never logs the key. `secretName` is the name of the
+   * kind's credential Secret.
+   */
+  const readAccountKey = (
+    providerAccountId: string,
+    secretName: string,
+    reading: string,
+  ): Effect.Effect<Option.Option<Redacted.Redacted<string>>, SqlError | Schema.SchemaError> =>
+    secrets.get(buildProviderAccountOwner(providerAccountId), secretName).pipe(
+      // The name comes from the plugin catalog, which refuses names the
+      // secrets store rejects.
+      Effect.catchTag("SecretNameError", Effect.die),
+      Effect.catchTag("SecretDecryptError", (error) =>
+        Effect.logWarning(
+          `Could not read the ${reading} of account ${providerAccountId}: its stored key cannot be decrypted`,
+          error,
+        ).pipe(Effect.as(Option.none<Redacted.Redacted<string>>())),
+      ),
+    );
 
   /**
    * Checks that the account can run in the harness and that the harness is
@@ -1125,7 +1149,10 @@ const make = Effect.gen(function* () {
      * key is never logged.
      *
      * - The provider accepted the key: the readings are stored as read, and
-     *   the account's failure is cleared. When the answer also says when the
+     *   the account's failure is cleared. The answer is the provider's whole
+     *   account of the usage, so a reading it stored earlier and the answer no
+     *   longer gives (a spending limit that was removed, a window that is gone)
+     *   is removed (`AccountUsage.record`). When the answer also says when the
      *   key expires (or that it never does), that is stored too, and a changed
      *   expiry is announced and warns again.
      * - The provider refused the key (a 401, or an answer its plugin reads as
@@ -1163,17 +1190,7 @@ const make = Effect.gen(function* () {
         // The generation is read before the key. A key replaced in between
         // makes this read's outcome stale, and a stale outcome is not stored.
         const generation = account.credentialGeneration;
-        const key = yield* secrets.get(buildProviderAccountOwner(account.id), secretName).pipe(
-          // The name comes from the plugin catalog, which refuses names the
-          // secrets store rejects.
-          Effect.catchTag("SecretNameError", Effect.die),
-          Effect.catchTag("SecretDecryptError", (error) =>
-            Effect.logWarning(
-              `Could not read the usage of account ${account.id}: its stored key cannot be decrypted`,
-              error,
-            ).pipe(Effect.as(Option.none<Redacted.Redacted<string>>())),
-          ),
-        );
+        const key = yield* readAccountKey(account.id, secretName, "usage");
         if (Option.isNone(key)) return;
         const outcome = yield* keyRequests.readUsage(kind.usage, parse, key.value);
         if (outcome._tag === "unavailable") {
@@ -1190,7 +1207,10 @@ const make = Effect.gen(function* () {
               return;
             }
             if (outcome._tag === "readings") {
-              yield* accountUsage.record(account.id, outcome.readings, { source: "read" });
+              yield* accountUsage.record(account.id, outcome.readings, {
+                source: "read",
+                wholeAnswerAt: outcome.takenAt,
+              });
               yield* recordCredentialAccepted(account.id, generation);
               yield* storeReportedExpiry(current.value, outcome.expiresAt);
             } else {
@@ -1209,7 +1229,7 @@ const make = Effect.gen(function* () {
      * the key is never logged.
      *
      * `stamp` is when the read started and which credential the account had
-     * then (`ProviderAccountProbes.readProbeStamp`), taken before this call
+     * then (`ProviderAccountProbes.buildReadStamp`), taken before this call
      * reads the key. The outcome is stored through
      * `ModelCatalogs.recordCatalogRead`:
      *
@@ -1236,7 +1256,7 @@ const make = Effect.gen(function* () {
      */
     readCatalogWithKey: (
       providerAccountId: string,
-      stamp: ProbeStamp,
+      stamp: ReadStamp,
     ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
       Effect.gen(function* () {
         const found = yield* accounts.one(providerAccountId);
@@ -1258,17 +1278,7 @@ const make = Effect.gen(function* () {
         }
         const recordFailedRead = (message: string) =>
           catalogs.recordCatalogRead(account.id, { _tag: "failed", message }, stamp);
-        const key = yield* secrets.get(buildProviderAccountOwner(account.id), secretName).pipe(
-          // The name comes from the plugin catalog, which refuses names the
-          // secrets store rejects.
-          Effect.catchTag("SecretNameError", Effect.die),
-          Effect.catchTag("SecretDecryptError", (error) =>
-            Effect.logWarning(
-              `Could not read the models of account ${account.id}: its stored key cannot be decrypted`,
-              error,
-            ).pipe(Effect.as(Option.none<Redacted.Redacted<string>>())),
-          ),
-        );
+        const key = yield* readAccountKey(account.id, secretName, "models");
         if (Option.isNone(key)) {
           return yield* recordFailedRead(
             `No usable key is stored for this account, so ${provider.displayName} cannot be asked for its models. Set the key again.`,

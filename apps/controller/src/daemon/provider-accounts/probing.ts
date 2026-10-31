@@ -532,7 +532,7 @@ const make = Effect.gen(function* () {
   /**
    * Runs forever. Sweeps the whole fleet every interval, because logins expire
    * and harnesses are upgraded outside Hercule. A sweep can take minutes on a
-   * big fleet, so it runs apart from `watchTokenExpiries`.
+   * big fleet, so it runs apart from `watchCredentialExpiries`.
    */
   const sweepOnTimer: Effect.Effect<void> = Effect.gen(function* () {
     const interval = yield* ProviderAccountProbeInterval;
@@ -543,15 +543,15 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Runs forever. Waits for the next expiry of a stored token and announces
-   * the account on the `provider` topic then, because a token that expires
-   * changes nothing that is stored. The wait is planned again whenever a
-   * snapshot is stored. A new token comes with a sign-in, and a sign-in always
-   * ends in a stored snapshot, so this covers a token that changes without a
-   * clock of its own. With no token to wait for, it waits for the next
-   * snapshot.
+   * Runs forever. Waits for the next expiry of a stored key or token and
+   * announces the account on the `provider` topic then, because a credential
+   * that expires changes nothing that is stored. The wait is planned again
+   * whenever a snapshot is stored. A new token comes with a sign-in, and a
+   * sign-in always ends in a stored snapshot, so this covers a token that
+   * changes without a clock of its own. With no expiry to wait for, it waits
+   * for the next snapshot.
    */
-  const watchTokenExpiries: Effect.Effect<void> = Effect.gen(function* () {
+  const watchCredentialExpiries: Effect.Effect<void> = Effect.gen(function* () {
     const replan = yield* Queue.dropping<void>(1);
     yield* Effect.forkScoped(
       Stream.runForEach(probes.snapshotChanges, () => Queue.offer(replan, undefined)),
@@ -561,11 +561,11 @@ const make = Effect.gen(function* () {
       // A database error must not stop the watcher, so it is logged and the
       // watcher waits for the next snapshot.
       const nextExpiry = yield* probes
-        .findNextTokenExpiry(announcedUntil)
+        .findNextCredentialExpiry(announcedUntil)
         .pipe(
           Effect.catchCause((cause) =>
             Effect.as(
-              Effect.logError("The next token expiry could not be read", cause),
+              Effect.logError("The next credential expiry could not be read", cause),
               Option.none<number>(),
             ),
           ),
@@ -582,17 +582,17 @@ const make = Effect.gen(function* () {
       if (woken === "replan") continue;
       const awake = yield* Clock.currentTimeMillis;
       yield* probes
-        .announceExpiredTokens(announcedUntil, awake)
+        .announceExpiredCredentials(announcedUntil, awake)
         .pipe(
           Effect.catchCause((cause) =>
-            Effect.logError("Expired tokens could not be announced", cause),
+            Effect.logError("Expired credentials could not be announced", cause),
           ),
         );
       announcedUntil = awake;
     }
   }).pipe(Effect.scoped);
 
-  /** Runs forever. Sweeps each runner that connects, the fleet on a timer, and watches the tokens' expiry. */
+  /** Runs forever. Sweeps each runner that connects, the fleet on a timer, and watches the credentials' expiry. */
   const driving: Effect.Effect<void> = Effect.all(
     [
       // Forked, because a runner that answers slowly must not hold up the
@@ -601,7 +601,7 @@ const make = Effect.gen(function* () {
         Effect.forkChild(sweepRunner(runnerId)),
       ),
       sweepOnTimer,
-      watchTokenExpiries,
+      watchCredentialExpiries,
     ],
     { concurrency: "unbounded", discard: true },
   );

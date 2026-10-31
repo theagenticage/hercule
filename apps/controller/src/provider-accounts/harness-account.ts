@@ -130,8 +130,8 @@ const make = Effect.gen(function* () {
      *   `runs`. The message says which and why;
      * - `InvalidState` when the account's kind holds a key or token and none is
      *   stored. A harness never falls back to another login then;
-     * - `InvalidState` when the account's token is past its expiry. The user
-     *   makes a new one;
+     * - `InvalidState` when the account's key or token is past its expiry. The
+     *   user adds a new key or makes a new token;
      * - `InvalidState` when the stored key does not decrypt. The user fixes it
      *   by entering the key again, so it is reported as a state and not as a
      *   fault.

@@ -29,6 +29,7 @@ import {
 import {
   computeArrivedModels,
   describeProviderAccount,
+  findRunDescriptor,
   type CatalogWithFirstRead,
 } from "../provider-accounts";
 import { describeHarnessLacksModel } from "./harness-evidence";
@@ -125,12 +126,20 @@ const resolveEntry = (
   const catalog = world.catalogs.find((one) => one.providerAccountId === account.id);
   const catalogItem = catalog?.models.find((one) => one.slug === entry.model);
   const snapshotModel = findSnapshotModel(account, resolvedHarnessId, entry.model);
+  // The options and the image input are those the harness runs the model with,
+  // which for a model the harness does not list is the catalog's declaration.
+  const runDescriptor = findRunDescriptor(
+    world.providers.find((one) => one.id === account.providerId),
+    world.harnesses.find((one) => one.id === resolvedHarnessId),
+    snapshotModel,
+    catalogItem,
+  );
   return {
     ...entry,
     resolvedHarnessId,
     name: catalogItem?.name ?? snapshotModel?.name ?? entry.model,
-    options: snapshotModel?.options ?? [],
-    imageInput: snapshotModel?.imageInput ?? null,
+    options: runDescriptor?.options ?? [],
+    imageInput: runDescriptor?.imageInput ?? null,
     problem: findEntryProblem(entry, account, resolvedHarnessId, catalog, world),
   };
 };

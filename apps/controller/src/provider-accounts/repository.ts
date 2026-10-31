@@ -34,8 +34,9 @@ export interface StoredProviderAccount {
   /** The qualified id of the harness a session uses when it names none. */
   readonly defaultHarnessId: string;
   /**
-   * When the account's token stops working, or null. Set only for an account
-   * whose credential is a token Hercule made.
+   * When the account's key or token stops working, or null. Set for an
+   * account whose credential is a token Hercule made, and for a key whose
+   * provider reports an expiry.
    */
   readonly credentialExpiresAt: string | null;
   /**

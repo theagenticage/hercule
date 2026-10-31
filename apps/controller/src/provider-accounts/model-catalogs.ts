@@ -40,7 +40,7 @@ import { runnerRepository } from "../runners";
 import { ProviderAccountRunners, type AccountRunners } from "./account-runners";
 import { modelCatalogRepository, type StoredModelCatalog } from "./model-catalog-repository";
 import { ModelProfileMembership, type DefaultSelection } from "./model-profile-membership";
-import type { ProbePair, ProbeStamp } from "./probes";
+import type { ProbePair, ReadStamp } from "./probes";
 import { providerAccountRepository } from "./repository";
 
 /** How old a catalog's last successful read may be before it is read again (spec 06 section 16.3). */
@@ -310,6 +310,11 @@ const make = Effect.gen(function* () {
      *   `unserved`, not even with no runner connected, and `servedBy` does
      *   not filter it: a runner that connects is a moment to catch up, and
      *   nothing else reads an API catalog at boot.
+     * - A due read of a `provider-api` account whose key the provider has
+     *   refused (the account has a `failure`) is skipped, so a revoked key is
+     *   not sent to the provider again at every sweep. A forced read still
+     *   happens: a new key, creating the account, and Refresh are the user's
+     *   own requests.
      * - For a `harness-probe` provider, the runner is chosen here, before the
      *   probe: among the connected
      *   runners where the account is ready in the source harness, the local
@@ -354,7 +359,11 @@ const make = Effect.gen(function* () {
             return [];
           }
           if (provider.catalogSource.kind === "provider-api") {
-            apiReads.push({ providerAccountId: account.id });
+            // A read that is not forced would send a key the provider has
+            // refused again at every sweep and every runner connection.
+            if (account.failure === null || options.force) {
+              apiReads.push({ providerAccountId: account.id });
+            }
             return [];
           }
           return [{ account, harnessId: provider.catalogSource.harnessId }];
@@ -389,7 +398,7 @@ const make = Effect.gen(function* () {
      * Records the outcome of one catalog read: the single place where a read
      * is stored, whether a probe answered it or no probe could be sent.
      * `stamp` is when the controller started the read and which credential the
-     * account had then (see `ProviderAccountProbes.readProbeStamp`).
+     * account had then (see `ProviderAccountProbes.buildReadStamp`).
      *
      * Runs in its own transaction, or joins the caller's: the probe that
      * carries a read stores its snapshot and the read together. In that
@@ -402,7 +411,7 @@ const make = Effect.gen(function* () {
     recordCatalogRead: (
       providerAccountId: string,
       outcome: CatalogReadOutcome,
-      stamp: ProbeStamp,
+      stamp: ReadStamp,
     ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
       promotion.whenServingOr(
         withTransaction(
