@@ -56,7 +56,7 @@ const baseFields = {
 } as const;
 
 const spec = {
-  instanceId: "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73",
+  providerAccountId: "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73",
   workspaceId: null,
   modelSelection: { model: "sonnet", options: { thinking: true, effort: "medium" } },
   accessMode: "approval-required",
@@ -70,9 +70,12 @@ const start = {
   sessionId: SESSION_ID,
   input: { text: "fix the login bug" },
   harnessId: "claude-code/claude-code",
-  config: {},
-  /** `{}` rather than absent, for an instance with no credential stored. */
-  secrets: {},
+  /** A per-machine account: no credential. */
+  harnessAccount: {
+    providerAccountId: "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73",
+    harnessHome: "providers/homes/0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73/claude-code/claude-code",
+    modelArgument: "{model}",
+  },
   spec,
   /** The session's own credential for the public API, created for each start. */
   token: "a-session-token",
@@ -615,7 +618,11 @@ describe("stopping a subagent", () => {
 describe("what the controller sends for a session", () => {
   it("round-trips a spec, a binding and an input", () => {
     expect(Effect.runSync(Schema.encodeEffect(SessionSpec)(spec))).toEqual(spec);
-    const binding = { sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: "inst-1" };
+    const binding = {
+      sessionId: SESSION_ID,
+      nativeSessionId: "native-1",
+      providerAccountId: "acct-1",
+    };
     expect(Effect.runSync(Schema.encodeEffect(SessionBinding)(binding))).toEqual(binding);
     expect(Effect.runSync(Schema.encodeEffect(TurnInput)({ text: "" }))).toEqual({ text: "" });
   });
@@ -643,9 +650,9 @@ describe("what the controller sends for a session", () => {
     for (const key of Object.keys(spec)) {
       expect(decode(SessionSpec, omitKey(spec, key))._tag, key).toBe("Failure");
     }
-    expect(decode(SessionBinding, { sessionId: SESSION_ID, instanceId: "inst-1" })._tag).toBe(
-      "Failure",
-    );
+    expect(
+      decode(SessionBinding, { sessionId: SESSION_ID, providerAccountId: "acct-1" })._tag,
+    ).toBe("Failure");
   });
 
   it("requires both timeouts on the spec, so a runner never has to pick one", () => {
@@ -785,15 +792,15 @@ describe("what the controller sends for a session", () => {
     expect(decode(SessionStart, { ...start, userMaterial: false })._tag).toBe("Failure");
   });
 
-  it("rejects an instance id that could escape its directory, on the spec and on the binding", () => {
+  it("rejects a Provider Account id that could escape its directory, on the spec and on the binding", () => {
     // The runner uses this id as a directory name, so a traversal would arrive
     // in a spec.
-    expect(decode(SessionSpec, { ...spec, instanceId: "../../etc" })._tag).toBe("Failure");
+    expect(decode(SessionSpec, { ...spec, providerAccountId: "../../etc" })._tag).toBe("Failure");
     expect(
       decode(SessionBinding, {
         sessionId: SESSION_ID,
         nativeSessionId: "native-1",
-        instanceId: "../../etc",
+        providerAccountId: "../../etc",
       })._tag,
     ).toBe("Failure");
   });

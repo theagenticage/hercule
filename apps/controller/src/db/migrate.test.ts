@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 import type { FileSystem } from "effect/FileSystem";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
@@ -16,6 +17,7 @@ import {
   readDatabaseVersion,
   runMigrations,
 } from "./migrate";
+import { MigrationMasterKey } from "./migration-master-key";
 import { binaryVersion, migrations } from "./migrations/index";
 import { TestDatabase, TestDatabaseWriter } from "./testing";
 
@@ -198,6 +200,63 @@ const createTableMigration = (id: number, table: string) =>
       }),
     ),
   ] as const;
+
+/** A migration that records whether the Master Key reached it. */
+const recordMasterKeyMigration = [
+  1,
+  "record-master-key",
+  Effect.succeed(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const key = yield* Effect.serviceOption(MigrationMasterKey);
+      yield* sql.unsafe(`CREATE TABLE key_seen (present INTEGER)`);
+      yield* sql`INSERT INTO key_seen (present) VALUES (${Option.isSome(key) ? 1 : 0})`;
+    }),
+  ),
+] as const;
+
+describe("the Master Key a migration receives", () => {
+  const readKeySeen = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ readonly present: number }>`SELECT present FROM key_seen`;
+    return rows.map((row) => row.present);
+  });
+
+  it("is handed to a migration that asks for it when the boot opened one", async () => {
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
+    const seen = await run(
+      databaseFile,
+      Effect.gen(function* () {
+        yield* migrate({
+          backupsDir,
+          databaseExisted: false,
+          migrations: [recordMasterKeyMigration],
+          masterKey: key,
+        });
+        return yield* readKeySeen;
+      }),
+    );
+    expect(seen).toEqual([1]);
+  });
+
+  it("is absent for a migration when the machine has no key yet", async () => {
+    const seen = await run(
+      databaseFile,
+      Effect.gen(function* () {
+        yield* migrate({
+          backupsDir,
+          databaseExisted: false,
+          migrations: [recordMasterKeyMigration],
+        });
+        return yield* readKeySeen;
+      }),
+    );
+    expect(seen).toEqual([0]);
+  });
+});
 
 describe("a migration added below the database's version", () => {
   it("refuses to start, names the skipped id, and changes nothing", async () => {

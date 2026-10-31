@@ -23,7 +23,7 @@ export class HarnessNotInstalled extends Schema.TaggedError<HarnessNotInstalled>
 
 /**
  * The failure of `startSession` when the harness is installed but its
- * provider instance has no login on this runner.
+ * Provider Account has no login on this runner.
  */
 export class HarnessLoginMissing extends Schema.TaggedError<HarnessLoginMissing>()(
   "HarnessLoginMissing",

@@ -25,12 +25,9 @@ import {
   ConnectionValidationFailed,
   decodeAgainst,
   HOST_API,
-  MAX_CONTRIBUTION_NAME_LENGTH,
   PluginError,
   PluginManifest,
-  HarnessDefinition,
   listChoiceFields,
-  listSecretFields,
   type ActivationContext,
   type ConnectionTypeContribution,
   type Deactivate,
@@ -68,7 +65,8 @@ import {
   type RegisteredConnectionType,
 } from "../connections";
 import { toPluginError, describeFieldIssues } from "./errors";
-import type { RegisteredHarness } from "./harnesses";
+import { registerHarnessContribution, type RegisteredHarness } from "./harnesses";
+import { registerProviderContribution, type RegisteredProvider } from "./providers";
 import {
   registerEventSourceContribution,
   type RegisteredEventKind,
@@ -97,6 +95,7 @@ import {
  */
 const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "harnesses",
+  "providers",
   "kv",
   "secrets",
   "connections",
@@ -166,15 +165,7 @@ const toLoadedPlugin = (entry: Entry): LoadedPlugin => ({
 });
 
 /** The names of the extension points registered in this file. */
-const HARNESS = "harness";
 const CONNECTION_TYPE = "connection-type";
-
-// An unknown key fails the decode rather than being stripped: dropping a field
-// the host does not know would make an unserializable value look accepted.
-const decodeHarness = Schema.decodeUnknownEffect(HarnessDefinition, {
-  errors: "all",
-  onExcessProperty: "error",
-});
 
 // Decodes the serializable part of a connection type. `validate` is removed
 // first: it is a function, and no catalog column can hold one.
@@ -244,15 +235,6 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
       ),
     ),
   );
-
-/**
- * A credential is entered per provider instance and stored under that
- * instance as its owner, so a secret field anywhere else has nowhere to be
- * stored. This is reported at registration, because the form that would show
- * the field is built from the schema rejected here.
- */
-const SECRET_FIELDS_ARE_HARNESS_ONLY =
-  "a secret-valued config field is supported on a harness definition only";
 
 /**
  * Only a Connection's config form can load choices from the external account,
@@ -366,12 +348,6 @@ const inspectManifest = (
   if (missing !== undefined) {
     return Result.fail({ kind: "unimplementedCapability", capability: missing });
   }
-  if (listSecretFields(manifest.configSchema).length > 0) {
-    return Result.fail({
-      kind: "unsupportedConfigSchema",
-      message: truncateMessage(`the plugin's own config: ${SECRET_FIELDS_ARE_HARNESS_ONLY}`),
-    });
-  }
   if (listChoiceFields(manifest.configSchema).length > 0) {
     return Result.fail({
       kind: "unsupportedConfigSchema",
@@ -391,14 +367,15 @@ const inspectManifest = (
  * caught in the caller's array, not by the primary key, where the failed
  * insert would lose every other plugin's rows too.
  *
- * A harness's or a connection type's id joins the plugin's id and the word it
- * declared. Two plugins may each declare a type `gmail` and still get two
+ * The id of a harness, a provider or a connection type joins the plugin's id and
+ * the word it declared. Two plugins may each declare a type `gmail` and still get two
  * different types, so no plugin can take a name from another.
  */
 const buildRegistrationHost = (
   manifest: PluginManifest,
   declared: Array<NewContribution>,
-  live: Array<RegisteredHarness>,
+  liveHarnesses: Array<RegisteredHarness>,
+  liveProviders: Array<RegisteredProvider>,
   types: Array<Omit<RegisteredConnectionType, "feeds">>,
   kinds: Map<string, RegisteredEventKind>,
   sources: Array<RegisteredEventSource>,
@@ -408,56 +385,15 @@ const buildRegistrationHost = (
     ? {
         harnesses: {
           register: (definition) =>
-            Effect.gen(function* () {
-              const decoded = yield* decodeHarness(definition).pipe(Effect.mapError(toPluginError));
-              // The id the catalog, the stored rows and every lookup use, built
-              // like a connection type's. Nothing splits it again.
-              const harnessId = `${manifest.id}/${decoded.id}`;
-              // The word alone passed the limit, but the qualified id is stored
-              // in a column with the same limit. Refusing here refuses this
-              // plugin; a row the database rejects would stop the whole boot.
-              if (harnessId.length > MAX_CONTRIBUTION_NAME_LENGTH) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the harness id ${harnessId} is ${String(harnessId.length)} characters long, and the limit is ${String(MAX_CONTRIBUTION_NAME_LENGTH)}. The id is the plugin id, a "/" and the harness's own id, so shorten the harness's id.`,
-                  }),
-                );
-              }
-              if (listChoiceFields(decoded.configSchema).length > 0) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the harness ${harnessId}: ${CHOICES_ARE_CONNECTION_ONLY}`,
-                  }),
-                );
-              }
-              // The catalog stores the derived JSON Schema: the plugin's Effect
-              // Schema is an object no catalog reader can use.
-              const configSchema = deriveConfigJsonSchema(decoded.configSchema);
-              if (Result.isFailure(configSchema)) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the harness ${harnessId}: ${configSchema.failure.message}`,
-                  }),
-                );
-              }
-              if (declared.some((row) => row.extensionPoint === HARNESS && row.id === harnessId)) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the ${HARNESS} contribution ${harnessId} is registered twice`,
-                  }),
-                );
-              }
-              declared.push({
-                owner: manifest.id,
-                extensionPoint: HARNESS,
-                id: harnessId,
-                definition: { ...decoded, id: harnessId, configSchema: configSchema.success },
-              });
-              // The catalog cannot hold an Effect Schema, so the definition is
-              // also kept in memory: decoding an instance's config needs the
-              // plugin's Effect Schema, not the JSON Schema derived from it.
-              live.push({ ...decoded, id: harnessId });
-            }),
+            registerHarnessContribution(manifest, definition, declared, liveHarnesses),
+        },
+      }
+    : {}),
+  ...(manifest.capabilities.includes("providers")
+    ? {
+        providers: {
+          register: (definition) =>
+            registerProviderContribution(manifest, definition, declared, liveProviders),
         },
       }
     : {}),
@@ -499,16 +435,6 @@ const buildRegistrationHost = (
               // A config schema goes into the catalog as the JSON Schema the
               // generated form is built from. The Effect Schema stays in memory,
               // where a connection's stored config is decoded against it.
-              if (
-                decoded.configSchema !== undefined &&
-                listSecretFields(decoded.configSchema).length > 0
-              ) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the connection type ${type}: ${SECRET_FIELDS_ARE_HARNESS_ONLY}`,
-                  }),
-                );
-              }
               if (
                 decoded.configSchema !== undefined &&
                 listChoices === undefined &&
@@ -587,6 +513,8 @@ const make = Effect.gen(function* () {
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
   const harnesses = yield* Ref.make<ReadonlyArray<RegisteredHarness>>([]);
+  /** Every provider this boot registered, in registry order. Set at boot, like the harnesses. */
+  const providers = yield* Ref.make<ReadonlyArray<RegisteredProvider>>([]);
   /** Every event kind this boot registered, by name. Set at boot, like the harnesses. */
   const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
   /** Every event source this boot registered, in registry order. Set at boot, like the harnesses. */
@@ -771,7 +699,8 @@ const make = Effect.gen(function* () {
     plugin: Plugin,
     manifest: PluginManifest,
     declared: Array<NewContribution>,
-    live: Array<RegisteredHarness>,
+    liveHarnesses: Array<RegisteredHarness>,
+    liveProviders: Array<RegisteredProvider>,
     types: Array<Omit<RegisteredConnectionType, "feeds">>,
     kinds: Map<string, RegisteredEventKind>,
     sources: Array<RegisteredEventSource>,
@@ -779,7 +708,16 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
       plugin.register(
-        buildRegistrationHost(manifest, declared, live, types, kinds, sources, actions),
+        buildRegistrationHost(
+          manifest,
+          declared,
+          liveHarnesses,
+          liveProviders,
+          types,
+          kinds,
+          sources,
+          actions,
+        ),
       ),
     ).pipe(
       Effect.as<PluginStatus>({ _tag: "inactive" }),
@@ -938,6 +876,7 @@ const make = Effect.gen(function* () {
         const booted = new Map<string, Entry>();
         const catalog: Array<NewContribution> = [];
         const registeredHarnesses: Array<RegisteredHarness> = [];
+        const registeredProviders: Array<RegisteredProvider> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
         const registeredKinds = new Map<string, RegisteredEventKind>();
         const registeredSources: Array<RegisteredEventSource> = [];
@@ -989,7 +928,8 @@ const make = Effect.gen(function* () {
           }
 
           const declared: Array<NewContribution> = [];
-          const live: Array<RegisteredHarness> = [];
+          const liveHarnesses: Array<RegisteredHarness> = [];
+          const liveProviders: Array<RegisteredProvider> = [];
           // A plugin may register a type's event source before or after the
           // type itself, so each type gets its feeds once the pass is over.
           const types: Array<Omit<RegisteredConnectionType, "feeds">> = [];
@@ -1000,7 +940,8 @@ const make = Effect.gen(function* () {
             plugin,
             manifest,
             declared,
-            live,
+            liveHarnesses,
+            liveProviders,
             types,
             kinds,
             sources,
@@ -1009,7 +950,8 @@ const make = Effect.gen(function* () {
           const registered = status._tag !== "errored";
           if (registered) {
             catalog.push(...declared);
-            registeredHarnesses.push(...live);
+            registeredHarnesses.push(...liveHarnesses);
+            registeredProviders.push(...liveProviders);
             registeredTypes.push(
               ...types.map((type) => ({
                 ...type,
@@ -1041,6 +983,7 @@ const make = Effect.gen(function* () {
         );
         yield* Ref.set(entries, booted);
         yield* Ref.set(harnesses, registeredHarnesses);
+        yield* Ref.set(providers, registeredProviders);
         yield* Ref.set(eventKinds, registeredKinds);
         yield* Ref.set(eventSources, registeredSources);
         yield* Ref.set(workflowActions, registeredActions);
@@ -1068,6 +1011,9 @@ const make = Effect.gen(function* () {
 
     /** Returns every harness this boot registered, in registry order. */
     harnesses: (): Effect.Effect<ReadonlyArray<RegisteredHarness>> => Ref.get(harnesses),
+
+    /** Returns every provider this boot registered, in registry order. */
+    providers: (): Effect.Effect<ReadonlyArray<RegisteredProvider>> => Ref.get(providers),
 
     /** Returns every event kind this boot registered, by name. */
     eventKinds: (): Effect.Effect<ReadonlyMap<string, RegisteredEventKind>> => Ref.get(eventKinds),

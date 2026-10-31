@@ -5,8 +5,10 @@ import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
 import { buildHomePaths, HerculeHome } from "../config";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
+import { decryptSecretValue, encryptSecretValue } from "./cipher";
 import {
   createFileStore,
   KEYCHAIN_SERVICE,
@@ -14,6 +16,7 @@ import {
   MASTER_KEY_BYTES,
   MasterKey,
   masterKeyLayer,
+  openExistingMasterKey,
   type SecurityRunner,
 } from "./masterKey";
 
@@ -108,6 +111,60 @@ describe("the master key file", () => {
     const exit = await buildMasterKey();
     expect(Exit.isFailure(exit)).toBe(true);
     expect(String(exit)).toContain("Cannot write the master key");
+  });
+});
+
+describe("opening an existing master key before the migrations", () => {
+  const openExisting = () =>
+    Effect.runPromiseExit(
+      openExistingMasterKey("file").pipe(
+        Effect.provide(buildHomeLayer()),
+        Effect.provide(TestDatabase),
+      ),
+    );
+
+  it("returns no key, and mints none, on a machine that has none", async () => {
+    const exit = await openExisting();
+    expect(Exit.isSuccess(exit) && exit.value).toBeUndefined();
+    expect(() => readFileSync(buildKeyFilePath())).toThrow();
+  });
+
+  it("returns the key the layer minted, so a value sealed by one opens with the other", async () => {
+    const minted = await buildMasterKey();
+    const opened = await openExisting();
+    expect(Exit.isSuccess(minted) && Exit.isSuccess(opened)).toBe(true);
+    if (!Exit.isSuccess(minted) || !Exit.isSuccess(opened)) return;
+    const owner = { kind: "core", id: "controller" } as const;
+    const plaintext = await Effect.runPromise(
+      encryptSecretValue(minted.value, owner, "n", "value").pipe(
+        Effect.flatMap((sealed) => decryptSecretValue(opened.value!, owner, "n", sealed)),
+      ),
+    );
+    expect(plaintext).toBe("value");
+  });
+
+  it("fails, without minting, when there is no key but the database holds secrets", async () => {
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* inTransaction(
+          sql`INSERT INTO secrets (id, owner_kind, owner_id, name, nonce, ciphertext, created_at)
+              VALUES (x'01', 'core', 'controller', 'n', x'00', x'00', '2026-10-01T00:00:00.000Z')`,
+        );
+        return yield* openExistingMasterKey("file");
+      }).pipe(Effect.provide(buildHomeLayer()), Effect.provide(TestDatabase)),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("1 encrypted secret row");
+    expect(() => readFileSync(buildKeyFilePath())).toThrow();
+  });
+
+  it("fails on a key file anyone but its owner can read", async () => {
+    await buildMasterKey();
+    chmodSync(buildKeyFilePath(), 0o644);
+    const exit = await openExisting();
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("0644");
   });
 });
 

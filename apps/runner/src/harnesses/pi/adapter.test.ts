@@ -109,7 +109,7 @@ describe("launching pi for a session", () => {
     expect(run.child.cwd).toBe(run.ctx.cwd);
   });
 
-  it("sets the instance's agent directory and Z.ai key, and turns off the update check", async () => {
+  it("sets the Harness Home and Z.ai key, and turns off the update check", async () => {
     const run = await startTestSession();
 
     expect(run.child.env["PI_CODING_AGENT_DIR"]).toBe(run.ctx.home);
@@ -117,20 +117,41 @@ describe("launching pi for a session", () => {
     expect(run.child.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
   });
 
-  it("uses only the instance's key, never a key from the runner's environment", async () => {
+  it("uses the account's key over a key from the runner's environment", async () => {
     const run = createDriving();
     const ctx = {
       ...run.ctx,
-      secrets: {},
       env: { ...run.ctx.env, ZAI_API_KEY: "the runner daemon's own key" },
     };
 
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, ctx));
-    const probed = await Effect.runPromise(run.adapter.probe(ctx, {}));
+    await Effect.runPromise(run.adapter.probe(ctx));
 
-    // Otherwise an instance with no key entered would run on the machine's
-    // key, and report itself as logged in.
+    // Otherwise a session would run on the machine's key, and a probe would
+    // report the account as logged in on it.
+    expect(run.spawns[0]!.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
+    expect(run.runs.find((ran) => ran.command.includes("check"))?.env["ZAI_API_KEY"]).toBe(
+      TEST_ZAI_KEY,
+    );
+  });
+
+  it("keeps the runner's own key from an account that has none stored", async () => {
+    const run = createDriving();
+    const ctx = {
+      ...run.ctx,
+      credential: { variable: "ZAI_API_KEY" },
+      env: { ...run.ctx.env, ZAI_API_KEY: "the runner daemon's own key" },
+    };
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, ctx));
+    const probed = await Effect.runPromise(run.adapter.probe(ctx));
+
+    // Otherwise the account would run on the machine's key, and report itself
+    // as logged in.
     expect(run.spawns[0]!.env["ZAI_API_KEY"]).toBeUndefined();
+    expect(
+      run.runs.find((ran) => ran.command.includes("check"))?.env["ZAI_API_KEY"],
+    ).toBeUndefined();
     expect(probed.auth.status).toBe("unauthenticated");
   });
 
@@ -393,12 +414,12 @@ describe("launching pi for a Thread that sees the user's own material", () => {
     expect(run.child.command).not.toContain("--append-system-prompt");
   });
 
-  it("writes nothing of the user's material into the instance's agent directory", async () => {
+  it("writes nothing of the user's material into the Harness Home", async () => {
     const thread = await startSessionWithMaterial(USER_MATERIAL);
     const isolated = await startSessionWithMaterial(undefined);
 
-    // Every session of the instance reads that directory, so anything written
-    // there for a Thread would reach the instance's other sessions too.
+    // Every session of the account reads that directory, so anything written
+    // there for a Thread would reach the account's other sessions too.
     expect(readdirSync(thread.ctx.home).sort()).toEqual(readdirSync(isolated.ctx.home).sort());
   });
 });
@@ -1110,7 +1131,7 @@ describe("launching pi for a session with an Agent", () => {
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
 
     // Otherwise one file per session ever started would pile up in the
-    // instance's home, each holding an Agent's instructions.
+    // Harness Home, each holding an Agent's instructions.
     await waitUntil(
       "said the session ended",
       () => filterByTag(run.seen, "session.exited").length === 1,
@@ -1178,8 +1199,8 @@ describe("launching pi for a session with an Agent", () => {
     const run = await startTestSession({}, { ...STRUCTURED, autoCompaction: false });
 
     expect(run.child.env[NO_AUTO_COMPACTION_VARIABLE]).toBe("1");
-    // Never pi's own command: it saves the choice in the instance's
-    // settings.json, which every later session of the instance reads.
+    // Never pi's own command: it saves the choice in the account's
+    // settings.json, which every later session of the account reads.
     expect(listSentCommands(run.sent, "set_auto_compaction")).toEqual([]);
   });
 

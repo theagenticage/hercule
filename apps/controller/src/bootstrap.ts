@@ -17,6 +17,7 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import type { PlatformError } from "effect/PlatformError";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as Migrator from "effect/sql/Migrator";
@@ -69,6 +70,7 @@ import {
 import {
   MasterKey,
   masterKeyLayer,
+  openExistingMasterKey,
   Secrets,
   secretsLayer,
   type MasterKeyBackend,
@@ -302,6 +304,9 @@ export const bootWith = <A, E>(
     // If the file did not exist before the driver created it, there is nothing
     // for a pre-migration copy to preserve.
     const databaseExisted = existsSync(paths.databaseFile);
+    // Filled by the set-up below, which opens an existing Master Key before the
+    // migrations, and read by the Master Key layer so the key is read once.
+    const openedMasterKey = yield* Ref.make<CryptoKey | undefined>(undefined);
 
     // The secrets repository is merged into the output rather than only
     // provided to the layers above it: `secret.*` are public operations, so
@@ -330,7 +335,11 @@ export const bootWith = <A, E>(
           ),
         ).pipe(
           Layer.provideMerge(
-            secretsLayer.pipe(Layer.provideMerge(masterKeyLayer(options.masterKeyBackend))),
+            secretsLayer.pipe(
+              Layer.provideMerge(
+                masterKeyLayer(options.masterKeyBackend, undefined, openedMasterKey),
+              ),
+            ),
           ),
         ),
       ),
@@ -495,7 +504,19 @@ export const bootWith = <A, E>(
           Layer.provideMerge(
             // The migrations run while the database opens, on the writer alone:
             // see `openDatabase`.
-            openDatabase(paths, migrate({ backupsDir: paths.backupsDir, databaseExisted })),
+            openDatabase(
+              paths,
+              // An existing Master Key is opened first, because a migration
+              // encrypts secrets again under it (spec 04, boot order). A key
+              // that cannot be opened stops the boot before the database
+              // changes. A machine with no key yet gets one after the
+              // migrations, in `masterKeyLayer`.
+              Effect.gen(function* () {
+                const masterKey = yield* openExistingMasterKey(options.masterKeyBackend);
+                yield* Ref.set(openedMasterKey, masterKey);
+                return yield* migrate({ backupsDir: paths.backupsDir, databaseExisted, masterKey });
+              }),
+            ),
           ),
         ),
       ),

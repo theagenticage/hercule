@@ -16,7 +16,7 @@ import { closedStruct } from "../closed";
 import { Conflict, Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
-import { InstanceModel } from "./settings";
+import { ProviderAccountHarnessModel } from "./settings";
 
 /** The reasons a text generation fails, the same in the record and in the status. */
 export const TextGenerationFailureReason = Schema.Literals([
@@ -35,16 +35,16 @@ export type TextGenerationFailureReason = Schema.Schema.Type<typeof TextGenerati
  */
 export const TextGenerationStatus = Schema.Struct({
   /**
-   * The instance and model text generations run on now: the chosen one, or
+   * The account, harness and model text generations run on now: the chosen one, or
    * what `automatic` resolves to. Null when text generation is off, by the
    * setting or because `automatic` found no match.
    */
-  model: Schema.NullOr(InstanceModel),
+  model: Schema.NullOr(ProviderAccountHarnessModel),
   /**
    * Why no text generation can run now, in words a user can act on, or null
    * when one can. It is set when text generation is off, when `automatic`
-   * finds no match or the chosen instance is gone, and when no placeable
-   * runner is logged in to the instance. A workflow step that waits for text
+   * finds no match or the chosen account is gone, and when no placeable
+   * runner is logged in to the account. A workflow step that waits for text
    * generation shows this text.
    */
   unavailableReason: Schema.NullOr(Schema.NonEmptyString),

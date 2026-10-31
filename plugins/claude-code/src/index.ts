@@ -15,9 +15,6 @@ const definition: HarnessDefinition = {
   id: "claude-code",
   displayName: "Claude Code",
   binaryName: "claude",
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({}),
-  defaultConfig: {},
   declared: {
     steering: "native",
     fork: "native",
@@ -32,8 +29,17 @@ const definition: HarnessDefinition = {
     disallowedTools: "native",
     structuredOutput: "supported",
   },
-  // The CLI's model list reports this alias, and it follows the newest Haiku.
-  suggestedTextGenerationModel: "haiku",
+  // The login of a Claude subscription lives in the Harness Home, so the
+  // kind has no credential variable, and Claude Code accepts every model the
+  // account lists under its own id.
+  runs: [
+    {
+      providerId: "anthropic/anthropic",
+      kinds: [{ kind: "subscription-per-machine" }],
+      modelArgument: "{model}",
+      models: "all",
+    },
+  ],
 };
 
 export const claudeCode: Plugin = {

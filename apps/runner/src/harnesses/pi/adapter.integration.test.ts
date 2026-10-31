@@ -5,7 +5,7 @@
  * Plan.
  *
  * The key is read from the environment and handed to the adapter as the
- * instance's secret. It is never printed, never written to the scratch home by
+ * account's secret. It is never printed, never written to the scratch home by
  * this file, and never asserted on.
  *
  * Every run gets a throwaway agent directory: the developer's own `~/.pi` is
@@ -49,9 +49,13 @@ const BUDGET_MS = 180_000;
 /** Long enough for a model to answer, and short enough to leave room in the budget. */
 const PATIENCE_MS = BUDGET_MS / 2;
 
-/** Builds a context with the real binary, the given secrets, and fresh directories for this run. */
-const buildLiveContext = (secrets: Readonly<Record<string, string>>): HarnessRunnerContext => ({
-  ...buildContext(createScratchDir(), createScratchDir(), secrets),
+/** Builds a context with the real binary, the given key, and fresh directories for this run. */
+const buildLiveContext = (zaiApiKey: string | null): HarnessRunnerContext => ({
+  ...buildContext(
+    createScratchDir(),
+    createScratchDir(),
+    zaiApiKey === null ? null : { variable: "ZAI_API_KEY", value: zaiApiKey },
+  ),
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
 });
@@ -96,7 +100,7 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
     it(
       `answers a prompt and runs a shell command on ${model}, and reports the turn's cost`,
       async () => {
-        const ctx = buildLiveContext({ zaiApiKey: key });
+        const ctx = buildLiveContext(key);
         const sessionId = crypto.randomUUID();
         const seen: Array<HarnessEvent> = [];
         Effect.runFork(
@@ -172,7 +176,7 @@ const runTurnUnderSchema = async (
     pi.startSession(
       sessionId,
       { ...buildSpec(STRUCTURED_MODEL), systemPrompt: ASSESSOR_SYSTEM_PROMPT, outputSchema },
-      buildLiveContext({ zaiApiKey: key }),
+      buildLiveContext(key),
     ),
   );
   await Effect.runPromise(pi.sendInput(sessionId, { text }));
@@ -240,7 +244,7 @@ describe.skipIf(binary === undefined)("probing a real pi", () => {
 
   it("reports the version, the key as usable, and the models Z.ai offers", async () => {
     const probed = await Effect.runPromise(
-      pi.probe(buildLiveContext({ zaiApiKey: "not-a-key-and-never-sent-anywhere" }), {}),
+      pi.probe(buildLiveContext("not-a-key-and-never-sent-anywhere")),
     );
 
     // Whatever version is installed: pinning one here would fail on the next
@@ -261,7 +265,7 @@ describe.skipIf(binary === undefined)("probing a real pi", () => {
   }, 60_000);
 
   it("reports a machine with no key as unauthenticated", async () => {
-    const probed = await Effect.runPromise(pi.probe(buildLiveContext({}), {}));
+    const probed = await Effect.runPromise(pi.probe(buildLiveContext(null)));
 
     expect(probed.harnessVersion).toBe(readInstalledVersion());
     expect(probed.auth.status).toBe("unauthenticated");

@@ -31,13 +31,15 @@ import { NO_CONTROLLER_UPLOADER } from "../harnesses/testing";
 
 afterAll(cleanTemporaries);
 
+const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
+
 const refuseSessionPlacement = async (
   workspaces: Workspaces,
   storageDir: string,
   workspaceId: string,
 ): Promise<void> => {
   const machine: Machine = {
-    providersDir: join(storageDir, "providers"),
+    storageDir,
     scratchDir: join(storageDir, "scratch"),
     attachmentsDir: join(storageDir, "attachments"),
     editMarksDir: join(storageDir, "edit-marks"),
@@ -71,11 +73,14 @@ const refuseSessionPlacement = async (
     sessionId: createId(),
     input: { text: "hello" },
     harnessId: "claude-code/claude-code",
-    config: {},
-    secrets: {},
+    harnessAccount: {
+      providerAccountId: ACCOUNT_ID,
+      harnessHome: `providers/${ACCOUNT_ID}`,
+      modelArgument: "{model}",
+    },
     token: "fixture-token",
     spec: {
-      instanceId: createId(),
+      providerAccountId: ACCOUNT_ID,
       workspaceId,
       modelSelection: { model: "fixture", options: {} },
       accessMode: "approval-required",

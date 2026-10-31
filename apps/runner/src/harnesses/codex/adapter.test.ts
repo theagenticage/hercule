@@ -101,7 +101,7 @@ const runProbe = (
     options,
   );
   return {
-    result: Effect.runPromise(makeCodexAdapter(seam).probe(buildContext(home), {})),
+    result: Effect.runPromise(makeCodexAdapter(seam).probe(buildContext(home))),
     spawns,
     home,
   };
@@ -245,9 +245,7 @@ describe("what the Codex adapter reports about a machine", () => {
     const probed = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const running = yield* Effect.forkChild(
-            makeCodexAdapter(seam).probe(buildContext(home), {}),
-          );
+          const running = yield* Effect.forkChild(makeCodexAdapter(seam).probe(buildContext(home)));
           yield* TestClock.adjust(Duration.zero);
           yield* TestClock.adjust(PROBE_DEADLINE);
           return yield* Fiber.join(running);
@@ -279,8 +277,8 @@ describe("the process a probe runs on", () => {
     const adapter = makeCodexAdapter(seam);
     const ctx = buildContext(home);
 
-    await Effect.runPromise(adapter.probe(ctx, {}));
-    await Effect.runPromise(adapter.probe(ctx, {}));
+    await Effect.runPromise(adapter.probe(ctx));
+    await Effect.runPromise(adapter.probe(ctx));
     expect(spawns).toHaveLength(2);
 
     const started = Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx)).then(
@@ -388,7 +386,7 @@ describe("the home directories a session's app-server gets", () => {
       "-c",
       "model_auto_compact_token_limit=9223372036854775807",
     ]);
-    // Never written into the instance's config, which every session reads.
+    // Never written into the Harness Home, which every session reads.
     expect(existsSync(join(home, "codex", "config.toml"))).toBe(false);
     await started;
   });
@@ -485,7 +483,7 @@ describe("the home directories a session's app-server gets", () => {
     });
   });
 
-  it("moves HOME for a Thread that sees the user's material too, and gives it the instance's own CODEX_HOME", async () => {
+  it("moves HOME for a Thread that sees the user's material too, and gives it the account's own Harness Home", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
     const ctx: HarnessRunnerContext = {
@@ -503,7 +501,7 @@ describe("the home directories a session's app-server gets", () => {
     const codexHome = join(home, "codex");
     expect(spawn.env["CODEX_HOME"]).toBe(codexHome);
     // Codex reads an `AGENTS.md` in its home for every session of the
-    // instance, so the user's instructions must never be placed there.
+    // account, so the user's instructions must never be placed there.
     expect(readdirSync(codexHome)).toEqual([]);
   });
 
@@ -744,7 +742,7 @@ describe("a session that cannot start", () => {
       run: () => Effect.die("a session must not run a command"),
     };
     const ctx = buildContext(createCodexHome());
-    // The instance home is a file, so creating the `codex` folder in it fails with ENOTDIR.
+    // The Harness Home is a file, so creating the `codex` folder in it fails with ENOTDIR.
     const file = join(createCodexHome(), "not-a-folder");
     writeFileSync(file, "");
 
@@ -825,7 +823,7 @@ describe("the thread a session gets", () => {
     expect(binding).toEqual({
       sessionId: SESSION,
       nativeSessionId: THREAD,
-      instanceId: SPEC.instanceId,
+      providerAccountId: SPEC.providerAccountId,
     });
     expect(listSentParams(requests, "thread/start")).toHaveLength(1);
     expect(listSentParams(requests, "thread/start")[0]).toMatchObject({
@@ -1473,7 +1471,7 @@ const OTHER_THREAD = "0199e0e7-0000-7000-8000-0000000000f6";
 /** The token the runner puts in each session's environment; each session has a different one. */
 const TOKENS = { [SESSION]: "token-of-the-first", [OTHER_SESSION]: "token-of-the-second" };
 
-/** Starts two sessions of one instance, each with its own token and its own app-server. */
+/** Starts two sessions of one account, each with its own token and its own app-server. */
 const startSessionPair = async (): Promise<ReturnType<typeof createDriving>> => {
   let opened = 0;
   const run = createDriving({
@@ -1524,7 +1522,11 @@ describe("each session's own app-server", () => {
     expect(run.spawns[0]?.kills()).toBe(1);
     expect(run.spawns[1]?.kills()).toBe(0);
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([
-      { sessionId: OTHER_SESSION, nativeSessionId: OTHER_THREAD, instanceId: SPEC.instanceId },
+      {
+        sessionId: OTHER_SESSION,
+        nativeSessionId: OTHER_THREAD,
+        providerAccountId: SPEC.providerAccountId,
+      },
     ]);
 
     await Effect.runPromise(run.adapter.stopSession(OTHER_SESSION, "stopped"));
@@ -1546,7 +1548,11 @@ describe("each session's own app-server", () => {
     expect(listExitReasons(run.seen, SESSION)).toEqual(["stopped"]);
     expect(listExitReasons(run.seen, OTHER_SESSION)).toEqual([]);
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([
-      { sessionId: OTHER_SESSION, nativeSessionId: OTHER_THREAD, instanceId: SPEC.instanceId },
+      {
+        sessionId: OTHER_SESSION,
+        nativeSessionId: OTHER_THREAD,
+        providerAccountId: SPEC.providerAccountId,
+      },
     ]);
   });
 
@@ -1562,7 +1568,11 @@ describe("each session's own app-server", () => {
     expect(listExitReasons(run.seen, SESSION)).toEqual(["process_exit"]);
     expect(listExitReasons(run.seen, OTHER_SESSION)).toEqual([]);
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([
-      { sessionId: OTHER_SESSION, nativeSessionId: OTHER_THREAD, instanceId: SPEC.instanceId },
+      {
+        sessionId: OTHER_SESSION,
+        nativeSessionId: OTHER_THREAD,
+        providerAccountId: SPEC.providerAccountId,
+      },
     ]);
   });
 
@@ -4076,7 +4086,7 @@ describe("notifications that name no thread", () => {
       },
     });
 
-    await Effect.runPromise(run.adapter.probe(run.ctx, {}));
+    await Effect.runPromise(run.adapter.probe(run.ctx));
     await settle();
 
     expect(run.seen).toEqual([]);

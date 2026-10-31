@@ -81,33 +81,50 @@ export const ThreadRows = Schema.Literals(["meta", "plain"]);
 export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
 
 /**
- * A model on a provider instance: the instance and the model's slug in that
- * instance's model list. The slug is at most as long as the protocol allows a
- * model name to be, so a name that fits here can always be sent to a runner.
+ * The model's slug in a Provider Account's model list. It is at most as long
+ * as the protocol allows a model name to be, so a name that fits here can
+ * always be sent to a runner.
  */
-export const InstanceModel = closedStruct({
-  instanceId: Id,
-  model: Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH)),
+const ModelSlug = Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH));
+
+/**
+ * A model from a Provider Account, run in one harness. `harnessId` left out
+ * means the account's default harness.
+ */
+export const ProviderAccountModel = closedStruct({
+  providerAccountId: Id,
+  harnessId: Schema.optionalKey(Schema.String),
+  model: ModelSlug,
 });
 
-export type InstanceModel = Schema.Schema.Type<typeof InstanceModel>;
+export type ProviderAccountModel = Schema.Schema.Type<typeof ProviderAccountModel>;
+
+/** A model from a Provider Account in a named harness: `ProviderAccountModel` with the harness worked out. */
+export const ProviderAccountHarnessModel = closedStruct({
+  providerAccountId: Id,
+  harnessId: Schema.String,
+  model: ModelSlug,
+});
+
+export type ProviderAccountHarnessModel = Schema.Schema.Type<typeof ProviderAccountHarnessModel>;
 
 /**
  * Which model makes text generations: small model calls such as naming a
  * Thread (spec 06 section 14).
  *
- * - `automatic`: the first provider, in the controller's order, whose
- *   suggested text generation model a logged-in instance offers. With no such
- *   provider, text generation is off.
+ * - `automatic`: the first Provider Account whose Provider suggests a text
+ *   generation model, and that can run somewhere now, in its default harness.
+ *   With no such account, text generation is off.
  * - `off`: nothing makes text generations.
- * - an instance and a model: that model on that instance, and never another.
- *   A call that cannot run there fails rather than switching provider.
+ * - an account, optionally a harness, and a model: that model from that
+ *   account, and never another. A call that cannot run there fails rather
+ *   than switching account.
  *
  * Unset reads as `automatic`.
  */
 export const TextGenerationModel = Schema.Union([
   Schema.Literals(["automatic", "off"]),
-  InstanceModel,
+  ProviderAccountModel,
 ]);
 
 export type TextGenerationModel = Schema.Schema.Type<typeof TextGenerationModel>;
@@ -173,7 +190,9 @@ export const SETTING_VALUES = {
     "lastChecked.checkin": Timestamp,
     "lastChecked.notifications": Timestamp,
     "onboarding.completedSteps": atMost(Schema.NonEmptyString, MAX_SETTING_LIST),
-    "thread.instanceId": Id,
+    "thread.providerAccountId": Id,
+    /** `null` runs a new Thread in the account's default harness. */
+    "thread.harnessId": Schema.NullOr(Schema.NonEmptyString),
     "thread.model": Schema.NonEmptyString,
     "thread.accessMode": AccessMode,
     "thread.profileId": Id,

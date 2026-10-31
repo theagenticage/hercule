@@ -1515,7 +1515,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
         const setupTarget = {
           runnerId: connection.runnerId,
           harnessId: frame.harnessId,
-          instanceId: frame.spec.instanceId,
+          providerAccountId: frame.spec.providerAccountId,
         };
         const held: Live = {
           inputCancellation: arrived.inputCancellation,

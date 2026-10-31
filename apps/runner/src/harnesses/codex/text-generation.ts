@@ -9,6 +9,7 @@
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import type { TextGenerationOutcome, TextGenerationSpec, Usage } from "@hercule/protocol";
+import { formatModelArgument } from "../account";
 import { judgeAnswer } from "../structured-result";
 import { truncateMessage } from "../text";
 import { readHarnessAnswer, readTotalUsage } from "./normalize";
@@ -56,7 +57,7 @@ import type {
  * A call that uses any of the four fails (see `watchTextGeneration`), and
  * the read-only sandbox and the never-ask policy mean Codex would not run a
  * patch anyway. There are no MCP servers to turn off:
- * the instance's Codex directory is Hercule's own and defines none.
+ * the Harness Home's Codex directory is Hercule's own and defines none.
  */
 const TOOLS_OFF: Readonly<Record<string, JsonValue>> = {
   "features.shell_tool": false,
@@ -98,14 +99,15 @@ export const TEXT_GENERATION_PROCESS_OVERRIDES: ReadonlyArray<string> = [
  * Builds the `thread/start` request for a text generation. The thread is
  * ephemeral, so Codex writes no session file for it. It runs in `scratchDir`,
  * a directory made for this call alone, in a read-only sandbox and never asks
- * for approval.
+ * for approval. The model is named the way the account's model argument says.
  */
 export const buildTextGenerationThread = (
   spec: TextGenerationSpec,
   scratchDir: string,
+  modelArgument: string,
 ): ThreadStartParams => ({
   cwd: scratchDir,
-  model: spec.model,
+  model: formatModelArgument(modelArgument, spec.model),
   baseInstructions: spec.instructions,
   ephemeral: true,
   approvalPolicy: "never",

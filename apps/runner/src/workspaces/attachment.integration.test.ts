@@ -36,6 +36,8 @@ type AttachmentFrame = WorkspaceProvision & {
   readonly attachment: { readonly path: string; readonly remoteName: string };
 };
 
+const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
+
 const createAttachment = (linked = false, remoteName = "origin") => {
   const remote = makeRemote();
   const world = createTemporaryDir("hercule-existing-");
@@ -282,7 +284,7 @@ describe("recovering attachment availability", () => {
 
     expect(Effect.runSync(manager.resolve(fixture.frame.workspaceId))).toBeUndefined();
     const machine: Machine = {
-      providersDir: join(fixture.storageDir, "providers"),
+      storageDir: fixture.storageDir,
       scratchDir: join(fixture.storageDir, "scratch"),
       attachmentsDir: join(fixture.storageDir, "attachments"),
       editMarksDir: join(fixture.storageDir, "edit-marks"),
@@ -315,11 +317,14 @@ describe("recovering attachment availability", () => {
       sessionId: createId(),
       input: { text: "hello" },
       harnessId: "claude-code/claude-code",
-      config: {},
-      secrets: {},
+      harnessAccount: {
+        providerAccountId: ACCOUNT_ID,
+        harnessHome: `providers/${ACCOUNT_ID}`,
+        modelArgument: "{model}",
+      },
       token: "fixture-session-token",
       spec: {
-        instanceId: createId(),
+        providerAccountId: ACCOUNT_ID,
         workspaceId: fixture.frame.workspaceId,
         modelSelection: { model: "fixture", options: {} },
         accessMode: "approval-required",

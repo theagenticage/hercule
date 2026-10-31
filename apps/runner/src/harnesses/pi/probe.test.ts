@@ -10,7 +10,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber, Logger } from "effect";
 import { TestClock } from "effect/testing";
-import type { ProbeResult } from "@hercule/protocol";
+import type { HarnessCredential, ProbeResult } from "@hercule/protocol";
 import { makePiAdapter } from "./adapter";
 import {
   buildFakePiSeam,
@@ -20,6 +20,7 @@ import {
   MODEL_STORE_REFRESHED,
   type FakePiBehaviour,
   createPiHome,
+  TEST_CREDENTIAL,
   TEST_ZAI_KEY,
 } from "./testing";
 
@@ -27,7 +28,7 @@ afterAll(cleanupHomes);
 
 const runProbe = (
   behaviour: FakePiBehaviour = {},
-  secrets: Readonly<Record<string, string>> = { zaiApiKey: TEST_ZAI_KEY },
+  credential: HarnessCredential | null = TEST_CREDENTIAL,
   // A rest parameter, not a default: a default would replace the explicit
   // `undefined` that the no-pi test passes, and give that test a pi anyway.
   ...binary: ReadonlyArray<string | undefined>
@@ -38,10 +39,10 @@ const runProbe = (
 } => {
   const { seam, runs, spawns } = buildFakePiSeam(behaviour);
   const ctx = {
-    ...buildContext(createPiHome(), null, secrets),
+    ...buildContext(createPiHome(), null, credential),
     ...(binary.length === 0 ? {} : { binary: binary[0] }),
   };
-  return { result: Effect.runPromise(makePiAdapter(seam).probe(ctx, {})), runs, spawns };
+  return { result: Effect.runPromise(makePiAdapter(seam).probe(ctx)), runs, spawns };
 };
 
 const findModelOption = (
@@ -83,7 +84,7 @@ describe("the pi adapter's probe", () => {
     ]);
   });
 
-  it("passes the instance's Z.ai key in the environment variable pi reads", async () => {
+  it("passes the account's Z.ai key in the environment variable pi reads", async () => {
     const { result, runs } = runProbe();
 
     await result;
@@ -91,8 +92,36 @@ describe("the pi adapter's probe", () => {
     expect(checked?.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
   });
 
+  it("checks the provider the account's model argument names, and lists only its models", async () => {
+    const { seam, runs } = buildFakePiSeam({});
+    const ctx = { ...buildContext(createPiHome()), modelArgument: "openrouter/{model}" };
+
+    const probed = await Effect.runPromise(makePiAdapter(seam).probe(ctx));
+
+    expect(runs.map((run) => run.command.slice(1))).toContainEqual([
+      "auth",
+      "check",
+      "--provider",
+      "openrouter",
+      "--json",
+    ]);
+    // The fake pi lists Z.ai models and one from another provider, none from openrouter.
+    expect(probed.models).toEqual([]);
+  });
+
+  it("fails the probe with a message when the model argument names no provider", async () => {
+    const { seam, runs } = buildFakePiSeam({});
+    const ctx = { ...buildContext(createPiHome()), modelArgument: "{model}" };
+
+    const probed = await Effect.runPromise(makePiAdapter(seam).probe(ctx));
+
+    expect(probed.auth.status).toBe("error");
+    expect(probed.auth.message).toContain("<provider>/{model}");
+    expect(runs).toEqual([]);
+  });
+
   it("reports a machine with no key as unauthenticated, not as broken", async () => {
-    const { result } = runProbe({}, {});
+    const { result } = runProbe({}, null);
 
     const probed = await result;
     // Not `error`: nobody has entered a key yet. The Fleet row must tell that
@@ -102,7 +131,7 @@ describe("the pi adapter's probe", () => {
   });
 
   it("reports an error with a message when pi is not installed", async () => {
-    const { result } = runProbe({}, { zaiApiKey: TEST_ZAI_KEY }, undefined);
+    const { result } = runProbe({}, TEST_CREDENTIAL, undefined);
 
     const probed = await result;
     expect(probed.auth.status).toBe("error");
@@ -242,7 +271,7 @@ describe("the pi adapter's probe", () => {
 
       const { result } = runOnClock(
         Effect.gen(function* () {
-          const probing = yield* Effect.forkChild(makePiAdapter(seam).probe(ctx, {}));
+          const probing = yield* Effect.forkChild(makePiAdapter(seam).probe(ctx));
           yield* TestClock.adjust(0);
           // The refresh has started and is not over, so the read has not started.
           expect(countRefreshes(runs)).toBe(1);
@@ -275,7 +304,7 @@ describe("the pi adapter's probe", () => {
       const { seam } = buildFakePiSeam({ refresh: Effect.succeed(FAILED) });
       const ctx = buildContext(createPiHome());
 
-      const { result, warnings } = runOnClock(makePiAdapter(seam).probe(ctx, {}));
+      const { result, warnings } = runOnClock(makePiAdapter(seam).probe(ctx));
 
       const probed = await result;
       expect(probed.auth.status).toBe("ok");
@@ -292,7 +321,7 @@ describe("the pi adapter's probe", () => {
 
       const { result, warnings } = runOnClock((collected) =>
         Effect.gen(function* () {
-          const probing = yield* Effect.forkChild(makePiAdapter(seam).probe(ctx, {}));
+          const probing = yield* Effect.forkChild(makePiAdapter(seam).probe(ctx));
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
           const probed = yield* Fiber.join(probing);
@@ -324,7 +353,7 @@ describe("the pi adapter's probe", () => {
       const { result } = runOnClock(
         Effect.gen(function* () {
           const probings = yield* Effect.forEach([1, 2], () =>
-            Effect.forkChild(adapter.probe(ctx, {})),
+            Effect.forkChild(adapter.probe(ctx)),
           );
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
@@ -345,12 +374,12 @@ describe("the pi adapter's probe", () => {
 
       const { result, warnings } = runOnClock(
         Effect.gen(function* () {
-          const probing = yield* Effect.forkChild(adapter.probe(ctx, {}));
+          const probing = yield* Effect.forkChild(adapter.probe(ctx));
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
           yield* Fiber.join(probing);
           yield* TestClock.adjust(Duration.seconds(25));
-          const second = yield* Effect.forkChild(adapter.probe(ctx, {}));
+          const second = yield* Effect.forkChild(adapter.probe(ctx));
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
           yield* Fiber.join(second);
@@ -363,7 +392,7 @@ describe("the pi adapter's probe", () => {
     });
 
     it("runs no refresh when no key is set", async () => {
-      const { result, runs } = runProbe({}, {});
+      const { result, runs } = runProbe({}, null);
 
       await result;
       expect(countRefreshes(runs)).toBe(0);

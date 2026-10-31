@@ -1,7 +1,7 @@
 import { type Effect, Schema } from "effect";
 import { AccessMode } from "@hercule/protocol";
 import type { ConnectionUnavailable } from "./connections";
-import { SchemaValue } from "./manifest";
+import { PLUGIN_ID_SOURCE } from "./manifest";
 import { TaskPriority } from "./limits";
 import type { KeyValueStore, PluginError } from "./plugin";
 
@@ -41,7 +41,7 @@ export const MAX_CONTRIBUTION_NAME_LENGTH = 128;
  * later extension point contributes. One limit for all of them, because they
  * are all stored in the same columns.
  */
-const ContributionName = Schema.String.check(
+export const ContributionName = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(MAX_CONTRIBUTION_NAME_LENGTH),
 );
@@ -60,30 +60,108 @@ export const ContributionWord = ContributionName.check(
 );
 
 /**
+ * The longest a folder name in a Harness Home path may be. A harness's
+ * qualified id becomes two such folder names, its plugin id and its own word
+ * (`providers/homes/<account>/<plugin id>/<word>`), and the runner refuses any
+ * home whose names are longer.
+ */
+export const MAX_HARNESS_HOME_SEGMENT_LENGTH = 64;
+
+/**
+ * The unqualified id a plugin gives a harness. It is a `ContributionWord`
+ * that is also usable as a folder name: letters, digits, `.`, `_` and `-`,
+ * starting with a letter or digit, at most `MAX_HARNESS_HOME_SEGMENT_LENGTH`
+ * characters. A harness's folder in each account's Harness Home is named
+ * after it, and a plugin accepted with a word the runner cannot use as a
+ * folder name would fail only when its first session starts.
+ */
+export const HarnessWord = ContributionWord.check(
+  Schema.isMaxLength(MAX_HARNESS_HOME_SEGMENT_LENGTH, {
+    message: `A harness id may be at most ${String(MAX_HARNESS_HOME_SEGMENT_LENGTH)} characters, because it names a folder in the Harness Home.`,
+  }),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, {
+    message:
+      "A harness id may hold only letters, digits, . _ and -, and must start with a letter or digit, because it names a folder in the Harness Home.",
+  }),
+);
+
+/**
+ * The qualified id of a contribution: the id of the plugin that owns it, a `/`,
+ * and the plugin's own word, such as `claude-code/claude-code`. The host mints
+ * these ids at registration (ADR 0034). A definition that names a contribution
+ * of another plugin, such as the provider a harness runs, writes this form,
+ * because it cannot know the other plugin's word any other way.
+ */
+export const QualifiedContributionId = ContributionName.check(
+  Schema.isPattern(new RegExp(`^${PLUGIN_ID_SOURCE}/[^/]+$`), {
+    message:
+      "A qualified id is the id of a plugin, a / character and the plugin's own word, such as claude-code/claude-code.",
+  }),
+);
+
+/**
+ * An environment variable name, as a harness process reads it: capital
+ * letters, digits and underscores, starting with a letter.
+ */
+const EnvironmentVariableName = Schema.String.check(
+  Schema.isPattern(/^[A-Z][A-Z0-9_]*$/, {
+    message:
+      "An environment variable name is capital letters, digits and underscores, starting with a letter.",
+  }),
+);
+
+/**
+ * How a harness runs the models of one provider: the account kinds it can run
+ * for that provider, how it names one of the provider's models, and which of
+ * the account's models it can run (spec 06 section 2).
+ */
+export const HarnessProviderSupport = Schema.Struct({
+  /** The qualified id of the provider, such as `anthropic/anthropic`. The provider's plugin need not be loaded. */
+  providerId: QualifiedContributionId,
+  /** The account kinds of that provider the harness can run. */
+  kinds: Schema.Array(
+    Schema.Struct({
+      /** The account kind's id, as the provider declares it. */
+      kind: ContributionWord,
+      /**
+       * The environment variable the account's credential goes in, in the
+       * harness process only. Absent for a kind whose login lives in the
+       * Harness Home instead.
+       */
+      credentialVariable: Schema.optionalKey(EnvironmentVariableName),
+    }),
+  ),
+  /**
+   * How the harness names a model of this provider, with `{model}` standing
+   * for the provider's own model id: `{model}`, or `zai/{model}` for pi.
+   */
+  modelArgument: Schema.String.check(
+    Schema.isPattern(/\{model\}/, {
+      message: "A model argument must contain {model}, where the model id goes.",
+    }),
+  ),
+  /**
+   * Which of the account's models the harness can run: `all` of them, or only
+   * those in the harness's own model list for the account (`own-list`).
+   */
+  models: Schema.Literals(["all", "own-list"]),
+});
+
+export type HarnessProviderSupport = Schema.Schema.Type<typeof HarnessProviderSupport>;
+
+/**
  * A harness's static self-description, which is all a harness plugin
  * contributes. `id` is the plugin's bare word; the host mints the qualified id
- * (`claude-code/claude-code`) at registration. `defaultConfig` is a value
- * rather than a function, because a function cannot be stored in the catalog.
+ * (`claude-code/claude-code`) at registration.
  */
 export const HarnessDefinition = Schema.Struct({
-  id: ContributionWord,
+  id: HarnessWord,
   displayName: ContributionName,
-  /** The harness's executable name on `PATH`, which links a runner's facts to an instance. */
+  /** The harness's executable name on `PATH`, which links a runner's facts to a harness. */
   binaryName: ContributionName,
-  /** Several accounts of one harness, kept apart by per-instance config dirs. */
-  supportsMultipleInstances: Schema.Boolean,
-  /** Per-instance logical settings only: environment and model defaults, never paths. */
-  configSchema: SchemaValue,
-  defaultConfig: Schema.Json,
   declared: DeclaredCapabilities,
-  /**
-   * The model slug this harness suggests for text generation: a small, cheap
-   * model from its catalog. The controller's `Automatic` text generation
-   * model picks the first harness, in its own order, whose suggested model
-   * a logged-in instance offers (spec 06 section 14). Absent when the
-   * harness suggests none.
-   */
-  suggestedTextGenerationModel: Schema.optionalKey(Schema.NonEmptyString),
+  /** The providers, and the account kinds of each, that the harness can run. */
+  runs: Schema.Array(HarnessProviderSupport),
 });
 
 export type HarnessDefinition = Schema.Schema.Type<typeof HarnessDefinition>;

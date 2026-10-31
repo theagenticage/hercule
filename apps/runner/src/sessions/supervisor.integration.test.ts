@@ -93,7 +93,8 @@ afterAll(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
+const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
+const HARNESS_HOME = `providers/${ACCOUNT_ID}`;
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const RUNNER_ID = "0199e0e7-0000-7000-8000-0000000000aa";
 const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
@@ -117,7 +118,7 @@ const INACTIVITY_MS = 30 * 60 * 1000;
 const ABSOLUTE_MS = 8 * 60 * 60 * 1000;
 
 const SPEC: SessionSpec = {
-  instanceId: INSTANCE,
+  providerAccountId: ACCOUNT_ID,
   workspaceId: null,
   modelSelection: { model: "claude-haiku-4-5", options: {} },
   accessMode: "approval-required",
@@ -130,8 +131,11 @@ const START: SessionStart = {
   sessionId: SESSION,
   input: START_INPUT,
   harnessId: "fake",
-  config: {},
-  secrets: {},
+  harnessAccount: {
+    providerAccountId: ACCOUNT_ID,
+    harnessHome: HARNESS_HOME,
+    modelArgument: "{model}",
+  },
   spec: SPEC,
   token: "a-session-token",
 };
@@ -237,7 +241,7 @@ const createFake = (): Fake => {
           const binding: SessionBinding = {
             sessionId,
             nativeSessionId: NATIVE,
-            instanceId: INSTANCE,
+            providerAccountId: ACCOUNT_ID,
           };
           held.set(sessionId, binding);
           fake.emit({ _tag: "session.started", eventId: "e-started", sessionId, at });
@@ -344,7 +348,7 @@ const buildConnection = (
   roots.push(under);
   const sent: Array<RunnerToController> = [];
   const machine: Machine = {
-    providersDir: join(under, "providers"),
+    storageDir: join(under, "storage"),
     scratchDir: join(under, "scratch"),
     attachmentsDir: join(under, "attachments"),
     editMarksDir: join(under, "edit-marks"),
@@ -594,10 +598,10 @@ describe("one session, start to exit", () => {
     // The controller inserts each event once, keyed by this number, so the
     // number must never repeat or go backwards.
     expect(events.map((frame) => frame.seq)).toEqual([1, 2, 3]);
-    // The harness is handed the scratch cwd and the instance's home, not paths
+    // The harness is handed the scratch cwd and the Harness Home, not paths
     // the controller invented.
     expect(fake.contexts[0]?.cwd).toBe(join(machine.scratchDir, SESSION));
-    expect(fake.contexts[0]?.home).toBe(join(machine.providersDir, INSTANCE));
+    expect(fake.contexts[0]?.home).toBe(join(machine.storageDir, HARNESS_HOME));
     expect(fake.contexts[0]?.binary).toBe("/usr/local/bin/fake-harness");
     expect(fake.contexts[0]?.env["HERCULE_SESSION"]).toBe("1");
     // The credential the session calls Hercule with, carried from the frame the
@@ -630,7 +634,7 @@ describe("one session, start to exit", () => {
     const reports = sent.filter((frame) => frame._tag === "sessionsReport");
     // A plain snapshot: each binding links the Hercule session to the harness's own session.
     expect(reports[0]?.sessions).toEqual([
-      { sessionId: SESSION, nativeSessionId: NATIVE, instanceId: INSTANCE },
+      { sessionId: SESSION, nativeSessionId: NATIVE, providerAccountId: ACCOUNT_ID },
     ]);
     expect(reports[1]?.sessions).toEqual([]);
     // The scratch directory dies with the session it was made for.
@@ -3418,15 +3422,15 @@ describe("a shutdown that happens before a start has added its entry", () => {
 });
 
 /**
- * Tests the instance's secret config values. They arrive in the start frame and
- * reach the adapter through the context and nowhere else. Written to the
- * runner's disk, they would outlive the session they belong to, and the machine
- * holds no Hercule state to restore them from.
+ * Tests the account's credential. It arrives in the start frame and reaches the
+ * adapter through the context and nowhere else. Written to the runner's disk,
+ * it would outlive the session it belongs to, and the machine holds no Hercule
+ * state to restore it from.
  */
-describe("the secrets a start frame carries", () => {
+describe("the account a start frame carries", () => {
   const KEY = "a-paid-credential-nobody-else-holds";
 
-  it("passes the frame's secrets to the adapter, by name", async () => {
+  it("passes the account's credential and model argument to the adapter", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
@@ -3434,18 +3438,26 @@ describe("the secrets a start frame carries", () => {
       fake,
       supervisor,
       Effect.gen(function* () {
-        yield* supervisor.start({ ...START, secrets: { zaiApiKey: KEY } });
+        yield* supervisor.start({
+          ...START,
+          harnessAccount: {
+            ...START.harnessAccount,
+            modelArgument: "zai/{model}",
+            credential: { variable: "ZAI_API_KEY", value: KEY },
+          },
+        });
         yield* waitUntil("started the session", () => fake.contexts.length === 1);
       }),
     );
 
-    expect(fake.contexts[0]?.secrets).toEqual({ zaiApiKey: KEY });
-    // The runner never adds them to the environment: only the adapter knows
-    // which variable a key belongs in.
+    expect(fake.contexts[0]?.credential).toEqual({ variable: "ZAI_API_KEY", value: KEY });
+    expect(fake.contexts[0]?.modelArgument).toBe("zai/{model}");
+    // The runner never adds it to the environment: the adapter puts it in the
+    // environment of the harness process.
     expect(JSON.stringify(fake.contexts[0]?.env)).not.toContain(KEY);
   });
 
-  it("passes an empty set of secrets when the frame has none", async () => {
+  it("passes no credential when the frame has none", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
@@ -3458,7 +3470,7 @@ describe("the secrets a start frame carries", () => {
       }),
     );
 
-    expect(fake.contexts[0]?.secrets).toEqual({});
+    expect(fake.contexts[0]).not.toHaveProperty("credential");
   });
 });
 

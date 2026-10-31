@@ -65,7 +65,7 @@ const buildPlugins = (): ReadonlyArray<Plugin> =>
     createPluginFixture({
       id: "alpha",
       configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
-      definitions: [buildHarnessDefinition("alpha", { model: "alpha-default" })],
+      definitions: [buildHarnessDefinition("alpha")],
     }),
     createPluginFixture({ id: "beta" }),
     createPluginFixture({ id: "outdated", hostApi: HOST_API + 1 }),
@@ -226,8 +226,8 @@ describe("GET /plugins", () => {
       expect(contribution.definition).toMatchObject({
         id: "alpha/alpha",
         displayName: "Harness alpha",
-        supportsMultipleInstances: true,
-        defaultConfig: { model: "alpha-default" },
+        binaryName: "harness",
+        runs: [],
       });
 
       for (const refused of REFUSED) {

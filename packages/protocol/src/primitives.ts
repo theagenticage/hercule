@@ -41,18 +41,52 @@ export const Timestamp = Schema.String.check(
 export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
 
 /**
- * A provider instance's id. Stricter than a fact, because the runner uses it as
- * a directory name: the credential a login writes, and the harness home a
- * session runs against, must stay under the instance's own home, with no way
- * for the path to escape it.
+ * A Provider Account's id. Stricter than a fact, because the runner uses it in
+ * the folder of a Harness Home: the credential a sign-in writes, and the home
+ * a session runs against, must stay under that folder, with no way for the
+ * path to escape it.
  */
-export const InstanceId = Schema.String.check(
+export const ProviderAccountId = Schema.String.check(
   Schema.isBetweenLength(1, 64),
-  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "instance id", description: "an identifier" }),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/, {
+    title: "provider account id",
+    description: "an identifier",
+  }),
 );
 
+export type ProviderAccountId = Schema.Schema.Type<typeof ProviderAccountId>;
+
 /**
- * A session's id. Strict for the same reason as an instance's: the runner uses
+ * The folder a harness runs in for one Provider Account, as a path relative to
+ * the runner's storage directory. The controller names it and the runner joins
+ * it to the storage directory; the runner never works one out from an id. Only
+ * two shapes are accepted, so a value can never leave the storage directory:
+ *
+ * - `providers/<providerAccountId>`: the home of an account carried over from
+ *   an earlier release, for its original harness.
+ * - `providers/homes/<providerAccountId>/<word>/<word>`: every other home,
+ *   where the two words are the harness id's plugin id and its own word.
+ *
+ * A word starts with a letter or digit, so `.` and `..` never match. Each
+ * segment is at most 64 characters, the limit ids have. The
+ * folder `providers/homes` is the parent of the derived homes, never an account's.
+ */
+export const HarnessHome = Schema.String.check(
+  Schema.isMaxLength(256),
+  Schema.isPattern(
+    /^providers\/(?:(?!homes$)[A-Za-z0-9_-]{1,64}|homes\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})$/,
+    {
+      title: "harness home",
+      description:
+        "providers/<account id> or providers/homes/<account id>/<word>/<word>, relative to the storage directory",
+    },
+  ),
+);
+
+export type HarnessHome = Schema.Schema.Type<typeof HarnessHome>;
+
+/**
+ * A session's id. Strict for the same reason as a Provider Account's: the runner uses
  * it as a directory name for a session without a workspace, and removes that
  * directory when the session exits. An id that could escape the scratch root
  * would be a path traversal followed by an `rm -rf`.
@@ -101,27 +135,56 @@ export const Sequenced = Schema.Struct({ seq: Seq });
 export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
 
 /**
- * The name a secret is stored under, with the same limits as the secrets
- * table's names, because these keys are those names. `|` is the separator in
- * the associated data that binds a stored value to its owner, so no name may
- * contain one.
+ * The environment variable a harness reads the key or token of an account
+ * from, and the key itself. The controller sends it whenever the harness
+ * declares a variable for the account's kind. `value` is left out when the
+ * account has no key stored, so the runner removes the variable from the
+ * harness's environment instead of letting a key of the runner's own stand in.
+ *
+ * The controller decrypts the value as it builds the frame, so the plaintext
+ * exists on the wire and in the runner's memory for that one operation and
+ * nowhere else: it is never logged and never written to disk.
  */
-const SecretName = Schema.String.check(
-  Schema.isBetweenLength(1, 256),
-  Schema.isPattern(/^[^|]+$/, { title: "secret name", description: "no `|`" }),
-);
+export const HarnessCredential = Schema.Struct({
+  variable: Schema.String.check(
+    Schema.isPattern(/^[A-Z][A-Z0-9_]*$/, {
+      title: "credential variable",
+      description: "an environment variable name in upper case",
+    }),
+    Schema.isMaxLength(128),
+  ),
+  value: Schema.optionalKey(Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH))),
+});
+
+export type HarnessCredential = Schema.Schema.Type<typeof HarnessCredential>;
 
 /**
- * The secret config fields of one provider instance, keyed by the name the
- * plugin gave each. The controller decrypts them as it builds the frame, so
- * the plaintext exists on the wire and in the runner's memory for that one
- * operation and nowhere else: never on the machine's disk, never in a log.
- * The field is always present: an instance with no credential stored sends
- * `{}`, so a runner handles one shape rather than two forms of the same state.
+ * What the runner needs to run a harness for one Provider Account, so it never
+ * looks anything up: the account, the folder to run in, how the harness names
+ * a model for this account's provider, and the credential of a key or token
+ * account.
+ *
+ * - `modelArgument` is the harness's form of the model argument, with
+ *   exactly one `{model}` standing for the model id (`{model}`, `zai/{model}`).
+ * - `credential` is absent for an account whose harness declares no variable
+ *   for its kind, such as a per-machine account whose login is in the Harness
+ *   Home.
  */
-export const InstanceSecrets = Schema.Record(SecretName, Schema.String);
+export const HarnessAccount = Schema.Struct({
+  providerAccountId: ProviderAccountId,
+  harnessHome: HarnessHome,
+  modelArgument: Schema.String.check(
+    Schema.isMaxLength(128),
+    // Braces are allowed only in the one placeholder, so there is exactly one.
+    Schema.isPattern(/^[^{}]*\{model\}[^{}]*$/, {
+      title: "model argument",
+      description: "text with exactly one `{model}` placeholder and no other braces",
+    }),
+  ),
+  credential: Schema.optionalKey(HarnessCredential),
+});
 
-export type InstanceSecrets = Schema.Schema.Type<typeof InstanceSecrets>;
+export type HarnessAccount = Schema.Schema.Type<typeof HarnessAccount>;
 
 /**
  * Identifies one step record of a run: the run, the step's id in the run's

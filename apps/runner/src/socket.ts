@@ -15,8 +15,6 @@
  *
  * A known id alone is not enough to trust whatever key comes with it.
  */
-import { mkdirSync } from "node:fs";
-import { join as joinPath } from "node:path";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -52,6 +50,7 @@ import {
   encodeChallengeBytes,
   type ControllerHello,
   type ForwardingPointer,
+  type HarnessAccount,
   MAX_FACT_LENGTH,
   type InstallRequest,
   type LoginStart,
@@ -79,6 +78,7 @@ import {
   type HarnessAdapter,
   type HarnessRunnerContext,
 } from "./harnesses";
+import { createHarnessHome } from "./harnesses/account";
 import type { LoginAnswer, Logins } from "./harnesses/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
@@ -155,12 +155,12 @@ export interface ConnectOptions {
   readonly probe: Effect.Effect<RunnerFacts>;
   readonly headroom: Effect.Effect<RunnerWatermark, Cause.UnknownError>;
   /**
-   * The directory that holds one config directory per provider instance on
-   * this machine. It keeps the name `providers`, because renaming it would
-   * move the logins stored in it. Each instance has its own, so two accounts of one harness
-   * never read each other's credentials, or the user's own.
+   * The runner's storage directory. A Harness Home is a path the controller
+   * names, joined to this directory. Each account has its own home, so two
+   * accounts of one harness never read each other's credentials, or the user's
+   * own.
    */
-  readonly providersDir: string;
+  readonly storageDir: string;
   /**
    * The directory that holds the empty working directory of each session
    * without a workspace. Each one is removed when its session exits
@@ -421,17 +421,15 @@ export const connect = (
       facts.harnesses.find((harness) => harness.name === binaryName && harness.present)?.path;
 
     /**
-     * Builds the context for a probe, login or install of one provider
-     * instance. Creates the instance's private directory, where the harness
-     * keeps its credentials.
+     * Builds the context for a probe, login or text generation of one Provider
+     * Account in one harness. Creates the account's Harness Home, the private
+     * folder where the harness keeps its credentials.
      */
     const buildContext = (
       adapter: HarnessAdapter,
-      instanceId: string,
-      secrets: Readonly<Record<string, string>>,
+      harnessAccount: HarnessAccount,
     ): HarnessRunnerContext => {
-      const home = joinPath(options.providersDir, instanceId);
-      mkdirSync(home, { recursive: true, mode: 0o700 });
+      const home = createHarnessHome(options.storageDir, harnessAccount.harnessHome);
       // Probes, logins and installs have no working directory. Only sessions
       // have one, and the session supervisor builds its own context
       // (spec 06 section 4.2).
@@ -440,7 +438,10 @@ export const connect = (
         home,
         binary: findBinaryPath(adapter.binaryName),
         env: process.env,
-        secrets,
+        modelArgument: harnessAccount.modelArgument,
+        ...(harnessAccount.credential === undefined
+          ? {}
+          : { credential: harnessAccount.credential }),
         // Required by the shared context type, although a probe, an install and
         // a login never load the skill.
         herculeTool: options.herculeTool,
@@ -459,7 +460,7 @@ export const connect = (
       runnerId: pin.runnerId,
       workspaceSteps: options.workspaceSteps,
       machine: {
-        providersDir: options.providersDir,
+        storageDir: options.storageDir,
         scratchDir: options.scratchDir,
         attachmentsDir: options.attachmentsDir,
         editMarksDir: options.editMarksDir,
@@ -547,7 +548,7 @@ export const connect = (
           encodeFrameText({
             _tag: "probeReport",
             requestId: request.requestId,
-            instanceId: request.instanceId,
+            providerAccountId: request.harnessAccount.providerAccountId,
             result,
           }),
         );
@@ -556,10 +557,7 @@ export const connect = (
         return yield* sendProbeReport(
           adapter === undefined
             ? buildFailedProbe(null, describeMissingAdapter(request.harnessId))
-            : yield* adapter.probe(
-                buildContext(adapter, request.instanceId, request.secrets),
-                request.config,
-              ),
+            : yield* adapter.probe(buildContext(adapter, request.harnessAccount)),
         );
       }).pipe(
         // The encoding happens inside the catch, so a result that cannot be
@@ -675,11 +673,11 @@ export const connect = (
             })
           : options.harnessLogins.start(
               request.requestId,
-              request.instanceId,
+              request.harnessAccount.providerAccountId,
               adapter,
               // A login is the harness writing its own credential on this
-              // machine, so the instance's stored secrets are not passed in.
-              buildContext(adapter, request.instanceId, {}),
+              // machine. The login command never reads the account's key.
+              buildContext(adapter, request.harnessAccount),
             );
       });
 
@@ -838,7 +836,7 @@ export const connect = (
               Effect.forkIn(
                 answerLogin(
                   message.requestId,
-                  options.harnessLogins.submit(message.instanceId, message.code),
+                  options.harnessLogins.submit(message.providerAccountId, message.code),
                 ),
                 connection,
               ),

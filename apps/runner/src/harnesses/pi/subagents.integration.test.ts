@@ -22,7 +22,7 @@ import { Effect, Stream } from "effect";
 import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { pi } from "./adapter";
 import { SUBAGENT_TOOL } from "./extension";
-import { cleanupHomes, buildContext, TEST_ZAI_KEY, SPEC, filterByTag, waitUntil } from "./testing";
+import { cleanupHomes, buildContext, SPEC, filterByTag, waitUntil } from "./testing";
 import { createScratchHome } from "../testing";
 import {
   endsWithToolResult,
@@ -173,7 +173,7 @@ const startLiveSession = async (
   // The fake server checks no key. The real PATH is passed so pi can find
   // the shell it runs commands with.
   const ctx = {
-    ...buildContext(home, cwd, { zaiApiKey: TEST_ZAI_KEY }),
+    ...buildContext(home, cwd),
     binary: binary!,
     env: { PATH: process.env["PATH"] ?? "" },
   };

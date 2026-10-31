@@ -328,11 +328,11 @@ export const CLI = {
     fields: {
       controller: {
         flag: "controller",
-        help: 'The controller\'s operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry, how deep runs may nest (run.nestingLimit) and which model makes text generations (textGeneration.model: "automatic" by default, "off", or {"instanceId":"<provider instance id>","model":"<model slug>"}; a chosen model never falls back to another provider).',
+        help: 'The controller\'s operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry, how deep runs may nest (run.nestingLimit) and which model makes text generations (textGeneration.model: "automatic" by default, "off", or {"providerAccountId":"<account id>","harnessId":"<harness id>","model":"<model slug>"} with "harnessId" optional; a chosen model never falls back to another account).',
       },
       user: {
         flag: "user",
-        help: "The user's own settings as a JSON object: timezone, thread defaults, the default GitHub account (github.defaultConnectionId), mutes.",
+        help: "The user's own settings as a JSON object: timezone, thread defaults (thread.providerAccountId, thread.harnessId, thread.model and the like), the default GitHub account (github.defaultConnectionId), mutes.",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -2263,17 +2263,25 @@ export const CLI = {
   },
   "runner.probe": {
     command: "runner probe",
-    help: "Probes one Provider Instance on a runner and returns a fresh Capability Snapshot. The snapshot holds its auth state, harness version and model catalog. Use it when a spawn failed because no machine was logged in.",
-    examples: [{ args: ["1f3a9c2e", "--instance", "7b41d0a5"] }],
+    help: "Probes one Provider Account in one harness on a runner and returns a fresh Capability Snapshot. The snapshot holds its auth state, harness version and model catalog. Use it when a spawn failed because no machine was signed in.",
+    examples: [
+      { args: ["1f3a9c2e", "--account", "7b41d0a5"] },
+      { args: ["1f3a9c2e", "--account", "7b41d0a5", "--harness", "claude-code/claude-code"] },
+    ],
     fields: {
       id: {
         positional: true,
         help: "The runner's id, or a tail of eight or more characters.",
         resolves: "runner.query",
       },
-      instanceId: {
-        flag: "instance",
-        help: "The Provider Instance to probe, by full id; find it with `hercule provider list`.",
+      providerAccountId: {
+        flag: "account",
+        help: "The Provider Account to probe, by its id or a tail of eight or more characters; find it with `hercule provider-account list`.",
+        resolves: "providerAccount.query",
+      },
+      harnessId: {
+        flag: "harness",
+        help: "The harness to probe it in, by its qualified harness id; leave it off for the account's default harness. Find ids with `hercule harness list`.",
       },
     },
   },
@@ -2301,7 +2309,7 @@ export const CLI = {
       },
       harnessId: {
         flag: "harness",
-        help: "Which harness to install, by its qualified harness id such as claude-code/claude-code or codex/codex; not an instance id.",
+        help: "Which harness to install, by its qualified harness id such as claude-code/claude-code or codex/codex; `hercule harness list` shows them.",
       },
     },
   },
@@ -2427,101 +2435,120 @@ export const CLI = {
     },
   },
 
-  "provider.query": {
-    command: "provider list",
-    help: "Lists the Provider Instances: one row per account of a harness. Each has its own config and its own vendor login. Placement and spawning route on the instance id, never on the harness id.",
+  "harness.query": {
+    command: "harness list",
+    help: "Lists the harnesses: the agent programs sessions run in, such as Claude Code, Codex and pi. Each row has its qualified id, its binary name, what it can do, and for every runner whether it is installed there and which version. Use the id with --harness. If a harness is missing on a runner, install it with `hercule runner install-harness`.",
     examples: [{ args: [] }],
     fields: {},
   },
-  "provider.read": {
-    command: "provider read",
-    help: "Reads one Provider Instance in full, with the Capability Snapshot each runner reported for it. A snapshot is auth state, harness version and model catalog.",
+  "provider.query": {
+    command: "provider list",
+    help: "Lists the Providers: the companies that serve models, such as Anthropic and Z.ai. Each row has its qualified id and the kinds of account you can have there, with the steps to set one up and the harnesses it may run in. Use the id and kind to open an account; `hercule provider-account list` shows the accounts that exist.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
+  "providerAccount.query": {
+    command: "provider-account list",
+    help: "Lists the Provider Accounts, oldest first. Each is one account at one Provider, with who is signed in, the plan, the default harness, and the Capability Snapshot each runner reported for it. A snapshot is auth state, harness version and model catalog. Sessions, Agents and assistants run on an account's id, never on a Provider's.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
+  "providerAccount.read": {
+    command: "provider-account read",
+    help: "Reads one Provider Account in full. It shows the Capability Snapshot each runner reported for it in each harness. A snapshot is auth state, harness version and model catalog.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
         positional: true,
-        help: "The instance's id, or a tail of eight or more characters.",
-        resolves: "provider.query",
+        placeholder: "account-id",
+        help: "The account's id, or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
       },
     },
   },
-  "provider.create": {
-    command: "provider create",
-    help: "Opens a Provider Instance: one account of one harness, with its own harness home on every runner. The config is a JSON object validated against the harness's own schema. Log the new instance in on a machine with `hercule provider login`.",
-    examples: [{ args: ["--harness", "claude-code/claude-code", "--name", "work"], stdin: "{}" }],
+  "providerAccount.update": {
+    command: "provider-account update",
+    help: "Edits a Provider Account; a field you leave out is not changed. `--label null` removes the label. New credentials replace the stored ones for sessions started afterwards. Pass them as a JSON object on stdin with --credentials-stdin, so a key never appears on a command line. Which fields a kind takes is in `hercule provider list`.",
+    examples: [
+      { args: ["1f3a9c2e", "--label", "personal"] },
+      { args: ["1f3a9c2e", "--credentials-stdin"], stdin: '{"apiKey":"zai_xxx"}' },
+    ],
     fields: {
-      harnessId: {
-        flag: "harness",
-        help: "Which harness to open an account of, by its qualified harness id such as claude-code/claude-code or codex/codex.",
+      id: {
+        positional: true,
+        placeholder: "account-id",
+        help: "The account's id, or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
       },
-      name: {
-        flag: "name",
-        help: "What to call this account, so a chooser can tell two of them apart.",
+      label: {
+        flag: "label",
+        help: "A new name, so you can tell two accounts at one Provider apart; unique within the Provider. `null` removes it.",
       },
-      config: {
+      credentials: {
         stdin: true,
-        flag: "config",
-        help: "The instance's config as a JSON object; send {} for none.",
+        flag: "credentials",
+        help: "The new credential values as a JSON object keyed by the field names of the kind's credentials step, such as apiKey; read from stdin only when --credentials-stdin asks for them.",
       },
     },
-  },
-  "provider.update": {
-    command: "provider update",
-    help: "Edits a Provider Instance; a field you leave out is not changed. The config goes inline here as JSON, because it is one value beside the name rather than the whole payload.",
-    examples: [{ args: ["1f3a9c2e", "--name", "personal"] }],
-    fields: {
-      id: {
-        positional: true,
-        help: "The instance's id, or a tail of eight or more characters.",
-        resolves: "provider.query",
-      },
-      name: { flag: "name", help: "A new name for the instance." },
-      config: {
-        flag: "config",
-        help: "A replacement config as inline JSON, validated against the harness's own schema.",
-      },
+    errors: {
+      conflict: "another account at the same Provider already has that label",
     },
   },
-  "provider.delete": {
-    command: "provider delete",
-    help: "Deletes a Provider Instance. Nothing can be spawned on it afterwards, so open its replacement with `hercule provider create` before deleting the last account of a harness.",
+  "providerAccount.delete": {
+    command: "provider-account delete",
+    help: "Deletes a Provider Account, with its stored credentials and Capability Snapshots. Nothing can be spawned on it afterwards. It is refused while an Agent or assistant, the textGeneration.model setting, the thread.providerAccountId setting or a running session still uses it; the message names each, so point them at another account first. Ended sessions keep their history, but cannot be continued.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
         positional: true,
-        help: "The instance's id, or a tail of eight or more characters.",
-        resolves: "provider.query",
+        placeholder: "account-id",
+        help: "The account's id, or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
       },
     },
+    errors: {
+      invalid_state:
+        "an Agent, assistant, setting or running session still uses the account; the message names each",
+    },
   },
-  "provider.login": {
-    command: "provider login",
-    help: "Starts the vendor login for a Provider Instance on one machine. Returns the URL to open. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. When the harness prints a code to type in the browser, the reply also holds that code and when it expires (expiresAt), and the login finishes by itself once you have typed it: `hercule provider read` then shows the machine logged in. Otherwise, paste the code the browser shows into `hercule provider submit-login-code`.",
+  "providerAccount.signIn": {
+    command: "provider-account sign-in",
+    help: "Starts the vendor sign-in for a Provider Account on one machine. Returns the URL to open. A vendor credential belongs to exactly one machine, because two live copies of one login rotate each other out. When the harness prints a code to type in the browser, the reply also holds that code and when it expires (expiresAt), and the sign-in finishes by itself once you have typed it: `hercule provider-account read` then shows the machine signed in. Otherwise, paste the code the browser shows into `hercule provider-account submit-sign-in-code`.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5"] }],
     fields: {
       id: {
         positional: true,
-        help: "The instance's id, or a tail of eight or more characters.",
-        resolves: "provider.query",
+        placeholder: "account-id",
+        help: "The account's id, or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
       },
       runnerId: {
         flag: "runner",
-        help: "Which machine the login runs on, by its full id.",
+        help: "Which machine the sign-in runs on, by its full id.",
       },
     },
+    errors: {
+      invalid_state:
+        "the runner is offline, the harness is not installed there, the account's kind has no sign-in step, or the runner printed no URL",
+    },
   },
-  "provider.submitLoginCode": {
-    command: "provider submit-login-code",
-    help: "Sends the code the browser showed, finishing what `hercule provider login` started. Returns a fresh Capability Snapshot for that machine, which shows whether the instance is usable there.",
+  "providerAccount.submitSignInCode": {
+    command: "provider-account submit-sign-in-code",
+    help: "Sends the code the browser showed, finishing what `hercule provider-account sign-in` started. Returns the account, whose Capability Snapshots show whether it is usable on that machine. A code the vendor refuses is rejected with the vendor's own words, and the sign-in stays open for another try.",
     examples: [{ args: ["1f3a9c2e", "--runner", "7b41d0a5", "--code", "ABCD-1234"] }],
     fields: {
       id: {
         positional: true,
-        help: "The instance's id, or a tail of eight or more characters.",
-        resolves: "provider.query",
+        placeholder: "account-id",
+        help: "The account's id, or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
       },
-      runnerId: { flag: "runner", help: "The same machine the login was started on." },
+      runnerId: { flag: "runner", help: "The same machine the sign-in was started on." },
       code: { flag: "code", help: "The code the browser showed; one line, no newlines." },
+    },
+    errors: {
+      conflict:
+        "the sign-in is for someone other than the person this account belongs to; sign in again as that person",
     },
   },
 
@@ -2789,14 +2816,14 @@ export const CLI = {
     help: "Creates an Agent: a named configuration sessions are spawned from. Its values are copied onto each session at spawn, so editing it later changes nothing that is already running. The system prompt is read from stdin.",
     examples: [
       {
-        args: ["--name", "assessor", "--instance", "7b41d0a5", "--profile", "1f3a9c2e"],
+        args: ["--name", "assessor", "--account", "7b41d0a5", "--profile", "1f3a9c2e"],
         stdin: "You assess incoming tasks and decide whether to accept them.",
       },
       {
         args: [
           "--name",
           "assessor",
-          "--instance",
+          "--account",
           "7b41d0a5",
           "--profile",
           "1f3a9c2e",
@@ -2821,10 +2848,14 @@ export const CLI = {
         flag: "system-prompt",
         help: "The instructions every session spawned from this agent starts with; appended to the harness's own.",
       },
-      instanceId: {
-        flag: "instance",
-        help: "The Provider Instance its sessions run on, by its id or a tail of eight or more characters.",
-        resolves: "provider.query",
+      providerAccountId: {
+        flag: "account",
+        help: "The Provider Account its sessions run on, by its id or a tail of eight or more characters; find it with `hercule provider-account list`.",
+        resolves: "providerAccount.query",
+      },
+      harnessId: {
+        flag: "harness",
+        help: "The harness its sessions run in, by its qualified harness id; leave it off for the account's default harness.",
       },
       permissionProfileId: {
         flag: "profile",
@@ -2837,7 +2868,7 @@ export const CLI = {
       },
       model: {
         flag: "model",
-        help: "The model its sessions open on, by its slug; leave it off to run on whatever the instance offers by default.",
+        help: "The model its sessions open on, by its slug; leave it off to run on whatever the account offers by default.",
       },
       options: {
         flag: "options",
@@ -2874,10 +2905,14 @@ export const CLI = {
         flag: "system-prompt",
         help: "Replacement instructions, read from stdin only when --system-prompt-stdin asks for them.",
       },
-      instanceId: {
-        flag: "instance",
-        help: "Run its sessions on this Provider Instance instead, by its id or a tail of eight or more characters.",
-        resolves: "provider.query",
+      providerAccountId: {
+        flag: "account",
+        help: "Run its sessions on this Provider Account instead, by its id or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
+      },
+      harnessId: {
+        flag: "harness",
+        help: "Run its sessions in this harness instead, by its qualified harness id. `null` puts it back on the account's default harness.",
       },
       permissionProfileId: {
         flag: "profile",
@@ -2887,7 +2922,7 @@ export const CLI = {
       accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },
       model: {
         flag: "model",
-        help: "The model its sessions open on instead, by its slug; it replaces the stored choices, so give --options with it to keep any. `null` puts it back on the instance default.",
+        help: "The model its sessions open on instead, by its slug; it replaces the stored choices, so give --options with it to keep any. `null` puts it back on the account's default model.",
       },
       options: {
         flag: "options",
@@ -2945,7 +2980,7 @@ export const CLI = {
         args: [
           "--name",
           "Ada",
-          "--instance",
+          "--account",
           "7b41d0a5",
           "--reply",
           "segments",
@@ -2966,10 +3001,14 @@ export const CLI = {
         flag: "system-prompt",
         help: "The assistant's system prompt, read from stdin only when --system-prompt-stdin asks for it; leave it off for the default system prompt.",
       },
-      instanceId: {
-        flag: "instance",
-        help: "The Provider Instance its sessions run on, by its id or a tail of eight or more characters; leave it off for the oldest instance of a harness this build carries.",
-        resolves: "provider.query",
+      providerAccountId: {
+        flag: "account",
+        help: "The Provider Account its sessions run on, by its id or a tail of eight or more characters; leave it off for the oldest account that can run an assistant.",
+        resolves: "providerAccount.query",
+      },
+      harnessId: {
+        flag: "harness",
+        help: "The harness its sessions run in, by its qualified harness id; leave it off for the account's default harness.",
       },
       permissionProfileId: {
         flag: "profile",
@@ -2982,7 +3021,7 @@ export const CLI = {
       },
       model: {
         flag: "model",
-        help: "The model its sessions open on, by its slug; leave it off to run on whatever the instance offers by default.",
+        help: "The model its sessions open on, by its slug; leave it off to run on whatever the account offers by default.",
       },
       options: {
         flag: "options",
@@ -3008,7 +3047,7 @@ export const CLI = {
     errors: {
       forbidden: AGENT_PROFILE_FORBIDDEN,
       invalid_state:
-        "there is no provider instance to run the assistant on, so add one with `hercule provider create`; or the shipped assistant profile was renamed, so name a profile with --profile",
+        "there is no Provider Account to run the assistant on, so look for one with `hercule provider-account list`; or the shipped assistant profile was renamed, so name a profile with --profile",
     },
   },
   "assistant.update": {
@@ -3034,10 +3073,14 @@ export const CLI = {
         flag: "system-prompt",
         help: "A replacement system prompt, read from stdin only when --system-prompt-stdin asks for it.",
       },
-      instanceId: {
-        flag: "instance",
-        help: "Run its sessions on this Provider Instance instead, by its id or a tail of eight or more characters.",
-        resolves: "provider.query",
+      providerAccountId: {
+        flag: "account",
+        help: "Run its sessions on this Provider Account instead, by its id or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
+      },
+      harnessId: {
+        flag: "harness",
+        help: "Run its sessions in this harness instead, by its qualified harness id. `null` puts it back on the account's default harness.",
       },
       permissionProfileId: {
         flag: "profile",
@@ -3047,7 +3090,7 @@ export const CLI = {
       accessMode: { flag: "access-mode", help: "What its sessions may do unasked." },
       model: {
         flag: "model",
-        help: "The model its sessions open on instead, by its slug; it replaces the stored choices, so give --options with it to keep any. `null` puts it back on the instance default.",
+        help: "The model its sessions open on instead, by its slug; it replaces the stored choices, so give --options with it to keep any. `null` puts it back on the account's default model.",
       },
       options: {
         flag: "options",
@@ -3605,7 +3648,7 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. A session's spawn, a Thread or from an Agent, runs on the calling session's Runner and in its workspace, so a reviewer sees the caller's files; --runner or --workspace sends it elsewhere. Either way, a flag given here takes precedence. `--role` names the session's job, such as review, so clients can show it in place of the title. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
+    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Account, harness, model and options when the Thread runs on the same account and harness, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. A session's spawn, a Thread or from an Agent, runs on the calling session's Runner and in its workspace, so a reviewer sees the caller's files; --runner or --workspace sends it elsewhere. Either way, a flag given here takes precedence. `--role` names the session's job, such as review, so clients can show it in place of the title. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
@@ -3626,13 +3669,15 @@ export const CLI = {
         stdin: "Assess this task: 'Fix a typo in the README'.",
       },
       {
-        args: ["--instance", "7b41d0a5", "--access-mode", "auto-accept-edits"],
+        args: ["--account", "7b41d0a5", "--access-mode", "auto-accept-edits"],
         stdin: "Bring the changelog up to date.",
       },
       {
         args: [
-          "--instance",
+          "--account",
           "7b41d0a5",
+          "--harness",
+          "codex/codex",
           "--model",
           "gpt-6.1-sol",
           "--options",
@@ -3683,7 +3728,7 @@ export const CLI = {
       },
       agentId: {
         flag: "agent",
-        help: "The Agent to spawn from, by its id or a tail of eight or more characters; --instance and --profile are not allowed with it, because those come from the Agent.",
+        help: "The Agent to spawn from, by its id or a tail of eight or more characters; --account, --harness and --profile are not allowed with it, because those come from the Agent.",
         resolves: "agent.query",
       },
       outputSchema: {
@@ -3694,14 +3739,18 @@ export const CLI = {
         flag: "role",
         help: `A one- or two-word name for this session's job, such as review, tests or migration; one line, at most ${String(MAX_ROLE_LENGTH)} characters. Clients show it in place of the title. Make it specific when a role is already taken, e.g. \`refunds review\`. Without it, a Thread gets one generated from its prompt.`,
       },
-      instanceId: {
-        flag: "instance",
-        help: "The Provider Instance to run on, in place of the default (a Thread takes the user's thread setting, or the calling session's own instance; a spawn from an Agent takes the Agent's, and does not allow this flag), by its id or a tail of eight or more characters.",
-        resolves: "provider.query",
+      providerAccountId: {
+        flag: "account",
+        help: "The Provider Account to run on, in place of the default (a Thread takes the user's thread setting, or the calling session's own account; a spawn from an Agent takes the Agent's, and does not allow this flag), by its id or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
+      },
+      harnessId: {
+        flag: "harness",
+        help: "The harness to run in, by its qualified harness id, in place of the default (the account's default harness, or for a Thread the user's thread setting or the calling session's own harness); a harness the account cannot run in is refused.",
       },
       model: {
         flag: "model",
-        help: "The model to open with, in place of the default (the Agent's model, or for a Thread the user's thread setting or the calling session's own model when the Thread runs on the same instance).",
+        help: "The model to open with, in place of the default (the Agent's model, or for a Thread the user's thread setting or the calling session's own model when the Thread runs on the same account and harness).",
       },
       options: {
         flag: "options",
@@ -3739,7 +3788,7 @@ export const CLI = {
       forbidden:
         "you lack session.spawn, which a Permission Request can get you. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's",
       invalid_state:
-        "nothing can host it: no connected runner is logged in to that provider instance, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider login`",
+        "nothing can host it: no connected runner is signed in to that Provider Account, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider-account read`, and sign in with `hercule provider-account sign-in`",
     },
   },
   "session.update": {
@@ -3905,7 +3954,7 @@ export const CLI = {
   },
   "session.continue": {
     command: "session continue",
-    help: "Forks a session: opens a second harness-native session off the one the parent left behind. The parent's own transcript is untouched. It runs on the parent's runner and Provider Instance, because that is where the native state is, and returns a new session with its own id. To continue the parent itself instead, send it `hercule session input`. A session that forks a Thread needs `thread.start` as well as `session.spawn`.",
+    help: "Forks a session: opens a second harness-native session off the one the parent left behind. The parent's own transcript is untouched. It runs on the parent's runner, Provider Account and harness, because that is where the native state is, and returns a new session with its own id. To continue the parent itself instead, send it `hercule session input`. A session that forks a Thread needs `thread.start` as well as `session.spawn`.",
     examples: [
       {
         args: ["1f3a9c2e", "--mode", "fork"],
@@ -4187,7 +4236,7 @@ export const NOUNS = {
   },
   secret: {
     summary:
-      "Secret references owned by connections, plugins, runners and provider instances. Values can never be read back.",
+      "Secret references owned by connections, plugins, runners and Provider Accounts. Values can never be read back.",
   },
   task: {
     summary: "Tasks: units of human intent, work-type-agnostic and never executions themselves.",
@@ -4261,9 +4310,18 @@ export const NOUNS = {
     summary:
       "The plugins this binary was built with: which are enabled, and what happened to each when the controller started.",
   },
+  harness: {
+    summary: "Harnesses: the agent programs sessions run in, and where each is installed.",
+    flow: "hercule harness list shows them with their qualified ids, hercule runner install-harness installs one on a machine.",
+  },
   provider: {
-    summary: "Provider Instances: the accounts of the coding harnesses sessions run on.",
-    flow: "hercule provider create opens an account, hercule provider login and hercule provider submit-login-code log it in on a machine, hercule runner probe shows whether it is usable there.",
+    summary:
+      "Providers: the companies that serve the models, with the kinds of account each offers.",
+    flow: "hercule provider list shows them; an account at one is a Provider Account, found with hercule provider-account list.",
+  },
+  "provider-account": {
+    summary: "Provider Accounts: the accounts at a Provider that sessions run on.",
+    flow: "hercule provider-account list finds an account, hercule provider-account sign-in and hercule provider-account submit-sign-in-code sign it in on a machine, hercule provider-account update changes its label or key, and hercule runner probe shows whether it is usable there.",
   },
   connection: {
     summary: "Connections: the named links to external accounts Hercule acts through.",

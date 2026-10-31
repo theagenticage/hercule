@@ -4,9 +4,11 @@ import { makeTestWorkspaces } from "../workspaces/testing";
  * leak the spec names:
  *
  * - a cwd the harness would read instruction files out of;
- * - a config directory shared with another instance, or with the user's own;
- * - an environment where instance config could take `HERCULE_SESSION` away
- *   from the `hercule` CLI the session calls.
+ * - a config directory shared with another account, or with the user's own;
+ * - an environment where the runner's own variables could take `HERCULE_SESSION`
+ *   away from the `hercule` CLI the session calls;
+ * - a credential that reaches the environment before the adapter puts it
+ *   there.
  */
 import {
   existsSync,
@@ -98,13 +100,14 @@ const createRoot = (): string => {
   return made;
 };
 
-const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
+const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
+const HARNESS_HOME = `providers/${ACCOUNT_ID}`;
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 
 const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
   const under = createRoot();
   return {
-    providersDir: join(under, "providers"),
+    storageDir: join(under, "storage"),
     scratchDir: join(under, "scratch"),
     attachmentsDir: join(under, "attachments"),
     editMarksDir: join(under, "edit-marks"),
@@ -140,11 +143,14 @@ const buildSessionStart = (overrides: Partial<SessionStart> = {}): SessionStart 
   sessionId: SESSION,
   input: { text: "hi" },
   harnessId: "claude-code/claude-code",
-  config: {},
-  secrets: {},
+  harnessAccount: {
+    providerAccountId: ACCOUNT_ID,
+    harnessHome: HARNESS_HOME,
+    modelArgument: "{model}",
+  },
   token: "a-session-token",
   spec: {
-    instanceId: INSTANCE,
+    providerAccountId: ACCOUNT_ID,
     workspaceId: null,
     modelSelection: { model: "claude-haiku-4-5", options: {} },
     accessMode: "approval-required",
@@ -175,25 +181,25 @@ describe("what a workspace-less session runs in", () => {
     expect(resolved?.scratch).toBe(resolved?.ctx.cwd);
   });
 
-  it("gets the instance's own config directory, made private", () => {
+  it("gets the account's own Harness Home, made private", () => {
     const machine = buildMachine();
 
     const resolved = resolveSync(buildSessionStart(), machine);
 
-    const home = join(machine.providersDir, INSTANCE);
+    const home = join(machine.storageDir, HARNESS_HOME);
     expect(resolved._tag === "Success" ? resolved.success.ctx.home : undefined).toBe(home);
     // A login lives in here, so nobody else on the machine reads it.
     expect(statSync(home).mode & 0o777).toBe(0o700);
   });
 
-  it("keeps a config directory another instance already made", () => {
+  it("keeps a config directory another account already made", () => {
     const machine = buildMachine();
     const outcome = resolveSync(buildSessionStart(), machine);
     expect(outcome._tag).toBe("Success");
-    const home = join(machine.providersDir, INSTANCE);
+    const home = join(machine.storageDir, HARNESS_HOME);
     writeFileSync(join(home, ".credentials.json"), "the login");
 
-    // The second session of the same instance must find the same login rather
+    // The second session of the same account must find the same login rather
     // than a fresh directory nobody is authenticated in.
     resolveSync(buildSessionStart({ sessionId: crypto.randomUUID() }), machine);
 
@@ -232,19 +238,17 @@ describe("the environment a session runs with", () => {
     return outcome._tag === "Success" ? { ...outcome.success.ctx.env } : {};
   };
 
-  it("layers the machine's own, then the instance's, then Hercule's", () => {
+  it("starts from the machine's own environment and leaves HOME where it is", () => {
+    // Moving HOME makes the Claude CLI report another account's login, or
+    // none: on macOS the Keychain item is keyed by the real home (spec 06
+    // section 9.1). Isolation is the Harness Home's job, not HOME's.
     const env = resolveEnv(
-      buildSessionStart({
-        config: { env: { ANTHROPIC_BASE_URL: "https://gateway.example", PATH: "/opt" } },
-      }),
-      buildMachine(),
+      buildSessionStart(),
+      buildMachine({ baseEnv: { PATH: "/usr/bin", HOME: "/home/somebody", LANG: "nl_NL" } }),
     );
 
-    // The instance's routing reaches the harness: that is what instance config
-    // is for (spec 06 section 2.1). Its `PATH` does not, because the session
-    // would then have no `hercule` to call.
-    expect(env["ANTHROPIC_BASE_URL"]).toBe("https://gateway.example");
     expect(env["HOME"]).toBe("/home/somebody");
+    expect(env["LANG"]).toBe("nl_NL");
   });
 
   it("tells the session the API URL, its token, and that it runs as a session", () => {
@@ -302,51 +306,72 @@ describe("the environment a session runs with", () => {
     expect(env["PATH"]).toBe(machine.binDir);
   });
 
-  it("does not let instance config override Hercule's variables or PATH", () => {
-    const machine = buildMachine();
-    const env = resolveEnv(
+  it("does not let the runner's own variables override Hercule's variables or put another PATH first", () => {
+    const machine = buildMachine({
+      baseEnv: {
+        PATH: "/opt",
+        HOME: "/home/somebody",
+        HERCULE_SESSION: "0",
+        HERCULE_API_URL: "http://elsewhere.example",
+        HERCULE_TOKEN: "a token nobody minted",
+      },
+    });
+    const env = resolveEnv(buildSessionStart(), machine);
+
+    expect(env["HERCULE_SESSION"]).toBe("1");
+    expect(env["HERCULE_API_URL"]).toBe("https://controller.example:4938");
+    expect(env["HERCULE_TOKEN"]).toBe("a-session-token");
+    expect(env["PATH"]).toBe(`${machine.binDir}:/opt`);
+  });
+
+  it("hands the adapter the model argument and the credential, and keeps the credential out of the environment", () => {
+    const outcome = resolveSync(
       buildSessionStart({
-        config: {
-          env: {
-            HERCULE_SESSION: "0",
-            HERCULE_API_URL: "http://attacker.example",
-            HERCULE_TOKEN: "a token nobody minted",
-            PATH: "/opt",
-          },
+        harnessAccount: {
+          providerAccountId: ACCOUNT_ID,
+          harnessHome: `providers/homes/${ACCOUNT_ID}/pi/pi`,
+          modelArgument: "zai/{model}",
+          credential: { variable: "ZAI_API_KEY", value: "the-key" },
+        },
+      }),
+      buildMachine(),
+    );
+
+    expect(outcome._tag).toBe("Success");
+    const ctx = outcome._tag === "Success" ? outcome.success.ctx : undefined;
+    expect(ctx?.modelArgument).toBe("zai/{model}");
+    expect(ctx?.credential).toEqual({ variable: "ZAI_API_KEY", value: "the-key" });
+    // Only the adapter puts the key in the environment of the harness process.
+    expect(ctx?.env["ZAI_API_KEY"]).toBeUndefined();
+    expect(JSON.stringify(ctx?.env)).not.toContain("the-key");
+  });
+
+  it("gives an account without a credential none", () => {
+    const outcome = resolveSync(buildSessionStart(), buildMachine());
+
+    expect(outcome._tag === "Success" ? "credential" in outcome.success.ctx : true).toBe(false);
+  });
+
+  it("runs in the Harness Home the frame names, joined to the storage directory and nowhere else", () => {
+    const machine = buildMachine();
+    const outcome = resolveSync(
+      buildSessionStart({
+        harnessAccount: {
+          providerAccountId: ACCOUNT_ID,
+          harnessHome: `providers/homes/${ACCOUNT_ID}/codex/codex`,
+          modelArgument: "{model}",
         },
       }),
       machine,
     );
 
-    // Instance config is the user's routing, not a way to point the session's
-    // credential, its controller or its `hercule` at something else.
-    expect(env["HERCULE_SESSION"]).toBe("1");
-    expect(env["HERCULE_API_URL"]).toBe("https://controller.example:4938");
-    expect(env["HERCULE_TOKEN"]).toBe("a-session-token");
-    expect(env["PATH"]).toBe(`${machine.binDir}:/usr/bin`);
-  });
-
-  it("does not let instance config move HOME", () => {
-    // Relocating it makes the Claude CLI report another account's login, or
-    // none: on macOS the Keychain item is keyed by the real home (spec 06
-    // section 9.1). Isolation is the config directory's job, not HOME's.
-    const env = resolveEnv(
-      buildSessionStart({ config: { env: { HOME: "/somewhere/else" } } }),
-      buildMachine(),
+    expect(outcome._tag === "Success" ? outcome.success.ctx.home : undefined).toBe(
+      join(machine.storageDir, "providers", "homes", ACCOUNT_ID, "codex", "codex"),
     );
-
-    expect(env["HOME"]).toBe("/home/somebody");
-  });
-
-  it("ignores instance config that is not a string-valued env, instead of failing the start", () => {
-    // No shipped harness declares an env field yet, so config arrives as `{}` today.
-    const env = resolveEnv(buildSessionStart({ config: { env: { PORT: 8080 } } }), buildMachine());
-
-    expect(env["PORT"]).toBeUndefined();
-    expect(env["HERCULE_SESSION"]).toBe("1");
     expect(
-      resolveEnv(buildSessionStart({ config: "nonsense" }), buildMachine())["HERCULE_SESSION"],
-    ).toBe("1");
+      statSync(join(machine.storageDir, "providers", "homes", ACCOUNT_ID, "codex", "codex")).mode &
+        0o777,
+    ).toBe(0o700);
   });
 });
 
@@ -645,10 +670,10 @@ describe("the user's own material", () => {
     expect(outcome._tag).toBe("Success");
     // No key at all, so the adapter keeps the harness isolated.
     expect(outcome._tag === "Success" && "userMaterial" in outcome.success.ctx).toBe(false);
-    expect(readdirSync(join(machine.providersDir, INSTANCE))).toEqual([]);
+    expect(readdirSync(join(machine.storageDir, HARNESS_HOME))).toEqual([]);
   });
 
-  it("reaches a session whose frame sets the userMaterial flag, and Claude Code's is linked into the instance home", () => {
+  it("reaches a session whose frame sets the userMaterial flag, and Claude Code's is linked into the Harness Home", () => {
     const machine = buildMachineWithUserMaterial();
 
     const outcome = resolveSync(buildSessionStart({ userMaterial: true }), machine);
@@ -657,7 +682,7 @@ describe("the user's own material", () => {
     expect(outcome._tag === "Success" ? outcome.success.ctx.userMaterial : undefined).toEqual(
       NO_USER_MATERIAL_PATHS,
     );
-    const link = join(machine.providersDir, INSTANCE, "CLAUDE.md");
+    const link = join(machine.storageDir, HARNESS_HOME, "CLAUDE.md");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(readFileSync(link, "utf8")).toBe("the user's instructions");
   });
@@ -679,7 +704,7 @@ describe("where the session's token is written", () => {
   it("is nowhere on disk: the token lives in the process environment alone", () => {
     const under = createRoot();
     const machine = buildMachine({
-      providersDir: join(under, "providers"),
+      storageDir: join(under, "storage"),
       scratchDir: join(under, "scratch"),
       binDir: join(under, "bin"),
       herculeTool: {

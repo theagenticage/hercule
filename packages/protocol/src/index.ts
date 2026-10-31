@@ -13,8 +13,10 @@ import { Effect, Schema } from "effect";
 
 import {
   Fact,
-  InstanceId,
-  InstanceSecrets,
+  HarnessAccount,
+  HarnessCredential,
+  HarnessHome,
+  ProviderAccountId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
@@ -75,7 +77,10 @@ export * from "./workspace-steps";
 export * from "./workspaces";
 export {
   Fact,
-  InstanceId,
+  HarnessAccount,
+  HarnessCredential,
+  HarnessHome,
+  ProviderAccountId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
@@ -137,8 +142,15 @@ export {
  *   facts. The harness ids are now qualified (`claude-code/claude-code`). An
  *   older peer cannot decode the renamed fields, so the two refuse each other
  *   at hello.
+ * - Version 15 made the frames name a Provider Account. The probe, login and
+ *   text generation requests and the session start carry a `HarnessAccount`
+ *   (the account, its Harness Home folder, the model argument and the
+ *   credential) in place of the earlier id, config and secrets fields; the
+ *   probe report, the login code, the session spec and the
+ *   session binding carry `providerAccountId`. An older peer cannot decode any
+ *   of them, so the two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -438,7 +450,7 @@ export const SnapshotAuth = Schema.Struct({
 export type SnapshotAuth = Schema.Schema.Type<typeof SnapshotAuth>;
 
 /**
- * What one runner found out about one provider instance. A probe has no side
+ * What one runner found out about one Provider Account in one harness. A probe has no side
  * effects: it reads the harness's own account and model list and makes no API
  * call.
  */
@@ -457,17 +469,15 @@ export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
 const RequestId = Fact;
 
 /**
- * Asks the runner to probe one provider instance. The instance id and its
- * config live on the controller, so the runner cannot start this on its own.
+ * Asks the runner to probe one harness for one Provider Account. The account's
+ * Harness Home, model argument and credential live on the controller, so the
+ * request carries them and the runner cannot start this on its own.
  */
 export const ProbeRequest = Schema.Struct({
   _tag: Schema.Literal("probeRequest"),
   requestId: RequestId,
-  instanceId: InstanceId,
   harnessId: Fact,
-  config: Schema.Json,
-  /** The instance's credentials, which its config never holds; `{}` when none. */
-  secrets: InstanceSecrets,
+  harnessAccount: HarnessAccount,
 });
 
 export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;
@@ -475,7 +485,7 @@ export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;
 export const ProbeReport = Schema.Struct({
   _tag: Schema.Literal("probeReport"),
   requestId: RequestId,
-  instanceId: InstanceId,
+  providerAccountId: ProviderAccountId,
   result: ProbeResult,
 });
 
@@ -516,15 +526,15 @@ export const MAX_AUTHORIZE_URL_LENGTH = 2048;
 const AuthorizeUrl = Schema.String.check(Schema.isBetweenLength(1, MAX_AUTHORIZE_URL_LENGTH));
 
 /**
- * Asks the runner to start the vendor's own login for one instance. The
- * credential lands in that instance's config directory, which is why this is
- * routed on the instance rather than on the harness.
+ * Asks the runner to start the vendor's own login for one Provider Account in
+ * one harness. The credential lands in the account's Harness Home, which is
+ * why the request carries the account.
  */
 export const LoginStart = Schema.Struct({
   _tag: Schema.Literal("loginStart"),
   requestId: RequestId,
-  instanceId: InstanceId,
   harnessId: Fact,
+  harnessAccount: HarnessAccount,
 });
 
 export type LoginStart = Schema.Schema.Type<typeof LoginStart>;
@@ -532,7 +542,7 @@ export type LoginStart = Schema.Schema.Type<typeof LoginStart>;
 export const LoginCode = Schema.Struct({
   _tag: Schema.Literal("loginCode"),
   requestId: RequestId,
-  instanceId: InstanceId,
+  providerAccountId: ProviderAccountId,
   code: Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH)),
 });
 
@@ -577,12 +587,12 @@ export const LOGIN_ENDED_CAPABILITY = "loginEnded";
  * exited, or its code expired and the runner stopped it. A device login reads
  * nothing back, so this is the only way the controller learns that the user
  * finished it in the browser. The frame carries no outcome: the controller
- * probes the instance again, and the probe says whether the login worked.
+ * probes the account again, and the probe says whether the login worked.
  *
  * `requestId` is the request id of the `LoginStart` that started the login.
- * It names one login rather than an instance, so the controller can tell this
- * login's end from the end of an earlier login on the same instance. The
- * controller knows which instance the login belongs to, so the frame does not
+ * It names one login rather than an account, so the controller can tell this
+ * login's end from the end of an earlier login on the same account. The
+ * controller knows which account the login belongs to, so the frame does not
  * repeat it.
  */
 export const LoginEnded = Schema.Struct({

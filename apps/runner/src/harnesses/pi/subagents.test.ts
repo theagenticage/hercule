@@ -3,7 +3,7 @@
  * an agent calls the `subagent` tool, the events attributed to it, the reply
  * its parent gets, the limits on how many may run and how deep, and every way
  * a subagent is stopped before it finishes. A subagent left running would keep
- * the instance's key and its model calls, and a parent left without a reply
+ * the account's key and its model calls, and a parent left without a reply
  * would wait forever, so the tests check both as carefully as the happy path.
  *
  * No vendor code runs. The frames pushed in are pi 0.85.1's own:

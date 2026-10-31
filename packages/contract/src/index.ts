@@ -179,6 +179,8 @@ export {
   SETTING_VALUES,
   SettingsPatch,
   SettingsState,
+  ProviderAccountHarnessModel,
+  ProviderAccountModel,
   ThreadRows,
   TextGenerationModel,
   ThreadWorkspace,
@@ -222,22 +224,20 @@ export {
   ProfileGrants,
   ProfileUpdateInput,
 } from "./groups/profile";
+export { Harness, HarnessOnRunner, DeclaredCapabilities, VersionVerdict } from "./groups/harness";
+export { AccountKind, AccountSetupStep, Provider } from "./groups/provider";
 export {
   CapabilitySnapshot,
-  DeclaredCapabilities,
-  MAX_PROVIDER_INSTANCE_NAME_LENGTH,
+  MAX_PROVIDER_ACCOUNT_LABEL_LENGTH,
   ModelDescriptor,
   ModelOption,
-  ProviderInstance,
-  ProviderInstanceCreateInput,
-  ProviderInstanceUpdateInput,
-  ProviderLoginCodeInput,
-  ProviderLoginInput,
-  ProviderLoginStarted,
-  ProviderSecretField,
+  ProviderAccount,
+  ProviderAccountSignInCodeInput,
+  ProviderAccountSignInInput,
+  ProviderAccountSignInStarted,
+  ProviderAccountUpdateInput,
   SnapshotAuth,
-  VersionVerdict,
-} from "./groups/provider";
+} from "./groups/provider-account";
 export {
   AGENT_SORT_FIELDS,
   Agent,

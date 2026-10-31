@@ -21,7 +21,9 @@ import { eventKind } from "./groups/event-kind";
 import { input } from "./groups/input";
 import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
+import { harness } from "./groups/harness";
 import { provider } from "./groups/provider";
+import { providerAccount } from "./groups/provider-account";
 import { notification } from "./groups/notification";
 import { permission } from "./groups/permission";
 import { signal } from "./groups/signal";
@@ -74,7 +76,9 @@ export const api = HttpApi.make("hercule")
     run,
     runner,
     plugin,
+    harness,
     provider,
+    providerAccount,
     connection,
     agent,
     assistant,

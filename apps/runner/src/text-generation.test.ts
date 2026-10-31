@@ -30,10 +30,12 @@ const BINARY = "/usr/local/bin/harness";
 const REQUEST: TextGenerationRequest = {
   _tag: "textGenerationRequest",
   requestId: "request-1",
-  instanceId: "instance-1",
   harnessId: "fake",
-  config: {},
-  secrets: {},
+  harnessAccount: {
+    providerAccountId: "account-1",
+    harnessHome: "providers/account-1",
+    modelArgument: "{model}",
+  },
   spec: {
     model: "fake-model",
     instructions: "Write a title.",
@@ -67,7 +69,7 @@ const buildContext = (binary: string | undefined): HarnessRunnerContext => ({
   home: scratchDir,
   binary,
   env: {},
-  secrets: {},
+  modelArgument: "{model}",
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(scratchDir, "claude-plugin") },
 });
 

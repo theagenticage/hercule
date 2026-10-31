@@ -7,7 +7,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { PluginDetail } from "@hercule/contract";
-import { PluginHost, Plugins, registry } from "./index";
+import { checkPluginMark } from "./mark";
+import {
+  PluginHost,
+  Plugins,
+  registry,
+  type RegisteredHarness,
+  type RegisteredProvider,
+} from "./index";
 import { asUser, buildPluginStack } from "./testing";
 
 /** Runs an effect on a fresh plugin stack, as the user, like a request through the API. */
@@ -22,12 +29,6 @@ const NO_SETTINGS = {
   additionalProperties: false,
 };
 
-/** The description pi's plugin gives the Z.ai key. */
-const ZAI_KEY_DESCRIPTION =
-  "From your Z.ai Coding Plan subscription. It is stored on the controller and " +
-  "sent to whichever machine runs a thread, so it is entered once and works on " +
-  "every machine.";
-
 /** Written out rather than derived, because copying from the wrong base is the mistake this catches. */
 const SHIPPED = [
   {
@@ -37,9 +38,6 @@ const SHIPPED = [
       id: "claude-code/claude-code",
       displayName: "Claude Code",
       binaryName: "claude",
-      supportsMultipleInstances: true,
-      configSchema: NO_SETTINGS,
-      defaultConfig: {},
       declared: {
         steering: "native",
         fork: "native",
@@ -54,7 +52,14 @@ const SHIPPED = [
         disallowedTools: "native",
         structuredOutput: "supported",
       },
-      suggestedTextGenerationModel: "haiku",
+      runs: [
+        {
+          providerId: "anthropic/anthropic",
+          kinds: [{ kind: "subscription-per-machine" }],
+          modelArgument: "{model}",
+          models: "all",
+        },
+      ],
     },
   },
   {
@@ -64,9 +69,6 @@ const SHIPPED = [
       id: "codex/codex",
       displayName: "Codex",
       binaryName: "codex",
-      supportsMultipleInstances: true,
-      configSchema: NO_SETTINGS,
-      defaultConfig: {},
       declared: {
         steering: "native",
         fork: "native",
@@ -81,7 +83,14 @@ const SHIPPED = [
         disallowedTools: "unsupported",
         structuredOutput: "supported",
       },
-      suggestedTextGenerationModel: "gpt-6-luna",
+      runs: [
+        {
+          providerId: "openai/openai",
+          kinds: [{ kind: "subscription-per-machine" }],
+          modelArgument: "{model}",
+          models: "all",
+        },
+      ],
     },
   },
   {
@@ -91,26 +100,6 @@ const SHIPPED = [
       id: "pi/pi",
       displayName: "pi",
       binaryName: "pi",
-      supportsMultipleInstances: true,
-      // The only harness with a setting: the Z.ai key, which is entered in a
-      // masked field and stored outside the config it is declared in.
-      configSchema: {
-        type: "object",
-        properties: {
-          zaiApiKey: {
-            type: "string",
-            title: "Z.ai API key",
-            description: ZAI_KEY_DESCRIPTION,
-            "x-secret": true,
-          },
-        },
-        // Not required: a secret field's value is stored in the secrets table,
-        // so a stored config is complete without it.
-        required: [],
-        additionalProperties: false,
-      },
-      defaultConfig: {},
-      suggestedTextGenerationModel: "glm-5.3-flash",
       declared: {
         steering: "native",
         fork: "native",
@@ -125,27 +114,104 @@ const SHIPPED = [
         disallowedTools: "native",
         structuredOutput: "supported",
       },
+      runs: [
+        {
+          providerId: "zai/zai",
+          kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
+          modelArgument: "zai/{model}",
+          models: "own-list",
+        },
+      ],
+    },
+  },
+];
+
+/** The providers a release ships, written out in full for the same reason. */
+const SHIPPED_PROVIDERS = [
+  {
+    id: "anthropic",
+    displayName: "Anthropic",
+    definition: {
+      id: "anthropic/anthropic",
+      displayName: "Anthropic",
+      kinds: [
+        {
+          id: "subscription-per-machine",
+          title: "Claude subscription, signed in on each machine",
+          description:
+            "Uses your Claude Pro or Max plan. You sign in to Claude Code once on each machine that runs it.",
+          setup: [{ kind: "harness-login" }],
+          harnesses: ["claude-code/claude-code"],
+        },
+      ],
+      suggestedTextGenerationModel: "haiku",
+    },
+  },
+  {
+    id: "openai",
+    displayName: "OpenAI",
+    definition: {
+      id: "openai/openai",
+      displayName: "OpenAI",
+      kinds: [
+        {
+          id: "subscription-per-machine",
+          title: "ChatGPT subscription, signed in on each machine",
+          description:
+            "Uses your ChatGPT plan through Codex. You sign in to Codex once on each machine that runs it.",
+          setup: [{ kind: "harness-login" }],
+          harnesses: ["codex/codex"],
+        },
+      ],
+      suggestedTextGenerationModel: "gpt-6-luna",
+    },
+  },
+  {
+    id: "zai",
+    displayName: "Z.ai",
+    definition: {
+      id: "zai/zai",
+      displayName: "Z.ai",
+      kinds: [
+        {
+          id: "api-key",
+          title: "API key",
+          description:
+            "From your Z.ai Coding Plan subscription. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          harnesses: ["pi/pi"],
+        },
+      ],
+      suggestedTextGenerationModel: "glm-5.3-flash",
     },
   },
 ];
 
 let details: ReadonlyArray<PluginDetail>;
+let harnesses: ReadonlyArray<RegisteredHarness>;
+let providers: ReadonlyArray<RegisteredProvider>;
 
 describe("the shipped registry after a boot", () => {
   beforeAll(async () => {
     details = await run(
       Effect.gen(function* () {
-        yield* Effect.flatMap(PluginHost, (host) => host.boot(registry));
+        const host = yield* PluginHost;
+        yield* host.boot(registry);
+        harnesses = yield* host.harnesses();
+        providers = yield* host.providers();
         return yield* Effect.flatMap(Plugins, (plugins) => plugins.query());
       }),
     );
   });
 
-  it("holds the three harness plugins and the github, sentry and linear plugins, in registry order", () => {
+  it("holds the three harness plugins, the three provider plugins and the github, sentry and linear plugins, in registry order", () => {
     expect(details.map((detail) => detail.id)).toEqual([
       "claude-code",
       "codex",
       "pi",
+      "anthropic",
+      "openai",
+      "zai",
       "github",
       "sentry",
       "linear",
@@ -167,4 +233,55 @@ describe("the shipped registry after a boot", () => {
       ]);
     },
   );
+
+  it.each(SHIPPED_PROVIDERS)(
+    "$id is active, asks nothing of the user, and contributes its provider",
+    ({ id, displayName, definition }) => {
+      const detail = details.find((one) => one.id === id);
+
+      expect(detail?.displayName).toBe(displayName);
+      expect(detail?.status).toEqual({ _tag: "active" });
+      expect(detail?.capabilities).toEqual(["providers"]);
+      expect(detail?.configSchema).toEqual(NO_SETTINGS);
+
+      expect(detail?.contributions).toEqual([
+        { extensionPoint: "provider", id: definition.id, definition },
+      ]);
+    },
+  );
+
+  it.each(SHIPPED_PROVIDERS)("$id declares a mark that passes the core's check", ({ id }) => {
+    const plugin = registry.find((one) => one.manifest.id === id);
+    const checked = checkPluginMark(plugin?.manifest.mark);
+
+    expect(checked.markError).toBeUndefined();
+    expect(checked.mark?.paths).toHaveLength(1);
+    // The host keeps the mark it was given, so the apps draw it.
+    expect(details.find((one) => one.id === id)?.mark).toEqual(plugin?.manifest.mark);
+  });
+
+  it("agrees with itself: every provider a harness runs lists that harness, and every harness a provider lists runs it", () => {
+    for (const harness of harnesses) {
+      for (const support of harness.runs) {
+        const provider = providers.find((one) => one.id === support.providerId);
+        expect(provider, `${harness.id} runs ${support.providerId}`).toBeDefined();
+        for (const { kind } of support.kinds) {
+          const declared = provider?.kinds.find((one) => one.id === kind);
+          expect(declared?.harnesses, `${support.providerId} kind ${kind}`).toContain(harness.id);
+        }
+      }
+    }
+    for (const provider of providers) {
+      for (const kind of provider.kinds) {
+        for (const harnessId of kind.harnesses) {
+          const harness = harnesses.find((one) => one.id === harnessId);
+          const kinds = harness?.runs.find((one) => one.providerId === provider.id)?.kinds;
+          expect(
+            kinds?.map((one) => one.kind),
+            `${provider.id} kind ${kind.id}`,
+          ).toContain(kind.id);
+        }
+      }
+    }
+  });
 });

@@ -113,7 +113,7 @@ export const ASSISTANT_SORT_FIELDS = ["createdAt"] as const;
 export const AssistantCreateInput = Schema.Struct({
   ...AgentCreateInput.fields,
   systemPrompt: Schema.optionalKey(AgentCreateInput.fields.systemPrompt),
-  instanceId: Schema.optionalKey(AgentCreateInput.fields.instanceId),
+  providerAccountId: Schema.optionalKey(AgentCreateInput.fields.providerAccountId),
   permissionProfileId: Schema.optionalKey(AgentCreateInput.fields.permissionProfileId),
   heartbeat: Schema.optionalKey(Heartbeat),
   rotation: Schema.optionalKey(Rotation),

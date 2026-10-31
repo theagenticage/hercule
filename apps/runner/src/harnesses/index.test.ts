@@ -43,7 +43,7 @@ describe("the adapters in this runner build", () => {
     // Nothing is started, so none of these paths are created.
     const scope = Effect.runSync(Scope.make());
     const machine: Machine = {
-      providersDir: "/var/hercule/runner/providers",
+      storageDir: "/var/hercule/runner",
       scratchDir: "/var/hercule/runner/scratch",
       attachmentsDir: "/var/hercule/runner/attachments",
       editMarksDir: "/var/hercule/runner/edit-marks",

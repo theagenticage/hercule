@@ -5,13 +5,13 @@
  * second login replaces the first.
  *
  * Every operation on a held login checks that it is the same login object,
- * not just the same instance id. Otherwise a caller that was still waiting
+ * not just the same Provider Account id. Otherwise a caller that was still waiting
  * when its login was replaced would kill the login the user is halfway
  * through.
  *
  * A device login reads nothing back, so no request is waiting when it ends.
  * Its end is reported instead, through `attachConnection`, so the controller can probe
- * the instance and learn whether the user finished it in the browser.
+ * the account and learn whether the user finished it in the browser.
  */
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
@@ -169,15 +169,15 @@ type ReportLoginEnded = (frame: LoginEnded) => Effect.Effect<void, unknown>;
 export interface Logins {
   readonly start: (
     requestId: string,
-    instanceId: string,
+    providerAccountId: string,
     adapter: HarnessAdapter,
     ctx: HarnessRunnerContext,
   ) => Effect.Effect<LoginAnswer>;
-  readonly submit: (instanceId: string, code: string) => Effect.Effect<LoginAnswer>;
+  readonly submit: (providerAccountId: string, code: string) => Effect.Effect<LoginAnswer>;
   /**
    * Reports through `report` each device login that ends, for as long as the
    * scope is open. A login that ends while nothing is attached is not
-   * reported: the controller probes every instance when a runner connects, so
+   * reported: the controller probes every account when a runner connects, so
    * the next connection makes up for it.
    */
   readonly attachConnection: (report: ReportLoginEnded) => Effect.Effect<void, never, Scope.Scope>;
@@ -191,7 +191,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
   /**
    * Reports that a device login ended, under the request id that started it,
    * so the controller knows which of its logins ended. A failed send is dropped: the
-   * connection is going away, and the next one probes every instance anyway.
+   * connection is going away, and the next one probes every account anyway.
    */
   const reportEnded = (login: Held): Effect.Effect<void> =>
     Effect.suspend(() =>
@@ -200,20 +200,20 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         : Effect.ignore(reporting({ _tag: "loginEnded", requestId: login.requestId })),
     );
 
-  const forgetLogin = (instanceId: string, login: Held): Effect.Effect<void> =>
+  const forgetLogin = (providerAccountId: string, login: Held): Effect.Effect<void> =>
     Effect.suspend(() => {
-      if (held.get(instanceId) !== login) return Effect.void;
-      held.delete(instanceId);
+      if (held.get(providerAccountId) !== login) return Effect.void;
+      held.delete(providerAccountId);
       return login.idle === undefined ? Effect.void : Fiber.interrupt(login.idle);
     });
 
-  const stopLogin = (instanceId: string, login: Held): Effect.Effect<void> =>
+  const stopLogin = (providerAccountId: string, login: Held): Effect.Effect<void> =>
     Effect.suspend(() => {
       login.child.kill();
       // A killed child's pipes do not always close, so the stdout reader cannot
       // be relied on to resolve `printed`.
       login.abandon();
-      return forgetLogin(instanceId, login);
+      return forgetLogin(providerAccountId, login);
     });
 
   /**
@@ -223,7 +223,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
    * its expiry is reported like any other end, so nobody keeps waiting for a
    * code that no longer works.
    */
-  const armExpiry = (instanceId: string, login: Held): Effect.Effect<void> =>
+  const armExpiry = (providerAccountId: string, login: Held): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (login.idle !== undefined) yield* Fiber.interrupt(login.idle);
       login.idle = yield* Effect.forkDetach(
@@ -235,7 +235,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
               login.idle = undefined;
             }),
           ),
-          Effect.andThen(stopLogin(instanceId, login)),
+          Effect.andThen(stopLogin(providerAccountId, login)),
           Effect.andThen(isDeviceLogin(login) ? reportEnded(login) : Effect.void),
         ),
       );
@@ -243,7 +243,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
 
   const openLogin = (
     requestId: string,
-    instanceId: string,
+    providerAccountId: string,
     command: LoginCommand,
   ): Effect.Effect<Held> =>
     Effect.gen(function* () {
@@ -310,7 +310,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
             : (yield* Clock.currentTimeMillis) + Duration.toMillis(LOGIN_CODE_LIFETIME),
         idle: undefined,
       };
-      held.set(instanceId, login);
+      held.set(providerAccountId, login);
       // Once the vendor exits on its own, nobody can finish this login. A
       // device login exits on its own when the user finishes it in the
       // browser, so its exit is reported. A login that is no longer held was
@@ -319,19 +319,19 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         .then(() =>
           Effect.runPromise(
             Effect.suspend(() =>
-              held.get(instanceId) === login && isDeviceLogin(login)
-                ? Effect.andThen(forgetLogin(instanceId, login), reportEnded(login))
-                : forgetLogin(instanceId, login),
+              held.get(providerAccountId) === login && isDeviceLogin(login)
+                ? Effect.andThen(forgetLogin(providerAccountId, login), reportEnded(login))
+                : forgetLogin(providerAccountId, login),
             ),
           ),
         )
         .catch(() => undefined);
-      yield* armExpiry(instanceId, login);
+      yield* armExpiry(providerAccountId, login);
       return login;
     });
 
   return {
-    start: (requestId, instanceId, adapter, ctx) =>
+    start: (requestId, providerAccountId, adapter, ctx) =>
       Effect.gen(function* () {
         if (adapter.login === undefined) {
           return buildLoginFailed(
@@ -342,13 +342,17 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           return buildLoginFailed(`no ${adapter.binaryName} on this machine`);
         }
         // A pasted code only works with the URL of the child that printed it,
-        // so only one login per instance can be waiting.
-        const previous = held.get(instanceId);
-        if (previous !== undefined) yield* stopLogin(instanceId, previous);
-        const login = yield* openLogin(requestId, instanceId, adapter.login(ctx, ctx.binary));
+        // so only one login per Provider Account can be waiting.
+        const previous = held.get(providerAccountId);
+        if (previous !== undefined) yield* stopLogin(providerAccountId, previous);
+        const login = yield* openLogin(
+          requestId,
+          providerAccountId,
+          adapter.login(ctx, ctx.binary),
+        );
         const printed = yield* Effect.promise(() => login.printed);
         if (printed === undefined) {
-          yield* stopLogin(instanceId, login);
+          yield* stopLogin(providerAccountId, login);
           // A device login that printed its URL but no code fails for a
           // different reason than one that printed nothing, so the messages differ.
           return buildLoginFailed(
@@ -363,7 +367,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         // A truncated URL cannot complete the login in the browser, so fail with
         // a clear message instead.
         if (printed.url.length > MAX_AUTHORIZE_URL_LENGTH) {
-          yield* stopLogin(instanceId, login);
+          yield* stopLogin(providerAccountId, login);
           return buildLoginFailed("the login printed a URL that is too long to pass on");
         }
         if (printed.userCode === undefined || login.expiresAt === undefined) {
@@ -391,9 +395,9 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           }),
       ),
 
-    submit: (instanceId, code) =>
+    submit: (providerAccountId, code) =>
       Effect.gen(function* () {
-        const login = held.get(instanceId);
+        const login = held.get(providerAccountId);
         if (login === undefined) return buildLoginFailed(NO_LOGIN);
         // For a device login the user types the code into the browser, and the
         // browser completes the login with the vendor. The child reads nothing,
@@ -402,7 +406,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           return buildLoginFailed(
             "this login does not accept a code here; type the code it showed into the browser",
           );
-        yield* armExpiry(instanceId, login);
+        yield* armExpiry(providerAccountId, login);
         yield* Effect.sync(() => {
           // Add a newline: the vendor reads a whole line, and without it the
           // child would wait forever for a code it already has.
@@ -425,19 +429,23 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
             // user can try again with the same URL.
             return { _tag: "loginResult", ok: false, message: truncateFact(outcome.complaint) };
           }
-          yield* forgetLogin(instanceId, login);
+          yield* forgetLogin(providerAccountId, login);
           return buildLoginResult(after.value, login.transcript());
         }
-        yield* forgetLogin(instanceId, login);
+        yield* forgetLogin(providerAccountId, login);
         return buildLoginResult(outcome.exit, login.transcript());
       }),
 
     // Suspend, so the map is read when shutdown runs rather than when this
     // object is built, which is before any login exists.
     stopAll: Effect.suspend(() =>
-      Effect.forEach([...held], ([instanceId, login]) => stopLogin(instanceId, login), {
-        discard: true,
-      }),
+      Effect.forEach(
+        [...held],
+        ([providerAccountId, login]) => stopLogin(providerAccountId, login),
+        {
+          discard: true,
+        },
+      ),
     ),
   };
 };

@@ -1,15 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import type { HarnessDefinition } from "./contributions";
-import { PluginError, registerHarness } from "./plugin";
+import type { ProviderDefinition } from "./providers";
+import { PluginError, registerHarness, registerProvider } from "./plugin";
 
 const definition: HarnessDefinition = {
   id: "fixture",
   displayName: "Fixture",
   binaryName: "harness",
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({}),
-  defaultConfig: {},
   declared: {
     steering: "native",
     fork: "native",
@@ -24,6 +22,21 @@ const definition: HarnessDefinition = {
     disallowedTools: "native",
     structuredOutput: "supported",
   },
+  runs: [],
+};
+
+const providerDefinition: ProviderDefinition = {
+  id: "fixture",
+  displayName: "Fixture",
+  kinds: [
+    {
+      id: "api-key",
+      title: "API key",
+      description: "A key from the provider.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      harnesses: ["fixture/fixture"],
+    },
+  ],
 };
 
 describe("registerHarness", () => {
@@ -55,5 +68,34 @@ describe("registerHarness", () => {
 
     expect(failure).toBeInstanceOf(PluginError);
     expect(failure.message).toContain("harnesses");
+  });
+});
+
+describe("registerProvider", () => {
+  it("passes the definition to the service the host granted", async () => {
+    const registered: Array<ProviderDefinition> = [];
+
+    await Effect.runPromise(
+      registerProvider(
+        {
+          providers: {
+            register: (one) =>
+              Effect.sync(() => {
+                registered.push(one);
+              }),
+          },
+        },
+        providerDefinition,
+      ),
+    );
+
+    expect(registered).toEqual([providerDefinition]);
+  });
+
+  it("fails the plugin's registration, with the capability in the message, when the service is absent", async () => {
+    const failure = await Effect.runPromise(Effect.flip(registerProvider({}, providerDefinition)));
+
+    expect(failure).toBeInstanceOf(PluginError);
+    expect(failure.message).toContain("providers");
   });
 });

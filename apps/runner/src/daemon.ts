@@ -178,7 +178,6 @@ export const runDaemon = (
       // No other user on the machine may read a session's workspace or the
       // credential socket.
       mkdirSync(storageDir, { recursive: true, mode: 0o700 });
-      const providersDir = joinPath(storageDir, "providers");
       // The working directories of sessions without a workspace, one per
       // session. They can be deleted at any time.
       const scratchDir = joinPath(storageDir, "scratch");
@@ -272,7 +271,7 @@ export const runDaemon = (
             facts,
             probe,
             headroom,
-            providersDir,
+            storageDir,
             scratchDir,
             attachmentsDir,
             editMarksDir,

@@ -63,7 +63,7 @@ export const SUBAGENTS_VARIABLE = "HERCULE_SUBAGENTS";
  *
  * The extension cancels the compaction instead of the adapter sending pi's
  * `set_auto_compaction` command, because that command saves the choice in the
- * instance's `settings.json`, and every later session of the instance would
+ * Harness Home's `settings.json`, and every later session of the account would
  * start with compaction off.
  */
 export const NO_AUTO_COMPACTION_VARIABLE = "HERCULE_NO_AUTO_COMPACTION";

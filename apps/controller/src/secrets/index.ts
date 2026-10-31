@@ -10,6 +10,7 @@ export {
   masterKeyLayer,
   createMasterKey,
   defaultBackend,
+  openExistingMasterKey,
   openKeyStore,
   type MasterKeyBackend,
   type MasterKeyError,

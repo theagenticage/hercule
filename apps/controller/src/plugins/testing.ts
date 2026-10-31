@@ -27,6 +27,7 @@ import {
   type Plugin,
   type PluginCapability,
   type HarnessDefinition,
+  type ProviderDefinition,
   type RegistrationHost,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
@@ -43,17 +44,17 @@ import { ServingPromotionStateLayer } from "../promotion/testing";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 import { PluginObserver } from "./observer";
 
-/** Builds a harness definition that supports everything natively. */
+/**
+ * Builds a harness definition that supports everything natively and, unless
+ * `runs` says otherwise, runs no provider.
+ */
 export const buildHarnessDefinition = (
   id: string,
-  defaultConfig: Schema.Json = {},
+  runs: HarnessDefinition["runs"] = [],
 ): HarnessDefinition => ({
   id,
   displayName: `Harness ${id}`,
   binaryName: "harness",
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({ token: Schema.String }),
-  defaultConfig,
   declared: {
     steering: "native",
     fork: "native",
@@ -68,6 +69,29 @@ export const buildHarnessDefinition = (
     disallowedTools: "native",
     structuredOutput: "supported",
   },
+  runs,
+});
+
+/**
+ * Builds a provider definition with one `api-key` account kind, entered as a
+ * single `apiKey` field, that runs in the harnesses named by `harnesses`
+ * (qualified ids).
+ */
+export const buildProviderDefinition = (
+  id: string,
+  harnesses: ReadonlyArray<string> = [],
+): ProviderDefinition => ({
+  id,
+  displayName: `Provider ${id}`,
+  kinds: [
+    {
+      id: "api-key",
+      title: "API key",
+      description: `A key for provider ${id}.`,
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      harnesses,
+    },
+  ],
 });
 
 const homes: Array<string> = [];
@@ -142,6 +166,8 @@ export const createPluginFixture = (options: {
   readonly configSchema?: Schema.Top;
   /** The harnesses to register, in order. By default, one harness named after the plugin. */
   readonly definitions?: ReadonlyArray<HarnessDefinition>;
+  /** The providers to register, in order. By default, none. */
+  readonly providers?: ReadonlyArray<ProviderDefinition>;
   /** A message to fail `register` with, after registering, where a plugin's own work would go. */
   readonly registerFails?: string;
   /** How many `activate` calls fail before the first one that succeeds. */
@@ -178,6 +204,9 @@ export const createPluginFixture = (options: {
           hosts.push(host);
           for (const definition of definitions) {
             if (host.harnesses !== undefined) yield* host.harnesses.register(definition);
+          }
+          for (const definition of options.providers ?? []) {
+            if (host.providers !== undefined) yield* host.providers.register(definition);
           }
           if (options.registerFails !== undefined) {
             return yield* Effect.fail(new PluginError({ message: options.registerFails }));

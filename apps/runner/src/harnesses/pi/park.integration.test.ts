@@ -18,7 +18,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type { AccessMode, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { pi } from "./adapter";
-import { cleanupHomes, buildContext, TEST_ZAI_KEY, SPEC, filterByTag, waitUntil } from "./testing";
+import { cleanupHomes, buildContext, SPEC, filterByTag, waitUntil } from "./testing";
 import { createScratchHome } from "../testing";
 import {
   PARKED_COMMAND,
@@ -72,7 +72,7 @@ const startLiveSession = async (
   // The fake server checks no key. The real PATH is passed so pi can find
   // the shell it runs the command with.
   const ctx = {
-    ...buildContext(home, cwd, { zaiApiKey: TEST_ZAI_KEY }),
+    ...buildContext(home, cwd),
     binary: binary!,
     env: { PATH: process.env["PATH"] ?? "" },
   };

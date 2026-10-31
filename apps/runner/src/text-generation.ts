@@ -14,6 +14,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER,
   MAX_MESSAGE_LENGTH,
+  type HarnessAccount,
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
@@ -42,11 +43,10 @@ export interface TextGeneratorOptions {
   readonly scratchDir: string;
   /** Finds the adapter for a harness id, or undefined when this build has none. */
   readonly findAdapter: (harnessId: string) => HarnessAdapter | undefined;
-  /** Builds the context of one provider instance, with the binary the runner found for the adapter. */
+  /** Builds the context of one Provider Account, with the binary the runner found for the adapter. */
   readonly buildContext: (
     adapter: HarnessAdapter,
-    instanceId: string,
-    secrets: Readonly<Record<string, string>>,
+    harnessAccount: HarnessAccount,
   ) => HarnessRunnerContext;
   /** How long a call may run before the runner stops it and answers `timeout`. */
   readonly deadline: Duration.Duration;
@@ -132,14 +132,14 @@ export const makeTextGenerator = (
       if (adapter === undefined) {
         return buildFailedOutcome(describeMissingAdapter(request.harnessId));
       }
-      const context = options.buildContext(adapter, request.instanceId, request.secrets);
+      const context = options.buildContext(adapter, request.harnessAccount);
       const binary = context.binary;
       if (binary === undefined) {
         return buildFailedOutcome(`no ${adapter.binaryName} on this machine`);
       }
       return yield* Effect.acquireUseRelease(
         makeScratchDirectory,
-        (cwd) => adapter.generateText({ ...context, binary, cwd }, request.config, request.spec),
+        (cwd) => adapter.generateText({ ...context, binary, cwd }, request.spec),
         removeScratchDirectory,
       );
     });

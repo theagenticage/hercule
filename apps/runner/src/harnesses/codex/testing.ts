@@ -43,7 +43,7 @@ export const buildContext = (home: string, cwd: string | null = null): HarnessRu
   home,
   binary: "/usr/local/bin/codex",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },
-  secrets: {},
+  modelArgument: "{model}",
   // The runner resolves this once, at start. A test that depends on it sets
   // its own value.
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
@@ -53,7 +53,7 @@ export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 export const THREAD = "0199e0e7-0000-7000-8000-0000000000fe";
 
 export const SPEC: SessionSpec = {
-  instanceId: "0199e0e7-0000-7000-8000-00000000000a",
+  providerAccountId: "0199e0e7-0000-7000-8000-00000000000a",
   workspaceId: null,
   modelSelection: { model: "gpt-5.5", options: {} },
   accessMode: "approval-required",

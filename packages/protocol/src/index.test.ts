@@ -91,7 +91,7 @@ const controllerHello = {
   signature: "c2lnbmF0dXJl",
 } as const;
 
-/** What one runner found out about one instance, with every optional key set. */
+/** What one runner found out about one Provider Account, with every optional key set. */
 const probeResult = {
   harnessVersion: "2.1.263",
   auth: {
@@ -120,11 +120,26 @@ const probeResult = {
 } as const;
 
 const REQUEST_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c72";
-const INSTANCE_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73";
+const PROVIDER_ACCOUNT_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73";
+
+/** A per-machine account's `HarnessAccount`: it has no credential. */
+const perMachineAccount = {
+  providerAccountId: PROVIDER_ACCOUNT_ID,
+  harnessHome: `providers/${PROVIDER_ACCOUNT_ID}`,
+  modelArgument: "{model}",
+} as const;
+
+/** A key account's `HarnessAccount`, with the optional credential set. */
+const harnessAccount = {
+  providerAccountId: PROVIDER_ACCOUNT_ID,
+  harnessHome: `providers/homes/${PROVIDER_ACCOUNT_ID}/pi/pi`,
+  modelArgument: "zai/{model}",
+  credential: { variable: "ZAI_API_KEY", value: "sk-test" },
+} as const;
 const SESSION_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c74";
 
 const spec = {
-  instanceId: INSTANCE_ID,
+  providerAccountId: PROVIDER_ACCOUNT_ID,
   workspaceId: null,
   modelSelection: { model: "sonnet", options: {} },
   accessMode: "approval-required",
@@ -148,7 +163,12 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   { _tag: "pong" },
   { _tag: "factsReport", facts },
   { _tag: "watermarkReport", watermark },
-  { _tag: "probeReport", requestId: REQUEST_ID, instanceId: INSTANCE_ID, result: probeResult },
+  {
+    _tag: "probeReport",
+    requestId: REQUEST_ID,
+    providerAccountId: PROVIDER_ACCOUNT_ID,
+    result: probeResult,
+  },
   { _tag: "installResult", requestId: REQUEST_ID, ok: false, message: "curl: (22) not found" },
   {
     _tag: "loginUrl",
@@ -194,7 +214,13 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   },
   {
     _tag: "sessionsReport",
-    sessions: [{ sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: INSTANCE_ID }],
+    sessions: [
+      {
+        sessionId: SESSION_ID,
+        nativeSessionId: "native-1",
+        providerAccountId: PROVIDER_ACCOUNT_ID,
+      },
+    ],
   },
   {
     _tag: "workspaceReport",
@@ -273,27 +299,30 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   {
     _tag: "probeRequest",
     requestId: REQUEST_ID,
-    instanceId: INSTANCE_ID,
-    harnessId: "claude-code/claude-code",
-    config: {},
-    secrets: {},
+    harnessId: "pi/pi",
+    harnessAccount,
   },
   { _tag: "installRequest", requestId: REQUEST_ID, harnessId: "claude-code/claude-code" },
   {
     _tag: "loginStart",
     requestId: REQUEST_ID,
-    instanceId: INSTANCE_ID,
     harnessId: "claude-code/claude-code",
+    // A per-machine account has no credential.
+    harnessAccount: perMachineAccount,
   },
-  { _tag: "loginCode", requestId: REQUEST_ID, instanceId: INSTANCE_ID, code: "the-pasted-code" },
+  {
+    _tag: "loginCode",
+    requestId: REQUEST_ID,
+    providerAccountId: PROVIDER_ACCOUNT_ID,
+    code: "the-pasted-code",
+  },
   {
     _tag: "sessionStart",
     requestId: "0199e0e7-0000-7000-8000-00000000000d",
     sessionId: SESSION_ID,
     input: { text: "fix the login bug" },
-    harnessId: "claude-code/claude-code",
-    config: {},
-    secrets: {},
+    harnessId: "pi/pi",
+    harnessAccount,
     spec,
     token: "a-session-token",
   },
@@ -393,10 +422,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   {
     _tag: "textGenerationRequest",
     requestId: REQUEST_ID,
-    instanceId: INSTANCE_ID,
-    harnessId: "claude-code/claude-code",
-    config: {},
-    secrets: {},
+    harnessId: "pi/pi",
+    harnessAccount,
     spec: {
       model: "haiku",
       instructions: "Write a short title for this message.",
@@ -412,8 +439,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 14, the version that renamed the harness fields and qualified the harness ids", () => {
-    expect(PROTOCOL_VERSION).toBe(14);
+  it("is 15, the version whose frames carry a Provider Account", () => {
+    expect(PROTOCOL_VERSION).toBe(15);
   });
 });
 
@@ -489,7 +516,7 @@ describe("the runner-to-controller catalogue", () => {
     const report = {
       _tag: "probeReport",
       requestId: REQUEST_ID,
-      instanceId: INSTANCE_ID,
+      providerAccountId: PROVIDER_ACCOUNT_ID,
       result: { ...probeResult, models: [omitKey(model, "imageInput")] },
     };
     expect(Schema.decodeUnknownSync(RunnerToController)(report)).toMatchObject({
@@ -502,7 +529,7 @@ describe("the runner-to-controller catalogue", () => {
     const reportWith = (imageInput: unknown) => ({
       _tag: "probeReport",
       requestId: REQUEST_ID,
-      instanceId: INSTANCE_ID,
+      providerAccountId: PROVIDER_ACCOUNT_ID,
       result: { ...probeResult, models: [{ ...model, imageInput }] },
     });
     expect(

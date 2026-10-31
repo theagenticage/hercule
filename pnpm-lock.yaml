@@ -87,6 +87,9 @@ importers:
       '@hercule/home':
         specifier: workspace:*
         version: link:../../packages/home
+      '@hercule/plugin-anthropic':
+        specifier: workspace:*
+        version: link:../../plugins/anthropic
       '@hercule/plugin-claude-code':
         specifier: workspace:*
         version: link:../../plugins/claude-code
@@ -102,12 +105,18 @@ importers:
       '@hercule/plugin-linear':
         specifier: workspace:*
         version: link:../../plugins/linear
+      '@hercule/plugin-openai':
+        specifier: workspace:*
+        version: link:../../plugins/openai
       '@hercule/plugin-pi':
         specifier: workspace:*
         version: link:../../plugins/pi
       '@hercule/plugin-sentry':
         specifier: workspace:*
         version: link:../../plugins/sentry
+      '@hercule/plugin-zai':
+        specifier: workspace:*
+        version: link:../../plugins/zai
       '@hercule/process-log':
         specifier: workspace:*
         version: link:../../packages/process-log
@@ -506,6 +515,15 @@ importers:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
 
+  plugins/anthropic:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
+
   plugins/claude-code:
     dependencies:
       '@hercule/plugin-host':
@@ -550,6 +568,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/contract
 
+  plugins/openai:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
+
   plugins/pi:
     dependencies:
       '@hercule/plugin-host':
@@ -571,6 +598,15 @@ importers:
       '@hercule/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+
+  plugins/zai:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
 
 packages:
 

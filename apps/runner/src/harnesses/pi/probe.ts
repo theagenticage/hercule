@@ -1,7 +1,8 @@
 /**
  * Probes a pi installation without starting a session: the version the binary
- * prints, whether pi finds a Z.ai key, and the models pi offers. Also builds
- * the install command that puts pi on a machine.
+ * prints, whether pi finds a key for the account's provider, and the models pi
+ * offers for that provider. Also builds the install command that puts pi on a
+ * machine.
  *
  * The version and the key check are one-shot commands. When a key is set, the
  * probe first refreshes pi's stored model list with `pi update --models`; every
@@ -26,17 +27,6 @@ import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Ran, Run } from "../process";
 import { truncateFact } from "../text";
 import { makeRpc, type PiSpawn } from "./rpc";
-
-/**
- * The Z.ai key: its secret name in the instance config, and the environment
- * variable pi reads it from. The runner cannot import the pi plugin, so the
- * pi adapter owns this mapping, the same way the Claude adapter owns
- * `CLAUDE_CONFIG_DIR`.
- */
-export const ZAI_KEY = { secret: "zaiApiKey", variable: "ZAI_API_KEY" };
-
-/** The only pi provider Hercule uses; no other provider is offered or checked. */
-export const ZAI = "zai";
 
 /** The thinking level a session uses when the user picked none. */
 export const DEFAULT_THINKING = "low";
@@ -90,7 +80,7 @@ const buildAuth = (ran: Ran): SnapshotAuth => {
     return { status: "error", message: truncateFact(readComplaint(ran)) };
   }
   if (status === "ready") return { status: "ok" };
-  // Z.ai uses an API key, so there is no account name to report, and a
+  // An API key has no account name to report, and a
   // made-up identity would show a name the user never entered.
   return status === "not_ready"
     ? { status: "unauthenticated" }
@@ -102,9 +92,9 @@ const formatLevelLabel = (level: string): string =>
 
 /**
  * Builds the model's thinking option from the levels it supports, or returns
- * no option when it supports none. A level mapped to `null` is left out: Z.ai
- * rejects a turn at that level, so offering it would offer a choice that
- * always fails.
+ * no option when it supports none. A level mapped to `null` is left out: the
+ * provider rejects a turn at that level, so offering it would offer a choice
+ * that always fails.
  */
 const buildThinkingOption = (model: PiModel): ReadonlyArray<ModelOption> => {
   const levels = Object.entries(model.thinkingLevelMap ?? {}).flatMap(([level, mapped]) =>
@@ -135,11 +125,14 @@ const buildThinkingOption = (model: PiModel): ReadonlyArray<ModelOption> => {
  */
 const PI_MAX_IMAGE_BYTES = 3_538_944;
 
-const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescriptor> =>
+const buildCatalog = (
+  models: ReadonlyArray<PiModel>,
+  provider: string,
+): ReadonlyArray<ModelDescriptor> =>
   models
     .filter(
       (model) =>
-        model.provider === ZAI &&
+        model.provider === provider &&
         typeof model.id === "string" &&
         model.id !== "" &&
         typeof model.name === "string" &&
@@ -161,10 +154,10 @@ const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescri
 /**
  * The environment variables the model store refresh keeps. `pi update
  * --models` refreshes every provider pi finds credentials for and cannot be
- * limited to one, while a session uses the instance's own key or none. So the
+ * limited to one, while a session uses the account's own key or none. So the
  * refresh must not see the runner's other keys (for example `OPENROUTER_API_KEY`
  * or AWS credentials). The proxy and TLS variables keep pi working behind a
- * corporate proxy.
+ * corporate proxy. The account's own credential variable is added to these.
  */
 const REFRESH_ENV_VARIABLES: ReadonlySet<string> = new Set([
   "PATH",
@@ -181,21 +174,26 @@ const REFRESH_ENV_VARIABLES: ReadonlySet<string> = new Set([
   "NODE_EXTRA_CA_CERTS",
   "PI_CODING_AGENT_DIR",
   "PI_SKIP_VERSION_CHECK",
-  ZAI_KEY.variable,
 ]);
 
 /**
  * Returns the part of a probe's environment that the model store refresh may
- * use. `PI_OFFLINE` is never in it, and pi turns the network off when that
+ * use: the variables above, and the account's credential variable when it has
+ * one. `PI_OFFLINE` is never in it, and pi turns the network off when that
  * variable is set to any value, `0` included.
  */
 const buildRefreshEnv = (
   env: Readonly<Record<string, string | undefined>>,
+  credentialVariable: string | undefined,
 ): Record<string, string | undefined> =>
-  Object.fromEntries(Object.entries(env).filter(([name]) => REFRESH_ENV_VARIABLES.has(name)));
+  Object.fromEntries(
+    Object.entries(env).filter(
+      ([name]) => REFRESH_ENV_VARIABLES.has(name) || name === credentialVariable,
+    ),
+  );
 
 /**
- * Refreshes the model list that pi stores in the instance's home, by running
+ * Refreshes the model list that pi stores in the Harness Home, by running
  * `pi update --models`, and waits for it at most `MODEL_STORE_REFRESH_WAIT`.
  * Never fails: a refresh that fails or is not finished in time is logged as a
  * warning, and the probe goes on with the list pi has stored, or the one
@@ -215,9 +213,10 @@ const refreshModelStore = (
   binary: string,
   home: string,
   env: Readonly<Record<string, string | undefined>>,
+  credentialVariable: string | undefined,
 ): Effect.Effect<void> => {
   const refresh = Effect.suspend(() =>
-    run([binary, "update", "--models"], buildRefreshEnv(env)),
+    run([binary, "update", "--models"], buildRefreshEnv(env, credentialVariable)),
   ).pipe(
     Effect.timeoutOption(MODEL_STORE_REFRESH_LIMIT),
     // The warnings are written here, in the fiber that ran the command, so a
@@ -259,6 +258,7 @@ const fetchCatalog = (
   spawn: PiSpawn,
   binary: string,
   env: Readonly<Record<string, string | undefined>>,
+  provider: string,
 ): Effect.Effect<ReadonlyArray<ModelDescriptor>, string> =>
   Effect.acquireUseRelease(
     Effect.try({
@@ -291,32 +291,39 @@ const fetchCatalog = (
           const models = (
             answer["data"] as { readonly models?: ReadonlyArray<PiModel> } | undefined
           )?.models;
-          return buildCatalog(models ?? []);
+          return buildCatalog(models ?? [], provider);
         }),
       );
     },
     (child) => Effect.sync(() => child.kill()),
   );
 
+/**
+ * Builds the probe of one account's provider. `provider` is pi's name for it
+ * (see `readPiProvider`), and `credentialVariable` the variable the account's
+ * key is in, or undefined for an account without one.
+ */
 export const makeProbe =
   (spawn: PiSpawn, run: Run) =>
   (
     binary: string,
     home: string,
     env: Readonly<Record<string, string | undefined>>,
+    provider: string,
+    credentialVariable: string | undefined,
   ): Effect.Effect<ProbeResult> => {
     const gather = Effect.gen(function* () {
       const version = yield* run([binary, "--version"], env);
       if (version.code !== 0) return buildFailedProbe(null, readComplaint(version));
       const harnessVersion = truncateFact(version.stdout.trim());
       const auth = buildAuth(
-        yield* run([binary, "auth", "check", "--provider", ZAI, "--json"], env),
+        yield* run([binary, "auth", "check", "--provider", provider, "--json"], env),
       );
       // pi lists only the providers it has a key for, so a machine with no key
       // has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [] };
-      yield* refreshModelStore(run, binary, home, env);
-      return yield* Effect.match(fetchCatalog(spawn, binary, env), {
+      yield* refreshModelStore(run, binary, home, env, credentialVariable);
+      return yield* Effect.match(fetchCatalog(spawn, binary, env, provider), {
         onFailure: (message) => buildFailedProbe(harnessVersion, message),
         onSuccess: (models) => ({ harnessVersion, auth, models }),
       });
