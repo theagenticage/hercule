@@ -983,6 +983,16 @@ describe("buildModelMenu for a running thread", () => {
     });
   });
 
+  it("says that no profile has a model yet when the thread's account is unknown and there is no filter", () => {
+    const menu = buildModelMenu(
+      buildCatalogs([MAIN]),
+      { ...ACTIVE, providerAccountId: "account-unknown" },
+      view,
+    );
+
+    expect(menu).toMatchObject({ rows: [], empty: "No models in your profiles yet." });
+  });
+
   it("lists each model once, the first profile that has it winning, across all profiles", () => {
     const first = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [OPUS])], {
       id: "profile-first",

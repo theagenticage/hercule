@@ -1,4 +1,4 @@
-import { useRef, useState, type HTMLAttributes, type JSX } from "react";
+import { useMemo, useRef, useState, type HTMLAttributes, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   addModelProfileAccount,
@@ -155,6 +155,18 @@ export function ModelProfileMenu({
   };
 
   const byId = new Map(sections.map((section) => [section.providerAccountId, section]));
+  // Built when the sections change, not when the pointer moves, so a section's
+  // picker is handed the same set while the pointer crosses the page.
+  const heldBySection = useMemo(
+    () =>
+      new Map(
+        sections.map((section) => [
+          section.providerAccountId,
+          new Set(section.sectionHarnessModels),
+        ]),
+      ),
+    [sections],
+  );
   return (
     <>
       {save.isError ? (
@@ -176,7 +188,7 @@ export function ModelProfileMenu({
             {order.keys.flatMap((providerAccountId) => {
               const section = byId.get(providerAccountId);
               if (section === undefined) return [];
-              const held = new Set(section.sectionHarnessModels);
+              const held = heldBySection.get(providerAccountId) ?? new Set<string>();
               return (
                 <ModelProfileSection
                   key={providerAccountId}

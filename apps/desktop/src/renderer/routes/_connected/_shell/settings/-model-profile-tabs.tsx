@@ -2,7 +2,7 @@ import { useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   buildModelProfileCopyName,
-  countModelProfileEntries,
+  countProfileEntries,
   readErrorMessage,
   renameModelProfile,
   updateModelProfile,
@@ -14,6 +14,7 @@ import { DeleteModelProfileDialog } from "./-delete-model-profile-dialog";
 import {
   addCachedModelProfile,
   readCachedModelProfile,
+  readCachedModelProfiles,
   replaceCachedModelProfile,
 } from "./-model-profile-cache";
 import { useOpenModelProfile } from "./-open-model-profile";
@@ -26,9 +27,10 @@ import { useOpenModelProfile } from "./-open-model-profile";
  * New profile dialog.
  *
  * Rename and Duplicate wait in line behind the saves of profiles that are
- * running (the "model-profile" mutation scope), and a rename is built from the
- * newest copy of the profile the page holds, so neither writes over a change
- * the user made just before. A rename the controller refuses shows its message
+ * running (the "model-profile" mutation scope), and each is built from the
+ * newest copy of the profiles the page holds when its turn comes, so neither
+ * writes over a change the user made just before, and two quick Duplicates
+ * name their copies "Main copy" and "Main copy 2". A rename the controller refuses shows its message
  * above the tabs, in the tab being edited; a blank name is refused without
  * asking the controller; a failed Duplicate shows above the tabs.
  */
@@ -55,13 +57,21 @@ export function ModelProfileTabs({
   });
   const duplicate = useMutation({
     scope: { id: "model-profile" },
-    mutationFn: (source: ModelProfile) =>
-      client.modelProfile.create({
+    // The source and the copy's name are read when the save starts, not when
+    // the user clicked: an earlier Duplicate or rename ahead in the line has
+    // changed the list by then.
+    mutationFn: (sourceId: string) => {
+      const source = readCachedModelProfile(queryClient, client, sourceId);
+      return client.modelProfile.create({
         payload: {
-          name: buildModelProfileCopyName(profiles, source.name),
+          name: buildModelProfileCopyName(
+            readCachedModelProfiles(queryClient, client),
+            source.name,
+          ),
           copyFromId: source.id,
         },
-      }),
+      });
+    },
     onSuccess: (created) => {
       addCachedModelProfile(queryClient, client, created);
       openProfile(created.id);
@@ -80,7 +90,7 @@ export function ModelProfileTabs({
         tabs={profiles.map((each) => ({
           id: each.id,
           name: each.name,
-          count: countModelProfileEntries(each),
+          count: countProfileEntries(each),
         }))}
         openId={profile.id}
         onOpen={(id) => {
@@ -99,8 +109,7 @@ export function ModelProfileTabs({
               )
         }
         onDuplicate={(id) => {
-          const source = profiles.find((each) => each.id === id);
-          if (source !== undefined) duplicate.mutate(source);
+          duplicate.mutate(id);
         }}
         onDelete={(id) => {
           setDeleting(profiles.find((each) => each.id === id) ?? null);

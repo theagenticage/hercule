@@ -779,13 +779,14 @@ export {
   type ModelSectionRow,
 } from "./model-profiles/profile-sections";
 export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
-export { findProjectModelProfile, listAccountModelProfiles } from "./model-profiles/profile-lookup";
 export {
-  buildModelProfileCopyName,
-  countModelProfileEntries,
-  findOpenModelProfile,
+  findModelProfileOrFirst,
+  findProjectModelProfile,
+  listAccountModelProfiles,
   listProjectsOfModelProfile,
-} from "./model-profiles/profile-tabs";
+} from "./model-profiles/profile-lookup";
+export { countProfileEntries } from "./model-profiles/profile-entries";
+export { buildModelProfileCopyName } from "./model-profiles/profile-tabs";
 export { updateModelProfile } from "./model-profiles/update-profile";
 export {
   resolveThreadConfig,

@@ -4,6 +4,15 @@ import type { ModelProfile } from "@hercule/contract";
 import { modelProfilesQuery } from "../../../../app/queries";
 
 /**
+ * Returns the cached list of Model Profiles, the newest the page holds, or an
+ * empty list when it holds none yet.
+ */
+export const readCachedModelProfiles = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): readonly ModelProfile[] => queryClient.getQueryData(modelProfilesQuery(client).queryKey) ?? [];
+
+/**
  * Returns the cached copy of the profile with the id `profileId`, which is the
  * newest copy the page holds: the `provider` live topic and the answers of
  * earlier saves keep it current. A save is built from it and not from the
@@ -16,9 +25,7 @@ export const readCachedModelProfile = (
   client: HerculeClient,
   profileId: string,
 ): ModelProfile => {
-  const cached = queryClient
-    .getQueryData(modelProfilesQuery(client).queryKey)
-    ?.find(({ id }) => id === profileId);
+  const cached = readCachedModelProfiles(queryClient, client).find(({ id }) => id === profileId);
   if (cached === undefined) throw new Error("The profile is gone.");
   return cached;
 };

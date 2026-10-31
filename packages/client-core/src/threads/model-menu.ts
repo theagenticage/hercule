@@ -36,6 +36,7 @@ import {
 } from "../model-profiles/entry-problem";
 import {
   buildProfileEntryKey,
+  countProfileEntries,
   findHarnessName,
   findOtherHarnessName,
   isSameProfileEntry,
@@ -71,7 +72,7 @@ const NO_MATCH_NOTE = "No model matches.";
 const EMPTY_PROFILE_NOTE = "No models in this profile yet.";
 
 /** What a running thread's list says in place of its rows when no profile offers a model to switch to. */
-const NO_MODELS_NOTE = "No models in your profile yet.";
+const NO_MODELS_NOTE = "No models in your profiles yet.";
 
 /** What the menu says in place of its list when the user has no Model Profile. */
 const NO_PROFILE_NOTE = "No Model Profile yet.";
@@ -440,10 +441,6 @@ const buildActiveMenu = (context: MenuContext, current: ModelMenuCurrent): Model
   };
 };
 
-/** Returns every entry the profiles hold, counted once per profile. */
-const countEntries = (profiles: readonly ModelProfile[]): number =>
-  profiles.reduce((total, profile) => total + listProfileEntries(profile).length, 0);
-
 /**
  * Returns the profile a draft's menu unfolds while the filter is empty, or
  * `undefined` when there is no profile. The first of these that exists:
@@ -506,11 +503,12 @@ const buildDraftMenu = (
     findProjectModelProfile(catalogs.projects ?? [], modelProfiles, current.projectId),
     view,
   );
-  const profiles = modelProfiles.flatMap((profile): readonly ModelMenuProfile[] => {
+  const entryCounts = modelProfiles.map(countProfileEntries);
+  const profiles = modelProfiles.flatMap((profile, index): readonly ModelMenuProfile[] => {
     const head = {
       profileId: profile.id,
       name: profile.name,
-      entryCount: listProfileEntries(profile).length,
+      entryCount: entryCounts[index] ?? 0,
     };
     if (filter === "" && profile !== unfolded) {
       return [{ ...head, unfolded: false, recent: [], lanes: [], empty: null }];
@@ -522,7 +520,7 @@ const buildDraftMenu = (
   });
   return {
     ...base,
-    filterable: countEntries(modelProfiles) > FILTER_THRESHOLD,
+    filterable: entryCounts.reduce((total, count) => total + count, 0) > FILTER_THRESHOLD,
     profiles,
     empty: profiles.length === 0 ? NO_MATCH_NOTE : null,
   };

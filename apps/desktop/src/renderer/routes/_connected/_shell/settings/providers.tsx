@@ -44,8 +44,9 @@ interface FixingAccount {
  * account is signed in on or "Every machine", then its usage or, when it needs
  * the user, its state and the button that fixes it. A click on a card opens the
  * account's sheet, and the header's Add an account opens the sheet that adds
- * one. Under the cards is the Models section, the menu of the open Model
- * Profile (spec 17 §Settings, Providers). The open profile is the URL's
+ * one. With no account, one line says so in place of the cards. Under them is
+ * the Models section, the menu of the open Model Profile, which shows with or
+ * without accounts (spec 17 §Settings, Providers). The open profile is the URL's
  * `profile` search parameter (`useOpenModelProfile`); the add-account sheet's
  * Done adds the account to it.
  *
@@ -105,41 +106,40 @@ function Providers(): JSX.Element {
       {accounts.length === 0 ? (
         <p className="pa-empty">No accounts yet. Add one to give your agents models.</p>
       ) : (
-        <>
-          <section className="set-sec provider-accounts">
-            <h2>Accounts</h2>
-            <p className="pa-lead">Who pays for the models in your menu.</p>
-            {sheet !== null && sheetProviderAccount === undefined && (
-              <p className="set-note" role="status">
-                {`${sheet.name} was deleted elsewhere, so its sheet closed.`}
-              </p>
-            )}
-            <div className="pa-cards">
-              {accounts.map((account) => (
-                <AccountCard
-                  key={account.id}
-                  account={account}
-                  onOpen={(providerAccountId, name) => {
-                    setSheet({ providerAccountId, name });
-                  }}
-                  onFix={(providerAccountId, name, fix) => {
-                    // Signing in is done in the sheet's Machines section.
-                    if (fix.kind === "sign-in") setSheet({ providerAccountId, name });
-                    else setFixing({ providerAccountId, fix });
-                  }}
-                />
-              ))}
-            </div>
-          </section>
-          <ModelsSection
-            client={client}
-            flashProviderAccountId={addedProviderAccountId}
-            onAddAccount={() => {
-              setAdding(true);
-            }}
-          />
-        </>
+        <section className="set-sec provider-accounts">
+          <h2>Accounts</h2>
+          <p className="pa-lead">Who pays for the models in your menu.</p>
+          {sheet !== null && sheetProviderAccount === undefined && (
+            <p className="set-note" role="status">
+              {`${sheet.name} was deleted elsewhere, so its sheet closed.`}
+            </p>
+          )}
+          <div className="pa-cards">
+            {accounts.map((account) => (
+              <AccountCard
+                key={account.id}
+                account={account}
+                onOpen={(providerAccountId, name) => {
+                  setSheet({ providerAccountId, name });
+                }}
+                onFix={(providerAccountId, name, fix) => {
+                  // Signing in is done in the sheet's Machines section.
+                  if (fix.kind === "sign-in") setSheet({ providerAccountId, name });
+                  else setFixing({ providerAccountId, fix });
+                }}
+              />
+            ))}
+          </div>
+        </section>
       )}
+      {/* Models shows with no account too: the profiles exist, and their tabs and teaching state are how the user builds one. */}
+      <ModelsSection
+        client={client}
+        flashProviderAccountId={addedProviderAccountId}
+        onAddAccount={() => {
+          setAdding(true);
+        }}
+      />
       {adding && (
         // Without its own boundary, the sheet's load would suspend the page behind it.
         <Suspense fallback={null}>

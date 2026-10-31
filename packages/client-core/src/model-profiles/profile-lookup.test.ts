@@ -1,7 +1,7 @@
 /**
- * Tests the two lookups of Model Profiles: the profile a project names
- * (`findProjectModelProfile`) and the profiles that hold an account
- * (`listAccountModelProfiles`).
+ * Tests the lookups of Model Profiles: the profile a project names, the
+ * profile with an id, the profiles that hold an account and the projects a
+ * profile serves.
  */
 import { describe, expect, it } from "vitest";
 import type { Project } from "@hercule/contract";
@@ -12,7 +12,12 @@ import {
   buildProfileEntry,
   buildProfileSection,
 } from "../providers.testing";
-import { findProjectModelProfile, listAccountModelProfiles } from "./profile-lookup";
+import {
+  findModelProfileOrFirst,
+  findProjectModelProfile,
+  listAccountModelProfiles,
+  listProjectsOfModelProfile,
+} from "./profile-lookup";
 
 const AT = "2026-09-05T09:00:00.000Z";
 
@@ -69,5 +74,38 @@ describe("listAccountModelProfiles", () => {
 
   it("returns an empty list for an account no profile holds", () => {
     expect(listAccountModelProfiles([MAIN, WORK], "account-unknown")).toEqual([]);
+  });
+});
+
+describe("findModelProfileOrFirst", () => {
+  it("returns the profile with the id", () => {
+    expect(findModelProfileOrFirst([MAIN, WORK], WORK.id)).toBe(WORK);
+  });
+
+  it.each([
+    ["is undefined", undefined],
+    ["names a profile that is gone", "profile-deleted"],
+  ])("returns the first profile when the id %s", (_case, id) => {
+    expect(findModelProfileOrFirst([MAIN, WORK], id)).toBe(MAIN);
+  });
+
+  it("returns nothing when there is no profile", () => {
+    expect(findModelProfileOrFirst([], "profile-main")).toBeUndefined();
+  });
+});
+
+describe("listProjectsOfModelProfile", () => {
+  it("returns the projects that name the profile, in order", () => {
+    const projects = [
+      buildProject("api", { modelProfileId: WORK.id }),
+      buildProject("site", { modelProfileId: MAIN.id }),
+      buildProject("docs"),
+      buildProject("app", { modelProfileId: WORK.id }),
+    ];
+
+    expect(listProjectsOfModelProfile(projects, WORK.id).map(({ id }) => id)).toEqual([
+      "api",
+      "app",
+    ]);
   });
 });

@@ -26,6 +26,7 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -89,8 +90,13 @@ const buildProject = (id: string, name: string, modelProfileId?: string): Projec
  * a delete clears the choice of the projects that named the profile.
  * `read` and `readProjects` return what is stored.
  */
-const playProfiles = (initial: ModelProfile[], initialProjects: Project[] = []) => {
+const playProfiles = (
+  initial: ModelProfile[],
+  initialProjects: Project[] = [],
+  holdFirstCreate?: Promise<void>,
+) => {
   let stored = initial;
+  let creates = 0;
   let projects = initialProjects;
   const newIds = [...NEW_IDS];
   const patch =
@@ -120,7 +126,10 @@ const playProfiles = (initial: ModelProfile[], initialProjects: Project[] = []) 
   const handlers: Record<string, Handler> = {
     "GET /api/v1/model-profiles": () => ({ body: stored }),
     "GET /api/v1/projects": () => ({ body: { items: projects } }),
-    "POST /api/v1/model-profiles": (call) => {
+    "POST /api/v1/model-profiles": async (call) => {
+      // The first create answers only when the test lets it, so a second
+      // click can come while it is on its way.
+      if (creates++ === 0) await holdFirstCreate;
       const input = call.body as { name: string; copyFromId?: string };
       if (stored.some((each) => each.name === input.name)) {
         return {
@@ -151,19 +160,23 @@ const playProfiles = (initial: ModelProfile[], initialProjects: Project[] = []) 
 const openModels = async ({
   profiles,
   projects = [],
+  accounts = IDENTITIES.map(buildAccount),
   path = "/settings/providers",
   handlers = {},
+  holdFirstCreate,
 }: {
   readonly profiles: ModelProfile[];
   readonly projects?: Project[];
+  readonly accounts?: ProviderAccount[];
   readonly path?: string;
   readonly handlers?: Record<string, Handler>;
+  readonly holdFirstCreate?: Promise<void>;
 }) => {
-  const controller = playProfiles(profiles, projects);
+  const controller = playProfiles(profiles, projects, holdFirstCreate);
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
-      accounts: IDENTITIES.map(buildAccount),
+      accounts,
       modelProfiles: profiles,
     }),
     ...controller.handlers,
@@ -263,6 +276,19 @@ describe("Settings > Providers > Models, profiles", () => {
       expect(router.state.location.search).toEqual({ profile: WORK_ID });
     });
     expect(document.activeElement).toBe(getTabs()[1]);
+  });
+
+  it("shows the tabs and the teaching state of the profiles when there is no account yet", async () => {
+    const empty = buildModelProfile([], { id: MAIN_ID, name: "Main", revision: 3 });
+    const work = buildModelProfile([], { id: WORK_ID, name: "Work", revision: 5 });
+    await openModels({ profiles: [empty, work], accounts: [] });
+
+    expect(screen.getByText("No accounts yet. Add one to give your agents models.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Accounts" })).toBeNull();
+    expect(listTabNames()).toEqual(["Main", "Work"]);
+    expect(screen.getByRole("button", { name: "New profile" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Build Main's model menu" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Or add a new account" })).toBeTruthy();
   });
 
   describe("New profile", () => {
@@ -386,6 +412,85 @@ describe("Settings > Providers > Models, profiles", () => {
       expect(listTabNames()).toEqual(["Main", "Work"]);
     });
 
+    it("keeps the field read-only while its save runs, so a letter typed then is not lost", async () => {
+      const save = holdAnswer();
+      await openModels({
+        profiles: [MAIN, WORK],
+        handlers: { [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: save.handler },
+      });
+      await chooseTabMenuItem("Main", "Rename");
+      const field = screen.getByRole<HTMLInputElement>("textbox", { name: "Name of Main" });
+      await userEvent.clear(field);
+      await userEvent.type(field, "Daily{Enter}");
+      await waitFor(() => {
+        expect(field.readOnly).toBe(true);
+      });
+
+      await userEvent.type(field, "xyz");
+
+      expect(field.value).toBe("Daily");
+      save.answer({
+        status: 400,
+        body: buildErrorBody("validation", "A profile called that exists."),
+      });
+      expect((await screen.findByRole("alert")).textContent).toBe("A profile called that exists.");
+      expect(field.readOnly).toBe(false);
+      await userEvent.type(field, "xyz");
+      expect(field.value).toBe("Dailyxyz");
+    });
+
+    it("keeps the rename the user has started on another tab when an earlier save answers", async () => {
+      const save = holdAnswer();
+      await openModels({
+        profiles: [MAIN, WORK],
+        handlers: { [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: save.handler },
+      });
+      await chooseTabMenuItem("Main", "Rename");
+      const field = screen.getByRole("textbox", { name: "Name of Main" });
+      await userEvent.clear(field);
+      await userEvent.type(field, "Daily{Enter}");
+      await userEvent.click(screen.getByRole("tab", { name: /^Work/, selected: false }));
+      await chooseTabMenuItem("Work", "Rename");
+      const other = screen.getByRole("textbox", { name: "Name of Work" });
+      await userEvent.clear(other);
+      await userEvent.type(other, "Jobs");
+
+      save.answer({ body: { ...MAIN, name: "Daily", revision: MAIN.revision + 1 } });
+
+      await waitFor(() => {
+        expect(screen.getByRole("tab", { name: /^Daily/ })).toBeTruthy();
+      });
+      expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Name of Work" }).value).toBe(
+        "Jobs",
+      );
+    });
+
+    it("does not show the refusal of an earlier tab's save over the rename of another", async () => {
+      const save = holdAnswer();
+      await openModels({
+        profiles: [MAIN, WORK],
+        handlers: { [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: save.handler },
+      });
+      await chooseTabMenuItem("Main", "Rename");
+      const field = screen.getByRole("textbox", { name: "Name of Main" });
+      await userEvent.clear(field);
+      await userEvent.type(field, "Work{Enter}");
+      await userEvent.click(screen.getByRole("tab", { name: /^Work/, selected: false }));
+      await chooseTabMenuItem("Work", "Rename");
+      await userEvent.type(screen.getByRole("textbox", { name: "Name of Work" }), "s");
+
+      save.answer({
+        status: 400,
+        body: buildErrorBody("validation", "A profile called that exists."),
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole("textbox", { name: "Name of Work" })).toBeTruthy();
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(listTabNames()[0]).toBe("Main");
+    });
+
     it("refuses a blank name in plain words without asking the controller, and keeps the field", async () => {
       const { calls, read } = await openModels({ profiles: [MAIN, WORK] });
 
@@ -415,6 +520,31 @@ describe("Settings > Providers > Models, profiles", () => {
       await waitFor(() => {
         expect(listTabNames()).toEqual(["Main", "Work", "Main copy", "Main copy 2"]);
       });
+      expect(getCalls(calls, "POST", "/api/v1/model-profiles").map((call) => call.body)).toEqual([
+        { name: "Main copy", copyFromId: MAIN_ID },
+        { name: "Main copy 2", copyFromId: MAIN_ID },
+      ]);
+    });
+  });
+
+  describe("Duplicate, quickly", () => {
+    it("names the copies from the profiles the page holds when each save starts", async () => {
+      let release: () => void = () => undefined;
+      const { calls } = await openModels({
+        profiles: [MAIN, WORK],
+        holdFirstCreate: new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      });
+
+      await chooseTabMenuItem("Main", "Duplicate");
+      await chooseTabMenuItem("Main", "Duplicate");
+      release();
+
+      await waitFor(() => {
+        expect(listTabNames()).toEqual(["Main", "Work", "Main copy", "Main copy 2"]);
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
       expect(getCalls(calls, "POST", "/api/v1/model-profiles").map((call) => call.body)).toEqual([
         { name: "Main copy", copyFromId: MAIN_ID },
         { name: "Main copy 2", copyFromId: MAIN_ID },

@@ -19,7 +19,9 @@
  * `?newprofile` opens the New profile dialog, and `?deleteprofile` the
  * delete confirmation of the open profile. `?empty` empties the open profile,
  * so the page teaches; `?addmenu` opens the menu of "Add an account to
- * <profile>".
+ * <profile>". `?noaccounts` removes every account, and with them every
+ * profile's sections, so the page says there is no account and the Models
+ * section still teaches (it works with `?profiles=2`).
  */
 import { mountProvidersSettingsSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
@@ -107,27 +109,31 @@ async function openAddAccountSheet(step: string): Promise<void> {
 
 const query = new URLSearchParams(location.search);
 const [fixtureMain] = PROVIDER_MODEL_PROFILES;
+const noAccounts = query.has("noaccounts");
 const main =
-  fixtureMain !== undefined && query.has("empty")
+  fixtureMain !== undefined && (query.has("empty") || noAccounts)
     ? { ...fixtureMain, accounts: [], defaultEntry: null }
     : fixtureMain;
+const baseRecords = noAccounts
+  ? { ...PROVIDERS_SIDEBAR_RECORDS, accounts: [] }
+  : PROVIDERS_SIDEBAR_RECORDS;
 await mountProvidersSettingsSpecimen(
   query.get("profiles") === "2" && main !== undefined && fixtureMain !== undefined
     ? {
-        ...PROVIDERS_SIDEBAR_RECORDS,
+        ...baseRecords,
         modelProfiles: [
           main,
           {
             ...fixtureMain,
             id: "01a06d02-8000-7000-8000-000000000b02",
             name: "Work",
-            accounts: fixtureMain.accounts.slice(1, 2),
+            accounts: noAccounts ? [] : fixtureMain.accounts.slice(1, 2),
           },
         ],
       }
-    : main !== undefined && query.has("empty")
-      ? { ...PROVIDERS_SIDEBAR_RECORDS, modelProfiles: [main] }
-      : PROVIDERS_SIDEBAR_RECORDS,
+    : main !== undefined && (query.has("empty") || noAccounts)
+      ? { ...baseRecords, modelProfiles: [main] }
+      : baseRecords,
   PROVIDERS_SETTINGS_RECORDS,
 );
 const sheet = new URLSearchParams(location.search).get("sheet");

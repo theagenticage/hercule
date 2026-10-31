@@ -17,7 +17,7 @@ import {
   asksForAccountLabel,
   buildProviderAccountCreateInput,
   buildProviderAccountName,
-  findOpenModelProfile,
+  findModelProfileOrFirst,
   isAddAccountStepFilled,
   isNotFound,
   listSignInRunnerOptions,
@@ -154,7 +154,7 @@ export function AddProviderAccount({
   });
   const addToProfile = useMutation({
     mutationFn: async (account: ProviderAccount) => {
-      const profile = findOpenModelProfile(
+      const profile = findModelProfileOrFirst(
         await queryClient.ensureQueryData(modelProfilesQuery(client)),
         modelProfileId,
       );

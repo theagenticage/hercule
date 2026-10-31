@@ -18,6 +18,17 @@ export interface ProfileTab {
 }
 
 /**
+ * One rename of a profile's name. `token` tells this edit from every earlier
+ * and later one, even on the same profile; `error` is the controller's
+ * refusal of the last save, shown while the edit is open.
+ */
+interface RenameEdit {
+  readonly token: number;
+  readonly id: string;
+  readonly error: string | null;
+}
+
+/**
  * Renders the open tab's ⌄ button and the menu it opens: Rename, Duplicate and
  * Delete…. Each item closes the menu and calls its callback.
  */
@@ -98,6 +109,10 @@ function ProfileTabMenu({
  * resolves to whether the name was saved; the field stays when it was not, so
  * the user can correct it. Esc, or a name that did not change, calls
  * `onStop` without saving.
+ *
+ * The field is read-only while its save runs, so the name the user sees is
+ * the name being saved: a letter typed then would be lost when the field
+ * closes.
  */
 function RenamingTab({
   tab,
@@ -110,6 +125,7 @@ function RenamingTab({
 }): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(tab.name);
+  const [saving, setSaving] = useState(false);
   // True once Esc or a save has decided the outcome, so the blur that follows
   // as the field goes away does not decide it again.
   const settled = useRef(false);
@@ -125,11 +141,14 @@ function RenamingTab({
       return;
     }
     settled.current = true;
-    if (await onSave(value)) onStop();
+    setSaving(true);
+    const saved = await onSave(value);
+    setSaving(false);
+    if (saved) onStop();
     else settled.current = false;
   };
   return (
-    <span className="pm-tab pm-tab--edit" aria-selected="true">
+    <span className="pm-tab pm-tab--edit" role="tab" aria-selected="true">
       <ProfileFace name={value === "" ? tab.name : value} size="sm" />
       <input
         ref={inputRef}
@@ -137,6 +156,8 @@ function RenamingTab({
         aria-label={`Name of ${tab.name}`}
         size={Math.max(8, value.length + 2)}
         value={value}
+        readOnly={saving}
+        aria-busy={saving}
         spellCheck={false}
         autoComplete="off"
         onChange={(event) => {
@@ -172,6 +193,13 @@ function RenamingTab({
  * resolves to the controller's message when it refuses it, such as a blank
  * name or one another profile has, or to `null` when it saved. The message
  * shows above the tabs while the name is being edited.
+ *
+ * Each Rename starts a new edit, and the answer to a save only reaches the
+ * edit that sent it. Opening another tab ends the edit, so an answer that
+ * arrives later changes nothing on screen: it cannot close or put an error on
+ * the edit of another tab the user has started since. A refusal that arrives
+ * after the user left the tab is therefore not shown; the tab keeps the name
+ * it had.
  */
 export function ProfileTabs({
   tabs,
@@ -191,8 +219,17 @@ export function ProfileTabs({
   readonly onDelete: (id: string) => void;
 }): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameError, setRenameError] = useState<string | null>(null);
+  const [edit, setEdit] = useState<RenameEdit | null>(null);
+  const nextEditToken = useRef(0);
+  /** Changes the edit `token` with `change`, unless that edit has ended or another has begun. */
+  const changeEdit = (token: number, change: (current: RenameEdit) => RenameEdit | null): void => {
+    setEdit((current) => (current?.token === token ? change(current) : current));
+  };
+
+  const openTab = (id: string): void => {
+    setEdit(null);
+    onOpen(id);
+  };
 
   const moveFocus = (event: KeyboardEvent<HTMLElement>): void => {
     const index = tabs.findIndex(({ id }) => id === openId);
@@ -209,7 +246,7 @@ export function ProfileTabs({
     const target = next === undefined ? undefined : tabs[next];
     if (target === undefined) return;
     event.preventDefault();
-    onOpen(target.id);
+    openTab(target.id);
     [...(listRef.current?.querySelectorAll<HTMLElement>("[role='tab']") ?? [])]
       .find((element) => element.dataset.tabId === target.id)
       ?.focus();
@@ -217,28 +254,28 @@ export function ProfileTabs({
 
   return (
     <>
-      {renameError === null ? null : (
+      {edit?.error == null ? null : (
         <p className="pm-err" role="alert">
-          {renameError}
+          {edit.error}
         </p>
       )}
       <div className="pm-tabs">
         <div ref={listRef} className="pm-tablist" role="tablist" aria-label="Profiles">
           {tabs.map((tab) => {
             const isOpen = tab.id === openId;
-            if (isOpen && renamingId === tab.id) {
+            if (isOpen && edit?.id === tab.id) {
+              const { token } = edit;
               return (
                 <RenamingTab
                   key={tab.id}
                   tab={tab}
                   onSave={async (name) => {
                     const message = await onRename(tab.id, name);
-                    setRenameError(message);
+                    changeEdit(token, (current) => ({ ...current, error: message }));
                     return message === null;
                   }}
                   onStop={() => {
-                    setRenamingId(null);
-                    setRenameError(null);
+                    changeEdit(token, () => null);
                   }}
                 />
               );
@@ -253,7 +290,7 @@ export function ProfileTabs({
                   aria-selected={isOpen}
                   tabIndex={isOpen ? 0 : -1}
                   onClick={() => {
-                    onOpen(tab.id);
+                    openTab(tab.id);
                   }}
                   onKeyDown={moveFocus}
                 >
@@ -265,7 +302,7 @@ export function ProfileTabs({
                   <ProfileTabMenu
                     name={tab.name}
                     onRename={() => {
-                      setRenamingId(tab.id);
+                      setEdit({ token: nextEditToken.current++, id: tab.id, error: null });
                     }}
                     onDuplicate={() => {
                       onDuplicate(tab.id);

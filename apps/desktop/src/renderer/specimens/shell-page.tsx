@@ -1232,9 +1232,12 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
       "Settings > Connections drew no Connection's row. Check the page's console for the error.",
     );
   }
-  if (screens.providersSettings !== undefined && document.querySelector(".pa-card") === null) {
+  if (
+    screens.providersSettings !== undefined &&
+    document.querySelector(".pa-card, .pa-empty") === null
+  ) {
     throw new Error(
-      "Settings > Providers drew no account's card. Check the page's console for the error.",
+      "Settings > Providers drew no account's card and no line saying there is none. Check the page's console for the error.",
     );
   }
   if (screens.intakeSettings !== undefined && document.querySelector(".set-sec") === null) {

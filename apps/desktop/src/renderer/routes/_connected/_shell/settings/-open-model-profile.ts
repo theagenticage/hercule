@@ -1,6 +1,6 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { findOpenModelProfile, type HerculeClient } from "@hercule/client-core";
+import { findModelProfileOrFirst, type HerculeClient } from "@hercule/client-core";
 import { isId, type ModelProfile } from "@hercule/contract";
 import { modelProfilesQuery } from "../../../../app/queries";
 
@@ -35,7 +35,7 @@ export function useOpenModelProfile(client: HerculeClient): {
   const { profile: openId } = useSearch({ from: PROVIDERS_ROUTE });
   const navigate = useNavigate();
   return {
-    profile: findOpenModelProfile(profiles, openId),
+    profile: findModelProfileOrFirst(profiles, openId),
     profiles,
     // Switching tabs replaces the history entry, so Back leaves the page.
     openProfile: (id) => {
