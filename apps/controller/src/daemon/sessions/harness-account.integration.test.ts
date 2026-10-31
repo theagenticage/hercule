@@ -50,12 +50,58 @@ const PLAIN: HarnessDefinition = buildHarnessDefinition("plain", [
   },
 ]);
 
+/** The variable the main harness of the two-harness provider reads its key from. */
+const MAIN_KEY_VARIABLE = "MAIN_API_KEY";
+
+/** The variable the second harness of the two-harness provider reads its key from. */
+const SECOND_KEY_VARIABLE = "SECOND_API_KEY";
+
+/** The harness an account of the two-harness provider runs in by default, like Claude Code. */
+const MAIN: HarnessDefinition = buildHarnessDefinition("main", [
+  {
+    providerId: "harnesses/dual",
+    kinds: [{ kind: "api-key", modelArgument: "{model}", credentialVariable: MAIN_KEY_VARIABLE }],
+    models: "all",
+  },
+]);
+
+/** A second harness for the same provider and account kind, like pi next to Claude Code. */
+const SECOND: HarnessDefinition = buildHarnessDefinition("second", [
+  {
+    providerId: "harnesses/dual",
+    kinds: [
+      { kind: "api-key", modelArgument: "dual/{model}", credentialVariable: SECOND_KEY_VARIABLE },
+    ],
+    models: "own-list",
+  },
+]);
+
 const buildPlugins = (): ReadonlyArray<Plugin> => [
   createPluginFixture({
     id: "harnesses",
     capabilities: ["harnesses", "providers"],
-    definitions: [KEYED, PLAIN],
+    definitions: [KEYED, PLAIN, MAIN, SECOND],
     providers: [
+      {
+        id: "dual",
+        displayName: "Dual",
+        kinds: [
+          {
+            id: "api-key",
+            title: "API key",
+            description: "A key for Dual, which two harnesses can use.",
+            setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+            keyCheck: {
+              url: "https://api.dual.test/v1/models",
+              headers: { authorization: "Bearer {apiKey}" },
+            },
+            harnesses: ["harnesses/main", "harnesses/second"],
+          },
+        ],
+        defaultHarnessId: "harnesses/main",
+        catalogSource: { kind: "harness-probe", harnessId: "harnesses/main" },
+        defaultSelection: "current-models",
+      },
       {
         id: "keyed",
         displayName: "Keyed",
@@ -103,7 +149,7 @@ const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [],
   harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["harnesses/keyed", "harnesses/plain"],
+  adapters: ["harnesses/keyed", "harnesses/plain", "harnesses/main", "harnesses/second"],
   identityPort: 4939,
 };
 
@@ -310,4 +356,60 @@ describe("the harness account a frame carries to a runner", () => {
       expect(await transcript.text()).toContain("could not be decrypted");
     });
   });
+
+  it.each([
+    {
+      name: "a new account gets the second harness's own home and key variable",
+      hasLegacyHome: false,
+      harnessId: "harnesses/second",
+      home: (id: string) => `providers/homes/${id}/harnesses/second`,
+      keyVariable: SECOND_KEY_VARIABLE,
+    },
+    {
+      name: "an account with a legacy home gets a derived home in the harness the folder does not belong to",
+      hasLegacyHome: true,
+      harnessId: "harnesses/second",
+      home: (id: string) => `providers/homes/${id}/harnesses/second`,
+      keyVariable: SECOND_KEY_VARIABLE,
+    },
+    {
+      name: "an account with a legacy home keeps that folder in the harness it belongs to",
+      hasLegacyHome: true,
+      harnessId: "harnesses/main",
+      home: (id: string) => `providers/${id}`,
+      keyVariable: MAIN_KEY_VARIABLE,
+    },
+  ])(
+    "$name when a session starts there",
+    async ({ hasLegacyHome, harnessId, home, keyVariable }) => {
+      await withFleet(async (arranged) => {
+        const dual = findProviderAccountId(arranged, "harnesses/main");
+        await setKey(arranged, dual, KEY_VALUE);
+        if (hasLegacyHome) {
+          await Effect.runPromise(
+            Effect.orDie(
+              withTransaction(
+                arranged.harness.sql,
+                arranged.harness.sql`
+                UPDATE provider_accounts
+                SET legacy_home_folder = ${dual}, legacy_home_harness_id = 'harnesses/main'
+                WHERE id = unhex(replace(${dual}, '-', ''))`,
+              ),
+            ),
+          );
+        }
+
+        await spawnSessionOrFail(arranged, { prompt: "hello", providerAccountId: dual, harnessId });
+        const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
+
+        expect(start.harnessId).toBe(harnessId);
+        expect(start.harnessAccount).toMatchObject({
+          providerAccountId: dual,
+          harnessHome: home(dual),
+          credentialVariables: [keyVariable],
+          credential: { variable: keyVariable, value: KEY_VALUE },
+        });
+      });
+    },
+  );
 });

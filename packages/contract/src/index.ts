@@ -121,6 +121,8 @@ export {
 
 export { ACCESS_MODE_CHAIN, findNearestSupportedAccessMode } from "./access-modes";
 
+export { findSnapshotModel, isModelMissingFromHarness } from "./harness-models";
+
 export {
   MAX_PASSWORD_LENGTH,
   MAX_TIMEZONE_LENGTH,

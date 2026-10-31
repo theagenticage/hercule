@@ -8,13 +8,13 @@
  * apply, but it stays in the picks, so it applies again when the catalogs
  * allow it (Max on model X, switch to model Y without Max, back to X: Max).
  */
-import type {
-  ModelDescriptor,
-  ModelOption,
-  ProviderAccount,
-  ResolvedModelProfileEntry,
-  Runner,
-  Workspace,
+import {
+  findSnapshotModel,
+  type ModelOption,
+  type ProviderAccount,
+  type ResolvedModelProfileEntry,
+  type Runner,
+  type Workspace,
 } from "@hercule/contract";
 import { findProfileEntry } from "../model-profiles/profile-entries";
 import { findProviderAccountReadiness, resolveThreadHarnessId } from "../provider-accounts";
@@ -96,8 +96,8 @@ export interface ResolvedActive {
    * The model's name, options and image input, from the profile entry for the
    * session's account, harness and model. When no profile offers the model,
    * they come from the account's newest good probe in the session's harness
-   * (`findProbedModel`); `undefined` when that lists the model no more than
-   * the profiles do.
+   * (`findSnapshotModel`, the rule the controller uses too); `undefined` when
+   * that lists the model no more than the profiles do.
    */
   readonly description: ModelDescription | undefined;
   readonly outgoing: OutgoingChange;
@@ -127,34 +127,6 @@ const keepOfferedOptions = (
       ),
     ),
   );
-
-/**
- * Returns the model of `account` in the harness `harnessId` as the account's
- * newest `ok` probe lists it, or `undefined` when no `ok` probe lists the
- * model. It mirrors the controller's `findSnapshotModel` in
- * `resolve-profile.ts`, which fills a profile entry's name, options and image
- * input from the same probe, so a model that left every profile keeps the
- * descriptor its entry had.
- *
- * It only describes the model. Whether the account can run it comes from
- * `ProviderAccount.readiness`, and whether a profile offers it from the
- * profiles; a probe says neither.
- */
-const findProbedModel = (
-  account: ProviderAccount | undefined,
-  harnessId: string,
-  slug: string,
-): ModelDescriptor | undefined => {
-  let newest: { readonly probedAt: string; readonly model: ModelDescriptor } | undefined;
-  for (const snapshot of account?.snapshots ?? []) {
-    if (snapshot.harnessId !== harnessId || snapshot.auth.status !== "ok") continue;
-    const model = snapshot.models.find((each) => each.slug === slug);
-    if (model !== undefined && (newest === undefined || snapshot.probedAt > newest.probedAt)) {
-      newest = { probedAt: snapshot.probedAt, model };
-    }
-  }
-  return newest?.model;
-};
 
 /**
  * Returns the runner id a draft runs on, when no existing workspace decides
@@ -271,6 +243,9 @@ const resolveActive = (
   const stored = readThreadConfig(thread);
   const runner = catalogs.runners.find((each) => each.id === session.runnerId);
   const model = picks.model ?? stored.model;
+  const sessionAccount = catalogs.accounts.find((each) => each.id === session.providerAccountId);
+  // A probe only describes the model. Whether the account can run it comes from
+  // `ProviderAccount.readiness`, and whether a profile offers it from the profiles.
   const description: ModelDescription | undefined =
     model === null
       ? undefined
@@ -279,11 +254,9 @@ const resolveActive = (
           harnessId: session.harnessId,
           model,
         }) ??
-        findProbedModel(
-          catalogs.accounts.find((each) => each.id === session.providerAccountId),
-          session.harnessId,
-          model,
-        ));
+        (sessionAccount === undefined
+          ? undefined
+          : findSnapshotModel(sessionAccount, session.harnessId, model)));
 
   const modelChanges = model !== stored.model;
   // The picked options that the model offers. Without a description nothing

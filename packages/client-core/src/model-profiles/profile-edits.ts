@@ -24,6 +24,7 @@ import type {
   ModelProfileEntry,
   ModelProfileUpdateInput,
   ResolvedModelProfileAccount,
+  ResolvedModelProfileEntry,
 } from "@hercule/contract";
 import { isSameStoredEntry } from "./profile-entries";
 
@@ -147,6 +148,97 @@ export const takeOutModelProfileEntry = (
           ...input.dismissedNewModels,
           { providerAccountId: entry.providerAccountId, model: entry.model },
         ],
+  };
+};
+
+/**
+ * Returns the profile with the section of `providerAccountId` running its
+ * models in `harnessId`; `null` is "same as the account", which follows the
+ * account's default harness. The entries keep their stored `harnessId`, so an
+ * entry that names a harness stays there and one that follows the section
+ * moves with it. An account the profile does not hold changes nothing.
+ */
+export const setModelProfileAccountHarness = (
+  profile: ModelProfile,
+  providerAccountId: string,
+  harnessId: string | null,
+): ModelProfileUpdateInput => {
+  const input = toUpdateInput(profile);
+  return {
+    ...input,
+    accounts: input.accounts.map((section) =>
+      section.providerAccountId === providerAccountId ? { ...section, harnessId } : section,
+    ),
+  };
+};
+
+/**
+ * Returns the profile with `entry` running in `harnessId`; `null` makes it
+ * follow its section's harness. When `entry` is the profile's default, the
+ * default moves with it. An entry the profile no longer holds (another
+ * window changed it first) changes nothing, so applying the move again to a
+ * fresher profile is safe.
+ */
+export const moveModelProfileEntryToHarness = (
+  profile: ModelProfile,
+  entry: ResolvedModelProfileEntry,
+  harnessId: string | null,
+): ModelProfileUpdateInput => {
+  const input = toUpdateInput(profile);
+  if (!holdsEntry(input, entry)) return input;
+  const moved: ModelProfileEntry = { ...toStoredEntry(entry), harnessId };
+  return {
+    ...input,
+    accounts: input.accounts.map((section) =>
+      section.providerAccountId === entry.providerAccountId && section.entries !== undefined
+        ? {
+            ...section,
+            entries: section.entries.map((each) => (isSameStoredEntry(each, entry) ? moved : each)),
+          }
+        : section,
+    ),
+    defaultEntry:
+      input.defaultEntry !== null && isSameStoredEntry(input.defaultEntry, entry)
+        ? moved
+        : input.defaultEntry,
+  };
+};
+
+/**
+ * Returns the profile with the model of `entry` also offered in `harnessId`
+ * (`null` follows the section's harness), as a second entry right after
+ * `entry`. Nothing changes when the section already holds the model in that
+ * harness, whether an entry follows the section or names it outright, because
+ * the controller refuses two entries of one model in one harness. Nothing
+ * changes either for an entry the profile no longer holds.
+ */
+export const offerModelProfileEntryIn = (
+  profile: ModelProfile,
+  entry: ResolvedModelProfileEntry,
+  harnessId: string | null,
+): ModelProfileUpdateInput => {
+  const input = toUpdateInput(profile);
+  const resolved = profile.accounts.find(
+    (section) => section.providerAccountId === entry.providerAccountId,
+  );
+  if (resolved === undefined) return input;
+  const offeredIn = harnessId ?? resolved.resolvedHarnessId;
+  const alreadyHeld = resolved.entries.some(
+    (each) => each.model === entry.model && each.resolvedHarnessId === offeredIn,
+  );
+  if (alreadyHeld) return input;
+  const offered: ModelProfileEntry = { ...toStoredEntry(entry), harnessId };
+  return {
+    ...input,
+    accounts: input.accounts.map((section) => {
+      if (section.providerAccountId !== entry.providerAccountId || section.entries === undefined) {
+        return section;
+      }
+      const at = section.entries.findIndex((each) => isSameStoredEntry(each, entry));
+      return at === -1
+        ? section
+        : { ...section, entries: section.entries.toSpliced(at + 1, 0, offered) };
+    }),
   };
 };
 

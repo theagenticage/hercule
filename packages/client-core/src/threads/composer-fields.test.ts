@@ -9,7 +9,8 @@
  * - a draft cannot join a workspace that is not ready, or run on a retired
  *   runner;
  * - the model pill names the account only when the harness has more than
- *   one account.
+ *   one account, and names the harness only when it is not the account's
+ *   default.
  */
 import { describe, expect, it } from "vitest";
 import type {
@@ -431,6 +432,7 @@ describe("buildComposerFields", () => {
       harnessId: "claude-code/claude-code",
       account: null,
       name: "Claude Sonnet 5",
+      inHarness: null,
     });
   });
 
@@ -444,7 +446,30 @@ describe("buildComposerFields", () => {
       harnessId: "claude-code/claude-code",
       account: "Anthropic · personal",
       name: "Claude Sonnet 5",
+      inHarness: null,
     });
+  });
+
+  it("names the harness in the pill when it is not the account's default", () => {
+    const inPi = composeDraft(buildCatalogs([CLAUDE]), buildConfig({ harnessId: "pi/pi" }));
+
+    expect(inPi.model.pill.harnessId).toBe("pi/pi");
+    expect(inPi.model.pill.inHarness).toBe("pi");
+  });
+
+  it("names no harness in the pill when the thread runs in the account's default", () => {
+    const named = composeDraft(
+      buildCatalogs([CLAUDE]),
+      buildConfig({ harnessId: CLAUDE.defaultHarnessId }),
+    );
+
+    expect(named.model.pill.inHarness).toBeNull();
+  });
+
+  it("names no harness in the pill when the account is unknown", () => {
+    const fields = composeDraft(buildCatalogs([]), buildConfig({ harnessId: "pi/pi" }));
+
+    expect(fields.model.pill.inHarness).toBeNull();
   });
 });
 

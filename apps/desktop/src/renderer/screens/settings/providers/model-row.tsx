@@ -4,6 +4,7 @@ import { CheckIcon } from "../../../icons/check";
 import { CloseIcon } from "../../../icons/close";
 import { GripIcon } from "../../../icons/grip";
 import { MoreIcon } from "../../../icons/more";
+import { PlusIcon } from "../../../icons/plus";
 import { HarnessLogo } from "../../thread/harness-logo";
 import { usePopoverMenu } from "../../use-popover-menu";
 import "../../thread/menus.css";
@@ -12,9 +13,15 @@ import "./models.css";
 /**
  * Renders one entry of a profile's section: its model's name, "default" when
  * it is the profile's default entry, "in pi" (the harness's name) when it runs
- * in another harness than its section, and a ⋯ menu with "Make it <profile>'s
- * default" and "Take out of the menu". A problem with the model shows under
- * the row.
+ * in another harness than its section, and a ⋯ menu. The menu holds:
+ *
+ * - "Make it <profile>'s default";
+ * - "Runs in", one radio per harness in `row.runsIn`, when there are any.
+ *   A harness that cannot be picked is faint and shows its reason;
+ * - "Also offer in <harness>" for each of `row.alsoOfferIn`;
+ * - "Take out of the menu".
+ *
+ * A problem with the model shows under the row.
  *
  * `rowProps` is spread on the list item. The caller makes the item draggable,
  * focusable and movable with Alt+Up and Alt+Down, and marks where a dragged
@@ -25,12 +32,18 @@ export function ModelRow({
   profileName,
   rowProps,
   onMakeDefault,
+  onMoveToHarness,
+  onAlsoOfferIn,
   onTakeOut,
 }: {
   readonly row: ModelSectionRow;
   readonly profileName: string;
   readonly rowProps: ComponentProps<"li">;
   readonly onMakeDefault: () => void;
+  /** Called with the `harnessId` of the picked "Runs in" option, other than the current one. */
+  readonly onMoveToHarness: (harnessId: string | null) => void;
+  /** Called with the `harnessId` of the "Also offer in" target. */
+  readonly onAlsoOfferIn: (harnessId: string | null) => void;
   readonly onTakeOut: () => void;
 }): JSX.Element {
   const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
@@ -74,6 +87,61 @@ export function ModelRow({
             {`Make it ${profileName}'s default`}
           </button>
         )}
+        {row.runsIn.length === 0 ? null : (
+          <div role="group" aria-label="Runs in">
+            <div className="pm-menu-h" aria-hidden="true">
+              Runs in
+            </div>
+            {row.runsIn.map((option) => {
+              const struck = option.unavailableReason !== null;
+              const itemProps = buildItemProps(`runs-in:${option.resolvedHarnessId}`, {
+                checked: option.isCurrent,
+                disabled: struck,
+              });
+              return (
+                <button
+                  key={option.resolvedHarnessId}
+                  type="button"
+                  {...itemProps}
+                  className={[itemProps.className, "pm-choice"].filter(Boolean).join(" ")}
+                  onClick={() => {
+                    if (struck) return;
+                    close();
+                    if (!option.isCurrent) onMoveToHarness(option.harnessId);
+                  }}
+                >
+                  <span className={option.isCurrent ? "pm-radio is-on" : "pm-radio"} />
+                  <span className="pm-choice-text">
+                    <span>
+                      {option.name}
+                      {option.harnessId === null ? (
+                        <small className="pm-choice-note"> like the account</small>
+                      ) : null}
+                    </span>
+                    {option.unavailableReason === null ? null : (
+                      <small className="pm-choice-why">{option.unavailableReason}</small>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {row.alsoOfferIn.map((target) => (
+          <button
+            key={target.resolvedHarnessId}
+            type="button"
+            {...buildItemProps(`also-offer:${target.resolvedHarnessId}`)}
+            onClick={() => {
+              close();
+              onAlsoOfferIn(target.harnessId);
+            }}
+          >
+            <PlusIcon size={13} />
+            {`Also offer in ${target.name}`}
+          </button>
+        ))}
+        <div className="pm-menu-sep" role="separator" />
         <button
           type="button"
           {...takeOutProps}

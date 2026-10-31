@@ -5,22 +5,35 @@
 export const FOCUSABLE_MENU_ITEM_SELECTOR =
   ":is([role='menuitem'], [role='menuitemradio']):not([aria-disabled='true'])";
 
+/** The keys `moveMenuFocus` handles. */
+export type MenuFocusKey = "ArrowDown" | "ArrowUp" | "Home" | "End";
+
+/** Returns whether `key` is one of the keys `moveMenuFocus` handles. */
+export const isMenuFocusKey = (key: string): key is MenuFocusKey =>
+  key === "ArrowDown" || key === "ArrowUp" || key === "Home" || key === "End";
+
 /**
- * Moves the focus one item down the menu `menu` for `ArrowDown`, or one item
- * up for `ArrowUp`, and returns the item that now has it. The focus wraps
- * around at either end, and passes over an item marked `aria-disabled`,
- * which cannot be taken. When no item has the focus, `ArrowDown` focuses the
- * first item and `ArrowUp` the last. Returns `undefined` when the menu has no
- * item that can take the focus.
+ * Moves the focus in the menu `menu` as `key` asks, and returns the item that
+ * now has it:
+ *
+ * - `ArrowDown` moves one item down and `ArrowUp` one item up. The focus wraps
+ *   around at either end. When no item has the focus, `ArrowDown` focuses the
+ *   first item and `ArrowUp` the last.
+ * - `Home` focuses the first item and `End` the last.
+ *
+ * All four keys pass over an item marked `aria-disabled`, which cannot be
+ * taken. Returns `undefined` when the menu has no item that can take the focus.
  *
  * The snooze menu and every menu built with `usePopoverMenu` call it from
- * their key handlers, so the arrow keys step through each menu the same way.
+ * their key handlers, so the keys step through each menu the same way.
  */
-export const moveMenuFocus = (
-  menu: HTMLElement,
-  key: "ArrowDown" | "ArrowUp",
-): HTMLElement | undefined => {
+export const moveMenuFocus = (menu: HTMLElement, key: MenuFocusKey): HTMLElement | undefined => {
   const items = [...menu.querySelectorAll<HTMLElement>(FOCUSABLE_MENU_ITEM_SELECTOR)];
+  if (key === "Home" || key === "End") {
+    const edge = key === "Home" ? items[0] : items.at(-1);
+    edge?.focus();
+    return edge;
+  }
   const at = items.indexOf(document.activeElement as HTMLElement);
   const step = key === "ArrowDown" ? 1 : -1;
   const from = at === -1 && step === -1 ? 0 : at;

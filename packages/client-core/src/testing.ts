@@ -17,10 +17,12 @@ export {
   HARNESSES,
   OPENAI_IDENTITY,
   PROVIDERS,
+  WITH_CLAUDE,
   ZAI_IDENTITY,
   buildModelProfile,
   buildProfileEntry,
   buildProfileSection,
   buildProviderAccount,
+  buildSnapshot,
   type ProviderAccountIdentity,
 } from "./providers.testing";

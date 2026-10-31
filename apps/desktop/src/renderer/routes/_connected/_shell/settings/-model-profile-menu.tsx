@@ -9,7 +9,10 @@ import {
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
+  moveModelProfileEntryToHarness,
+  offerModelProfileEntryIn,
   readErrorMessage,
+  setModelProfileAccountHarness,
   setModelProfileEntryIncluded,
   takeOutModelProfileEntry,
   type HerculeClient,
@@ -20,6 +23,7 @@ import {
   pluginsQuery,
   providerAccountsQuery,
   providersQuery,
+  runnersQuery,
 } from "../../../../app/queries";
 import { AddProfileAccount } from "../../../../screens/settings/providers/add-profile-account";
 import { ModelProfileSection } from "../../../../screens/settings/providers/model-profile-section";
@@ -51,7 +55,8 @@ import { AccountModelPicker } from "./-models-picker";
  * section flashes once. So does the section of an account the user joins to
  * the profile from the page itself, through "Add an account to <profile>" or
  * a tile of the empty profile; both join it with its provider's Default
- * Selection. `onAddAccount` opens the add-account sheet, which joins the new
+ * Selection. `onOpenAccount` opens the sheet of an account, from "Change it"
+ * in the harness pill's popover. `onAddAccount` opens the add-account sheet, which joins the new
  * account to this profile when it is done.
  *
  * Beside the sections, or under them in a narrow body, the preview shows the
@@ -67,15 +72,18 @@ export function ModelProfileMenu({
   profile,
   flashProviderAccountId,
   onAddAccount,
+  onOpenAccount,
 }: {
   readonly client: HerculeClient;
   readonly profile: ModelProfile;
   readonly flashProviderAccountId: string | null;
   readonly onAddAccount: () => void;
+  readonly onOpenAccount: (providerAccountId: string) => void;
 }): JSX.Element {
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const runners = useSuspenseQuery(runnersQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
 
   const save = useModelProfileUpdate(client);
@@ -90,7 +98,12 @@ export function ModelProfileMenu({
   // carries it is over. A second click before the first save is answered
   // reads the page as it was drawn, so it would ask for the same thing twice.
   const wanted = useRef(new Map<string, boolean>());
-  const sections = buildModelProfileSections(profile, { accounts, providers, harnesses });
+  const sections = buildModelProfileSections(profile, {
+    accounts,
+    providers,
+    harnesses,
+    runners,
+  });
   const order = useOptimisticOrder(sections.map(({ providerAccountId }) => providerAccountId));
   const moveSection = (providerAccountId: string, toIndex: number): Promise<void> =>
     order.move(providerAccountId, toIndex, () =>
@@ -220,8 +233,24 @@ export function ModelProfileMenu({
                   onMoveEntry={(entry, toIndex) =>
                     change((current) => moveModelProfileEntry(current, entry, toIndex))
                   }
+                  onSetHarness={(harnessId) => {
+                    void change((current) =>
+                      setModelProfileAccountHarness(current, providerAccountId, harnessId),
+                    );
+                  }}
+                  onOpenAccount={() => {
+                    onOpenAccount(providerAccountId);
+                  }}
                   onMakeDefault={(entry) => {
                     void change((current) => makeDefaultModelProfileEntry(current, entry));
+                  }}
+                  onMoveToHarness={(entry, harnessId) => {
+                    void change((current) =>
+                      moveModelProfileEntryToHarness(current, entry, harnessId),
+                    );
+                  }}
+                  onAlsoOfferIn={(entry, harnessId) => {
+                    void change((current) => offerModelProfileEntryIn(current, entry, harnessId));
                   }}
                   onTakeOut={(entry) => {
                     void change((current) => takeOutModelProfileEntry(current, entry));

@@ -35,18 +35,46 @@ const readKindNoun = (title: string): string => title.split(",")[0]!.trim();
 const withArticle = (noun: string): string => `${/^[AEIOU]/i.test(noun) ? "an" : "a"} ${noun}`;
 
 /**
- * Checks whether the harness is installed on at least one runner that is not
- * retired, going by the runner's facts. The harness's executable name on the
- * runner's `PATH` is its `binaryName`.
+ * Checks whether the harness is installed on the runner, going by the
+ * runner's facts. The harness's executable name on the runner's `PATH` is its
+ * `binaryName`.
  */
+export const isHarnessInstalledOnRunner = (harness: Harness, runner: Runner): boolean =>
+  (runner.facts?.harnesses ?? []).some(
+    (binary) => binary.name === harness.binaryName && binary.present,
+  );
+
+/** Checks whether the harness is installed on at least one runner that is not retired. */
 const isInstalledOnAnyRunner = (harness: Harness, runners: ReadonlyArray<Runner>): boolean =>
   runners.some(
-    (runner) =>
-      runner.lifecycle !== "retired" &&
-      (runner.facts?.harnesses ?? []).some(
-        (binary) => binary.name === harness.binaryName && binary.present,
-      ),
+    (runner) => runner.lifecycle !== "retired" && isHarnessInstalledOnRunner(harness, runner),
   );
+
+/**
+ * Checks that the harness lists the account's provider and kind among what it
+ * runs, which is what `harness.runs` declares.
+ */
+const doesHarnessRunAccountKind = (
+  account: Pick<ProviderAccount, "providerId" | "kind">,
+  harness: Harness,
+): boolean =>
+  harness.runs
+    .find((support) => support.providerId === account.providerId)
+    ?.kinds.some((each) => each.kind === account.kind) === true;
+
+/**
+ * Checks that the account's kind can run in the harness at all: the provider's
+ * terms allow the kind in it, and the harness runs the provider and the kind.
+ * It does not ask whether the harness is installed on any machine, because
+ * that changes with the machines while this stays the same.
+ */
+export const canAccountKindRunInHarness = (
+  account: Pick<ProviderAccount, "providerId" | "kind">,
+  providers: ReadonlyArray<Provider>,
+  harness: Harness,
+): boolean =>
+  findProviderAccountKind(providers, account)?.harnesses.includes(harness.id) === true &&
+  doesHarnessRunAccountKind(account, harness);
 
 /**
  * Returns one entry for each harness in `harnesses`, in that order, saying
@@ -82,10 +110,7 @@ export const listProviderAccountHarnessChoices = (
     if (!kind.harnesses.includes(harness.id)) {
       return `${providerName} allows ${withArticle(readKindNoun(kind.title))} only in ${formatNameList(kind.harnesses.map(nameOf), "and")}`;
     }
-    const supportsKind = harness.runs
-      .find((support) => support.providerId === account.providerId)
-      ?.kinds.some((each) => each.kind === account.kind);
-    if (supportsKind !== true) {
+    if (!doesHarnessRunAccountKind(account, harness)) {
       return `${harness.displayName} can't run ${providerName}'s ${readKindNoun(kind.title)}`;
     }
     return isInstalledOnAnyRunner(harness, runners)

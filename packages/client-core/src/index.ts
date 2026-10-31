@@ -769,7 +769,10 @@ export {
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
+  moveModelProfileEntryToHarness,
+  offerModelProfileEntryIn,
   renameModelProfile,
+  setModelProfileAccountHarness,
   setModelProfileEntryIncluded,
   takeOutModelProfileEntry,
 } from "./model-profiles/profile-edits";
@@ -778,6 +781,11 @@ export {
   type ModelSection,
   type ModelSectionRow,
 } from "./model-profiles/profile-sections";
+export type {
+  HarnessOption,
+  HarnessTarget,
+  SectionHarness,
+} from "./model-profiles/profile-harnesses";
 export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
 export {
   findModelProfileOrFirst,

@@ -10,6 +10,7 @@ import {
 import type { ModelSection, ModelSectionRow } from "@hercule/client-core";
 import type { ResolvedModelProfileEntry } from "@hercule/contract";
 import { GripIcon } from "../../../icons/grip";
+import { HarnessPill } from "./harness-pill";
 import { ModelRow } from "./model-row";
 import { useDragReorder } from "./use-drag-reorder";
 import { useOptimisticOrder } from "./use-optimistic-order";
@@ -38,7 +39,7 @@ const joinClassNames = (...names: readonly string[]): string =>
 
 /**
  * Renders one account's section of a Model Profile: its head, with the
- * provider's `mark` and the account's name, then its entries in order, then
+ * provider's `mark`, the account's name and the harness pill, then its entries in order, then
  * `addModel` (the "Add a model" button and its picker) at the foot.
  *
  * - The head drags the section, and Alt+Up and Alt+Down move it, through
@@ -63,7 +64,11 @@ export function ModelProfileSection({
   drag,
   addModel,
   onMoveEntry,
+  onSetHarness,
+  onOpenAccount,
   onMakeDefault,
+  onMoveToHarness,
+  onAlsoOfferIn,
   onTakeOut,
 }: {
   readonly section: ModelSection;
@@ -73,7 +78,13 @@ export function ModelProfileSection({
   readonly drag: SectionDrag;
   readonly addModel: ReactNode;
   readonly onMoveEntry: (entry: ResolvedModelProfileEntry, toIndex: number) => Promise<void>;
+  /** Sets the harness the account's models run in; `null` follows the account's default. */
+  readonly onSetHarness: (harnessId: string | null) => void;
+  /** Opens the account's sheet, where its default harness is set. */
+  readonly onOpenAccount: () => void;
   readonly onMakeDefault: (entry: ResolvedModelProfileEntry) => void;
+  readonly onMoveToHarness: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
+  readonly onAlsoOfferIn: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
   readonly onTakeOut: (entry: ResolvedModelProfileEntry) => void;
 }): JSX.Element {
   const rowsByKey = new Map<string, ModelSectionRow>(section.rows.map((row) => [row.key, row]));
@@ -150,6 +161,8 @@ export function ModelProfileSection({
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
         title={`Drag to move ${section.name}'s models up or down the menu`}
         onKeyDown={(event) => {
+          // The pill and its popover inside the head take their own keys.
+          if (event.target !== event.currentTarget) return;
           const offset = readAltArrowOffset(event);
           if (offset === null) return;
           event.preventDefault();
@@ -161,6 +174,13 @@ export function ModelProfileSection({
         </span>
         {mark}
         <b>{section.name}</b>
+        <HarnessPill
+          harness={section.harness}
+          accountName={section.name}
+          profileName={profileName}
+          onPick={onSetHarness}
+          onChangeAccountHarness={onOpenAccount}
+        />
       </div>
       {rows.length === 0 ? null : (
         <ul className="pm-rows">
@@ -172,6 +192,12 @@ export function ModelProfileSection({
               rowProps={buildRowProps(row.key)}
               onMakeDefault={() => {
                 onMakeDefault(row.entry);
+              }}
+              onMoveToHarness={(harnessId) => {
+                onMoveToHarness(row.entry, harnessId);
+              }}
+              onAlsoOfferIn={(harnessId) => {
+                onAlsoOfferIn(row.entry, harnessId);
               }}
               onTakeOut={() => {
                 onTakeOut(row.entry);

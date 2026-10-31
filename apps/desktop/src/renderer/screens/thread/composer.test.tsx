@@ -714,6 +714,16 @@ describe("the composer", () => {
     expect(document.querySelector(".composer-note")?.textContent).toBe("");
   });
 
+  it("adds a quiet 'in pi' after the model's name when the thread runs in a harness that is not the account's default", async () => {
+    await renderComposer(changeSession(IDLE, { harnessId: "pi/pi" }));
+
+    const pill = document.querySelector(".pick--pill")!;
+    const harness = within(pill as HTMLElement).getByText("in pi");
+    expect(harness.className).toBe("faint");
+    // It follows the name, and only the name truncates.
+    expect(harness.previousElementSibling?.className).toBe("pick-name");
+  });
+
   it("shows a picked model and option at once, sends them with the next message, and remembers the model", async () => {
     const user = userEvent.setup();
     const { calls, pendingSubmissions } = await renderComposer(IDLE);

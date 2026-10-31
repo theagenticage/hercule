@@ -5,12 +5,13 @@
  * snapshots, the Model Catalogs, the providers and the harnesses), and passes
  * them in.
  */
-import type {
-  Issue,
-  ModelProfileAccountInput,
-  ModelProfileEntry,
-  ModelProfileUpdateInput,
-  ProviderAccount,
+import {
+  isModelMissingFromHarness,
+  type Issue,
+  type ModelProfileAccountInput,
+  type ModelProfileEntry,
+  type ModelProfileUpdateInput,
+  type ProviderAccount,
 } from "@hercule/contract";
 import { decideProviderAccountHarness } from "../plugins";
 import {
@@ -18,7 +19,7 @@ import {
   describeProviderAccount,
   type DefaultSelection,
 } from "../provider-accounts";
-import { describeHarnessLacksModel, isModelMissingFromHarness } from "./harness-evidence";
+import { describeHarnessLacksModel } from "./harness-evidence";
 import {
   buildSelectionEntries,
   findNamedHarnessId,
@@ -149,7 +150,7 @@ const findEntryIssues = (
   world: ResolutionWorld,
 ): ReadonlyArray<Issue> => {
   const issues: Array<Issue> = [];
-  const firstIndexOfKey = new Map<string, number>();
+  const seenKeys = new Set<string>();
   const lacking: Array<{ index: number; model: string; harnessName: string }> = [];
   (entries ?? []).forEach((entry, index) => {
     const entryPath = [...path, "entries", index];
@@ -166,18 +167,17 @@ const findEntryIssues = (
     if (harnessIssue !== undefined) issues.push(harnessIssue);
     const harnessId = findNamedHarnessId(entry, section) ?? account.defaultHarnessId;
     const key = buildEntryKey(account.id, entry.model, harnessId);
-    const first = firstIndexOfKey.get(key);
-    if (first === undefined) {
-      firstIndexOfKey.set(key, index);
-    } else {
+    const harness = world.harnesses.find((one) => one.id === harnessId);
+    if (seenKeys.has(key)) {
       issues.push(
         buildIssue(
           entryPath,
-          `${entry.model} in ${harnessId} is already entry ${first} of this section; an account's model appears once per harness`,
+          `${entry.model} is already in this section in ${harness?.displayName ?? harnessId}; an account's model appears once per harness`,
         ),
       );
+    } else {
+      seenKeys.add(key);
     }
-    const harness = world.harnesses.find((one) => one.id === harnessId);
     if (
       harnessIssue === undefined &&
       !heldEntryKeys.has(key) &&

@@ -22,7 +22,10 @@ import {
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
+  moveModelProfileEntryToHarness,
+  offerModelProfileEntryIn,
   renameModelProfile,
+  setModelProfileAccountHarness,
   setModelProfileEntryIncluded,
   takeOutModelProfileEntry,
 } from "./profile-edits";
@@ -447,6 +450,162 @@ describe("setModelProfileEntryIncluded", () => {
     expect(readModels(added)[0]).toContain("fable");
     expect(readModels(retried)[0]).toEqual(["sonnet", "opus", "haiku", "fable"]);
     expect(retried.dismissedNewModels).toEqual(PROFILE.dismissedNewModels);
+  });
+});
+
+describe("setModelProfileAccountHarness", () => {
+  it("sets the harness of the section and leaves the stored harness of its entries alone", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS, SONNET_IN_PI]),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]);
+
+    const input = setModelProfileAccountHarness(profile, CLAUDE, "pi/pi");
+
+    expect(input.accounts.map((section) => section.harnessId)).toEqual(["pi/pi", null]);
+    expect(input.accounts[0]?.entries?.map((entry) => entry.harnessId)).toEqual([
+      null,
+      null,
+      "pi/pi",
+    ]);
+  });
+
+  it("sets the harness back to the account's with null", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET], { harnessId: "pi/pi" }),
+    ]);
+
+    expect(setModelProfileAccountHarness(profile, CLAUDE, null).accounts[0]?.harnessId).toBeNull();
+  });
+
+  it("keeps a pending section pending", () => {
+    const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, "pending")]);
+
+    const [section] = setModelProfileAccountHarness(profile, CLAUDE, "pi/pi").accounts;
+
+    expect(section).toEqual({ providerAccountId: CLAUDE, harnessId: "pi/pi" });
+    expect(section).not.toHaveProperty("entries");
+  });
+
+  it("changes nothing for an account the profile does not hold", () => {
+    expect(setModelProfileAccountHarness(PROFILE, ZAI, "pi/pi")).toEqual(
+      moveModelProfileAccount(PROFILE, CLAUDE, 0),
+    );
+  });
+});
+
+describe("moveModelProfileEntryToHarness", () => {
+  it("makes the entry name the harness, and leaves the other entries alone", () => {
+    const input = moveModelProfileEntryToHarness(PROFILE, OPUS, "pi/pi");
+
+    expect(input.accounts[0]?.entries).toEqual([
+      stored(ANTHROPIC_IDENTITY, "sonnet"),
+      stored(ANTHROPIC_IDENTITY, "opus", "pi/pi"),
+      stored(ANTHROPIC_IDENTITY, "haiku"),
+    ]);
+    expect(input.accounts[1]).toEqual(moveModelProfileAccount(PROFILE, CLAUDE, 0).accounts[1]);
+  });
+
+  it("makes an entry follow its section again with null", () => {
+    const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET_IN_PI])]);
+
+    const input = moveModelProfileEntryToHarness(profile, SONNET_IN_PI, null);
+
+    expect(input.accounts[0]?.entries).toEqual([stored(ANTHROPIC_IDENTITY, "sonnet")]);
+  });
+
+  it("moves the default entry with the entry", () => {
+    const input = moveModelProfileEntryToHarness(PROFILE, SONNET, "pi/pi");
+
+    expect(input.defaultEntry).toEqual(stored(ANTHROPIC_IDENTITY, "sonnet", "pi/pi"));
+  });
+
+  it("keeps the default when another entry is the default", () => {
+    expect(moveModelProfileEntryToHarness(PROFILE, OPUS, "pi/pi").defaultEntry).toEqual(
+      stored(ANTHROPIC_IDENTITY, "sonnet"),
+    );
+  });
+
+  it("changes nothing for an entry the profile no longer holds, such as a retry after the move", () => {
+    const moved = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET_IN_PI])], {
+      revision: 8,
+    });
+
+    expect(moveModelProfileEntryToHarness(moved, SONNET, "pi/pi")).toEqual({
+      ...moveModelProfileAccount(moved, CLAUDE, 0),
+    });
+    expect(
+      moveModelProfileEntryToHarness(PROFILE, buildProfileEntry(ZAI_IDENTITY, "glm"), "pi/pi"),
+    ).toEqual(moveModelProfileAccount(PROFILE, CLAUDE, 0));
+  });
+});
+
+describe("offerModelProfileEntryIn", () => {
+  it("adds the same model in the harness right after the entry", () => {
+    const input = offerModelProfileEntryIn(PROFILE, SONNET, "pi/pi");
+
+    expect(input.accounts[0]?.entries).toEqual([
+      stored(ANTHROPIC_IDENTITY, "sonnet"),
+      stored(ANTHROPIC_IDENTITY, "sonnet", "pi/pi"),
+      stored(ANTHROPIC_IDENTITY, "opus"),
+      stored(ANTHROPIC_IDENTITY, "haiku"),
+    ]);
+    expect(input.defaultEntry).toEqual(stored(ANTHROPIC_IDENTITY, "sonnet"));
+  });
+
+  it("adds it after an entry in the middle of the section, and as the last one at the end", () => {
+    expect(readModels(offerModelProfileEntryIn(PROFILE, OPUS, "pi/pi"))[0]).toEqual([
+      "sonnet",
+      "opus",
+      "opus",
+      "haiku",
+    ]);
+    expect(readModels(offerModelProfileEntryIn(PROFILE, HAIKU, "pi/pi"))[0]).toEqual([
+      "sonnet",
+      "opus",
+      "haiku",
+      "haiku",
+    ]);
+  });
+
+  it("changes nothing when applied again to the profile it produced", () => {
+    const first = offerModelProfileEntryIn(PROFILE, SONNET, "pi/pi");
+    const afterFirst = buildModelProfile(
+      [buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, SONNET_IN_PI, OPUS, HAIKU])],
+      { revision: 8, defaultEntry: stored(ANTHROPIC_IDENTITY, "sonnet") },
+    );
+
+    const again = offerModelProfileEntryIn(afterFirst, SONNET, "pi/pi");
+
+    expect(again.accounts[0]?.entries).toEqual(first.accounts[0]?.entries);
+  });
+
+  it("changes nothing for the harness the model already runs in, whether named or the section's own", () => {
+    const unchanged = moveModelProfileAccount(PROFILE, CLAUDE, 0);
+
+    expect(offerModelProfileEntryIn(PROFILE, SONNET, null)).toEqual(unchanged);
+    expect(offerModelProfileEntryIn(PROFILE, SONNET, ANTHROPIC_IDENTITY.harnessId)).toEqual(
+      unchanged,
+    );
+  });
+
+  it("reads null as the harness of the section, not the account's", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET_IN_PI], { harnessId: "pi/pi" }),
+    ]);
+
+    expect(offerModelProfileEntryIn(profile, SONNET_IN_PI, null).accounts[0]?.entries).toHaveLength(
+      1,
+    );
+  });
+
+  it("changes nothing for an entry the profile does not hold", () => {
+    expect(
+      offerModelProfileEntryIn(PROFILE, buildProfileEntry(ZAI_IDENTITY, "glm"), "pi/pi"),
+    ).toEqual(moveModelProfileAccount(PROFILE, CLAUDE, 0));
+    expect(
+      offerModelProfileEntryIn(PROFILE, buildProfileEntry(ANTHROPIC_IDENTITY, "gone"), "pi/pi"),
+    ).toEqual(moveModelProfileAccount(PROFILE, CLAUDE, 0));
   });
 });
 

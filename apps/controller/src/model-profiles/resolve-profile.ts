@@ -6,8 +6,10 @@
  * harnesses once for all profiles, and passes them in, so resolving an entry
  * never queries.
  */
-import type {
-  EntryProblem,
+import {
+  findSnapshotModel,
+  isModelMissingFromHarness,
+  type EntryProblem,
   ModelCatalog,
   ModelProfile,
   ProviderAccount,
@@ -23,11 +25,7 @@ import {
   type RegisteredProvider,
 } from "../plugins";
 import { describeProviderAccount } from "../provider-accounts";
-import {
-  describeHarnessLacksModel,
-  findSnapshotModel,
-  isModelMissingFromHarness,
-} from "./harness-evidence";
+import { describeHarnessLacksModel } from "./harness-evidence";
 import { findNamedHarnessId, type StoredSection } from "./profile-body";
 import type { StoredModelProfile } from "./repository";
 

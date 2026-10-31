@@ -506,7 +506,11 @@ describe("modelProfile.update", () => {
         defaultEntry: entry(accountId, "current"),
       }));
 
-      expect(issues(failure)).toEqual([expect.stringContaining("appears once per harness")]);
+      expect(issues(failure)).toEqual([
+        expect.stringMatching(
+          /^current is already in this section in Harness \w+; an account's model appears once per harness$/,
+        ),
+      ]);
     });
 
     it("a harness the account's kind does not allow", async () => {

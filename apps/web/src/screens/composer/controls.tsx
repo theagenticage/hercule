@@ -172,7 +172,8 @@ export function PreviousButton({
 
 /**
  * Renders the model pill's content: the harness logo, the account when a
- * harness has two, and the model name.
+ * provider has two, the model name, and "in pi" when the thread runs in a
+ * harness other than the account's default.
  *
  * The parts are laid out as a flex row rather than inline text, because the
  * logo is an `svg` block and a block inside inline text breaks the line. Only
@@ -188,6 +189,12 @@ export function PillLabel({ pill }: { readonly pill: ModelPill }): JSX.Element {
         <span className="shrink-0 text-faint">{pill.account}</span>
       )}{" "}
       <span className="truncate">{pill.name ?? "No model"}</span>
+      {pill.inHarness === null ? null : (
+        <>
+          {" "}
+          <span className="shrink-0 text-faint">in {pill.inHarness}</span>
+        </>
+      )}
     </span>
   );
 }
