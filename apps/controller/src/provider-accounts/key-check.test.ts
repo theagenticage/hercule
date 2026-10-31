@@ -7,7 +7,11 @@ import { Duration, Effect, Layer, Redacted } from "effect";
 import * as HttpClient from "effect/http/HttpClient";
 import type { AccountKind } from "@hercule/plugin-host";
 import type { RegisteredProvider } from "../plugins";
-import { ProviderKeyCheck, ProviderKeyCheckLayer, ProviderKeyCheckTimeout } from "./key-check";
+import {
+  ProviderKeyRequests,
+  ProviderKeyRequestsLayer,
+  ProviderKeyRequestTimeout,
+} from "./provider-key-requests";
 import { buildFakeProviderApi, type FakeProviderAnswer } from "./testing";
 
 const PROVIDER = { id: "acme/acme", displayName: "Acme" } as RegisteredProvider;
@@ -33,15 +37,17 @@ const checkKey = async (
   const api = buildFakeProviderApi(answer);
   const outcome = await Effect.runPromise(
     Effect.gen(function* () {
-      const keyCheck = yield* ProviderKeyCheck;
-      return yield* Effect.exit(keyCheck.check(PROVIDER, KIND, Redacted.make(key)));
+      const keyRequests = yield* ProviderKeyRequests;
+      return yield* Effect.exit(keyRequests.check(PROVIDER, KIND, Redacted.make(key)));
     }).pipe(
       Effect.provide(
-        ProviderKeyCheckLayer.pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, api.client))),
+        ProviderKeyRequestsLayer.pipe(
+          Layer.provide(Layer.succeed(HttpClient.HttpClient, api.client)),
+        ),
       ),
       timeout === undefined
         ? (effect) => effect
-        : Effect.provideService(ProviderKeyCheckTimeout, timeout),
+        : Effect.provideService(ProviderKeyRequestTimeout, timeout),
     ),
   );
   return { outcome, requests: api.requests };
@@ -54,7 +60,7 @@ const readFailure = (outcome: Awaited<ReturnType<typeof checkKey>>["outcome"]): 
   return failure?.error;
 };
 
-describe("ProviderKeyCheck.check", () => {
+describe("ProviderKeyRequests.check", () => {
   it("accepts a key the provider answers with a 2xx status, sending the declared headers with the key in them", async () => {
     // A `$&` in a key must reach the provider as it is, not as a replacement pattern.
     const { outcome, requests } = await checkKey("sk-$&-1", () => new Response("{}"));

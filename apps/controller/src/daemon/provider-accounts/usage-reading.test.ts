@@ -26,8 +26,7 @@ import {
   ProviderAccountRunnersLayer,
   ProviderAccountService,
   ProviderAccountServiceLayer,
-  ProviderKeyCheckLayer,
-  ProviderUsageEndpointLayer,
+  ProviderKeyRequestsLayer,
 } from "../../provider-accounts";
 import {
   addAccount,
@@ -35,6 +34,10 @@ import {
   addSnapshot,
   ALPHA_HARNESS_ID,
   buildFakeProviderApi,
+  buildMeteredPlugin,
+  METERED,
+  METERED_KEY_KIND,
+  METERED_PROVIDER_ID,
   setTokenExpiry,
   SIGNED_IN,
   storeCredential,
@@ -47,33 +50,14 @@ import { AccountUsage, AccountUsageLayer } from "../../usage";
 import { ProviderAccountProbing, ProviderAccountProbingLayer } from "./probing";
 import { runAccountUsageReadingLoop } from "./usage-reading";
 
-const PROVIDER_ID = "meter/meter";
-
-/** The three ways a Meter account's usage is read: with its key, through a probe, or only by its sessions. */
-const KEY_KIND = "api-key";
+/** Metered's key account is read with its key. The two kinds added here are read through a probe, and by sessions only. */
 const MACHINE_KIND = "subscription";
 const SESSIONS_KIND = "sessions-only";
 
-const METER: ProviderDefinition = {
-  id: "meter",
-  displayName: "Meter",
+const METERED_WITH_MACHINES: ProviderDefinition = {
+  ...METERED,
   kinds: [
-    {
-      id: KEY_KIND,
-      title: "API key",
-      description: "A key for Meter.",
-      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
-      keyCheck: {
-        url: "https://api.meter.test/v1/models",
-        headers: { authorization: "Bearer {apiKey}" },
-      },
-      usage: {
-        readBy: "endpoint",
-        url: "https://api.meter.test/v1/usage",
-        headers: { authorization: "{apiKey}" },
-      },
-      harnesses: [ALPHA_HARNESS_ID],
-    },
+    ...METERED.kinds,
     {
       id: MACHINE_KIND,
       title: "Subscription",
@@ -91,40 +75,18 @@ const METER: ProviderDefinition = {
       harnesses: [ALPHA_HARNESS_ID],
     },
   ],
-  defaultHarnessId: ALPHA_HARNESS_ID,
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({
-    id: "meter",
-    capabilities: ["providers"],
-    definitions: [],
-    providers: [METER],
-    providerOptions: {
-      parseUsageBody: {
-        [KEY_KIND]: (body, takenAt) => ({
-          readings: [
-            {
-              kind: "window",
-              window: "five-hour",
-              usedPercent: (body as { used: number }).used,
-              resetsAt: null,
-              hit: false,
-              takenAt,
-            },
-          ],
-        }),
-      },
-    },
-  }).plugin,
+  buildMeteredPlugin(METERED_WITH_MACHINES),
   createPluginFixture({
     id: "alpha",
     definitions: [
       buildHarnessDefinition("alpha", [
         {
-          providerId: PROVIDER_ID,
+          providerId: METERED_PROVIDER_ID,
           kinds: [
-            { kind: KEY_KIND, credentialVariable: "METER_API_KEY" },
+            { kind: METERED_KEY_KIND, credentialVariable: "METERED_API_KEY" },
             { kind: MACHINE_KIND },
             { kind: SESSIONS_KIND },
           ],
@@ -208,7 +170,7 @@ interface Logged {
 }
 
 /**
- * Runs `body` as the user, on a database with the Meter plugins booted, a
+ * Runs `body` as the user, on a database with the Metered plugins booted, a
  * test clock set to `NOW`, and the fake runner connection and provider API.
  * `body` starts the loop itself, so it can arrange the world first.
  */
@@ -228,8 +190,7 @@ const run = <A, E>(
       Effect.provide(
         ProviderAccountProbingLayer.pipe(
           Layer.provideMerge(ProviderAccountServiceLayer),
-          Layer.provideMerge(ProviderKeyCheckLayer),
-          Layer.provideMerge(ProviderUsageEndpointLayer),
+          Layer.provideMerge(ProviderKeyRequestsLayer),
           Layer.provide(Layer.succeed(HttpClient.HttpClient, provider.client)),
           Layer.provideMerge(ProviderAccountRunnersLayer),
           Layer.provideMerge(ProviderAccountProbesLayer),
@@ -290,19 +251,23 @@ const startLoop = Effect.gen(function* () {
   };
 });
 
-/** Adds a Meter key account holding `key`. */
+/** Adds a Metered key account holding `key`. */
 const addKeyAccount = (key = "sk-live") =>
   Effect.gen(function* () {
-    const account = yield* addAccount({ providerId: PROVIDER_ID, kind: KEY_KIND, label: key });
+    const account = yield* addAccount({
+      providerId: METERED_PROVIDER_ID,
+      kind: METERED_KEY_KIND,
+      label: key,
+    });
     yield* storeCredential(account.id, "apiKey", key);
     return account;
   });
 
-/** Adds a Meter subscription account, and a signed-in snapshot of it on the runner when given one. */
+/** Adds a Metered subscription account, and a signed-in snapshot of it on the runner when given one. */
 const addMachineAccount = (signedInOn?: string, label?: string) =>
   Effect.gen(function* () {
     const account = yield* addAccount({
-      providerId: PROVIDER_ID,
+      providerId: METERED_PROVIDER_ID,
       kind: MACHINE_KIND,
       ...(label === undefined ? {} : { label }),
     });
@@ -375,7 +340,7 @@ describe("the usage loop, for an account read with its key", () => {
               takenAt: NOW,
             },
           ],
-          "session",
+          { source: "session", credentialSince: null },
         );
         const loop = yield* startLoop;
         yield* loop.passMinutes(14);
@@ -513,7 +478,7 @@ describe("the usage loop, for an account whose usage only sessions report", () =
       provider,
       Effect.gen(function* () {
         const runner = yield* addRunner("laptop");
-        const account = yield* addAccount({ providerId: PROVIDER_ID, kind: SESSIONS_KIND });
+        const account = yield* addAccount({ providerId: METERED_PROVIDER_ID, kind: SESSIONS_KIND });
         yield* addSnapshot(account.id, ALPHA_HARNESS_ID, runner);
         const loop = yield* startLoop;
         yield* loop.passMinutes(20);

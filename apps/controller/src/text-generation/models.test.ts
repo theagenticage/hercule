@@ -18,6 +18,7 @@ import {
 } from "../provider-accounts";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { Settings, SettingsLayer } from "../settings";
+import { AccountUsageLayer } from "../usage";
 import { TextGenerationModels, TextGenerationModelsLayer } from "./models";
 import {
   addFixtureAccount,
@@ -30,6 +31,7 @@ import {
 
 const layer = TextGenerationModelsLayer.pipe(
   Layer.provideMerge(ProviderAccountRunnersLayer),
+  Layer.provideMerge(AccountUsageLayer),
   Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(buildPluginStack()),
 );

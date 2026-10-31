@@ -86,7 +86,7 @@ export const runAccountUsageReadingLoop: Effect.Effect<
     );
     yield* absorbFailures(
       "Listing the provider account usage reads that are due failed",
-      Effect.flatMap(runners.listUsageReads(accountUsage.listDueAccounts), (due) =>
+      Effect.flatMap(runners.listUsageReads(), (due) =>
         Effect.forEach(
           due,
           (one) =>

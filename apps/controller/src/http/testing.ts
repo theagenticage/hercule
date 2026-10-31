@@ -112,8 +112,7 @@ import {
   ProviderAccountProbesLayer,
   ProviderAccountRunnersLayer,
   ProviderAccountServiceLayer,
-  ProviderKeyCheckLayer,
-  ProviderUsageEndpointLayer,
+  ProviderKeyRequestsLayer,
 } from "../provider-accounts";
 import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
@@ -231,10 +230,7 @@ const buildServices = (
         SessionTokensLayer,
         PromotionTokensLayer,
         Layer.succeed(GithubSkillSources, githubSkillSources),
-        ProviderKeyCheckLayer.pipe(
-          Layer.provide(Layer.succeed(HttpClient.HttpClient, providerKeyHttpClient)),
-        ),
-        ProviderUsageEndpointLayer.pipe(
+        ProviderKeyRequestsLayer.pipe(
           Layer.provide(Layer.succeed(HttpClient.HttpClient, providerKeyHttpClient)),
         ),
       ),

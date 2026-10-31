@@ -3228,7 +3228,8 @@ const make = Effect.gen(function* () {
             "Dropped a runner's usage report, because the account's kind declares no usage",
           ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId, providerAccountId }));
         }
-        yield* accountUsage.record(providerAccountId, report.readings, "session", {
+        yield* accountUsage.record(providerAccountId, report.readings, {
+          source: "session",
           credentialSince: session.value.processStartedAt,
         });
       }),

@@ -15,7 +15,7 @@ import * as Layer from "effect/Layer";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { AccountUsageReading, AccountUsageSource } from "@hercule/contract";
+import type { AccountUsageReading } from "@hercule/contract";
 import type { UsageReading } from "@hercule/protocol";
 import { announce, withTransaction } from "../db";
 import { accountUsageRepository } from "./repository";
@@ -46,6 +46,21 @@ const MAX_CLOCK_AHEAD_MILLIS = 5 * 60 * 1000;
  * sessions reporting alternately, each within the interval, still reach it.
  */
 const ANNOUNCE_UNCHANGED_AFTER_MILLIS = 5 * 60 * 1000;
+
+/**
+ * Where a call to `AccountUsage.record` got its readings from.
+ *
+ * - `session`: a running session's harness reported them. `credentialSince`
+ *   is the time the session's process got its credential, or null when
+ *   unknown.
+ * - `read`: the controller read them itself, from the provider's endpoint or
+ *   with a probe. It used the account's current credential.
+ *
+ * `source` is the value the contract exposes on each stored reading.
+ */
+export type UsageOrigin =
+  | { readonly source: "session"; readonly credentialSince: string | null }
+  | { readonly source: "read" };
 
 /** Returns the newest reading of each window (and of the credit), in the order they first appear. */
 const keepNewestOfEach = (readings: ReadonlyArray<UsageReading>): ReadonlyArray<UsageReading> => {
@@ -82,13 +97,12 @@ const make = Effect.gen(function* () {
      *   is announced only when its value (ignoring time and source) differs
      *   from the stored one, or the account was last announced at least 5
      *   minutes ago by the controller's clock.
-     * - For the source `session`, the time of the account's newest session
+     * - For the origin `session`, the time of the account's newest session
      *   report is raised to the newest `takenAt` kept, but not beyond now.
-     * - `options.credentialSince` is for a report from a running session: the
-     *   time the session's process got its credential, or null when unknown.
      *   The report is dropped when the account's readings were cleared (its
-     *   key or token replaced) at or after that time, because the process
-     *   still holds the old credential and may report someone else's usage.
+     *   key or token replaced) at or after `credentialSince`, or when that
+     *   time is unknown, because the process still holds the old credential
+     *   and may report someone else's usage.
      *
      * A reading for an account that no longer exists is ignored and not an
      * error: the account may have been deleted while a runner was still
@@ -97,17 +111,16 @@ const make = Effect.gen(function* () {
     record: (
       providerAccountId: string,
       received: ReadonlyArray<UsageReading>,
-      source: AccountUsageSource,
-      options?: { readonly credentialSince: string | null },
+      origin: UsageOrigin,
     ): Effect.Effect<boolean, SqlError | Schema.SchemaError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
-          if (options !== undefined) {
+          if (origin.source === "session") {
             const clearedAt = yield* repository.readClearedAt(providerAccountId);
             if (
               clearedAt !== null &&
-              (options.credentialSince === null || options.credentialSince <= clearedAt)
+              (origin.credentialSince === null || origin.credentialSince <= clearedAt)
             ) {
               return yield* Effect.logDebug(
                 "Dropped a session's usage report, because its process started before the account's credential was replaced",
@@ -137,13 +150,13 @@ const make = Effect.gen(function* () {
             const write = yield* repository.upsertReadingIfNewer(
               providerAccountId,
               reading,
-              source,
+              origin.source,
             );
             if (!write.stored) continue;
             stored = true;
             valueChanged ||= write.valueChanged;
           }
-          if (source === "session" && readings.length > 0) {
+          if (origin.source === "session" && readings.length > 0) {
             const newest = readings.reduce(
               (latest, reading) => (reading.takenAt > latest ? reading.takenAt : latest),
               readings[0]!.takenAt,

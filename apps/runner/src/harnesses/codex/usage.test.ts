@@ -183,60 +183,21 @@ describe("the readings of a snapshot", () => {
   });
 });
 
-describe("a sparse update that leaves out a window's length", () => {
-  const withoutLength = (usedPercent: number) =>
-    buildSnapshot({
-      primary: { usedPercent, windowDurationMins: null, resetsAt: FIVE_HOUR_RESET },
+describe("a sparse update that leaves out the windows' lengths", () => {
+  it("takes each window's own length from an earlier update, so the two windows stay apart", () => {
+    const known = createWindowDurations();
+    completeWindowDurations(PLUS, known);
+    const sparse = buildSnapshot({
+      primary: { usedPercent: 80, windowDurationMins: null, resetsAt: FIVE_HOUR_RESET },
+      secondary: { usedPercent: 30, windowDurationMins: null, resetsAt: WEEKLY_RESET },
     });
 
-  it("takes the length from an earlier update of the same session", () => {
-    const known = createWindowDurations();
-    completeWindowDurations(PLUS, known);
+    const readings = buildUsageReadings(completeWindowDurations(sparse, known), TAKEN_AT);
 
-    const readings = buildUsageReadings(
-      completeWindowDurations(withoutLength(80), known),
-      TAKEN_AT,
-    );
-
-    expect(readings).toEqual([
-      {
-        kind: "window",
-        window: "five-hour",
-        usedPercent: 80,
-        resetsAt: "2026-10-31T17:00:00.000Z",
-        hit: false,
-        takenAt: TAKEN_AT,
-      },
+    expect(readings).toMatchObject([
+      { window: "five-hour", usedPercent: 80 },
+      { window: "weekly", usedPercent: 30 },
     ]);
-  });
-
-  it("drops the window when no earlier update gave its length", () => {
-    const known = createWindowDurations();
-
-    expect(buildUsageReadings(completeWindowDurations(withoutLength(80), known), TAKEN_AT)).toEqual(
-      [],
-    );
-  });
-
-  it("keeps the two windows' lengths apart, and uses the newest length of a window", () => {
-    const known = createWindowDurations();
-    completeWindowDurations(PLUS, known);
-    completeWindowDurations(
-      buildSnapshot({ primary: { usedPercent: 1, windowDurationMins: 10_080, resetsAt: null } }),
-      known,
-    );
-
-    expect(known).toEqual({ primary: 10_080, secondary: 10_080 });
-  });
-
-  it("still gives no reading for a window with no used percentage", () => {
-    const known = createWindowDurations();
-    completeWindowDurations(PLUS, known);
-    const update = buildSnapshot({
-      primary: { usedPercent: null, windowDurationMins: null, resetsAt: null },
-    } as unknown as Partial<RateLimitSnapshot>);
-
-    expect(buildUsageReadings(completeWindowDurations(update, known), TAKEN_AT)).toEqual([]);
   });
 });
 

@@ -19,12 +19,11 @@ export {
 } from "./account-runners";
 export { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
 export { resolveProviderAccountHarness } from "./harness-choice";
-export { ProviderKeyCheck, ProviderKeyCheckLayer, ProviderKeyCheckTimeout } from "./key-check";
 export {
-  ProviderUsageEndpoint,
-  ProviderUsageEndpointLayer,
-  ProviderUsageEndpointTimeout,
-} from "./usage-endpoint";
+  ProviderKeyRequests,
+  ProviderKeyRequestsLayer,
+  ProviderKeyRequestTimeout,
+} from "./provider-key-requests";
 export {
   ProviderAccountProbes,
   ProviderAccountProbesLayer,

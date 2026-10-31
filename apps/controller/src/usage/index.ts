@@ -4,4 +4,4 @@
  * daemon feeds it from session reports and active reads, and the Provider
  * Account service reads it to fill the accounts it returns.
  */
-export { AccountUsage, AccountUsageLayer } from "./service";
+export { AccountUsage, AccountUsageLayer, type UsageOrigin } from "./service";

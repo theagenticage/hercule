@@ -66,14 +66,12 @@ import type { Settings } from "../settings";
 import { buildVersionKey, harnessRepository } from "../harnesses";
 import { describeSnapshot } from "./describe-snapshot";
 import { HarnessAccounts } from "./harness-account";
-import { ProviderKeyCheck } from "./key-check";
-import { isHeaderSafe } from "./key-request";
+import { ProviderKeyRequests } from "./provider-key-requests";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
   type StoredSnapshot,
 } from "./repository";
-import { ProviderUsageEndpoint } from "./usage-endpoint";
 import { decideHarnessOnRunner, describeProviderAccount, findHarnessProblem } from "./runnability";
 import { providerAccountUses, type ProviderAccountUses } from "./uses";
 
@@ -164,11 +162,10 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const reportedVersions = yield* harnessRepository;
   const secrets = yield* Secrets;
-  const keyCheck = yield* ProviderKeyCheck;
+  const keyRequests = yield* ProviderKeyRequests;
   const harnessAccounts = yield* HarnessAccounts;
   const notifier = yield* Notifier;
   const accountUsage = yield* AccountUsage;
-  const usageEndpoint = yield* ProviderUsageEndpoint;
   const promotion = yield* PromotionState;
 
   const announceAccountChanged = (id: string): Effect.Effect<void> =>
@@ -372,7 +369,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Asks the provider whether it accepts the key in `credentials`, and fails
-   * as `ProviderKeyCheck.check` does when it does not. The key is the value of
+   * as `ProviderKeyRequests.check` does when it does not. The key is the value of
    * the field named like the kind's credential Secret.
    */
   const checkKey = (
@@ -385,7 +382,7 @@ const make = Effect.gen(function* () {
     // `validateCredentials` has already checked that the kind takes this field.
     return key === undefined
       ? Effect.die(new Error(`the account kind ${kind.id} has no key field to check`))
-      : keyCheck.check(provider, kind, Redacted.make(key));
+      : keyRequests.check(provider, kind, Redacted.make(key));
   };
 
   /**
@@ -438,8 +435,20 @@ const make = Effect.gen(function* () {
       ? `another ${providerName} account already has no label; give that one a label first, or give this one a label`
       : `another ${providerName} account is already labelled "${label}"; choose another label`;
 
-  // The two methods below are also used by `readUsageWithKey`, so they are
-  // defined before the service object.
+  /**
+   * Records that the provider refused the account's key or token, which a
+   * usage read learned. `credentialGeneration` is the generation the refused
+   * credential was sent under: a refusal of an older credential is ignored,
+   * so it cannot fail the new one, and so is one for an account that was
+   * deleted.
+   *
+   * When the account was not failed, it becomes failed and, in the same
+   * transaction, raises `core.account-failed` with `message` as its body.
+   * When it was failed already, only the stored message is replaced and no
+   * second notification is raised: the account must stop being failed first
+   * (`recordCredentialAccepted`, or a new credential). Announces the account
+   * on the `provider` topic when something was stored.
+   */
   const recordCredentialRefused = (
     providerAccountId: string,
     credentialGeneration: number,
@@ -471,6 +480,12 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /**
+   * Records that the provider accepted the account's key or token. Clears the
+   * account's failure and announces the account on the `provider` topic. Does
+   * nothing when the account is not failed, when `credentialGeneration` is not
+   * the account's current one, or when the account was deleted.
+   */
   const recordCredentialAccepted = (
     providerAccountId: string,
     credentialGeneration: number,
@@ -521,7 +536,7 @@ const make = Effect.gen(function* () {
      * - `label` is required when another account of the provider exists, and
      *   must differ from theirs (`Conflict`).
      *
-     * A new key is checked with the provider first (see `ProviderKeyCheck`),
+     * A new key is checked with the provider first (see `ProviderKeyRequests.check`),
      * before the write transaction opens, so no transaction waits on the
      * network and a refused key stores nothing. The row, the credential
      * Secret and the audit entry are then written together.
@@ -928,33 +943,6 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Records that the provider refused the account's key or token, which the
-     * controller daemon learned from a use of it. `credentialGeneration` is the
-     * generation the refused credential was sent under: a refusal of an older
-     * credential is ignored, so it cannot fail the new one, and so is one for
-     * an account that was deleted.
-     *
-     * When the account was not failed, it becomes failed and, in the same
-     * transaction, raises `core.account-failed` with `message` as its body.
-     * When it was failed already, only the stored message is replaced and no
-     * second notification is raised: the account must stop being failed first
-     * (`recordCredentialAccepted`, or a new credential). Announces the account
-     * on the `provider` topic when something was stored. Checks no grant: the
-     * controller daemon calls it.
-     */
-    recordCredentialRefused,
-
-    /**
-     * Records that the provider accepted the account's key or token, which the
-     * controller daemon learned from a use of it. Clears the account's failure
-     * and announces the account on the `provider` topic. Does nothing when the
-     * account is not failed, when `credentialGeneration` is not the account's
-     * current one, or when the account was deleted. Checks no grant: the
-     * controller daemon calls it.
-     */
-    recordCredentialAccepted,
-
-    /**
      * Raises one `core.account-expiring` notification for each account whose
      * credential stops working within 14 days (spec 06 section 18.3) and that
      * has not been warned about that credential. A credential that has expired
@@ -1055,13 +1043,7 @@ const make = Effect.gen(function* () {
           ),
         );
         if (Option.isNone(key)) return;
-        if (!isHeaderSafe(Redacted.value(key.value))) {
-          yield* Effect.logWarning(
-            `Could not read the usage of account ${account.id}: the stored key holds characters a header cannot carry`,
-          );
-          return;
-        }
-        const outcome = yield* usageEndpoint.read(kind.usage, parse, key.value);
+        const outcome = yield* keyRequests.readUsage(kind.usage, parse, key.value);
         if (outcome._tag === "unavailable") {
           yield* Effect.logWarning(
             `Could not read the usage of account ${account.id} from ${provider?.displayName}: ${outcome.reason}`,
@@ -1076,7 +1058,7 @@ const make = Effect.gen(function* () {
               return;
             }
             if (outcome._tag === "readings") {
-              yield* accountUsage.record(account.id, outcome.readings, "read");
+              yield* accountUsage.record(account.id, outcome.readings, { source: "read" });
               yield* recordCredentialAccepted(account.id, generation);
             } else {
               yield* recordCredentialRefused(account.id, generation, outcome.message);
@@ -1125,8 +1107,7 @@ export const ProviderAccountServiceLayer: Layer.Layer<
   | AuditLog
   | Secrets
   | Settings
-  | ProviderKeyCheck
-  | ProviderUsageEndpoint
+  | ProviderKeyRequests
   | PromotionState
   | HarnessAccounts
   | Notifier

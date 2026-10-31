@@ -9,9 +9,14 @@ import { TestClock } from "effect/testing";
 import type { UsageReading } from "@hercule/protocol";
 import { mintUuid, uuidToString, uuidFromString } from "../db";
 import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
-import { AccountUsage, AccountUsageLayer } from "./index";
+import { AccountUsage, AccountUsageLayer, type UsageOrigin } from "./index";
 
 const NOW = "2026-10-31T12:00:00.000Z";
+
+/** A report from a session whose process started with the current credential, as far as anyone knows. */
+const SESSION: UsageOrigin = { source: "session", credentialSince: null };
+
+const READ: UsageOrigin = { source: "read" };
 
 /** Returns the instant `minutes` before or after `NOW` (negative is before). */
 const minutesFromNow = (minutes: number): string =>
@@ -97,10 +102,10 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-10))], "read");
-        const older = yield* accountUsage.record(id, [fiveHour(10, minutesFromNow(-30))], "read");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-10))], READ);
+        const older = yield* accountUsage.record(id, [fiveHour(10, minutesFromNow(-30))], READ);
         const afterOlder = yield* accountUsage.read(id);
-        const newer = yield* accountUsage.record(id, [fiveHour(60, minutesFromNow(-5))], "session");
+        const newer = yield* accountUsage.record(id, [fiveHour(60, minutesFromNow(-5))], SESSION);
         return { older, newer, afterOlder, final: yield* accountUsage.read(id) };
       }),
     );
@@ -116,10 +121,10 @@ describe("recording readings", () => {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
         // Taken 3 minutes ahead of the controller's clock: within the allowed difference.
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(3))], "session");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(3))], SESSION);
         const afterEarly = yield* accountUsage.read(id);
         yield* TestClock.adjust(5 * 60_000);
-        yield* accountUsage.record(id, [fiveHour(45, minutesFromNow(5))], "read");
+        yield* accountUsage.record(id, [fiveHour(45, minutesFromNow(5))], READ);
         return [afterEarly, yield* accountUsage.read(id)] as const;
       }),
     );
@@ -133,10 +138,10 @@ describe("recording readings", () => {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
         // At 12:00, a reading taken at 12:04 (the runner's clock is 4 minutes ahead).
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(4))], "session");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(4))], SESSION);
         // At 12:01, a reading taken at 12:03 is older than the stored one.
         yield* TestClock.adjust(60_000);
-        yield* accountUsage.record(id, [fiveHour(30, minutesFromNow(3))], "session");
+        yield* accountUsage.record(id, [fiveHour(30, minutesFromNow(3))], SESSION);
         return yield* accountUsage.read(id);
       }),
     );
@@ -149,11 +154,11 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-1))], "read");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-1))], READ);
         const changed = yield* accountUsage.record(
           id,
           [fiveHour(50, minutesFromNow(20)), weekly(60, minutesFromNow(30)), credit(1, NOW)],
-          "session",
+          SESSION,
         );
         return [id, { changed, readings: yield* accountUsage.read(id) }] as const;
       }),
@@ -174,7 +179,7 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(4))], "session");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(4))], SESSION);
         yield* TestClock.adjust(15 * 60_000);
         return yield* accountUsage.claimRead(id);
       }),
@@ -194,7 +199,7 @@ describe("recording readings", () => {
             fiveHour(30, minutesFromNow(-1)),
             fiveHour(20, minutesFromNow(-2)),
           ],
-          "session",
+          SESSION,
         );
         return [changed, yield* accountUsage.read(id)] as const;
       }),
@@ -208,8 +213,8 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
-        const changed = yield* accountUsage.record(id, [fiveHour(55, NOW)], "session");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], READ);
+        const changed = yield* accountUsage.record(id, [fiveHour(55, NOW)], SESSION);
         return [changed, yield* accountUsage.read(id)] as const;
       }),
     );
@@ -225,13 +230,13 @@ describe("recording readings", () => {
         yield* accountUsage.record(
           id,
           [credit(5, minutesFromNow(-1)), weekly(70, minutesFromNow(-1))],
-          "read",
+          READ,
         );
         // Newer for the five-hour window, older for the weekly window and the credit.
         yield* accountUsage.record(
           id,
           [credit(9, minutesFromNow(-20)), fiveHour(20, NOW), weekly(30, minutesFromNow(-20))],
-          "session",
+          SESSION,
         );
         return yield* accountUsage.read(id);
       }),
@@ -250,12 +255,8 @@ describe("recording readings", () => {
         const first = yield* addAccount;
         const second = yield* addAccount;
         const none = yield* addAccount;
-        yield* accountUsage.record(
-          first,
-          [credit(5, NOW), weekly(1, NOW), fiveHour(2, NOW)],
-          "read",
-        );
-        yield* accountUsage.record(second, [weekly(3, NOW)], "read");
+        yield* accountUsage.record(first, [credit(5, NOW), weekly(1, NOW), fiveHour(2, NOW)], READ);
+        yield* accountUsage.record(second, [weekly(3, NOW)], READ);
         const all = yield* accountUsage.readAll();
         return { all, first, second, none };
       }),
@@ -275,8 +276,8 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
-        yield* accountUsage.record(id, [fiveHour(10, minutesFromNow(-5))], "read");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], READ);
+        yield* accountUsage.record(id, [fiveHour(10, minutesFromNow(-5))], READ);
         return id;
       }),
     );
@@ -290,10 +291,10 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], READ);
         before = announced.length;
         yield* TestClock.adjust(60_000);
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(1))], "session");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(1))], SESSION);
         return yield* accountUsage.read(id);
       }),
     );
@@ -310,10 +311,10 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], READ);
         before = announced.length;
         yield* TestClock.adjust(60_000);
-        yield* accountUsage.record(id, [fiveHour(41, minutesFromNow(1))], "session");
+        yield* accountUsage.record(id, [fiveHour(41, minutesFromNow(1))], SESSION);
         return id;
       }),
     );
@@ -329,10 +330,10 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], READ);
         before = announced.length;
         yield* TestClock.adjust(6 * 60_000);
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(6))], "session");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(6))], SESSION);
         return id;
       }),
     );
@@ -347,13 +348,13 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "session");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], SESSION);
         const announcedAt: Array<number> = [0];
         // Two sessions report the same value, alternately, 2.5 minutes apart.
         for (let step = 1; step <= 8; step++) {
           yield* TestClock.adjust(150_000);
           const before = announced.length;
-          yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(step * 2.5))], "session");
+          yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(step * 2.5))], SESSION);
           if (announced.length > before) announcedAt.push(step * 2.5);
         }
         return announcedAt;
@@ -368,11 +369,11 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "session");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], SESSION);
         const before = announced.length;
         for (let step = 1; step <= 3; step++) {
           yield* TestClock.adjust(5 * 60_000);
-          yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(step * 5))], "session");
+          yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(step * 5))], SESSION);
         }
         return announced.length - before;
       }),
@@ -386,7 +387,7 @@ describe("recording readings", () => {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
         yield* deleteAccount(id);
-        const changed = yield* accountUsage.record(id, [fiveHour(40, NOW)], "session");
+        const changed = yield* accountUsage.record(id, [fiveHour(40, NOW)], SESSION);
         return [changed, yield* countRows("account_usage_readings")] as const;
       }),
     );
@@ -399,7 +400,7 @@ describe("recording readings", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "session");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], SESSION);
         yield* accountUsage.claimRead(id);
         yield* deleteAccount(id);
         return [
@@ -421,8 +422,8 @@ describe("clearing readings", () => {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
         const other = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
-        yield* accountUsage.record(other, [fiveHour(50, NOW)], "read");
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], READ);
+        yield* accountUsage.record(other, [fiveHour(50, NOW)], READ);
         const claimed = yield* accountUsage.claimRead(id);
         yield* accountUsage.clear(id);
         return {
@@ -451,23 +452,15 @@ describe("a session report after the credential was replaced", () => {
         const oldProcess = minutesFromNow(-30);
         yield* accountUsage.clear(id);
         yield* TestClock.adjust(60_000);
-        const fromOld = yield* accountUsage.record(
-          id,
-          [fiveHour(70, minutesFromNow(1))],
-          "session",
-          {
-            credentialSince: oldProcess,
-          },
-        );
+        const fromOld = yield* accountUsage.record(id, [fiveHour(70, minutesFromNow(1))], {
+          source: "session",
+          credentialSince: oldProcess,
+        });
         const afterOld = yield* accountUsage.read(id);
-        const fromNew = yield* accountUsage.record(
-          id,
-          [fiveHour(10, minutesFromNow(1))],
-          "session",
-          {
-            credentialSince: minutesFromNow(1),
-          },
-        );
+        const fromNew = yield* accountUsage.record(id, [fiveHour(10, minutesFromNow(1))], {
+          source: "session",
+          credentialSince: minutesFromNow(1),
+        });
         return { fromOld, afterOld, fromNew, afterNew: yield* accountUsage.read(id) };
       }),
     );
@@ -485,10 +478,12 @@ describe("a session report after the credential was replaced", () => {
         const untouched = yield* addAccount;
         yield* accountUsage.clear(replaced);
         yield* TestClock.adjust(60_000);
-        yield* accountUsage.record(replaced, [fiveHour(70, minutesFromNow(1))], "session", {
+        yield* accountUsage.record(replaced, [fiveHour(70, minutesFromNow(1))], {
+          source: "session",
           credentialSince: null,
         });
-        yield* accountUsage.record(untouched, [fiveHour(20, minutesFromNow(1))], "session", {
+        yield* accountUsage.record(untouched, [fiveHour(20, minutesFromNow(1))], {
+          source: "session",
           credentialSince: null,
         });
         return {
@@ -508,7 +503,7 @@ describe("a session report after the credential was replaced", () => {
         const id = yield* addAccount;
         yield* accountUsage.clear(id);
         yield* TestClock.adjust(60_000);
-        yield* accountUsage.record(id, [fiveHour(70, minutesFromNow(1))], "read");
+        yield* accountUsage.record(id, [fiveHour(70, minutesFromNow(1))], READ);
         return yield* accountUsage.read(id);
       }),
     );
@@ -527,7 +522,7 @@ describe("listing the accounts that are due for an active read", () => {
         const claimed = yield* addAccount;
         const reported = yield* addAccount;
         yield* accountUsage.claimRead(claimed);
-        yield* accountUsage.record(reported, [fiveHour(40, minutesFromNow(-5))], "session");
+        yield* accountUsage.record(reported, [fiveHour(40, minutesFromNow(-5))], SESSION);
         const due = yield* accountUsage.listDueAccounts([reported, claimed, fresh]);
         const dueAgain = yield* accountUsage.listDueAccounts([fresh]);
         const claim = yield* accountUsage.claimRead(fresh);
@@ -568,7 +563,7 @@ describe("claiming an active read", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-5))], "session");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-5))], SESSION);
         return yield* accountUsage.claimRead(id);
       }),
     );
@@ -580,7 +575,7 @@ describe("claiming an active read", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-5))], "read");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-5))], READ);
         return yield* accountUsage.claimRead(id);
       }),
     );
@@ -592,7 +587,7 @@ describe("claiming an active read", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-20))], "session");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-20))], SESSION);
         return yield* accountUsage.claimRead(id);
       }),
     );
@@ -604,8 +599,8 @@ describe("claiming an active read", () => {
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-5))], "session");
-        yield* accountUsage.record(id, [weekly(10, minutesFromNow(-20))], "session");
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-5))], SESSION);
+        yield* accountUsage.record(id, [weekly(10, minutesFromNow(-20))], SESSION);
         return yield* accountUsage.claimRead(id);
       }),
     );

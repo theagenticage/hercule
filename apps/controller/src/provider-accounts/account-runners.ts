@@ -15,6 +15,7 @@ import { buildVersionKey, harnessRepository } from "../harnesses";
 import { decideProviderAccountHarness, findAccountKind, PluginHost } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Secrets } from "../secrets";
+import { AccountUsage } from "../usage";
 import { providerAccountRepository, type StoredSnapshot } from "./repository";
 import {
   decideHarnessOnRunner,
@@ -104,6 +105,7 @@ const make = Effect.gen(function* () {
   const reportedVersions = yield* harnessRepository;
   const host = yield* PluginHost;
   const secrets = yield* Secrets;
+  const accountUsage = yield* AccountUsage;
 
   /**
    * Lists where each pair can run (see `listMany` of the service below). It
@@ -242,17 +244,12 @@ const make = Effect.gen(function* () {
      * nothing is sent and the caller claims nothing. An account whose kind
      * reads usage from its sessions only, or declares no usage, is not listed.
      *
-     * `selectDue` receives the ids of all accounts that could be read and
-     * returns those whose read is due (`AccountUsage.listDueAccounts`). The
-     * rest are left out before the fleet is looked at, so the many ticks at
-     * which nothing is due cost one read of the accounts and no more. Reads
+     * Only accounts whose read is due are listed (`AccountUsage.listDueAccounts`).
+     * The rest are left out before the fleet is looked at, so the many ticks
+     * at which nothing is due cost one read of the accounts and no more. Reads
      * the accounts and the fleet once, however many accounts there are.
      */
-    listUsageReads: (
-      selectDue: (
-        providerAccountIds: ReadonlyArray<string>,
-      ) => Effect.Effect<ReadonlyArray<string>, SqlError>,
-    ): Effect.Effect<ReadonlyArray<UsageRead>, SqlError> =>
+    listUsageReads: (): Effect.Effect<ReadonlyArray<UsageRead>, SqlError> =>
       Effect.gen(function* () {
         const providers = yield* host.providers();
         // `harnessId` is null for an account read with its key.
@@ -264,7 +261,7 @@ const make = Effect.gen(function* () {
             candidates.push({ id: account.id, harnessId: usage.harnessId });
           }
         }
-        const due = new Set(yield* selectDue(candidates.map(({ id }) => id)));
+        const due = new Set(yield* accountUsage.listDueAccounts(candidates.map(({ id }) => id)));
         const reads: Array<UsageRead> = [];
         const harnessPairs: Array<AccountHarnessPair> = [];
         for (const { id, harnessId } of candidates) {
@@ -303,5 +300,5 @@ export class ProviderAccountRunners extends Context.Service<
 export const ProviderAccountRunnersLayer: Layer.Layer<
   ProviderAccountRunners,
   never,
-  SqlClient.SqlClient | PluginHost | Secrets
+  SqlClient.SqlClient | PluginHost | Secrets | AccountUsage
 > = Layer.effect(ProviderAccountRunners)(make);

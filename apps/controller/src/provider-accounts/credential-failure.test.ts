@@ -1,13 +1,15 @@
 /**
- * Tests when a Provider Account becomes failed and when it warns that its
- * credential expires (spec 06 section 18.3), through the service, on a real
- * database and the real notifier.
+ * Tests what a new credential clears and when a Provider Account warns that
+ * its credential expires (spec 06 section 18.3), through the service, on a
+ * real database and the real notifier. How an account becomes failed and
+ * recovers is tested with the usage read that fails it (`usage-read.test.ts`).
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { uuidFromString } from "../db";
+import { nowIso, uuidFromString, withTransaction } from "../db";
 import { AccountUsage } from "../usage";
+import { providerAccountRepository } from "./repository";
 import { ProviderAccountService } from "./service";
 import {
   addAccount,
@@ -19,8 +21,6 @@ import {
   setTokenExpiry,
   TOKEN_KIND,
 } from "./testing";
-
-const MISSING = "0199e0e7-9999-7000-8000-000000000000";
 
 const DAY_MILLIS = 86_400_000;
 
@@ -53,106 +53,26 @@ const readGeneration = (accountId: string) =>
     return rows[0]?.credential_generation ?? -1;
   });
 
+/**
+ * Marks the account failed on its current credential, as a refused usage read
+ * does but without the notification, and returns what the repository found.
+ */
+const markFailed = (accountId: string, message: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    const generation = yield* readGeneration(accountId);
+    return yield* withTransaction(
+      sql,
+      accounts.markCredentialRefused(accountId, generation, message, yield* nowIso),
+    );
+  });
+
 /** Replaces the account's key, which the fake provider API accepts. */
 const replaceKey = (accountId: string, apiKey: string) =>
   withService((service) => service.update({ id: accountId, credentials: { apiKey } }));
 
-describe("recordCredentialRefused and recordCredentialAccepted", () => {
-  it("fails the account with one notification, and a second refusal only updates the message", async () => {
-    const outcome = await runWithAccounts(
-      Effect.gen(function* () {
-        const added = yield* addAccount({ kind: KEY_KIND, label: "Work" });
-        const generation = yield* readGeneration(added.id);
-        const before = yield* withService((service) => service.read(added.id));
-        yield* withService((service) =>
-          service.recordCredentialRefused(added.id, generation, "invalid key"),
-        );
-        const first = yield* withService((service) => service.read(added.id));
-        yield* withService((service) =>
-          service.recordCredentialRefused(added.id, generation, "key revoked"),
-        );
-        return {
-          before,
-          first,
-          second: yield* withService((service) => service.read(added.id)),
-          notifications: yield* readNotificationsAbout("core.account-failed", added.id),
-        };
-      }),
-    );
-
-    expect(outcome.before.failure).toBeNull();
-    expect(outcome.first.failure).toEqual({
-      message: "invalid key",
-      failedAt: expect.any(String) as unknown,
-    });
-    expect(outcome.second.failure).toEqual({
-      message: "key revoked",
-      failedAt: outcome.first.failure?.failedAt,
-    });
-    expect(outcome.notifications).toEqual([
-      { title: "Acme · Work stopped working", body: "` invalid key `" },
-    ]);
-  });
-
-  it("clears the failure when the credential is accepted, and a later refusal notifies again", async () => {
-    const outcome = await runWithAccounts(
-      Effect.gen(function* () {
-        const added = yield* addAccount({ kind: KEY_KIND });
-        const generation = yield* readGeneration(added.id);
-        yield* withService((service) =>
-          service.recordCredentialRefused(added.id, generation, "invalid key"),
-        );
-        yield* withService((service) => service.recordCredentialAccepted(added.id, generation));
-        const cleared = yield* withService((service) => service.read(added.id));
-        yield* withService((service) =>
-          service.recordCredentialRefused(added.id, generation, "invalid again"),
-        );
-        return {
-          cleared,
-          notifications: yield* readNotificationsAbout("core.account-failed", added.id),
-        };
-      }),
-    );
-
-    expect(outcome.cleared.failure).toBeNull();
-    expect(outcome.notifications.map((notification) => notification.body)).toEqual([
-      "` invalid key `",
-      "` invalid again `",
-    ]);
-  });
-
-  it("ignores an answer about an older credential, and about an account that is gone", async () => {
-    const outcome = await runWithAccounts(
-      Effect.gen(function* () {
-        const added = yield* addAccount({ kind: KEY_KIND });
-        yield* replaceKey(added.id, "sk-old");
-        const oldGeneration = yield* readGeneration(added.id);
-        yield* replaceKey(added.id, "sk-new");
-        yield* withService((service) =>
-          service.recordCredentialRefused(added.id, oldGeneration, "old key refused"),
-        );
-        const afterStaleRefusal = yield* withService((service) => service.read(added.id));
-        const currentGeneration = yield* readGeneration(added.id);
-        yield* withService((service) =>
-          service.recordCredentialRefused(added.id, currentGeneration, "new key refused"),
-        );
-        yield* withService((service) => service.recordCredentialAccepted(added.id, oldGeneration));
-        const afterStaleAcceptance = yield* withService((service) => service.read(added.id));
-        yield* withService((service) => service.recordCredentialRefused(MISSING, 0, "gone"));
-        yield* withService((service) => service.recordCredentialAccepted(MISSING, 0));
-        return {
-          afterStaleRefusal,
-          afterStaleAcceptance,
-          notifications: yield* readNotificationsAbout("core.account-failed", added.id),
-        };
-      }),
-    );
-
-    expect(outcome.afterStaleRefusal.failure).toBeNull();
-    expect(outcome.afterStaleAcceptance.failure).toMatchObject({ message: "new key refused" });
-    expect(outcome.notifications).toHaveLength(1);
-  });
-
+describe("a new credential", () => {
   it.each([
     {
       way: "a new key",
@@ -180,37 +100,33 @@ describe("recordCredentialRefused and recordCredentialAccepted", () => {
         ),
     },
   ])(
-    "$way clears the failure and the expiry warning, so both fire again for it",
+    "$way clears the failure and the expiry warning, so the account can fail and be warned again",
     async ({ kind, replace }) => {
       const outcome = await runWithAccounts(
         Effect.gen(function* () {
           const added = yield* addAccount({ kind });
           yield* setTokenExpiry(added.id, inDays(10));
           yield* withService((service) => service.notifyExpiring());
-          const generation = yield* readGeneration(added.id);
-          yield* withService((service) =>
-            service.recordCredentialRefused(added.id, generation, "refused"),
-          );
+          const refused = yield* markFailed(added.id, "refused");
           yield* replace(added.id);
           const renewed = yield* withService((service) => service.read(added.id));
           // The new credential also gets a near expiry, as a short-lived one would.
           yield* setTokenExpiry(added.id, inDays(10));
           yield* withService((service) => service.notifyExpiring());
-          const newGeneration = yield* readGeneration(added.id);
-          yield* withService((service) =>
-            service.recordCredentialRefused(added.id, newGeneration, "refused again"),
-          );
           return {
+            refused,
             renewed,
+            // "failed" and not "still-failed": the account recovered, so a new refusal notifies again.
+            refusedAgain: yield* markFailed(added.id, "refused again"),
             expiring: yield* readNotificationsAbout("core.account-expiring", added.id),
-            failed: yield* readNotificationsAbout("core.account-failed", added.id),
           };
         }),
       );
 
+      expect(outcome.refused).toBe("failed");
       expect(outcome.renewed.failure).toBeNull();
+      expect(outcome.refusedAgain).toBe("failed");
       expect(outcome.expiring).toHaveLength(2);
-      expect(outcome.failed).toHaveLength(2);
     },
   );
 });
@@ -310,7 +226,7 @@ describe("a new credential and the stored usage readings", () => {
         const runner = yield* addRunner("laptop");
         const added = yield* addAccount({ kind });
         const usage = yield* AccountUsage;
-        yield* usage.record(added.id, [fiveHour()], "session");
+        yield* usage.record(added.id, [fiveHour()], { source: "session", credentialSince: null });
         const before = yield* withService((service) => service.read(added.id));
         yield* replace(added.id, runner);
         const after = yield* withService((service) => service.read(added.id));

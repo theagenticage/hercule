@@ -115,8 +115,7 @@ import {
   ProviderAccountRunnersLayer,
   ProviderAccountService,
   ProviderAccountServiceLayer,
-  ProviderKeyCheckLayer,
-  ProviderUsageEndpointLayer,
+  ProviderKeyRequestsLayer,
 } from "./provider-accounts";
 import { seed } from "./seed";
 import { readSetupComplete } from "./setup";
@@ -339,8 +338,7 @@ export const bootWith = <A, E>(
           JoinTokensLayer,
           PromotionTokensLayer,
           GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer)),
-          ProviderKeyCheckLayer.pipe(Layer.provide(FetchHttpClient.layer)),
-          ProviderUsageEndpointLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+          ProviderKeyRequestsLayer.pipe(Layer.provide(FetchHttpClient.layer)),
           AccountUsageLayer,
           PromotionStateLayer.pipe(
             Layer.provide(Layer.mergeAll(controllerIdentityLayer, AuditLogLayer)),

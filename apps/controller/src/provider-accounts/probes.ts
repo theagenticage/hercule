@@ -319,7 +319,7 @@ const make = Effect.gen(function* () {
             judged.usage !== null &&
             judged.usage.length > 0
           ) {
-            yield* accountUsage.record(providerAccountId, judged.usage, "read");
+            yield* accountUsage.record(providerAccountId, judged.usage, { source: "read" });
           }
           yield* afterCommit(() => {
             PubSub.publishUnsafe(snapshotWrites, undefined);
