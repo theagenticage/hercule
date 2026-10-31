@@ -261,10 +261,13 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
   it("has a head per profile, with the profile that holds the current entry unfolded", () => {
     renderMenu({ profiles: [MAIN, WORK] });
 
-    // Each head reads as the profile's initial on its face, its name, and its
-    // number of entries.
+    // Each head is named by the profile's name and its number of entries. The
+    // face beside the name is decoration, so it is not part of the name.
     const heads = readHeads();
-    expect(heads.map((head) => head.textContent)).toEqual(["MMain3", "WWork2"]);
+    expect(heads).toEqual([
+      screen.getByRole("button", { name: /^Main\s?3$/ }),
+      screen.getByRole("button", { name: /^Work\s?2$/ }),
+    ]);
     expect(heads.map((head) => head.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
     // Only the unfolded profile's lanes are drawn.
     expect(screen.queryByText("Claude Haiku 5")).toBeNull();
@@ -338,11 +341,9 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
     await user.type(screen.getByRole("textbox", { name: "Filter models" }), "haiku");
 
     // Main holds no Haiku, so its head is gone; Work and Big are both unfolded.
-    expect(
-      readHeads().map((head) => [head.textContent, head.getAttribute("aria-expanded")]),
-    ).toEqual([
-      ["WWork2", "true"],
-      ["BBig8", "true"],
+    expect(readHeads()).toEqual([
+      screen.getByRole("button", { name: /^Work\s?2$/, expanded: true }),
+      screen.getByRole("button", { name: /^Big\s?8$/, expanded: true }),
     ]);
     await user.clear(screen.getByRole("textbox", { name: "Filter models" }));
     await user.type(screen.getByRole("textbox", { name: "Filter models" }), "zzz");
@@ -354,15 +355,21 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
     const user = userEvent.setup();
     renderMenu({ profiles: [MAIN, WORK] });
 
-    const stops: (string | null)[] = [];
+    const stops: (Element | null)[] = [];
     for (let stop = 0; stop < 5; stop += 1) {
       await user.tab();
-      stops.push(document.activeElement?.textContent ?? null);
+      stops.push(document.activeElement);
     }
 
     // The first head, the unfolded profile's two entries and the Sign in on
     // the third, then the second head.
-    expect(stops).toEqual(["MMain3", "Claude Sonnet 5", "Claude Opus 5", "Sign in", "WWork2"]);
+    expect(stops).toEqual([
+      screen.getByRole("button", { name: /^Main\s?3$/ }),
+      screen.getByRole("button", { name: /Claude Sonnet 5/ }),
+      screen.getByRole("button", { name: /Claude Opus 5/ }),
+      screen.getByText("Sign in"),
+      screen.getByRole("button", { name: /^Work\s?2$/ }),
+    ]);
     await user.keyboard("{Enter}");
     expect(document.activeElement?.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
