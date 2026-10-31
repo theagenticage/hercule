@@ -156,7 +156,7 @@ export function createTemporaryHome(gitconfig?: string): TemporaryHome {
     home,
     // A process can still write into the home for a moment after the
     // controller has stopped. The runner stops the Claude Code CLI it started
-    // to check the provider, but does not wait for the CLI to exit, and the
+    // to check the harness, but does not wait for the CLI to exit, and the
     // CLI writes its config file into the home. When that file lands in a
     // folder Node has just emptied, the delete fails with ENOTEMPTY. Trying
     // again removes the late file too.

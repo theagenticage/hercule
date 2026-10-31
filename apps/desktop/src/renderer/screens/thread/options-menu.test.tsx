@@ -9,7 +9,7 @@ import type { ModelOption } from "@hercule/contract";
 import { EFFORT_OPTION } from "../../app/testing";
 import { OptionsMenu } from "./options-menu";
 
-/** An off/on option, whose pick the provider expects as a boolean. */
+/** An off/on option, whose pick the harness expects as a boolean. */
 const FAST_MODE: ModelOption = {
   id: "fastMode",
   label: "Fast mode",

@@ -518,7 +518,7 @@ const AuthorizeUrl = Schema.String.check(Schema.isBetweenLength(1, MAX_AUTHORIZE
 /**
  * Asks the runner to start the vendor's own login for one instance. The
  * credential lands in that instance's config directory, which is why this is
- * routed on the instance rather than on the provider.
+ * routed on the instance rather than on the harness.
  */
 export const LoginStart = Schema.Struct({
   _tag: Schema.Literal("loginStart"),

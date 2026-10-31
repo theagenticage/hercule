@@ -516,7 +516,7 @@ const SavedUsageReport = Schema.Struct({
 
 /**
  * Restores the native total without counting historical work. Returns false
- * for another provider, another Codex thread, or invalid counters. The
+ * for another harness, another Codex thread, or invalid counters. The
  * controller keeps the report unchanged; only this adapter interprets it.
  */
 export const restoreUsageReport = (state: Normalizing, report: unknown): boolean => {

@@ -1103,7 +1103,7 @@ const listWorkspaceIssues = (
 
 /**
  * Lints a step's output schema. The schema must stay within the JSON Schema
- * subset that every provider accepts. Returns one issue per broken rule, at
+ * subset that every harness accepts. Returns one issue per broken rule, at
  * `path`.
  */
 const listOutputSchemaIssues = (
@@ -1112,7 +1112,7 @@ const listOutputSchemaIssues = (
 ): ReadonlyArray<Issue> =>
   lintOutputSchema(outputSchema).map((finding) => ({
     path,
-    message: `The output schema is outside the JSON Schema subset that every provider accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
+    message: `The output schema is outside the JSON Schema subset that every harness accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
   }));
 
 /**

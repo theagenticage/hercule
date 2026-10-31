@@ -83,7 +83,7 @@ describe("buildAssistantProviderField", () => {
     expect(field.hint).toBe("rogier@example.com");
   });
 
-  it("names two instances of one provider by their account names", () => {
+  it("names two instances of one harness by their account names", () => {
     const instances = [
       buildInstance(PERSONAL, "claude-code/claude-code", "personal", "Claude Code", LOGGED_IN),
       buildInstance(WORK, "claude-code/claude-code", "work", "Claude Code", LOGGED_IN),

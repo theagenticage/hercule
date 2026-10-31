@@ -15,10 +15,10 @@ import { buildProviderInstanceOwner, Secrets } from "./repository";
 
 /**
  * Returns the instance's secrets, decrypted, keyed by field name. Only the
- * secret fields the provider declares are returned: a row left by a plugin
+ * secret fields the harness declares are returned: a row left by a plugin
  * that has since dropped the field, or written by hand, is not a credential
  * and must not be sent to a runner. When this build no longer has the
- * provider, nothing is returned.
+ * harness, nothing is returned.
  *
  * Fails when a secret cannot be read or decrypted, and the caller fails with
  * it. A probe or a session that went ahead without the key would report that

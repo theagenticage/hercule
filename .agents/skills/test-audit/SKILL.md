@@ -50,7 +50,7 @@ matches one, and audits hunt for existing tests that do.
 - exact source, import, or string greps;
 - private predicate or call-shape tests duplicated at real boundaries;
 - duplicate invocations of the same contract;
-- provider-local replays of shared helpers;
+- harness-local replays of shared helpers;
 - tests whose only purpose is preserving test-only exports, globals, or wrappers;
 - dead production code whose only callers are tests;
 - expected values produced by the helper or renderer under test;

@@ -44,7 +44,7 @@ const stopCapturedProcess = async (pid: number): Promise<void> => {
   await waitForProcessGone(pid);
 };
 
-/** Establishes provider facts before the real runner takes over the enrolled identity. */
+/** Establishes harness facts before the real runner takes over the enrolled identity. */
 const bootstrapRunner = async (
   arranged: Arranged,
 ): Promise<{

@@ -29,7 +29,7 @@ const captureHarnessDefinition = (): HarnessDefinition => {
   return definitions[0]!;
 };
 
-describe("the pi provider's config", () => {
+describe("the pi harness's config", () => {
   it("declares the Z.ai key as its one secret-valued field", () => {
     const result = deriveConfigJsonSchema(captureHarnessDefinition().configSchema);
 

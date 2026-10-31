@@ -127,7 +127,7 @@ const THREAD_TITLE_INSTRUCTIONS =
  * The answer the model gives for a Thread's title and role.
  *
  * `role` has no length limit here, like `title`. A `maxLength` may be outside
- * the strict JSON Schema subset every provider shares, and an answer that
+ * the strict JSON Schema subset every harness shares, and an answer that
  * misses the schema fails the whole call as `invalid-output`, which would lose
  * a good title over a long role. The service drops a role that is too long.
  */

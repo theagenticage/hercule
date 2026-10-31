@@ -44,7 +44,7 @@
  * migration 94 is seeded in the new spelling instead (`--harness`, qualified
  * ids, `harnesses`, `harnessRefs`), and the checks then show only that the
  * rows survive. It is
- * not a matrix of session states or provider behaviour.
+ * not a matrix of session states or harness behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
  * sits outside the two-minute added-CI budget. The session and its transcript

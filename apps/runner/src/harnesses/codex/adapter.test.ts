@@ -3878,7 +3878,7 @@ describe("restoring only missing child reports", () => {
         mode: "resume",
         subagents: [
           { subagentId: CHILD, lastUsageReport: checkpoint },
-          { subagentId: SIBLING, lastUsageReport: { ...checkpoint, source: "different-provider" } },
+          { subagentId: SIBLING, lastUsageReport: { ...checkpoint, source: "different-harness" } },
         ],
       },
     };

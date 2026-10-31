@@ -85,7 +85,7 @@ fun formatShortText(request: SessionRequest): String = when (request) {
 
 /**
  * Returns a short description of one step, such as "pnpm test cart" or "Edit checkout.ts".
- * Item details differ per provider and may be any JSON value, so every key is optional; a
+ * Item details differ per harness and may be any JSON value, so every key is optional; a
  * step whose detail is not an object, or names nothing useful, reads "Working".
  */
 fun describeStep(kind: ItemKind, detail: JsonElement?): String {

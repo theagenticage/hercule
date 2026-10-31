@@ -1087,7 +1087,7 @@ describe("restoring a saved Codex counter report", () => {
   it.each([
     undefined,
     null,
-    { source: "other-provider", payload: {} },
+    { source: "other-harness", payload: {} },
     {
       source: SOURCE,
       payload: {

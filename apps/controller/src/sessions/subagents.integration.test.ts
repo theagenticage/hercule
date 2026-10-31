@@ -891,7 +891,7 @@ describe("Token Usage across a resume", () => {
       const session = await startSession(arranged);
       const id = session.id;
       const lastUsageReport = {
-        source: "test.provider",
+        source: "test.harness",
         payload: { nativeCounts: [1000, 900, 10], thread: "a1" },
       };
       reportEvents(arranged, 2, [
@@ -934,7 +934,7 @@ describe("Token Usage across a resume", () => {
         ...buildBase(id, "a1"),
         _tag: "session.usage.updated",
         usage: { inputTokens: 999, outputTokens: 99 },
-        raw: { source: "test.provider", payload: { nativeCounts: [9999, 0, 99] } },
+        raw: { source: "test.harness", payload: { nativeCounts: [9999, 0, 99] } },
       } as const;
       reportEvent(arranged.wire, 7, lateEvent);
       await waitUntil("stored late usage report", async () => {

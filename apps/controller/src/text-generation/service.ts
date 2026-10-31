@@ -41,7 +41,7 @@ export interface TextGenerationCall {
   /** What the model works on. */
   readonly input: string;
   /**
-   * The JSON Schema of the answer, in the subset every provider accepts (see
+   * The JSON Schema of the answer, in the subset every harness accepts (see
    * `lintOutputSchema`). It is sent to the harness, and the answer is checked
    * against it before it is returned.
    */
@@ -102,7 +102,7 @@ interface TextGenerationShape {
    * Makes one text generation and waits for it. Returns the model's answer,
    * a JSON value that matches `outputSchema`, or fails with a
    * `TextGenerationError`. An output schema outside the subset every
-   * provider accepts fails as `failed`, and the call is never sent.
+   * harness accepts fails as `failed`, and the call is never sent.
    *
    * The call may wait: for a runner, when `whenNoRunner` is `wait`, then for
    * a free slot on the runner, then up to 60 seconds for the runner's

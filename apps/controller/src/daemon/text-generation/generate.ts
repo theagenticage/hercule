@@ -508,7 +508,7 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(
             new TextGenerationError({
               reason: "failed",
-              message: `the output schema is outside the JSON Schema subset every provider accepts: ${issues.join("; ")}`,
+              message: `the output schema is outside the JSON Schema subset every harness accepts: ${issues.join("; ")}`,
             }),
           );
         }

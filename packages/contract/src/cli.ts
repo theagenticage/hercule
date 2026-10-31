@@ -2429,7 +2429,7 @@ export const CLI = {
 
   "provider.query": {
     command: "provider list",
-    help: "Lists the Provider Instances: one row per account of a provider. Each has its own config and its own vendor login. Placement and spawning route on the instance id, never on the harness id.",
+    help: "Lists the Provider Instances: one row per account of a harness. Each has its own config and its own vendor login. Placement and spawning route on the instance id, never on the harness id.",
     examples: [{ args: [] }],
     fields: {},
   },

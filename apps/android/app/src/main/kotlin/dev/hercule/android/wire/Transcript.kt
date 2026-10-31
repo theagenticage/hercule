@@ -79,7 +79,7 @@ sealed interface HarnessEvent {
 
     /**
      * An item began. [detail] is any JSON value, usually an object whose keys differ per
-     * provider and per [kind], so check its shape and read every key as optional. The text of a message or of reasoning is never in it; it
+     * harness and per [kind], so check its shape and read every key as optional. The text of a message or of reasoning is never in it; it
      * arrives as [ContentDelta]s with the same [itemId].
      */
     @Serializable

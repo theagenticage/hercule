@@ -134,7 +134,7 @@ export const connectProofRunner = async (
         break;
       case "sessionStart":
         if (options.finishSessions === false) break;
-        // Filesystem proofs finish the synthetic session without executing a provider or spending tokens.
+        // Filesystem proofs finish the synthetic session without executing a harness or spending tokens.
         write({
           _tag: "sessionInputResult",
           requestId: frame.requestId,

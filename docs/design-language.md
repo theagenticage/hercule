@@ -326,7 +326,7 @@ at the sidebar foot above Marks that expands on click, a Codex / t3-shaped threa
 "Worked for" dividers and docked permission requests, and the **composer as the thread's
 configuration**: every selector opens a menu anchored above it, and whatever cannot be picked is
 **dimmed with the reason, never hidden**. The t3-code selector clone (brand orange, yellow stars, a blue
-focus rule) was built as the record and rejected under the color doctrine; provider marks, if ever
+focus rule) was built as the record and rejected under the color doctrine; harness marks, if ever
 shown, are monochrome. Owner: spec 14 §App shell.
 
 Amended 2026-09-14 by ticket #186 (Web: a quiet light/dark/system theme selector at the sidebar foot):

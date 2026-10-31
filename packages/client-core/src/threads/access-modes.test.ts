@@ -16,7 +16,7 @@ import { ACCESS_MODE_CHAIN, type AccessMode } from "@hercule/contract";
 import { buildAccessModeMenu, formatAccessMode } from "./access-modes";
 
 /** The harness's display name, as used in a dimmed row's note. */
-const PROVIDER = "Claude Code";
+const HARNESS = "Claude Code";
 
 const ALL_NATIVE: Record<AccessMode, "native" | "unsupported"> = {
   "approval-required": "native",
@@ -38,7 +38,7 @@ describe("formatAccessMode", () => {
 
 describe("buildAccessModeMenu", () => {
   it("lists the four modes in order with their name and fixed meaning, none dimmed when every mode is native", () => {
-    const items = buildAccessModeMenu(ALL_NATIVE, PROVIDER);
+    const items = buildAccessModeMenu(ALL_NATIVE, HARNESS);
 
     expect(items.map((item) => item.mode)).toEqual([
       "approval-required",
@@ -62,7 +62,7 @@ describe("buildAccessModeMenu", () => {
   });
 
   it("dims auto with its fallback when auto-accept-edits is the nearest native mode below it", () => {
-    const items = buildAccessModeMenu({ ...ALL_NATIVE, auto: "unsupported" }, PROVIDER);
+    const items = buildAccessModeMenu({ ...ALL_NATIVE, auto: "unsupported" }, HARNESS);
 
     expect(items.find((item) => item.mode === "auto")).toMatchObject({
       dimmed: "runs as Auto-accept edits on Claude Code",
@@ -72,7 +72,7 @@ describe("buildAccessModeMenu", () => {
   it("walks past an also-unsupported mode down to the next native one", () => {
     const items = buildAccessModeMenu(
       { ...ALL_NATIVE, auto: "unsupported", "full-access": "unsupported" },
-      PROVIDER,
+      HARNESS,
     );
 
     expect(items.find((item) => item.mode === "full-access")).toMatchObject({
@@ -91,7 +91,7 @@ describe("buildAccessModeMenu", () => {
   it("never dims approval-required, even when it is declared unsupported", () => {
     const items = buildAccessModeMenu(
       { ...ALL_NATIVE, "approval-required": "unsupported" },
-      PROVIDER,
+      HARNESS,
     );
 
     expect(items.find((item) => item.mode === "approval-required")).toMatchObject({

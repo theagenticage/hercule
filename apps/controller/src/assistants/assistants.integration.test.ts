@@ -260,7 +260,7 @@ describe("assistant.create", () => {
         Effect.orDie(
           withTransaction(
             arranged.harness.sql,
-            arranged.harness.sql`UPDATE provider_instances SET provider_id = 'retired-provider'
+            arranged.harness.sql`UPDATE provider_instances SET provider_id = 'retired-harness'
                                WHERE id = ${uuidFromString(oldest!.id)}`,
           ),
         ),

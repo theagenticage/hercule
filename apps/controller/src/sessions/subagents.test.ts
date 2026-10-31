@@ -166,7 +166,7 @@ describe("computeSubagentAfter", () => {
   });
 
   it("keeps the latest native usage report through a process exit and a restart", () => {
-    const report = { source: "test.provider", payload: { native: [100, 80, 3], label: "opaque" } };
+    const report = { source: "test.harness", payload: { native: [100, 80, 3], label: "opaque" } };
     const event = {
       ...base,
       _tag: "session.usage.updated",
