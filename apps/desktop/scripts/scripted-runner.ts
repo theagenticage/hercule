@@ -85,6 +85,7 @@ import type {
   ToolResultImage,
   TurnState,
   Usage,
+  UsageReading,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   WorkspaceReport,
 } from "../../../packages/protocol/src/index";
@@ -383,6 +384,13 @@ export interface ScriptedRunner {
    * when it is busy.
    */
   readonly openRequest: (sessionId: string, kind: RequestKind) => string;
+  /**
+   * Reports the usage of the session's Provider Account, as a running
+   * session's harness does when its provider sends a rate limit update. The
+   * controller stores the readings and announces the account on the
+   * `provider` topic.
+   */
+  readonly reportAccountUsage: (sessionId: string, readings: ReadonlyArray<UsageReading>) => void;
   /**
    * Plays a script into the running turn of the session's own agent: each
    * step reports its events in order, over the time the step takes. Waits up
@@ -1402,6 +1410,10 @@ export async function enlistScriptedRunner(
       session.requests.set(request.requestId, { agent: session.main, resumeScript: undefined });
       reportEvent(session, { _tag: "request.opened", ...stampEvent(sessionId), request });
       return request.requestId;
+    },
+    reportAccountUsage: (sessionId, readings) => {
+      findSession(sessionId);
+      send({ _tag: "accountUsageReported", sessionId, readings: [...readings] });
     },
     playScript,
     endSession,
