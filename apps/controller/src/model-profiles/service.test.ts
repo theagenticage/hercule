@@ -7,10 +7,11 @@
  * runs nothing. The database starts with the profile "Main".
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Clock, Effect } from "effect";
 import {
   MAX_DISMISSED_NEW_MODELS,
   MAX_MODEL_PROFILE_ACCOUNTS,
+  MAX_MODEL_PROFILES,
   MAX_MODEL_PROFILE_SECTION_ENTRIES,
   type ModelProfile,
   type ModelProfileUpdateInput,
@@ -1238,6 +1239,29 @@ describe("modelProfile.create", () => {
     });
   });
 
+  it("refuses invalid_state at the limit, naming it, and creates nothing", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        // "Main" is already there.
+        for (let n = 1; n < MAX_MODEL_PROFILES; n++) yield* createProfile(`Profile ${String(n)}`);
+        const failure = yield* Effect.flip(createProfile("One too many"));
+        const profiles = yield* ModelProfileService;
+        const listed = yield* profiles.query();
+        yield* profiles.delete(listed[1]!.id);
+        return { failure, count: listed.length, again: yield* createProfile("One too many") };
+      }),
+    );
+
+    expect(outcome.count).toBe(MAX_MODEL_PROFILES);
+    expect(outcome.failure).toMatchObject({
+      error: { code: "invalid_state", message: expect.stringContaining("32 Model Profiles") },
+    });
+    expect(outcome.failure).toMatchObject({
+      error: { message: expect.stringContaining("Delete one") },
+    });
+    expect(outcome.again.name).toBe("One too many");
+  });
+
   it("fails not_found when the profile to copy does not exist, and creates nothing", async () => {
     const outcome = await runWithProfiles(
       Effect.gen(function* () {
@@ -1253,6 +1277,48 @@ describe("modelProfile.create", () => {
 });
 
 describe("modelProfile.delete", () => {
+  it("stamps the cleared projects, their events and its own event with one instant", async () => {
+    // A clock that moves a millisecond on every read, so a second read in the
+    // delete would show as a different instant.
+    let millis = Date.UTC(2026, 9, 31, 12);
+    const withTickingClock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Clock.clockWith((real) =>
+        // The real clock is a class instance, so a spread would drop its methods.
+        Effect.provideService(
+          effect,
+          Clock.Clock,
+          Object.assign(Object.create(real) as Clock.Clock, {
+            currentTimeMillisUnsafe: () => millis++,
+            currentTimeMillis: Effect.sync(() => millis++),
+          }),
+        ),
+      );
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const doomed = yield* createProfile("Review");
+        const projectId = yield* addProject("Using", doomed.id);
+        yield* withTickingClock((yield* ModelProfileService).delete(doomed.id));
+        const sql = yield* SqlClient.SqlClient;
+        return {
+          projectId,
+          project: yield* sql<{ readonly updated_at: string }>`
+            SELECT updated_at FROM projects WHERE id = ${uuidFromString(projectId)}
+          `,
+          cleared: yield* readEventsOfKind("project.updated"),
+          deleted: yield* readEventsOfKind("modelProfile.deleted"),
+        };
+      }),
+    );
+
+    const [deleted] = outcome.deleted;
+    const cleared = outcome.cleared.filter(
+      (event) => event.payload["projectId"] === outcome.projectId,
+    );
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]?.receivedAt).toBe(deleted?.receivedAt);
+    expect(outcome.project[0]?.updated_at).toBe(deleted?.receivedAt);
+  });
+
   it("removes the profile and audits it", async () => {
     const outcome = await runWithProfiles(
       Effect.gen(function* () {

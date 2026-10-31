@@ -1183,7 +1183,7 @@ export const CLI = {
     help: "Creates a Project to group related work. It is organisation only: nothing about a task changes because it joins one. The one default it carries is a Model Profile, which a new thread in the project starts on. The description is markdown.",
     examples: [
       { args: ["--name", "Hercule v1"] },
-      { args: ["--name", "Hercule v1", "--model-profile", "01a2b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b"] },
+      { args: ["--name", "Hercule v1", "--model-profile", "01a2b3c4"] },
       {
         args: ["--name", "Hercule v1", "--description-stdin"],
         stdin: "Everything for the first release.",
@@ -1198,7 +1198,8 @@ export const CLI = {
       },
       modelProfileId: {
         flag: "model-profile",
-        help: "The Model Profile a new thread in this project starts on, by its full id. Leave it off and a new thread starts on the thread default.",
+        help: "The Model Profile a new thread in this project starts on, by its id or a tail of eight or more characters. Leave it off and a new thread starts on the thread default.",
+        resolves: "modelProfile.query",
       },
     },
     errors: { validation: "the name is empty or too long, or --model-profile is no profile" },
@@ -1208,7 +1209,7 @@ export const CLI = {
     help: "Edits a project; a field you leave out is not changed. Changing the Model Profile changes no thread that already exists.",
     examples: [
       { args: ["1f3a9c2e", "--name", "Hercule v1.1"] },
-      { args: ["1f3a9c2e", "--model-profile", "01a2b3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b"] },
+      { args: ["1f3a9c2e", "--model-profile", "01a2b3c4"] },
       { args: ["1f3a9c2e", "--model-profile", "null"] },
       {
         args: ["1f3a9c2e", "--description-stdin"],
@@ -1229,7 +1230,8 @@ export const CLI = {
       },
       modelProfileId: {
         flag: "model-profile",
-        help: "The Model Profile a new thread in this project starts on, by its full id; `null` removes it, and a new thread starts on the thread default.",
+        help: "The Model Profile a new thread in this project starts on, by its id or a tail of eight or more characters; `null` removes it, and a new thread starts on the thread default.",
+        resolves: "modelProfile.query",
       },
     },
     errors: { validation: "the name is empty or too long, or --model-profile is no profile" },
@@ -2673,12 +2675,14 @@ export const CLI = {
       name: { flag: "name", help: "The profile's name; unique among the profiles." },
       copyFromId: {
         flag: "copy-from",
-        help: "The id of a Model Profile to copy, by its full id. Leave it off to start empty.",
+        help: "The Model Profile to copy, by its id or a tail of eight or more characters. Leave it off to start empty.",
+        resolves: "modelProfile.query",
       },
     },
     errors: {
       validation: "another profile has the name",
       not_found: "--copy-from names no profile",
+      invalid_state: "there are already 32 Model Profiles, the most there can be; delete one first",
     },
   },
   "modelProfile.update": {

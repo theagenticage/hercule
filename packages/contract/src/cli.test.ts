@@ -365,6 +365,8 @@ const RESOLVES: Record<string, string> = {
   "project.read id": "project.query",
   "project.update id": "project.query",
   "project.delete id": "project.query",
+  "project.create modelProfileId": "modelProfile.query",
+  "project.update modelProfileId": "modelProfile.query",
 
   "resource.read id": "resource.query",
   "resource.update id": "resource.query",
@@ -415,6 +417,7 @@ const RESOLVES: Record<string, string> = {
   "providerAccount.readCatalog id": "providerAccount.query",
   "providerAccount.refresh id": "providerAccount.query",
 
+  "modelProfile.create copyFromId": "modelProfile.query",
   "modelProfile.delete id": "modelProfile.query",
   "modelProfile.read id": "modelProfile.query",
   "modelProfile.update id": "modelProfile.query",

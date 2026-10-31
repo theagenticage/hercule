@@ -35,6 +35,13 @@ export const MAX_MODEL_PROFILE_NAME_LENGTH = 128;
 
 const ModelProfileName = bounded(1, MAX_MODEL_PROFILE_NAME_LENGTH);
 
+/**
+ * The most Model Profiles there can be. `modelProfile.query` returns every
+ * profile with every entry resolved, and every client loads it, so the count
+ * is bounded. `modelProfile.create` is refused `invalid_state` at this count.
+ */
+export const MAX_MODEL_PROFILES = 32;
+
 /** The most accounts (sections) one `modelProfile.update` may send. */
 export const MAX_MODEL_PROFILE_ACCOUNTS = 64;
 
@@ -259,7 +266,7 @@ export const modelProfile = HttpApiGroup.make("modelProfile")
     HttpApiEndpoint.post("create", "/model-profiles", {
       payload: ModelProfileCreateInput,
       success: ModelProfile,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.patch("update", "/model-profiles/:id", {
       params: { id: Id },

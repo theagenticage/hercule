@@ -784,8 +784,12 @@ const make = Effect.gen(function* () {
    * The harness is the entry's own, else its section's, else undefined, which
    * means the account's default harness. The user's or the calling session's
    * options are dropped because they belong to another model. The entry stays
-   * the choice even when it cannot run now: the start then fails with the
-   * ordinary reason, instead of silently running another entry.
+   * the choice even when it cannot run now, so no other entry runs in its
+   * place. Placement then applies its ordinary account, harness and runner
+   * checks to the entry, as to any model source. It does not check that the
+   * model is in the account's Model Catalog, for any source (an explicit model,
+   * the thread default, an Agent's model or this entry). A client greys the
+   * entry out from its resolved problem before the start.
    *
    * This reads the profile straight from its rows. It checks no grant,
    * because the caller is starting a Thread, not reading the profile.

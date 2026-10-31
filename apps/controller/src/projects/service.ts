@@ -263,12 +263,13 @@ const make = Effect.gen(function* () {
      * Removes a Model Profile from every project that names it, deleted
      * projects included, and records a `project.updated` event for each
      * project that is not deleted. The Model Profile service calls it when it
-     * deletes a profile, in the same transaction. It is not an operation and
-     * checks no grant: the caller has checked its own.
+     * deletes a profile, in the same transaction, and passes its own `at` so
+     * the cleared projects, their events and the profile's delete share one
+     * instant. It is not an operation and checks no grant: the caller has
+     * checked its own.
      */
-    clearModelProfile: (modelProfileId: string): Effect.Effect<void, SqlError> =>
+    clearModelProfile: (modelProfileId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const at = yield* nowIso;
         const live = yield* projects.clearModelProfile(modelProfileId, at);
         const actor = yield* currentStamp;
         yield* Effect.forEach(

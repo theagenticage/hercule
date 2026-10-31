@@ -26,6 +26,7 @@ import {
   createNotFoundError,
   createValidationError,
   Id,
+  MAX_MODEL_PROFILES,
   ModelProfileCreateInput,
   ModelProfileUpdateInput,
   type Conflict,
@@ -58,7 +59,10 @@ const decodeCreate = Schema.decodeUnknownEffect(ModelProfileCreateInput);
 /** The body of a profile that holds no account, no entry and no dismissed model. */
 const EMPTY_BODY: StoredProfileBody = { accounts: [], defaultEntry: null, dismissedNewModels: [] };
 
-const LAST_PROFILE = "This is your only Model Profile. Create another before you delete this one.";
+const LAST_PROFILE_REFUSAL =
+  "This is your only Model Profile. Create another before you delete this one.";
+
+const TOO_MANY_PROFILES = `There are already ${String(MAX_MODEL_PROFILES)} Model Profiles, the most there can be. Delete one before you create another.`;
 
 const NO_SUCH_PROFILE = "no such model profile";
 
@@ -165,10 +169,11 @@ const make = Effect.gen(function* () {
      *
      * - `Validation` when another profile has the name.
      * - `NotFound` when `copyFromId` names no profile.
+     * - `InvalidState` when there are already `MAX_MODEL_PROFILES` profiles.
      */
     create: (
       input: ModelProfileCreateInput,
-    ): Effect.Effect<ModelProfile, ReadError | Validation | NotFound> =>
+    ): Effect.Effect<ModelProfile, ReadError | Validation | NotFound | InvalidState> =>
       Effect.gen(function* () {
         yield* requireGrant("modelProfile.create");
         const request = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
@@ -176,6 +181,9 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
+            if ((yield* profiles.count()) >= MAX_MODEL_PROFILES) {
+              return yield* Effect.fail(createInvalidStateError(TOO_MANY_PROFILES));
+            }
             yield* requireFreeName(request.name, undefined);
             const body =
               request.copyFromId === undefined
@@ -206,12 +214,7 @@ const make = Effect.gen(function* () {
      * - `NotFound` when there is no such profile.
      * - `InvalidState` for the last profile, because the composer needs one.
      */
-    delete: (
-      id: Id,
-    ): Effect.Effect<
-      Record<string, never>,
-      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError | Schema.SchemaError
-    > =>
+    delete: (id: Id): Effect.Effect<Record<string, never>, ReadError | NotFound | InvalidState> =>
       Effect.gen(function* () {
         yield* requireGrant("modelProfile.delete");
         return yield* withTransaction(
@@ -220,9 +223,9 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const doomed = yield* readStoredOrFail(id);
             if ((yield* profiles.count()) <= 1) {
-              return yield* Effect.fail(createInvalidStateError(LAST_PROFILE));
+              return yield* Effect.fail(createInvalidStateError(LAST_PROFILE_REFUSAL));
             }
-            yield* projects.clearModelProfile(id);
+            yield* projects.clearModelProfile(id, at);
             yield* profiles.delete(id);
             yield* audit.append({
               kind: "modelProfile.deleted",

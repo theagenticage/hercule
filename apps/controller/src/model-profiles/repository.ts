@@ -97,17 +97,16 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns whether a profile other than `exceptId` already has this name.
-     * With no `exceptId`, any profile counts.
+     * With no `exceptId`, any profile counts (`id IS NOT NULL` holds for
+     * every row).
      */
     isNameTaken: (name: string, exceptId?: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
-        exceptId === undefined
-          ? sql<{
-              readonly one: number;
-            }>`SELECT 1 AS one FROM model_profiles WHERE name = ${name} LIMIT 1`
-          : sql<{ readonly one: number }>`
-              SELECT 1 AS one FROM model_profiles WHERE name = ${name} AND id <> ${uuidFromString(exceptId)} LIMIT 1
-            `,
+        sql<{ readonly one: number }>`
+          SELECT 1 AS one FROM model_profiles
+          WHERE name = ${name} AND id IS NOT ${exceptId === undefined ? null : uuidFromString(exceptId)}
+          LIMIT 1
+        `,
         (rows) => rows.length > 0,
       ),
 
