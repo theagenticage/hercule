@@ -12,14 +12,17 @@
 import { Effect, Schema } from "effect";
 
 import {
+  CredentialVariable,
   Fact,
   HarnessAccount,
   HarnessCredential,
   HarnessHome,
+  ModelArgument,
   ProviderAccountId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
+  MAX_SECRET_VALUE_LENGTH,
   Seq,
   Sequenced,
   StorageId,
@@ -76,14 +79,17 @@ export * from "./text-generation";
 export * from "./workspace-steps";
 export * from "./workspaces";
 export {
+  CredentialVariable,
   Fact,
   HarnessAccount,
   HarnessCredential,
   HarnessHome,
+  ModelArgument,
   ProviderAccountId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
+  MAX_SECRET_VALUE_LENGTH,
   Sequenced,
   StorageId,
   Subdirectory,

@@ -51,7 +51,7 @@ import {
   buildSpecimenSession,
   CLAUDE_SONNET,
   GPT,
-  SPECIMEN_INSTANCES,
+  SPECIMEN_ACCOUNTS,
   STUDIO_MAC,
 } from "./sidebar-fixture";
 import type { EventBody } from "../app/testing";
@@ -71,7 +71,8 @@ export const buildAssistant = (suffix: string, name: string): Assistant => ({
   id: `01a0ec64-6e80-7000-8000-a000000000${suffix}`,
   name,
   systemPrompt: `You are ${name}.`,
-  instanceId: CLAUDE_SONNET.instanceId,
+  providerAccountId: CLAUDE_SONNET.providerAccountId,
+  harnessId: null,
   permissionProfileId: "01a0ec64-6e80-7000-8000-b00000000001",
   accessMode: "auto-accept-edits",
   model: null,
@@ -466,7 +467,7 @@ const buildSceneRecords = (
   workspaces: [],
   resources: [],
   runners: [STUDIO_MAC, BUILD_BOX],
-  instances: SPECIMEN_INSTANCES,
+  accounts: SPECIMEN_ACCOUNTS,
   user: { username: "Rogier" },
 });
 

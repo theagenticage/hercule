@@ -21,7 +21,7 @@ import {
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   FIXTURE_SUBAGENT,
   FIXTURE_THREAD_IDS,
   neverAnswer,
@@ -517,13 +517,13 @@ describe("a step session's header", () => {
 
   const AGENT_ID = "01a06d02-7b00-7000-8000-0000000000a1";
   // The ids the contract accepts, taken from a fixture thread on the fixture's runner.
-  const { runnerId, permissionProfileId, instanceId } = THREAD_FIXTURES.finished.session;
+  const { runnerId, permissionProfileId, providerAccountId } = THREAD_FIXTURES.finished.session;
 
   /** The run's first step session, which has finished its turn. */
   const PLAN_SESSION: Session = buildSession({
     runnerId,
     permissionProfileId,
-    instanceId,
+    providerAccountId,
     id: PLAN_ID,
     kind: "run",
     agentId: AGENT_ID,
@@ -537,7 +537,7 @@ describe("a step session's header", () => {
   const IMPLEMENT_SESSION: Session = buildSession({
     runnerId,
     permissionProfileId,
-    instanceId,
+    providerAccountId,
     id: IMPLEMENT_ID,
     kind: "run",
     agentId: AGENT_ID,
@@ -842,7 +842,7 @@ describe("the side pane's toggle", () => {
   const openApp = (path: string) => {
     stubElementSize(800, 800);
     stubApi({
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
       ...buildThreadHandlers(THREAD_FIXTURES.delegating),
     });
     return renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {

@@ -418,7 +418,7 @@ const arrangeAccountPerHarness = async (harness: ServerHarness): Promise<void> =
       const sql = yield* SqlClient.SqlClient;
       const host = yield* PluginHost;
       const accounts = yield* providerAccountRepository;
-      const existing = yield* accounts.list();
+      const existing = [...(yield* accounts.list())];
       const providers = yield* host.providers();
       for (const registered of yield* host.harnesses()) {
         if (existing.some((account) => account.defaultHarnessId === registered.id)) continue;
@@ -426,16 +426,20 @@ const arrangeAccountPerHarness = async (harness: ServerHarness): Promise<void> =
         const kind = support?.kinds[0]?.kind;
         const provider = providers.find((candidate) => candidate.id === support?.providerId);
         if (provider === undefined || kind === undefined) continue;
-        yield* withTransaction(
+        // A provider allows one account without a label, so a second account
+        // of the same provider is labelled with its harness.
+        const taken = existing.some((account) => account.providerId === provider.id);
+        const inserted = yield* withTransaction(
           sql,
           accounts.insert({
             providerId: provider.id,
             kind,
-            label: null,
+            label: taken ? registered.id : null,
             defaultHarnessId: registered.id,
             at: yield* nowIso,
           }),
         );
+        existing.push(inserted);
       }
     }),
   );

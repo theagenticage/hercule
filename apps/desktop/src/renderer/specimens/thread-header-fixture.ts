@@ -22,7 +22,7 @@
 import type { Session } from "@hercule/contract";
 import { buildCheckout, buildRepo, buildWorkspace } from "@hercule/client-core/threads/testing";
 import {
-  buildInstance,
+  buildSpecimenAccount,
   buildSpecimenSession,
   CLAUDE_OPUS,
   CLAUDE_SONNET,
@@ -42,7 +42,8 @@ const GPT_54: SpecimenModel = { ...GPT, name: "gpt-5.4" };
 
 /** The drawing's Haiku 4.5, which the other fixtures do not use. */
 const HAIKU: SpecimenModel = {
-  instanceId: "i-claude",
+  providerAccountId: "a-claude",
+  harnessId: "claude-code/claude-code",
   slug: "claude-haiku-4-5",
   name: "Haiku 4.5",
   imageInput: { maxBytes: null },
@@ -51,7 +52,8 @@ const HAIKU: SpecimenModel = {
 
 /** The drawing's gpt-5.4-mini. */
 const GPT_MINI: SpecimenModel = {
-  instanceId: "i-codex",
+  providerAccountId: "a-codex",
+  harnessId: "codex/codex",
   slug: "gpt-5.4-mini",
   name: "gpt-5.4-mini",
   imageInput: { maxBytes: null },
@@ -232,13 +234,13 @@ export const THREAD_HEADER_RECORDS: SidebarRecords = {
   threads: THREADS,
   workspaces: [RESULT_WORKSPACE],
   resources: [PAYMENTS_REPO],
-  instances: [
-    buildInstance("i-claude", "claude-code/claude-code", "Claude Code", "claude", [
+  accounts: [
+    buildSpecimenAccount("a-claude", "anthropic/anthropic", "claude-code/claude-code", [
       SONNET,
       CLAUDE_OPUS,
       HAIKU,
     ]),
-    buildInstance("i-codex", "codex/codex", "Codex", "codex", [GPT_54, GPT_MINI]),
+    buildSpecimenAccount("a-codex", "openai/openai", "codex/codex", [GPT_54, GPT_MINI]),
   ],
 };
 

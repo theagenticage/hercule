@@ -33,7 +33,9 @@ import {
 } from "@hercule/client-core";
 import type { SessionInputPayload } from "@hercule/contract";
 import {
+  harnessesQuery,
   projectsQuery,
+  providerAccountsQuery,
   providersQuery,
   resourcesQuery,
   runnersQuery,
@@ -145,7 +147,9 @@ export function ThreadComposer({
   const { client, pendingSubmissions } = controller;
   const queryClient = useQueryClient();
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
@@ -164,7 +168,9 @@ export function ThreadComposer({
   // No runner is local to the desktop app. A started thread names its own
   // runner, which is the one every field reads.
   const catalogs: ThreadCatalogs = {
-    instances,
+    accounts,
+    providers,
+    harnesses,
     runners,
     thisMacRunnerId: null,
     projects,

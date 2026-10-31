@@ -31,17 +31,23 @@ interface Fleet {
   readonly openai: StoredProviderAccount;
   readonly zai: StoredProviderAccount;
   readonly anthropic: StoredProviderAccount;
-  readonly addRunner: (traits?: RunnerTraits) => Effect.Effect<string>;
+  readonly addRunner: (traits?: RunnerTraits) => Effect.Effect<string, never, SqlClient.SqlClient>;
   /** Stores a snapshot of an account in its own default harness. */
   readonly snapshot: (
     account: StoredProviderAccount,
     runner: string,
     result: ReturnType<typeof probed>,
-  ) => Effect.Effect<void>;
+  ) => Effect.Effect<void, never, SqlClient.SqlClient>;
 }
 
 const run = <A>(
-  arrange: (fleet: Fleet) => Effect.Effect<A, unknown, Settings | TextGenerationModels | SqlClient.SqlClient | PluginHost>,
+  arrange: (
+    fleet: Fleet,
+  ) => Effect.Effect<
+    A,
+    unknown,
+    Settings | TextGenerationModels | SqlClient.SqlClient | PluginHost
+  >,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -84,11 +90,20 @@ describe("automatic", () => {
     const target = await Effect.runPromise(
       Effect.gen(function* () {
         yield* Effect.flatMap(PluginHost, (host) => host.boot(buildTextGenerationPlugins()));
-        const signedOut = yield* addFixtureAccount("openai", "signed out", "2026-10-01T00:00:00.000Z");
+        const signedOut = yield* addFixtureAccount(
+          "openai",
+          "signed out",
+          "2026-10-01T00:00:00.000Z",
+        );
         const older = yield* addFixtureAccount("openai", "older", "2026-10-02T00:00:00.000Z");
         const newer = yield* addFixtureAccount("openai", "newer", "2026-10-03T00:00:00.000Z");
         const runner = yield* addTextGenerationRunner();
-        yield* addSnapshot(signedOut.id, signedOut.defaultHarnessId, runner, probed("unauthenticated", "codex-mini"));
+        yield* addSnapshot(
+          signedOut.id,
+          signedOut.defaultHarnessId,
+          runner,
+          probed("unauthenticated", "codex-mini"),
+        );
         yield* addSnapshot(newer.id, newer.defaultHarnessId, runner, probed("ok", "codex-mini"));
         yield* addSnapshot(older.id, older.defaultHarnessId, runner, probed("ok", "codex-mini"));
         return { target: yield* resolve, olderId: older.id };
@@ -114,7 +129,11 @@ describe("automatic", () => {
       }),
     );
 
-    expect(target).toMatchObject({ _tag: "resolved", harnessId: "claude-code/claude-code", model: "haiku" });
+    expect(target).toMatchObject({
+      _tag: "resolved",
+      harnessId: "claude-code/claude-code",
+      model: "haiku",
+    });
   });
 
   it("skips an account that is signed in only on an offline runner", async () => {
@@ -268,7 +287,10 @@ describe("a chosen account and model", () => {
         const runner = yield* addRunner();
         yield* snapshot(openai, runner, probed("ok", "codex-mini"));
         yield* inTransaction(
-          settings.set("textGeneration.model", { providerAccountId: openai.id, model: "codex-mini" }),
+          settings.set("textGeneration.model", {
+            providerAccountId: openai.id,
+            model: "codex-mini",
+          }),
         );
         const byDefault = yield* resolve.pipe(Effect.orDie);
         yield* inTransaction(

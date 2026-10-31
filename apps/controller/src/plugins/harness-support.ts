@@ -1,6 +1,6 @@
 import type { HarnessProviderSupport } from "@hercule/plugin-host";
-import type { RegisteredHarness, RegisteredProvider } from "../plugins";
-import type { StoredProviderAccount } from "./repository";
+import type { RegisteredHarness } from "./harnesses";
+import type { RegisteredProvider } from "./providers";
 
 /** How a harness runs an account: the entry of the harness's `runs` that covers the account's provider and kind. */
 export interface HarnessSupport {
@@ -34,7 +34,7 @@ export interface HarnessRefusal {
 export const checkHarnessSupport = (
   providers: ReadonlyArray<RegisteredProvider>,
   harness: RegisteredHarness,
-  account: Pick<StoredProviderAccount, "providerId" | "kind">,
+  account: { readonly providerId: string; readonly kind: string },
 ): HarnessSupport | HarnessRefusal => {
   const provider = providers.find((candidate) => candidate.id === account.providerId);
   if (provider === undefined) {

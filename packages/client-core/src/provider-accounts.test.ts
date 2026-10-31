@@ -13,6 +13,7 @@ import {
 } from "./providers.testing";
 import {
   buildProviderAccountName,
+  describeAccountIdentity,
   findAccountKind,
   findAccountNameIfAmbiguous,
   listAccountCredentialFields,
@@ -88,5 +89,31 @@ describe("listAccountCredentialFields", () => {
 
   it("lists none for a kind that signs in on each machine", () => {
     expect(listAccountCredentialFields(PROVIDERS, ANTHROPIC)).toEqual([]);
+  });
+});
+
+describe("describeAccountIdentity", () => {
+  it("is the identity and the plan of an account that knows who is signed in", () => {
+    expect(
+      describeAccountIdentity(PROVIDERS, {
+        ...ANTHROPIC,
+        identity: "rogier@acme.com",
+        planLabel: "Max",
+      }),
+    ).toEqual({ text: "rogier@acme.com", plan: "Max" });
+  });
+
+  it("has no plan when the vendor reports none", () => {
+    expect(
+      describeAccountIdentity(PROVIDERS, { ...ANTHROPIC, identity: "rogier@acme.com" }),
+    ).toEqual({ text: "rogier@acme.com", plan: null });
+  });
+
+  it("is the title of the kind for an account that knows no identity", () => {
+    expect(describeAccountIdentity(PROVIDERS, ZAI)).toEqual({ text: "API key", plan: null });
+  });
+
+  it("is the kind's id when the provider no longer declares the kind", () => {
+    expect(describeAccountIdentity([], ZAI)).toEqual({ text: "api-key", plan: null });
   });
 });

@@ -188,6 +188,7 @@ export {
   ApiError,
   ConnectionError,
   isConflict,
+  isInvalidState,
   isNotFound,
   readErrorMessage,
   readValidationIssues,
@@ -539,9 +540,12 @@ export { matchYourWork, type YourWork } from "./your-work";
 export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
+export { listAccountMachines, type AccountMachine } from "./account-machines";
 export { buildProviderRows, type CredentialFieldOffer, type ProviderRow } from "./provider-rows";
 export {
   buildProviderAccountName,
+  describeAccountIdentity,
+  type AccountIdentityLine,
   findAccountKind,
   findAccountNameIfAmbiguous,
   listAccountCredentialFields,

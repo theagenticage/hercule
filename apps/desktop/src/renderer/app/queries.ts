@@ -290,11 +290,27 @@ export const runnersQuery = (client: HerculeClient) =>
     ...SHELL_READ_OPTIONS,
   });
 
-/** Reads every provider instance, whose catalogs name the model a thread runs. */
+/** Reads every Provider Account with what each runner last learned about it. */
+export const providerAccountsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.providerAccounts(),
+    queryFn: () => client.providerAccount.query(),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/** Reads the providers the controller's plugins register, whose names name the accounts. */
 export const providersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),
     queryFn: () => client.provider.query(),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/** Reads the harnesses the controller's plugins register, with what each declares it can do. */
+export const harnessesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.harnesses(),
+    queryFn: () => client.harness.query(),
     ...SHELL_READ_OPTIONS,
   });
 
@@ -579,8 +595,8 @@ export const startTasksQuery = (client: HerculeClient, projectId: string) =>
  * Reads the controller's own record. Its `localRunnerId` is the runner on the
  * controller's machine, or `null` when no runner runs there.
  *
- * Its text generation status can change with a runner or a provider
- * instance, so pushes on the `runner` and `provider` topics, which the shell
+ * Its text generation status can change with a runner or a Provider
+ * Account, so pushes on the `runner` and `provider` topics, which the shell
  * holds, read it again. Its default runner and its text generation model
  * can change from the CLI or the web app with no push, so Settings > System
  * and a run's page read it with `readOnOpen`.
@@ -1956,7 +1972,9 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(workspacesQuery(client)),
     queryClient.ensureQueryData(resourcesQuery(client)),
     queryClient.ensureQueryData(runnersQuery(client)),
+    queryClient.ensureQueryData(providerAccountsQuery(client)),
     queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(harnessesQuery(client)),
     queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(userQuery(client)),
     queryClient.ensureQueryData(signalsToDoQuery(client)),
@@ -1996,7 +2014,9 @@ export const ensureFirstRunData = async (
   await Promise.all([
     queryClient.ensureQueryData(controllerQuery(client)),
     queryClient.ensureQueryData(runnersQuery(client)),
+    queryClient.ensureQueryData(providerAccountsQuery(client)),
     queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(harnessesQuery(client)),
     queryClient.ensureQueryData(connectionsQuery(client)),
     queryClient.ensureQueryData(projectsQuery(client)),
     queryClient.ensureQueryData(assistantsQuery(client)),

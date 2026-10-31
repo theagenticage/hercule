@@ -31,7 +31,7 @@ import { requireUserActor, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { PluginHost } from "../plugins";
+import { checkHarnessSupport, PluginHost } from "../plugins";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 import { validateTimezone } from "./timezone";
 
@@ -84,15 +84,10 @@ const make = Effect.gen(function* () {
 
   /**
    * Checks that `textGeneration.model`, when the patch chooses a model, names
-   * an existing Provider Account, and a harness this build carries (the
+   * an existing Provider Account and a harness that account can run in (the
    * account's default harness when the choice names none). Fails with a
-   * validation error otherwise, because a text generation set to a missing
-   * account or harness could never run.
-   *
-   * It does not check that the account may run in the harness. That rule
-   * lives in the provider-accounts domain, which settings cannot import. A
-   * choice that fails it is reported when a text generation runs, as the
-   * reason text generation is unavailable.
+   * validation error otherwise, because a text generation set to such a pair
+   * could never run. The error names the part that is wrong, and says why.
    */
   const validateTextGenerationAccount = (
     patch: SettingsPatch,
@@ -100,10 +95,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
       if (chosen === undefined || typeof chosen === "string") return;
-      const defaultHarnessId = yield* settings.readProviderAccountDefaultHarness(
-        chosen.providerAccountId,
-      );
-      if (Option.isNone(defaultHarnessId)) {
+      const account = yield* settings.readProviderAccountHarnessFacts(chosen.providerAccountId);
+      if (Option.isNone(account)) {
         return yield* Effect.fail(
           createValidationError([
             {
@@ -113,19 +106,24 @@ const make = Effect.gen(function* () {
           ]),
         );
       }
-      const harnessId = chosen.harnessId ?? defaultHarnessId.value;
-      const carried = (yield* host.harnesses()).some((definition) => definition.id === harnessId);
-      if (!carried) {
+      const harnessId = chosen.harnessId ?? account.value.defaultHarnessId;
+      const harnessPath = chosen.harnessId === undefined ? "providerAccountId" : "harnessId";
+      const definition = (yield* host.harnesses()).find((one) => one.id === harnessId);
+      if (definition === undefined) {
         return yield* Effect.fail(
           createValidationError([
             {
-              path: [
-                "controller",
-                TEXT_GENERATION_MODEL,
-                chosen.harnessId === undefined ? "providerAccountId" : "harnessId",
-              ],
+              path: ["controller", TEXT_GENERATION_MODEL, harnessPath],
               message: `this build carries no ${harnessId} harness`,
             },
+          ]),
+        );
+      }
+      const support = checkHarnessSupport(yield* host.providers(), definition, account.value);
+      if (support._tag === "refused") {
+        return yield* Effect.fail(
+          createValidationError([
+            { path: ["controller", TEXT_GENERATION_MODEL, harnessPath], message: support.reason },
           ]),
         );
       }

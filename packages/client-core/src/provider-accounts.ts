@@ -72,3 +72,25 @@ export const listAccountCredentialFields = (
   (findAccountKind(providers, account)?.setup ?? []).flatMap((step) =>
     step.kind === "credentials" ? step.fields : [],
   );
+
+/** The line under an account's name, in the two parts the card keeps apart so a long identity can be cut short. */
+export interface AccountIdentityLine {
+  /** The identity the account is signed in as, such as "rogier@acme.com", or the kind's title when none is known. */
+  readonly text: string;
+  /** The plan the vendor reports, such as "Max", or `null` when no identity or no plan is known. */
+  readonly plan: string | null;
+}
+
+/**
+ * Returns the line under an account's name: who is signed in and the plan,
+ * such as "rogier@acme.com" and "Max", when the account knows its identity.
+ * Otherwise `text` is the title of the account's kind, such as "API key", or
+ * the kind's id when the provider no longer declares it.
+ */
+export const describeAccountIdentity = (
+  providers: readonly Provider[],
+  account: Pick<ProviderAccount, "providerId" | "kind" | "identity" | "planLabel">,
+): AccountIdentityLine =>
+  account.identity === null
+    ? { text: findAccountKind(providers, account)?.title ?? account.kind, plan: null }
+    : { text: account.identity, plan: account.planLabel };

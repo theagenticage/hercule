@@ -20,7 +20,7 @@ import userEvent from "@testing-library/user-event";
 import { findResumeBlockedReason, queryKeys, TYPING_PAUSE_MS } from "@hercule/client-core";
 import type {
   Attachment,
-  ProviderInstance,
+  ProviderAccount,
   Session,
   SessionRequest,
   SessionSkill,
@@ -28,7 +28,7 @@ import type {
 import {
   buildErrorBody,
   CONTROLLER_URL,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   FIXTURE_SUBAGENT,
   holdAnswer,
   readFieldPlaceholder,
@@ -85,10 +85,10 @@ const SCREEN_ATTACHMENT: Attachment = {
   sizeBytes: 4,
 };
 
-/** `FIXTURE_INSTANCE` with models that take no images. */
-const WITHOUT_IMAGES: ProviderInstance = {
-  ...FIXTURE_INSTANCE,
-  snapshots: FIXTURE_INSTANCE.snapshots.map((snapshot) => ({
+/** `FIXTURE_ACCOUNT` with models that take no images. */
+const WITHOUT_IMAGES: ProviderAccount = {
+  ...FIXTURE_ACCOUNT,
+  snapshots: FIXTURE_ACCOUNT.snapshots.map((snapshot) => ({
     ...snapshot,
     models: snapshot.models.map((model) => ({ ...model, imageInput: null })),
   })),
@@ -123,7 +123,7 @@ const readSkillReads = (calls: readonly Call[], thread: ThreadRecords): readonly
  * the calls, the query cache, the pending submissions, and what the composer
  * reported to the screen.
  *
- * The controller offers `FIXTURE_INSTANCE`, and accepts every message and
+ * The controller offers `FIXTURE_ACCOUNT`, and accepts every message and
  * interrupt unless `handlers` say otherwise.
  *
  * A thread that takes input makes the composer read its skills when it mounts.
@@ -154,7 +154,7 @@ const renderComposer = async (
     {
       thread,
       handlers: {
-        "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+        "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] },
         [buildInputOperation(thread)]: OPENED,
         [buildInterruptOperation(thread)]: { body: thread.session },
         ...handlers,
@@ -222,7 +222,7 @@ const renderLeavableComposer = async (thread: ThreadRecords) => {
     {
       thread,
       handlers: {
-        "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+        "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] },
         [buildInputOperation(thread)]: held.handler,
       },
     },
@@ -654,7 +654,7 @@ describe("the composer", () => {
   it("keeps Attach off for a model that takes no images, and holds the images already attached", async () => {
     const user = userEvent.setup();
     const { calls, pendingSubmissions } = await renderComposer(IDLE, {
-      handlers: { "GET /api/v1/providers": { body: [WITHOUT_IMAGES] } },
+      handlers: { "GET /api/v1/provider-accounts": { body: [WITHOUT_IMAGES] } },
     });
     const sent = calls.length;
 
@@ -733,7 +733,7 @@ describe("the composer", () => {
     ]);
     expect(document.querySelector(".composer-note")?.textContent).toBe("");
     expect(readRecentModels(CONTROLLER_URL)).toEqual([
-      { instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" },
+      { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" },
     ]);
   });
 
@@ -761,7 +761,7 @@ describe("the composer", () => {
       expect(readText()).toBe("");
     });
     expect(readRecentModels(CONTROLLER_URL)).toEqual([
-      { instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" },
+      { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" },
     ]);
     expect(pendingSubmissions.read(sessionId).picks).toEqual({ model: "claude-sonnet-4" });
     expect(readSent(calls, IDLE)).toEqual([{ text: "Think harder", model: "claude-opus-5" }]);
@@ -1326,7 +1326,7 @@ describe("the composer answering a question", () => {
           />
         </>
       ),
-      { thread: ASKED, handlers: { "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] } } },
+      { thread: ASKED, handlers: { "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] } } },
     );
     fireEvent.paste(readField(), {
       clipboardData: { files: [buildImage("shot.png")], types: ["Files"], getData: () => "" },
@@ -1372,7 +1372,7 @@ describe("the composer answering a question", () => {
           />
         </>
       ),
-      { thread: idle, handlers: { "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] } } },
+      { thread: idle, handlers: { "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] } } },
     );
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
     expect(readFieldPlaceholder(readField())).toBe("Reply…");

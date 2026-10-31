@@ -15,9 +15,8 @@ import {
   type NotFound,
 } from "@hercule/contract";
 import type { HarnessAccount } from "@hercule/protocol";
-import { PluginHost } from "../plugins";
+import { checkHarnessSupport, PluginHost } from "../plugins";
 import { readProviderAccountCredential, Secrets } from "../secrets";
-import { checkHarnessSupport } from "./harness-support";
 import { resolveHarnessHome } from "./harness-home";
 import { providerAccountRepository } from "./repository";
 

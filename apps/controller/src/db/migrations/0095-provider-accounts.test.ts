@@ -11,7 +11,9 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
+import { MAX_PROVIDER_ACCOUNT_LABEL_LENGTH } from "@hercule/contract";
 import { decryptSecretValue, encryptSecretValue, type Bytes } from "../../secrets/cipher";
+import type { SecretOwner } from "../../secrets/repository";
 import { uuidToString } from "../id";
 import { runMigrations } from "../migrate";
 import { TestDatabaseWriter } from "../testing";
@@ -153,6 +155,13 @@ const insertSessionsAndAgents = Effect.gen(function* () {
   }
 });
 
+/**
+ * An owner of the kind the previous head had. The kind is no longer one the
+ * secrets domain knows, but the cipher reads it only as text in its associated
+ * data.
+ */
+const instanceOwner = (id: string): SecretOwner => ({ kind: "provider-instance", id }) as never;
+
 /** A fresh Master Key, as the boot opens it. */
 const makeMasterKey = (): Promise<CryptoKey> =>
   crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
@@ -172,7 +181,9 @@ const insertSecret = (
     const sql = yield* SqlClient.SqlClient;
     const sealed = yield* encryptSecretValue(
       key,
-      { kind: secret.ownerKind, id: secret.ownerId },
+      secret.ownerKind === "connection"
+        ? { kind: "connection", id: secret.ownerId }
+        : instanceOwner(secret.ownerId),
       secret.name,
       secret.value,
     );
@@ -317,6 +328,37 @@ describe("the provider accounts migration", () => {
       );
 
       expect(labels.map((row) => row.label)).toEqual([longName, `${"x".repeat(126)} 2`]);
+    });
+
+    it("keeps a label within the API's limit, counted in UTF-16 units, when it adds a number", async () => {
+      // 64 emoji are 128 UTF-16 units but only 64 code points. The odd name is
+      // also 128 units, and cutting it to 126 would split the 63rd emoji.
+      const emojiName = "\u{1F600}".repeat(64);
+      const oddName = `a${"\u{1F600}".repeat(63)}b`;
+      const labels = await runOnFreshDatabase(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* runMigrations(BEFORE);
+          yield* insertInstances([
+            { fill: 1, harnessId: CODEX, name: emojiName },
+            { fill: 2, harnessId: CODEX, name: emojiName },
+            { fill: 3, harnessId: CODEX, name: oddName },
+            { fill: 4, harnessId: CODEX, name: oddName },
+          ]);
+          yield* runMigrations();
+          return yield* sql<{ readonly label: string }>`
+            SELECT label FROM provider_accounts ORDER BY created_at`;
+        }),
+      );
+
+      const [, secondEmoji, , secondOdd] = labels.map((row) => row.label);
+      expect(secondEmoji).toBe(`${"\u{1F600}".repeat(63)} 2`);
+      expect(secondOdd).toBe(`a${"\u{1F600}".repeat(62)} 2`);
+      for (const { label } of labels) {
+        expect(label.length).toBeLessThanOrEqual(MAX_PROVIDER_ACCOUNT_LABEL_LENGTH);
+        // encodeURIComponent throws on a lone surrogate.
+        expect(() => encodeURIComponent(label)).not.toThrow();
+      }
     });
 
     it("refuses two accounts of one provider with the same label, or both without, and allows one without", async () => {
@@ -708,7 +750,7 @@ describe("the provider accounts migration", () => {
             moved,
           );
           const underOldOwner = yield* Effect.result(
-            decryptSecretValue(key, { kind: "provider-instance", id: piOwner }, "zaiApiKey", moved),
+            decryptSecretValue(key, instanceOwner(piOwner), "zaiApiKey", moved),
           );
           const connection = {
             before,
@@ -731,6 +773,28 @@ describe("the provider accounts migration", () => {
         rotated_at: minute(4),
       });
       expect(connection.after).toEqual(connection.before);
+    });
+
+    it("keeps every index the secrets table had", async () => {
+      const key = await makeMasterKey();
+      const readIndexes = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        // Automatic indexes have no SQL, and are not created by name.
+        return yield* sql<{ readonly name: string; readonly sql: string }>`
+          SELECT name, sql FROM sqlite_master
+          WHERE type = 'index' AND tbl_name = 'secrets' AND sql IS NOT NULL ORDER BY name`;
+      });
+      const { before, after } = await runOnFreshDatabase(
+        Effect.gen(function* () {
+          yield* runMigrations(BEFORE);
+          const before = yield* readIndexes;
+          yield* runMigrations(migrations, key);
+          return { before, after: yield* readIndexes };
+        }),
+      );
+
+      expect(before.map((index) => index.name)).toEqual(["secrets_name", "secrets_owner_name"]);
+      expect(after).toEqual(before);
     });
 
     it("allows the owner kind `provider-account` and no longer `provider-instance`", async () => {

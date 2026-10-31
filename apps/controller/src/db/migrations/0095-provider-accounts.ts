@@ -100,7 +100,14 @@ const SHIPPED_HARNESSES: Readonly<
   "pi/pi": { providerId: "zai/zai", kind: "api-key", displayName: "pi" },
 };
 
-/** The longest label an account may have, as the table's CHECK says. */
+/**
+ * The longest label an account may have, counted in UTF-16 code units: the
+ * way the API's label check counts a JavaScript string, and so the way a label
+ * must be measured for the API to accept it again. The table's CHECK counts
+ * characters (code points) with SQLite's `length()`, which never exceeds the
+ * unit count, so a label that passes the API's check always passes the CHECK.
+ * The migration therefore follows the API, not the CHECK.
+ */
 const MAX_LABEL_LENGTH = 128;
 
 interface InstanceRow {
@@ -113,15 +120,16 @@ interface InstanceRow {
 
 /**
  * Returns the label of `name` with " 2", " 3" and so on added until `isTaken`
- * no longer holds. The name is shortened so that the result fits the limit.
+ * no longer holds. The name is shortened so that the result fits the limit,
+ * and is never cut between the two halves of a surrogate pair (one emoji).
  */
 const addNumber = (name: string, isTaken: (label: string) => boolean): string => {
   for (let number = 2; ; number += 1) {
     const suffix = ` ${number}`;
-    const label = Array.from(name)
-      .slice(0, MAX_LABEL_LENGTH - suffix.length)
-      .join("")
-      .concat(suffix);
+    let cut = Math.min(name.length, MAX_LABEL_LENGTH - suffix.length);
+    const lastKept = name.charCodeAt(cut - 1);
+    if (cut < name.length && lastKept >= 0xd800 && lastKept <= 0xdbff) cut -= 1;
+    const label = name.slice(0, cut) + suffix;
     if (!isTaken(label)) return label;
   }
 };
@@ -445,7 +453,10 @@ export default Effect.gen(function* () {
   }
   yield* sql`DROP TABLE secrets`;
   yield* sql`ALTER TABLE secrets_new RENAME TO secrets`;
+  // Dropping a table drops its indexes, so every index the table had is made
+  // again: `secrets_owner_name` (0001) and `secrets_name` (0002).
   yield* sql`CREATE UNIQUE INDEX secrets_owner_name ON secrets (owner_kind, owner_id, name)`;
+  yield* sql`CREATE INDEX secrets_name ON secrets (name, id)`;
 
   yield* sql`DROP TABLE provider_instances`;
 });

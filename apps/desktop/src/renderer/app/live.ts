@@ -11,7 +11,7 @@
  *   no assistant's session;
  * - `runner`, for the runners, whose connectivity draws a thread as away;
  * - `workspace`, for working files, observations and retained work;
- * - `provider`, for the providers, whose catalogs name each thread's model;
+ * - `provider`, for the Provider Accounts, whose catalogs name each thread's model;
  * - `task`, for the open tasks a Draft Thread offers to start from, for the
  *   Tasks Tracking lists, whose waiting rows the To do count takes in, and for
  *   Intake's Done lists, whose rows show where a handoff's Task stands;

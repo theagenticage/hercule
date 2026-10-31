@@ -45,6 +45,7 @@ const withIdentity = <A, E>(
     | Settings
     | LastTextGenerationFailure
     | TextGenerationModels
+    | PluginHost
     | SqlClient.SqlClient
   >,
   actor: Actor | null = USER,

@@ -11,6 +11,7 @@ import { ACCESS_MODE_CHAIN, type TextGenerationModel } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import {
   controllerQuery,
+  providerAccountsQuery,
   providersQuery,
   readOnOpen,
   runnersQuery,
@@ -101,13 +102,19 @@ function TextGenerationRow(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const { textGeneration } = useSuspenseQuery(controllerQuery(client)).data;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const model = useSavedSetting(
     client,
     settings.controller["textGeneration.model"] ?? "automatic",
     (value: TextGenerationModel) => ({ controller: { "textGeneration.model": value } }),
   );
-  const { choices, selectedKey } = buildTextGenerationField(model.value, instances, textGeneration);
+  const { choices, selectedKey } = buildTextGenerationField(
+    model.value,
+    providers,
+    accounts,
+    textGeneration,
+  );
   const failure = describeTextGenerationFailure(model.value, textGeneration, new Date());
   return (
     <>

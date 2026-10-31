@@ -88,9 +88,7 @@ import {
 const completeSetupWithNoProviderAccount = async (harness: ServerHarness): Promise<string> => {
   const token = await completeSetup(harness.base);
   await Effect.runPromise(
-    Effect.orDie(
-      withTransaction(harness.sql, harness.sql.unsafe(`DELETE FROM provider_accounts`)),
-    ),
+    Effect.orDie(withTransaction(harness.sql, harness.sql.unsafe(`DELETE FROM provider_accounts`))),
   );
   return token;
 };
@@ -485,10 +483,10 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 15 replaced the instance id and the harness config and secrets on the probe, sign-in
-  // and start frames with the account's harness account, which a version 14 peer cannot decode. So
-  // versions 14 and 15 refuse each other at hello; this is the version 15 controller refusing a
-  // version 14 runner.
+  // Version 15 keyed the probe, sign-in and start frames by Provider Account, and replaced the
+  // harness config and secrets on them with the account's harness account, which a version 14 peer
+  // cannot decode. So versions 14 and 15 refuse each other at hello; this is the version 15
+  // controller refusing a version 14 runner.
   it("refuses a runner on protocol version 14 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
@@ -1614,7 +1612,7 @@ describe("refreshing a runner's facts on demand", () => {
 
 /**
  * Runs `body` against a server with the real plugin registry, so "one request
- * per instance" covers the three harnesses the binary really includes. The
+ * per account" covers the three harnesses the binary really includes. The
  * probe deadline and interval are passed in like the ping interval, because a
  * real Bun server cannot run on a `TestClock`.
  */
@@ -1640,11 +1638,7 @@ const listAccounts = async (base: string, token: string): Promise<ReadonlyArray<
   return (await response.json()) as ReadonlyArray<Account>;
 };
 
-const findAccountFor = async (
-  base: string,
-  token: string,
-  harnessId: string,
-): Promise<Account> => {
+const findAccountFor = async (base: string, token: string, harnessId: string): Promise<Account> => {
   const found = (await listAccounts(base, token)).find((one) => one.defaultHarnessId === harnessId);
   expect(found, `no account for ${harnessId}`).toBeDefined();
   return found!;
@@ -1716,9 +1710,9 @@ describe("probing a runner's provider accounts", () => {
         const asked = await waitForProbeRequests(wire, all.length);
         // One request per account, keyed by account id, never harness id:
         // one harness can have several accounts.
-        expect([...asked].map((request) => request.harnessAccount.providerAccountId).sort()).toEqual(
-          [...all].map((one) => one.id).sort(),
-        );
+        expect(
+          [...asked].map((request) => request.harnessAccount.providerAccountId).sort(),
+        ).toEqual([...all].map((one) => one.id).sort());
         for (const request of asked) {
           const account = all.find((one) => one.id === request.harnessAccount.providerAccountId);
           expect(request.harnessId).toBe(account?.defaultHarnessId);
@@ -1877,7 +1871,9 @@ describe("probing a runner's provider accounts", () => {
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, 3);
-        const mine = asked.find((request) => request.harnessAccount.providerAccountId === claude.id)!;
+        const mine = asked.find(
+          (request) => request.harnessAccount.providerAccountId === claude.id,
+        )!;
 
         // A request id this controller never sent. Storing it would let a
         // runner write any account's snapshot at any time.
@@ -1911,7 +1907,9 @@ describe("probing a runner's provider accounts", () => {
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const first = await greet(harness.base, joined.credential);
       const asked = await waitForProbeRequests(first.wire, 3);
-      const stale = asked.find((request) => request.harnessAccount.providerAccountId === claude.id)!;
+      const stale = asked.find(
+        (request) => request.harnessAccount.providerAccountId === claude.id,
+      )!;
 
       const second = await greet(harness.base, joined.credential);
       try {
@@ -1923,7 +1921,9 @@ describe("probing a runner's provider accounts", () => {
         });
 
         const fresh = await waitForProbeRequests(second.wire, 3);
-        const current = fresh.find((request) => request.harnessAccount.providerAccountId === claude.id)!;
+        const current = fresh.find(
+          (request) => request.harnessAccount.providerAccountId === claude.id,
+        )!;
         second.wire.send({
           _tag: "probeReport",
           requestId: current.requestId,
@@ -1989,9 +1989,9 @@ describe("probing a runner's provider accounts", () => {
           // not just the one somebody last looked at.
           await waitForProbeRequests(wire, all.length * 2);
           const second = listProbeRequests(wire).slice(all.length, all.length * 2);
-          expect([...second].map((request) => request.harnessAccount.providerAccountId).sort()).toEqual(
-            [...all].map((one) => one.id).sort(),
-          );
+          expect(
+            [...second].map((request) => request.harnessAccount.providerAccountId).sort(),
+          ).toEqual([...all].map((one) => one.id).sort());
         } finally {
           wire.close();
         }
@@ -2200,14 +2200,21 @@ describe("installing a harness on a runner", () => {
  */
 describe("signing a runner in to a provider account", () => {
   const startLogin = (base: string, token: string, providerAccountId: string, runnerId: string) =>
-    send("POST", base, `/api/v1/provider-accounts/${providerAccountId}/sign-in`, { body: { runnerId }, token });
+    send("POST", base, `/api/v1/provider-accounts/${providerAccountId}/sign-in`, {
+      body: { runnerId },
+      token,
+    });
 
   const submitCode = (
     base: string,
     token: string,
     providerAccountId: string,
     body: { readonly runnerId: string; readonly code: string },
-  ) => send("POST", base, `/api/v1/provider-accounts/${providerAccountId}/sign-in-code`, { body, token });
+  ) =>
+    send("POST", base, `/api/v1/provider-accounts/${providerAccountId}/sign-in-code`, {
+      body,
+      token,
+    });
 
   const waitForProbe = (
     wire: RunnerSocket,
@@ -2219,7 +2226,8 @@ describe("signing a runner in to a provider account", () => {
         .slice(after)
         .find(
           (frame): frame is ProbeRequest =>
-            frame._tag === "probeRequest" && frame.harnessAccount.providerAccountId === providerAccountId,
+            frame._tag === "probeRequest" &&
+            frame.harnessAccount.providerAccountId === providerAccountId,
         ),
     );
 
@@ -2358,7 +2366,11 @@ describe("signing a runner in to a provider account", () => {
   const startDeviceLogin = async (
     harness: ServerHarness,
     token: string,
-    login: { readonly providerAccountId: string; readonly runnerId: string; readonly wire: RunnerSocket },
+    login: {
+      readonly providerAccountId: string;
+      readonly runnerId: string;
+      readonly wire: RunnerSocket;
+    },
     nth = 0,
   ): Promise<string> => {
     const pending = startLogin(harness.base, token, login.providerAccountId, login.runnerId);
@@ -2384,8 +2396,11 @@ describe("signing a runner in to a provider account", () => {
   };
 
   const countProbes = (wire: RunnerSocket, providerAccountId: string): number =>
-    wire.frames.filter((frame) => frame._tag === "probeRequest" && frame.harnessAccount.providerAccountId === providerAccountId)
-      .length;
+    wire.frames.filter(
+      (frame) =>
+        frame._tag === "probeRequest" &&
+        frame.harnessAccount.providerAccountId === providerAccountId,
+    ).length;
 
   /** A runner that can drive Codex too, whose account serves as a second, independent login. */
   const TWO_ADAPTERS: Partial<RunnerHello> = {
@@ -2407,7 +2422,11 @@ describe("signing a runner in to a provider account", () => {
   const settleCodexLogin = async (
     harness: ServerHarness,
     token: string,
-    login: { readonly providerAccountId: string; readonly runnerId: string; readonly wire: RunnerSocket },
+    login: {
+      readonly providerAccountId: string;
+      readonly runnerId: string;
+      readonly wire: RunnerSocket;
+    },
     nth: number,
   ): Promise<void> => {
     const before = login.wire.frames.length;
@@ -2948,15 +2967,20 @@ describe("signing a runner in to a provider account", () => {
 
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
-        const snapshot = (await response.json()) as Account["snapshots"][number];
-        expect(snapshot.runnerId).toBe(joined.runnerId);
-        expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
+        // The response is the account, with the snapshot the new probe stored.
+        const account = (await response.json()) as Account;
+        const snapshot = account.snapshots.find((one) => one.runnerId === joined.runnerId);
+        expect(snapshot?.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
 
         // The code and the URL are valid for one exchange and are never
         // stored.
-        const logged = await harness.audit("provider.loggedIn");
+        const logged = await harness.audit("providerAccount.signedIn");
         expect(logged).toHaveLength(1);
-        expect(logged[0]?.payload).toEqual({ providerAccountId: claude.id, runnerId: joined.runnerId });
+        expect(logged[0]?.payload).toEqual({
+          providerAccountId: claude.id,
+          runnerId: joined.runnerId,
+          harnessId: "claude-code/claude-code",
+        });
         expect(logged[0]?.actor).toBe("user");
         expect(JSON.stringify(logged[0])).not.toContain("the-pasted-code");
       } finally {

@@ -24,7 +24,7 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   holdAnswer,
   neverAnswer,
   type Answer,
@@ -113,7 +113,7 @@ const openAssistants = async (
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
-      providers: [FIXTURE_INSTANCE],
+      accounts: [FIXTURE_ACCOUNT],
       assistants: [
         { assistant: ADA, session: null },
         { assistant: MILO, session: null },

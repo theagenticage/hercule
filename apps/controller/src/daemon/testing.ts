@@ -28,7 +28,7 @@ import { github } from "@hercule/plugin-github";
 import { withTransaction } from "../db";
 import { appendIngestedEvent } from "../events";
 import { get, post, type ServerHarness } from "../http/testing";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition } from "../plugins/testing";
 import {
   spawnThreadWithGrants,
   at,
@@ -40,6 +40,7 @@ import {
   waitForStartFrames,
   readSessionToken,
   waitUntil,
+  buildFleetPlugin,
   withFleet as sharedWithFleet,
   type SpawnedThread,
   type Arranged,
@@ -87,7 +88,7 @@ export const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
  */
 export const READS_RAW = "event.raw != null";
 
-export const HARNESS = buildHarnessDefinition("full", { token: "t" });
+export const HARNESS = buildHarnessDefinition("full");
 
 export const FACTS: RunnerFacts = {
   os: "darwin",
@@ -105,7 +106,7 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 export const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "harnesses", definitions: [HARNESS] }).plugin,
+  buildFleetPlugin("harnesses", [HARNESS]),
   github,
 ];
 

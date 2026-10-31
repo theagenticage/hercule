@@ -136,9 +136,7 @@ const buildServiceLayer = (
 
 /** Builds the service, as `buildServiceLayer` does, on a database of its own. */
 const buildLayer = (sendRequest: SendRequest, stubs: Stubs) =>
-  buildServiceLayer(sendRequest, stubs).pipe(
-    Layer.provideMerge(buildPluginStack()),
-  );
+  buildServiceLayer(sendRequest, stubs).pipe(Layer.provideMerge(buildPluginStack()));
 
 /** Runs `body` against the layer, with the deadline set to `deadline`. */
 const runWithLayer = <A, E>(

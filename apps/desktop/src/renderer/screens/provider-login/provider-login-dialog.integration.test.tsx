@@ -7,12 +7,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hercule/contract";
+import type { CapabilitySnapshot, ProviderAccount, Runner } from "@hercule/contract";
 import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -38,21 +38,21 @@ const MOSS: Runner = {
   },
 };
 
-const LOGGED_IN = FIXTURE_INSTANCE.snapshots[0]!;
+const LOGGED_IN = FIXTURE_ACCOUNT.snapshots[0]!;
 
 /** Returns the fixture instance with one snapshot on moss, probed at `probedAt`. */
 const buildInstance = (
   auth: CapabilitySnapshot["auth"],
   probedAt = LOGGED_IN.probedAt,
-): ProviderInstance => ({
-  ...FIXTURE_INSTANCE,
+): ProviderAccount => ({
+  ...FIXTURE_ACCOUNT,
   snapshots: [{ ...LOGGED_IN, auth, probedAt }],
 });
 
 const LOGGED_OUT = buildInstance({ status: "unauthenticated" });
 
-const LOGIN_PATH = `/api/v1/providers/${FIXTURE_INSTANCE.id}/login`;
-const CODE_PATH = `/api/v1/providers/${FIXTURE_INSTANCE.id}/login-code`;
+const LOGIN_PATH = `/api/v1/providers/${FIXTURE_ACCOUNT.id}/login`;
+const CODE_PATH = `/api/v1/providers/${FIXTURE_ACCOUNT.id}/login-code`;
 
 /**
  * Opens a draft in webshop whose provider instance is not logged in on moss,
@@ -62,7 +62,7 @@ const CODE_PATH = `/api/v1/providers/${FIXTURE_INSTANCE.id}/login-code`;
  */
 const openLogin = async (handlers: Readonly<Record<string, Handler>>) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [MOSS], providers: [LOGGED_OUT] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [MOSS], accounts: [LOGGED_OUT] }),
     ...handlers,
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
@@ -85,9 +85,9 @@ const readCalls = (calls: readonly Call[], path: string): readonly Call[] =>
 
 describe("the provider login dialog", () => {
   it("starts a paste-back login as it opens, and closes once the code is accepted", async () => {
-    let providers: readonly ProviderInstance[] = [LOGGED_OUT];
+    let providers: readonly ProviderAccount[] = [LOGGED_OUT];
     const { calls, dialog, linkOpen } = await openLogin({
-      "GET /api/v1/providers": () => ({ body: providers }),
+      "GET /api/v1/provider-accounts": () => ({ body: providers }),
       [`POST ${LOGIN_PATH}`]: { body: { url: "https://claude.ai/oauth/authorize?code=1" } },
       [`POST ${CODE_PATH}`]: () => {
         providers = [buildInstance({ status: "ok" }, "2026-09-10T09:00:00.000Z")];
@@ -141,10 +141,10 @@ describe("the provider login dialog", () => {
   });
 
   it("shows a device code, and closes when a fresh snapshot says the harness is logged in", async () => {
-    let providers: readonly ProviderInstance[] = [LOGGED_OUT];
+    let providers: readonly ProviderAccount[] = [LOGGED_OUT];
     const expiresAt = new Date(Date.now() + 14 * 60_000 + 30_000).toISOString();
     const { dialog, live } = await openLogin({
-      "GET /api/v1/providers": () => ({ body: providers }),
+      "GET /api/v1/provider-accounts": () => ({ body: providers }),
       [`POST ${LOGIN_PATH}`]: {
         body: { url: "https://auth.openai.com/codex/device", userCode: "WXYZ-1234", expiresAt },
       },

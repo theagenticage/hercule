@@ -123,13 +123,15 @@ const storeSecret = (
   value: string,
 ): Promise<void> =>
   Effect.runPromise(
-    Effect.orDie(
-      withTransaction(
-        arranged.harness.sql,
-        arranged.harness.secrets.set(
-          buildProviderAccountOwner(providerAccountId),
-          name,
-          Redacted.make(value),
+    Effect.asVoid(
+      Effect.orDie(
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.secrets.set(
+            buildProviderAccountOwner(providerAccountId),
+            name,
+            Redacted.make(value),
+          ),
         ),
       ),
     ),
@@ -138,11 +140,13 @@ const storeSecret = (
 /** Corrupts every stored key. That looks the same as a row written under another Master Key. */
 const corruptStoredKeys = (arranged: Arranged): Promise<void> =>
   Effect.runPromise(
-    Effect.orDie(
-      withTransaction(
-        arranged.harness.sql,
-        arranged.harness
-          .sql`UPDATE secrets SET ciphertext = X'00' WHERE owner_kind = 'provider-account'`,
+    Effect.asVoid(
+      Effect.orDie(
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness
+            .sql`UPDATE secrets SET ciphertext = X'00' WHERE owner_kind = 'provider-account'`,
+        ),
       ),
     ),
   );

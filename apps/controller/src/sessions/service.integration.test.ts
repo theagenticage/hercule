@@ -1693,14 +1693,22 @@ describe("SessionService.queryPassages", () => {
     const spec = buildSpec(providerAccountId, "clever");
     const runnerId = mintId();
     const thread = yield* insertQueuedSession(runnerId, { providerAccountId, spec });
-    const agentRun = yield* insertQueuedSession(runnerId, { providerAccountId, spec, agentId: agentA });
+    const agentRun = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec,
+      agentId: agentA,
+    });
     const child = yield* insertQueuedSession(runnerId, {
       providerAccountId,
       spec,
       agentId: agentA,
       createdBy: buildSessionStamp(thread),
     });
-    const other = yield* insertQueuedSession(runnerId, { providerAccountId, spec, agentId: agentB });
+    const other = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec,
+      agentId: agentB,
+    });
     const base = { eventId: "e", sessionId: "native", at: t[0]! };
     const userMessage = (text: string) =>
       ({

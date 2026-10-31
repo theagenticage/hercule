@@ -7,7 +7,7 @@ import type { Run, Session, Workflow } from "@hercule/contract";
 import {
   agentsQuery,
   pluginsQuery,
-  providersQuery,
+  providerAccountsQuery,
   triggersQuery,
   workflowActionsQuery,
 } from "../../../../app/queries";
@@ -40,7 +40,7 @@ export function RunGraph({
   readonly onOpenSession: (sessionId: string) => void;
 }): JSX.Element {
   const { data: everyTrigger } = useSuspenseQuery(triggersQuery(client));
-  const { data: instances } = useSuspenseQuery(providersQuery(client));
+  const { data: accounts } = useSuspenseQuery(providerAccountsQuery(client));
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { data: agents } = useSuspenseQuery(agentsQuery(client));
   const { data: actions } = useSuspenseQuery(workflowActionsQuery(client));
@@ -60,7 +60,7 @@ export function RunGraph({
           triggers,
           agents,
           actions,
-          instances,
+          accounts,
           workflow,
           run,
           sessions,

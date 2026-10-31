@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { HarnessAccount, HarnessHome, ProviderAccountId } from "./primitives";
+import {
+  CredentialVariable,
+  HarnessAccount,
+  HarnessHome,
+  MAX_SECRET_VALUE_LENGTH,
+  ModelArgument,
+  ProviderAccountId,
+} from "./primitives";
 
 const isAccepted = (schema: Schema.Decoder<unknown>, input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(schema)(input))._tag === "Success";
@@ -157,9 +164,52 @@ describe("a Harness Account", () => {
     ).toBe(true);
   });
 
+  it("carries a credential value as long as the API accepts a secret", () => {
+    const withValue = (value: string) => ({
+      ...account,
+      credential: { variable: "ZAI_API_KEY", value },
+    });
+    expect(isAccepted(HarnessAccount, withValue("k".repeat(MAX_SECRET_VALUE_LENGTH)))).toBe(true);
+    expect(isAccepted(HarnessAccount, withValue("k".repeat(MAX_SECRET_VALUE_LENGTH + 1)))).toBe(
+      false,
+    );
+    // The old bound for a credential was 512 characters.
+    expect(isAccepted(HarnessAccount, withValue("k".repeat(513)))).toBe(true);
+  });
+
   it("refuses an empty credential value", () => {
     expect(
       isAccepted(HarnessAccount, { ...account, credential: { variable: "KEY", value: "" } }),
     ).toBe(false);
+  });
+});
+
+describe("the schemas a plugin shares with the wire", () => {
+  const account = {
+    providerAccountId: ACCOUNT_ID,
+    harnessHome: `providers/homes/${ACCOUNT_ID}/pi/pi`,
+    modelArgument: "zai/{model}",
+  };
+
+  it("accepts and refuses the same model arguments as a HarnessAccount", () => {
+    for (const modelArgument of [
+      "{model}",
+      "zai/{model}",
+      "{model}/{model}",
+      "x",
+      "a".repeat(129),
+    ]) {
+      expect(isAccepted(ModelArgument, modelArgument), modelArgument).toBe(
+        isAccepted(HarnessAccount, { ...account, modelArgument }),
+      );
+    }
+  });
+
+  it("accepts and refuses the same credential variables as a HarnessCredential", () => {
+    for (const variable of ["ZAI_API_KEY", "zai", "", "A".repeat(129)]) {
+      expect(isAccepted(CredentialVariable, variable), variable).toBe(
+        isAccepted(HarnessAccount, { ...account, credential: { variable, value: "k" } }),
+      );
+    }
   });
 });

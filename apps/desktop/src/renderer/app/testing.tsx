@@ -15,6 +15,8 @@ import type { Live } from "@hercule/client-core";
 import {
   buildErrorBody,
   createApiStub,
+  HARNESSES,
+  PROVIDERS,
   stubWebSocketInto,
   type Answer,
   type Call,
@@ -39,7 +41,7 @@ import {
   type OpenRequest,
   type PluginDetail,
   type Project,
-  type ProviderInstance,
+  type ProviderAccount,
   type Resource,
   type Runner,
   type RunSummary,
@@ -576,7 +578,7 @@ export interface SidebarRecords {
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
-  readonly providers: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
   /** The signed-in user's name. */
   readonly username: string;
   /** The assistants, each with the current session of its main conversation. None when absent. */
@@ -609,14 +611,14 @@ export interface AssistantRecords {
   readonly session: Session | null;
 }
 
-/** A controller that holds no threads, projects, workspaces, resources, runners or providers. */
+/** A controller that holds no threads, projects, workspaces, resources, runners or accounts. */
 export const NO_SIDEBAR_RECORDS: SidebarRecords = {
   threads: [],
   projects: [],
   workspaces: [],
   resources: [],
   runners: [],
-  providers: [],
+  accounts: [],
   username: "rogier",
 };
 
@@ -718,7 +720,7 @@ export const answerSignalQuery = (signals: readonly Signal[], call: Call): Answe
 
 /**
  * Returns the handlers that answer the sidebar's reads from `records`: the
- * threads, projects, workspaces, resources, runners, providers, the user, the
+ * threads, projects, workspaces, resources, runners, accounts, the user, the
  * assistants and each assistant's current session. Each list comes back as
  * one page, with no cursor to a next one.
  *
@@ -738,7 +740,11 @@ export const buildSidebarHandlers = (
   "GET /api/v1/workspaces": { body: { items: records.workspaces } },
   "GET /api/v1/resources": { body: { items: records.resources } },
   "GET /api/v1/runners": { body: { items: records.runners } },
-  "GET /api/v1/providers": { body: records.providers },
+  "GET /api/v1/provider-accounts": { body: records.accounts },
+  // The providers and harnesses are what the plugins register, so they do not
+  // vary with the accounts a test sets up.
+  "GET /api/v1/providers": { body: PROVIDERS },
+  "GET /api/v1/harnesses": { body: HARNESSES },
   "GET /api/v1/user": { body: { username: records.username } },
   "GET /api/v1/settings": { body: { controller: {}, user: {} } },
   "GET /api/v1/profiles": { body: { items: [] } },
@@ -904,9 +910,9 @@ export const FIXTURE_THREAD_IDS = {
 
 const WORLD = buildThreadsWorld(WORLD_IDS);
 
-/** The permission profile and provider instance every fixture thread names. */
+/** The permission profile and Provider Account every fixture thread names. */
 const PROFILE_ID = "01a06d02-7500-7000-8000-000000000001";
-const INSTANCE_ID = "01a06d02-7600-7000-8000-000000000001";
+const ACCOUNT_ID = "01a06d02-7600-7000-8000-000000000001";
 
 /** Returns a fixture thread on moss, with ids the contract accepts. */
 const buildFixtureThread = (
@@ -915,7 +921,8 @@ const buildFixtureThread = (
   buildSession({
     runnerId: WORLD.MOSS.id,
     permissionProfileId: PROFILE_ID,
-    instanceId: INSTANCE_ID,
+    providerAccountId: ACCOUNT_ID,
+    harnessId: "claude-code/claude-code",
     ...over,
   });
 
@@ -928,7 +935,8 @@ export const buildFixtureAssistant = (
   over: Partial<Assistant> & Pick<Assistant, "id" | "name" | "mainConversationId">,
 ): Assistant => ({
   systemPrompt: `You are ${over.name}.`,
-  instanceId: INSTANCE_ID,
+  providerAccountId: ACCOUNT_ID,
+  harnessId: null,
   permissionProfileId: PROFILE_ID,
   accessMode: "auto-accept-edits",
   model: null,
@@ -1030,7 +1038,7 @@ export const SIDEBAR_FIXTURE: SidebarRecords = {
   workspaces: [{ ...WORLD.PRIMARY, sessionIds: [FIXTURE_THREAD_IDS.bunPin] }, WORLD.THREAD_3F1],
   resources: [WORLD.WEBSHOP, WORLD.INFRA, WORLD.RUNBOOKS],
   runners: [WORLD.MOSS],
-  providers: [],
+  accounts: [],
   username: "rogier",
 };
 
@@ -1048,38 +1056,25 @@ export const EFFORT_OPTION: ModelOption = {
 };
 
 /**
- * The provider instance every fixture thread names, as moss probed it: Claude
+ * The Provider Account every fixture thread names, as moss probed it: Claude
  * Code, signed in, with the fixture turns' model as its default, a second
  * model, and an older one. Both current models offer `EFFORT_OPTION`.
  *
  * `SIDEBAR_FIXTURE` leaves it out, so its threads show their model's slug. A
- * test that needs model names adds it to the providers.
+ * test that needs model names adds it to the accounts.
  */
-export const FIXTURE_INSTANCE: ProviderInstance = {
-  id: INSTANCE_ID,
-  harnessId: "claude-code/claude-code",
-  name: "personal",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
+export const FIXTURE_ACCOUNT: ProviderAccount = {
+  id: ACCOUNT_ID,
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: "rogier@example.com",
+  planLabel: "Claude Max",
+  defaultHarnessId: "claude-code/claude-code",
   snapshots: [
     {
       runnerId: WORLD.MOSS.id,
+      harnessId: "claude-code/claude-code",
       probedAt: "2026-09-10T08:00:00.000Z",
       harnessVersion: "2.1.263",
       versionVerdict: "ok",

@@ -12,8 +12,7 @@ import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createValidationError, type Validation } from "@hercule/contract";
-import { PluginHost, type RegisteredHarness } from "../plugins";
-import { checkHarnessSupport } from "./harness-support";
+import { checkHarnessSupport, PluginHost, type RegisteredHarness } from "../plugins";
 import {
   providerAccountRepository,
   type StoredProviderAccount,

@@ -117,10 +117,7 @@ const withAgentStepFleet = (
     Partial<Pick<FleetOptions, "plugins">> = {},
 ): Promise<void> =>
   withFleet(body, {
-    plugins: [
-      buildFleetPlugin("harnesses", [buildHarnessDefinition("test")]),
-      ...plugins,
-    ],
+    plugins: [buildFleetPlugin("harnesses", [buildHarnessDefinition("test")]), ...plugins],
     facts: FACTS,
     models: MODELS,
     ...options,

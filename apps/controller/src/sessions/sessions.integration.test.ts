@@ -526,7 +526,7 @@ const endSession = async (arranged: Arranged, session: Session, seq: number): Pr
       {
         sessionId: session.id,
         nativeSessionId: "native-1",
-        providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
+        providerAccountId: session.providerAccountId,
       },
     ],
   });
@@ -560,6 +560,7 @@ describe("session.spawn", () => {
       expect(session.status).toBe("starting");
       expect(session.runnerId).toBe(arranged.runnerId);
       expect(session.providerAccountId).toBe(findProviderAccountId(arranged, "harnesses/full"));
+      expect(session.harnessId).toBe("harnesses/full");
       expect(session.requestedAccessMode).toBe("approval-required");
       expect(session.accessMode).toBe("approval-required");
       expect(session.nativeSessionId).toBeNull();
@@ -943,6 +944,113 @@ describe("the `userMaterial` flag on a start frame", () => {
       },
       { firstRunnerIsLocal: true },
     );
+  });
+});
+
+/** Gives an account the home a migrated account kept: `providers/<account id>`. */
+const giveLegacyHome = (arranged: Arranged, providerAccountId: string): Promise<unknown> =>
+  Effect.runPromise(
+    Effect.orDie(
+      withTransaction(
+        arranged.harness.sql,
+        arranged.harness.sql`
+          UPDATE provider_accounts
+          SET legacy_home_folder = ${providerAccountId}, legacy_home_harness_id = 'harnesses/full'
+          WHERE id = unhex(replace(${providerAccountId}, '-', ''))`,
+      ),
+    ),
+  );
+
+describe("the harness account on a session's start, resume and fork frames", () => {
+  it.each([
+    ["a migrated account keeps its legacy home", true, (id: string) => `providers/${id}`],
+    [
+      "a new account gets a home of its own",
+      false,
+      (id: string) => `providers/homes/${id}/harnesses/full`,
+    ],
+  ])("%s, on every frame", async (_name, legacy, home) => {
+    await withFleet(async (arranged) => {
+      const accountId = findProviderAccountId(arranged, "harnesses/full");
+      if (legacy) await giveLegacyHome(arranged, accountId);
+
+      const parent = await startAndEndSession(arranged, "hello");
+      const forked = await continueSession(arranged, parent.id, { mode: "fork", prompt: "more" });
+      expect(forked.status, await forked.clone().text()).toBe(200);
+      const child = (await forked.json()) as Session;
+      const resumed = await sendInput(arranged, parent.id, { text: "still there?" });
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+
+      const [start, resume] = await waitForStartFrames(arranged, parent.id, 2);
+      const [fork] = await waitForStartFrames(arranged, child.id, 1);
+      expect(start!.spec.continue).toBeUndefined();
+      expect(resume!.spec.continue?.mode).toBe("resume");
+      expect(fork!.spec.continue?.mode).toBe("fork");
+      for (const frame of [start!, resume!, fork!]) {
+        expect(frame.harnessId).toBe("harnesses/full");
+        expect(frame.harnessAccount).toMatchObject({
+          providerAccountId: accountId,
+          harnessHome: home(accountId),
+        });
+      }
+    });
+  });
+
+  it("keeps the stored harness on the resumed and forked session", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await startAndEndSession(arranged, "hello");
+      const forked = await continueSession(arranged, parent.id, { mode: "fork", prompt: "more" });
+      expect(forked.status, await forked.clone().text()).toBe(200);
+      const child = (await forked.json()) as Session;
+      const resumed = await sendInput(arranged, parent.id, { text: "still there?" });
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+
+      for (const session of [await readSession(arranged, parent.id), child]) {
+        expect(session.harnessId).toBe("harnesses/full");
+        expect(session.providerAccountId).toBe(parent.providerAccountId);
+      }
+    });
+  });
+});
+
+describe("continuing a session whose account was deleted", () => {
+  it("refuses a resume and a fork as invalid_state, and sends nothing", async () => {
+    await withFleet(async (arranged) => {
+      // The default assistant runs on the first account, which cannot be
+      // deleted while it does, so the session runs on another.
+      const limited = findProviderAccountId(arranged, "harnesses/limited");
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: "hello",
+        providerAccountId: limited,
+      });
+      await waitForStartFrames(arranged, session.id, 1);
+      const parent = await endSession(arranged, session, 1);
+      const deleted = await send(
+        "DELETE",
+        arranged.harness.base,
+        `/api/v1/provider-accounts/${limited}`,
+        {
+          token: arranged.token,
+        },
+      );
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+      // The ended session is history: it keeps the account's id.
+      expect((await readSession(arranged, parent.id)).providerAccountId).toBe(limited);
+
+      const input = await sendInput(arranged, parent.id, { text: "still there?" });
+      const fork = await continueSession(arranged, parent.id, { mode: "fork", prompt: "more" });
+
+      for (const response of [input, fork]) {
+        expect(response.status, await response.clone().text()).toBe(409);
+        const refusal = (await response.json()) as {
+          readonly error: { readonly code: string; readonly message: string };
+        };
+        expect(refusal.error.code).toBe("invalid_state");
+        expect(refusal.error.message).toBe("The account this thread ran on was deleted.");
+      }
+      expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
+      expect((await readSession(arranged, parent.id)).status).toBe("exited");
+    });
   });
 });
 

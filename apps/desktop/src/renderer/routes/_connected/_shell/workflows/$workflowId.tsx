@@ -15,7 +15,7 @@ import { throwScreenNotFound } from "../../../../app/last-screen";
 import {
   agentsQuery,
   pluginsQuery,
-  providersQuery,
+  providerAccountsQuery,
   readOnOpen,
   settingsQuery,
   triggersQuery,
@@ -118,7 +118,7 @@ export const Route = createFileRoute("/_connected/_shell/workflows/$workflowId")
       await Promise.all([
         queryClient.ensureQueryData(workflowQuery(client, workflowId)),
         queryClient.ensureQueryData(triggersQuery(client)),
-        queryClient.ensureQueryData(providersQuery(client)),
+        queryClient.ensureQueryData(providerAccountsQuery(client)),
         cause === "stay"
           ? queryClient.ensureQueryData(agentsQuery(client))
           : readOnOpen(queryClient, agentsQuery(client)),
@@ -190,7 +190,7 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const { data: agents } = useSuspenseQuery(agentsQuery(client));
   const { data: actions } = useSuspenseQuery(workflowActionsQuery(client));
-  const { data: instances } = useSuspenseQuery(providersQuery(client));
+  const { data: accounts } = useSuspenseQuery(providerAccountsQuery(client));
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
 
@@ -240,7 +240,7 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
             triggers,
             agents,
             actions,
-            instances,
+            accounts,
             workflow: shownWorkflow,
           })
         }

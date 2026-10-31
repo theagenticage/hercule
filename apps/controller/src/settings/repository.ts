@@ -295,22 +295,39 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the default harness of the Provider Account with this id, or
-     * `None` when there is no such account. Used to check a setting that
-     * names an account. The query is here, not in the provider-accounts
-     * domain, because that domain imports the runners domain, which imports
-     * settings, so settings cannot import the account repository without a
-     * cycle.
+     * Returns what is needed to decide which harnesses the Provider Account
+     * with this id can run in (its provider, its account kind and its default
+     * harness), or `None` when there is no such account. Used to check a
+     * setting that names an account. The query is here, not in the
+     * provider-accounts domain, because that domain imports the runners
+     * domain, which imports settings, so settings cannot import the account
+     * repository without a cycle.
      */
-    readProviderAccountDefaultHarness: (
+    readProviderAccountHarnessFacts: (
       providerAccountId: string,
-    ): Effect.Effect<Option.Option<string>, SqlError> =>
+    ): Effect.Effect<
+      Option.Option<{
+        readonly providerId: string;
+        readonly kind: string;
+        readonly defaultHarnessId: string;
+      }>,
+      SqlError
+    > =>
       Effect.map(
-        sql<{ readonly default_harness_id: string }>`
-          SELECT default_harness_id FROM provider_accounts
+        sql<{
+          readonly provider_id: string;
+          readonly kind: string;
+          readonly default_harness_id: string;
+        }>`
+          SELECT provider_id, kind, default_harness_id FROM provider_accounts
           WHERE id = ${uuidFromString(providerAccountId)}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => row.default_harness_id),
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            providerId: row.provider_id,
+            kind: row.kind,
+            defaultHarnessId: row.default_harness_id,
+          })),
       ),
 
     /**

@@ -25,13 +25,9 @@ import {
   type ServerHarness,
   type ServerOptions,
 } from "../http/testing";
-import {
-  buildHarnessDefinition,
-  createPluginFixture,
-  IDLE_FEEDS,
-  IDLE_INGEST_OPEN,
-} from "../plugins/testing";
+import { buildHarnessDefinition, IDLE_FEEDS, IDLE_INGEST_OPEN } from "../plugins/testing";
 import { withTransaction } from "../db";
+import { buildFleetPlugin } from "../sessions/testing";
 import type { DeclaredTrigger } from "./repository";
 import type { WorkflowPage } from "./service";
 
@@ -42,7 +38,7 @@ export const ABSENT_ID = "0192f0a1-0000-7000-8000-00000000dead";
 export const ACCEPTED_GITHUB_TOKEN = "ghp_a-token";
 
 /** The harness an agent step's Agent runs on. */
-export const AGENT_HARNESS = buildHarnessDefinition("test", { token: "t" });
+export const AGENT_HARNESS = buildHarnessDefinition("test");
 
 /** The qualified id of `AGENT_HARNESS`: the plugin that registers it is `harnesses`. */
 const AGENT_HARNESS_ID = "harnesses/test";
@@ -152,7 +148,7 @@ export const withSetUpController = (
     {
       ...timings,
       plugins: [
-        createPluginFixture({ id: "harnesses", definitions: [AGENT_HARNESS] }).plugin,
+        buildFleetPlugin("harnesses", [AGENT_HARNESS]),
         localGithubPlugin,
         ...additionalPlugins,
       ],
@@ -327,12 +323,12 @@ export const expectNothingStored = async (base: string, token: string): Promise<
 
 /** Creates an Agent on the test harness and returns its id, for use in an agent step. */
 export const createAgent = async (base: string, token: string): Promise<string> => {
-  const providers = await get(base, "/api/v1/providers", token);
-  expect(providers.status, await providers.clone().text()).toBe(200);
-  const instance = (
-    (await providers.json()) as ReadonlyArray<{ id: string; harnessId: string }>
-  ).find((provider) => provider.harnessId === AGENT_HARNESS_ID);
-  expect(instance, AGENT_HARNESS_ID).toBeDefined();
+  const accounts = await get(base, "/api/v1/provider-accounts", token);
+  expect(accounts.status, await accounts.clone().text()).toBe(200);
+  const account = (
+    (await accounts.json()) as ReadonlyArray<{ id: string; defaultHarnessId: string }>
+  ).find((listed) => listed.defaultHarnessId === AGENT_HARNESS_ID);
+  expect(account, AGENT_HARNESS_ID).toBeDefined();
   const profiles = await get(base, "/api/v1/profiles", token);
   expect(profiles.status, await profiles.clone().text()).toBe(200);
   const profile = (
@@ -345,7 +341,7 @@ export const createAgent = async (base: string, token: string): Promise<string> 
     {
       name: "reviewer",
       systemPrompt: "You review pull requests.",
-      instanceId: instance!.id,
+      providerAccountId: account!.id,
       permissionProfileId: profile!.id,
     },
     token,

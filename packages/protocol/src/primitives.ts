@@ -135,6 +135,44 @@ export const Sequenced = Schema.Struct({ seq: Seq });
 export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
 
 /**
+ * The largest secret value, in characters. The contract bounds a secret the
+ * user writes (such as an account's API key) to this length, and the same value
+ * rides in a `HarnessCredential`, so a value the API accepts is always one a
+ * frame can carry. The bound is generous on purpose: a secret may be a private
+ * key or a service-account document. It is still a bound, because it is
+ * caller-controlled text that lands in the database.
+ */
+export const MAX_SECRET_VALUE_LENGTH = 64 * 1024;
+
+/**
+ * The name of the environment variable a harness reads an account's key or
+ * token from: capital letters, digits and underscores, starting with a letter.
+ * Plugins check their declarations against this same schema, so a harness
+ * cannot register a variable the wire then refuses.
+ */
+export const CredentialVariable = Schema.String.check(
+  Schema.isPattern(/^[A-Z][A-Z0-9_]*$/, {
+    title: "credential variable",
+    description: "an environment variable name in upper case",
+  }),
+  Schema.isMaxLength(128),
+);
+
+/**
+ * How a harness names a model of one provider, with exactly one `{model}`
+ * standing for the model id: `{model}`, or `zai/{model}`. Braces are allowed
+ * only in that placeholder. Plugins check their declarations against this same
+ * schema, so a harness cannot register an argument the wire then refuses.
+ */
+export const ModelArgument = Schema.String.check(
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[^{}]*\{model\}[^{}]*$/, {
+    title: "model argument",
+    description: "text with exactly one `{model}` placeholder and no other braces",
+  }),
+);
+
+/**
  * The environment variable a harness reads the key or token of an account
  * from, and the key itself. The controller sends it whenever the harness
  * declares a variable for the account's kind. `value` is left out when the
@@ -146,14 +184,10 @@ export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
  * nowhere else: it is never logged and never written to disk.
  */
 export const HarnessCredential = Schema.Struct({
-  variable: Schema.String.check(
-    Schema.isPattern(/^[A-Z][A-Z0-9_]*$/, {
-      title: "credential variable",
-      description: "an environment variable name in upper case",
-    }),
-    Schema.isMaxLength(128),
+  variable: CredentialVariable,
+  value: Schema.optionalKey(
+    Schema.String.check(Schema.isBetweenLength(1, MAX_SECRET_VALUE_LENGTH)),
   ),
-  value: Schema.optionalKey(Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH))),
 });
 
 export type HarnessCredential = Schema.Schema.Type<typeof HarnessCredential>;
@@ -173,14 +207,7 @@ export type HarnessCredential = Schema.Schema.Type<typeof HarnessCredential>;
 export const HarnessAccount = Schema.Struct({
   providerAccountId: ProviderAccountId,
   harnessHome: HarnessHome,
-  modelArgument: Schema.String.check(
-    Schema.isMaxLength(128),
-    // Braces are allowed only in the one placeholder, so there is exactly one.
-    Schema.isPattern(/^[^{}]*\{model\}[^{}]*$/, {
-      title: "model argument",
-      description: "text with exactly one `{model}` placeholder and no other braces",
-    }),
-  ),
+  modelArgument: ModelArgument,
   credential: Schema.optionalKey(HarnessCredential),
 });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ApiError,
   ConnectionError,
+  isInvalidState,
   isNotFound,
   readErrorMessage,
   readValidationIssues,
@@ -44,6 +45,17 @@ describe("isNotFound", () => {
       false,
     );
     expect(isNotFound(null)).toBe(false);
+  });
+});
+
+describe("isInvalidState", () => {
+  it("is true only for an invalid_state response", () => {
+    expect(isInvalidState(new ApiError("invalid_state", "An Agent uses it."))).toBe(true);
+    expect(isInvalidState(new ApiError("conflict", "Changed."))).toBe(false);
+    expect(
+      isInvalidState(new ConnectionError("http://controller.test", new Error("refused"))),
+    ).toBe(false);
+    expect(isInvalidState(null)).toBe(false);
   });
 });
 

@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { Session } from "@hercule/contract";
 import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
 import {
@@ -18,9 +19,10 @@ import {
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
-import { withTransaction } from "../../db";
+import { nowIso, withTransaction } from "../../db";
 import { del, get, post, send } from "../../http/testing";
-import { buildHarnessDefinition } from "../../plugins/testing";
+import { buildHarnessDefinition, createPluginFixture } from "../../plugins/testing";
+import { providerAccountRepository } from "../../provider-accounts";
 import {
   spawnThreadUnder,
   buildFleetPlugin,
@@ -69,8 +71,43 @@ const GAMMA: HarnessDefinition = {
   },
 };
 
+/** What both multi-harness harnesses run: one provider's subscription, signed in on each machine. */
+const MULTI_RUN = {
+  providerId: "multi/multi",
+  kinds: [{ kind: "subscription" }],
+  modelArgument: "{model}",
+  models: "all",
+} as const;
+
+/** The harness an account of the `multi` provider starts in. */
+const DELTA = buildHarnessDefinition("delta", [MULTI_RUN]);
+
+/** The harness an account of the `multi` provider runs in only when a call, an agent or a default names it. */
+const EPSILON = buildHarnessDefinition("epsilon", [MULTI_RUN]);
+
 const buildPlugins = (): ReadonlyArray<Plugin> => [
   buildFleetPlugin("harnesses", [ALPHA, BETA, GAMMA]),
+  // One provider that two harnesses run, so one account can be placed in either.
+  createPluginFixture({
+    id: "multi",
+    capabilities: ["harnesses", "providers"],
+    definitions: [DELTA, EPSILON],
+    providers: [
+      {
+        id: "multi",
+        displayName: "Multi",
+        kinds: [
+          {
+            id: "subscription",
+            title: "Subscription",
+            description: "A plan signed in on each machine.",
+            setup: [{ kind: "harness-login" }],
+            harnesses: ["multi/delta", "multi/epsilon"],
+          },
+        ],
+      },
+    ],
+  }).plugin,
 ];
 
 const FACTS: RunnerFacts = {
@@ -80,7 +117,13 @@ const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
   harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["harnesses/alpha", "harnesses/beta", "harnesses/gamma"],
+  adapters: [
+    "harnesses/alpha",
+    "harnesses/beta",
+    "harnesses/gamma",
+    "multi/delta",
+    "multi/epsilon",
+  ],
   identityPort: 4939,
 };
 
@@ -259,7 +302,11 @@ describe("placeSession from an Agent", () => {
   const createAssessor = async (
     arranged: Arranged,
     fields: Record<string, unknown> = {},
-  ): Promise<{ readonly id: string; readonly profileId: string; readonly providerAccountId: string }> => {
+  ): Promise<{
+    readonly id: string;
+    readonly profileId: string;
+    readonly providerAccountId: string;
+  }> => {
     const profile = await readProfileNamed(arranged, "worker");
     const providerAccountId = findProviderAccountId(arranged, "harnesses/alpha");
     const agent = await createAgent(arranged, {
@@ -341,7 +388,7 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it.each(["providerAccountId", "permissionProfileId"])(
+  it.each(["providerAccountId", "harnessId", "permissionProfileId"])(
     "refuses a spawn that names %s beside the agent it comes from",
     async (field) => {
       await withFleet(async (arranged) => {
@@ -349,7 +396,9 @@ describe("placeSession from an Agent", () => {
         const value =
           field === "providerAccountId"
             ? agent.providerAccountId
-            : (await readProfileNamed(arranged, "worker")).id;
+            : field === "harnessId"
+              ? "harnesses/alpha"
+              : (await readProfileNamed(arranged, "worker")).id;
 
         const refused = await parseRefusal(
           await spawnSession(arranged, {
@@ -595,6 +644,211 @@ describe("placeSession from an Agent", () => {
 
       const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
       expect(((await listing.json()) as { items: ReadonlyArray<unknown> }).items).toEqual([]);
+    });
+  });
+});
+
+describe("the harness a session is placed in", () => {
+  const DELTA_ID = "multi/delta";
+  const EPSILON_ID = "multi/epsilon";
+
+  /** Asks the controller to probe an account in a harness on the fleet's runner, which the fake runner answers as signed in. */
+  const probeAccount = async (
+    arranged: Arranged,
+    providerAccountId: string,
+    harnessId?: string,
+  ): Promise<void> => {
+    const response = await post(
+      arranged.harness.base,
+      `/api/v1/runners/${arranged.runnerId}/probe`,
+      { providerAccountId, ...(harnessId === undefined ? {} : { harnessId }) },
+      arranged.token,
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+  };
+
+  /**
+   * Runs `body` with three accounts of the `multi` provider: `first` starts
+   * in delta, `epsilonAccount` in epsilon, and `second` (labelled) in delta.
+   * Every account is signed in on the runner in its default harness, and
+   * `first` also in epsilon.
+   */
+  const withMulti = (
+    body: (
+      arranged: Arranged,
+      accounts: { first: string; epsilonAccount: string; second: string },
+    ) => Promise<void>,
+  ): Promise<void> =>
+    withFleet(async (arranged) => {
+      const first = findProviderAccountId(arranged, DELTA_ID);
+      const epsilonAccount = findProviderAccountId(arranged, EPSILON_ID);
+      const inserted = await arranged.harness.runWithLiveSessions(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const accounts = yield* providerAccountRepository;
+          return yield* withTransaction(
+            sql,
+            accounts.insert({
+              providerId: "multi/multi",
+              kind: "subscription",
+              label: "second",
+              defaultHarnessId: DELTA_ID,
+              at: yield* nowIso,
+            }),
+          );
+        }),
+      );
+      if (inserted._tag !== "Success") throw new Error("the second account was not inserted");
+      const second = inserted.value.id;
+      await probeAccount(arranged, second);
+      await probeAccount(arranged, first, EPSILON_ID);
+      await body(arranged, { first, epsilonAccount, second });
+    });
+
+  /** Spawns a Thread as the user, failing the test if it is refused. */
+  const spawnThread = (arranged: Arranged, fields: Record<string, unknown>) =>
+    spawnSessionOrFail(arranged, { prompt: "hello", ...fields });
+
+  it("stores the account's default harness when nothing names one", async () => {
+    await withMulti(async (arranged, { first, epsilonAccount }) => {
+      const delta = await spawnThread(arranged, { providerAccountId: first });
+      const epsilon = await spawnThread(arranged, { providerAccountId: epsilonAccount });
+
+      expect(delta.harnessId).toBe(DELTA_ID);
+      expect(epsilon.harnessId).toBe(EPSILON_ID);
+      const [start] = await waitForStartFrames(arranged, epsilon.id, 1);
+      expect(start!.harnessId).toBe(EPSILON_ID);
+    });
+  });
+
+  it("takes the harness of the call over every default", async () => {
+    await withMulti(async (arranged, { first }) => {
+      await setThreadDefaults(arranged, {
+        "thread.providerAccountId": first,
+        "thread.harnessId": DELTA_ID,
+      });
+
+      const session = await spawnThread(arranged, { harnessId: EPSILON_ID });
+
+      expect(session.providerAccountId).toBe(first);
+      expect(session.harnessId).toBe(EPSILON_ID);
+    });
+  });
+
+  it("takes the user's thread.harnessId when the Thread runs on the thread default's account, and the account's default harness on another", async () => {
+    await withMulti(async (arranged, { first, second }) => {
+      await setThreadDefaults(arranged, {
+        "thread.providerAccountId": first,
+        "thread.harnessId": EPSILON_ID,
+      });
+
+      const onDefaultAccount = await spawnThread(arranged, {});
+      const onOtherAccount = await spawnThread(arranged, { providerAccountId: second });
+
+      expect(onDefaultAccount).toMatchObject({ providerAccountId: first, harnessId: EPSILON_ID });
+      // A harness default belongs to its account: the other account is placed
+      // in its own default, never in a harness nobody chose for it.
+      expect(onOtherAccount).toMatchObject({ providerAccountId: second, harnessId: DELTA_ID });
+    });
+  });
+
+  it("takes the caller's harness for a session's spawn on the caller's account, and the account's default on another", async () => {
+    await withMulti(async (arranged, { first, second }) => {
+      const caller = await spawnThreadUnder(
+        arranged,
+        await createProfile(arranged, "thread-starter", ["session.spawn", "thread.start"]),
+        { providerAccountId: first, harnessId: EPSILON_ID },
+      );
+      const spawnAs = async (fields: Record<string, unknown>): Promise<Session> => {
+        const response = await post(
+          arranged.harness.base,
+          "/api/v1/sessions",
+          { prompt: "a job for you", ...fields },
+          caller.token,
+        );
+        expect(response.status, await response.clone().text()).toBe(200);
+        return (await response.json()) as Session;
+      };
+
+      expect(await spawnAs({})).toMatchObject({ providerAccountId: first, harnessId: EPSILON_ID });
+      expect(await spawnAs({ providerAccountId: second })).toMatchObject({
+        providerAccountId: second,
+        harnessId: DELTA_ID,
+      });
+      expect(await spawnAs({ harnessId: DELTA_ID })).toMatchObject({
+        providerAccountId: first,
+        harnessId: DELTA_ID,
+      });
+    });
+  });
+
+  it("takes the agent's harness, or the account's default when the agent names none", async () => {
+    await withMulti(async (arranged, { first }) => {
+      const profile = await readProfileNamed(arranged, "worker");
+      const inEpsilon = await createAgent(arranged, {
+        name: "in-epsilon",
+        systemPrompt: "You assess tasks.",
+        providerAccountId: first,
+        harnessId: EPSILON_ID,
+        permissionProfileId: profile.id,
+      });
+      const inDefault = await createAgent(arranged, {
+        name: "in-default",
+        systemPrompt: "You assess tasks.",
+        providerAccountId: first,
+        permissionProfileId: profile.id,
+      });
+
+      const epsilon = await spawnThread(arranged, { agentId: inEpsilon.id });
+      const delta = await spawnThread(arranged, { agentId: inDefault.id });
+
+      expect(epsilon.harnessId).toBe(EPSILON_ID);
+      expect(delta.harnessId).toBe(DELTA_ID);
+    });
+  });
+
+  it("refuses a harness the account's provider does not allow, and says which", async () => {
+    await withMulti(async (arranged, { first }) => {
+      const response = await spawnSession(arranged, {
+        prompt: "hello",
+        providerAccountId: first,
+        harnessId: "harnesses/alpha",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      const refused = await parseRefusal(response);
+      expect(refused.code).toBe("validation");
+      expect(refused.text).toContain("harnessId");
+    });
+  });
+
+  it("refuses a harness the account is not signed in to on any runner, as it refuses an account that is not signed in", async () => {
+    await withMulti(async (arranged, { epsilonAccount }) => {
+      // Only a probe in the harness shows a runner signed in to it, and the
+      // controller probes an account in its default harness alone.
+      const response = await spawnSession(arranged, {
+        prompt: "hello",
+        providerAccountId: epsilonAccount,
+        harnessId: DELTA_ID,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("signed in");
+    });
+  });
+
+  it("checks a model's options against the snapshot of the account in the chosen harness", async () => {
+    await withMulti(async (arranged, { first }) => {
+      const response = await spawnSession(arranged, {
+        prompt: "hello",
+        providerAccountId: first,
+        harnessId: EPSILON_ID,
+        model: "fast",
+        options: { effort: "medium" },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+      expect((await parseRefusal(response)).code).toBe("validation");
     });
   });
 });
@@ -951,7 +1205,11 @@ const spawnAndEnd = async (arranged: Arranged, body: unknown): Promise<Session> 
   arranged.wire.send({
     _tag: "sessionsReport",
     sessions: [
-      { sessionId: session.id, nativeSessionId: "native-1", providerAccountId: session.providerAccountId },
+      {
+        sessionId: session.id,
+        nativeSessionId: "native-1",
+        providerAccountId: session.providerAccountId,
+      },
     ],
   });
   await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);

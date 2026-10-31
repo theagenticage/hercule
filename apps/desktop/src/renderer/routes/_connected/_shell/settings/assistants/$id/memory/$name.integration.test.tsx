@@ -17,7 +17,7 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -47,7 +47,7 @@ const openDocument = async (name: string, handlers: Readonly<Record<string, Hand
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
-      providers: [FIXTURE_INSTANCE],
+      accounts: [FIXTURE_ACCOUNT],
       assistants: [{ assistant: ADA, session: null }],
     }),
     ...storeMemory(ADA.id, [CORE, WEBSHOP]),

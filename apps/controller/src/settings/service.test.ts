@@ -10,7 +10,7 @@ import {
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, withTransaction } from "../db";
-import { buildPluginStack } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginStack, createPluginFixture } from "../plugins/testing";
 import { readEventsOfKind } from "../events/testing";
 import { Settings, SettingsLayer } from "./repository";
 import { SettingsOperations, SettingsOperationsLayer } from "./service";
@@ -339,7 +339,14 @@ const withSettings = (
       const token = await completeSetup(harness.base);
       await body(harness.base, token, harness);
     },
-    { plugins: [githubPlugin, mailerPlugin] },
+    // `other/other` is a harness this build carries that no provider lists.
+    {
+      plugins: [
+        githubPlugin,
+        mailerPlugin,
+        createPluginFixture({ id: "other", definitions: [buildHarnessDefinition("other")] }).plugin,
+      ],
+    },
   );
 
 const patchSettings = (base: string, token: string, body: unknown): Promise<Response> =>
@@ -582,6 +589,26 @@ describe("the text generation model", () => {
           "textGeneration.model": {
             providerAccountId: account.id,
             harnessId: "nowhere/nowhere",
+            model: "fast",
+          },
+        },
+      });
+
+      expect(await readErrorCode(response)).toBe("validation");
+      expect((await readSettings(base, token)).controller["textGeneration.model"]).toBe("off");
+    });
+  });
+
+  it("rejects a harness this build carries but the account cannot run, and keeps the stored value", async () => {
+    await withSettings(async (base, token) => {
+      const account = await readFirstAccount(base, token);
+      await patchSettings(base, token, { controller: { "textGeneration.model": "off" } });
+
+      const response = await patchSettings(base, token, {
+        controller: {
+          "textGeneration.model": {
+            providerAccountId: account.id,
+            harnessId: "other/other",
             model: "fast",
           },
         },

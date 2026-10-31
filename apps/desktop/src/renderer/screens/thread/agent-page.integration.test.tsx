@@ -16,7 +16,7 @@ import {
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   FIXTURE_SUBAGENT,
   renderApp,
   RUNNING_ITEM_ID,
@@ -67,7 +67,7 @@ const openThread = async (
   handlers: Readonly<Record<string, Handler>> = {},
 ) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
     ...buildThreadHandlers(thread),
     ...handlers,
   });

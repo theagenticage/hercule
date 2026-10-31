@@ -505,9 +505,13 @@ describe("what a harness declares it will not enforce", () => {
     "reports unenforced for $what, at create and at read",
     async ({ harness, tools, unenforced }) => {
       await withFleet(async (arranged) => {
-        const created = await createAgentOnAccount(arranged, findProviderAccountId(arranged, harness), {
-          disallowedTools: tools,
-        });
+        const created = await createAgentOnAccount(
+          arranged,
+          findProviderAccountId(arranged, harness),
+          {
+            disallowedTools: tools,
+          },
+        );
 
         expect(created.unenforced).toEqual(unenforced);
         expect((await readAgent(arranged, created.id)).unenforced).toEqual(unenforced);

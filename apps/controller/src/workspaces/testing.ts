@@ -23,13 +23,14 @@ import {
 } from "@hercule/plugin-host";
 import { withTransaction } from "../db";
 import { get, post } from "../http/testing";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition } from "../plugins/testing";
 import {
   reportEvent,
   spawnSessionOrFail,
   waitForFrames,
   waitForStartFrames,
   waitUntil,
+  buildFleetPlugin,
   withFleet as withRunnerFleet,
   type Arranged,
   type Wire,
@@ -72,10 +73,7 @@ export const withFleet = (
 ): Promise<void> =>
   withRunnerFleet(body, {
     plugins: [
-      createPluginFixture({
-        id: "harnesses",
-        definitions: [buildHarnessDefinition("test")],
-      }).plugin,
+      buildFleetPlugin("harnesses", [buildHarnessDefinition("test")]),
       ...(options.plugins ?? []),
     ],
     facts: FACTS,
@@ -316,7 +314,7 @@ export const bindTranscript = async (arranged: Arranged, session: Session): Prom
       {
         sessionId: session.id,
         nativeSessionId: "native-1",
-        instanceId: arranged.instances[0]!.id,
+        providerAccountId: arranged.accounts[0]!.id,
       },
     ],
   });

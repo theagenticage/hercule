@@ -23,6 +23,10 @@ import { GlassDialog } from "./glass-dialog";
  *   it, and `action` for one that only adds. A body whose first control is a
  *   checkbox or a radio needs it, so the focus starts on a button.
  * - `error`, when given, is shown under `children` as an alert.
+ * - `refusal`, when given, is shown the same way, and the action button goes:
+ *   the controller refused the action because of a state that asking again
+ *   does not change, so only the closing button is left. A caller usually
+ *   also sets `closeLabel` to "Cancel", which no longer reads as a choice.
  * - The closing button, Esc and a click on the scrim close the dialog
  *   without calling `onConfirm`. `onClose` is called whenever the dialog
  *   closes, and the caller then unmounts it.
@@ -36,6 +40,7 @@ export function ConfirmDialog({
   initialFocus,
   pending = false,
   error = null,
+  refusal = null,
   onConfirm,
   onClose,
   children,
@@ -48,6 +53,7 @@ export function ConfirmDialog({
   readonly initialFocus?: "close" | "action" | undefined;
   readonly pending?: boolean;
   readonly error?: string | null;
+  readonly refusal?: string | null;
   readonly onConfirm: () => void;
   readonly onClose: () => void;
   readonly children: ReactNode;
@@ -72,13 +78,13 @@ export function ConfirmDialog({
         className="pop-sec confirm-dialog-body"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!pending) onConfirm();
+          if (!pending && refusal === null) onConfirm();
         }}
       >
         {children}
-        {error !== null && (
+        {(refusal ?? error) !== null && (
           <p className="fl-err" role="alert">
-            {error}
+            {refusal ?? error}
           </p>
         )}
         <div className="confirm-dialog-acts">
@@ -90,14 +96,16 @@ export function ConfirmDialog({
           >
             {closeLabel}
           </button>
-          <button
-            ref={actionRef}
-            type="submit"
-            className={`btn btn--${actionClass}`}
-            aria-disabled={pending}
-          >
-            {actionLabel}
-          </button>
+          {refusal === null && (
+            <button
+              ref={actionRef}
+              type="submit"
+              className={`btn btn--${actionClass}`}
+              aria-disabled={pending}
+            >
+              {actionLabel}
+            </button>
+          )}
         </div>
       </form>
     </GlassDialog>

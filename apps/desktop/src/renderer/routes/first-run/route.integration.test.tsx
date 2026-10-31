@@ -29,7 +29,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -60,7 +60,7 @@ const REMOTE = "git@github.com:rogier/shop.git";
  */
 const buildControllerInfo = (
   localRunnerId: string | null,
-  model: { instanceId: string; model: string } | null = null,
+  model: { providerAccountId: string; model: string } | null = null,
 ) => ({
   id: "01a06d02-7800-7000-8000-000000000001",
   publicKey: "controller-key",
@@ -712,7 +712,7 @@ describe("the first run's steps", () => {
         handlers: {
           "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
           "GET /api/v1/runners": { body: { items: [MOSS] } },
-          "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+          "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] },
           "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
@@ -730,7 +730,7 @@ describe("the first run's steps", () => {
     it("names the model that makes text generations, read again when All set opens", async () => {
       // The first run reads the record before the user logs in, when no model can be chosen yet.
       let reads = 0;
-      const sonnet = { instanceId: FIXTURE_INSTANCE.id, model: "claude-sonnet-5" };
+      const sonnet = { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-sonnet-5" };
       await openSignedIn({
         firstRun: { putOff: [] },
         handlers: {
@@ -739,7 +739,7 @@ describe("the first run's steps", () => {
             return { body: buildControllerInfo(MOSS!.id, reads === 1 ? null : sonnet) };
           },
           "GET /api/v1/runners": { body: { items: [MOSS] } },
-          "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+          "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] },
           "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
@@ -755,7 +755,7 @@ describe("the first run's steps", () => {
         handlers: {
           "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
           "GET /api/v1/runners": { body: { items: [MOSS] } },
-          "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+          "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] },
           "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },

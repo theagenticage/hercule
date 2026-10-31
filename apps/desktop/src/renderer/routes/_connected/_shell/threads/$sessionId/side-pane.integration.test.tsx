@@ -14,7 +14,7 @@ import {
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   FIXTURE_SUBAGENT,
   renderApp,
   setVisibility,
@@ -103,7 +103,7 @@ afterEach(() => {
 /** Starts the app signed in at `path`, with the delegating thread's reads and its interrupt. */
 const openApp = async (path: string) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
     ...buildThreadHandlers(THREAD),
     ...buildThreadHandlers(THREAD_FIXTURES.failed),
     [`POST ${INTERRUPT_PATH}`]: { body: THREAD.session },

@@ -12,13 +12,12 @@ import type {
   TextGenerationOutcome,
   TextGenerationRequest,
 } from "@hercule/protocol";
-import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
+import type { Plugin } from "@hercule/plugin-host";
 import { SYSTEM_ACTOR } from "../../actor";
 import { uuidFromString, withTransaction } from "../../db";
 import { get, send } from "../../http/testing";
-import { createPluginFixture, buildHarnessDefinition } from "../../plugins/testing";
 import {
-  findInstanceId,
+  findProviderAccountId,
   waitForFrames,
   waitForRunnerGone,
   WAIT_DEADLINE_MS,
@@ -31,27 +30,17 @@ import {
   TextGenerationError,
   type TextGenerationCall,
 } from "../../text-generation";
+import { buildTextGenerationPlugins } from "../../text-generation/testing";
 
 const SECRET_INSTRUCTIONS = "Name the thread in four words";
 const SECRET_INPUT = "the user pasted a private key here";
 const TITLE = "Fix the login bug";
 
-/** The three harnesses `automatic` tries, each suggesting a model of its own. */
-const withSuggestion = (id: string, model: string): HarnessDefinition => ({
-  ...buildHarnessDefinition(id, { token: "t" }),
-  suggestedTextGenerationModel: model,
-});
-
-const buildPlugins = (): ReadonlyArray<Plugin> => [
-  // One plugin per harness, named like the shipped ones, so the qualified ids
-  // are the ones `automatic` lists.
-  createPluginFixture({ id: "codex", definitions: [withSuggestion("codex", "codex-mini")] }).plugin,
-  createPluginFixture({ id: "pi", definitions: [withSuggestion("pi", "pi-small")] }).plugin,
-  createPluginFixture({
-    id: "claude-code",
-    definitions: [withSuggestion("claude-code", "haiku")],
-  }).plugin,
-];
+/**
+ * The three providers `automatic` tries, each suggesting a model of its own,
+ * and the harness that runs each, named like the shipped ones.
+ */
+const buildPlugins = (): ReadonlyArray<Plugin> => buildTextGenerationPlugins();
 
 const FACTS: RunnerFacts = {
   os: "darwin",
@@ -163,13 +152,13 @@ const logOut = (arranged: Arranged, runnerId: string): Promise<unknown> =>
     ).pipe(Effect.orDie),
   );
 
-/** Marks the login of one provider instance as expired, on every runner, as a probe would. */
-const logOutInstance = (arranged: Arranged, instanceId: string): Promise<unknown> =>
+/** Marks the login of one Provider Account as expired, on every runner, as a probe would. */
+const logOutAccount = (arranged: Arranged, providerAccountId: string): Promise<unknown> =>
   Effect.runPromise(
     withTransaction(
       arranged.harness.sql,
       arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-           WHERE instance_id = ${uuidFromString(instanceId)}`,
+           WHERE provider_account_id = ${uuidFromString(providerAccountId)}`,
     ).pipe(Effect.orDie),
   );
 
@@ -182,7 +171,7 @@ const reserve = (arranged: Arranged, runnerId: string): Promise<unknown> =>
   );
 
 describe("a text generation that succeeds", () => {
-  it("returns the decoded value, and sends the runner the model, the schema and the credentials", async () => {
+  it("returns the decoded value, and sends the runner the harness, the account's home, the model and the schema", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
 
@@ -195,9 +184,12 @@ describe("a text generation that succeeds", () => {
         1,
       );
       expect(request).toMatchObject({
-        instanceId: findInstanceId(arranged, "codex/codex"),
         harnessId: "codex/codex",
-        secrets: {},
+        harnessAccount: {
+          providerAccountId: findProviderAccountId(arranged, "codex/codex"),
+          harnessHome: `providers/homes/${findProviderAccountId(arranged, "codex/codex")}/codex/codex`,
+          modelArgument: "{model}",
+        },
         spec: {
           model: "codex-mini",
           instructions: SECRET_INSTRUCTIONS,
@@ -237,7 +229,8 @@ describe("a text generation that succeeds", () => {
       expect(entries[0]!.payload).toEqual({
         purpose: "sessions/thread.title",
         caller: "core:sessions",
-        instanceId: findInstanceId(arranged, "codex/codex"),
+        providerAccountId: findProviderAccountId(arranged, "codex/codex"),
+        harnessId: "codex/codex",
         model: "codex-mini",
         runnerId: arranged.runnerId,
         durationMs: expect.any(Number) as unknown,
@@ -279,8 +272,10 @@ describe("the last failure after the model setting changes", () => {
       await generate(arranged);
       expect((await readStatus(arranged)).lastFailure).toMatchObject({ reason: "failed" });
 
-      const pi = findInstanceId(arranged, "pi/pi");
-      expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
+      const pi = findProviderAccountId(arranged, "pi/pi");
+      expect((await setModel(arranged, { providerAccountId: pi, model: "haiku" })).status).toBe(
+        200,
+      );
 
       expect((await readStatus(arranged)).lastFailure).toBeNull();
     });
@@ -288,22 +283,22 @@ describe("the last failure after the model setting changes", () => {
 
   it("is not shown when automatic starts resolving to another model", async () => {
     await withFleet(async (arranged) => {
-      const codex = findInstanceId(arranged, "codex/codex");
-      const pi = findInstanceId(arranged, "pi/pi");
+      const codex = findProviderAccountId(arranged, "codex/codex");
+      const pi = findProviderAccountId(arranged, "pi/pi");
       arranged.wire.setTextGenerationAnswer(() => ({
         outcome: "failed",
         message: "codex went wrong",
       }));
       await generate(arranged);
       expect(await readStatus(arranged)).toMatchObject({
-        model: { instanceId: codex, model: "codex-mini" },
+        model: { providerAccountId: codex, harnessId: "codex/codex", model: "codex-mini" },
         lastFailure: { message: "codex went wrong" },
       });
 
-      await logOutInstance(arranged, codex);
+      await logOutAccount(arranged, codex);
 
       expect(await readStatus(arranged)).toEqual({
-        model: { instanceId: pi, model: "pi-small" },
+        model: { providerAccountId: pi, harnessId: "pi/pi", model: "pi-small" },
         unavailableReason: null,
         lastFailure: null,
       });
@@ -318,8 +313,10 @@ describe("the last failure after the model setting changes", () => {
         "textGenerationRequest",
         1,
       );
-      const pi = findInstanceId(arranged, "pi/pi");
-      expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
+      const pi = findProviderAccountId(arranged, "pi/pi");
+      expect((await setModel(arranged, { providerAccountId: pi, model: "haiku" })).status).toBe(
+        200,
+      );
 
       arranged.wire.send({
         _tag: "textGenerationReport",
@@ -434,17 +431,19 @@ describe("text generation switched off", () => {
 });
 
 describe("the model automatic chooses", () => {
-  it("prefers codex, then pi, then claude-code", async () => {
+  it("prefers OpenAI, then Z.ai, then Anthropic", async () => {
     await withFleet(async (arranged) => {
       expect((await readStatus(arranged)).model).toEqual({
-        instanceId: findInstanceId(arranged, "codex/codex"),
+        providerAccountId: findProviderAccountId(arranged, "codex/codex"),
+        harnessId: "codex/codex",
         model: "codex-mini",
       });
     });
     await withFleet(
       async (arranged) => {
         expect((await readStatus(arranged)).model).toEqual({
-          instanceId: findInstanceId(arranged, "pi/pi"),
+          providerAccountId: findProviderAccountId(arranged, "pi/pi"),
+          harnessId: "pi/pi",
           model: "pi-small",
         });
       },
@@ -453,7 +452,8 @@ describe("the model automatic chooses", () => {
     await withFleet(
       async (arranged) => {
         expect((await readStatus(arranged)).model).toEqual({
-          instanceId: findInstanceId(arranged, "claude-code/claude-code"),
+          providerAccountId: findProviderAccountId(arranged, "claude-code/claude-code"),
+          harnessId: "claude-code/claude-code",
           model: "haiku",
         });
       },
@@ -461,15 +461,14 @@ describe("the model automatic chooses", () => {
     );
   });
 
-  it("skips a harness that is logged out", async () => {
+  it("skips an account that is logged out", async () => {
     await withFleet(async (arranged) => {
-      // The logout is stored for every instance on the runner, so log back in
-      // everything but codex by rewriting the one row.
+      // Logs out the OpenAI account alone, by rewriting its rows.
       await Effect.runPromise(
         withTransaction(
           arranged.harness.sql,
           arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-               WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex/codex"))}`,
+               WHERE provider_account_id = ${uuidFromString(findProviderAccountId(arranged, "codex/codex"))}`,
         ).pipe(Effect.orDie),
       );
       answerOk(arranged);
@@ -485,7 +484,7 @@ describe("the model automatic chooses", () => {
   });
 
   for (const kind of ["offline", "without the capability"] as const) {
-    it(`skips an instance that only a runner ${kind} has, and runs on one that can take the call`, async () => {
+    it(`skips an account that only a runner ${kind} has, and runs on one that can take the call`, async () => {
       await withFleet(
         async (arranged) => {
           const other = await arranged.enlist();
@@ -499,7 +498,7 @@ describe("the model automatic chooses", () => {
               Effect.gen(function* () {
                 const sql = arranged.harness.sql;
                 yield* sql`DELETE FROM capability_snapshots
-                WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex/codex"))}
+                WHERE provider_account_id = ${uuidFromString(findProviderAccountId(arranged, "codex/codex"))}
                   AND runner_id = ${uuidFromString(other.runnerId)}`;
                 if (kind === "offline") {
                   yield* sql`UPDATE runners SET connectivity = 'offline'
@@ -510,7 +509,8 @@ describe("the model automatic chooses", () => {
           );
 
           expect((await readStatus(arranged)).model).toEqual({
-            instanceId: findInstanceId(arranged, "pi/pi"),
+            providerAccountId: findProviderAccountId(arranged, "pi/pi"),
+            harnessId: "pi/pi",
             model: "pi-small",
           });
           const result = await generate(arranged);
@@ -520,7 +520,7 @@ describe("the model automatic chooses", () => {
           const [entry] = await arranged.harness.audit("textGeneration.completed");
           expect(entry!.payload).toMatchObject({
             runnerId: other.runnerId,
-            instanceId: findInstanceId(arranged, "pi/pi"),
+            providerAccountId: findProviderAccountId(arranged, "pi/pi"),
           });
         },
         kind === "offline" ? {} : { capabilities: [] },
@@ -528,7 +528,7 @@ describe("the model automatic chooses", () => {
     });
   }
 
-  it("fails with unavailable, and records it, when no harness offers its suggested model", async () => {
+  it("fails with unavailable, and records it, when no account offers its provider's suggested model", async () => {
     await withFleet(
       async (arranged) => {
         answerOk(arranged);
@@ -540,13 +540,14 @@ describe("the model automatic chooses", () => {
         const [entry] = await arranged.harness.audit("textGeneration.failed");
         expect(entry!.payload).toMatchObject({
           reason: "unavailable",
-          instanceId: null,
+          providerAccountId: null,
+          harnessId: null,
           model: null,
           runnerId: null,
         });
         expect(await readStatus(arranged)).toMatchObject({
           model: null,
-          unavailableReason: expect.stringContaining("suggested model") as unknown,
+          unavailableReason: expect.stringContaining("suggested text generation model") as unknown,
           lastFailure: { reason: "unavailable" },
         });
       },
@@ -556,35 +557,39 @@ describe("the model automatic chooses", () => {
 });
 
 describe("a model the user chose", () => {
-  it("runs on that instance and model", async () => {
+  it("runs on that account and model, in the account's harness", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
-      const pi = findInstanceId(arranged, "pi/pi");
-      expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
+      const pi = findProviderAccountId(arranged, "pi/pi");
+      expect((await setModel(arranged, { providerAccountId: pi, model: "haiku" })).status).toBe(
+        200,
+      );
 
       await generate(arranged);
 
       expect(requestsOn(arranged)[0]).toMatchObject({
-        instanceId: pi,
         harnessId: "pi/pi",
+        harnessAccount: { providerAccountId: pi, modelArgument: "zai/{model}" },
         spec: { model: "haiku" },
       });
       expect(await readStatus(arranged)).toMatchObject({
-        model: { instanceId: pi, model: "haiku" },
+        model: { providerAccountId: pi, harnessId: "pi/pi", model: "haiku" },
       });
     });
   });
 
-  it("never falls back to another harness when the chosen one cannot run", async () => {
+  it("never falls back to another account when the chosen one cannot run", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
-      const pi = findInstanceId(arranged, "pi/pi");
-      expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
+      const pi = findProviderAccountId(arranged, "pi/pi");
+      expect((await setModel(arranged, { providerAccountId: pi, model: "haiku" })).status).toBe(
+        200,
+      );
       await Effect.runPromise(
         withTransaction(
           arranged.harness.sql,
           arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-               WHERE instance_id = ${uuidFromString(pi)}`,
+               WHERE provider_account_id = ${uuidFromString(pi)}`,
         ).pipe(Effect.orDie),
       );
 
@@ -592,6 +597,39 @@ describe("a model the user chose", () => {
 
       expect(result).toMatchObject({ ok: false, error: { reason: "unavailable" } });
       expect(requestsOn(arranged)).toEqual([]);
+    });
+  });
+});
+
+describe("a chosen account that was deleted", () => {
+  it("makes text generation unavailable, says why, and sends nothing", async () => {
+    await withFleet(async (arranged) => {
+      answerOk(arranged);
+      const pi = findProviderAccountId(arranged, "pi/pi");
+      expect((await setModel(arranged, { providerAccountId: pi, model: "pi-small" })).status).toBe(
+        200,
+      );
+      await Effect.runPromise(
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`DELETE FROM provider_accounts WHERE id = ${uuidFromString(pi)}`,
+        ).pipe(Effect.orDie),
+      );
+
+      const result = await generate(arranged);
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          reason: "unavailable",
+          message: expect.stringContaining("was deleted") as unknown,
+        },
+      });
+      expect(requestsOn(arranged)).toEqual([]);
+      expect(await readStatus(arranged)).toMatchObject({
+        model: null,
+        unavailableReason: expect.stringContaining("was deleted") as unknown,
+      });
     });
   });
 });
@@ -653,14 +691,16 @@ describe("which runner makes the call", () => {
       async (arranged) => {
         const other = await arranged.enlist();
         other.wire.setTextGenerationAnswer(() => OK);
-        const pi = findInstanceId(arranged, "pi/pi");
-        expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
+        const pi = findProviderAccountId(arranged, "pi/pi");
+        expect((await setModel(arranged, { providerAccountId: pi, model: "haiku" })).status).toBe(
+          200,
+        );
         // The local runner no longer lists any model for pi.
         await Effect.runPromise(
           withTransaction(
             arranged.harness.sql,
             arranged.harness.sql`UPDATE capability_snapshots SET models = '[]'
-            WHERE instance_id = ${uuidFromString(pi)}
+            WHERE provider_account_id = ${uuidFromString(pi)}
               AND runner_id = ${uuidFromString(arranged.runnerId)}`,
           ).pipe(Effect.orDie),
         );
@@ -679,10 +719,10 @@ describe("which runner makes the call", () => {
   it("fails with unavailable, and says why in the status, when no runner lists the chosen model", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
-      const pi = findInstanceId(arranged, "pi/pi");
-      expect((await setModel(arranged, { instanceId: pi, model: "not-in-any-list" })).status).toBe(
-        200,
-      );
+      const pi = findProviderAccountId(arranged, "pi/pi");
+      expect(
+        (await setModel(arranged, { providerAccountId: pi, model: "not-in-any-list" })).status,
+      ).toBe(200);
 
       const result = await generate(arranged);
 
@@ -693,7 +733,8 @@ describe("which runner makes the call", () => {
       expect(requestsOn(arranged)).toEqual([]);
       const [entry] = await arranged.harness.audit("textGeneration.failed");
       expect(entry!.payload).toMatchObject({
-        instanceId: pi,
+        providerAccountId: pi,
+        harnessId: "pi/pi",
         model: "not-in-any-list",
         runnerId: null,
       });
@@ -914,8 +955,13 @@ describe("an error nobody expected", () => {
   it("is recorded as failed, with one audit entry and a last failure, and then reaches the caller", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
-      // The call reads the instance's secrets before it sends anything. With
-      // the table gone, that read fails in a way no caller can act on.
+      // The Z.ai account holds a key, so the call reads its secret before it
+      // sends anything. With the table gone, that read fails in a way no
+      // caller can act on.
+      const pi = findProviderAccountId(arranged, "pi/pi");
+      expect((await setModel(arranged, { providerAccountId: pi, model: "pi-small" })).status).toBe(
+        200,
+      );
       await Effect.runPromise(
         withTransaction(
           arranged.harness.sql,

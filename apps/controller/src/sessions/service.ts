@@ -2982,7 +2982,7 @@ const make = Effect.gen(function* () {
         // An input fails, instead of going back to waiting, in two cases:
         //
         // - The failure is about the session's setup (the harness is not
-        //   installed or not logged in, the transcript to resume is
+        //   installed or not signed in, the transcript to resume is
         //   missing). Sending the input again would fail the same way, and
         //   the runner ends the session.
         // - The failure leaves it unknown whether the harness took the input

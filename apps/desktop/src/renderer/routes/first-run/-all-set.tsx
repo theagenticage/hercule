@@ -25,11 +25,11 @@ import { pickProjectTint } from "../../screens/project-tile";
 /**
  * Renders All set, the first run's last screen. Leaving it, by either of its
  * buttons, ends the first run: main forgets it, and the app opens the New
- * thread draft in the first project. Without a logged-in provider, the
- * draft's Log in button is where the user logs in.
+ * thread draft in the first project. Without a signed-in account, the
+ * draft's Sign in button is where the user signs in.
  *
  * The recap names the model that makes text generations. The controller works
- * it out when it answers, and the user may have logged in since the first run
+ * it out when it answers, and the user may have signed in since the first run
  * read the controller's record, so All set reads the record again each time
  * it opens and leaves the row out until that read answers. The first run is
  * one route and All set is a card in it, so no route loader runs when All set
@@ -63,7 +63,11 @@ export function AllSetCard({
   const textGeneration =
     controller.isFetching || controller.data === undefined
       ? null
-      : describeTextGenerationRecap(reads.instances, controller.data.textGeneration);
+      : describeTextGenerationRecap(
+          reads.providers,
+          reads.accounts,
+          controller.data.textGeneration,
+        );
   const { project } = recap;
 
   const endFirstRun = useMutation({

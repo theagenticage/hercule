@@ -22,9 +22,9 @@ import { HarnessLogo } from "../thread/harness-logo";
  * other button calls `onLeave`, which opens the new project's draft. `error`
  * is why the last leave failed, or null.
  *
- * Without a logged-in provider, no agent can take a desk, so the main button
- * is Log in to a provider and Open Hercule is the quiet one. Both open the
- * draft, whose own Log in button is where the user logs in.
+ * Without a signed-in account, no agent can take a desk, so the main button
+ * is Sign in to an account and Open Hercule is the quiet one. Both open the
+ * draft, whose own Sign in button is where the user signs in.
  */
 export function AllSet({
   username,
@@ -69,7 +69,7 @@ export function AllSet({
       </div>
       <p className="st-sub">
         {recap.providerNames === null
-          ? "Agents need a provider before they can take a desk. Log in from your first thread’s draft, and it can start."
+          ? "Agents need an account before they can take a desk. Sign in from your first thread’s draft, and it can start."
           : recap.gitHubAccount === null
             ? `Your first colleague is at its desk. It can research, write and plan for ${projectName} now. For code, connect GitHub, then add ${projectName}’s repository.`
             : `Your first colleague is at its desk. Tell it what to do in ${projectName}: it works in its own workspace, and raises its hand when it needs you.`}
@@ -82,9 +82,9 @@ export function AllSet({
           mark={
             recap.harnessId === null ? null : <HarnessLogo harnessId={recap.harnessId} size={16} />
           }
-          name={<b>{recap.providerNames ?? "No provider yet"}</b>}
+          name={<b>{recap.providerNames ?? "No account yet"}</b>}
         >
-          {recap.providerNames === null ? doItNow("providers") : <em>logged in</em>}
+          {recap.providerNames === null ? doItNow("providers") : <em>signed in</em>}
         </RecapRow>
         {recap.providerNames === null || textGeneration === null ? null : (
           <RecapRow mark={<SparkleIcon size={16} />} name={<b>Text generation</b>}>
@@ -125,7 +125,7 @@ export function AllSet({
         {recap.providerNames === null ? (
           <>
             <button type="button" className="btn btn--accent btn--lg" onClick={onLeave}>
-              Log in to a provider
+              Sign in to an account
             </button>
             <button type="button" className="btn btn--quiet" onClick={onLeave}>
               Open Hercule

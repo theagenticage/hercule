@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessDefinition, ProviderDefinition } from "@hercule/plugin-host";
-import type { RegisteredHarness, RegisteredProvider } from "../plugins";
-import { buildHarnessDefinition } from "../plugins/testing";
+import type { RegisteredHarness } from "./harnesses";
+import type { RegisteredProvider } from "./providers";
+import { buildHarnessDefinition } from "./testing";
 import { checkHarnessSupport } from "./harness-support";
 
 const PROVIDER: RegisteredProvider = {

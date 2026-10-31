@@ -1,5 +1,5 @@
 import { type Effect, Schema } from "effect";
-import { AccessMode } from "@hercule/protocol";
+import { AccessMode, CredentialVariable, ModelArgument } from "@hercule/protocol";
 import type { ConnectionUnavailable } from "./connections";
 import { PLUGIN_ID_SOURCE } from "./manifest";
 import { TaskPriority } from "./limits";
@@ -100,17 +100,6 @@ export const QualifiedContributionId = ContributionName.check(
 );
 
 /**
- * An environment variable name, as a harness process reads it: capital
- * letters, digits and underscores, starting with a letter.
- */
-const EnvironmentVariableName = Schema.String.check(
-  Schema.isPattern(/^[A-Z][A-Z0-9_]*$/, {
-    message:
-      "An environment variable name is capital letters, digits and underscores, starting with a letter.",
-  }),
-);
-
-/**
  * How a harness runs the models of one provider: the account kinds it can run
  * for that provider, how it names one of the provider's models, and which of
  * the account's models it can run (spec 06 section 2).
@@ -128,18 +117,14 @@ export const HarnessProviderSupport = Schema.Struct({
        * harness process only. Absent for a kind whose login lives in the
        * Harness Home instead.
        */
-      credentialVariable: Schema.optionalKey(EnvironmentVariableName),
+      credentialVariable: Schema.optionalKey(CredentialVariable),
     }),
   ),
   /**
    * How the harness names a model of this provider, with `{model}` standing
    * for the provider's own model id: `{model}`, or `zai/{model}` for pi.
    */
-  modelArgument: Schema.String.check(
-    Schema.isPattern(/\{model\}/, {
-      message: "A model argument must contain {model}, where the model id goes.",
-    }),
-  ),
+  modelArgument: ModelArgument,
   /**
    * Which of the account's models the harness can run: `all` of them, or only
    * those in the harness's own model list for the account (`own-list`).

@@ -19,7 +19,7 @@ import {
   type AssistantReply,
   type DisallowedTool,
 } from "@hercule/contract";
-import { profilesQuery, providersQuery } from "../../../../../app/queries";
+import { profilesQuery, providerAccountsQuery, providersQuery } from "../../../../../app/queries";
 import type { SavedField } from "../../../../../app/saved-field";
 import { ShieldIcon } from "../../../../../icons/shield";
 import { DisallowedToolsRow } from "../../../../../screens/settings/assistants/disallowed-tools-row";
@@ -170,22 +170,27 @@ export function HowItWorksSection({ assistant }: { readonly assistant: Assistant
 }
 
 /**
- * Renders the Provider row: one menu that picks both the provider instance
- * and the model on it. The hint is the account the instance is logged in as.
+ * Renders the Provider row: one menu that picks both the account and the
+ * model on it. The hint is the identity the account is signed in as.
  */
 function ProviderRow({ assistant }: { readonly assistant: Assistant }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
   const provider = useSavedAssistantField(
     client,
     assistant.id,
-    { instanceId: assistant.instanceId, model: assistant.model?.model ?? null },
+    {
+      providerAccountId: assistant.providerAccountId,
+      harnessId: assistant.harnessId,
+      model: assistant.model?.model ?? null,
+    },
     (_value, picked: ProviderChoice) => picked,
     (latest, picked) => buildAssistantUpdate(latest, { ...buildAssistantDraft(latest), ...picked }),
   );
   // The field is built for the value on screen, so a pick that is still
-  // saving shows its own instance's logo and account.
-  const field = buildAssistantProviderField(instances, provider.value);
+  // saving shows its own account's logo and identity.
+  const field = buildAssistantProviderField(accounts, providers, provider.value);
   return (
     <SettingRow
       label="Provider"
@@ -200,7 +205,7 @@ function ProviderRow({ assistant }: { readonly assistant: Assistant }): JSX.Elem
             onChange={(event) => provider.save(JSON.parse(event.target.value) as ProviderChoice)}
           >
             {field.groups.map((group) => (
-              <optgroup key={group.instanceId} label={group.label}>
+              <optgroup key={group.providerAccountId} label={group.label}>
                 {group.choices.map((choice) => (
                   <option key={choice.model ?? ""} value={encodeProviderChoice(choice)}>
                     {choice.label}
@@ -215,8 +220,8 @@ function ProviderRow({ assistant }: { readonly assistant: Assistant }): JSX.Elem
   );
 }
 
-/** An assistant's provider instance and the model on it, as the Provider row picks them. */
-type ProviderChoice = Pick<AssistantDraft, "instanceId" | "model">;
+/** An assistant's account, its harness and the model, as the Provider row picks them. */
+type ProviderChoice = Pick<AssistantDraft, "providerAccountId" | "harnessId" | "model">;
 
 /** A disallowed tools change: one tool family added to the list or removed from it. */
 interface DisallowedToolChange {
@@ -224,9 +229,9 @@ interface DisallowedToolChange {
   readonly disallowed: boolean;
 }
 
-/** Returns the select's value for an instance and a model: both, as JSON, in a fixed key order. */
-const encodeProviderChoice = ({ instanceId, model }: ProviderChoice): string =>
-  JSON.stringify({ instanceId, model });
+/** Returns the select's value for a choice: its three parts, as JSON, in a fixed key order. */
+const encodeProviderChoice = ({ providerAccountId, harnessId, model }: ProviderChoice): string =>
+  JSON.stringify({ providerAccountId, harnessId, model });
 
 /**
  * Returns one scalar field of the form as a saved field: a change saves

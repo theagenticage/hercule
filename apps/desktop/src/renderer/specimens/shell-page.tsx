@@ -67,7 +67,7 @@ import type {
   PluginDetail,
   Profile,
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -88,6 +88,7 @@ import {
   type Live,
   type ThreadPicks,
 } from "@hercule/client-core";
+import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
 import type { Bridge } from "../../ipc/bridge";
 import {
   agentsQuery,
@@ -112,6 +113,8 @@ import {
   previewSkillsQuery,
   profilesQuery,
   projectsQuery,
+  harnessesQuery,
+  providerAccountsQuery,
   providersQuery,
   queuedInputsQuery,
   rerunsQuery,
@@ -206,7 +209,7 @@ export interface SidebarRecords {
   readonly workspaces: ReadonlyArray<Workspace>;
   readonly resources: ReadonlyArray<Resource>;
   readonly runners: ReadonlyArray<Runner>;
-  readonly instances: ReadonlyArray<ProviderInstance>;
+  readonly accounts: ReadonlyArray<ProviderAccount>;
   readonly user: SignedInUser;
   /**
    * The Connections, which decide the red dot on the Connections row of the
@@ -561,7 +564,11 @@ const seedQueryCache = (
   queryClient.setQueryData(workspacesQuery(client).queryKey, records.workspaces);
   queryClient.setQueryData(resourcesQuery(client).queryKey, records.resources);
   queryClient.setQueryData(runnersQuery(client).queryKey, records.runners);
-  queryClient.setQueryData(providersQuery(client).queryKey, records.instances);
+  queryClient.setQueryData(providerAccountsQuery(client).queryKey, records.accounts);
+  // The providers and harnesses are what the plugins register, so every
+  // specimen shows the same ones.
+  queryClient.setQueryData(providersQuery(client).queryKey, PROVIDERS);
+  queryClient.setQueryData(harnessesQuery(client).queryKey, HARNESSES);
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
   queryClient.setQueryData(connectionsQuery(client).queryKey, records.connections ?? []);
   queryClient.setQueryData(signalsToDoQuery(client).queryKey, records.signals ?? []);

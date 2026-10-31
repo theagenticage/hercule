@@ -12,7 +12,7 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -109,11 +109,17 @@ describe("Settings > System", () => {
 });
 
 describe("Settings > System, text generation", () => {
-  const OPUS = { instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" };
-  const SONNET = { instanceId: FIXTURE_INSTANCE.id, model: "claude-sonnet-5" };
+  const OPUS = { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" };
+  const SONNET = { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-sonnet-5" };
+
+  /** Returns `model` as the controller reports it: with the harness it runs in. */
+  const report = (model: { providerAccountId: string; model: string }) => ({
+    ...model,
+    harnessId: "claude-code/claude-code",
+  });
 
   /**
-   * Opens System on a controller that holds the Claude Code instance, the
+   * Opens System on a controller that holds the Anthropic account, the
    * stored `setting` (none when undefined) and the text generation `status`.
    * A save is answered with the settings it stores. `status` is either fixed,
    * or worked out from the setting stored when the controller is read, as the
@@ -131,7 +137,7 @@ describe("Settings > System, text generation", () => {
       user: {},
     };
     const calls = stubApi({
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
       "GET /api/v1/settings": () => ({ body: stored }),
       "PATCH /api/v1/settings": (call) => {
         stored = { controller: (call.body as SettingsPatch).controller ?? {}, user: {} };
@@ -166,8 +172,8 @@ describe("Settings > System, text generation", () => {
   const followSetting = (stored: unknown): ControllerInfo["textGeneration"] => {
     if (stored === "off") return NO_TEXT_GENERATION;
     if (typeof stored === "object")
-      return { model: stored as typeof OPUS, lastFailure: null, unavailableReason: null };
-    return { model: SONNET, lastFailure: null, unavailableReason: null };
+      return { model: report(stored as typeof OPUS), lastFailure: null, unavailableReason: null };
+    return { model: report(SONNET), lastFailure: null, unavailableReason: null };
   };
 
   const readSelect = (): HTMLSelectElement =>
@@ -179,16 +185,16 @@ describe("Settings > System, text generation", () => {
       .map((call) => call.body);
 
   it("names the model that Automatic resolves to, and offers each model and Off", async () => {
-    await openSystem({ model: SONNET, lastFailure: null, unavailableReason: null });
+    await openSystem({ model: report(SONNET), lastFailure: null, unavailableReason: null });
 
     const select = readSelect();
     expect(select.selectedOptions[0]?.textContent).toBe(
-      "Automatic - currently Claude Code · Claude Sonnet 5",
+      "Automatic - currently Anthropic · Claude Sonnet 5",
     );
     expect([...select.options].map((option) => option.textContent)).toEqual([
-      "Automatic - currently Claude Code · Claude Sonnet 5",
-      "Claude Code · Claude Sonnet 5",
-      "Claude Code · Claude Opus 5",
+      "Automatic - currently Anthropic · Claude Sonnet 5",
+      "Anthropic · Claude Sonnet 5",
+      "Anthropic · Claude Opus 5",
       "Off",
     ]);
   });
@@ -201,7 +207,7 @@ describe("Settings > System, text generation", () => {
 
     await waitFor(() => {
       expect(readSelect().selectedOptions[0]?.textContent).toBe(
-        "Automatic - currently Claude Code · Claude Sonnet 5",
+        "Automatic - currently Anthropic · Claude Sonnet 5",
       );
     });
     expect(listPatches(calls)).toEqual([{ controller: { "textGeneration.model": "automatic" } }]);
@@ -209,13 +215,13 @@ describe("Settings > System, text generation", () => {
 
   it("names the model Automatic resolves to after switching from a chosen model", async () => {
     await openSystem(followSetting, OPUS);
-    expect(readSelect().selectedOptions[0]?.textContent).toBe("Claude Code · Claude Opus 5");
+    expect(readSelect().selectedOptions[0]?.textContent).toBe("Anthropic · Claude Opus 5");
 
     await userEvent.selectOptions(readSelect(), "automatic");
 
     await waitFor(() => {
       expect(readSelect().selectedOptions[0]?.textContent).toBe(
-        "Automatic - currently Claude Code · Claude Sonnet 5",
+        "Automatic - currently Anthropic · Claude Sonnet 5",
       );
     });
   });
@@ -227,9 +233,9 @@ describe("Settings > System, text generation", () => {
   });
 
   it("saves the picked model, and then Off", async () => {
-    const calls = await openSystem({ model: SONNET, lastFailure: null, unavailableReason: null });
+    const calls = await openSystem({ model: report(SONNET), lastFailure: null, unavailableReason: null });
 
-    await userEvent.selectOptions(readSelect(), "Claude Code · Claude Opus 5");
+    await userEvent.selectOptions(readSelect(), "Anthropic · Claude Opus 5");
     await waitFor(() => {
       expect(listPatches(calls)).toEqual([{ controller: { "textGeneration.model": OPUS } }]);
     });
@@ -245,14 +251,14 @@ describe("Settings > System, text generation", () => {
   });
 
   it("shows the stored model", async () => {
-    await openSystem({ model: OPUS, lastFailure: null, unavailableReason: null }, OPUS);
+    await openSystem({ model: report(OPUS), lastFailure: null, unavailableReason: null }, OPUS);
 
-    expect(readSelect().selectedOptions[0]?.textContent).toBe("Claude Code · Claude Opus 5");
+    expect(readSelect().selectedOptions[0]?.textContent).toBe("Anthropic · Claude Opus 5");
   });
 
   it("shows the last failure, with its age, its reason and the controller's message", async () => {
     await openSystem({
-      model: SONNET,
+      model: report(SONNET),
       lastFailure: {
         reason: "timeout",
         message: "Claude Code did not answer within 60 seconds.",
@@ -268,7 +274,7 @@ describe("Settings > System, text generation", () => {
 
   it("reads a failure with the reason failed as a failed call, not as a missing model", async () => {
     await openSystem({
-      model: SONNET,
+      model: report(SONNET),
       lastFailure: {
         reason: "failed",
         message: "The harness exited with code 1.",
@@ -283,7 +289,7 @@ describe("Settings > System, text generation", () => {
   });
 
   it("shows no failure line when nothing has failed", async () => {
-    await openSystem({ model: SONNET, lastFailure: null, unavailableReason: null });
+    await openSystem({ model: report(SONNET), lastFailure: null, unavailableReason: null });
     expect(document.querySelector(".set-note")).toBeNull();
   });
 

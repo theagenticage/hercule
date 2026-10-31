@@ -92,6 +92,13 @@ describe("what a harness declares it runs", () => {
   it.each([
     ["an unqualified provider id", { providerId: "zai" }],
     ["a model argument without {model}", { modelArgument: "zai/model" }],
+    ["a model argument with {model} twice", { modelArgument: "{model}/{model}" }],
+    ["a model argument with another brace", { modelArgument: "{model}}" }],
+    ["a model argument over the wire's length", { modelArgument: `${"a".repeat(128)}{model}` }],
+    [
+      "a credential variable over the wire's length",
+      { kinds: [{ kind: "api-key", credentialVariable: "A".repeat(129) }] },
+    ],
     [
       "a credential variable in lower case",
       { kinds: [{ kind: "api-key", credentialVariable: "zai_key" }] },
