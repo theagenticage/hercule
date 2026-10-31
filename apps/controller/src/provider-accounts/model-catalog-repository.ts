@@ -27,6 +27,13 @@ export interface StoredModelCatalog {
   readonly firstSeen: ReadonlyMap<string, string>;
   /** When the last successful read ended; `null` before the first one. */
   readonly readAt: string | null;
+  /**
+   * When the first successful read ended; `null` before it. It is set once
+   * and never changes. It is stored apart from `firstSeen` because a first
+   * read that lists no model leaves `firstSeen` empty, and the first read that
+   * lists some would then look like the first one.
+   */
+  readonly firstReadAt: string | null;
   /** Why the newest read failed; `null` when it succeeded or none has run. */
   readonly error: string | null;
   /** When the controller sent the probe whose answer `models` holds; `null` before the first successful read. */
@@ -48,6 +55,7 @@ interface CatalogRow {
   readonly models: string | null;
   readonly first_seen: string | null;
   readonly read_at: string | null;
+  readonly first_read_at: string | null;
   readonly error: string | null;
   readonly models_stamp: string | null;
   readonly attempt_stamp: string | null;
@@ -70,6 +78,7 @@ const toStoredCatalog = (row: CatalogRow): Effect.Effect<StoredModelCatalog, Sch
         Object.entries(row.first_seen === null ? {} : yield* decodeFirstSeen(row.first_seen)),
       ),
       readAt: row.read_at,
+      firstReadAt: row.first_read_at,
       error: row.error,
       modelsStamp: row.models_stamp,
       attemptStamp: row.attempt_stamp,
@@ -78,7 +87,7 @@ const toStoredCatalog = (row: CatalogRow): Effect.Effect<StoredModelCatalog, Sch
 
 /** Selects one entry per account, with the catalog columns empty for an account that was never read. */
 const SELECT_CATALOGS = `
-  SELECT a.id AS provider_account_id, c.models, c.first_seen, c.read_at, c.error,
+  SELECT a.id AS provider_account_id, c.models, c.first_seen, c.read_at, c.first_read_at, c.error,
          c.models_stamp, c.attempt_stamp
   FROM provider_accounts a
   LEFT JOIN model_catalogs c ON c.provider_account_id = a.id
@@ -108,14 +117,17 @@ const make = Effect.gen(function* () {
   const upsert = (catalog: StoredModelCatalog): Effect.Effect<void, SqlError> =>
     Effect.asVoid(sql`
       INSERT INTO model_catalogs
-        (provider_account_id, models, first_seen, read_at, error, models_stamp, attempt_stamp)
+        (provider_account_id, models, first_seen, read_at, first_read_at, error, models_stamp,
+         attempt_stamp)
       VALUES (${uuidFromString(catalog.providerAccountId)}, ${JSON.stringify(catalog.models)},
               ${JSON.stringify(Object.fromEntries(catalog.firstSeen))}, ${catalog.readAt},
-              ${catalog.error}, ${catalog.modelsStamp}, ${catalog.attemptStamp})
+              ${catalog.firstReadAt}, ${catalog.error}, ${catalog.modelsStamp},
+              ${catalog.attemptStamp})
       ON CONFLICT (provider_account_id) DO UPDATE SET
         models = excluded.models,
         first_seen = excluded.first_seen,
         read_at = excluded.read_at,
+        first_read_at = excluded.first_read_at,
         error = excluded.error,
         models_stamp = excluded.models_stamp,
         attempt_stamp = excluded.attempt_stamp
@@ -167,6 +179,7 @@ const make = Effect.gen(function* () {
     /**
      * Stores a successful read: replaces the models, sets `readAt`, and adds
      * the slugs the catalog has not held before to `firstSeen` at `readAt`.
+     * The first successful read also sets `firstReadAt` to `readAt`.
      * `stamp` is when the controller sent the probe.
      *
      * Returns whether it stored: `false` when the catalog already holds models
@@ -196,6 +209,7 @@ const make = Effect.gen(function* () {
           models,
           firstSeen,
           readAt,
+          firstReadAt: found.value.firstReadAt ?? readAt,
           error: newestIsLater ? found.value.error : null,
           modelsStamp: stamp,
           attemptStamp: newestIsLater ? found.value.attemptStamp : stamp,

@@ -262,6 +262,7 @@ export {
   ModelProfileEntry,
   ModelProfileCreateInput,
   ModelProfileUpdateInput,
+  NewModel,
   ResolvedModelProfileEntry,
 } from "./groups/model-profile";
 export {

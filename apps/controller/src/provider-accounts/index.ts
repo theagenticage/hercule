@@ -29,6 +29,7 @@ export {
   computeDefaultSelection,
   ModelCatalogs,
   ModelCatalogsLayer,
+  type ArrivedModel,
   type ChosenReads,
   type UnservedRead,
 } from "./model-catalogs";

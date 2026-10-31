@@ -73,6 +73,42 @@ export const computeDefaultSelection = (
   };
 };
 
+/** A model that joined an account's Default Selection after the account's first catalog read. */
+export interface ArrivedModel {
+  readonly model: string;
+  /** The model's name in the account's catalog. */
+  readonly name: string;
+  /** When the controller first saw the model in the account's catalog. */
+  readonly firstSeenAt: string;
+}
+
+/**
+ * Computes the models that arrived in an account's Default Selection after
+ * its first successful catalog read, in the order of the Default Selection.
+ * Returns none while the account has never been read, and none for a provider
+ * whose Default Selection is `none`.
+ *
+ * A model arrived when it is in the Default Selection now and was first seen
+ * later than the first read. So a model of the first read never arrived, and a
+ * model first seen after it but marked legacy has not arrived yet. If that
+ * model later stops being legacy, it arrives then, because its first-seen time
+ * is still after the first read.
+ */
+export const computeArrivedModels = (
+  provider: Pick<RegisteredProvider, "defaultSelection">,
+  catalog: Pick<StoredModelCatalog, "models" | "firstSeen" | "firstReadAt">,
+): ReadonlyArray<ArrivedModel> => {
+  if (catalog.firstReadAt === null) return [];
+  const firstReadMillis = Date.parse(catalog.firstReadAt);
+  const names = new Map(catalog.models.map((model) => [model.slug, model.name]));
+  return computeDefaultSelection(provider, catalog.models).models.flatMap((model) => {
+    const firstSeenAt = catalog.firstSeen.get(model);
+    return firstSeenAt !== undefined && Date.parse(firstSeenAt) > firstReadMillis
+      ? [{ model, name: names.get(model) ?? model, firstSeenAt }]
+      : [];
+  });
+};
+
 /**
  * Returns the error to store for a probe that did not find the account signed
  * in: the harness's own message when it gave one, else a sentence that says
@@ -197,6 +233,10 @@ const make = Effect.gen(function* () {
       return stored;
     });
 
+  /** Returns the stored catalog of every account, in the order the accounts were added. Dies when a stored row is corrupt. */
+  const listStoredCatalogs = (): Effect.Effect<ReadonlyArray<StoredModelCatalog>, SqlError> =>
+    catalogs.listCatalogs().pipe(Effect.catchTag("SchemaError", Effect.die));
+
   return {
     /**
      * Returns the catalog of every account, in the order the accounts were
@@ -204,10 +244,39 @@ const make = Effect.gen(function* () {
      * time. Dies when a stored row is corrupt.
      */
     listCatalogs: (): Effect.Effect<ReadonlyArray<ModelCatalog>, SqlError> =>
-      catalogs.listCatalogs().pipe(
-        Effect.catchTag("SchemaError", Effect.die),
-        Effect.flatMap((all) => Effect.forEach(all, toModelCatalog)),
-      ),
+      Effect.flatMap(listStoredCatalogs(), (all) => Effect.forEach(all, toModelCatalog)),
+
+    /**
+     * Returns the catalog of every account, as `listCatalogs` does, and with
+     * it the models that arrived in each account's Default Selection after its
+     * first read (`computeArrivedModels`), by account id. An account whose
+     * provider is not loaded has no entry there. Reads the stored catalogs
+     * once for both. Dies when a stored row is corrupt.
+     */
+    listCatalogsWithArrivedModels: (): Effect.Effect<
+      {
+        readonly catalogs: ReadonlyArray<ModelCatalog>;
+        readonly arrivedModels: ReadonlyMap<string, ReadonlyArray<ArrivedModel>>;
+      },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const stored = yield* listStoredCatalogs();
+        const providers = yield* host.providers();
+        const providerIds = new Map(
+          (yield* accounts.list()).map((account) => [account.id, account.providerId]),
+        );
+        const arrivedModels = new Map<string, ReadonlyArray<ArrivedModel>>();
+        for (const catalog of stored) {
+          const provider = providers.find(
+            (one) => one.id === providerIds.get(catalog.providerAccountId),
+          );
+          if (provider !== undefined) {
+            arrivedModels.set(catalog.providerAccountId, computeArrivedModels(provider, catalog));
+          }
+        }
+        return { catalogs: yield* Effect.forEach(stored, toModelCatalog), arrivedModels };
+      }),
 
     /**
      * Returns the account's catalog. Fails with `NotFound` when the account

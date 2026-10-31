@@ -144,6 +144,23 @@ export const ResolvedModelProfileEntry = Schema.Struct({
 export type ResolvedModelProfileEntry = Schema.Schema.Type<typeof ResolvedModelProfileEntry>;
 
 /**
+ * A model that joined its account's Default Selection after the account's
+ * first Model Catalog read, and that the profile has neither taken in nor
+ * dismissed. A client offers it as "New" with Add and Not now.
+ *
+ * `firstSeenAt` is when the controller first saw the model in the account's
+ * catalog, which is when it arrived.
+ */
+export const NewModel = Schema.Struct({
+  model: ModelSlug,
+  /** The model's name in the account's Model Catalog. */
+  name: Schema.String,
+  firstSeenAt: Timestamp,
+});
+
+export type NewModel = Schema.Schema.Type<typeof NewModel>;
+
+/**
  * One account's section of a profile, as a client reads it.
  *
  * `harnessId` is the harness the section's entries run in unless an entry
@@ -166,6 +183,14 @@ export const ResolvedModelProfileAccount = Schema.Struct({
    */
   selectionPending: Schema.Boolean,
   entries: Schema.Array(ResolvedModelProfileEntry),
+  /**
+   * The models to announce as new in this section, in the order of the
+   * account's Default Selection. A model is listed while the section holds no
+   * entry of it (in any harness) and the profile has not dismissed it. Empty
+   * while `selectionPending`, and for a provider whose Default Selection is
+   * empty.
+   */
+  newModels: Schema.Array(NewModel),
 });
 
 export type ResolvedModelProfileAccount = Schema.Schema.Type<typeof ResolvedModelProfileAccount>;

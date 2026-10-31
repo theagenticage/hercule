@@ -11,7 +11,7 @@ import type { ModelDescriptor, ProbeResult } from "@hercule/protocol";
 import { withTransaction } from "../db";
 import { ModelProfileService } from "../model-profiles";
 import { runWithProfiles } from "../model-profiles/testing";
-import { ModelCatalogs, computeDefaultSelection } from "./model-catalogs";
+import { ModelCatalogs, computeArrivedModels, computeDefaultSelection } from "./model-catalogs";
 import { ProviderAccountProbes } from "./probes";
 import { providerAccountRepository } from "./repository";
 import { ProviderAccountService } from "./service";
@@ -107,6 +107,64 @@ const addKeyAccount = (label: string | null = null) =>
     yield* storeCredential(account.id, "apiKey");
     return account;
   });
+
+describe("computeArrivedModels", () => {
+  const CURRENT_MODELS = { defaultSelection: "current-models" } as const;
+  const FIRST_READ = "2026-10-31T09:00:00.000Z";
+  const LATER = "2026-10-31T13:00:00.000Z";
+
+  it("returns the models of the Default Selection first seen after the first read, in its order", () => {
+    const arrived = computeArrivedModels(CURRENT_MODELS, {
+      models: [
+        model("old"),
+        model("later-b"),
+        model("later-a"),
+        model("legacy", { isLegacy: true }),
+      ],
+      firstSeen: new Map([
+        ["old", FIRST_READ],
+        ["later-b", LATER],
+        ["later-a", LATER],
+        ["legacy", LATER],
+      ]),
+      firstReadAt: FIRST_READ,
+    });
+
+    expect(arrived).toEqual([
+      { model: "later-b", name: "later-b", firstSeenAt: LATER },
+      { model: "later-a", name: "later-a", firstSeenAt: LATER },
+    ]);
+  });
+
+  it("returns a model that was legacy when it appeared once it is current", () => {
+    const arrived = computeArrivedModels(CURRENT_MODELS, {
+      models: [model("promoted")],
+      firstSeen: new Map([["promoted", LATER]]),
+      firstReadAt: FIRST_READ,
+    });
+
+    expect(arrived).toEqual([{ model: "promoted", name: "promoted", firstSeenAt: LATER }]);
+  });
+
+  it("returns nothing before the first successful read", () => {
+    const arrived = computeArrivedModels(CURRENT_MODELS, {
+      models: [],
+      firstSeen: new Map(),
+      firstReadAt: null,
+    });
+
+    expect(arrived).toEqual([]);
+  });
+
+  it("returns nothing for the provider rule none", () => {
+    const arrived = computeArrivedModels(
+      { defaultSelection: "none" },
+      { models: [model("later")], firstSeen: new Map([["later", LATER]]), firstReadAt: FIRST_READ },
+    );
+
+    expect(arrived).toEqual([]);
+  });
+});
 
 describe("computeDefaultSelection", () => {
   const models = [
@@ -463,6 +521,71 @@ describe("reading the stored catalogs", () => {
     );
 
     expect(failure).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("the models that arrived after the first read", () => {
+  it("counts the first successful read, not the first read that lists a model, and ignores a failure before it", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedOut(), 1);
+        yield* recordRead(runner, account.id, signedInWith(), 2);
+        const afterEmptyRead = yield* catalogs.listCatalogsWithArrivedModels();
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b")), 3);
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b"), model("c")), 4);
+        return {
+          id: account.id,
+          afterEmptyRead,
+          afterLaterReads: yield* catalogs.listCatalogsWithArrivedModels(),
+        };
+      }),
+    );
+
+    expect(outcome.afterEmptyRead.arrivedModels.get(outcome.id)).toEqual([]);
+    const { catalogs, arrivedModels } = outcome.afterLaterReads;
+    expect(arrivedModels.get(outcome.id)?.map((one) => one.model)).toEqual(["a", "b", "c"]);
+    expect(arrivedModels.get(outcome.id)).toEqual(
+      catalogs[0]!.models.map((one) => ({
+        model: one.slug,
+        name: one.name,
+        firstSeenAt: one.firstSeenAt,
+      })),
+    );
+  });
+
+  it("does not move the first read when the catalog is read again", async () => {
+    const arrived = await runWithAccounts(
+      Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedInWith(model("a")), 1);
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b")), 2);
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b")), 3);
+        return (yield* catalogs.listCatalogsWithArrivedModels()).arrivedModels.get(account.id);
+      }),
+    );
+
+    expect(arrived?.map((one) => one.model)).toEqual(["b"]);
+  });
+
+  it("leaves out an account whose provider is not loaded", async () => {
+    const arrived = await runWithAccounts(
+      Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
+        const account = yield* addAccount({ providerId: "gone/gone" });
+        return (yield* catalogs.listCatalogsWithArrivedModels()).arrivedModels.has(account.id);
+      }),
+    );
+
+    expect(arrived).toBe(false);
   });
 });
 
