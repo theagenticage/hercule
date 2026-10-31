@@ -2620,7 +2620,7 @@ export const CLI = {
   },
   "providerAccount.readCatalog": {
     command: "provider-account read-catalog",
-    help: "Reads the Model Catalog stored for a Provider Account. It has each model's slug, name, options, image input and the date it was first seen, when the catalog was last read, and the error of the last failed read. It fetches nothing, so it is fast; `hercule provider-account refresh` reads the catalog again. A catalog is empty until the first successful read.",
+    help: "Reads the Model Catalog stored for a Provider Account. It has each model's slug, name, options, image input and the date it was first seen, plus the details the provider gives for it (maker, context window, output limit, prices per million tokens, release date, tool use and reasoning), when the catalog was last read, and the error of the last failed read. Only the details a provider gives are present. It fetches nothing, so it is fast; `hercule provider-account refresh` reads the catalog again. A catalog is empty until the first successful read.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2633,7 +2633,7 @@ export const CLI = {
   },
   "providerAccount.refresh": {
     command: "provider-account refresh",
-    help: "Reads the account's Model Catalog again, by probing it on every runner where it can run. It returns the account at once, before the probes end. The outcome arrives later: run `hercule provider-account read` to see the new model count, the time of the read, and the error of a failed read. A failed read keeps the last good catalog.",
+    help: "Reads the account's Model Catalog again. A provider's catalog is read either by probing the account on every runner where it can run, or by the controller from the provider's API with one request. It returns the account at once, before the reads end. The outcome arrives later: run `hercule provider-account read` to see the new model count, the time of the read, and the error of a failed read. A failed read keeps the last good catalog.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {

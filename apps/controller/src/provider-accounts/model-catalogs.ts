@@ -28,7 +28,7 @@ import {
   type NewModel,
   type NotFound,
 } from "@hercule/contract";
-import type { ModelDescriptor, ProbeResult } from "@hercule/protocol";
+import type { CatalogModel, ModelDescriptor, ProbeResult } from "@hercule/protocol";
 import { announce, nowIso, withTransaction } from "../db";
 import { PluginHost, type RegisteredProvider } from "../plugins";
 import { PromotionState } from "../promotion";
@@ -136,13 +136,19 @@ export interface UnservedRead {
 }
 
 /**
- * What one catalog read observed: the result of the probe, judged against the
- * account's identity, or the reason there is no result because no probe was
- * sent or none was answered (no machine to ask, a key that does not decrypt,
- * a machine that did not answer in time).
+ * What one catalog read observed:
+ *
+ * - `probed`: the result of the probe, judged against the account's identity.
+ * - `listed`: the models the provider's own API listed for the account's key.
+ *   It is stored as a successful read, exactly like a probe that found the
+ *   account signed in.
+ * - `failed`: the reason there is no result because no read was sent or none
+ *   was answered (no machine to ask, a key that does not decrypt, a machine
+ *   that did not answer in time, a provider that refused the key).
  */
 export type CatalogReadOutcome =
   | { readonly _tag: "probed"; readonly result: Pick<ProbeResult, "auth" | "models"> }
+  | { readonly _tag: "listed"; readonly models: ReadonlyArray<CatalogModel> }
   | { readonly _tag: "failed"; readonly message: string };
 
 /** The catalog reads `chooseDueReads` chose to send, and the accounts it could not serve. */
@@ -198,6 +204,8 @@ const make = Effect.gen(function* () {
    *   account that waits for its first catalog the account's Default
    *   Selection (`ModelProfileMembership`). It clears the error unless a read
    *   sent later has failed since.
+   * - A listed outcome does the same, since a provider that lists models for
+   *   the account's key has accepted the key.
    * - Any other outcome keeps the models and records why it failed.
    *
    * A success sent before the models the catalog already holds is dropped,
@@ -212,21 +220,20 @@ const make = Effect.gen(function* () {
       if (outcome._tag === "failed") {
         return yield* catalogs.recordFailure(account.id, outcome.message, sentAt);
       }
-      const { result } = outcome;
-      if (result.auth.status !== "ok") {
-        return yield* catalogs.recordFailure(account.id, describeReadFailure(result), sentAt);
+      if (outcome._tag === "probed" && outcome.result.auth.status !== "ok") {
+        return yield* catalogs.recordFailure(
+          account.id,
+          describeReadFailure(outcome.result),
+          sentAt,
+        );
       }
-      const stored = yield* catalogs.recordSuccess(
-        account.id,
-        result.models,
-        yield* nowIso,
-        sentAt,
-      );
+      const models = outcome._tag === "listed" ? outcome.models : outcome.result.models;
+      const stored = yield* catalogs.recordSuccess(account.id, models, yield* nowIso, sentAt);
       const provider = (yield* host.providers()).find((one) => one.id === account.providerId);
       if (stored && provider !== undefined) {
         yield* membership.fillPendingSelections(
           account.id,
-          computeDefaultSelection(provider, result.models),
+          computeDefaultSelection(provider, models),
         );
       }
       return stored;
@@ -315,7 +322,10 @@ const make = Effect.gen(function* () {
           const readAt = summaries.get(account.id)?.readAt ?? null;
           const scoped =
             options.accountIds === undefined || options.accountIds.includes(account.id);
+          // A `provider-api` account is not chosen: the controller reads it
+          // itself from the provider's API, which is not a probe on a runner.
           return provider !== undefined &&
+            provider.catalogSource.kind === "harness-probe" &&
             scoped &&
             (options.force || isCatalogReadDue(readAt, nowMillis))
             ? [{ account, harnessId: provider.catalogSource.harnessId }]

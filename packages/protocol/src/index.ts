@@ -9,7 +9,7 @@
  * This package sits on the runner's import path, so it depends on nothing but
  * `effect`.
  */
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 
 import {
   CredentialVariable,
@@ -34,6 +34,7 @@ import {
   UsageWindow,
   WorkspaceStepKey,
 } from "./primitives";
+import { ModelDescriptor } from "./models";
 import {
   AccountUsageReported,
   FilesEdited,
@@ -75,6 +76,7 @@ export * from "./adapter-errors";
 export * from "./attachments";
 export * from "./image-signatures";
 export * from "./identity-port";
+export * from "./models";
 export * from "./output-schema";
 export * from "./remote";
 export * from "./sessions";
@@ -179,8 +181,12 @@ export {
  *   `MAX_PROBE_MODELS` (256). A controller on 17 cannot decode a list of more
  *   than 64 models and would close the socket on it, so the two refuse each
  *   other at hello.
+ * - Version 19 added `SessionStart.unlistedModels`, the catalog models a
+ *   harness's own list lacks. A runner on 18 would drop the key and start a pi
+ *   session that cannot run the model the user chose, with no error, so the
+ *   two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -402,70 +408,6 @@ export const WatermarkReport = Schema.Struct({
 });
 
 export type WatermarkReport = Schema.Schema.Type<typeof WatermarkReport>;
-
-/**
- * One choice the composer offers for a model: a select over named values, or a
- * switch. Each harness decides what it accepts per model, so this is probed
- * from the harness rather than written by hand.
- */
-export const ModelOption = Schema.Struct({
-  id: Fact,
-  label: Fact,
-  kind: Schema.Literals(["select", "boolean"]),
-  choices: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ value: Fact, label: Fact })).check(
-      Schema.isMaxLength(MAX_FACT_ITEMS),
-    ),
-  ),
-  default: Schema.Union([Schema.String, Schema.Boolean]),
-});
-
-export type ModelOption = Schema.Schema.Type<typeof ModelOption>;
-
-/**
- * What a model takes as image input. `maxBytes` is the largest image the
- * model accepts, or `null` when it sets no limit of its own beyond the
- * controller's 10 MiB per upload.
- */
-export const ImageInputCapability = Schema.Struct({
-  maxBytes: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
-});
-
-export type ImageInputCapability = Schema.Schema.Type<typeof ImageInputCapability>;
-
-/** One model a harness offers, and the per-model choices that come with it. */
-export const ModelDescriptor = Schema.Struct({
-  slug: Fact,
-  name: Fact,
-  isDefault: Schema.optionalKey(Schema.Boolean),
-  /** A model the harness no longer lists but still forwards to the API. */
-  isLegacy: Schema.optionalKey(Schema.Boolean),
-  /**
-   * Whether the model takes images as input, and how large, or `null` when it
-   * takes none. The composer and the controller refuse images for a model
-   * whose value is `null`.
-   *
-   * The capability is one field per kind of input, not one flag for all
-   * attachments, for two reasons:
-   *
-   * - harnesses declare input support per modality (text, image, and so on);
-   * - the limits differ per kind, so each kind carries its own.
-   *
-   * A later kind, such as documents, gets a field of its own beside this one
-   * (`documentInput`).
-   *
-   * A missing answer must never count as yes, so the field is required on the
-   * decoded type and every adapter sets it. A descriptor without it decodes as
-   * `null`: a runner on an older build sends none, and neither do the
-   * snapshots the controller stored before the field existed.
-   */
-  imageInput: Schema.NullOr(ImageInputCapability).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed(null)),
-  ),
-  options: Schema.Array(ModelOption).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
-});
-
-export type ModelDescriptor = Schema.Schema.Type<typeof ModelDescriptor>;
 
 /** Whether the harness reports a usable login, and whose it is. */
 export const SnapshotAuth = Schema.Struct({

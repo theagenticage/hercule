@@ -121,8 +121,19 @@ describe("a provider definition", () => {
     );
   });
 
-  it("needs a catalog source, which can only be a harness probe of a qualified harness id", () => {
+  it("needs a catalog source: a harness probe of a qualified harness id, or the provider's API", () => {
     expect(accepts(ProviderDefinition, omitField(provider, "catalogSource"))).toBe(false);
+    expect(
+      accepts(ProviderDefinition, {
+        ...provider,
+        catalogSource: {
+          kind: "provider-api",
+          url: "https://api.example.com/models",
+          headers: { Authorization: "Bearer {apiKey}" },
+        },
+      }),
+    ).toBe(true);
+    // A provider-api source names a request, not a harness.
     expect(
       accepts(ProviderDefinition, {
         ...provider,

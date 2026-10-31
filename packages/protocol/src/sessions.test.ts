@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { AdapterError } from "./adapter-errors";
+import { MAX_UNLISTED_MODELS } from "./models";
 import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "./primitives";
 import {
   EditedFile,
@@ -791,6 +792,31 @@ describe("what the controller sends for a session", () => {
     const flagged = { ...start, userMaterial: true };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(flagged))).toEqual(flagged);
     expect(decode(SessionStart, { ...start, userMaterial: false })._tag).toBe("Failure");
+  });
+
+  it("carries the unlisted catalog models, with or without details, up to a limit", () => {
+    // A probe's descriptor has no details, so it must be a valid catalog model
+    // as it is; a model from a provider's catalog adds details.
+    const descriptor = { slug: "acme/free", name: "Acme: Free", imageInput: null, options: [] };
+    const detailed = {
+      ...descriptor,
+      maker: "Acme",
+      contextWindow: 200_000,
+      inputPrice: 0,
+      releasedAt: "2026-10-01T00:00:00.000Z",
+      tools: true,
+    };
+    const withModels = { ...start, unlistedModels: [descriptor, detailed] };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(withModels))).toEqual(
+      withModels,
+    );
+    // A start without the key is a start with nothing unlisted.
+    expect(decode(SessionStart, start)._tag).toBe("Success");
+    const tooMany = Array.from({ length: MAX_UNLISTED_MODELS + 1 }, () => descriptor);
+    expect(decode(SessionStart, { ...start, unlistedModels: tooMany })._tag).toBe("Failure");
+    expect(
+      decode(SessionStart, { ...start, unlistedModels: [{ ...descriptor, inputPrice: -1 }] })._tag,
+    ).toBe("Failure");
   });
 
   it("rejects a Provider Account id that could escape its directory, on the spec and on the binding", () => {

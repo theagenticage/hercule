@@ -11,6 +11,7 @@ import { Schema, SchemaGetter } from "effect";
 
 import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
+import { CatalogModel, MAX_UNLISTED_MODELS } from "./models";
 import { OutputSchema } from "./output-schema";
 import { MAX_SKILLS, LibrarySkillRevision } from "./skills";
 import {
@@ -1227,6 +1228,15 @@ export const SessionStart = Schema.Struct({
    */
   skills: Schema.optionalKey(
     Schema.Array(LibrarySkillRevision).check(Schema.isMaxLength(MAX_SKILLS)),
+  ),
+  /**
+   * The catalog models of the session's Provider Account that the harness's
+   * own model list lacks, so the harness can run a model the user picked from
+   * the catalog. The pi adapter declares them to pi before it starts; every
+   * other adapter ignores them. Absent or empty means there are none.
+   */
+  unlistedModels: Schema.optionalKey(
+    Schema.Array(CatalogModel).check(Schema.isMaxLength(MAX_UNLISTED_MODELS)),
   ),
 });
 

@@ -88,13 +88,16 @@ export {
   CatalogSource,
   DefaultSelection,
   HarnessLoginStep,
+  HarnessProbeCatalogSource,
   KeyCheck,
+  ProviderApiCatalogSource,
   ProviderDefinition,
+  type ParseCatalogBody,
   type ParseUsageBody,
 } from "./providers";
 
-// What a usage parser takes and returns, so a plugin names them without linking the protocol.
-export type { Timestamp, UsageReading } from "@hercule/protocol";
+// What a usage or catalog parser takes and returns, so a plugin names them without linking the protocol.
+export type { CatalogModel, Timestamp, UsageReading } from "@hercule/protocol";
 
 export { checkEmittedEvent } from "./check-event";
 

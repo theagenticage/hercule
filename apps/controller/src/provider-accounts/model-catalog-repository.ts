@@ -12,13 +12,13 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { ModelDescriptor } from "@hercule/protocol";
+import { CatalogModel } from "@hercule/protocol";
 import { uuidFromString, uuidToString } from "../db";
 
 /** One account's catalog as stored. `firstSeen` maps a model slug to the time the model first appeared. */
 export interface StoredModelCatalog {
   readonly providerAccountId: string;
-  readonly models: ReadonlyArray<ModelDescriptor>;
+  readonly models: ReadonlyArray<CatalogModel>;
   /**
    * The time each slug the account's catalog has ever held first appeared.
    * Slugs are never removed. A map, because a slug such as `constructor` or
@@ -61,9 +61,7 @@ interface CatalogRow {
   readonly attempt_stamp: string | null;
 }
 
-const decodeModels = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Array(ModelDescriptor)),
-);
+const decodeModels = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(CatalogModel)));
 
 const decodeFirstSeen = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
@@ -206,7 +204,7 @@ const make = Effect.gen(function* () {
      */
     recordSuccess: (
       providerAccountId: string,
-      models: ReadonlyArray<ModelDescriptor>,
+      models: ReadonlyArray<CatalogModel>,
       readAt: string,
       stamp: string,
     ): Effect.Effect<boolean, SqlError | Schema.SchemaError> =>
