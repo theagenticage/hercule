@@ -104,6 +104,9 @@ export function Composer({
   // The model pill's element. The lip's branch menu measures it to stay clear of the pill.
   const pill = useRef<HTMLSpanElement>(null);
   const [filter, setFilter] = useState("");
+  // The profile the user opened in the model menu by clicking its head. It
+  // lasts as long as the menu is open, like the filter.
+  const [openedProfileId, setOpenedProfileId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   // The position of the shelf image shown large, or null when none is.
   const [preview, setPreview] = useState<number | null>(null);
@@ -124,7 +127,10 @@ export function Composer({
   // close request clears the open selector only if that selector asked to close.
   const handleOpenChange = (key: SelectorKey, next: boolean): void => {
     setOpen((current) => (next ? key : current === key ? null : current));
-    if (key === "model" && !next) setFilter("");
+    if (key === "model" && !next) {
+      setFilter("");
+      setOpenedProfileId(null);
+    }
   };
   // The model menu is built only while it is open.
   const models =
@@ -134,6 +140,8 @@ export function Composer({
           filter,
           recent: model.recent,
           runnerId: model.menuRunnerId,
+          openedProfileId,
+          lastOpenProfileId: model.lastOpenProfileId,
         })
       : null;
   const projectId = config.projectId ?? null;
@@ -334,6 +342,10 @@ export function Composer({
                     menu={models}
                     filter={filter}
                     onFilter={setFilter}
+                    onOpenProfile={(profileId) => {
+                      setOpenedProfileId(profileId);
+                      model.recordOpenProfile(profileId);
+                    }}
                     pill={fields.model.pill}
                     disabled={model.readOnly !== null}
                     open={open === "model"}

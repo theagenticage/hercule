@@ -2,8 +2,9 @@
  * Tests `buildModelMenu(catalogs, current, view)`, which builds what the model
  * selector renders from the user's Model Profiles:
  *
- * - a draft shows the open profile: Recent, then one lane per account with
- *   its entries, a filter only for more than eight entries;
+ * - a draft shows every profile as a head, one unfolded; the unfolded profile
+ *   shows Recent, then one lane per account with its entries, and a filter
+ *   shows for more than eight entries in all profiles together;
  * - an entry that cannot run is dimmed with its reason, and offers a sign-in
  *   when signing in would fix it;
  * - a running thread shows one flat list of its account and harness.
@@ -93,12 +94,26 @@ const CURRENT = {
   runnerId: null,
 };
 
-const DRAFT: ModelMenuView = { kind: "draft", filter: "", recent: [], runnerId: null };
+const DRAFT: ModelMenuView = {
+  kind: "draft",
+  filter: "",
+  recent: [],
+  runnerId: null,
+  openedProfileId: null,
+  lastOpenProfileId: null,
+};
 
-/** Returns the open profile of a draft menu. */
+/** Returns the draft menu's profiles. */
+const readDraft = (menu: ModelMenu) => {
+  if (menu.kind !== "draft") throw new Error("expected a draft menu");
+  return menu;
+};
+
+/** Returns the unfolded profile of a draft menu. */
 const readDraftProfile = (menu: ModelMenu) => {
-  if (menu.kind !== "draft" || menu.profile === null) throw new Error("expected a draft profile");
-  return menu.profile;
+  const profile = readDraft(menu).profiles.find((each) => each.unfolded);
+  if (profile === undefined) throw new Error("expected an unfolded profile");
+  return profile;
 };
 
 const readActive = (menu: ModelMenu) => {
@@ -111,8 +126,9 @@ describe("buildModelMenu for a draft", () => {
     expect(buildModelMenu(buildCatalogs([]), CURRENT, DRAFT)).toEqual({
       kind: "draft",
       filterable: false,
-      profile: null,
-      empty: "No models in your profile yet.",
+      hasHeads: false,
+      profiles: [],
+      empty: "No Model Profile yet.",
     });
   });
 
@@ -203,23 +219,18 @@ describe("buildModelMenu for a draft", () => {
     expect(lane.rows.map((row) => row.isCurrent)).toEqual([false, true]);
   });
 
-  it("names a lane by its account's label, and shows the open profile only", () => {
+  it("names a lane by its account's label", () => {
     const work = buildProviderAccount({ ...ANTHROPIC_IDENTITY, id: "account-work", label: "work" });
     const workIdentity = { ...ANTHROPIC_IDENTITY, id: "account-work" };
-    const second = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [OPUS])], {
-      id: "profile-second",
-      name: "Second",
-    });
-    const first = buildModelProfile([
+    const profile = buildModelProfile([
       buildProfileSection(workIdentity, [buildProfileEntry(workIdentity, "claude-opus-5")]),
     ]);
 
-    const profile = readDraftProfile(
-      buildModelMenu(buildCatalogs([first, second], [work, CLAUDE]), CURRENT, DRAFT),
-    );
+    const lanes = readDraftProfile(
+      buildModelMenu(buildCatalogs([profile], [work, CLAUDE]), { ...CURRENT, model: null }, DRAFT),
+    ).lanes;
 
-    expect(profile.profileId).toBe(first.id);
-    expect(profile.lanes.map((lane) => lane.name)).toEqual(["Anthropic · work"]);
+    expect(lanes.map((lane) => lane.name)).toEqual(["Anthropic · work"]);
   });
 
   it("offers a filter only when the profile holds more than eight entries", () => {
@@ -283,23 +294,21 @@ describe("buildModelMenu for a draft", () => {
 
     it("shows nothing, and says that no model matches, when nothing matches", () => {
       const menu = buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, filter: "zzz" });
-      const profile = readDraftProfile(menu);
 
-      expect(profile.lanes).toEqual([]);
-      expect(profile.recent).toEqual([]);
-      expect(menu).toMatchObject({ empty: "No model matches." });
+      expect(menu).toMatchObject({ profiles: [], empty: "No model matches." });
     });
 
     it("says nothing about being empty while something is listed", () => {
       expect(buildModelMenu(buildCatalogs([MAIN]), CURRENT, DRAFT)).toMatchObject({ empty: null });
     });
 
-    it("says the profile is empty when it holds nothing and the user is not filtering", () => {
+    it("says the unfolded profile is empty when it holds nothing and the user is not filtering", () => {
       const empty = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]);
 
-      expect(buildModelMenu(buildCatalogs([empty]), CURRENT, DRAFT)).toMatchObject({
-        empty: "No models in your profile yet.",
-      });
+      const menu = buildModelMenu(buildCatalogs([empty]), CURRENT, DRAFT);
+
+      expect(menu).toMatchObject({ empty: null });
+      expect(readDraftProfile(menu).empty).toBe("No models in this profile yet.");
     });
 
     it("filters Recent too", () => {
@@ -680,9 +689,278 @@ describe("buildModelMenu for a draft", () => {
   });
 });
 
+describe("buildModelMenu for a draft with several profiles", () => {
+  /** Anthropic's Sonnet and Opus. */
+  const WORK_PROFILE = buildModelProfile(
+    [buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS])],
+    {
+      id: "profile-work",
+      name: "Work",
+    },
+  );
+  /** OpenAI's GPT-6 and Z.ai's GLM. */
+  const HOME_PROFILE = buildModelProfile(
+    [buildProfileSection(OPENAI_IDENTITY, [GPT]), buildProfileSection(ZAI_IDENTITY, [GLM])],
+    { id: "profile-home", name: "Home" },
+  );
+  /** Holds Sonnet again, so Sonnet is in two profiles. */
+  const SHARED_PROFILE = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET])], {
+    id: "profile-shared",
+    name: "Shared",
+  });
+  const PROFILES = [WORK_PROFILE, HOME_PROFILE];
+  const ON_GPT = { ...CURRENT, providerAccountId: CODEX.id, model: "gpt-6" };
+  const ON_NOTHING = { ...CURRENT, model: "claude-haiku-5" };
+
+  const unfoldedIds = (menu: ModelMenu) =>
+    readDraft(menu)
+      .profiles.filter((profile) => profile.unfolded)
+      .map((profile) => profile.profileId);
+  const project = (modelProfileId: string | undefined) => ({
+    ...buildCatalogs(PROFILES),
+    projects: [
+      {
+        id: "p-1",
+        name: "mono",
+        createdAt: "2026-09-05T09:00:00.000Z",
+        updatedAt: "2026-09-05T09:00:00.000Z",
+        ...(modelProfileId === undefined ? {} : { modelProfileId }),
+      },
+    ],
+  });
+
+  it("lists every profile as a head in the profiles' order, with its entry count, and draws the entries of the unfolded one only", () => {
+    const menu = readDraft(buildModelMenu(buildCatalogs(PROFILES), CURRENT, DRAFT));
+
+    expect(menu.hasHeads).toBe(true);
+    expect(
+      menu.profiles.map((profile) => [profile.name, profile.entryCount, profile.unfolded]),
+    ).toEqual([
+      ["Work", 2, true],
+      ["Home", 2, false],
+    ]);
+    expect(menu.profiles[0]!.lanes).toHaveLength(1);
+    expect(menu.profiles[1]).toMatchObject({ recent: [], lanes: [], empty: null });
+  });
+
+  it("has no heads with one profile", () => {
+    expect(readDraft(buildModelMenu(buildCatalogs([MAIN]), CURRENT, DRAFT)).hasHeads).toBe(false);
+  });
+
+  describe("which profile is unfolded", () => {
+    it("is the one the user opened, even when another holds the current entry", () => {
+      const menu = buildModelMenu(buildCatalogs(PROFILES), CURRENT, {
+        ...DRAFT,
+        openedProfileId: HOME_PROFILE.id,
+        lastOpenProfileId: WORK_PROFILE.id,
+      });
+
+      expect(unfoldedIds(menu)).toEqual([HOME_PROFILE.id]);
+    });
+
+    it("opening a head leaves the current entry alone: the check mark stays on the other profile's entry", () => {
+      const menu = buildModelMenu(buildCatalogs(PROFILES), CURRENT, {
+        ...DRAFT,
+        openedProfileId: HOME_PROFILE.id,
+      });
+
+      const marked = readDraft(menu).profiles.flatMap((profile) =>
+        profile.lanes.flatMap((lane) => lane.rows.filter((row) => row.isCurrent)),
+      );
+      expect(marked).toEqual([]);
+      expect(unfoldedIds(buildModelMenu(buildCatalogs(PROFILES), CURRENT, DRAFT))).toEqual([
+        WORK_PROFILE.id,
+      ]);
+    });
+
+    it("is the profile that holds the current entry", () => {
+      expect(unfoldedIds(buildModelMenu(buildCatalogs(PROFILES), ON_GPT, DRAFT))).toEqual([
+        HOME_PROFILE.id,
+      ]);
+    });
+
+    it("prefers the project's profile among several that hold the current entry", () => {
+      const catalogs = {
+        ...project(SHARED_PROFILE.id),
+        modelProfiles: [WORK_PROFILE, SHARED_PROFILE, HOME_PROFILE],
+      };
+
+      const menu = buildModelMenu(catalogs, { ...CURRENT, projectId: "p-1" }, DRAFT);
+
+      expect(unfoldedIds(menu)).toEqual([SHARED_PROFILE.id]);
+    });
+
+    it("prefers the profile open last among several that hold the current entry, when the project's does not", () => {
+      const catalogs = buildCatalogs([WORK_PROFILE, SHARED_PROFILE, HOME_PROFILE]);
+
+      const menu = buildModelMenu(catalogs, CURRENT, {
+        ...DRAFT,
+        lastOpenProfileId: SHARED_PROFILE.id,
+      });
+
+      expect(unfoldedIds(menu)).toEqual([SHARED_PROFILE.id]);
+    });
+
+    it("takes the first of several that hold the current entry when nothing else decides", () => {
+      const catalogs = buildCatalogs([HOME_PROFILE, SHARED_PROFILE, WORK_PROFILE]);
+
+      expect(unfoldedIds(buildModelMenu(catalogs, CURRENT, DRAFT))).toEqual([SHARED_PROFILE.id]);
+    });
+
+    it("is the project's profile when no profile holds the current entry", () => {
+      const menu = buildModelMenu(
+        project(HOME_PROFILE.id),
+        { ...ON_NOTHING, projectId: "p-1" },
+        { ...DRAFT, lastOpenProfileId: WORK_PROFILE.id },
+      );
+
+      expect(unfoldedIds(menu)).toEqual([HOME_PROFILE.id]);
+    });
+
+    it("is the profile open last when no profile holds the current entry and the project names none", () => {
+      const menu = buildModelMenu(
+        project(undefined),
+        { ...ON_NOTHING, projectId: "p-1" },
+        {
+          ...DRAFT,
+          lastOpenProfileId: HOME_PROFILE.id,
+        },
+      );
+
+      expect(unfoldedIds(menu)).toEqual([HOME_PROFILE.id]);
+    });
+
+    it("is the first profile when nothing else decides", () => {
+      expect(unfoldedIds(buildModelMenu(buildCatalogs(PROFILES), ON_NOTHING, DRAFT))).toEqual([
+        WORK_PROFILE.id,
+      ]);
+    });
+
+    it("ignores a profile id that no longer exists, wherever it comes from", () => {
+      const gone = "profile-deleted";
+      const catalogs = project(gone);
+
+      const menu = buildModelMenu(
+        catalogs,
+        { ...ON_NOTHING, projectId: "p-1" },
+        { ...DRAFT, openedProfileId: gone, lastOpenProfileId: gone },
+      );
+
+      expect(unfoldedIds(menu)).toEqual([WORK_PROFILE.id]);
+    });
+  });
+
+  describe("Recent", () => {
+    const recent = [
+      { providerAccountId: CLAUDE.id, harnessId: CLAUDE_HARNESS, model: "claude-opus-5" },
+      { providerAccountId: CODEX.id, harnessId: CODEX_HARNESS, model: "gpt-6" },
+      { providerAccountId: CLAUDE.id, harnessId: CLAUDE_HARNESS, model: "claude-sonnet-5" },
+    ];
+
+    it("shows in each profile only the entries that profile holds", () => {
+      const forWork = buildModelMenu(buildCatalogs(PROFILES), CURRENT, { ...DRAFT, recent });
+      const forHome = buildModelMenu(buildCatalogs(PROFILES), CURRENT, {
+        ...DRAFT,
+        recent,
+        openedProfileId: HOME_PROFILE.id,
+      });
+
+      expect(readDraftProfile(forWork).recent.map((row) => row.name)).toEqual([
+        "Opus 5",
+        "Sonnet 5",
+      ]);
+      expect(readDraftProfile(forHome).recent.map((row) => row.name)).toEqual(["GPT-6"]);
+    });
+
+    it("shows three of a profile even when the history is longer and other profiles fill it", () => {
+      const lots = [...Array.from({ length: 10 }, () => recent[1]!), recent[0]!, recent[2]!];
+      const menu = buildModelMenu(buildCatalogs(PROFILES), CURRENT, { ...DRAFT, recent: lots });
+
+      expect(readDraftProfile(menu).recent.map((row) => row.name)).toEqual(["Opus 5", "Sonnet 5"]);
+    });
+  });
+
+  describe("the filter", () => {
+    const profiles = [
+      buildModelProfile(
+        [
+          buildProfileSection(
+            ANTHROPIC_IDENTITY,
+            Array.from({ length: 5 }, (_, i) =>
+              buildProfileEntry(ANTHROPIC_IDENTITY, `claude-${String(i)}`),
+            ),
+          ),
+        ],
+        { id: "profile-a", name: "A" },
+      ),
+      buildModelProfile(
+        [buildProfileSection(OPENAI_IDENTITY, [GPT, buildProfileEntry(OPENAI_IDENTITY, "gpt-7")])],
+        { id: "profile-b", name: "B" },
+      ),
+      buildModelProfile(
+        [buildProfileSection(ZAI_IDENTITY, [GLM, buildProfileEntry(ZAI_IDENTITY, "glm-6")])],
+        {
+          id: "profile-c",
+          name: "C",
+        },
+      ),
+    ];
+
+    it("shows only when all the profiles together hold more than eight entries", () => {
+      expect(buildModelMenu(buildCatalogs(profiles), CURRENT, DRAFT)).toMatchObject({
+        filterable: true,
+      });
+      expect(buildModelMenu(buildCatalogs(profiles.slice(0, 2)), CURRENT, DRAFT)).toMatchObject({
+        filterable: false,
+      });
+    });
+
+    it("unfolds every profile with a match, shows only its matches and leaves out the others", () => {
+      const menu = readDraft(
+        buildModelMenu(buildCatalogs(profiles), CURRENT, { ...DRAFT, filter: "gpt" }),
+      );
+
+      expect(
+        menu.profiles.map((profile) => [
+          profile.profileId,
+          profile.unfolded,
+          profile.lanes.flatMap((lane) => lane.rows.map((row) => row.model)),
+        ]),
+      ).toEqual([["profile-b", true, ["gpt-6", "gpt-7"]]]);
+    });
+
+    it("unfolds several profiles when several match", () => {
+      const menu = readDraft(
+        buildModelMenu(buildCatalogs(profiles), CURRENT, { ...DRAFT, filter: "6" }),
+      );
+
+      expect(menu.profiles.map((profile) => [profile.profileId, profile.unfolded])).toEqual([
+        ["profile-b", true],
+        ["profile-c", true],
+      ]);
+    });
+
+    it("restores the one-open state once it is cleared", () => {
+      const catalogs = buildCatalogs(profiles);
+      const filtered = buildModelMenu(catalogs, ON_NOTHING, { ...DRAFT, filter: "6" });
+      const cleared = buildModelMenu(catalogs, ON_NOTHING, { ...DRAFT, filter: "  " });
+
+      expect(readDraft(filtered).profiles).toHaveLength(2);
+      expect(unfoldedIds(cleared)).toEqual(["profile-a"]);
+      expect(readDraft(cleared).profiles).toHaveLength(3);
+    });
+
+    it("says that no model matches when no profile has a match", () => {
+      expect(
+        buildModelMenu(buildCatalogs(profiles), CURRENT, { ...DRAFT, filter: "zzz" }),
+      ).toMatchObject({ profiles: [], empty: "No model matches." });
+    });
+  });
+});
+
 describe("buildModelMenu for a running thread", () => {
   const ACTIVE = { ...CURRENT, runnerId: MOSS.id };
-  const view: ModelMenuView = { kind: "active", filter: "", recent: [], runnerId: null };
+  const view: ModelMenuView = { ...DRAFT, kind: "active" };
 
   it("is one flat list of the entries with the session's account and harness, with the note, and no Recent", () => {
     const menu = readActive(buildModelMenu(buildCatalogs([MAIN]), ACTIVE, view));

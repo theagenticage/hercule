@@ -50,14 +50,23 @@ export const buildThreadModelField = (
   catalogs: ThreadCatalogs,
   current: StoredEntry,
 ): ThreadModelField => {
+  // The field always offers the first profile, as the menu's opened one.
   const menu = buildModelMenu(
     catalogs,
     { ...current, runnerId: null },
-    { kind: "draft", filter: "", recent: [], runnerId: null },
+    {
+      kind: "draft",
+      filter: "",
+      recent: [],
+      runnerId: null,
+      openedProfileId: catalogs.modelProfiles[0]?.id ?? null,
+      lastOpenProfileId: null,
+    },
   );
+  const profile = menu.kind === "draft" ? menu.profiles.find((each) => each.unfolded) : undefined;
   const options: ThreadModelFieldOption[] =
-    menu.kind === "draft" && menu.profile !== null
-      ? menu.profile.lanes.flatMap((lane) =>
+    profile !== undefined
+      ? profile.lanes.flatMap((lane) =>
           lane.rows.map((row) => ({
             key: formatProfileEntryKey({
               providerAccountId: row.providerAccountId,

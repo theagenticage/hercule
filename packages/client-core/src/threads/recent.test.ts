@@ -1,5 +1,5 @@
 /**
- * Tests `pushRecent(recent, entry)`, which keeps the last three entries
+ * Tests `pushRecent(recent, entry)`, which keeps the last 24 entries
  * (account, harness, model) the user picked, newest first; `buildRecentModel`,
  * which decides which entry a successful submission adds, from the picks the
  * submission was sent with and the thread it resolved to; and
@@ -81,7 +81,6 @@ describe("buildRecentModel", () => {
 describe("pushRecent", () => {
   const SONNET_ENTRY = { providerAccountId: WORK, harnessId: CLAUDE, model: SONNET };
   const OPUS_ENTRY = { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS };
-  const HAIKU_ENTRY = { providerAccountId: WORK, harnessId: CLAUDE, model: HAIKU };
 
   it("starts the list with the first pick", () => {
     expect(pushRecent([], SONNET_ENTRY)).toEqual([SONNET_ENTRY]);
@@ -105,13 +104,15 @@ describe("pushRecent", () => {
     expect(pushRecent([SONNET_ENTRY], inPi)).toEqual([inPi, SONNET_ENTRY]);
   });
 
-  it("caps the list at three, dropping the oldest", () => {
-    const personal = { ...SONNET_ENTRY, providerAccountId: PERSONAL };
-    expect(pushRecent([SONNET_ENTRY, OPUS_ENTRY, HAIKU_ENTRY], personal)).toEqual([
-      personal,
-      SONNET_ENTRY,
-      OPUS_ENTRY,
-    ]);
+  it("keeps the last 24 picks, dropping the oldest, so one profile's picks do not push out another's", () => {
+    const full = Array.from({ length: 24 }, (_, index) => ({
+      ...SONNET_ENTRY,
+      model: `m-${index}`,
+    }));
+    const next = pushRecent(full, OPUS_ENTRY);
+    expect(next).toHaveLength(24);
+    expect(next[0]).toEqual(OPUS_ENTRY);
+    expect(next[23]).toEqual({ ...SONNET_ENTRY, model: "m-22" });
   });
 });
 
@@ -165,17 +166,26 @@ describe("parseRecentModels", () => {
     ).toEqual([]);
   });
 
-  it("keeps only the three newest entries of a longer stored list", () => {
+  it("reads a list stored when the limit was three as it is", () => {
     const stored = JSON.stringify([
       { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS },
       { providerAccountId: WORK, harnessId: CLAUDE, model: SONNET },
       { providerAccountId: WORK, harnessId: CLAUDE, model: HAIKU },
-      { providerAccountId: PERSONAL, harnessId: CLAUDE, model: OPUS },
     ]);
-    expect(parseRecentModels(stored)).toEqual([
-      { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS },
-      { providerAccountId: WORK, harnessId: CLAUDE, model: SONNET },
-      { providerAccountId: WORK, harnessId: CLAUDE, model: HAIKU },
-    ]);
+    expect(parseRecentModels(stored)).toHaveLength(3);
+  });
+
+  it("keeps only the 24 newest entries of a longer stored list", () => {
+    const stored = JSON.stringify(
+      Array.from({ length: 30 }, (_, index) => ({
+        providerAccountId: WORK,
+        harnessId: CLAUDE,
+        model: `m-${index}`,
+      })),
+    );
+    const parsed = parseRecentModels(stored);
+    expect(parsed).toHaveLength(24);
+    expect(parsed[0]?.model).toBe("m-0");
+    expect(parsed[23]?.model).toBe("m-23");
   });
 });

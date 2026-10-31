@@ -1,10 +1,12 @@
 /**
- * The Recent list: the last three (Provider Account, harness, model) entries the user picked,
- * which the model menu shows first.
+ * What the desktop app remembers about the model menu, in `localStorage`, one
+ * value per controller URL because an id means nothing to another controller:
  *
- * The list is kept in `localStorage`, one entry per controller URL, because
- * a Provider Account id means nothing to another controller. A thread adds its
- * model to the list when a submission with a picked model is accepted.
+ * - the Recent list: the entries (Provider Account, harness, model) the user
+ *   picked lately, which the model menu shows per profile and a new thread in
+ *   a project with a profile starts from. A thread adds its model to the list
+ *   when a submission with a picked model is accepted;
+ * - the Model Profile the user opened last in the menu.
  */
 import { parseRecentModels, pushRecent, type RecentModel } from "@hercule/client-core";
 
@@ -22,4 +24,21 @@ export const readRecentModels = (controllerUrl: string): readonly RecentModel[] 
 export const rememberRecentModel = (controllerUrl: string, pair: RecentModel): void => {
   const recent = pushRecent(readRecentModels(controllerUrl), pair);
   localStorage.setItem(buildStorageKey(controllerUrl), JSON.stringify(recent));
+};
+
+/** Returns the `localStorage` key that holds the profile opened last for `controllerUrl`. */
+const buildLastOpenProfileKey = (controllerUrl: string): string =>
+  `last-open-model-profile:${controllerUrl}`;
+
+/**
+ * Returns the id of the Model Profile the user opened last in the model menu
+ * for `controllerUrl`, or `null` when none is stored. The profile may have
+ * been deleted since; the menu ignores such an id.
+ */
+export const readLastOpenProfileId = (controllerUrl: string): string | null =>
+  localStorage.getItem(buildLastOpenProfileKey(controllerUrl));
+
+/** Stores `profileId` as the Model Profile the user opened last for `controllerUrl`. */
+export const rememberOpenProfile = (controllerUrl: string, profileId: string): void => {
+  localStorage.setItem(buildLastOpenProfileKey(controllerUrl), profileId);
 };

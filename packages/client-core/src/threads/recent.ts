@@ -3,11 +3,12 @@ import type { ThreadPicks } from "./config";
 import type { ResolvedThread } from "./resolve-thread";
 
 /**
- * One of the last three entries the user picked, newest first: the Provider
+ * One of the entries the user picked lately, newest first: the Provider
  * Account, the harness it ran in and the model. The three together identify an
  * entry of a Model Profile, because one model may be offered in two harnesses.
- * The client keeps this list itself: the API does not store it, and the model
- * menu only uses it to show what was picked recently.
+ * The client keeps this list itself: the API does not store it. The model menu
+ * shows the last three of each profile, and a new thread in a project with a
+ * profile starts on the newest one the profile holds.
  */
 export interface RecentModel {
   readonly providerAccountId: string;
@@ -16,9 +17,14 @@ export interface RecentModel {
   readonly model: string;
 }
 
-const LIMIT = 3;
+/**
+ * How many picks the list keeps. The menu shows three per profile, and one
+ * profile's picks must not push out another's, so the list holds more than
+ * three.
+ */
+const LIMIT = 24;
 
-/** Returns `recent` with `entry` moved or added to the front, trimmed to three. */
+/** Returns `recent` with `entry` moved or added to the front, trimmed to the list's limit. */
 export const pushRecent = (
   recent: readonly RecentModel[],
   entry: RecentModel,
@@ -74,7 +80,8 @@ const StoredRecentModels = Schema.fromJsonString(
 const decodeStoredRecentModels = Schema.decodeUnknownOption(StoredRecentModels);
 
 /**
- * Parses the Recent list a client stored as JSON text, trimmed to three.
+ * Parses the Recent list a client stored as JSON text, trimmed to the list's
+ * limit. A list stored when the limit was three parses as it is.
  * Returns an empty list when nothing is stored or the text does not parse to
  * a list of (account, model) entries: a Recent list that cannot be read only
  * costs the user the Recent lane, so it is not an error. An entry that names

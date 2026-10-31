@@ -15,6 +15,7 @@ import {
   settingsQuery,
   workspacesQuery,
 } from "../../../app/queries";
+import { readRecentModels } from "../../../app/recent-models";
 import { Composer } from "../../../screens/composer/composer";
 import { ContentColumn } from "../../../screens/content-column";
 import { ThreadChrome } from "../../../screens/thread/thread-chrome";
@@ -85,7 +86,8 @@ function NewThread(): JSX.Element {
   const joined = workspaces.find((each) => each.id === search.workspace);
   // The composer applies the user's picks on top of this config. It decides
   // where a draft that joins no workspace opens, and which runner a joined
-  // workspace uses.
+  // workspace uses. In a project that names a Model Profile it also decides
+  // the model, from the user's recent picks.
   const config = buildDraftConfig({
     settingsUser: settings.user,
     accounts,
@@ -93,6 +95,8 @@ function NewThread(): JSX.Element {
     profiles,
     thisMacRunnerId,
     modelProfiles,
+    projects,
+    recent: readRecentModels(),
     projectId: search.project ?? null,
     workspaceId: search.workspace ?? null,
   });

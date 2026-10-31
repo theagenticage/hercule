@@ -4,8 +4,10 @@
  * the desktop app draw the result as it is, so neither interprets a profile
  * itself.
  *
- * - A **draft** shows the open profile: Recent, then one lane per Provider
- *   Account in the profile's order, each with its entries in order.
+ * - A **draft** shows every profile as one head of an accordion, in the
+ *   profiles' order, with exactly one unfolded. The unfolded profile shows
+ *   Recent, then one lane per Provider Account in the profile's order, each
+ *   with its entries in order. With one profile there are no heads.
  * - A **running thread** keeps its account and harness, so it shows one flat
  *   list of the models it can switch to.
  *
@@ -26,6 +28,7 @@ import type {
   Runner,
 } from "@hercule/contract";
 import { matchesModelSearch } from "../model-profiles/catalog-search";
+import { findProjectModelProfile } from "../model-profiles/profile-lookup";
 import {
   describeEntryProblem,
   isMachineProblemReason,
@@ -52,10 +55,10 @@ import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";
 import { buildSignInTarget, type SignInTarget } from "./sign-in-target";
 
-/** The menu offers a filter when the open profile holds more entries than this. */
+/** The menu offers a filter when the profiles together hold more entries than this. */
 const FILTER_THRESHOLD = 8;
 
-/** How many recent entries the menu shows, however many the client kept. */
+/** How many recent entries the menu shows in a profile, however many the client kept. */
 const RECENT_LIMIT = 3;
 
 /** The line under a running thread's list. */
@@ -64,8 +67,14 @@ const OTHER_MODELS_NOTE = "Other models start a new thread.";
 /** What the menu says in place of its list while the filter matches nothing. */
 const NO_MATCH_NOTE = "No model matches.";
 
-/** What the menu says in place of its list when the profile holds nothing to pick. */
-const EMPTY_PROFILE_NOTE = "No models in your profile yet.";
+/** What an unfolded profile says in place of its list when it holds nothing to pick. */
+const EMPTY_PROFILE_NOTE = "No models in this profile yet.";
+
+/** What a running thread's list says in place of its rows when no profile offers a model to switch to. */
+const NO_MODELS_NOTE = "No models in your profile yet.";
+
+/** What the menu says in place of its list when the user has no Model Profile. */
+const NO_PROFILE_NOTE = "No Model Profile yet.";
 
 /** What a lane says while its account's first Model Catalog read is still to come. */
 const READING_MODELS_NOTE = "Reading models…";
@@ -114,12 +123,22 @@ export interface ModelMenuLane {
   readonly note: string | null;
 }
 
-/** A Model Profile as the menu draws it. */
+/**
+ * A Model Profile as the menu draws it: a head, and when `unfolded`, its
+ * Recent entries and lanes. A folded profile has neither, because nothing
+ * draws them.
+ */
 export interface ModelMenuProfile {
   readonly profileId: string;
   readonly name: string;
+  /** How many entries the profile holds, the filter ignored. */
+  readonly entryCount: number;
+  readonly unfolded: boolean;
+  /** Up to three entries of this profile the user picked most recently, newest first. */
   readonly recent: readonly ModelMenuRecentRow[];
   readonly lanes: readonly ModelMenuLane[];
+  /** What to draw in place of the list when the profile is unfolded and holds nothing to pick; else `null`. */
+  readonly empty: string | null;
 }
 
 export type ModelMenu =
@@ -127,12 +146,18 @@ export type ModelMenu =
       readonly kind: "draft";
       /** Whether the menu offers a filter field. */
       readonly filterable: boolean;
-      /** The open profile, or `null` when the user has no profile. */
-      readonly profile: ModelMenuProfile | null;
+      /** Whether each profile has a head. False when the user has one profile. */
+      readonly hasHeads: boolean;
       /**
-       * What to draw in place of the list when it holds nothing: that no model
-       * matches the filter, or that the profile is empty. `null` when there is
-       * something to draw.
+       * The profiles in their order, exactly one unfolded. While the filter has
+       * text, every profile with a match is unfolded and shows only its
+       * matches, and a profile without a match is left out.
+       */
+      readonly profiles: readonly ModelMenuProfile[];
+      /**
+       * What to draw in place of the whole list: that the user has no profile,
+       * or that no model matches the filter. `null` when there are profiles
+       * to draw.
        */
       readonly empty: string | null;
     }
@@ -151,15 +176,26 @@ export type ModelMenu =
 /** What the thread runs now: the entry that gets the check mark, and for a running thread its runner. */
 export type ModelMenuCurrent = Pick<
   ThreadConfig,
-  "providerAccountId" | "harnessId" | "model" | "runnerId"
+  "providerAccountId" | "harnessId" | "model" | "runnerId" | "projectId"
 >;
 
 export interface ModelMenuView {
   readonly kind: ThreadKind;
   /** The text typed in the filter field; empty means no filter. */
   readonly filter: string;
-  /** The entries the user picked, newest first. */
+  /** The entries the user picked, newest first. A profile shows the first three it holds. */
   readonly recent: readonly RecentModel[];
+  /**
+   * The profile the user opened in this menu by clicking its head, or `null`
+   * until they click one. A draft ignores an id that is no profile.
+   */
+  readonly openedProfileId: string | null;
+  /**
+   * The profile the user had open last on this device, which the client
+   * stores, or `null` when none is stored. A draft ignores an id that is no
+   * profile.
+   */
+  readonly lastOpenProfileId: string | null;
   /**
    * The runner a draft is bound to: the one the user picked, or the one a
    * joined workspace decides. `null` while any runner will do, and then an
@@ -287,11 +323,18 @@ const buildRow = (
   };
 };
 
-const buildDraftProfile = (
+/** What an unfolded profile shows. */
+interface ProfileBody {
+  readonly recent: readonly ModelMenuRecentRow[];
+  readonly lanes: readonly ModelMenuLane[];
+}
+
+/** Builds the Recent entries and the lanes of `profile`, the filter applied. */
+const buildProfileBody = (
   context: MenuContext,
   profile: ModelProfile,
   recent: readonly RecentModel[],
-): ModelMenuProfile => {
+): ProfileBody => {
   const { catalogs, filter } = context;
   const placed = listPlacedEntries(profile, catalogs.accounts);
 
@@ -339,12 +382,12 @@ const buildDraftProfile = (
     ];
   });
 
-  return { profileId: profile.id, name: profile.name, recent: recentRows, lanes };
+  return { recent: recentRows, lanes };
 };
 
-/** Returns what the menu says in place of an empty list: that nothing matches the filter, or that the profile is empty. */
+/** Returns what a running thread's list says in place of an empty list. */
 const describeEmptyList = (filter: string): string =>
-  filter === "" ? EMPTY_PROFILE_NOTE : NO_MATCH_NOTE;
+  filter === "" ? NO_MODELS_NOTE : NO_MATCH_NOTE;
 
 /**
  * Builds the flat list of a running thread: every entry of every profile with
@@ -397,14 +440,102 @@ const buildActiveMenu = (context: MenuContext, current: ModelMenuCurrent): Model
   };
 };
 
+/** Returns every entry the profiles hold, counted once per profile. */
+const countEntries = (profiles: readonly ModelProfile[]): number =>
+  profiles.reduce((total, profile) => total + listProfileEntries(profile).length, 0);
+
+/**
+ * Returns the profile a draft's menu unfolds while the filter is empty, or
+ * `undefined` when there is no profile. The first of these that exists:
+ *
+ * 1. the profile the user opened in this menu;
+ * 2. a profile that holds the current entry. When several do, the project's
+ *    profile, then the profile open last, then the first in the profiles'
+ *    order;
+ * 3. the project's profile;
+ * 4. the profile open last on this device;
+ * 5. the first profile.
+ *
+ * An id that no profile has, such as a deleted profile's, counts as absent.
+ */
+const chooseUnfoldedProfile = (
+  profiles: readonly ModelProfile[],
+  currentKey: ProfileEntryKey | null,
+  projectProfile: ModelProfile | undefined,
+  view: ModelMenuView,
+): ModelProfile | undefined => {
+  const findProfile = (id: string | null) => profiles.find((profile) => profile.id === id);
+  const holders =
+    currentKey === null
+      ? []
+      : profiles.filter((profile) =>
+          listProfileEntries(profile).some((entry) =>
+            isSameProfileEntry(buildProfileEntryKey(entry), currentKey),
+          ),
+        );
+  return (
+    findProfile(view.openedProfileId) ??
+    holders.find((profile) => profile.id === projectProfile?.id) ??
+    holders.find((profile) => profile.id === view.lastOpenProfileId) ??
+    holders[0] ??
+    projectProfile ??
+    findProfile(view.lastOpenProfileId) ??
+    profiles[0]
+  );
+};
+
+/**
+ * Builds a draft's menu: every profile as a head, one unfolded. With filter
+ * text, every profile with a match is unfolded and shows its matches only,
+ * and a profile without a match is left out.
+ */
+const buildDraftMenu = (
+  context: MenuContext,
+  current: ModelMenuCurrent,
+  view: ModelMenuView,
+): ModelMenu => {
+  const { catalogs, filter } = context;
+  const { modelProfiles } = catalogs;
+  const base = { kind: "draft", hasHeads: modelProfiles.length > 1 } as const;
+  if (modelProfiles.length === 0) {
+    return { ...base, filterable: false, profiles: [], empty: NO_PROFILE_NOTE };
+  }
+  const unfolded = chooseUnfoldedProfile(
+    modelProfiles,
+    context.currentKey,
+    findProjectModelProfile(catalogs.projects ?? [], modelProfiles, current.projectId),
+    view,
+  );
+  const profiles = modelProfiles.flatMap((profile): readonly ModelMenuProfile[] => {
+    const head = {
+      profileId: profile.id,
+      name: profile.name,
+      entryCount: listProfileEntries(profile).length,
+    };
+    if (filter === "" && profile !== unfolded) {
+      return [{ ...head, unfolded: false, recent: [], lanes: [], empty: null }];
+    }
+    const { recent, lanes } = buildProfileBody(context, profile, view.recent);
+    const hasRows = recent.length > 0 || lanes.length > 0;
+    if (filter !== "" && !hasRows) return [];
+    return [{ ...head, unfolded: true, recent, lanes, empty: hasRows ? null : EMPTY_PROFILE_NOTE }];
+  });
+  return {
+    ...base,
+    filterable: countEntries(modelProfiles) > FILTER_THRESHOLD,
+    profiles,
+    empty: profiles.length === 0 ? NO_MATCH_NOTE : null,
+  };
+};
+
 /**
  * Returns the model menu for the thread's current config.
  *
- * A draft gets its profile's lanes (the first profile; more than one is not
- * built yet). A running thread gets the flat list of its account and harness.
- * Picking a row is one `model` choice that names its account, harness and
- * model together (`applyThreadChoice`), so the draft runs the entry the row
- * showed.
+ * A draft gets every profile as a head of an accordion, one unfolded (see
+ * `chooseUnfoldedProfile`). A running thread gets the flat list of its account
+ * and harness. Picking a row is one `model` choice that names its account,
+ * harness and model together (`applyThreadChoice`), so the draft runs the
+ * entry the row showed. Opening a head changes nothing in the draft's config.
  */
 export const buildModelMenu = (
   catalogs: ThreadCatalogs,
@@ -424,19 +555,7 @@ export const buildModelMenu = (
         ? null
         : { providerAccountId: account.id, harnessId, model: current.model },
   };
-  if (view.kind === "active") return buildActiveMenu(context, current);
-  const profile = catalogs.modelProfiles[0];
-  if (profile === undefined) {
-    return { kind: "draft", filterable: false, profile: null, empty: EMPTY_PROFILE_NOTE };
-  }
-  const built = buildDraftProfile(context, profile, view.recent);
-  return {
-    kind: "draft",
-    filterable: listProfileEntries(profile).length > FILTER_THRESHOLD,
-    profile: built,
-    empty:
-      built.lanes.length === 0 && built.recent.length === 0
-        ? describeEmptyList(context.filter)
-        : null,
-  };
+  return view.kind === "active"
+    ? buildActiveMenu(context, current)
+    : buildDraftMenu(context, current, view);
 };

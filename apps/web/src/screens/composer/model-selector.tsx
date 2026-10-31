@@ -14,6 +14,7 @@ export function ModelSelector({
   menu,
   filter,
   onFilter,
+  onOpenProfile,
   pill,
   disabled,
   open,
@@ -26,6 +27,8 @@ export function ModelSelector({
   readonly menu: ModelMenu | null;
   readonly filter: string;
   readonly onFilter: (filter: string) => void;
+  /** Unfolds the profile whose head the user clicked, which folds the one that was open. */
+  readonly onOpenProfile: (profileId: string) => void;
   readonly pill: ModelPill;
   readonly disabled: boolean;
   readonly open: boolean;
@@ -66,6 +69,7 @@ export function ModelSelector({
             menu={menu}
             renderProviderMark={renderProviderMark}
             onChoose={forwardThreadChoice}
+            onOpenProfile={onOpenProfile}
             signInSlot={signInSlot}
           />
         </>

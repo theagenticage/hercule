@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readRecentModels, rememberRecentModel } from "./recent-models";
+import {
+  readLastOpenProfileId,
+  readRecentModels,
+  rememberOpenProfile,
+  rememberRecentModel,
+} from "./recent-models";
 
 const HOME = "http://127.0.0.1:4937";
 const WORK = "http://10.0.0.2:4937";
@@ -11,12 +16,22 @@ describe("the Recent list", () => {
     expect(readRecentModels(HOME)).toEqual([]);
   });
 
-  it("puts the latest pick first and keeps three", () => {
-    for (const model of ["a", "b", "c", "d"]) {
-      rememberRecentModel(HOME, { providerAccountId: "claude", harnessId: CLAUDE_CODE, model });
+  it("puts the latest pick first and keeps the last 24", () => {
+    for (let index = 0; index < 26; index += 1) {
+      rememberRecentModel(HOME, {
+        providerAccountId: "claude",
+        harnessId: CLAUDE_CODE,
+        model: `m-${String(index)}`,
+      });
     }
-    rememberRecentModel(HOME, { providerAccountId: "claude", harnessId: CLAUDE_CODE, model: "c" });
-    expect(readRecentModels(HOME).map((each) => each.model)).toEqual(["c", "d", "b"]);
+    rememberRecentModel(HOME, {
+      providerAccountId: "claude",
+      harnessId: CLAUDE_CODE,
+      model: "m-5",
+    });
+    const models = readRecentModels(HOME).map((each) => each.model);
+    expect(models).toHaveLength(24);
+    expect(models.slice(0, 3)).toEqual(["m-5", "m-25", "m-24"]);
   });
 
   it("keeps one model picked in two harnesses as two entries", () => {
@@ -64,5 +79,18 @@ describe("the Recent list", () => {
     expect(readRecentModels(HOME)).toEqual([
       { providerAccountId: "claude", harnessId: CLAUDE_CODE, model: "opus" },
     ]);
+  });
+});
+
+describe("the profile opened last", () => {
+  it("is null for a controller with nothing stored", () => {
+    expect(readLastOpenProfileId(HOME)).toBeNull();
+  });
+
+  it("is the profile opened last, kept apart for each controller", () => {
+    rememberOpenProfile(HOME, "profile-work");
+    rememberOpenProfile(HOME, "profile-home");
+    expect(readLastOpenProfileId(HOME)).toBe("profile-home");
+    expect(readLastOpenProfileId(WORK)).toBeNull();
   });
 });
