@@ -16,6 +16,20 @@ describe("the Recent list", () => {
     expect(readRecentModels(HOME)).toEqual([]);
   });
 
+  it("returns the same list while nothing was stored, and a new one after a pick or an outside change", () => {
+    rememberRecentModel(HOME, { providerAccountId: "claude", harnessId: CLAUDE_CODE, model: "a" });
+    const first = readRecentModels(HOME);
+    expect(readRecentModels(HOME)).toBe(first);
+
+    rememberRecentModel(HOME, { providerAccountId: "claude", harnessId: CLAUDE_CODE, model: "b" });
+    const second = readRecentModels(HOME);
+    expect(second).not.toBe(first);
+    expect(second.map((each) => each.model)).toEqual(["b", "a"]);
+
+    localStorage.setItem(`recent-models:${HOME}`, "[]");
+    expect(readRecentModels(HOME)).toEqual([]);
+  });
+
   it("puts the latest pick first and keeps the last 24", () => {
     for (let index = 0; index < 26; index += 1) {
       rememberRecentModel(HOME, {

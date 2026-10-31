@@ -14,11 +14,28 @@ import { parseRecentModels, pushRecent, type RecentModel } from "@hercule/client
 const buildStorageKey = (controllerUrl: string): string => `recent-models:${controllerUrl}`;
 
 /**
- * Returns the Recent list for `controllerUrl`, newest first. Returns an empty
- * list when none is stored or the stored text cannot be read.
+ * The last text read from storage for each controller URL, with the list it
+ * parsed to. The draft is drawn on every keystroke, and the sidebar draws it
+ * too, so the text is parsed again only when it changed.
  */
-export const readRecentModels = (controllerUrl: string): readonly RecentModel[] =>
-  parseRecentModels(localStorage.getItem(buildStorageKey(controllerUrl)));
+const parsedByControllerUrl = new Map<
+  string,
+  { readonly text: string | null; readonly recent: readonly RecentModel[] }
+>();
+
+/**
+ * Returns the Recent list for `controllerUrl`, newest first. Returns an empty
+ * list when none is stored or the stored text cannot be read. While the
+ * stored text is unchanged, every call returns the same array.
+ */
+export const readRecentModels = (controllerUrl: string): readonly RecentModel[] => {
+  const text = localStorage.getItem(buildStorageKey(controllerUrl));
+  const cached = parsedByControllerUrl.get(controllerUrl);
+  if (cached?.text === text) return cached.recent;
+  const recent = parseRecentModels(text);
+  parsedByControllerUrl.set(controllerUrl, { text, recent });
+  return recent;
+};
 
 /** Moves or adds `pair` to the front of the Recent list for `controllerUrl`. */
 export const rememberRecentModel = (controllerUrl: string, pair: RecentModel): void => {
