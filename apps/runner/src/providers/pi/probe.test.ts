@@ -8,7 +8,8 @@
  * status object and exits with code 1 when no key is configured.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Deferred, Duration, Effect, Fiber, Logger } from "effect";
+import { TestClock } from "effect/testing";
 import type { ProbeResult } from "@hercule/protocol";
 import { makePiAdapter } from "./adapter";
 import {
@@ -16,6 +17,7 @@ import {
   cleanupHomes,
   buildContext,
   FAKE_PI_VERSION,
+  MODEL_STORE_REFRESHED,
   type FakePiBehaviour,
   createPiHome,
   TEST_ZAI_KEY,
@@ -177,5 +179,245 @@ describe("the pi adapter's probe", () => {
       "max",
     ]);
     expect(findModelOption(probed.models, "glm-4.7", "thinking")).toBeUndefined();
+  });
+
+  describe("refreshing the model list", () => {
+    const FAILED = { code: 1, stdout: "", stderr: "Error: could not reach pi.dev" };
+
+    /**
+     * Runs an effect on a test clock and collects the warnings written while it
+     * runs. A detached refresh keeps the logger it was started with, so its
+     * late warnings are collected too. A test that reads the warnings while the
+     * effect runs passes a function, which receives the list.
+     */
+    const runOnClock = <A>(
+      build: Effect.Effect<A> | ((warnings: ReadonlyArray<string>) => Effect.Effect<A>),
+    ) => {
+      const warnings: Array<string> = [];
+      const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(String(message));
+      });
+      const effect = typeof build === "function" ? build(warnings) : build;
+      const result = Effect.runPromise(
+        effect.pipe(Effect.provide(TestClock.layer()), Effect.provide(Logger.layer([collecting]))),
+      );
+      return { result, warnings };
+    };
+
+    /** Returns a `refresh` behaviour that ends only when the test lets it end. */
+    const buildControlledRefresh = (ending: typeof MODEL_STORE_REFRESHED) => {
+      const gate = Deferred.makeUnsafe<void>();
+      let interrupted = false;
+      return {
+        refresh: Deferred.await(gate).pipe(
+          Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true))),
+          Effect.as(ending),
+        ),
+        finish: Deferred.succeed(gate, undefined),
+        wasInterrupted: () => interrupted,
+      };
+    };
+
+    const countRefreshes = (runs: ReadonlyArray<{ readonly command: ReadonlyArray<string> }>) =>
+      runs.filter((run) => run.command[1] === "update").length;
+
+    // Past the refresh's wait of 8 seconds, short of the probe's own deadline of 15.
+    const PAST_WAIT = Duration.seconds(10);
+
+    it("refreshes online with only the variables pi needs, before the offline read", async () => {
+      const { seam, runs, spawns } = buildFakePiSeam({
+        refresh: Effect.sleep(Duration.millis(20)).pipe(Effect.as(MODEL_STORE_REFRESHED)),
+      });
+      const home = createPiHome();
+      const ctx = {
+        ...buildContext(home),
+        env: {
+          PATH: "/usr/bin",
+          HTTPS_PROXY: "http://proxy.example:3128",
+          PI_OFFLINE: "1",
+          OPENROUTER_API_KEY: "another-providers-key",
+          AWS_ACCESS_KEY_ID: "another-providers-key-id",
+        },
+      };
+
+      const { result } = runOnClock(
+        Effect.gen(function* () {
+          const probing = yield* Effect.forkChild(makePiAdapter(seam).probe(ctx, {}));
+          yield* TestClock.adjust(0);
+          // The refresh has started and is not over, so the read has not started.
+          expect(countRefreshes(runs)).toBe(1);
+          expect(spawns).toHaveLength(0);
+          yield* TestClock.adjust(Duration.millis(20));
+          return yield* Fiber.join(probing);
+        }),
+      );
+
+      const probed = await result;
+      const refresh = runs.find((run) => run.command[1] === "update");
+      expect(refresh?.command).toEqual(["/usr/local/bin/pi", "update", "--models"]);
+      // Another provider's credentials would send them to that provider, and
+      // `PI_OFFLINE` set to any value turns the network off.
+      expect(Object.keys(refresh?.env ?? {}).sort()).toEqual([
+        "HTTPS_PROXY",
+        "PATH",
+        "PI_CODING_AGENT_DIR",
+        "PI_SKIP_VERSION_CHECK",
+        "ZAI_API_KEY",
+      ]);
+      expect(refresh?.env["PI_CODING_AGENT_DIR"]).toBe(home);
+      expect(refresh?.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
+      expect(spawns).toHaveLength(1);
+      expect(spawns[0]?.command).toContain("--offline");
+      expect(probed.models.length).toBeGreaterThan(0);
+    });
+
+    it("still reports the catalog when the refresh fails, and warns with pi's error", async () => {
+      const { seam } = buildFakePiSeam({ refresh: Effect.succeed(FAILED) });
+      const ctx = buildContext(createPiHome());
+
+      const { result, warnings } = runOnClock(makePiAdapter(seam).probe(ctx, {}));
+
+      const probed = await result;
+      expect(probed.auth.status).toBe("ok");
+      expect(probed.models.map((model) => model.slug)).toContain("glm-5.3");
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(ctx.home);
+      expect(warnings[0]).toContain("Error: could not reach pi.dev");
+    });
+
+    it("goes on without waiting past the budget, and reports a late failure after the probe returned", async () => {
+      const controlled = buildControlledRefresh(FAILED);
+      const { seam } = buildFakePiSeam({ refresh: controlled.refresh });
+      const ctx = buildContext(createPiHome());
+
+      const { result, warnings } = runOnClock((collected) =>
+        Effect.gen(function* () {
+          const probing = yield* Effect.forkChild(makePiAdapter(seam).probe(ctx, {}));
+          yield* TestClock.adjust(0);
+          yield* TestClock.adjust(PAST_WAIT);
+          const probed = yield* Fiber.join(probing);
+          const warningsAtReturn = [...collected];
+          yield* controlled.finish;
+          yield* TestClock.adjust(0);
+          return { probed, warningsAtReturn };
+        }),
+      );
+
+      const { probed, warningsAtReturn } = await result;
+      expect(probed.auth.status).toBe("ok");
+      expect(probed.models.map((model) => model.slug)).toContain("glm-5.3");
+      expect(controlled.wasInterrupted()).toBe(false);
+      expect(warningsAtReturn).toHaveLength(1);
+      expect(warningsAtReturn[0]).toContain(ctx.home);
+      expect(warningsAtReturn[0]).toContain("has not refreshed");
+      expect(warnings).toHaveLength(2);
+      expect(warnings[1]).toContain(ctx.home);
+      expect(warnings[1]).toContain("Error: could not reach pi.dev");
+    });
+
+    it("starts one refresh per home while an earlier one is still running", async () => {
+      const controlled = buildControlledRefresh(MODEL_STORE_REFRESHED);
+      const { seam, runs } = buildFakePiSeam({ refresh: controlled.refresh });
+      const adapter = makePiAdapter(seam);
+      const sharedHome = buildContext(createPiHome());
+      const otherHome = buildContext(createPiHome());
+
+      const { result } = runOnClock(
+        Effect.gen(function* () {
+          const probings = yield* Effect.forEach([sharedHome, sharedHome, otherHome], (ctx) =>
+            Effect.forkChild(adapter.probe(ctx, {})),
+          );
+          yield* TestClock.adjust(0);
+          yield* TestClock.adjust(PAST_WAIT);
+          const probed = yield* Effect.forEach(probings, Fiber.join);
+          yield* controlled.finish;
+          return probed;
+        }),
+      );
+
+      expect((await result).map((one) => one.auth.status)).toEqual(["ok", "ok", "ok"]);
+      // Two probes share the first home's refresh. The other home has its own.
+      expect(countRefreshes(runs)).toBe(2);
+    });
+
+    it.each([
+      ["ended", undefined],
+      ["failed", FAILED],
+    ])("starts a new refresh for a home whose last refresh %s", async (_ending, refresh) => {
+      const { seam, runs } = buildFakePiSeam(
+        refresh === undefined ? {} : { refresh: Effect.succeed(refresh) },
+      );
+      const adapter = makePiAdapter(seam);
+      const ctx = buildContext(createPiHome());
+
+      const { result } = runOnClock(
+        Effect.gen(function* () {
+          yield* adapter.probe(ctx, {});
+          yield* adapter.probe(ctx, {});
+        }),
+      );
+
+      await result;
+      expect(countRefreshes(runs)).toBe(2);
+    });
+
+    it("reuses a refresh that outlasts a probe's wait, and starts a new one once it has ended", async () => {
+      const controlled = buildControlledRefresh(MODEL_STORE_REFRESHED);
+      const { seam, runs } = buildFakePiSeam({ refresh: controlled.refresh });
+      const adapter = makePiAdapter(seam);
+      const ctx = buildContext(createPiHome());
+
+      const { result } = runOnClock(
+        Effect.gen(function* () {
+          const probeAfterWait = Effect.gen(function* () {
+            const probing = yield* Effect.forkChild(adapter.probe(ctx, {}));
+            yield* TestClock.adjust(0);
+            yield* TestClock.adjust(PAST_WAIT);
+            yield* Fiber.join(probing);
+          });
+          yield* probeAfterWait;
+          yield* probeAfterWait;
+          const whileRunning = countRefreshes(runs);
+          yield* controlled.finish;
+          yield* TestClock.adjust(0);
+          yield* adapter.probe(ctx, {});
+          return whileRunning;
+        }),
+      );
+
+      expect(await result).toBe(1);
+      expect(countRefreshes(runs)).toBe(2);
+    });
+
+    it("signals a refresh that outlasts Hercule's own limit, and frees its home", async () => {
+      const { seam, runs } = buildFakePiSeam({ refresh: Effect.never });
+      const adapter = makePiAdapter(seam);
+      const ctx = buildContext(createPiHome());
+
+      const { result, warnings } = runOnClock(
+        Effect.gen(function* () {
+          const probing = yield* Effect.forkChild(adapter.probe(ctx, {}));
+          yield* TestClock.adjust(0);
+          yield* TestClock.adjust(PAST_WAIT);
+          yield* Fiber.join(probing);
+          yield* TestClock.adjust(Duration.seconds(25));
+          const second = yield* Effect.forkChild(adapter.probe(ctx, {}));
+          yield* TestClock.adjust(0);
+          yield* TestClock.adjust(PAST_WAIT);
+          yield* Fiber.join(second);
+        }),
+      );
+
+      await result;
+      expect(countRefreshes(runs)).toBe(2);
+      expect(warnings.some((line) => line.includes("sent it a stop signal"))).toBe(true);
+    });
+
+    it("runs no refresh when no key is set", async () => {
+      const { result, runs } = runProbe({}, {});
+
+      await result;
+      expect(countRefreshes(runs)).toBe(0);
+    });
   });
 });

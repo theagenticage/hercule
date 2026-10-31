@@ -10,7 +10,7 @@
  * - a Thread on the controller's local runner also reads the user's own
  *   prompt templates and instructions.
  */
-import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -106,7 +106,7 @@ import {
   type RunningTool,
 } from "./normalize";
 import { readPiHome } from "./edited-path";
-import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI } from "./probe";
+import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI, ZAI_KEY } from "./probe";
 import {
   describeError,
   makeRpc,
@@ -123,14 +123,6 @@ const PI_BINARY = "pi";
 
 /** The name the user knows this harness by, as it appears in the messages shown to them. */
 const PI_NAME = "pi";
-
-/**
- * The Z.ai key: its secret name in the instance config, and the environment
- * variable pi reads it from. The runner cannot import the pi plugin, so the
- * adapter owns this mapping, the same way the Claude adapter owns
- * `CLAUDE_CONFIG_DIR`.
- */
-const ZAI_KEY = { secret: "zaiApiKey", variable: "ZAI_API_KEY" };
 
 /** How many of pi's last stderr lines are kept, to report why it exited. */
 const MAX_COMPLAINT_LINES = 5;
@@ -1640,15 +1632,27 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           const extensionFile = join(ctx.cwd, "extension.ts");
           const instructionsFile = join(ctx.cwd, "instructions.txt");
           writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
+          // The probe stores the model catalog it refreshed from pi.dev in the
+          // home, so the call can use models newer than the installed pi. A
+          // copy read while the probe writes may be cut short. pi then reports
+          // the model as unknown for this one call, which fails it rather than
+          // picking another model. A home that was never probed has no catalog,
+          // and pi then uses its bundled one.
+          try {
+            copyFileSync(join(ctx.home, "models-store.json"), join(ctx.cwd, "models-store.json"));
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
           const released = Promise.withResolvers<void>();
           const child = spawnAgent(
             [ctx.binary, ...buildTextGenerationArgv(spec, extensionFile, instructionsFile)],
             buildEnv(ctx, {
               // pi writes bookkeeping files into its agent directory even with
-              // `--no-session`. Pointing it at the scratch directory keeps
-              // them out of the instance's home, and removes them with the
-              // call. The key comes from the environment, not from this
-              // directory.
+              // `--no-session`. Pointing it at the scratch directory removes
+              // them with the call. It also keeps out whatever a session may
+              // have written into the instance's home, such as an
+              // `APPEND_SYSTEM.md`, which pi would append to the instructions.
+              // The key comes from the environment, not from this directory.
               PI_CODING_AGENT_DIR: ctx.cwd,
               // The approval hook never asks about `submit_result`, so the
               // answer does not wait. It asks about every other tool, and
@@ -1770,7 +1774,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> =>
       ctx.binary === undefined
         ? Effect.succeed(buildFailedProbe(null, `no ${PI_BINARY} on this machine`))
-        : probe(ctx.binary, buildEnv(ctx)),
+        : probe(ctx.binary, ctx.home, buildEnv(ctx)),
 
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {

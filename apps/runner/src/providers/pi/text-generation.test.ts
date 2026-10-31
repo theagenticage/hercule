@@ -3,7 +3,7 @@
  * runs: how pi is launched, and how each way the call can end is reported.
  * The events pushed to the fake follow the shapes pi 0.85.1 emits.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
@@ -355,6 +355,32 @@ describe("launching pi for a text generation", () => {
     await outcome;
 
     expect(child.kills()).toBe(1);
+  });
+
+  it("gives pi the model catalog the probe stored in the instance's home", async () => {
+    const { seam, spawns } = buildFakePiSeam();
+    const home = createPiHome();
+    const catalog = '{"models":["a-model-newer-than-pi"]}';
+    writeFileSync(join(home, "models-store.json"), catalog, { mode: 0o600 });
+    const outcome = Effect.runPromise(generate(makePiAdapter(seam), home));
+    await waitUntil("launched a pi", () => spawns.length === 1);
+    const child = spawns[0]!;
+
+    const copy = join(child.cwd!, "models-store.json");
+    expect(readFileSync(copy, "utf8")).toBe(catalog);
+    expect(statSync(copy).mode & 0o777).toBe(0o600);
+
+    answerWith(child, ANSWER);
+    await outcome;
+  });
+
+  it("starts pi when the instance's home holds no stored model catalog", async () => {
+    const { outcome, child } = await startGeneration();
+
+    expect(existsSync(join(child.cwd!, "models-store.json"))).toBe(false);
+
+    answerWith(child, ANSWER);
+    await expect(outcome).resolves.toMatchObject({ outcome: "ok" });
   });
 
   it("writes nothing into the instance's home", async () => {

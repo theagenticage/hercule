@@ -219,9 +219,11 @@ describe.skipIf(binary === undefined || key === "")(
 );
 
 /**
- * The probe makes no API call: pi reads the key from the environment and the
- * catalog from its installed providers. So a fake key is enough to test what
- * a Fleet row will show.
+ * The probe sends no key anywhere: pi reads the key from the environment, and
+ * the probe's only network request is the refresh of pi's model list from
+ * pi.dev, which carries no key. When that request fails, for example offline,
+ * the probe still reports the catalog pi has stored or bundled. So a fake key
+ * is enough to test what a Fleet row will show.
  */
 describe.skipIf(binary === undefined)("probing a real pi", () => {
   /** Returns the version the installed binary prints, which the probe should report. */
