@@ -37,7 +37,7 @@ One run of a harness-backed agent: its process, context and transcript, resumabl
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
-A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. Nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
+A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. One exception, for both: a Thread started in a Project whose Model Profile has a default entry starts on that entry when the call names no model ([spec 06 section 17.9](./docs/spec/06-providers.md#179-a-projects-profile-and-how-a-new-thread-starts)). Nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
 **Role**:
