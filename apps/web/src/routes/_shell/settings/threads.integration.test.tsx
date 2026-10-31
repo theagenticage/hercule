@@ -295,6 +295,47 @@ describe("Settings > Threads defaults", () => {
     });
   });
 
+  it("offers the entries of every profile in a group per profile, and saves an entry only the second holds", async () => {
+    const user = userEvent.setup();
+    const first = buildModelProfile([buildProfileSection(IDENTITY_LOCAL, [SONNET])], {
+      id: MAIN.id,
+      name: "Main",
+    });
+    const second = buildModelProfile([buildProfileSection(IDENTITY_ZAI, [GLM])], {
+      id: "01a06d02-4000-7000-8000-000000000002",
+      name: "Cheap",
+    });
+    const { api } = await openApp({}, { modelProfiles: [first, second] });
+
+    const field = await findModelField();
+
+    expect(
+      [...field.querySelectorAll("optgroup")].map((group) => [
+        group.label,
+        [...group.querySelectorAll("option")].map((option) => option.textContent),
+      ]),
+    ).toEqual([
+      ["Main", ["Anthropic · Sonnet 5"]],
+      ["Cheap", [expect.stringContaining("GLM-5")]],
+    ]);
+
+    await user.selectOptions(
+      field,
+      [...field.options].find((o) => o.textContent?.includes("GLM-5"))!,
+    );
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(listWrites(api)[0]?.body).toMatchObject({
+      user: { "thread.providerAccountId": ACCOUNT_ZAI.id, "thread.model": "glm-5" },
+    });
+  });
+
+  it("draws no group when there is one profile", async () => {
+    await openApp();
+
+    expect((await findModelField()).querySelector("optgroup")).toBeNull();
+  });
+
   it("shows the profile's default entry when no default was ever saved", async () => {
     await openApp({
       "thread.providerAccountId": undefined,

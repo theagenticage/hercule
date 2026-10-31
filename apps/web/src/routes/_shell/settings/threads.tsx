@@ -126,15 +126,24 @@ function Threads(): JSX.Element {
                       No model chosen
                     </option>
                   ) : null}
-                  {modelField.options.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.missing
-                        ? `${option.label} (not offered)`
-                        : option.problem === null
-                          ? option.label
-                          : `${option.label} (${option.problem})`}
-                    </option>
-                  ))}
+                  {modelField.groups.map((group) => {
+                    const options = group.options.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.missing
+                          ? `${option.label} (not offered)`
+                          : option.problem === null
+                            ? option.label
+                            : `${option.label} (${option.problem})`}
+                      </option>
+                    ));
+                    return group.label === null ? (
+                      options
+                    ) : (
+                      <optgroup key={group.label} label={group.label}>
+                        {options}
+                      </optgroup>
+                    );
+                  })}
                 </Select>
               )}
               <p className="text-fine text-faint">
