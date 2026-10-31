@@ -558,7 +558,9 @@ export const connect = (
         return yield* sendProbeReport(
           adapter === undefined
             ? buildFailedProbe(null, describeMissingAdapter(request.harnessId))
-            : yield* adapter.probe(buildContext(adapter, request.harnessAccount)),
+            : yield* adapter.probe(buildContext(adapter, request.harnessAccount), {
+                readUsage: request.readUsage,
+              }),
         );
       }).pipe(
         // The encoding happens inside the catch, so a result that cannot be

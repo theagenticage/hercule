@@ -70,6 +70,7 @@ import {
   type ProbeReport,
   type ProbeRequest,
   type FrameCarryingInput,
+  type AccountUsageReported,
   type FilesEdited,
   type SessionEvent,
   type SessionInputResult,
@@ -169,13 +170,19 @@ const readRequiredCapability = (request: Request): string | undefined => {
  * input opened a turn changes the session's status, and a status must be
  * written in the order the runner reported things.
  *
- * A `filesEdited` frame has no sequence number, but it joins the queue so it
- * never runs at the same time as the session's own events.
+ * A `filesEdited` or `accountUsageReported` frame has no sequence number, but
+ * it joins the queue so it never runs at the same time as the session's own
+ * events.
  */
 export interface SessionTraffic {
   readonly runnerId: string;
   readonly connection: Connection;
-  readonly frame: SessionEvent | SessionsReport | SessionInputResult | FilesEdited;
+  readonly frame:
+    | SessionEvent
+    | SessionsReport
+    | SessionInputResult
+    | FilesEdited
+    | AccountUsageReported;
 }
 
 /**

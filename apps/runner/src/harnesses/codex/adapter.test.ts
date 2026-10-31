@@ -38,6 +38,7 @@ import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
 import type { EditMarks, HarnessRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
+import { USAGE_READ_DEADLINE } from "./probe";
 import { RPC_DEADLINE } from "./rpc";
 import { PROBE_DEADLINE } from "../probe";
 import {
@@ -79,6 +80,7 @@ import {
   THREAD,
   TURN,
   waitUntil,
+  type Sent,
   type Spawn,
 } from "./testing";
 
@@ -104,21 +106,25 @@ const API_KEY_OVERRIDES = [
 
 const runProbe = (
   answers: Answers = {},
-  options: { readonly dies?: boolean } = {},
+  options: { readonly dies?: boolean; readonly readUsage?: boolean } = {},
 ): {
   readonly result: Promise<ProbeResult>;
   readonly spawns: Array<Spawn>;
+  readonly requests: Array<Sent>;
   readonly home: string;
 } => {
   const home = createCodexHome();
   // A probe test starts from a machine with no login, unlike a session test.
-  const { seam, spawns } = buildScriptedSeam(
+  const { seam, spawns, requests } = buildScriptedSeam(
     { "account/read": () => LOGGED_OUT, ...answers },
     options,
   );
   return {
-    result: Effect.runPromise(makeCodexAdapter(seam).probe(buildContext(home))),
+    result: Effect.runPromise(
+      makeCodexAdapter(seam).probe(buildContext(home), { readUsage: options.readUsage === true }),
+    ),
     spawns,
+    requests,
     home,
   };
 };
@@ -4320,5 +4326,211 @@ describe("the bytes of a generated image", () => {
     expect(completed.map((event) => event.kind)).toContain("image_generation");
     // Everything else in the item stays in `raw`.
     expect(JSON.stringify(completed[0]?.raw)).toContain("a cat");
+  });
+});
+
+/** The reply to `account/rateLimits/read` for a Plus account, shaped like `GetAccountRateLimitsResponse`. */
+const PLUS_RATE_LIMITS = {
+  ordinaryUsageAllowed: true,
+  rateLimits: {
+    limitId: "codex",
+    limitName: null,
+    normalModelSlug: null,
+    primary: { usedPercent: 42, windowDurationMins: 300, resetsAt: 1_793_466_000 },
+    secondary: { usedPercent: 7, windowDurationMins: 10_080, resetsAt: 1_793_871_000 },
+    credits: null,
+    individualLimit: null,
+    spendControlReached: null,
+    planType: "plus",
+    rateLimitReachedType: null,
+  },
+  rateLimitsByLimitId: null,
+  rateLimitResetCredits: null,
+  accountId: null,
+  rateLimitUpsell: null,
+};
+
+const RATE_LIMITS_UPDATE = {
+  method: "account/rateLimits/updated",
+  params: {
+    rateLimits: {
+      limitId: "codex",
+      limitName: null,
+      normalModelSlug: null,
+      primary: { usedPercent: 61, windowDurationMins: 300, resetsAt: 1_793_466_000 },
+      secondary: null,
+      credits: null,
+      individualLimit: null,
+      spendControlReached: null,
+      planType: null,
+      rateLimitReachedType: null,
+    },
+  },
+};
+
+describe("a probe that reads usage", () => {
+  const countRateLimitReads = (requests: ReadonlyArray<Sent>): number =>
+    requests.filter((request) => request.method === "account/rateLimits/read").length;
+
+  it("reads the rate limits of a ChatGPT sign-in beside the model list, without the reset credit lookup", async () => {
+    const { result, requests } = runProbe(
+      { "account/read": () => CHATGPT, "account/rateLimits/read": () => PLUS_RATE_LIMITS },
+      { readUsage: true },
+    );
+
+    const probed = await result;
+
+    expect(listSentParams(requests, "account/rateLimits/read")).toEqual([
+      { excludeResetCreditDetails: true },
+    ]);
+    expect(probed.usage?.map((reading) => reading.kind === "window" && reading.window)).toEqual([
+      "five-hour",
+      "weekly",
+    ]);
+    expect(probed.auth.status).toBe("ok");
+    expect(probed.models).not.toEqual([]);
+  });
+
+  it("does not read the rate limits when the probe was not asked to", async () => {
+    const { result, requests } = runProbe({
+      "account/read": () => CHATGPT,
+      "account/rateLimits/read": () => PLUS_RATE_LIMITS,
+    });
+
+    const probed = await result;
+
+    expect(countRateLimitReads(requests)).toBe(0);
+    expect(probed.usage).toBeNull();
+  });
+
+  it.each([
+    ["an API key login", API_KEY],
+    ["no login", LOGGED_OUT],
+  ])("does not read the rate limits for %s", async (_name, account) => {
+    const { result, requests } = runProbe(
+      { "account/read": () => account, "account/rateLimits/read": () => PLUS_RATE_LIMITS },
+      { readUsage: true },
+    );
+
+    const probed = await result;
+
+    expect(countRateLimitReads(requests)).toBe(0);
+    expect(probed.usage).toBeNull();
+  });
+
+  it("does not read the rate limits for an account that has an API key", async () => {
+    const { seam, requests } = buildScriptedSeam({
+      "account/read": () => CHATGPT,
+      "account/rateLimits/read": () => PLUS_RATE_LIMITS,
+    });
+    const ctx: HarnessRunnerContext = {
+      ...buildContext(createCodexHome()),
+      credentialVariables: ["OPENAI_API_KEY"],
+      credential: { variable: "OPENAI_API_KEY", value: "sk-test-not-real" },
+    };
+
+    const probed = await Effect.runPromise(makeCodexAdapter(seam).probe(ctx, { readUsage: true }));
+
+    expect(countRateLimitReads(requests)).toBe(0);
+    expect(probed.usage).toBeNull();
+  });
+
+  it("keeps the auth and the models when the rate-limit read fails", async () => {
+    const { result } = runProbe(
+      {
+        "account/read": () => CHATGPT,
+        "account/rateLimits/read": () => buildRefusal("failed to fetch codex rate limits"),
+      },
+      { readUsage: true },
+    );
+
+    const probed = await result;
+
+    expect(probed.usage).toBeNull();
+    expect(probed.auth).toMatchObject({ status: "ok", backend: "chatgpt" });
+    expect(probed.models).not.toEqual([]);
+  });
+
+  it("keeps the auth and the models when the rate-limit read never replies", async () => {
+    const { seam } = buildScriptedSeam({
+      "account/read": () => CHATGPT,
+      "account/rateLimits/read": SILENT,
+    });
+
+    const probed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const running = yield* Effect.forkChild(
+            makeCodexAdapter(seam).probe(buildContext(createCodexHome()), { readUsage: true }),
+          );
+          // Lets the scripted app-server answer everything it will answer.
+          yield* Effect.promise(settle);
+          yield* TestClock.adjust(USAGE_READ_DEADLINE);
+          return yield* Fiber.join(running);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(probed.usage).toBeNull();
+    expect(probed.auth.status).toBe("ok");
+    expect(probed.models).not.toEqual([]);
+  });
+});
+
+describe("the rate limits a Codex session reports", () => {
+  const collectUsageReports = (adapter: ReturnType<typeof makeCodexAdapter>) => {
+    const reports: Array<{
+      readonly sessionId: string;
+      readonly readings: ReadonlyArray<unknown>;
+    }> = [];
+    Effect.runFork(
+      Stream.runForEach(adapter.usageReports, (report) =>
+        Effect.sync(() => void reports.push(report)),
+      ),
+    );
+    return reports;
+  };
+
+  it("sends an update to the usage reports of its session and keeps it out of the events", async () => {
+    const run = createDriving();
+    const reports = collectUsageReports(run.adapter);
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push(RATE_LIMITS_UPDATE);
+    // A frame after the update proves the reader got past it.
+    run.spawns[0]!.push({ method: "warning", params: { threadId: THREAD, message: "later" } });
+    await waitUntil(
+      "saw the later warning",
+      () => filterByTag(run.seen, "runtime.warning").length > 0,
+    );
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      sessionId: SESSION,
+      readings: [{ kind: "window", window: "five-hour", usedPercent: 61, hit: false }],
+    });
+    expect(JSON.stringify(run.seen)).not.toContain("rateLimits");
+    expect(filterByTag(run.seen, "runtime.warning")).toHaveLength(1);
+  });
+
+  it("sends nothing for an update that gives no reading", async () => {
+    const run = createDriving();
+    const reports = collectUsageReports(run.adapter);
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push({
+      method: "account/rateLimits/updated",
+      params: {
+        rateLimits: { ...RATE_LIMITS_UPDATE.params.rateLimits, primary: null },
+      },
+    });
+    run.spawns[0]!.push({ method: "warning", params: { threadId: THREAD, message: "later" } });
+    await waitUntil(
+      "saw the later warning",
+      () => filterByTag(run.seen, "runtime.warning").length > 0,
+    );
+
+    expect(reports).toEqual([]);
   });
 });

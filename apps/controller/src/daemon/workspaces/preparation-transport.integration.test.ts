@@ -87,7 +87,12 @@ const bootstrapRunner = async (
             _tag: "probeReport",
             requestId: frame.requestId,
             providerAccountId: frame.harnessAccount.providerAccountId,
-            result: { harnessVersion: "99.0.0", auth: { status: "ok" }, models: MODELS },
+            result: {
+              harnessVersion: "99.0.0",
+              auth: { status: "ok" },
+              models: MODELS,
+              usage: null,
+            },
           }),
         );
       }

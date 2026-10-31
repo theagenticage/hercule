@@ -8,6 +8,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Runner, Session } from "@hercule/contract";
 import { buildHeadline } from "@hercule/client-core";
+import { ANTHROPIC_IDENTITY, buildProviderAccount } from "@hercule/client-core/testing";
 import { readPageText, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 /**
@@ -25,19 +26,8 @@ const NOW = new Date("2026-09-08T12:00:00.000Z");
 
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
-const buildClaudeCodeProviderAccount = () => ({
-  id: CLAUDE_ID,
-  providerId: "anthropic/anthropic",
-  kind: "subscription-per-machine",
-  label: null,
-  identity: null,
-  planLabel: null,
-  defaultHarnessId: "claude-code/claude-code",
-  expiresAt: null,
-  snapshots: [],
-  createdAt: "2026-09-05T09:00:00.000Z",
-  updatedAt: "2026-09-05T09:00:00.000Z",
-});
+const buildClaudeCodeProviderAccount = () =>
+  buildProviderAccount({ ...ANTHROPIC_IDENTITY, id: CLAUDE_ID }, []);
 
 /** The runner every session here runs on. It is online, so a queued session waits for a free slot. */
 const MOSS: Runner = {

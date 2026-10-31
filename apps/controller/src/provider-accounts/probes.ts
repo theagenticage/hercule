@@ -31,6 +31,7 @@ import { PromotionState } from "../promotion";
 import { runnerRepository } from "../runners";
 import { decideProviderAccountHarness, PluginHost } from "../plugins";
 import { Secrets } from "../secrets";
+import { AccountUsage } from "../usage";
 import { describeSnapshot } from "./describe-snapshot";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 import { decideHarnessOnRunner, findCredentialProblem, isIdentityCompatible } from "./runnability";
@@ -105,6 +106,7 @@ const make = Effect.gen(function* () {
   const promotion = yield* PromotionState;
   const host = yield* PluginHost;
   const secrets = yield* Secrets;
+  const accountUsage = yield* AccountUsage;
   // A wake needs no payload, and one unread change already says that a
   // snapshot was stored, so the PubSub keeps only the latest.
   const snapshotWrites = yield* PubSub.sliding<void>(1);
@@ -250,6 +252,11 @@ const make = Effect.gen(function* () {
      * account is, so placement never uses that runner. The identity write and
      * the snapshot write are one transaction.
      *
+     * When the stored snapshot is `ok` and the result carries usage readings
+     * (`result.usage`), they are stored as read in the same transaction (see
+     * `AccountUsage.record`). A result that is not `ok` stores none: when it
+     * is a sign-in as someone else, the readings belong to that person.
+     *
      * Only the store passes the promotion gate, not the wait for the runner, so
      * a freeze never waits up to a probe's deadline for its answer. While a
      * promotion freezes the controller, the store waits until the freeze ends.
@@ -297,6 +304,9 @@ const make = Effect.gen(function* () {
           }
           const judged = judgeIdentity(result, accountIdentity);
           yield* accounts.recordSnapshot(providerAccountId, harnessId, runnerId, judged, sentAt);
+          if (judged.auth.status === "ok" && judged.usage !== null && judged.usage.length > 0) {
+            yield* accountUsage.record(providerAccountId, judged.usage, "read");
+          }
           yield* afterCommit(() => {
             PubSub.publishUnsafe(snapshotWrites, undefined);
           });
@@ -372,5 +382,5 @@ export class ProviderAccountProbes extends Context.Service<
 export const ProviderAccountProbesLayer: Layer.Layer<
   ProviderAccountProbes,
   never,
-  SqlClient.SqlClient | PluginHost | PromotionState | Secrets
+  SqlClient.SqlClient | PluginHost | PromotionState | Secrets | AccountUsage
 > = Layer.effect(ProviderAccountProbes)(make);

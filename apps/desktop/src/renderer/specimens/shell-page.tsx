@@ -61,6 +61,7 @@ import type {
   EventHandling,
   EventWithFacts,
   HandoffLeg,
+  Harness,
   IgnoreRuleWithCatches,
   Input,
   MemoryDocument,
@@ -390,6 +391,8 @@ export interface ProvidersSettingsRecords {
   readonly thisMacRunnerId: string;
   /** The providers, with every kind of account each offers, which the add-account sheet draws. */
   readonly providers: ReadonlyArray<Provider>;
+  /** The harnesses, when the accounts use a kind the shared ones do not run: the account sheet's Default harness lists them. */
+  readonly harnesses?: ReadonlyArray<Harness>;
   /** The id of the runner on the machine that runs the controller, which the add-account sheet puts first. */
   readonly controllerRunnerId: string;
   /** The account `providerAccount.create` answers with. */
@@ -694,6 +697,9 @@ const seedQueryCache = (
       providersSettings.thisMacRunnerId,
     );
     queryClient.setQueryData(providersQuery(client).queryKey, providersSettings.providers);
+    if (providersSettings.harnesses !== undefined) {
+      queryClient.setQueryData(harnessesQuery(client).queryKey, providersSettings.harnesses);
+    }
     queryClient.setQueryData(controllerQuery(client).queryKey, {
       id: "01a06d02-7800-7000-8000-000000000001",
       publicKey: "controller-key",

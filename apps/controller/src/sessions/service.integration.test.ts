@@ -49,7 +49,8 @@ import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
 import { permissionRequestRepository, SessionTokens, SessionTokensLayer } from "../permissions";
-import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
+import { PluginConfigsLayer, PluginHost, PluginHostLayer } from "../plugins";
+import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { RunWorkspaceStepActivityLayer } from "../runs";
@@ -58,6 +59,7 @@ import { subscriptionRepository } from "../subscriptions";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { providerAccountRepository } from "../provider-accounts";
+import { AccountUsage, AccountUsageLayer } from "../usage";
 import { sessionRepository } from "./repository";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver } from "./observer";
@@ -150,6 +152,7 @@ const layer = SessionServiceLayer.pipe(
     Layer.mergeAll(
       AuditLogLayer,
       SessionTokensLayer,
+      AccountUsageLayer,
       ignoreSessions,
       buildHostLayer(buildRealSecretsLayer()),
     ),
@@ -293,6 +296,7 @@ const buildGatedCredentialStack = (
       Layer.mergeAll(
         AuditLogLayer,
         SessionTokensLayer,
+        AccountUsageLayer,
         ignoreSessions,
         gatedSecrets,
         buildHostLayer(gatedSecrets),
@@ -1578,6 +1582,144 @@ describe("files a runner reports as edited by commands", () => {
     );
 
     expect(observedEdits).toEqual([]);
+  });
+});
+
+/** Builds a plugin with a provider whose one account kind reports its usage through sessions. */
+const buildMeteredPlugin = () =>
+  createPluginFixture({
+    id: "metered",
+    capabilities: ["harnesses", "providers"],
+    definitions: [
+      buildHarnessDefinition("metered", [
+        {
+          providerId: "metered/metered",
+          kinds: [{ kind: "subscription" }],
+          modelArgument: "{model}",
+          models: "all",
+        },
+      ]),
+    ],
+    providers: [
+      {
+        id: "metered",
+        displayName: "Metered",
+        kinds: [
+          {
+            id: "subscription",
+            title: "Subscription",
+            description: "A plan signed in on each machine.",
+            setup: [{ kind: "harness-login", method: "sign-in" }],
+            usage: { readBy: "sessions" },
+            harnesses: ["metered/metered"],
+          },
+        ],
+        defaultHarnessId: "metered/metered",
+      },
+    ],
+  }).plugin;
+
+describe("usage a runner reports for a session", () => {
+  const readings = [
+    {
+      kind: "window" as const,
+      window: "five-hour" as const,
+      usedPercent: 42,
+      resetsAt: null,
+      hit: false,
+      takenAt: at,
+    },
+  ];
+
+  /**
+   * Boots a provider whose one kind reports usage through sessions, inserts a
+   * running session on an account of it, held by `runnerId`, and returns the
+   * ids of the session and the account.
+   */
+  const arrangeMeteredSession = (runnerId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const host = yield* PluginHost;
+      const accounts = yield* providerAccountRepository;
+      yield* host.boot([buildMeteredPlugin()]);
+      const account = yield* withTransaction(
+        sql,
+        accounts.insert({
+          providerId: "metered/metered",
+          kind: "subscription",
+          label: null,
+          defaultHarnessId: "metered/metered",
+          at,
+        }),
+      );
+      const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+      yield* withTransaction(
+        sql,
+        sql`
+          UPDATE sessions SET provider_account_id = ${uuidFromString(account.id)}
+          WHERE id = ${uuidFromString(sessionId)}
+        `,
+      );
+      return { sessionId, accountId: account.id };
+    });
+
+  const report = (sessionId: string) => ({
+    _tag: "accountUsageReported" as const,
+    sessionId,
+    readings,
+  });
+
+  it("is stored for the session's account when the runner holds the session", async () => {
+    const runnerId = mintId();
+    const stored = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const usage = yield* AccountUsage;
+        const { sessionId, accountId } = yield* arrangeMeteredSession(runnerId);
+        yield* sessions.applyAccountUsageReported(runnerId, report(sessionId));
+        return yield* usage.read(accountId);
+      }),
+    );
+
+    expect(stored).toMatchObject([{ window: "five-hour", usedPercent: 42, source: "session" }]);
+  });
+
+  it("is dropped, and logged, when another runner holds the session", async () => {
+    const logged: Array<string> = [];
+    const stored = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sessions = yield* SessionService;
+          const usage = yield* AccountUsage;
+          const { sessionId, accountId } = yield* arrangeMeteredSession(mintId());
+          yield* sessions.applyAccountUsageReported(mintId(), report(sessionId));
+          return yield* usage.read(accountId);
+        }),
+        layer.pipe(Layer.provideMerge(captureLogs(logged))),
+      ),
+    );
+
+    expect(stored).toEqual([]);
+    expect(logged.filter((line) => line.includes("Dropped a runner's usage report"))).toHaveLength(
+      1,
+    );
+  });
+
+  it("is dropped for a session the controller does not know", async () => {
+    const logged: Array<string> = [];
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sessions = yield* SessionService;
+          yield* sessions.applyAccountUsageReported(mintId(), report(mintId()));
+        }),
+        layer.pipe(Layer.provideMerge(captureLogs(logged))),
+      ),
+    );
+
+    expect(logged.filter((line) => line.includes("Dropped a runner's usage report"))).toHaveLength(
+      1,
+    );
   });
 });
 

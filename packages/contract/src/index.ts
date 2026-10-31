@@ -227,6 +227,8 @@ export {
 export { Harness, HarnessOnRunner, DeclaredCapabilities, VersionVerdict } from "./groups/harness";
 export { AccountKind, AccountSetupStep, Provider } from "./groups/provider";
 export {
+  AccountUsageReading,
+  AccountUsageSource,
   CapabilitySnapshot,
   MAX_PROVIDER_ACCOUNT_LABEL_LENGTH,
   ModelDescriptor,

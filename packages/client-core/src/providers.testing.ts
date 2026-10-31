@@ -225,6 +225,8 @@ export const buildProviderAccount = (
   planLabel: null,
   defaultHarnessId: identity.harnessId,
   expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: snapshots.map((snapshot) => ({
     ...snapshot,
     harnessId: snapshot.harnessId ?? identity.harnessId,

@@ -92,6 +92,8 @@ const buildCreated = (
   planLabel: null,
   defaultHarnessId,
   expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: [],
   createdAt: PERSONAL.createdAt,
   updatedAt: PERSONAL.updatedAt,

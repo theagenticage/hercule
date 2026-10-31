@@ -46,6 +46,30 @@ describe("an account kind", () => {
     );
   });
 
+  it("takes a usage declaration read by sessions, by a harness or by an endpoint", () => {
+    const endpoint = {
+      readBy: "endpoint",
+      url: "https://api.example.com/v1/usage",
+      headers: { authorization: "{apiKey}" },
+    };
+    expect(accepts(AccountKind, { ...kind, usage: { readBy: "sessions" } })).toBe(true);
+    expect(
+      accepts(AccountKind, {
+        ...kind,
+        usage: { readBy: "harness", harnessId: "claude-code/claude-code" },
+      }),
+    ).toBe(true);
+    expect(accepts(AccountKind, { ...kind, usage: endpoint })).toBe(true);
+  });
+
+  it("refuses a usage declaration that is incomplete or reads another way", () => {
+    expect(accepts(AccountKind, { ...kind, usage: { readBy: "endpoint", headers: {} } })).toBe(
+      false,
+    );
+    expect(accepts(AccountKind, { ...kind, usage: { readBy: "harness" } })).toBe(false);
+    expect(accepts(AccountKind, { ...kind, usage: { readBy: "telepathy" } })).toBe(false);
+  });
+
   it("can use every step a Connection type can", () => {
     const steps = [
       { kind: "checklist", markdown: "Do this first." },

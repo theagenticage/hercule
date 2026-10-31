@@ -321,11 +321,11 @@ export const makeProbe =
       );
       // pi lists only the providers it has a key for, so a machine with no key
       // has no catalog to read.
-      if (auth.status !== "ok") return { harnessVersion, auth, models: [] };
+      if (auth.status !== "ok") return { harnessVersion, auth, models: [], usage: null };
       yield* refreshModelStore(run, binary, home, env, credentialVariable);
       return yield* Effect.match(fetchCatalog(spawn, binary, env, provider), {
         onFailure: (message) => buildFailedProbe(harnessVersion, message),
-        onSuccess: (models) => ({ harnessVersion, auth, models }),
+        onSuccess: (models) => ({ harnessVersion, auth, models, usage: null }),
       });
     });
     return Effect.map(

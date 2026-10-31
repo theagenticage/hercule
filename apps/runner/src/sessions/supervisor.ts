@@ -46,7 +46,12 @@ import {
   type SubagentId,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
-import { describeMissingAdapter, type AdapterTurnInput, type HarnessAdapter } from "../harnesses";
+import {
+  describeMissingAdapter,
+  type AdapterTurnInput,
+  type HarnessAdapter,
+  type SessionUsageReport,
+} from "../harnesses";
 import {
   buildAdapterFailed,
   buildInputStopped,
@@ -435,6 +440,9 @@ export interface Supervising {
    * session table and the timers up to date, saves an agent step's outcome,
    * removes the entry of a session that exited, then numbers the event and
    * sends it on the attached connection, or drops it while none is attached.
+   * It also sends every adapter's usage reports on the attached connection,
+   * and drops them in the same way.
+   *
    * Fork it once when the process starts, before the first connection: an
    * adapter's events are not replayed, so one published before the watch
    * subscribes is lost to the supervisor too. It never returns.
@@ -994,6 +1002,25 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
       ),
     );
   };
+
+  /**
+   * Sends one adapter's usage report as an `accountUsageReported` frame, beside
+   * the session's events and outside their numbering. Drops the report when no
+   * connection is attached, or when this runner does not host the session: the
+   * report is best effort, and the next one replaces it.
+   */
+  const forwardUsageReport = (report: SessionUsageReport): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const connection = attached;
+      if (connection === undefined || !live.has(report.sessionId)) return Effect.void;
+      return Effect.ignoreCause(
+        connection.send({
+          _tag: "accountUsageReported",
+          sessionId: report.sessionId,
+          readings: report.readings,
+        }),
+      );
+    });
 
   /**
    * Sends a `runtime.error` on the session's own stream, where the user
@@ -2040,12 +2067,24 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
     });
 
   return {
-    watch: Stream.runForEach(
-      Stream.mergeAll(
-        adapters.map((adapter) => adapter.events),
-        { concurrency: "unbounded" },
-      ),
-      forwardEvent,
+    watch: Effect.all(
+      [
+        Stream.runForEach(
+          Stream.mergeAll(
+            adapters.map((adapter) => adapter.events),
+            { concurrency: "unbounded" },
+          ),
+          forwardEvent,
+        ),
+        Stream.runForEach(
+          Stream.mergeAll(
+            adapters.map((adapter) => adapter.usageReports),
+            { concurrency: "unbounded" },
+          ),
+          forwardUsageReport,
+        ),
+      ],
+      { concurrency: "unbounded", discard: true },
     ),
     forConnection,
     shutdown,

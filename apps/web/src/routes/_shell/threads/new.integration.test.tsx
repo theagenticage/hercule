@@ -128,6 +128,8 @@ const buildProviderAccount = (
   planLabel: null,
   defaultHarnessId: provider.harnessId,
   expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: snapshots.map((snapshot) => ({ ...snapshot, harnessId: provider.harnessId })),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",

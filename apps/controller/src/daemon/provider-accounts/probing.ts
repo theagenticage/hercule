@@ -45,7 +45,9 @@ import {
   type ProbeOutcome,
   type ProbePair,
 } from "../../provider-accounts";
+import { PromotionState } from "../../promotion";
 import { RunnerConnections, type Answer } from "../../runners";
+import { AccountUsage } from "../../usage";
 
 /**
  * The runner's own 15s probe timeout plus the round trip, so the runner's
@@ -142,6 +144,8 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const probes = yield* ProviderAccountProbes;
   const harnessAccounts = yield* HarnessAccounts;
+  const accountUsage = yield* AccountUsage;
+  const promotion = yield* PromotionState;
 
   // One semaphore per runner id, made on first use. Runners are few, so the
   // map is never pruned.
@@ -157,19 +161,26 @@ const make = Effect.gen(function* () {
 
   /**
    * Probes one account in one harness on one runner and stores the snapshot.
-   * Returns the outcome (see `ProbeOutcome`): `unanswered` if the runner does
-   * not answer before the deadline, `superseded` if the account changed or a
-   * newer probe was stored while this one ran. A late report is dropped
-   * rather than stored, because nothing is waiting for that request any more.
+   * Asks the runner for the account's usage too when `readUsage` is true; the
+   * readings in the answer are stored with the snapshot. Returns the outcome
+   * (see `ProbeOutcome`): `unanswered` if the runner does not answer before
+   * the deadline, `superseded` if the account changed or a newer probe was
+   * stored while this one ran. A late report is dropped rather than stored,
+   * because nothing is waiting for that request any more.
+   *
+   * Private on purpose: a usage read starts a harness process that talks to
+   * the provider, so it may only be asked for through `readUsageByProbe`,
+   * which claims the read first.
    *
    * Fails with `NotFound` when the account does not exist, and with
    * `InvalidState` before anything is sent when the account cannot run in the
    * harness, or its stored key does not decrypt.
    */
-  const probe = (
+  const probeAndMaybeReadUsage = (
     runnerId: string,
     providerAccountId: string,
     harnessId: string,
+    readUsage: boolean,
   ): Effect.Effect<ProbeOutcome, StoreError | NotFound> =>
     Effect.gen(function* () {
       // Taken before the credential is read, so the snapshot never claims to
@@ -184,6 +195,7 @@ const make = Effect.gen(function* () {
           // Decrypted here, at send time: the probe runs the harness's own auth
           // check, which is only meaningful with the credential.
           harnessAccount: yield* harnessAccounts.prepare(providerAccountId, harnessId),
+          readUsage,
         },
         yield* ProviderAccountProbeDeadline,
       );
@@ -198,6 +210,17 @@ const make = Effect.gen(function* () {
         stamp,
       );
     });
+
+  /**
+   * Probes one account in one harness on one runner and stores the snapshot,
+   * without reading usage. Returns and fails as `probeAndMaybeReadUsage` does.
+   */
+  const probe = (
+    runnerId: string,
+    providerAccountId: string,
+    harnessId: string,
+  ): Effect.Effect<ProbeOutcome, StoreError | NotFound> =>
+    probeAndMaybeReadUsage(runnerId, providerAccountId, harnessId, false);
 
   /**
    * Probes the account in the harness on the runner to check a sign-in that
@@ -441,6 +464,36 @@ const make = Effect.gen(function* () {
   return {
     probe,
 
+    /**
+     * Claims the account's next usage read (`AccountUsage.claimRead`) and, when
+     * the claim is granted, probes the account in the harness on the runner
+     * asking for usage. The runner's readings are stored with the snapshot.
+     * This is the only way a probe asks for usage, so a usage read never
+     * happens without a claim. The probe is a background one: it waits for a
+     * free slot on the runner like a sweep probe does, and the claim is made
+     * only once the slot is held, so the 15 minutes do not start running while
+     * the read waits.
+     *
+     * Returns whether the claim was granted. Fails as `probe` does.
+     */
+    readUsageByProbe: (
+      runnerId: string,
+      providerAccountId: string,
+      harnessId: string,
+    ): Effect.Effect<boolean, StoreError | NotFound> =>
+      readProbeSlots(runnerId).withPermits(1)(
+        Effect.gen(function* () {
+          // The claim is a write, so it waits while a promotion freezes the
+          // controller and is never made once it is sealed. The probe is not
+          // held at the gate: it stores its answer through `recordProbe`,
+          // which passes the gate itself.
+          const claimed = yield* promotion.whenServing(accountUsage.claimRead(providerAccountId));
+          if (!claimed) return false;
+          yield* probeAndMaybeReadUsage(runnerId, providerAccountId, harnessId, true);
+          return true;
+        }),
+      ),
+
     probeToCheckSignIn,
 
     /**
@@ -548,5 +601,5 @@ export class ProviderAccountProbing extends Context.Service<
 export const ProviderAccountProbingLayer: Layer.Layer<
   ProviderAccountProbing,
   never,
-  RunnerConnections | ProviderAccountProbes | HarnessAccounts
+  RunnerConnections | ProviderAccountProbes | HarnessAccounts | AccountUsage | PromotionState
 > = Layer.effect(ProviderAccountProbing)(make);

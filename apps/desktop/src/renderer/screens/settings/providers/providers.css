@@ -37,23 +37,50 @@
 }
 
 /* ---------- A card ---------- */
-/* One button. The prototype's card is a box with the button inside it, and a
-   foot under the button that comes with the profiles. Without a foot the
-   box and the button are the same shape, so there is only the button. The
+/* The prototype's card is a box with the button inside it, and a foot under
+   the button. The box is `.pa-card`; the button that opens the sheet is
+   `.pa-card-open`. The foot holds the button that fixes the card's state, and
+   a card in good standing has none, so there the button is the whole box. The
    card has no hover style: hovering a card lights nothing. */
 .pa-card {
   position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-width: 0;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+}
+/* A card that needs the user takes the state's tint, as the prototype's does. */
+.pa-card.is-attention {
+  background: color-mix(in oklab, var(--you-tint) 60%, var(--raised));
+}
+.pa-card.is-fail {
+  background: color-mix(in oklab, var(--fail-tint) 70%, var(--raised));
+}
+.pa-card-open {
   display: grid;
   align-content: start;
   gap: 2px;
   min-width: 0;
   padding: 11px 12px 10px;
   border-radius: var(--r-md);
-  background: var(--raised);
-  box-shadow:
-    inset 0 0 0 1px var(--line-soft),
-    var(--shadow-1);
   text-align: left;
+}
+.pa-card-open.has-foot {
+  padding-bottom: 8px;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+/* The ring goes around the whole card, not around its button alone, which
+   ends at the foot's rule. */
+.pa-card-open:focus-visible {
+  outline: 0;
+}
+.pa-card:has(> .pa-card-open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 .pa-card-top {
   display: flex;
@@ -87,6 +114,124 @@
   color: var(--faint);
   font-size: var(--t-11);
   white-space: nowrap;
+}
+
+/* The gauge: the prototype's number, then a 4px bar that takes the rest of
+   the row, with the window's name added after it. Each line has the same
+   columns, so the bars of a card line up. */
+.pa-gauge {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+.pa-gauge-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 44px;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 18px;
+}
+.pa-gauge-row > .pa-bar {
+  align-self: center;
+}
+.pa-gauge-num {
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pa-gauge-label,
+.pa-gauge-credit {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pa-gauge-row.is-credit .pa-gauge-credit {
+  grid-column: 2 / -1;
+}
+.pa-bar {
+  position: relative;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.pa-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink);
+}
+.pa-gauge-row.is-attention .pa-bar > i {
+  background: var(--you);
+}
+.pa-gauge-row.is-attention .pa-gauge-num {
+  color: var(--you-ink);
+}
+.pa-gauge-row.is-fail .pa-bar > i {
+  background: var(--fail);
+}
+.pa-gauge-row.is-fail .pa-gauge-num {
+  color: var(--fail-ink);
+}
+.pa-card-sub {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+/* The state, in the gauge's place. */
+.pa-card-state {
+  display: grid;
+  gap: 1px;
+  margin-top: 8px;
+}
+.pa-card-state-text {
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.pa-card-state-text.is-attention {
+  color: var(--you-ink);
+}
+.pa-card-state-text.is-fail {
+  color: var(--fail-ink);
+}
+.pa-card-sub.is-attention {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* The foot, as the prototype's `.vi-card-foot` is, holds the button that fixes
+   the card's state, at the right. The button is the prototype's quiet
+   `.vi-use`, in the state's ink so it reads as the fix. */
+.pa-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 30px;
+  padding: 0 8px 0 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.pa-card-fix {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pa-card-fix.is-fail {
+  color: var(--fail-ink);
+}
+.pa-card-fix.is-attention {
+  color: var(--you-ink);
+}
+.pa-card-fix:hover {
+  background: var(--hover);
 }
 
 /* The identity and the plan on one line. The identity gives way first. */
@@ -342,4 +487,90 @@
 }
 .pa-harnesses .fl-err {
   margin: 0;
+}
+
+/* The Usage section: the prototype's row is a name (90px), a 6px bar, the
+   number (40px) and when the window resets, 10px apart. The prototype's reset
+   column is 96px for a weekday alone; the time that follows it, "resets Mon
+   12:30", needs 124px. */
+.pa-use {
+  display: grid;
+  gap: 2px;
+}
+.pa-use-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 40px 124px;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: var(--t-12);
+}
+.pa-use-row b {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pa-use-row small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pa-use-bar {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.pa-use-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink);
+}
+.pa-use-row.is-attention .pa-use-bar > i {
+  background: var(--you);
+}
+.pa-use-row.is-attention b {
+  color: var(--you-ink);
+}
+.pa-use-row.is-fail .pa-use-bar > i {
+  background: var(--fail);
+}
+.pa-use-row.is-fail b {
+  color: var(--fail-ink);
+}
+.pa-use-credit {
+  grid-column: 2 / -1;
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.pa-use-credit small {
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.pa-use .pa-hint {
+  margin-top: 4px;
+}
+
+/* The Credential section: the state as the card draws it, the expiry, then
+   the button. */
+.pa-cred {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+.pa-cred > .pa-card-state {
+  margin-top: 0;
+}
+.pa-cred-message,
+.pa-cred-expiry {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }

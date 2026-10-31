@@ -1072,6 +1072,8 @@ export const FIXTURE_ACCOUNT: ProviderAccount = {
   planLabel: "Claude Max",
   defaultHarnessId: "claude-code/claude-code",
   expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: [
     {
       runnerId: WORLD.MOSS.id,

@@ -25,6 +25,7 @@ import {
   buildAgentStepResultRequest,
   SessionSpec,
   type AccessMode,
+  type AccountUsageReported,
   type AgentStepResultRequest,
   type ApprovalDecision,
   type ContinuedSubagent,
@@ -86,7 +87,7 @@ import {
 } from "@hercule/contract";
 import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
-import { PluginHost } from "../plugins";
+import { findAccountKind, PluginHost } from "../plugins";
 import { providerAccountRepository } from "../provider-accounts";
 import {
   afterCommit,
@@ -112,6 +113,7 @@ import {
 import type { SendOutcome } from "../runners";
 import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
 import { permissionRequestSubscriptions } from "../subscriptions";
+import { AccountUsage } from "../usage";
 import { WorkspaceService, type GithubAccount } from "../workspaces";
 import {
   APPROVAL_ANSWER_IDS,
@@ -775,6 +777,8 @@ const make = Effect.gen(function* () {
   const editObserver = yield* SessionEditObserver;
   const workspaces = yield* WorkspaceService;
   const notifier = yield* Notifier;
+  const accountUsage = yield* AccountUsage;
+  const host = yield* PluginHost;
   // The attachment claim, the image check and the skills decision read
   // through this service's client.
   const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
@@ -3189,6 +3193,37 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Records the usage a running session's harness reported for the
+     * session's Provider Account (spec 06 section 18). Drops the report, and
+     * logs why, when the session is unknown, is held by another runner (a
+     * runner may report only on sessions placed on it), or its account's kind
+     * declares no `usage`, because then there is no gauge to fill.
+     */
+    applyAccountUsageReported: (
+      runnerId: string,
+      report: AccountUsageReported,
+    ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const session = yield* sessions.one(report.sessionId);
+        if (Option.isNone(session) || session.value.runnerId !== runnerId) {
+          return yield* Effect.logInfo(
+            "Dropped a runner's usage report, because the session is unknown or not on that runner",
+          ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId }));
+        }
+        const { providerAccountId } = session.value;
+        const account = yield* providerAccounts.one(providerAccountId);
+        const kind = Option.isSome(account)
+          ? findAccountKind(yield* host.providers(), account.value)
+          : undefined;
+        if (kind?.usage === undefined) {
+          return yield* Effect.logDebug(
+            "Dropped a runner's usage report, because the account's kind declares no usage",
+          ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId, providerAccountId }));
+        }
+        yield* accountUsage.record(providerAccountId, report.readings, "session");
+      }),
+
+    /**
      * Applies a runner's report of the sessions it holds. Stores the native id
      * from each binding, then ends every session the controller thinks runs on
      * this runner but the report leaves out. A runner restart shows up only in
@@ -3646,6 +3681,7 @@ export const SessionServiceLayer: Layer.Layer<
   | SessionEditObserver
   | WorkspaceService
   | Notifier
+  | AccountUsage
 > = Layer.effect(SessionService)(make);
 
 /**

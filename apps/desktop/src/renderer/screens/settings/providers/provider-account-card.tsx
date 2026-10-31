@@ -1,7 +1,14 @@
 import type { JSX, ReactNode } from "react";
-import type { ProviderAccountIdentityLine } from "@hercule/client-core";
+import type {
+  AccountFix,
+  AccountState,
+  AccountUsage,
+  ProviderAccountIdentityLine,
+} from "@hercule/client-core";
 import { FleetIcon } from "../../../icons/fleet";
+import { AccountStateLine } from "./account-state-line";
 import { IdentityLine } from "./identity-line";
+import { UsageGauge } from "./usage-gauge";
 import "./providers.css";
 
 /** One machine of a per-machine account, as its card draws it. */
@@ -38,9 +45,16 @@ function MachinePips({
 }
 
 /**
- * Renders the card of one Provider Account as a single button that opens its
- * sheet: the provider's `mark`, the account's `name`, the `identity`
- * line under it, and where the account works.
+ * Renders the card of one Provider Account: a button that opens its sheet,
+ * holding the provider's `mark`, the account's `name`, the `identity` line
+ * under it, where the account works, and then one of two things:
+ *
+ * - the account's `state`, when it needs the user: what is wrong, and a
+ *   second button under the card that fixes it, which calls `onFix`. The card
+ *   takes the state's hue. The fix is a button of its own and not part of the
+ *   card's button, because a button cannot hold a button;
+ * - else the usage `usage` as a gauge, with when it was read. An account with
+ *   no usage has no gauge.
  *
  * `machines` lists the machines of an account that signs in on each one,
  * drawn as pips beside the name. It is `null` for an account whose
@@ -52,28 +66,58 @@ export function ProviderAccountCard({
   name,
   identity,
   machines,
+  usage,
+  state,
   onOpen,
+  onFix,
 }: {
   readonly mark: ReactNode;
   readonly name: string;
   readonly identity: ProviderAccountIdentityLine;
   readonly machines: ReadonlyArray<MachinePip> | null;
+  readonly usage: AccountUsage | null;
+  readonly state: AccountState;
   readonly onOpen: () => void;
+  readonly onFix: (fix: AccountFix) => void;
 }): JSX.Element {
+  const fix = state.kind === "ok" ? null : state.fix;
   return (
-    <button type="button" className="pa-card" title={`Open ${name}`} onClick={onOpen}>
-      <span className="pa-card-top">
-        {mark}
-        <b>{name}</b>
-        {machines !== null && <MachinePips machines={machines} />}
-      </span>
-      <IdentityLine line={identity} className="pa-card-identity" />
-      {machines === null && (
-        <span className="pa-card-reach">
-          <FleetIcon size={11} />
-          Every machine
+    <div className={state.kind === "ok" ? "pa-card" : `pa-card is-${state.tone}`}>
+      <button
+        type="button"
+        className={fix === null ? "pa-card-open" : "pa-card-open has-foot"}
+        title={`Open ${name}`}
+        onClick={onOpen}
+      >
+        <span className="pa-card-top">
+          {mark}
+          <b>{name}</b>
+          {machines !== null && <MachinePips machines={machines} />}
         </span>
+        <IdentityLine line={identity} className="pa-card-identity" />
+        {machines === null && (
+          <span className="pa-card-reach">
+            <FleetIcon size={11} />
+            Every machine
+          </span>
+        )}
+        {state.kind !== "ok" ? (
+          <AccountStateLine state={state} />
+        ) : (
+          usage !== null && <UsageGauge usage={usage} />
+        )}
+      </button>
+      {fix !== null && (
+        <div className="pa-card-foot">
+          <button
+            type="button"
+            className={`pa-card-fix is-${state.kind === "ok" ? "fail" : state.tone}`}
+            onClick={() => onFix(fix)}
+          >
+            {fix.label}
+          </button>
+        </div>
       )}
-    </button>
+    </div>
   );
 }

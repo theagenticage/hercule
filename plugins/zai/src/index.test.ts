@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { ProviderDefinition } from "@hercule/plugin-host";
 import { zai } from "./index";
+import { parseQuotaBody } from "./quota";
 
 /** Returns the definition the plugin gives the catalog, captured from its registration. */
 const captureProviderDefinition = (): ProviderDefinition => {
@@ -44,10 +45,34 @@ describe("the Z.ai provider", () => {
       url: "https://api.z.ai/api/coding/paas/v4/models",
       headers: { authorization: "Bearer {apiKey}" },
     });
+    // Z.ai's own usage plugin sends the raw key, with no `Bearer`.
+    expect(kind.usage).toEqual({
+      readBy: "endpoint",
+      url: "https://api.z.ai/api/monitor/usage/quota/limit",
+      headers: { authorization: "{apiKey}" },
+    });
     expect(kind.harnesses).toEqual(["pi/pi"]);
     expect(definition.defaultHarnessId).toBe("pi/pi");
     // The key is a paid credential: the description tells the user where it is kept.
     expect(kind.description).toContain("Coding Plan");
+  });
+
+  it("registers the quota parser for the API key kind", () => {
+    const registered: Array<unknown> = [];
+    Effect.runSync(
+      Effect.orDie(
+        zai.register({
+          providers: {
+            register: (_definition, options) =>
+              Effect.sync(() => {
+                registered.push(options?.parseUsageBody);
+              }),
+          },
+        }),
+      ),
+    );
+
+    expect(registered).toEqual([{ "api-key": parseQuotaBody }]);
   });
 
   it("suggests glm-5.3-flash for text generation", () => {

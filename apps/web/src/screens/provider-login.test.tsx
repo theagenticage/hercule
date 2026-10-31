@@ -16,6 +16,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createClient, queryKeys, type Live, type LiveQueryKey } from "@hercule/client-core";
+import { OPENAI_IDENTITY, buildProviderAccount } from "@hercule/client-core/testing";
+import type { CapabilitySnapshot } from "@hercule/contract";
 import { ProviderLogin } from "./provider-login";
 import { expectInDocumentOrder, readPageText, stubApi, type Handler } from "../app/testing";
 
@@ -33,7 +35,7 @@ const LOGIN_CODE = `POST /api/v1/provider-accounts/${ACCOUNT}/sign-in-code`;
 const ACCOUNTS = "GET /api/v1/provider-accounts";
 
 /** A snapshot of the account; the drawer only needs it to be valid. */
-const SNAPSHOT = {
+const SNAPSHOT: CapabilitySnapshot = {
   runnerId: RUNNER,
   harnessId: "codex/codex",
   probedAt: "2026-09-14T09:10:00.000Z",
@@ -47,22 +49,11 @@ const listSentCodes = (api: ReturnType<typeof stubApi>) =>
   api.calls.filter((call) => call.path.endsWith("/sign-in-code"));
 
 /** Returns the OpenAI account as the controller lists it, with `snapshot` as its only snapshot. */
-const buildCodex = (snapshot: object) => ({
-  id: ACCOUNT,
-  providerId: "openai/openai",
-  kind: "subscription-per-machine",
-  label: null,
-  identity: null,
-  planLabel: null,
-  defaultHarnessId: "codex/codex",
-  expiresAt: null,
-  snapshots: [snapshot],
-  createdAt: "2026-09-14T09:00:00.000Z",
-  updatedAt: "2026-09-14T09:00:00.000Z",
-});
+const buildCodex = (snapshot: CapabilitySnapshot) =>
+  buildProviderAccount({ ...OPENAI_IDENTITY, id: ACCOUNT }, [snapshot]);
 
 /** The snapshot from before the login started: the account is signed out. */
-const SIGNED_OUT = { ...SNAPSHOT, auth: { status: "unauthenticated" } };
+const SIGNED_OUT: CapabilitySnapshot = { ...SNAPSHOT, auth: { status: "unauthenticated" } };
 /** The snapshot the probe takes after the vendor's login ended. */
 const SIGNED_IN = { ...SNAPSHOT, probedAt: "2026-09-14T09:12:00.000Z" };
 
@@ -129,9 +120,9 @@ const buildExpiresAt = (minutesFromNow: number): string =>
  * that.
  */
 const stubProviderAccounts = (
-  before: object = SIGNED_OUT,
+  before: CapabilitySnapshot = SIGNED_OUT,
 ): { handler: Handler; signedIn: () => void } => {
-  let snapshot: object = before;
+  let snapshot = before;
   return {
     handler: () => ({ body: [buildCodex(snapshot)] }),
     signedIn: () => {

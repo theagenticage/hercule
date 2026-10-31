@@ -10,6 +10,7 @@ import {
   ONLY_THE_USER_IMPORTS_SKILLS,
   OPERATIONS,
   type OperationId,
+  type ProviderAccount,
 } from "@hercule/contract";
 import { main, readSetupUrl } from "./index";
 import { buildErrorEnvelope, buildId, stubFetch, stubIo, type Handler } from "./testing";
@@ -838,7 +839,7 @@ describe("id tails", () => {
   it("resolves a tail through a list that is returned whole", async () => {
     // The Provider Account list is returned whole rather than as a page,
     // because there are only a few accounts.
-    const account = {
+    const account: ProviderAccount = {
       id: buildId("cccccccc"),
       providerId: "anthropic/anthropic",
       kind: "subscription-per-machine",
@@ -847,6 +848,8 @@ describe("id tails", () => {
       planLabel: null,
       defaultHarnessId: "claude-code/claude-code",
       expiresAt: null,
+      usage: [],
+      failure: null,
       snapshots: [],
       createdAt: "2026-09-07T00:00:00.000Z",
       updatedAt: "2026-09-07T00:00:00.000Z",

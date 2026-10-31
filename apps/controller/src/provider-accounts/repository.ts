@@ -45,6 +45,12 @@ export interface StoredProviderAccount {
    * the change is told apart from one that describes the current credential.
    */
   readonly credentialGeneration: number;
+  /**
+   * Why and since when the provider refuses the account's key or token, or
+   * null while it does not. Cleared by a new credential and by an answer
+   * that accepts the current one.
+   */
+  readonly failure: { readonly message: string; readonly failedAt: string } | null;
   /** The folder name under `providers/` that an account made by the upgrade from the previous version keeps, or null. */
   readonly legacyHomeFolder: string | null;
   /** The qualified id of the harness that folder belongs to, or null. Null exactly when the folder is. */
@@ -77,6 +83,8 @@ interface ProviderAccountRow {
   readonly default_harness_id: string;
   readonly credential_expires_at: string | null;
   readonly credential_generation: number;
+  readonly failure_message: string | null;
+  readonly failed_at: string | null;
   readonly legacy_home_folder: string | null;
   readonly legacy_home_harness_id: string | null;
   readonly created_at: string;
@@ -85,7 +93,7 @@ interface ProviderAccountRow {
 
 const ACCOUNT_COLUMNS =
   "id, provider_id, kind, label, identity, plan_label, default_harness_id, " +
-  "credential_expires_at, credential_generation, legacy_home_folder, legacy_home_harness_id, created_at, updated_at";
+  "credential_expires_at, credential_generation, failure_message, failed_at, legacy_home_folder, legacy_home_harness_id, created_at, updated_at";
 
 const toStoredProviderAccount = (row: ProviderAccountRow): StoredProviderAccount => ({
   id: uuidToString(row.id),
@@ -97,11 +105,34 @@ const toStoredProviderAccount = (row: ProviderAccountRow): StoredProviderAccount
   defaultHarnessId: row.default_harness_id,
   credentialExpiresAt: row.credential_expires_at,
   credentialGeneration: row.credential_generation,
+  failure:
+    row.failure_message === null || row.failed_at === null
+      ? null
+      : { message: row.failure_message, failedAt: row.failed_at },
   legacyHomeFolder: row.legacy_home_folder,
   legacyHomeHarnessId: row.legacy_home_harness_id,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
+
+/** What `claimExpiryWarnings` returns for each account it marked. */
+export interface ExpiringAccount {
+  readonly id: string;
+  readonly providerId: string;
+  readonly kind: string;
+  readonly label: string | null;
+  readonly credentialExpiresAt: string;
+}
+
+/**
+ * What `markCredentialRefused` found:
+ *
+ * - `failed`: the account was not failed and now is.
+ * - `still-failed`: the account was already failed; only its message changed.
+ * - `ignored`: the account is gone, or the refused credential is not its
+ *   current one.
+ */
+export type RefusalOutcome = "failed" | "still-failed" | "ignored";
 
 /** What one runner found out about one account in one harness, the last time it probed. */
 export interface StoredSnapshot {
@@ -164,15 +195,20 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   /**
-   * Adds one to the account's credential generation. Call it in the
-   * transaction that stores a new credential, so a probe sent before it is
-   * recognised as stale. A sign-in uses `recordAcceptedSignIn`. Does nothing
-   * when the account does not exist.
+   * Starts a new credential for the account: adds one to its credential
+   * generation, and clears its failure and its expiry warning, because both
+   * were about the old credential. Call it in the transaction that stores a
+   * new key or token or accepts a sign-in (`recordAcceptedSignIn` calls it),
+   * so a probe sent before it is recognised as stale and the warnings can
+   * fire again for the new credential. Does nothing when the account does not
+   * exist.
    */
   const advanceCredentialGeneration = (id: string, at: string): Effect.Effect<void, SqlError> =>
     Effect.asVoid(sql`
       UPDATE provider_accounts
-      SET credential_generation = credential_generation + 1, updated_at = ${at}
+      SET credential_generation = credential_generation + 1,
+          failure_message = NULL, failed_at = NULL, expiry_notified_at = NULL,
+          updated_at = ${at}
       WHERE id = ${uuidFromString(id)}
     `);
 
@@ -268,6 +304,7 @@ const make = Effect.gen(function* () {
           defaultHarnessId: account.defaultHarnessId,
           credentialExpiresAt: null,
           credentialGeneration: 0,
+          failure: null,
           legacyHomeFolder: null,
           legacyHomeHarnessId: null,
           createdAt: account.at,
@@ -314,8 +351,9 @@ const make = Effect.gen(function* () {
 
     /**
      * Records that a sign-in on a runner was accepted, whatever it stored: it
-     * advances the account's credential generation, so a probe sent before the
-     * sign-in is stale when its answer arrives, and marks the runner's
+     * starts a new credential for the account (`advanceCredentialGeneration`:
+     * a probe sent before the sign-in is stale when its answer arrives, and
+     * the failure and expiry warning are cleared), and marks the runner's
      * snapshot of the account in the harness as not signed in with the message
      * "Checking the sign-in…" (keeping its time), because that snapshot was
      * taken before the sign-in and may describe another person. Placement
@@ -334,6 +372,95 @@ const make = Effect.gen(function* () {
         yield* advanceCredentialGeneration(providerAccountId, at);
         yield* markSnapshotSignInPending(providerAccountId, harnessId, runnerId);
       }),
+
+    /**
+     * Records that the provider refused the account's credential, if
+     * `credentialGeneration` is the account's current one. A refusal of an
+     * older credential says nothing about the current one and is ignored.
+     * Stores the message either way, and the time only when the account was
+     * not failed yet. Returns which of the three happened. Call it in a
+     * transaction.
+     */
+    markCredentialRefused: (
+      id: string,
+      credentialGeneration: number,
+      message: string,
+      at: string,
+    ): Effect.Effect<RefusalOutcome, SqlError> =>
+      Effect.gen(function* () {
+        const alreadyFailed = yield* sql`
+          UPDATE provider_accounts SET failure_message = ${message}, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)}
+            AND credential_generation = ${credentialGeneration}
+            AND failed_at IS NOT NULL
+          RETURNING id
+        `;
+        if (alreadyFailed.length > 0) return "still-failed" as const;
+        const newlyFailed = yield* sql`
+          UPDATE provider_accounts
+          SET failure_message = ${message}, failed_at = ${at}, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)}
+            AND credential_generation = ${credentialGeneration}
+          RETURNING id
+        `;
+        return newlyFailed.length > 0 ? ("failed" as const) : ("ignored" as const);
+      }),
+
+    /**
+     * Clears the account's failure, if `credentialGeneration` is the account's
+     * current one. Returns whether the account was failed and now is not.
+     */
+    clearFailure: (
+      id: string,
+      credentialGeneration: number,
+      at: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`
+          UPDATE provider_accounts
+          SET failure_message = NULL, failed_at = NULL, updated_at = ${at}
+          WHERE id = ${uuidFromString(id)}
+            AND credential_generation = ${credentialGeneration}
+            AND failed_at IS NOT NULL
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Marks every account whose credential expires at or before `cutoff` and
+     * that has not been warned yet, and returns those accounts. It is one
+     * statement, so two callers never both get the same account. Times are
+     * compared as instants, not as text, so an expiry written with a UTC
+     * offset compares correctly.
+     */
+    claimExpiryWarnings: (
+      cutoff: string,
+      at: string,
+    ): Effect.Effect<ReadonlyArray<ExpiringAccount>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly id: Uint8Array;
+          readonly provider_id: string;
+          readonly kind: string;
+          readonly label: string | null;
+          readonly credential_expires_at: string;
+        }>`
+          UPDATE provider_accounts SET expiry_notified_at = ${at}
+          WHERE credential_expires_at IS NOT NULL
+            AND julianday(credential_expires_at) <= julianday(${cutoff})
+            AND expiry_notified_at IS NULL
+          RETURNING id, provider_id, kind, label, credential_expires_at
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            id: uuidToString(row.id),
+            providerId: row.provider_id,
+            kind: row.kind,
+            label: row.label,
+            credentialExpiresAt: row.credential_expires_at,
+          })),
+      ),
 
     /** Deletes the account. Its snapshots are deleted with it, by the foreign key. */
     delete: (id: string): Effect.Effect<void, SqlError> =>

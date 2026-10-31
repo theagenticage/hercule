@@ -19,6 +19,7 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
@@ -186,7 +187,9 @@ const make = Effect.gen(function* () {
    * The work each write leads to is forked after the gate, not inside it,
    * so it passes the gate on its own once the write is done.
    */
-  const ingestSessionTraffic = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
+  const ingestSessionTraffic = (
+    traffic: SessionTraffic,
+  ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
         const ended = yield* promotion.whenServing(
@@ -211,6 +214,11 @@ const make = Effect.gen(function* () {
       if (traffic.frame._tag === "filesEdited") {
         return yield* promotion.whenServing(
           sessions.applyFilesEdited(traffic.runnerId, traffic.frame),
+        );
+      }
+      if (traffic.frame._tag === "accountUsageReported") {
+        return yield* promotion.whenServing(
+          sessions.applyAccountUsageReported(traffic.runnerId, traffic.frame),
         );
       }
       if (traffic.frame._tag === "sessionInputResult") {

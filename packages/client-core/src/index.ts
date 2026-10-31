@@ -579,6 +579,21 @@ export {
   type HarnessLoginMethod,
 } from "./provider-accounts";
 export {
+  describeAccountUsage,
+  type AccountUsage,
+  type AccountUsageCreditLine,
+  type AccountUsageLine,
+  type AccountUsageTone,
+  type AccountUsageWindowLine,
+} from "./account-usage";
+export {
+  decideAccountState,
+  describeCredentialExpiry,
+  findCredentialReplacement,
+  type AccountFix,
+  type AccountState,
+} from "./account-state";
+export {
   decideDeviceLoginStep,
   describeDeviceLoginWait,
   startProviderLogin,

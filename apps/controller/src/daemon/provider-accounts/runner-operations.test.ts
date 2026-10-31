@@ -216,6 +216,7 @@ const SIGNED_IN_RESULT: ProbeResult = {
   harnessVersion: "1.0.0",
   auth: { status: "ok", identity: "someone@example.com" },
   models: [{ slug: "model-1", name: "Model 1", imageInput: null, options: [] }],
+  usage: null,
 };
 
 /** Answers the sign-in and probe frames: the login result is `login`, the probe is `probe`. */

@@ -19,4 +19,5 @@ export const buildFailedProbe = (harnessVersion: string | null, message: string)
   harnessVersion,
   auth: { status: "error", message: truncateFact(message) },
   models: [],
+  usage: null,
 });

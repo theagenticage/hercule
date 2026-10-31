@@ -957,6 +957,7 @@ describe("a controller asking a runner to probe a harness it has no adapter for"
       modelArgument: "{model}",
       credentialVariables: [],
     },
+    readUsage: false,
   };
 
   const findProbeReport = (stub: Stub): ProbeReport | undefined =>
@@ -1077,6 +1078,7 @@ describe("session frames on one connection", () => {
         harnessId: HARNESS_ID,
         binaryName: "fake-harness",
         events: Stream.fromPubSub(events),
+        usageReports: Stream.empty,
         probe: () => Effect.die("not probed here"),
         generateText: () => Effect.die("no text generation here"),
         listSessions: Effect.suspend(() => {

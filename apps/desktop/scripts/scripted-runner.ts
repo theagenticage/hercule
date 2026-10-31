@@ -148,12 +148,14 @@ const PROBE_RESULT: Omit<ProbeResult, "harnessVersion"> = {
       options: MODEL_OPTIONS,
     },
   ],
+  usage: null,
 };
 
 /** The report of a probe after `setSignedIn(false)`: the harness holds no login and lists no models. */
 const SIGNED_OUT_PROBE_RESULT: Omit<ProbeResult, "harnessVersion"> = {
   auth: { status: "unauthenticated" },
   models: [],
+  usage: null,
 };
 
 /**
@@ -1331,7 +1333,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 16 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 17 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,

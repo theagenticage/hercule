@@ -130,7 +130,9 @@ export const CORE_KIND_PREFIX = "core.";
  * `build` failed, and stays open until a later `build` of the kind succeeds.
  * `core.breaker-tripped` is the decision raised when a start trigger spends
  * its spawn bound and pauses, and `core.workflow-invalid` is raised when a
- * stored workflow stops validating. Spec 10 §7.2 owns the list.
+ * stored workflow stops validating. `core.account-expiring` and
+ * `core.account-failed` are informational: a Provider Account's credential
+ * is about to expire, or the provider refused it. Spec 10 §7.2 owns the list.
  */
 export const CORE_NOTIFICATION_KINDS = [
   "core.approval",
@@ -144,6 +146,8 @@ export const CORE_NOTIFICATION_KINDS = [
   "core.signal-build-failed",
   "core.breaker-tripped",
   "core.workflow-invalid",
+  "core.account-expiring",
+  "core.account-failed",
 ] as const;
 
 export type CoreNotificationKind = (typeof CORE_NOTIFICATION_KINDS)[number];
@@ -193,7 +197,8 @@ const buildIdSubject = <const Kind extends string, Value extends Schema.Top>(
  * the core can resolve the decision about one request without touching other
  * decisions about the same session. A Permission Request has its own kind,
  * so its id is never read as an approval's. A signal kind is named by its
- * qualified name, such as `github/review-requested`.
+ * qualified name, such as `github/review-requested`. A Provider Account is
+ * named by its id, for the notifications about its credential.
  */
 export const NotificationSubject = Schema.Union([
   buildIdSubject("task", Id),
@@ -206,6 +211,7 @@ export const NotificationSubject = Schema.Union([
   buildIdSubject("plugin", PluginId),
   buildIdSubject("event", EventId),
   buildIdSubject("permissionRequest", Id),
+  buildIdSubject("providerAccount", Id),
   buildIdSubject("signalKind", Schema.String),
   Schema.Struct({ kind: Schema.Literal("trigger"), workflowId: Id, triggerId: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("request"), sessionId: Id, requestId: Fact }),

@@ -486,20 +486,20 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 16 reshaped the harness account the probe, sign-in and start frames carry, and added the
-  // login method, which a version 15 peer cannot read. So versions 15 and 16 refuse each other at
-  // hello; this is the version 16 controller refusing a version 15 runner.
-  it("refuses a runner on protocol version 15 and says to upgrade it", async () => {
+  // Version 17 added Account Usage frames and fields, which a version 16 peer cannot read. So
+  // versions 16 and 17 refuse each other at hello; this is the version 17 controller refusing a
+  // version 16 runner.
+  it("refuses a runner on protocol version 16 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 15 }));
+      wire.send(buildHello({ protocolVersion: 16 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(16);
+      expect(PROTOCOL_VERSION).toBe(17);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 16 and the runner does not; " +
-          "upgrade the runner to a build that uses version 16",
+        "this controller uses runner protocol version 17 and the runner does not; " +
+          "upgrade the runner to a build that uses version 17",
       );
       expect(wire.frames).toEqual([]);
     });
@@ -1458,7 +1458,12 @@ describe("refreshing a runner's facts on demand", () => {
             _tag: "probeReport",
             requestId: "facts",
             providerAccountId: "0199e0e7-0000-7000-8000-0000000000c1",
-            result: { harnessVersion: null, auth: { status: "unauthenticated" }, models: [] },
+            result: {
+              harnessVersion: null,
+              auth: { status: "unauthenticated" },
+              models: [],
+              usage: null,
+            },
           });
 
           expect((await pending).status).toBe(409);
@@ -1705,6 +1710,7 @@ const buildProbeResult = (version: string): ProbeResult => ({
     backend: "firstParty",
   },
   models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],
+  usage: null,
 });
 
 describe("probing a runner's provider accounts", () => {

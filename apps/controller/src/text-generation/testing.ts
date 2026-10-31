@@ -177,6 +177,7 @@ export const buildProbeResult = (
     isDefault: index === 0,
     options: [],
   })),
+  usage: null,
 });
 
 /** Stores a runner's snapshot of an account in one of its harnesses. */

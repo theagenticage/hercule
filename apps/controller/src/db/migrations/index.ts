@@ -104,6 +104,8 @@ import sessionDedupKeys from "./0093-session-dedup-keys";
 import qualifiedHarnessIds from "./0094-qualified-harness-ids";
 import providerAccounts from "./0095-provider-accounts";
 import providerAccountCredentialState from "./0096-provider-account-credential-state";
+import accountUsage from "./0097-account-usage";
+import providerAccountFailure from "./0098-provider-account-failure";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -202,6 +204,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [94, "qualified-harness-ids", Effect.succeed(qualifiedHarnessIds)],
   [95, "provider-accounts", Effect.succeed(providerAccounts)],
   [96, "provider-account-credential-state", Effect.succeed(providerAccountCredentialState)],
+  [97, "account-usage", Effect.succeed(accountUsage)],
+  [98, "provider-account-failure", Effect.succeed(providerAccountFailure)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

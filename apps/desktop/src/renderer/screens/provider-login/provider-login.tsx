@@ -379,10 +379,11 @@ function DeviceLoginWait({
 /**
  * Renders the entry of a credential field of the account's kind, such as the
  * Z.ai API key: the field's description, a password field and Save. The value
- * is sent with `providerAccount.update` and never read back. Calls `onSaved`
- * once it is stored.
+ * is sent with `providerAccount.update` and never read back. The controller
+ * checks a key with its provider before it stores it, and a refusal shows
+ * under the field. Calls `onSaved` once the credential is stored.
  */
-function CredentialFieldEntry({
+export function CredentialFieldEntry({
   client,
   providerAccountId,
   field,
@@ -390,7 +391,7 @@ function CredentialFieldEntry({
 }: {
   readonly client: HerculeClient;
   readonly providerAccountId: string;
-  readonly field: CredentialFieldOffer;
+  readonly field: Pick<CredentialFieldOffer, "name" | "title" | "description">;
   readonly onSaved: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();

@@ -31,6 +31,7 @@ import {
   type ActivationContext,
   type ConnectionTypeContribution,
   type Deactivate,
+  type ParseUsageBody,
   type KeyValueStore,
   type Plugin,
   type PluginCapability,
@@ -392,8 +393,8 @@ const buildRegistrationHost = (
   ...(manifest.capabilities.includes("providers")
     ? {
         providers: {
-          register: (definition) =>
-            registerProviderContribution(manifest, definition, declared, liveProviders),
+          register: (definition, options) =>
+            registerProviderContribution(manifest, definition, declared, liveProviders, options),
         },
       }
     : {}),
@@ -1014,6 +1015,21 @@ const make = Effect.gen(function* () {
 
     /** Returns every provider this boot registered, in registry order. */
     providers: (): Effect.Effect<ReadonlyArray<RegisteredProvider>> => Ref.get(providers),
+
+    /**
+     * Returns the parser of the usage endpoint's response for one account kind
+     * of one provider, or none when the kind does not read its usage from an
+     * endpoint or the provider is not registered.
+     */
+    findUsageParser: (
+      providerId: string,
+      kindId: string,
+    ): Effect.Effect<Option.Option<ParseUsageBody>> =>
+      Effect.map(Ref.get(providers), (registered) =>
+        Option.fromNullishOr(
+          registered.find((provider) => provider.id === providerId)?.parseUsageBody[kindId],
+        ),
+      ),
 
     /** Returns every event kind this boot registered, by name. */
     eventKinds: (): Effect.Effect<ReadonlyMap<string, RegisteredEventKind>> => Ref.get(eventKinds),

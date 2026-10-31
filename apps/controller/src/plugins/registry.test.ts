@@ -160,6 +160,7 @@ const SHIPPED_PROVIDERS = [
           description:
             "Uses your Claude Pro or Max plan. You sign in to Claude Code once on each machine that runs it.",
           setup: [{ kind: "harness-login", method: "sign-in" }],
+          usage: { readBy: "harness", harnessId: "claude-code/claude-code" },
           harnesses: ["claude-code/claude-code"],
         },
         {
@@ -168,6 +169,7 @@ const SHIPPED_PROVIDERS = [
           description:
             "Uses your Claude Pro or Max plan. Hercule makes a token with Claude Code once, keeps it on the controller, and it works on every machine. It lasts a year.",
           setup: [{ kind: "harness-login", method: "create-token" }],
+          usage: { readBy: "sessions" },
           harnesses: ["claude-code/claude-code"],
         },
         {
@@ -200,6 +202,7 @@ const SHIPPED_PROVIDERS = [
           description:
             "Uses your ChatGPT plan through Codex. You sign in to Codex once on each machine that runs it.",
           setup: [{ kind: "harness-login", method: "sign-in" }],
+          usage: { readBy: "harness", harnessId: "codex/codex" },
           harnesses: ["codex/codex"],
         },
         {
@@ -235,6 +238,11 @@ const SHIPPED_PROVIDERS = [
           keyCheck: {
             url: "https://api.z.ai/api/coding/paas/v4/models",
             headers: { authorization: "Bearer {apiKey}" },
+          },
+          usage: {
+            readBy: "endpoint",
+            url: "https://api.z.ai/api/monitor/usage/quota/limit",
+            headers: { authorization: "{apiKey}" },
           },
           harnesses: ["pi/pi"],
         },

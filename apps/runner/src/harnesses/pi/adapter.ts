@@ -1775,6 +1775,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     binaryName: PI_BINARY,
 
     events: Stream.fromPubSub(published),
+    usageReports: Stream.empty,
 
     probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> => {
       const binary = ctx.binary;

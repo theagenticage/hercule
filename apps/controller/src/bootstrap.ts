@@ -116,11 +116,13 @@ import {
   ProviderAccountService,
   ProviderAccountServiceLayer,
   ProviderKeyCheckLayer,
+  ProviderUsageEndpointLayer,
 } from "./provider-accounts";
 import { seed } from "./seed";
 import { readSetupComplete } from "./setup";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
+import { AccountUsage, AccountUsageLayer } from "./usage";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 import { RunWorkspaceStepActivityLayer } from "./runs";
 import type { WorkflowValidity } from "./workflows";
@@ -246,6 +248,7 @@ export interface BootOptions {
  */
 export type ControllerServices =
   | SqlClient.SqlClient
+  | AccountUsage
   | ControllerIdentity
   | Secrets
   | MasterKey
@@ -337,6 +340,8 @@ export const bootWith = <A, E>(
           PromotionTokensLayer,
           GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer)),
           ProviderKeyCheckLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+          ProviderUsageEndpointLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+          AccountUsageLayer,
           PromotionStateLayer.pipe(
             Layer.provide(Layer.mergeAll(controllerIdentityLayer, AuditLogLayer)),
           ),

@@ -31,6 +31,8 @@ const definition: ProviderDefinition = {
       description:
         "Uses your ChatGPT plan through Codex. You sign in to Codex once on each machine that runs it.",
       setup: [{ kind: "harness-login", method: "sign-in" }],
+      // Codex's probe reads the plan's limits, and running sessions report them too.
+      usage: { readBy: "harness", harnessId: "codex/codex" },
       harnesses: ["codex/codex"],
     },
     {

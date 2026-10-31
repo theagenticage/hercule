@@ -41,6 +41,48 @@ export const Timestamp = Schema.String.check(
 export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
 
 /**
+ * How much of one usage window of a Provider Account is used, as a harness or
+ * a provider reported it. A window is a stretch of time with a limit, such as
+ * the five hours a Claude subscription allows a share of.
+ */
+export const UsageWindow = Schema.Struct({
+  kind: Schema.Literal("window"),
+  /** Which window: the rolling five hours, the week, or the month. */
+  window: Schema.Literals(["five-hour", "weekly", "monthly"]),
+  /** The share of the window's limit that is used, from 0 to 100. */
+  usedPercent: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  /** When the window resets and its usage starts again; `null` when the provider gave no time. */
+  resetsAt: Schema.NullOr(Timestamp),
+  /** Whether the limit has been reached, so the account cannot run until the reset. */
+  hit: Schema.Boolean,
+  /** When the reporter read this window. */
+  takenAt: Timestamp,
+});
+
+export type UsageWindow = Schema.Schema.Type<typeof UsageWindow>;
+
+/**
+ * Credit a Provider Account has left, in the provider's own unit (Codex
+ * credits, for example). The wire does not name the unit.
+ */
+export const UsageCredit = Schema.Struct({
+  kind: Schema.Literal("credit"),
+  /** The credit left, never negative. */
+  remaining: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** The credit the account started with or may hold at most; `null` when the provider reports none. */
+  limit: Schema.NullOr(Schema.Finite.check(Schema.isGreaterThan(0))),
+  /** When the reporter read this credit. */
+  takenAt: Timestamp,
+});
+
+export type UsageCredit = Schema.Schema.Type<typeof UsageCredit>;
+
+/** One reading of an account's usage: a usage window or the credit left. */
+export const UsageReading = Schema.Union([UsageWindow, UsageCredit]);
+
+export type UsageReading = Schema.Schema.Type<typeof UsageReading>;
+
+/**
  * A Provider Account's id. Stricter than a fact, because the runner uses it in
  * the folder of a Harness Home: the credential a sign-in writes, and the home
  * a session runs against, must stay under that folder, with no way for the

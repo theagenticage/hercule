@@ -1229,7 +1229,7 @@ const NOTIFICATION_DECISIONS = {
   "item/plan/delta":
     "Codex documents that the deltas need not add up to the final plan, and the completed plan item carries the whole text",
   "account/rateLimits/updated":
-    "rate limits are not shown yet; a separate piece of work (#625) decides how",
+    "the adapter sends it to its usage reports before the notification reaches this table; it is the account's, not the conversation's",
   "account/updated": "account state belongs in the capability snapshot, not in a session",
   "account/login/completed":
     "signing in is done by the runner's login flow, never during a session",

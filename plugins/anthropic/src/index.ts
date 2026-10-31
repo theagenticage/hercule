@@ -32,6 +32,9 @@ const definition: ProviderDefinition = {
       description:
         "Uses your Claude Pro or Max plan. You sign in to Claude Code once on each machine that runs it.",
       setup: [{ kind: "harness-login", method: "sign-in" }],
+      // Claude Code's probe reads the plan's limits with the Agent SDK's usage
+      // read, and running sessions report their rate limit events.
+      usage: { readBy: "harness", harnessId: "claude-code/claude-code" },
       harnesses: ["claude-code/claude-code"],
     },
     {
@@ -40,6 +43,9 @@ const definition: ProviderDefinition = {
       description:
         "Uses your Claude Pro or Max plan. Hercule makes a token with Claude Code once, keeps it on the controller, and it works on every machine. It lasts a year.",
       setup: [{ kind: "harness-login", method: "create-token" }],
+      // The token lacks the user:profile scope, so the plan's limits cannot be
+      // read. Only the rate limit events of running sessions show usage.
+      usage: { readBy: "sessions" },
       harnesses: ["claude-code/claude-code"],
     },
     {

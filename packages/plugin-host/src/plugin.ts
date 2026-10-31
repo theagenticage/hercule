@@ -5,7 +5,7 @@ import type {
   HarnessDefinition,
   WorkflowActionContribution,
 } from "./contributions";
-import type { ProviderDefinition } from "./providers";
+import type { ParseUsageBody, ProviderDefinition } from "./providers";
 import type {
   ConnectionRegistration,
   ConnectionsRuntime,
@@ -24,8 +24,24 @@ export interface HarnessRegistration {
   readonly register: (definition: HarnessDefinition) => Effect.Effect<void, PluginError>;
 }
 
+/**
+ * The code a plugin passes beside a `ProviderDefinition`, which is data. The
+ * host keeps it in its live registry only, never in the stored catalog.
+ */
+export interface ProviderRegistrationOptions {
+  /**
+   * The parser of each account kind that reads its usage from an endpoint,
+   * keyed by the kind's id. Every such kind needs one, and no other kind may
+   * have one.
+   */
+  readonly parseUsageBody?: Readonly<Record<string, ParseUsageBody>>;
+}
+
 export interface ProviderRegistration {
-  readonly register: (definition: ProviderDefinition) => Effect.Effect<void, PluginError>;
+  readonly register: (
+    definition: ProviderDefinition,
+    options?: ProviderRegistrationOptions,
+  ) => Effect.Effect<void, PluginError>;
 }
 
 export interface EventSourceRegistration {
@@ -110,10 +126,11 @@ export const registerHarness = (
 export const registerProvider = (
   host: RegistrationHost,
   definition: ProviderDefinition,
+  options?: ProviderRegistrationOptions,
 ): Effect.Effect<void, PluginError> =>
   host.providers === undefined
     ? Effect.fail(new PluginError({ message: "the providers capability was not granted" }))
-    : host.providers.register(definition);
+    : host.providers.register(definition, options);
 
 export const registerConnectionType = (
   host: RegistrationHost,

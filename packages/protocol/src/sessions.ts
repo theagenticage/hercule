@@ -24,6 +24,7 @@ import {
   Sequenced,
   SessionId,
   Timestamp,
+  UsageReading,
   WorkspaceStepKey,
 } from "./primitives";
 
@@ -1401,6 +1402,22 @@ export const FilesEdited = Schema.Struct({
 });
 
 export type FilesEdited = Schema.Schema.Type<typeof FilesEdited>;
+
+/**
+ * Sent by the runner, unasked, when a running session's harness reports the
+ * usage of the session's Provider Account (Claude Code's `rate_limit_event`,
+ * Codex's `account/rateLimits/updated`). It travels outside the session's
+ * numbered events and is best effort, like `FilesEdited`: the controller needs
+ * the latest reading, not every one, so a reading lost with a dropped socket
+ * is replaced by the next.
+ */
+export const AccountUsageReported = Schema.Struct({
+  _tag: Schema.Literal("accountUsageReported"),
+  sessionId: Fact,
+  readings: Schema.Array(UsageReading).check(Schema.isBetweenLength(1, MAX_FACT_ITEMS)),
+});
+
+export type AccountUsageReported = Schema.Schema.Type<typeof AccountUsageReported>;
 
 /**
  * The capability for `GithubTokenRequest` and `GithubTokenAnswer`. The runner

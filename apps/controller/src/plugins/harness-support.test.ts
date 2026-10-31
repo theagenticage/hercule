@@ -27,7 +27,12 @@ const PROVIDER: RegisteredProvider = {
     },
   ],
   defaultHarnessId: "alpha/alpha",
-} satisfies ProviderDefinition & { id: string; pluginId: string };
+  parseUsageBody: {},
+} satisfies ProviderDefinition & {
+  id: string;
+  pluginId: string;
+  parseUsageBody: object;
+};
 
 const buildHarness = (id: string, runs: HarnessDefinition["runs"]): RegisteredHarness => ({
   ...buildHarnessDefinition(id, runs),

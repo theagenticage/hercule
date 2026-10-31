@@ -28,9 +28,13 @@ import {
   StorageId,
   Subdirectory,
   Timestamp,
+  UsageCredit,
+  UsageReading,
+  UsageWindow,
   WorkspaceStepKey,
 } from "./primitives";
 import {
+  AccountUsageReported,
   FilesEdited,
   GithubTokenAnswer,
   GithubTokenRequest,
@@ -94,6 +98,9 @@ export {
   StorageId,
   Subdirectory,
   Timestamp,
+  UsageCredit,
+  UsageReading,
+  UsageWindow,
   WorkspaceStepKey,
 };
 
@@ -161,8 +168,13 @@ export {
  *   `token` of a successful `loginResult`. An older runner would leave the
  *   ambient key of its own environment in place and could not make a token, so
  *   the two refuse each other at hello.
+ * - Version 17 added Account Usage: the required `readUsage` of the probe
+ *   request, the required `usage` of the probe result and the
+ *   `AccountUsageReported` frame. An older peer cannot decode them, so the two
+ *   refuse each other at hello. The new frame needs no capability, because the
+ *   bump already keeps it away from an older runner or controller.
  */
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -464,12 +476,19 @@ export type SnapshotAuth = Schema.Schema.Type<typeof SnapshotAuth>;
 /**
  * What one runner found out about one Provider Account in one harness. A probe has no side
  * effects: it reads the harness's own account and model list and makes no API
- * call.
+ * call. The one exception is a usage read (`ProbeRequest.readUsage`), which goes
+ * through the harness's own usage call (Codex's `account/rateLimits/read`, the
+ * Claude Agent SDK's usage read).
  */
 export const ProbeResult = Schema.Struct({
   harnessVersion: Schema.NullOr(Fact),
   auth: SnapshotAuth,
   models: Schema.Array(ModelDescriptor).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The account's usage as the harness read it. `null` when the request did
+   * not ask for it, or when the harness has no usage to give.
+   */
+  usage: Schema.NullOr(Schema.Array(UsageReading).check(Schema.isMaxLength(MAX_FACT_ITEMS))),
 });
 
 export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
@@ -490,6 +509,12 @@ export const ProbeRequest = Schema.Struct({
   requestId: RequestId,
   harnessId: Fact,
   harnessAccount: HarnessAccount,
+  /**
+   * Whether the harness should also read the account's usage. The controller
+   * sets it only when its 15-minute rule allows a read, because a usage read
+   * is a call to the provider.
+   */
+  readUsage: Schema.Boolean,
 });
 
 export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;
@@ -704,6 +729,7 @@ export const RunnerToController = Schema.Union([
   LoginEnded,
   SessionEvent,
   FilesEdited,
+  AccountUsageReported,
   GithubTokenRequest,
   SessionInputResult,
   SessionRespondToQuestionResult,

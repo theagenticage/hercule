@@ -84,10 +84,15 @@ export {
 export {
   AccountKind,
   AccountSetupStep,
+  AccountUsageDeclaration,
   HarnessLoginStep,
   KeyCheck,
   ProviderDefinition,
+  type ParseUsageBody,
 } from "./providers";
+
+// What a usage parser takes and returns, so a plugin names them without linking the protocol.
+export type { Timestamp, UsageReading } from "@hercule/protocol";
 
 export { checkEmittedEvent } from "./check-event";
 
@@ -130,6 +135,7 @@ export {
   type PluginSecrets,
   type HarnessRegistration,
   type ProviderRegistration,
+  type ProviderRegistrationOptions,
   type RegistrationHost,
   type WorkflowActionRegistration,
 } from "./plugin";

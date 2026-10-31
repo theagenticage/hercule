@@ -2,12 +2,14 @@
  * Tests Settings > Providers: one card per Provider Account with its mark,
  * name, identity line and machine pips, the reads the section makes as it
  * opens, the account sheet, renaming an account, choosing its default
- * harness, a delete the controller refuses, a delete it accepts, and a
- * sign-in started from a machine's row.
+ * harness, a delete the controller refuses, a delete it accepts, a
+ * sign-in started from a machine's row, and the usage, expiry and failure of
+ * an account with the buttons that fix them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describeAccountUsage, queryKeys } from "@hercule/client-core";
 import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
 import type { ProviderAccount, Runner } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../app/last-settings-section";
@@ -23,6 +25,13 @@ import {
   stubElementSize,
   type Handler,
 } from "../../../../app/testing";
+
+// Wraps the usage reading, which a card makes each time it draws, so a test can
+// count how many cards draw.
+vi.mock("@hercule/client-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@hercule/client-core")>();
+  return { ...actual, describeAccountUsage: vi.fn(actual.describeAccountUsage) };
+});
 
 // The Office draws a 3D scene, which jsdom cannot, so a stub stands in for it.
 vi.mock("../../../../office/office-screen", () => ({ OfficeScreen: () => <p>The Office</p> }));
@@ -88,6 +97,8 @@ const ZAI: ProviderAccount = {
   planLabel: null,
   defaultHarnessId: "pi/pi",
   expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: [],
   createdAt: PERSONAL.createdAt,
   updatedAt: PERSONAL.updatedAt,
@@ -526,6 +537,314 @@ describe("Settings > Providers", () => {
           within(sheet).getByRole<HTMLInputElement>("radio", { name: "Claude Code" }).checked,
         ).toBe(true);
       });
+    });
+  });
+
+  describe("usage and expiry", () => {
+    const NOW = new Date("2026-10-31T10:50:00.000Z");
+    const TAKEN_AT = "2026-10-31T10:42:00.000Z";
+    const DAY = 24 * 60 * 60 * 1000;
+    const inDays = (days: number): string => new Date(NOW.getTime() + days * DAY).toISOString();
+
+    // Only the clock is fixed: the expiry and the reading times are worked
+    // out when a card draws.
+    beforeEach(() => {
+      vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const reading = (
+      window: "five-hour" | "weekly" | "monthly",
+      fields: { usedPercent: number; hit?: boolean },
+    ): ProviderAccount["usage"][number] => ({
+      kind: "window",
+      window,
+      usedPercent: fields.usedPercent,
+      resetsAt: "2026-11-02T09:00:00.000Z",
+      hit: fields.hit ?? false,
+      takenAt: TAKEN_AT,
+      source: "session",
+    });
+    /** Anthropic's three kinds, with the token that lasts a year added to its subscription. */
+    const withTokenKind = (): Readonly<Record<string, Handler>> => ({
+      "GET /api/v1/providers": {
+        body: PROVIDERS.map((provider) =>
+          provider.id === "anthropic/anthropic"
+            ? {
+                ...provider,
+                kinds: [
+                  ...provider.kinds,
+                  {
+                    id: "subscription-token",
+                    title: "Claude subscription, every machine",
+                    description: "A token that lasts a year.",
+                    setup: [{ kind: "harness-login", method: "create-token" }],
+                    harnesses: ["claude-code/claude-code"],
+                  },
+                ],
+              }
+            : provider,
+        ),
+      },
+      "GET /api/v1/controller": {
+        body: {
+          id: "01a06d02-7800-7000-8000-000000000001",
+          publicKey: "controller-key",
+          version: "0.4.2",
+          defaultRunnerId: null,
+          localRunnerId: MOSS.id,
+          textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+        },
+      },
+    });
+    /** A Claude subscription token that expires in `days` days. */
+    const tokenAccount = (days: number): ProviderAccount => ({
+      ...PERSONAL,
+      id: "01a06d02-8000-7000-8000-000000000004",
+      label: "token",
+      kind: "subscription-token",
+      expiresAt: inDays(days),
+    });
+    const cardOf = (name: string): HTMLElement => getCard(name).closest<HTMLElement>(".pa-card")!;
+
+    it("draws one bar for each window with its number and name, and when the newest was read", async () => {
+      await openProviders({
+        accounts: [
+          {
+            ...PERSONAL,
+            usage: [
+              reading("five-hour", { usedPercent: 85 }),
+              reading("weekly", { usedPercent: 38 }),
+            ],
+          },
+          WORK,
+        ],
+      });
+
+      const card = cardOf("Anthropic · personal");
+      const rows = [...card.querySelectorAll(".pa-gauge-row")];
+      expect(rows.map((row) => row.textContent)).toEqual(["85%5-hour", "38%Weekly"]);
+      expect(rows.map((row) => row.className)).toEqual([
+        "pa-gauge-row is-attention",
+        "pa-gauge-row is-normal",
+      ]);
+      expect(rows.map((row) => row.querySelector<HTMLElement>(".pa-bar > i")!.style.width)).toEqual(
+        ["85%", "38%"],
+      );
+      expect(card.querySelector(".pa-gauge .pa-card-sub")!.textContent).toMatch(
+        /^as of \d\d:\d\d$/,
+      );
+      // An account that reported nothing has no gauge, never an estimate.
+      expect(cardOf("Anthropic · work").querySelector(".pa-gauge")).toBeNull();
+    });
+
+    it("draws again only the card whose account changed when the accounts are read again", async () => {
+      let stored: ProviderAccount[] = [
+        { ...PERSONAL, usage: [reading("five-hour", { usedPercent: 40 })] },
+        ZAI,
+      ];
+      const { context } = await openProviders({
+        accounts: stored,
+        handlers: { "GET /api/v1/provider-accounts": () => ({ body: stored }) },
+      });
+      vi.mocked(describeAccountUsage).mockClear();
+
+      // A usage report arrives on the `provider` topic and the list is read again.
+      stored = [{ ...stored[0]!, usage: [reading("five-hour", { usedPercent: 90 })] }, stored[1]!];
+      await context.queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
+
+      await waitFor(() => {
+        expect(cardOf("Anthropic · personal").querySelector(".pa-gauge-row")!.textContent).toBe(
+          "90%5-hour",
+        );
+      });
+      // One draw, and the card that shows the new reading is the one it was for.
+      expect(vi.mocked(describeAccountUsage)).toHaveBeenCalledTimes(1);
+    });
+
+    it("draws a window that is hit as a full bar, and the credit as a number", async () => {
+      await openProviders({
+        accounts: [
+          { ...PERSONAL, usage: [reading("five-hour", { usedPercent: 97, hit: true })] },
+          {
+            ...ZAI,
+            usage: [
+              { kind: "credit", remaining: 1240, limit: 2000, takenAt: TAKEN_AT, source: "read" },
+            ],
+          },
+        ],
+      });
+
+      const hit = cardOf("Anthropic · personal").querySelector<HTMLElement>(".pa-gauge-row")!;
+      expect(hit.className).toBe("pa-gauge-row is-fail");
+      expect(hit.textContent).toBe("Hit5-hour");
+      expect(hit.querySelector<HTMLElement>(".pa-bar > i")!.style.width).toBe("100%");
+      expect(cardOf("Z.ai").querySelector(".pa-gauge-row")!.textContent).toBe(
+        "1,240of 2,000 credits left",
+      );
+    });
+
+    it("shows a refused key in place of the gauge, and Replace key opens the key's entry", async () => {
+      const refused: ProviderAccount = {
+        ...ZAI,
+        usage: [reading("monthly", { usedPercent: 10 })],
+        failure: { message: "401 Unauthorized", failedAt: "2026-10-31T09:14:00.000Z" },
+      };
+      const { calls } = await openProviders({
+        accounts: [refused],
+        handlers: { [`PATCH ${accountPath(ZAI)}`]: { body: { ...ZAI } } },
+      });
+
+      const card = cardOf("Z.ai");
+      expect(card.className).toBe("pa-card is-fail");
+      expect(card.querySelector(".pa-card-state")!.textContent).toMatch(/^Key refusedat /);
+      expect(card.querySelector(".pa-gauge")).toBeNull();
+      // The fix is a button of its own, not inside the card's button.
+      const fix = within(card).getByRole("button", { name: "Replace key" });
+      expect(fix.closest(".pa-card-open")).toBeNull();
+
+      await userEvent.click(fix);
+      const dialog = await screen.findByRole("dialog", { name: "Replace the key of Z.ai" });
+      await userEvent.type(within(dialog).getByLabelText("API key"), "  zai-new-key  ");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).toBeNull();
+      });
+      expect(calls.filter((call) => call.method === "PATCH").map((call) => call.body)).toEqual([
+        { credentials: { apiKey: "zai-new-key" } },
+      ]);
+    });
+
+    it("says how many days a token has left, and Make a new token runs the token flow on a machine", async () => {
+      const { calls } = await openProviders({
+        accounts: [tokenAccount(12)],
+        handlers: {
+          ...withTokenKind(),
+          [`POST ${accountPath(tokenAccount(12))}/sign-in`]: {
+            body: { url: "https://claude.ai/oauth/authorize?code=1" },
+          },
+        },
+      });
+
+      const card = cardOf("Anthropic · token");
+      expect(card.className).toBe("pa-card is-attention");
+      expect(card.querySelector(".pa-card-state")!.textContent).toBe("Expires in 12 dayson 12 Nov");
+      await userEvent.click(within(card).getByRole("button", { name: "Make a new token" }));
+
+      const dialog = await screen.findByRole("dialog", {
+        name: "Sign in to Anthropic · token on moss",
+      });
+      expect(await within(dialog).findByRole("textbox", { name: "Code" })).toBeTruthy();
+      expect(
+        calls
+          .filter((call) => call.method === "POST" && call.path.endsWith("/sign-in"))
+          .map((call) => call.body),
+      ).toEqual([{ runnerId: MOSS.id }]);
+    });
+
+    it("says an expired token is expired, and a token with a year left needs nothing", async () => {
+      await openProviders({
+        accounts: [
+          tokenAccount(-3),
+          { ...tokenAccount(300), id: "01a06d02-8000-7000-8000-000000000005", label: "fresh" },
+        ],
+        handlers: withTokenKind(),
+      });
+
+      expect(cardOf("Anthropic · token").className).toBe("pa-card is-fail");
+      expect(cardOf("Anthropic · token").querySelector(".pa-card-state")!.textContent).toBe(
+        "Expiredon 28 Oct",
+      );
+      expect(cardOf("Anthropic · fresh").className).toBe("pa-card");
+      expect(
+        within(cardOf("Anthropic · fresh")).queryByRole("button", { name: "Make a new token" }),
+      ).toBeNull();
+    });
+
+    it("says a per-machine account is signed out, and Sign in opens its sheet", async () => {
+      await openProviders({ accounts: [WORK] });
+
+      const card = cardOf("Anthropic · work");
+      expect(card.className).toBe("pa-card is-fail");
+      expect(card.querySelector(".pa-card-state")!.textContent).toBe("Signed out");
+      await userEvent.click(within(card).getByRole("button", { name: "Sign in" }));
+
+      const sheet = await screen.findByRole("dialog", { name: "Anthropic · work" });
+      expect(within(sheet).getByRole("heading", { name: "Machines" })).toBeTruthy();
+    });
+
+    it("lists each window with its reset time in the sheet, above the machines", async () => {
+      await openProviders({
+        accounts: [
+          {
+            ...PERSONAL,
+            usage: [
+              reading("five-hour", { usedPercent: 61 }),
+              reading("weekly", { usedPercent: 100, hit: true }),
+            ],
+          },
+        ],
+      });
+
+      const sheet = await openSheet("Anthropic · personal");
+
+      const headings = [...sheet.querySelectorAll("h3")].map((heading) => heading.textContent);
+      expect(headings.slice(0, 3)).toEqual(["Name", "Usage", "Machines"]);
+      const rows = [...sheet.querySelectorAll(".pa-use-row")].map((row) => row.textContent);
+      expect(rows[0]).toMatch(/^5-hour61%resets /);
+      expect(rows[1]).toMatch(/^WeeklyHitresets /);
+      expect(within(sheet).getByText(/^as of \d\d:\d\d$/)).toBeTruthy();
+    });
+
+    it("has no Usage section for an account with no reading", async () => {
+      await openProviders({ accounts: [PERSONAL] });
+
+      const sheet = await openSheet("Anthropic · personal");
+
+      expect(within(sheet).queryByRole("heading", { name: "Usage" })).toBeNull();
+    });
+
+    it("shows a key's refusal in the sheet's Credential section, and Replace key opens the same entry", async () => {
+      await openProviders({
+        accounts: [
+          {
+            ...ZAI,
+            failure: { message: "401 Unauthorized", failedAt: "2026-10-31T09:14:00.000Z" },
+          },
+        ],
+      });
+
+      const sheet = await openSheet("Z.ai");
+
+      const credential = within(sheet).getByRole("heading", { name: "Credential" }).parentElement!;
+      expect(credential.textContent).toContain("Key refused");
+      expect(credential.textContent).toContain("401 Unauthorized");
+      await userEvent.click(within(credential).getByRole("button", { name: "Replace key" }));
+      expect(await screen.findByRole("dialog", { name: "Replace the key of Z.ai" })).toBeTruthy();
+    });
+
+    it("shows when a token expires under Make a new token in the sheet", async () => {
+      await openProviders({ accounts: [tokenAccount(300)], handlers: withTokenKind() });
+
+      const sheet = await openSheet("Anthropic · token");
+
+      const credential = within(sheet).getByRole("heading", { name: "Credential" }).parentElement!;
+      expect(credential.querySelector(".pa-cred")!.textContent).toBe(
+        "Expires 27 Aug 2027Make a new token",
+      );
+      // A token is not signed in per machine.
+      expect(within(sheet).queryByRole("heading", { name: "Machines" })).toBeNull();
+    });
+
+    it("has no Credential section for an account that signs in on each machine", async () => {
+      await openProviders({ accounts: [PERSONAL] });
+
+      const sheet = await openSheet("Anthropic · personal");
+
+      expect(within(sheet).queryByRole("heading", { name: "Credential" })).toBeNull();
     });
   });
 });

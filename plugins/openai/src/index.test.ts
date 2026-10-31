@@ -37,6 +37,7 @@ describe("the OpenAI provider", () => {
     expect(kind.id).toBe("subscription-per-machine");
     expect(kind.title).toBe("ChatGPT subscription, signed in on each machine");
     expect(kind.setup).toEqual([{ kind: "harness-login", method: "sign-in" }]);
+    expect(kind.usage).toEqual({ readBy: "harness", harnessId: "codex/codex" });
     expect(kind.harnesses).toEqual(["codex/codex"]);
   });
 
@@ -51,6 +52,7 @@ describe("the OpenAI provider", () => {
       url: "https://api.openai.com/v1/models",
       headers: { authorization: "Bearer {apiKey}" },
     });
+    expect(kind.usage).toBeUndefined();
     expect(kind.harnesses).toEqual(["codex/codex", "pi/pi"]);
   });
 

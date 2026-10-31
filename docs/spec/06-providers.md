@@ -199,7 +199,7 @@ Discovery never creates, resumes, or mutates a harness conversation, and never r
 | Codex | `initialize` (user-agent carries the version) + `account/read` + `model/list` over a probe-only app-server process |
 | pi | `pi auth check --provider <id> --json` per configured upstream provider; `pi --version` for the harness version |
 
-`auth.status` is `unauthenticated` when the harness reports no usable login, `error` when the probe itself failed (binary missing, protocol error), `ok` otherwise. A provider instance with `auth.status !== "ok"` on a runner is filtered out of placement for that runner ([./03-controller-and-runners.md](./03-controller-and-runners.md)).
+`auth.status` is `unauthenticated` when the harness reports no usable login, `error` when the probe itself failed (binary missing, protocol error), `ok` otherwise. A provider instance with `auth.status !== "ok"` on a runner is filtered out of placement for that runner ([./03-controller-and-runners.md](./03-controller-and-runners.md)). *(Amended 2026-10-31, [#939](https://github.com/theagenticage/hercule/issues/939).)* One exception to "no API call": a probe that the controller asks to read usage (`ProbeRequest.readUsage`) also calls the harness's own usage read, which reaches the provider through the harness (the Claude Agent SDK's usage read, Codex's `account/rateLimits/read`). No turn is run and nothing is spent. The controller asks only when its 15-minute rule allows it (section 18.3, "What #939 builds").
 
 *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A probe runs in the pair's Harness Home and with the account's credential. For a key or token account, the controller sends the credential with the probe frame and the harness reads it from its environment (section 10.4). pi's probe checks the account's own provider (`pi auth check --provider zai`, `openrouter`, ...), no longer only `zai`. A Provider Account whose `auth.status` is not `ok` for a harness on a runner is filtered out of placement there. A key or token account is `ok` on every runner where the harness is installed, until the provider refuses the credential (section 15.6).
 
@@ -1737,12 +1737,14 @@ Placement looks at nothing else about the model. If the harness on the chosen ru
 
 - `ready`: the account can run on at least one connected runner.
 - `not-signed-in`: a per-machine account that no connected runner is signed in to as its identity.
-- `failed`: the provider refused the credential (a 401), from a catalog read, a usage read or the harness. `statusMessage` carries the provider's words. A network error or a timeout is not a failure: the account keeps its status, and the read records its error (section 16.2).
+- `failed`: the provider refused the credential (a 401), ~~from a catalog read, a usage read or the harness~~ *(Amended 2026-10-31, [#939](https://github.com/theagenticage/hercule/issues/939).)* from a usage read made with the account's key (section 18.3, "What #939 builds"). `statusMessage` carries the provider's words. A network error or a timeout is not a failure: the account keeps its status, and the read records its error (section 16.2).
 - `no-runner`: nothing above fails, but no connected runner can run the account in any harness it may run in.
 
 `failed` is stored when a read is refused, and cleared by the next read that succeeds or by a new credential. The other values are worked out on every read and stored nowhere.
 
 Replacing a key or a token affects the frames sent afterwards. A running session keeps the credential it started with. The new credential clears a stored `failed` and the expiry warnings about the old credential (section 18.3).
+
+*(Amended 2026-10-31, [#939](https://github.com/theagenticage/hercule/issues/939).)* **What is built of this section.** `status` and `statusMessage` are not fields of `ProviderAccount`. The record carries `failure` (`null`, or the provider's `message` and `failedAt`) and its `snapshots`, and a client decides the state from them. The desktop's `decideAccountState` in `client-core` returns one of `failed`, `expired`, `expiring`, `signed-out` or `ok`, in that order of precedence ([./17-desktop-app.md](./17-desktop-app.md) slice 47). `signed-out` is drawn for a per-machine account that is signed in on no machine, which is `not-signed-in` without the check that the machine is connected. `no-runner` is not drawn anywhere yet. Section 18.3 says what sets and clears the stored `failure`.
 
 ### 15.7 Deleting an account
 
@@ -1931,7 +1933,7 @@ Per account, Account Usage holds readings. A reading is either a **window**, wit
 - **Nothing is estimated.** With no reading there is no gauge.
 - **How often.** Running sessions report for free, so they come first. An active read happens at most every 15 minutes per account, and is skipped when a session reported within that window. A subscription read starts a short harness process on a runner, which is why it is not more frequent.
 
-**Verify at build time:** whether `rate_limit_event`s carry the windows when Claude Code runs on a long-lived token; whether any other way to read a long-lived token's usage, or who it belongs to, exists inside Anthropic's terms (the usage ticket researches this first); and whether Z.ai's quota endpoint takes the key with `Bearer` or bare. Sources: `research/usage-sources.md` on `research/usage-sources`.
+**Verify at build time:** whether `rate_limit_event`s carry the windows when Claude Code runs on a long-lived token; whether any other way to read a long-lived token's usage, or who it belongs to, exists inside Anthropic's terms (the usage ticket researches this first); and whether Z.ai's quota endpoint takes the key with `Bearer` or bare. Sources: `research/usage-sources.md` on `research/usage-sources`. *(Amended 2026-10-31, [#939](https://github.com/theagenticage/hercule/issues/939).)* Checked against the live endpoint with a bogus key: a refused key answers HTTP 200 with the body `{"code":401,"msg":"token expired or incorrect","success":false}`, not an HTTP 401, and the endpoint reads the key the same way with or without `Bearer`. Hercule sends the raw key, as Z.ai's own plugin does. A request with no `Authorization` header answers code 1001, which is Hercule's own defect and never marks a key as refused. What a valid key's answer looks like is still to be checked with a real key ([./16-open-items.md](./16-open-items.md)). *(Amended 2026-10-31, [#939](https://github.com/theagenticage/hercule/issues/939).)* The first two questions, about a long-lived Claude token, are answered in part by `research/claude-token-usage.md` on `research/claude-token-usage`; the findings and what is left are in [./16-open-items.md](./16-open-items.md).
 
 ### 18.3 Expiry and warnings
 
@@ -1940,6 +1942,48 @@ Per account, Account Usage holds readings. A reading is either a **window**, wit
 - Other accounts have no expiry. A per-machine sign-in shows as failed on a runner once a session or a probe cannot sign in there.
 
 The account card and the account's composer entries show the expiry from 30 days before it. One notification is sent at 14 days (`core.account-expiring`), and one when an account becomes `failed` (`core.account-failed`) ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.2). A new credential clears both, so they fire again for the new one.
+
+*(Amended 2026-10-31, [#939](https://github.com/theagenticage/hercule/issues/939).)* **What #939 builds, and the choices it made.** Account Usage, the stored `failed` and both notifications are built. Where this section and the build differ, these are the choices:
+
+- **The store.** The controller domain `usage` owns two tables (migration `0097`). `account_usage_readings` holds the latest reading of each window, or of the credit, per account, with its `source` (`session` or `read`) and its time. `account_usage_reads` holds, per account, when the last active read was claimed and the time of the newest session report. They are two tables, not the one `account_usage` row of [./04-state-store.md](./04-state-store.md). The service `AccountUsage` has `record`, `readAll`, `read`, `claimRead` and `clear`. None is a public operation, so none checks a grant. Both tables are new, so the upgrade test needs no fixture.
+- **What a reading holds.** A window is `five-hour`, `weekly` or `monthly`, with `usedPercent` (0 to 100), `resetsAt` (`null` when the provider gave none), `hit` and `takenAt`. A credit holds `remaining`, `limit` (`null` when there is none) and `takenAt`. A newer reading of the same window replaces the stored one, and a reading with the same time or an older one changes nothing.
+- **The controller's clock caps a reading's time.** A `takenAt` later than the controller's now is stored as now. A runner whose clock runs ahead would otherwise block active reads and outrank every newer reading until real time caught up.
+- **Which readings the harnesses and Z.ai give.**
+  - Claude Code: the five-hour and weekly windows. A `rate_limit_event` names one window at a time, and gives no reading when it carries no utilization, because a missing number is never shown as 0%. The probe's usage read gives both windows.
+  - Codex: the `codex` limit only, from `account/rateLimits/read` and `account/rateLimits/updated`. A window is read when it lasts 300, 10,080 or 43,200 minutes, and is `hit` at 100% or more. The credit is read when the account has credits that are not unlimited, with no `limit`.
+  - Z.ai: the `TOKENS_LIMIT` entries of the quota answer, the five-hour and weekly windows.
+  - **Scoped windows are left out.** These are Claude's Opus and Sonnet weekly windows, Codex's other limit ids, and Z.ai's MCP tool-call limit. They are follow-up [#954](https://github.com/theagenticage/hercule/issues/954).
+- **A kind declares how its usage is read.** `AccountKind.usage` is one of `{ readBy: "sessions" }`, `{ readBy: "harness", harnessId }` and `{ readBy: "endpoint", url, headers }` ([./05-plugins.md](./05-plugins.md) section 9). A kind that declares none shows no usage, and the usage that running sessions report for it is dropped. A session's report is also dropped when the session is unknown or is not on the runner that sent the report. The shipped kinds declare:
+
+  | Account kind | `usage` |
+  |---|---|
+  | Anthropic `subscription-per-machine` | `harness`, `claude-code/claude-code` |
+  | Anthropic `subscription-token` | `sessions` |
+  | OpenAI `subscription-per-machine` | `harness`, `codex/codex` |
+  | Z.ai `api-key` | `endpoint`, `https://api.z.ai/api/monitor/usage/quota/limit`, with `authorization: {apiKey}` |
+  | Anthropic and OpenAI `api-key` | none |
+
+  OpenRouter, OpenCode and MiniMax have no plugin yet, so their rows of section 18.2 are not built.
+- **The active reads.** The controller daemon's loop ticks at once and then every minute, after the previous tick ends. A tick warns about expiring credentials (section 18.3 above), then reads the account usage that is due.
+  - **A read starts only after `claimRead` grants it.** It is granted when the last claim is at least 15 minutes old and no session reported usage taken within the last 15 minutes. The claim is stored before the read and never given back, so a read that fails still counts and the next one waits.
+  - **`endpoint`:** the controller sends one GET request with the account's key, with a 10 second timeout, and follows no redirect.
+  - **`harness`:** the controller sends a probe with `readUsage` on the first connected runner that can run the account in that harness. It takes one of the runner's two sweep slots, and the claim is made once the slot is held. An account that no connected runner can run is not claimed. The probe's readings are stored in the same transaction as its snapshot, only when the snapshot's `auth` is `ok`. Each harness gives its usage read 5 seconds; when it fails or is late, the probe keeps the account and the models and has no usage.
+  - `providerAccount.refresh` is not built, so no read is made on request.
+- **The endpoint parser is code beside the definition.** A plugin passes `parseUsageBody` (a function for each `endpoint` kind) to `registerProvider` as a third argument. It is kept in the host's live registry and never in the stored catalog or the public definition. The host refuses an `endpoint` kind without a parser, and a parser for any other kind.
+  - The parser takes the parsed JSON body of a 2xx answer and the time the controller received it, which it puts on every reading. It returns `{ readings }` or `{ refused }`, the provider's words for a key it rejects.
+  - A body that is not the shape the plugin expects makes the parser throw. The read then tells nothing about the key: it is logged and the account keeps its state.
+- **What makes an account `failed`.** The stored `failure` is two columns, `failure_message` and `failed_at` (migration `0098`, with `expiry_notified_at`), and `ProviderAccount.failure` carries them. In this ticket one thing sets it: an endpoint usage read that the provider refuses.
+  - A refusal is an HTTP 401, or a `{ refused }` from the parser. Z.ai answers a refused key with HTTP 200, so its parser refuses on the body codes `401`, `1000` and `1003`.
+  - A 403, a 429, a 5xx, a redirect, a timeout, a network error and an answer the parser cannot read are not failures. They are logged as warnings.
+  - A refusal counts against the credential the request was sent with. A key replaced while the read was in flight is not failed.
+  - A read that the provider accepts clears the failure.
+  - **Not yet:** a refusal found by a catalog read or by a harness, and the Claude token's refusal ([#953](https://github.com/theagenticage/hercule/issues/953)). A per-machine account's failure stays per runner, in its snapshot's `auth`, and is not stored on the account.
+- **The two notifications.** The subject of both is `{ kind: "providerAccount", id }`.
+  - `core.account-failed` is raised in the transaction that turns the account from not failed to failed, with the provider's words as its body. A later refusal while the account is failed replaces the stored words and raises nothing. It is raised again only after the account recovered: an accepted read, or a new credential.
+  - `core.account-expiring` is raised by the loop for each account whose credential expires within 14 days and has not been warned about, and `expiry_notified_at` records it. A credential that has already expired is warned about once as well, for an account whose controller was off at the 14-day mark. Its title counts the days left rounded up in 24-hour periods, while the desktop's card counts calendar days ([./17-desktop-app.md](./17-desktop-app.md) slice 47), so the two can differ by one day.
+- **A new credential deletes the readings.** A new key (`providerAccount.update` with `credentials`) and a new token (`submitSignInCode` on a token kind) call `AccountUsage.clear`, because the new credential may belong to someone else. They also clear the failure and `expiry_notified_at`. A per-machine sign-in keeps the readings: it is not a new credential (section 11). In both cases the 15-minute limit stays, so the first read of a new key waits for it.
+- **The wire and the record.** `PROTOCOL_VERSION` is 17 ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2): `AccountUsageReported`, `ProbeRequest.readUsage` and `ProbeResult.usage`. `ProviderAccount` gains `usage` and `failure` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2).
+- **The composer's expiry entries are not built.** Section 18.3 says the composer shows the expiry from 30 days before it. That waits for the composer's work of [#935](https://github.com/theagenticage/hercule/issues/935).
 
 ## 19. Migrating provider instances
 

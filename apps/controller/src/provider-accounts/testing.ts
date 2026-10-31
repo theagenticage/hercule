@@ -29,9 +29,11 @@ import {
 import { RunnerConnections, RunnerConnectionsLayer, runnerRepository } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { SettingsLayer } from "../settings";
+import { AccountUsage, AccountUsageLayer } from "../usage";
 import { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
 import { ProviderAccountRunners, ProviderAccountRunnersLayer } from "./account-runners";
 import { ProviderKeyCheckLayer } from "./key-check";
+import { ProviderUsageEndpointLayer } from "./usage-endpoint";
 import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 import { ProviderAccountService, ProviderAccountServiceLayer } from "./service";
@@ -154,11 +156,13 @@ export const buildFakeProviderApi = (
 const buildStack = (providerApi: HttpClient.HttpClient) =>
   ProviderAccountServiceLayer.pipe(
     Layer.provideMerge(ProviderKeyCheckLayer),
+    Layer.provideMerge(ProviderUsageEndpointLayer),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
     Layer.provideMerge(ProviderAccountProbesLayer),
     Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(HarnessAccountsLayer),
     Layer.provideMerge(SettingsLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(RunnerConnectionsLayer),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(buildPluginStack()),
@@ -166,6 +170,7 @@ const buildStack = (providerApi: HttpClient.HttpClient) =>
 
 export type AccountServices =
   | ProviderAccountService
+  | AccountUsage
   | ProviderAccountProbes
   | ProviderAccountRunners
   | HarnessAccounts
@@ -176,16 +181,18 @@ export type AccountServices =
 
 /**
  * Runs an effect as the user on a fresh database, after the fixture plugins
- * have been booted. Key checks go to `providerApi`, which accepts every key
- * unless the test gives its own.
+ * have been booted. Key checks and usage reads go to `providerApi`, which
+ * accepts every key unless the test gives its own. A test that needs other
+ * providers passes `plugins` in place of the fixture plugins.
  */
 export const runWithAccounts = <A, E>(
   body: Effect.Effect<A, E, AccountServices>,
   providerApi: HttpClient.HttpClient = buildFakeProviderApi().client,
+  plugins: ReadonlyArray<Plugin> = buildAccountPlugins(),
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(buildAccountPlugins()));
+      yield* Effect.flatMap(PluginHost, (host) => host.boot(plugins));
       return yield* body;
     }).pipe(Effect.provide(buildStack(providerApi)), asUser) as Effect.Effect<A, E, never>,
   );
@@ -326,6 +333,7 @@ export const SIGNED_IN: ProbeResult = {
   harnessVersion: "1.2.3",
   auth: { status: "ok", identity: "someone@example.com" },
   models: [{ slug: "model-1", name: "Model 1", imageInput: null, options: [] }],
+  usage: null,
 };
 
 /** Stores a snapshot for an account in a harness on a runner. */

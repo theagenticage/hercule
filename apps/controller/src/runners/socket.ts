@@ -324,6 +324,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "sessionEvent":
           case "sessionsReport":
           case "filesEdited":
+          case "accountUsageReported":
             // Passed on rather than handled: the sessions domain interprets
             // what a runner reports about its sessions, and this file only
             // deals with the socket.
