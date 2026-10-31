@@ -244,7 +244,7 @@ describe.skipIf(binary === undefined)("probing a real pi", () => {
 
   it("reports the version, the key as usable, and the models Z.ai offers", async () => {
     const probed = await Effect.runPromise(
-      pi.probe(buildLiveContext("not-a-key-and-never-sent-anywhere")),
+      pi.probe(buildLiveContext("not-a-key-and-never-sent-anywhere"), { readUsage: false }),
     );
 
     // Whatever version is installed: pinning one here would fail on the next
@@ -265,7 +265,7 @@ describe.skipIf(binary === undefined)("probing a real pi", () => {
   }, 60_000);
 
   it("reports a machine with no key as unauthenticated", async () => {
-    const probed = await Effect.runPromise(pi.probe(buildLiveContext(null)));
+    const probed = await Effect.runPromise(pi.probe(buildLiveContext(null), { readUsage: false }));
 
     expect(probed.harnessVersion).toBe(readInstalledVersion());
     expect(probed.auth.status).toBe("unauthenticated");

@@ -175,6 +175,7 @@ export interface Answered {
  */
 export const SILENT = Symbol("no reply");
 
+/** A reply is the answer, or a promise of it for an app-server that answers slowly. */
 export type Answers = Readonly<Record<string, ((params: unknown) => unknown) | typeof SILENT>>;
 
 /**
@@ -257,15 +258,21 @@ export const buildScriptedSeam = (
         if (reply === undefined || reply === SILENT) return;
         const returned = reply(frame["params"]);
         if (returned === SILENT) return;
-        const replied = returned as { readonly error?: unknown };
-        out.push(
-          JSON.stringify(
-            replied !== null && typeof replied === "object" && "error" in replied
-              ? { id: frame["id"], error: replied.error }
-              : { id: frame["id"], result: replied },
-          ),
-        );
-        if (method === "initialize") out.push(JSON.stringify(UNSOLICITED));
+        const push = (settled: unknown): void => {
+          const replied = settled as { readonly error?: unknown };
+          out.push(
+            JSON.stringify(
+              replied !== null && typeof replied === "object" && "error" in replied
+                ? { id: frame["id"], error: replied.error }
+                : { id: frame["id"], result: replied },
+            ),
+          );
+          if (method === "initialize") out.push(JSON.stringify(UNSOLICITED));
+        };
+        // A reply that is a promise is sent when it settles, like an app-server
+        // that answers slowly.
+        if (returned instanceof Promise) void returned.then(push);
+        else push(returned);
       };
       spawns.push({
         command,

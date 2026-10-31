@@ -53,7 +53,7 @@ const UNIT_WEEKS = 6;
 /** Returns which window a `TOKENS_LIMIT` entry is, or `undefined` for a length Hercule does not show. */
 const findWindow = (unit: number | null | undefined, number: number | null | undefined) => {
   if (unit === UNIT_HOURS && number === 5) return "five-hour" as const;
-  if (unit === UNIT_WEEKS) return "weekly" as const;
+  if (unit === UNIT_WEEKS && number === 1) return "weekly" as const;
   return undefined;
 };
 
@@ -70,7 +70,7 @@ const convertResetTime = (millis: number | null | undefined): Timestamp | null =
  * `takenAt`.
  *
  * - `TOKENS_LIMIT` with unit 3 (hours) and number 5 is the five-hour window,
- *   and `TOKENS_LIMIT` with unit 6 (weeks) is the weekly window.
+ *   and `TOKENS_LIMIT` with unit 6 (weeks) and number 1 is the weekly window.
  * - Every other entry is dropped: the MCP time limit (`TIME_LIMIT`) and the
  *   Team plan's `CREDIT_LIMIT` are not shown yet.
  * - An entry with no `percentage` gives no reading, because a missing number

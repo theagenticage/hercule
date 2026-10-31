@@ -106,6 +106,7 @@ import providerAccounts from "./0095-provider-accounts";
 import providerAccountCredentialState from "./0096-provider-account-credential-state";
 import accountUsage from "./0097-account-usage";
 import providerAccountFailure from "./0098-provider-account-failure";
+import sessionProcessStart from "./0099-session-process-start";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -206,6 +207,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [96, "provider-account-credential-state", Effect.succeed(providerAccountCredentialState)],
   [97, "account-usage", Effect.succeed(accountUsage)],
   [98, "provider-account-failure", Effect.succeed(providerAccountFailure)],
+  [99, "session-process-start", Effect.succeed(sessionProcessStart)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

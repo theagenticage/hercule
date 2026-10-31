@@ -144,6 +144,7 @@ export function OpenedProviderAccountSheet({
   const now = new Date();
   const usage = describeAccountUsage(account, timezone, now);
   const replacement = findCredentialReplacement(providers, account);
+  const credentialState = decideAccountState(providers, account, timezone, now);
   const machines = listProviderAccountMachines(account, runners, providers, harnesses);
   // `client-core` decides which action a machine offers; this only draws it
   // and says what pressing it does.
@@ -216,8 +217,8 @@ export function OpenedProviderAccountSheet({
         {replacement !== null && (
           <ProviderAccountSheetSection heading="Credential">
             <SheetCredential
-              state={decideAccountState(providers, account, timezone, now)}
-              expiry={describeCredentialExpiry(account, timezone, now)}
+              state={credentialState}
+              expiry={describeCredentialExpiry(account, credentialState, timezone, now)}
               button={{ label: replacement.label, onPress: () => setReplacingCredential(true) }}
             />
           </ProviderAccountSheetSection>

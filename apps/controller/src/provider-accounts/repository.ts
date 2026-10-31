@@ -388,22 +388,22 @@ const make = Effect.gen(function* () {
       at: string,
     ): Effect.Effect<RefusalOutcome, SqlError> =>
       Effect.gen(function* () {
-        const alreadyFailed = yield* sql`
-          UPDATE provider_accounts SET failure_message = ${message}, updated_at = ${at}
-          WHERE id = ${uuidFromString(id)}
-            AND credential_generation = ${credentialGeneration}
-            AND failed_at IS NOT NULL
-          RETURNING id
+        // RETURNING shows the row after the update, so it cannot tell a new
+        // failure from a repeated one. The row is read first instead; this
+        // runs in a transaction, so nothing changes it in between.
+        const current = yield* sql<{ readonly failed_at: string | null }>`
+          SELECT failed_at FROM provider_accounts
+          WHERE id = ${uuidFromString(id)} AND credential_generation = ${credentialGeneration}
         `;
-        if (alreadyFailed.length > 0) return "still-failed" as const;
-        const newlyFailed = yield* sql`
+        if (current.length === 0) return "ignored" as const;
+        yield* sql`
           UPDATE provider_accounts
-          SET failure_message = ${message}, failed_at = ${at}, updated_at = ${at}
+          SET failure_message = ${message},
+              failed_at = COALESCE(failed_at, ${at}),
+              updated_at = ${at}
           WHERE id = ${uuidFromString(id)}
-            AND credential_generation = ${credentialGeneration}
-          RETURNING id
         `;
-        return newlyFailed.length > 0 ? ("failed" as const) : ("ignored" as const);
+        return current[0]!.failed_at === null ? ("failed" as const) : ("still-failed" as const);
       }),
 
     /**

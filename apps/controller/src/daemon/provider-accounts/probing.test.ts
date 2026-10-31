@@ -426,6 +426,25 @@ describe("a probe that reads usage", () => {
     );
   });
 
+  it("stores no readings from a probe that did not ask for usage, even when the runner returns some", async () => {
+    probeResult.current = () => Effect.succeed({ ...SIGNED_IN, usage: [FIVE_HOUR_READING] });
+
+    const readings = await run(
+      [],
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const usage = yield* AccountUsage;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+
+        const outcome = yield* probing.probe(runner, account.id, ALPHA_HARNESS_ID);
+        return { stored: outcome._tag, readings: yield* usage.read(account.id) };
+      }),
+    );
+
+    expect(readings).toEqual({ stored: "stored", readings: [] });
+  });
+
   it("stores no readings from an answer that was superseded", async () => {
     const sent: Array<Sent> = [];
 

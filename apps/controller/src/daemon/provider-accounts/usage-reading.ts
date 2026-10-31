@@ -65,16 +65,17 @@ export const runAccountUsageReadingLoop: Effect.Effect<
   const interval = yield* AccountUsageReadingInterval;
 
   /**
-   * Reads one account's usage if the claim allows it. The endpoint read
-   * writes, so all of it waits for the promotion gate (its request is bounded
-   * by a timeout). The harness read is claimed and gated inside `probing`.
+   * Reads one account's usage if the claim allows it. Only the claim waits
+   * for the promotion gate: the endpoint request itself takes up to its
+   * timeout, and a freeze must not wait for that. `readUsageWithKey` gates
+   * its own writes. The harness read is claimed and gated inside `probing`.
    */
   const read = (due: UsageRead) =>
     due._tag === "endpoint"
-      ? promotion.whenServing(
-          Effect.flatMap(accountUsage.claimRead(due.providerAccountId), (claimed) =>
+      ? Effect.flatMap(
+          promotion.whenServing(accountUsage.claimRead(due.providerAccountId)),
+          (claimed) =>
             claimed ? providerAccounts.readUsageWithKey(due.providerAccountId) : Effect.void,
-          ),
         )
       : Effect.asVoid(probing.readUsageByProbe(due.runnerId, due.providerAccountId, due.harnessId));
 
@@ -85,7 +86,7 @@ export const runAccountUsageReadingLoop: Effect.Effect<
     );
     yield* absorbFailures(
       "Listing the provider account usage reads that are due failed",
-      Effect.flatMap(runners.listUsageReads(), (due) =>
+      Effect.flatMap(runners.listUsageReads(accountUsage.listDueAccounts), (due) =>
         Effect.forEach(
           due,
           (one) =>

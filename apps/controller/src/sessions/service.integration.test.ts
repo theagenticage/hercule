@@ -1619,6 +1619,20 @@ const buildMeteredPlugin = () =>
     ],
   }).plugin;
 
+describe("the start of a session's process", () => {
+  it("is stored when dispatch claims the session", async () => {
+    const stored = await run(
+      Effect.gen(function* () {
+        const rows = yield* sessionRepository;
+        const { sessionId } = yield* insertRunningSession(mintId(), "starting", 0);
+        return yield* rows.one(sessionId);
+      }),
+    );
+
+    expect(Option.getOrThrow(stored).processStartedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
 describe("usage a runner reports for a session", () => {
   const readings = [
     {
@@ -1682,6 +1696,66 @@ describe("usage a runner reports for a session", () => {
     );
 
     expect(stored).toMatchObject([{ window: "five-hour", usedPercent: 42, source: "session" }]);
+  });
+
+  it("is dropped when the session's process started before the account's credential was replaced", async () => {
+    const runnerId = mintId();
+    const stored = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const usage = yield* AccountUsage;
+        const { sessionId, accountId } = yield* arrangeMeteredSession(runnerId);
+        yield* usage.clear(accountId);
+        yield* sessions.applyAccountUsageReported(runnerId, report(sessionId));
+        return yield* usage.read(accountId);
+      }),
+    );
+
+    expect(stored).toEqual([]);
+  });
+
+  it("is stored when the session's process started after the account's credential was replaced", async () => {
+    const runnerId = mintId();
+    const stored = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const usage = yield* AccountUsage;
+        const { sessionId, accountId } = yield* arrangeMeteredSession(runnerId);
+        yield* usage.clear(accountId);
+        // The session was resumed after the replacement: dispatch stamped a later process start.
+        const resumedAt = new Date(Date.now() + 60_000).toISOString();
+        yield* withTransaction(
+          sql,
+          sql`
+            UPDATE sessions SET process_started_at = ${resumedAt}
+            WHERE id = ${uuidFromString(sessionId)}
+          `,
+        );
+        yield* sessions.applyAccountUsageReported(runnerId, report(sessionId));
+        return yield* usage.read(accountId);
+      }),
+    );
+
+    expect(stored).toMatchObject([{ window: "five-hour", usedPercent: 42, source: "session" }]);
+  });
+
+  it("is dropped when the session has exited", async () => {
+    const runnerId = mintId();
+    const stored = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const rows = yield* sessionRepository;
+        const usage = yield* AccountUsage;
+        const { sessionId, accountId } = yield* arrangeMeteredSession(runnerId);
+        yield* withTransaction(sql, rows.moved(sessionId, "exited", at));
+        yield* sessions.applyAccountUsageReported(runnerId, report(sessionId));
+        return yield* usage.read(accountId);
+      }),
+    );
+
+    expect(stored).toEqual([]);
   });
 
   it("is dropped, and logged, when another runner holds the session", async () => {

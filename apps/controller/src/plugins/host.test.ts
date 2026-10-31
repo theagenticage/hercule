@@ -843,29 +843,6 @@ describe("a plugin that registers a provider", () => {
         expect(message, kindId).toContain(`registers a parseUsageBody for ${kindId}`);
       }
     });
-
-    it("hands the controller the parser of a kind, and none for another kind or provider", async () => {
-      const definition = endpointKind(buildProviderDefinition("vendor"), endpoint);
-      const plugin = providerPlugin("vendor", [definition], {
-        parseUsageBody: { "api-key": parseQuota },
-      });
-
-      const found = await run(
-        Effect.gen(function* () {
-          const host = yield* PluginHost;
-          yield* host.boot([plugin]);
-          return {
-            kind: yield* host.findUsageParser("vendor/vendor", "api-key"),
-            otherKind: yield* host.findUsageParser("vendor/vendor", "token"),
-            otherProvider: yield* host.findUsageParser("other/other", "api-key"),
-          };
-        }),
-      );
-
-      expect(found.kind).toEqual(Option.some(parseQuota));
-      expect(found.otherKind).toEqual(Option.none());
-      expect(found.otherProvider).toEqual(Option.none());
-    });
   });
 
   it("is errored when an account kind declares two credential sources", async () => {

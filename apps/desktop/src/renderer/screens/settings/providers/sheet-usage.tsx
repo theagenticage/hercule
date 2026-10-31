@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { AccountUsage } from "@hercule/client-core";
+import type { AccountUsageGauge } from "@hercule/client-core";
 import "./providers.css";
 
 /**
@@ -9,7 +9,7 @@ import "./providers.css";
  * taken, such as "as of 10:42". The bar turns marigold from 80% and tomato
  * when the limit is reached.
  */
-export function SheetUsage({ usage }: { readonly usage: AccountUsage }): JSX.Element {
+export function SheetUsage({ usage }: { readonly usage: AccountUsageGauge }): JSX.Element {
   return (
     <div className="pa-use">
       {usage.lines.map((line) =>
@@ -18,8 +18,7 @@ export function SheetUsage({ usage }: { readonly usage: AccountUsage }): JSX.Ele
             <span>{line.label}</span>
             <span className="pa-use-credit">
               {line.remainingText}
-              {line.limitText !== null && <small>{` ${line.limitText}`}</small>}
-              <small>{" left"}</small>
+              <small>{` ${line.suffixText}`}</small>
             </span>
           </div>
         ) : (

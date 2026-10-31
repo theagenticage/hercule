@@ -576,7 +576,7 @@ const ready =
  */
 const probed = !ready
   ? undefined
-  : await Effect.runPromise(codex.probe(buildContext(createHomeWithLogin())));
+  : await Effect.runPromise(codex.probe(buildContext(createHomeWithLogin()), { readUsage: false }));
 
 const authed = probed?.auth.status === "ok";
 

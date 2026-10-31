@@ -38,7 +38,7 @@ import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
 import type { EditMarks, HarnessRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
-import { USAGE_READ_DEADLINE } from "./probe";
+import { USAGE_READ_DEADLINE } from "../probe";
 import { RPC_DEADLINE } from "./rpc";
 import { PROBE_DEADLINE } from "../probe";
 import {
@@ -191,7 +191,7 @@ describe("what the Codex adapter reports about a machine", () => {
       credential: { variable: "OPENAI_API_KEY", value: "sk-test-not-real" },
     };
 
-    const probed = await Effect.runPromise(makeCodexAdapter(seam).probe(ctx));
+    const probed = await Effect.runPromise(makeCodexAdapter(seam).probe(ctx, { readUsage: false }));
 
     expect(probed.auth).toEqual({ status: "ok", backend: "apiKey" });
     expect(probed.models).not.toEqual([]);
@@ -291,7 +291,9 @@ describe("what the Codex adapter reports about a machine", () => {
     const probed = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const running = yield* Effect.forkChild(makeCodexAdapter(seam).probe(buildContext(home)));
+          const running = yield* Effect.forkChild(
+            makeCodexAdapter(seam).probe(buildContext(home), { readUsage: false }),
+          );
           yield* TestClock.adjust(Duration.zero);
           yield* TestClock.adjust(PROBE_DEADLINE);
           return yield* Fiber.join(running);
@@ -323,8 +325,8 @@ describe("the process a probe runs on", () => {
     const adapter = makeCodexAdapter(seam);
     const ctx = buildContext(home);
 
-    await Effect.runPromise(adapter.probe(ctx));
-    await Effect.runPromise(adapter.probe(ctx));
+    await Effect.runPromise(adapter.probe(ctx, { readUsage: false }));
+    await Effect.runPromise(adapter.probe(ctx, { readUsage: false }));
     expect(spawns).toHaveLength(2);
 
     const started = Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx)).then(
@@ -4187,7 +4189,7 @@ describe("notifications that name no thread", () => {
       },
     });
 
-    await Effect.runPromise(run.adapter.probe(run.ctx));
+    await Effect.runPromise(run.adapter.probe(run.ctx, { readUsage: false }));
     await settle();
 
     expect(run.seen).toEqual([]);
@@ -4476,6 +4478,39 @@ describe("a probe that reads usage", () => {
     expect(probed.auth.status).toBe("ok");
     expect(probed.models).not.toEqual([]);
   });
+
+  it("gives the rate-limit read only the time the probe has left, so a slow account read does not cost the auth and the models", async () => {
+    let releaseAccount: (answer: unknown) => void = () => undefined;
+    const slowAccount = new Promise<unknown>((resolve) => {
+      releaseAccount = resolve;
+    });
+    const { seam } = buildScriptedSeam({
+      "account/read": () => slowAccount,
+      "account/rateLimits/read": SILENT,
+    });
+
+    const probed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const running = yield* Effect.forkChild(
+            makeCodexAdapter(seam).probe(buildContext(createCodexHome()), { readUsage: true }),
+          );
+          yield* Effect.promise(settle);
+          yield* TestClock.adjust(Duration.seconds(12));
+          releaseAccount(CHATGPT);
+          yield* Effect.promise(settle);
+          // The read had the 5 seconds of its own deadline, but only 2 are left.
+          yield* TestClock.adjust(Duration.seconds(2));
+          return yield* Fiber.join(running);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(probed.usage).toBeNull();
+    expect(probed.auth).toMatchObject({ status: "ok", backend: "chatgpt" });
+    expect(probed.models).not.toEqual([]);
+  });
 });
 
 describe("the rate limits a Codex session reports", () => {
@@ -4532,5 +4567,30 @@ describe("the rate limits a Codex session reports", () => {
     );
 
     expect(reports).toEqual([]);
+  });
+
+  it("completes an update that leaves out a window's length from the session's earlier updates", async () => {
+    const run = createDriving();
+    const reports = collectUsageReports(run.adapter);
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+    const update = (primary: unknown) => ({
+      method: "account/rateLimits/updated",
+      params: { rateLimits: { ...RATE_LIMITS_UPDATE.params.rateLimits, primary } },
+    });
+
+    // Before any update gave the length, the sparse update is dropped.
+    run.spawns[0]!.push(update({ usedPercent: 10, windowDurationMins: null, resetsAt: null }));
+    run.spawns[0]!.push(RATE_LIMITS_UPDATE);
+    run.spawns[0]!.push(update({ usedPercent: 80, windowDurationMins: null, resetsAt: null }));
+    run.spawns[0]!.push({ method: "warning", params: { threadId: THREAD, message: "later" } });
+    await waitUntil(
+      "saw the later warning",
+      () => filterByTag(run.seen, "runtime.warning").length > 0,
+    );
+
+    expect(reports.map((report) => report.readings)).toMatchObject([
+      [{ window: "five-hour", usedPercent: 61 }],
+      [{ window: "five-hour", usedPercent: 80 }],
+    ]);
   });
 });

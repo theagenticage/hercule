@@ -90,7 +90,7 @@ describe("recordCredentialRefused and recordCredentialAccepted", () => {
       failedAt: outcome.first.failure?.failedAt,
     });
     expect(outcome.notifications).toEqual([
-      { title: "Acme · Work stopped working", body: "invalid key" },
+      { title: "Acme · Work stopped working", body: "` invalid key `" },
     ]);
   });
 
@@ -116,8 +116,8 @@ describe("recordCredentialRefused and recordCredentialAccepted", () => {
 
     expect(outcome.cleared.failure).toBeNull();
     expect(outcome.notifications.map((notification) => notification.body)).toEqual([
-      "invalid key",
-      "invalid again",
+      "` invalid key `",
+      "` invalid again `",
     ]);
   });
 

@@ -3,7 +3,13 @@
  * shaped like the generated `RateLimitSnapshot`, not invented fields.
  */
 import { describe, expect, it } from "vitest";
-import { buildUsageReadings, pickCodexSnapshot, pickUpdatedSnapshot } from "./usage";
+import {
+  buildUsageReadings,
+  completeWindowDurations,
+  createWindowDurations,
+  pickCodexSnapshot,
+  pickUpdatedSnapshot,
+} from "./usage";
 import type { GetAccountRateLimitsResponse, RateLimitSnapshot } from "./types";
 
 const TAKEN_AT = "2026-10-31T12:00:00.000Z";
@@ -153,13 +159,84 @@ describe("the readings of a snapshot", () => {
   });
 
   it.each([
+    ["with credits", true],
+    ["without credits", false],
+  ])(
+    "reads a zero balance as a reading for an account %s, so a stored balance does not outlive it",
+    (_name, hasCredits) => {
+      const readings = buildUsageReadings(
+        buildSnapshot({ credits: { hasCredits, unlimited: false, balance: "0" } }),
+        TAKEN_AT,
+      );
+      expect(readings).toEqual([{ kind: "credit", remaining: 0, limit: null, takenAt: TAKEN_AT }]);
+    },
+  );
+
+  it.each([
     ["unlimited credits", { hasCredits: true, unlimited: true, balance: "100" }],
-    ["no credits", { hasCredits: false, unlimited: false, balance: "0" }],
+    ["a negative balance", { hasCredits: true, unlimited: false, balance: "-1" }],
     ["no balance", { hasCredits: true, unlimited: false, balance: null }],
     ["a balance that is not a number", { hasCredits: true, unlimited: false, balance: "n/a" }],
     ["an empty balance", { hasCredits: true, unlimited: false, balance: "" }],
   ])("gives no credit reading for %s", (_name, credits) => {
     expect(buildUsageReadings(buildSnapshot({ credits }), TAKEN_AT)).toEqual([]);
+  });
+});
+
+describe("a sparse update that leaves out a window's length", () => {
+  const withoutLength = (usedPercent: number) =>
+    buildSnapshot({
+      primary: { usedPercent, windowDurationMins: null, resetsAt: FIVE_HOUR_RESET },
+    });
+
+  it("takes the length from an earlier update of the same session", () => {
+    const known = createWindowDurations();
+    completeWindowDurations(PLUS, known);
+
+    const readings = buildUsageReadings(
+      completeWindowDurations(withoutLength(80), known),
+      TAKEN_AT,
+    );
+
+    expect(readings).toEqual([
+      {
+        kind: "window",
+        window: "five-hour",
+        usedPercent: 80,
+        resetsAt: "2026-10-31T17:00:00.000Z",
+        hit: false,
+        takenAt: TAKEN_AT,
+      },
+    ]);
+  });
+
+  it("drops the window when no earlier update gave its length", () => {
+    const known = createWindowDurations();
+
+    expect(buildUsageReadings(completeWindowDurations(withoutLength(80), known), TAKEN_AT)).toEqual(
+      [],
+    );
+  });
+
+  it("keeps the two windows' lengths apart, and uses the newest length of a window", () => {
+    const known = createWindowDurations();
+    completeWindowDurations(PLUS, known);
+    completeWindowDurations(
+      buildSnapshot({ primary: { usedPercent: 1, windowDurationMins: 10_080, resetsAt: null } }),
+      known,
+    );
+
+    expect(known).toEqual({ primary: 10_080, secondary: 10_080 });
+  });
+
+  it("still gives no reading for a window with no used percentage", () => {
+    const known = createWindowDurations();
+    completeWindowDurations(PLUS, known);
+    const update = buildSnapshot({
+      primary: { usedPercent: null, windowDurationMins: null, resetsAt: null },
+    } as unknown as Partial<RateLimitSnapshot>);
+
+    expect(buildUsageReadings(completeWindowDurations(update, known), TAKEN_AT)).toEqual([]);
   });
 });
 

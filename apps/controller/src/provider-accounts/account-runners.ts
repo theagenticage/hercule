@@ -241,20 +241,36 @@ const make = Effect.gen(function* () {
      * An account of the second kind with no such runner is left out, so
      * nothing is sent and the caller claims nothing. An account whose kind
      * reads usage from its sessions only, or declares no usage, is not listed.
-     * Reads the accounts and the fleet once, however many accounts there are.
+     *
+     * `selectDue` receives the ids of all accounts that could be read and
+     * returns those whose read is due (`AccountUsage.listDueAccounts`). The
+     * rest are left out before the fleet is looked at, so the many ticks at
+     * which nothing is due cost one read of the accounts and no more. Reads
+     * the accounts and the fleet once, however many accounts there are.
      */
-    listUsageReads: (): Effect.Effect<ReadonlyArray<UsageRead>, SqlError> =>
+    listUsageReads: (
+      selectDue: (
+        providerAccountIds: ReadonlyArray<string>,
+      ) => Effect.Effect<ReadonlyArray<string>, SqlError>,
+    ): Effect.Effect<ReadonlyArray<UsageRead>, SqlError> =>
       Effect.gen(function* () {
         const providers = yield* host.providers();
-        const reads: Array<UsageRead> = [];
-        const harnessPairs: Array<AccountHarnessPair> = [];
+        // `harnessId` is null for an account read with its key.
+        const candidates: Array<{ id: string; harnessId: string | null }> = [];
         for (const account of yield* accounts.list()) {
           const usage = findAccountKind(providers, account)?.usage;
-          if (usage?.readBy === "endpoint") {
-            reads.push({ _tag: "endpoint", providerAccountId: account.id });
-          } else if (usage?.readBy === "harness") {
-            harnessPairs.push({ providerAccountId: account.id, harnessId: usage.harnessId });
+          if (usage?.readBy === "endpoint") candidates.push({ id: account.id, harnessId: null });
+          else if (usage?.readBy === "harness") {
+            candidates.push({ id: account.id, harnessId: usage.harnessId });
           }
+        }
+        const due = new Set(yield* selectDue(candidates.map(({ id }) => id)));
+        const reads: Array<UsageRead> = [];
+        const harnessPairs: Array<AccountHarnessPair> = [];
+        for (const { id, harnessId } of candidates) {
+          if (!due.has(id)) continue;
+          if (harnessId === null) reads.push({ _tag: "endpoint", providerAccountId: id });
+          else harnessPairs.push({ providerAccountId: id, harnessId });
         }
         if (harnessPairs.length === 0) return reads;
         const online = new Set(yield* runners.connected());

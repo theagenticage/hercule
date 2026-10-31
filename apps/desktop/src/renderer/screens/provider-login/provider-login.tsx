@@ -382,17 +382,24 @@ function DeviceLoginWait({
  * is sent with `providerAccount.update` and never read back. The controller
  * checks a key with its provider before it stores it, and a refusal shows
  * under the field. Calls `onSaved` once the credential is stored.
+ *
+ * While the controller checks the key, Save reads "Checking the key…" (no
+ * spinner), and `onPendingChange` is called with `true`, then with `false`
+ * once the check has ended and `onSaved` has been called. A caller that sits
+ * in a dialog uses it to keep the dialog open until the controller answers.
  */
 export function CredentialFieldEntry({
   client,
   providerAccountId,
   field,
   onSaved,
+  onPendingChange,
 }: {
   readonly client: HerculeClient;
   readonly providerAccountId: string;
   readonly field: Pick<CredentialFieldOffer, "name" | "title" | "description">;
   readonly onSaved: () => void;
+  readonly onPendingChange?: (pending: boolean) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
@@ -404,10 +411,12 @@ export function CredentialFieldEntry({
         // vendor would treat it as a different credential.
         payload: { credentials: { [field.name]: value.trim() } },
       }),
+    onMutate: () => onPendingChange?.(true),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
       onSaved();
     },
+    onSettled: () => onPendingChange?.(false),
   });
   const canSave = value.trim() !== "" && !save.isPending;
   return (
@@ -436,7 +445,7 @@ export function CredentialFieldEntry({
           disabled={!canSave}
           onClick={() => save.mutate()}
         >
-          Save
+          {save.isPending ? "Checking the key…" : "Save"}
         </button>
       </span>
     </>

@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       // Taken before the credential is read, so the snapshot never claims to
       // be newer than the state the probe saw.
-      const stamp = yield* probes.readProbeStamp(providerAccountId);
+      const stamp = yield* probes.readProbeStamp(providerAccountId, readUsage);
       const answer = yield* connections.asked(
         runnerId,
         {

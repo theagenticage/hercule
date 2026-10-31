@@ -191,14 +191,17 @@ export const decideAccountState = (
  * Returns when the account's credential stops working, such as "Expires 31 Oct
  * 2027", or "Expired 31 Oct 2026" once it has, for the account sheet's
  * Credential section. Returns `null` for an account whose credential does not
- * expire.
+ * expire, and when `state` (the account's state, from `decideAccountState`)
+ * already says the expiry, so the section does not say it twice.
  */
 export const describeCredentialExpiry = (
   account: Pick<ProviderAccount, "expiresAt">,
+  state: AccountState,
   timezone: string,
   now: Date,
 ): string | null => {
   if (account.expiresAt === null) return null;
+  if (state.kind === "expired" || state.kind === "expiring") return null;
   const expiry = new Date(account.expiresAt);
   const date = formatExpiryDate(expiry, timezone, now);
   if (date === undefined) return null;

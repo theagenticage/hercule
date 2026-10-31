@@ -580,7 +580,7 @@ export {
 } from "./provider-accounts";
 export {
   describeAccountUsage,
-  type AccountUsage,
+  type AccountUsageGauge,
   type AccountUsageCreditLine,
   type AccountUsageLine,
   type AccountUsageTone,

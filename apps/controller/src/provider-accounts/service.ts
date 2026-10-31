@@ -49,14 +49,16 @@ import type { HarnessAccount, LoginMethod } from "@hercule/protocol";
 import { currentStamp, requireGrant } from "../actor";
 import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { Notifier } from "../notifications";
+import { formatInlineCode, Notifier } from "../notifications";
 import {
   decideProviderAccountHarness,
+  findAccountKind,
   findCredentialSecretName,
   PluginHost,
   type RegisteredHarness,
   type RegisteredProvider,
 } from "../plugins";
+import { PromotionState } from "../promotion";
 import { NO_SUCH_RUNNER, requireAdapter, requireOnline, runnerRepository } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { AccountUsage } from "../usage";
@@ -65,6 +67,7 @@ import { buildVersionKey, harnessRepository } from "../harnesses";
 import { describeSnapshot } from "./describe-snapshot";
 import { HarnessAccounts } from "./harness-account";
 import { ProviderKeyCheck } from "./key-check";
+import { isHeaderSafe } from "./key-request";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
@@ -166,6 +169,7 @@ const make = Effect.gen(function* () {
   const notifier = yield* Notifier;
   const accountUsage = yield* AccountUsage;
   const usageEndpoint = yield* ProviderUsageEndpoint;
+  const promotion = yield* PromotionState;
 
   const announceAccountChanged = (id: string): Effect.Effect<void> =>
     announce({ _tag: "record", topic: "provider", id, kind: "updated" });
@@ -178,10 +182,7 @@ const make = Effect.gen(function* () {
     account: Pick<StoredProviderAccount, "providerId" | "kind">,
     providers: ReadonlyArray<RegisteredProvider>,
   ): string => {
-    const kind = providers
-      .find((provider) => provider.id === account.providerId)
-      ?.kinds.find((candidate) => candidate.id === account.kind);
-    const makesToken = kind?.setup.some(
+    const makesToken = findAccountKind(providers, account)?.setup.some(
       (step) => step.kind === "harness-login" && step.method === "create-token",
     );
     return makesToken === true
@@ -460,7 +461,9 @@ const make = Effect.gen(function* () {
           yield* notifier.createCoreNotification({
             kind: "core.account-failed",
             title: `${name} stopped working`,
-            body: message,
+            // The provider's words are third-party text and the body is
+            // markdown: as inline code they cannot add a link or an image.
+            body: formatInlineCode(message),
             subject: [{ kind: "providerAccount", id: providerAccountId }],
           });
         }
@@ -1006,12 +1009,18 @@ const make = Effect.gen(function* () {
      * - The provider accepted the key: the readings are stored as read, and
      *   the account's failure is cleared.
      * - The provider refused the key (a 401, or an answer its plugin reads as
-     *   a refusal): the account is failed with the provider's words. A key
-     *   replaced while the read was in flight is not failed, because the
-     *   refusal is judged against the generation read before the request.
+     *   a refusal): the account is failed with the provider's words.
      * - Anything else (no answer in time, 403, 429, 5xx, a redirect, an answer
-     *   the plugin cannot read, a stored key that cannot be decrypted) is
-     *   logged as a warning, and the account keeps its status.
+     *   the plugin cannot read, a stored key that cannot be decrypted or
+     *   cannot be sent in a header) is logged as a warning, and the account
+     *   keeps its status.
+     *
+     * The readings (or the refusal) are stored in one transaction, and only
+     * when the account still has the credential generation it had before the
+     * request. A key replaced while the read was in flight therefore gets
+     * neither the old key's readings nor its refusal. The transaction waits
+     * for the promotion gate, but the request does not hold it, and a sealed
+     * controller stores nothing.
      *
      * Does nothing for an account that does not exist, that has no stored
      * key, or whose kind does not read usage from an endpoint.
@@ -1023,19 +1032,16 @@ const make = Effect.gen(function* () {
         const found = yield* accounts.one(providerAccountId);
         if (Option.isNone(found)) return;
         const account = found.value;
-        const provider = (yield* host.providers()).find(({ id }) => id === account.providerId);
-        const kind = provider?.kinds.find(({ id }) => id === account.kind);
-        const parse = yield* host.findUsageParser(account.providerId, account.kind);
+        const providers = yield* host.providers();
+        const provider = providers.find(({ id }) => id === account.providerId);
+        const kind = findAccountKind(providers, account);
+        const parse = provider?.parseUsageBody[account.kind];
         const secretName = kind === undefined ? undefined : findCredentialSecretName(kind);
-        if (
-          kind?.usage?.readBy !== "endpoint" ||
-          Option.isNone(parse) ||
-          secretName === undefined
-        ) {
+        if (kind?.usage?.readBy !== "endpoint" || parse === undefined || secretName === undefined) {
           return;
         }
         // The generation is read before the key. A key replaced in between
-        // makes this read's outcome stale, and a stale outcome is ignored.
+        // makes this read's outcome stale, and a stale outcome is not stored.
         const generation = account.credentialGeneration;
         const key = yield* secrets.get(buildProviderAccountOwner(account.id), secretName).pipe(
           // The name comes from the plugin catalog, which refuses names the
@@ -1049,17 +1055,35 @@ const make = Effect.gen(function* () {
           ),
         );
         if (Option.isNone(key)) return;
-        const outcome = yield* usageEndpoint.read(kind.usage, parse.value, key.value);
-        if (outcome._tag === "readings") {
-          yield* accountUsage.record(account.id, outcome.readings, "read");
-          yield* recordCredentialAccepted(account.id, generation);
-        } else if (outcome._tag === "refused") {
-          yield* recordCredentialRefused(account.id, generation, outcome.reason);
-        } else {
+        if (!isHeaderSafe(Redacted.value(key.value))) {
+          yield* Effect.logWarning(
+            `Could not read the usage of account ${account.id}: the stored key holds characters a header cannot carry`,
+          );
+          return;
+        }
+        const outcome = yield* usageEndpoint.read(kind.usage, parse, key.value);
+        if (outcome._tag === "unavailable") {
           yield* Effect.logWarning(
             `Could not read the usage of account ${account.id} from ${provider?.displayName}: ${outcome.reason}`,
           );
+          return;
         }
+        const store = withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const current = yield* accounts.one(account.id);
+            if (Option.isNone(current) || current.value.credentialGeneration !== generation) {
+              return;
+            }
+            if (outcome._tag === "readings") {
+              yield* accountUsage.record(account.id, outcome.readings, "read");
+              yield* recordCredentialAccepted(account.id, generation);
+            } else {
+              yield* recordCredentialRefused(account.id, generation, outcome.message);
+            }
+          }),
+        );
+        yield* promotion.whenServingOr(store, () => Effect.void);
       }),
 
     /**
@@ -1103,6 +1127,7 @@ export const ProviderAccountServiceLayer: Layer.Layer<
   | Settings
   | ProviderKeyCheck
   | ProviderUsageEndpoint
+  | PromotionState
   | HarnessAccounts
   | Notifier
   | AccountUsage

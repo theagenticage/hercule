@@ -4,7 +4,7 @@
  * is stored for each answer, and which answers fail the account.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect } from "effect";
+import { Duration, Effect, Logger } from "effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -12,7 +12,7 @@ import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import { uuidFromString } from "../db";
 import { createPluginFixture } from "../plugins/testing";
 import { ProviderAccountService } from "./service";
-import { UsageReadTimeout } from "./usage-endpoint";
+import { ProviderUsageEndpointTimeout } from "./usage-endpoint";
 import {
   addAccount,
   ALPHA_HARNESS_ID,
@@ -47,7 +47,8 @@ const METERED: ProviderDefinition = {
 
 /**
  * Metered's usage body is `{ "used": 40 }` for a good answer, `{ "refuse": "..." }`
- * for a refusal, and anything else is a defect that the parser throws on.
+ * for a refusal, `{ "nothing": true }` returns nothing, and anything else is a
+ * defect that the parser throws on.
  */
 const METERED_PLUGINS: ReadonlyArray<Plugin> = [
   createPluginFixture({
@@ -60,7 +61,10 @@ const METERED_PLUGINS: ReadonlyArray<Plugin> = [
         "api-key": (body, takenAt) => {
           const answer = body as { used?: number; refuse?: string };
           if (typeof answer.refuse === "string") return { refused: answer.refuse };
-          if (typeof answer.used !== "number") throw new Error("not a Metered answer");
+          if ((body as { nothing?: boolean }).nothing === true) return undefined as never;
+          if (typeof answer.used !== "number") {
+            throw new Error("not a Metered answer\nsecond line \u001b[31mred");
+          }
           return {
             readings: [
               {
@@ -95,6 +99,14 @@ const readGeneration = (accountId: string) =>
     return rows[0]?.credential_generation ?? -1;
   });
 
+/** Reads the body of the account-failed notification, or `null` when there is none. */
+const readFailureNotificationBody = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{ readonly body: string | null }>`
+    SELECT body FROM notifications WHERE kind = 'core.account-failed'`;
+  return rows[0]?.body ?? null;
+});
+
 /** Counts the account-failed notifications. */
 const countFailureNotifications = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -120,12 +132,18 @@ const addMeteredAccount = Effect.gen(function* () {
  */
 const readOnce = async (
   answer: () => FakeProviderAnswer,
-  options: { readonly alreadyFailed?: boolean; readonly timeout?: Duration.Duration } = {},
+  options: {
+    readonly alreadyFailed?: boolean;
+    readonly timeout?: Duration.Duration;
+    readonly key?: string;
+  } = {},
 ) => {
   const api = buildFakeProviderApi(answer);
+  const logged: Array<string> = [];
   const account = await runWithAccounts(
     Effect.gen(function* () {
       const added = yield* addMeteredAccount;
+      if (options.key !== undefined) yield* storeCredential(added.id, "apiKey", options.key);
       if (options.alreadyFailed === true) {
         const generation = yield* readGeneration(added.id);
         yield* withService((service) =>
@@ -136,16 +154,24 @@ const readOnce = async (
       return {
         account: yield* withService((service) => service.read(added.id)),
         notifications: yield* countFailureNotifications,
+        notificationBody: yield* readFailureNotificationBody,
       };
     }).pipe(
+      Effect.provide(
+        Logger.layer([
+          Logger.make<unknown, void>(({ message }) => {
+            logged.push(String(message));
+          }),
+        ]),
+      ),
       options.timeout === undefined
         ? (effect) => effect
-        : Effect.provideService(UsageReadTimeout, options.timeout),
+        : Effect.provideService(ProviderUsageEndpointTimeout, options.timeout),
     ),
     api.client,
     METERED_PLUGINS,
   );
-  return { ...account, requests: api.requests };
+  return { ...account, requests: api.requests, logged };
 };
 
 describe("ProviderAccountService.readUsageWithKey", () => {
@@ -165,7 +191,9 @@ describe("ProviderAccountService.readUsageWithKey", () => {
   });
 
   it("fails the account with the provider's words on a 401, and raises one notification", async () => {
-    const { account, notifications } = await readOnce(() => json({ msg: "Key revoked" }, 401));
+    const { account, notifications } = await readOnce(() =>
+      json({ error: { message: "Key revoked" } }, 401),
+    );
 
     expect(account.failure).toMatchObject({ message: "Key revoked" });
     expect(account.usage).toEqual([]);
@@ -210,34 +238,113 @@ describe("ProviderAccountService.readUsageWithKey", () => {
     expect(account.failure).toMatchObject({ message: "an earlier refusal" });
   });
 
-  it("does not fail a key that replaced the refused one while the read was in flight", async () => {
-    const hook: { replaceKey: Effect.Effect<unknown> | undefined } = { replaceKey: undefined };
-    const client = HttpClient.make((request) =>
-      Effect.gen(function* () {
-        if (request.url === USAGE_URL) {
-          yield* hook.replaceKey ?? Effect.void;
-          return HttpClientResponse.fromWeb(request, json({ msg: "Key revoked" }, 401));
-        }
-        return HttpClientResponse.fromWeb(request, json({}));
-      }),
-    );
+  describe("when the key is replaced while the read is in flight", () => {
+    /**
+     * Reads the usage of a Metered account whose provider answers `answer`
+     * only after the key has been replaced, and the new key has been refused
+     * (`aNewRefusal`) when `refuseNewKey` is true. Returns the account as the
+     * user sees it afterwards.
+     */
+    const readWhileKeyIsReplaced = (answer: () => Response, refuseNewKey: boolean) => {
+      const hook: { replaceKey: Effect.Effect<unknown> | undefined } = { replaceKey: undefined };
+      const client = HttpClient.make((request) =>
+        Effect.gen(function* () {
+          if (request.url === USAGE_URL) {
+            yield* hook.replaceKey ?? Effect.void;
+            return HttpClientResponse.fromWeb(request, answer());
+          }
+          return HttpClientResponse.fromWeb(request, json({}));
+        }),
+      );
+      return runWithAccounts(
+        Effect.gen(function* () {
+          const added = yield* addMeteredAccount;
+          const context = yield* Effect.context<ProviderAccountService | SqlClient.SqlClient>();
+          hook.replaceKey = Effect.gen(function* () {
+            yield* withService((service) =>
+              service.update({ id: added.id, credentials: { apiKey: "sk-new" } }),
+            );
+            if (refuseNewKey) {
+              const generation = yield* readGeneration(added.id);
+              yield* withService((service) =>
+                service.recordCredentialRefused(added.id, generation, "the new key is refused"),
+              );
+            }
+          }).pipe(Effect.provideContext(context), Effect.orDie);
+          yield* withService((service) => service.readUsageWithKey(added.id));
+          return yield* withService((service) => service.read(added.id));
+        }),
+        client,
+        METERED_PLUGINS,
+      );
+    };
 
-    const account = await runWithAccounts(
-      Effect.gen(function* () {
-        const added = yield* addMeteredAccount;
-        const context = yield* Effect.context<ProviderAccountService>();
-        hook.replaceKey = withService((service) =>
-          service.update({ id: added.id, credentials: { apiKey: "sk-new" } }),
-        ).pipe(Effect.provideContext(context), Effect.orDie);
-        yield* withService((service) => service.readUsageWithKey(added.id));
-        return yield* withService((service) => service.read(added.id));
-      }),
-      client,
-      METERED_PLUGINS,
-    );
+    it("does not fail the new key with the refusal of the old one", async () => {
+      const account = await readWhileKeyIsReplaced(
+        () => json({ error: { message: "Key revoked" } }, 401),
+        false,
+      );
 
-    expect(account.failure).toBeNull();
+      expect(account.failure).toBeNull();
+    });
+
+    it("stores none of the old key's readings and does not clear the new key's failure", async () => {
+      const account = await readWhileKeyIsReplaced(() => json({ used: 40 }), true);
+
+      expect(account.usage).toEqual([]);
+      expect(account.failure).toMatchObject({ message: "the new key is refused" });
+    });
   });
+
+  it("keeps a bad answer of the plugin out of the stored readings", async () => {
+    const { account, logged } = await readOnce(() => json({ used: 150 }));
+
+    expect(account.usage).toEqual([]);
+    expect(account.failure).toBeNull();
+    expect(logged.join("\n")).toContain("the plugin returned something that is neither readings");
+  });
+
+  it("treats a parser that returns nothing as an unreadable answer", async () => {
+    const { account, logged } = await readOnce(() => json({ nothing: true }), {
+      alreadyFailed: true,
+    });
+
+    expect(account.usage).toEqual([]);
+    expect(account.failure).toMatchObject({ message: "an earlier refusal" });
+    expect(logged.join("\n")).toContain("the plugin returned something that is neither readings");
+  });
+
+  it("logs what a parser threw on one line, without control characters", async () => {
+    const { logged } = await readOnce(() => json({ surprise: true }));
+
+    const line = logged.find((message) => message.includes("not a Metered answer"));
+    expect(line).toContain("not a Metered answer second line [31mred");
+    expect(line?.includes("\n")).toBe(false);
+    expect(line?.includes("\u001b")).toBe(false);
+  });
+
+  it("reads nothing with a stored key that a header cannot carry, and says so", async () => {
+    const { account, requests, logged } = await readOnce(() => json({ used: 40 }), {
+      key: "sk bad\nkey",
+    });
+
+    expect(requests).toEqual([]);
+    expect(account.usage).toEqual([]);
+    expect(logged.join("\n")).toContain("the stored key holds characters a header cannot carry");
+  });
+
+  it.each([
+    ["an image", "![x](https://evil.test/x.png)"],
+    ["a link", "[click](https://evil.test)"],
+  ])(
+    "puts %s in the provider's words into the notification as plain text",
+    async (_name, words) => {
+      const { notificationBody } = await readOnce(() => json({ refuse: words }));
+
+      // Inside inline code, markdown does not become an image or a link.
+      expect(notificationBody).toBe(`\` ${words} \``);
+    },
+  );
 
   it("does nothing for an account that does not exist", async () => {
     const api = buildFakeProviderApi();

@@ -180,23 +180,31 @@ describe("decideAccountState", () => {
 });
 
 describe("describeCredentialExpiry", () => {
-  it("names the date a credential expires, with the year when it is not this year", () => {
-    expect(describeCredentialExpiry(expiresIn(TOKEN_ACCOUNT, 365 * DAY), "UTC", NOW)).toBe(
-      "Expires 31 Oct 2027",
-    );
-    expect(describeCredentialExpiry(expiresIn(TOKEN_ACCOUNT, 12 * DAY), "UTC", NOW)).toBe(
-      "Expires 12 Nov",
-    );
-  });
+  const describeExpiry = (account: ProviderAccount): string | null =>
+    describeCredentialExpiry(account, decide(account), "UTC", NOW);
 
-  it("says Expired once the date has passed", () => {
-    expect(describeCredentialExpiry(expiresIn(TOKEN_ACCOUNT, -2 * DAY), "UTC", NOW)).toBe(
-      "Expired 29 Oct",
-    );
+  it("names the date a credential expires, with the year when it is not this year", () => {
+    expect(describeExpiry(expiresIn(TOKEN_ACCOUNT, 365 * DAY))).toBe("Expires 31 Oct 2027");
+    expect(describeExpiry(expiresIn(KEY_ACCOUNT, 90 * DAY))).toBe("Expires 29 Jan 2027");
   });
 
   it("returns nothing for a credential that does not expire", () => {
-    expect(describeCredentialExpiry(KEY_ACCOUNT, "UTC", NOW)).toBeNull();
+    expect(describeExpiry(KEY_ACCOUNT)).toBeNull();
+  });
+
+  it("returns nothing when the account's state already says the expiry", () => {
+    expect(describeExpiry(expiresIn(TOKEN_ACCOUNT, 12 * DAY))).toBeNull();
+    expect(describeExpiry(expiresIn(TOKEN_ACCOUNT, -2 * DAY))).toBeNull();
+  });
+
+  it("says Expired beside a state that is not about the expiry", () => {
+    const refused = {
+      ...expiresIn(TOKEN_ACCOUNT, -2 * DAY),
+      failure: { message: "401", failedAt: "2026-10-31T09:14:00.000Z" },
+    };
+
+    expect(decide(refused).kind).toBe("failed");
+    expect(describeExpiry(refused)).toBe("Expired 29 Oct");
   });
 });
 

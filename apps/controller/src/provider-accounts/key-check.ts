@@ -22,7 +22,7 @@ import {
 } from "@hercule/contract";
 import type { AccountKind } from "@hercule/plugin-host";
 import { findCredentialSecretName, type RegisteredProvider } from "../plugins";
-import { isHeaderSafe, readBoundedBody, readRefusalReason, sendKeyRequest } from "./key-request";
+import { isHeaderSafe, readBoundedBody, readRefusalMessage, sendKeyRequest } from "./key-request";
 
 /** How long the provider has to answer. A hung provider must not hold the dialog open. */
 const KEY_CHECK_TIMEOUT: Duration.Duration = Duration.seconds(10);
@@ -74,8 +74,7 @@ const make = Effect.gen(function* () {
             new Error(`the account kind ${kind.id} of ${provider.id} holds no key to check`),
           );
         }
-        const key = Redacted.value(apiKey);
-        if (!isHeaderSafe(key)) {
+        if (!isHeaderSafe(Redacted.value(apiKey))) {
           return yield* createValidationError(
             [
               {
@@ -91,18 +90,18 @@ const make = Effect.gen(function* () {
         const couldNotReach = createInvalidStateError(
           `Could not reach ${provider.displayName} to check the key. Try again.`,
         );
-        return yield* sendKeyRequest(client, keyCheck, key, timeout, (response) =>
+        return yield* sendKeyRequest(client, keyCheck, apiKey, timeout, (response) =>
           Effect.gen(function* () {
             if (response.status >= 200 && response.status < 300) return;
             if (response.status === 401 || response.status === 403) {
               const body = yield* readBoundedBody(response);
-              const reason = readRefusalReason(
+              const message = readRefusalMessage(
                 body,
                 response.status === 401 ? "Unauthorized" : "Forbidden",
               );
               return yield* createValidationError(
-                [{ path: ["credentials", keyField], message: reason }],
-                reason,
+                [{ path: ["credentials", keyField], message }],
+                message,
               );
             }
             return yield* createInvalidStateError(

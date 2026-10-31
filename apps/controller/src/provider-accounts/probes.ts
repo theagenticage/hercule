@@ -75,12 +75,15 @@ export interface ProbePair {
 }
 
 /**
- * What the controller knew when it sent a probe: the time, and which
- * credential the account had. The answer is judged against both.
+ * What the controller knew when it sent a probe: the time, which credential
+ * the account had, and whether the probe asked for usage. The answer is
+ * judged against all three.
  */
 export interface ProbeStamp {
   readonly sentAt: string;
   readonly credentialGeneration: number;
+  /** Whether the probe asked the runner for the account's usage. Usage in the answer to a probe that did not ask is not stored. */
+  readonly readUsage: boolean;
 }
 
 /**
@@ -177,15 +180,19 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Reads what to send with a probe of the account: the time and the
-     * account's credential generation. Read this before the credential is
+     * Reads what to send with a probe of the account: the time, the
+     * account's credential generation, and `readUsage`, whether the probe asks
+     * for usage. Read this before the credential is
      * decrypted for the probe, so a credential that changes in between only
      * makes the answer look older than it is, never newer. The times this
      * service hands out strictly increase: when the clock has not moved past
      * the last one, the stamp is that one plus a millisecond. Fails with
      * `NotFound` when the account does not exist.
      */
-    readProbeStamp: (providerAccountId: string): Effect.Effect<ProbeStamp, SqlError | NotFound> =>
+    readProbeStamp: (
+      providerAccountId: string,
+      readUsage: boolean,
+    ): Effect.Effect<ProbeStamp, SqlError | NotFound> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
         lastStampMillis = Math.max(now, lastStampMillis + 1);
@@ -194,7 +201,7 @@ const make = Effect.gen(function* () {
         if (Option.isNone(found)) {
           return yield* Effect.fail(createNotFoundError(NO_SUCH_PROVIDER_ACCOUNT));
         }
-        return { sentAt, credentialGeneration: found.value.credentialGeneration };
+        return { sentAt, credentialGeneration: found.value.credentialGeneration, readUsage };
       }),
 
     /**
@@ -252,10 +259,12 @@ const make = Effect.gen(function* () {
      * account is, so placement never uses that runner. The identity write and
      * the snapshot write are one transaction.
      *
-     * When the stored snapshot is `ok` and the result carries usage readings
-     * (`result.usage`), they are stored as read in the same transaction (see
-     * `AccountUsage.record`). A result that is not `ok` stores none: when it
-     * is a sign-in as someone else, the readings belong to that person.
+     * When the probe asked for usage (`stamp.readUsage`), the stored snapshot
+     * is `ok` and the result carries usage readings (`result.usage`), they are
+     * stored as read in the same transaction (see `AccountUsage.record`).
+     * Usage in the answer to a probe that did not ask for it is dropped, and
+     * so is the usage of a result that is not `ok`: when it is a sign-in as
+     * someone else, the readings belong to that person.
      *
      * Only the store passes the promotion gate, not the wait for the runner, so
      * a freeze never waits up to a probe's deadline for its answer. While a
@@ -304,7 +313,12 @@ const make = Effect.gen(function* () {
           }
           const judged = judgeIdentity(result, accountIdentity);
           yield* accounts.recordSnapshot(providerAccountId, harnessId, runnerId, judged, sentAt);
-          if (judged.auth.status === "ok" && judged.usage !== null && judged.usage.length > 0) {
+          if (
+            stamp.readUsage &&
+            judged.auth.status === "ok" &&
+            judged.usage !== null &&
+            judged.usage.length > 0
+          ) {
             yield* accountUsage.record(providerAccountId, judged.usage, "read");
           }
           yield* afterCommit(() => {

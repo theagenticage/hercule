@@ -22,9 +22,10 @@ import { ProviderAccountCard, ProviderMark } from "../../../../screens/settings/
 
 /**
  * Renders the card of the Provider Account `account` on the Providers page.
- * It reads the lists it needs to name the account, show its machines, its
- * usage and its state, so that a card draws again only when its own account
- * or one of those lists changes. The `provider` live topic reads the accounts
+ * It exists apart from `ProviderAccountCard`, which only draws, so that each
+ * card reads its own lists and a push redraws only the card whose account
+ * changed. It reads what it needs to name the account and to work out its
+ * machines, usage and state. The `provider` live topic reads the accounts
  * again when any account's usage moves, and the cache keeps the record of an
  * account that did not change as it was, so the cards of the others stay as
  * they are.

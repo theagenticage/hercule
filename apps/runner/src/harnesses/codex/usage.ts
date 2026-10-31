@@ -11,6 +11,7 @@ import type {
   RateLimitSnapshot,
   RateLimitWindow,
 } from "./types";
+import { clampPercent, convertEpochSecondsToTimestamp } from "../usage-values";
 
 /** The limit that covers ordinary Codex use. Codex also reports limits for single models, which are not read. */
 const CODEX_LIMIT_ID = "codex";
@@ -68,8 +69,10 @@ const isCodexLimit = (
  * - `hit` is true when `usedPercent` is 100 or more. The snapshot's
  *   `rateLimitReachedType` is not used: it does not say which window was
  *   reached, and its credit values describe credit, not a window.
- * - Credit is read when the account has credits that are not unlimited and
- *   the balance is a number.
+ * - Credit is read when the credits are not unlimited and the balance is a
+ *   number of zero or more. A balance of zero is a reading, whatever
+ *   `hasCredits` says, so a stored balance does not outlive the credit. A
+ *   missing or non-numeric balance gives no reading.
  */
 export const buildUsageReadings = (
   snapshot: RateLimitSnapshot,
@@ -85,6 +88,51 @@ export const buildUsageReadings = (
   return readings;
 };
 
+/**
+ * The length in minutes of the `primary` and the `secondary` window of the
+ * `codex` limit, as far as a session has seen them. `null` means not seen yet.
+ */
+export interface WindowDurations {
+  primary: number | null;
+  secondary: number | null;
+}
+
+/** Returns durations for a session that has seen no update yet. */
+export const createWindowDurations = (): WindowDurations => ({ primary: null, secondary: null });
+
+/**
+ * Returns the snapshot with each window's missing length filled in from
+ * `known`, and records the lengths the snapshot does carry in `known`.
+ *
+ * An `account/rateLimits/updated` notification is sparse: a rolling update can
+ * carry `usedPercent` without `windowDurationMins`, and the length is what
+ * says which window it is. A length that no earlier update gave stays
+ * missing, and the window is then left out of the readings.
+ */
+export const completeWindowDurations = (
+  snapshot: RateLimitSnapshot,
+  known: WindowDurations,
+): RateLimitSnapshot => {
+  const complete = (
+    window: RateLimitWindow | null | undefined,
+    which: keyof WindowDurations,
+  ): RateLimitWindow | null => {
+    if (window === null || window === undefined) return null;
+    const duration = window.windowDurationMins;
+    if (typeof duration === "number") {
+      known[which] = duration;
+      return window;
+    }
+    const remembered = known[which];
+    return remembered === null ? window : { ...window, windowDurationMins: remembered };
+  };
+  return {
+    ...snapshot,
+    primary: complete(snapshot.primary, "primary"),
+    secondary: complete(snapshot.secondary, "secondary"),
+  };
+};
+
 const buildWindowReading = (
   window: RateLimitWindow | null | undefined,
   takenAt: Timestamp,
@@ -95,22 +143,15 @@ const buildWindowReading = (
   // refuses a percentage that is not a number.
   if (name === undefined || typeof window.usedPercent !== "number") return undefined;
   if (!Number.isFinite(window.usedPercent)) return undefined;
-  const usedPercent = Math.min(100, Math.max(0, window.usedPercent));
+  const usedPercent = clampPercent(window.usedPercent);
   return {
     kind: "window",
     window: name,
     usedPercent,
-    resetsAt: readResetTime(window.resetsAt),
+    resetsAt: convertEpochSecondsToTimestamp(window.resetsAt),
     hit: usedPercent >= 100,
     takenAt,
   };
-};
-
-/** Converts Codex's reset time, in epoch seconds, to a timestamp. Returns `null` when there is none or it is not a valid time. */
-const readResetTime = (epochSeconds: number | null | undefined): Timestamp | null => {
-  if (typeof epochSeconds !== "number") return null;
-  const date = new Date(epochSeconds * 1000);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
 
 const buildCreditReading = (
@@ -118,7 +159,7 @@ const buildCreditReading = (
   takenAt: Timestamp,
 ): UsageReading | undefined => {
   if (credits === null || credits === undefined) return undefined;
-  if (!credits.hasCredits || credits.unlimited) return undefined;
+  if (credits.unlimited) return undefined;
   const balance = typeof credits.balance === "string" ? credits.balance.trim() : "";
   const remaining = balance === "" ? Number.NaN : Number(balance);
   if (!Number.isFinite(remaining) || remaining < 0) return undefined;

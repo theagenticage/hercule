@@ -7,7 +7,7 @@
  * an account with the buttons that fix them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describeAccountUsage, queryKeys } from "@hercule/client-core";
 import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
@@ -716,6 +716,69 @@ describe("Settings > Providers", () => {
       expect(calls.filter((call) => call.method === "PATCH").map((call) => call.body)).toEqual([
         { credentials: { apiKey: "zai-new-key" } },
       ]);
+    });
+
+    it("keeps the Replace key dialog open while the controller checks the key", async () => {
+      const refused: ProviderAccount = {
+        ...ZAI,
+        failure: { message: "401 Unauthorized", failedAt: "2026-10-31T09:14:00.000Z" },
+      };
+      let answer: () => void = () => undefined;
+      const { calls } = await openProviders({
+        accounts: [refused],
+        handlers: {
+          [`PATCH ${accountPath(ZAI)}`]: () =>
+            new Promise((resolve) => {
+              answer = () => resolve({ body: { ...ZAI } });
+            }),
+        },
+      });
+
+      await userEvent.click(within(cardOf("Z.ai")).getByRole("button", { name: "Replace key" }));
+      const dialog = await screen.findByRole("dialog", { name: "Replace the key of Z.ai" });
+      await userEvent.type(within(dialog).getByLabelText("API key"), "zai-new-key");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      // The button says what runs, with no spinner.
+      const checking = await within(dialog).findByRole("button", { name: "Checking the key…" });
+      expect(checking.querySelector(".spin")).toBeNull();
+      // Esc is cancelled, which stops the browser from closing the dialog, and a press on the scrim does nothing.
+      expect(fireEvent.keyDown(dialog, { key: "Escape" })).toBe(false);
+      fireEvent.pointerDown(dialog);
+      fireEvent.click(dialog);
+      expect(dialog.hasAttribute("open")).toBe(true);
+
+      answer();
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).toBeNull();
+      });
+      expect(calls.filter((call) => call.method === "PATCH")).toHaveLength(1);
+    });
+
+    it("lets Esc close the Replace key dialog again once the controller refused the key", async () => {
+      const refused: ProviderAccount = {
+        ...ZAI,
+        failure: { message: "401 Unauthorized", failedAt: "2026-10-31T09:14:00.000Z" },
+      };
+      await openProviders({
+        accounts: [refused],
+        handlers: {
+          [`PATCH ${accountPath(ZAI)}`]: {
+            status: 400,
+            body: buildErrorBody("validation", "The key was refused."),
+          },
+        },
+      });
+
+      await userEvent.click(within(cardOf("Z.ai")).getByRole("button", { name: "Replace key" }));
+      const dialog = await screen.findByRole("dialog", { name: "Replace the key of Z.ai" });
+      await userEvent.type(within(dialog).getByLabelText("API key"), "bad");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await within(dialog).findByText("The key was refused.");
+      expect(within(dialog).getByRole("button", { name: "Save" })).toBeTruthy();
+      expect(fireEvent.keyDown(dialog, { key: "Escape" })).toBe(true);
     });
 
     it("says how many days a token has left, and Make a new token runs the token flow on a machine", async () => {

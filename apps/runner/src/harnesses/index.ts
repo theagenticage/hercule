@@ -278,10 +278,9 @@ export interface HarnessAdapter {
   readonly binaryName: string;
   /**
    * Side-effect free: writes nothing outside `ctx.home`, and makes no API call
-   * except the usage read that `options.readUsage` asks for. Without
-   * `options` it reads no usage.
+   * except the usage read that `options.readUsage` asks for.
    */
-  readonly probe: (ctx: HarnessRunnerContext, options?: ProbeOptions) => Effect.Effect<ProbeResult>;
+  readonly probe: (ctx: HarnessRunnerContext, options: ProbeOptions) => Effect.Effect<ProbeResult>;
   /**
    * Takes an environment rather than a context, because an install is per machine, not per
    * account.

@@ -35,7 +35,7 @@ const signedInAs = (identity: string, planLabel?: string): ProbeResult => ({
 const SENT_AT = "2026-10-31T10:00:00.000Z";
 
 /** What the controller read when it sent the probes in these tests. */
-const STAMP = { sentAt: SENT_AT, credentialGeneration: 0 };
+const STAMP = { sentAt: SENT_AT, credentialGeneration: 0, readUsage: false };
 
 /** Returns the snapshot of a `stored` outcome, and fails the test for any other outcome. */
 const requireStored = (outcome: ProbeOutcome) => {
@@ -68,7 +68,7 @@ describe("recording a probe", () => {
           account.id,
           ALPHA_HARNESS_ID,
           signedInAs("old@example.com"),
-          { sentAt: "2026-10-31T09:59:59.000Z", credentialGeneration: 0 },
+          { sentAt: "2026-10-31T09:59:59.000Z", credentialGeneration: 0, readUsage: false },
         );
         const accounts = yield* providerAccountRepository;
         return {
@@ -218,7 +218,7 @@ describe("recording a probe", () => {
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
         // The old key's probe is sent.
-        const oldStamp = yield* probes.readProbeStamp(account.id);
+        const oldStamp = yield* probes.readProbeStamp(account.id, false);
         // The key is replaced, as `ProviderAccountService.update` does.
         yield* withTransaction(
           sql,
@@ -236,7 +236,7 @@ describe("recording a probe", () => {
           oldStamp,
         );
         const afterOld = yield* readAccount(account.id);
-        const newStamp = yield* probes.readProbeStamp(account.id);
+        const newStamp = yield* probes.readProbeStamp(account.id, false);
         const fresh = yield* probes.recordProbe(
           runner,
           account.id,
@@ -265,9 +265,9 @@ describe("recording a probe", () => {
         const probes = yield* ProviderAccountProbes;
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
-        const oldStamp = yield* probes.readProbeStamp(account.id);
+        const oldStamp = yield* probes.readProbeStamp(account.id, false);
         yield* probes.acceptDeviceSignIn(account.id, runner, ALPHA_HARNESS_ID);
-        const current = yield* probes.readProbeStamp(account.id);
+        const current = yield* probes.readProbeStamp(account.id, false);
         yield* probes.recordProbe(
           runner,
           account.id,
@@ -340,9 +340,9 @@ describe("probe stamps", () => {
         const account = yield* addAccount({ kind: MACHINE_KIND });
         yield* TestClock.setTime(Date.parse(SENT_AT));
         const stamps = [
-          yield* probes.readProbeStamp(account.id),
-          yield* probes.readProbeStamp(account.id),
-          yield* probes.readProbeStamp(account.id),
+          yield* probes.readProbeStamp(account.id, false),
+          yield* probes.readProbeStamp(account.id, false),
+          yield* probes.readProbeStamp(account.id, false),
         ];
         return stamps.map((stamp) => stamp.sentAt);
       }).pipe(Effect.provide(TestClock.layer())),
@@ -362,8 +362,8 @@ describe("probe stamps", () => {
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
         yield* TestClock.setTime(Date.parse(SENT_AT));
-        const first = yield* probes.readProbeStamp(account.id);
-        const second = yield* probes.readProbeStamp(account.id);
+        const first = yield* probes.readProbeStamp(account.id, false);
+        const second = yield* probes.readProbeStamp(account.id, false);
         const accounts = yield* providerAccountRepository;
         // The later probe answers first.
         yield* probes.recordProbe(runner, account.id, ALPHA_HARNESS_ID, SIGNED_IN, second);
@@ -402,14 +402,14 @@ describe("accepting a device sign-in", () => {
           account.id,
           ALPHA_HARNESS_ID,
           signedInAs("a@work.com"),
-          yield* probes.readProbeStamp(account.id),
+          yield* probes.readProbeStamp(account.id, false),
         );
         yield* probes.recordProbe(
           other,
           account.id,
           ALPHA_HARNESS_ID,
           signedInAs("a@work.com"),
-          yield* probes.readProbeStamp(account.id),
+          yield* probes.readProbeStamp(account.id, false),
         );
         const before = Option.getOrThrow(
           yield* accounts.readSnapshot(account.id, ALPHA_HARNESS_ID, signedIn),

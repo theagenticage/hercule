@@ -23,7 +23,7 @@ export { ProviderKeyCheck, ProviderKeyCheckLayer, ProviderKeyCheckTimeout } from
 export {
   ProviderUsageEndpoint,
   ProviderUsageEndpointLayer,
-  UsageReadTimeout,
+  ProviderUsageEndpointTimeout,
 } from "./usage-endpoint";
 export {
   ProviderAccountProbes,

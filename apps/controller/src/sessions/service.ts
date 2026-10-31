@@ -3196,8 +3196,11 @@ const make = Effect.gen(function* () {
      * Records the usage a running session's harness reported for the
      * session's Provider Account (spec 06 section 18). Drops the report, and
      * logs why, when the session is unknown, is held by another runner (a
-     * runner may report only on sessions placed on it), or its account's kind
-     * declares no `usage`, because then there is no gauge to fill.
+     * runner may report only on sessions placed on it), has exited, or its
+     * account's kind declares no `usage`, because then there is no gauge to
+     * fill. `AccountUsage.record` also drops it when the session's process
+     * started before the account's key or token was replaced, because that
+     * process still holds the old credential.
      */
     applyAccountUsageReported: (
       runnerId: string,
@@ -3210,6 +3213,11 @@ const make = Effect.gen(function* () {
             "Dropped a runner's usage report, because the session is unknown or not on that runner",
           ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId }));
         }
+        if (session.value.status === "exited") {
+          return yield* Effect.logDebug(
+            "Dropped a runner's usage report, because the session has exited",
+          ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId }));
+        }
         const { providerAccountId } = session.value;
         const account = yield* providerAccounts.one(providerAccountId);
         const kind = Option.isSome(account)
@@ -3220,7 +3228,9 @@ const make = Effect.gen(function* () {
             "Dropped a runner's usage report, because the account's kind declares no usage",
           ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId, providerAccountId }));
         }
-        yield* accountUsage.record(providerAccountId, report.readings, "session");
+        yield* accountUsage.record(providerAccountId, report.readings, "session", {
+          credentialSince: session.value.processStartedAt,
+        });
       }),
 
     /**

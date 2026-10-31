@@ -18,11 +18,11 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import type { ParseUsageBody } from "@hercule/plugin-host";
-import type { UsageReading } from "@hercule/protocol";
+import { UsageReading } from "@hercule/protocol";
 import {
   cleanRefusalMessage,
   readBoundedBody,
-  readRefusalReason,
+  readRefusalMessage,
   sendKeyRequest,
   type KeyRequest,
 } from "./key-request";
@@ -31,8 +31,8 @@ import {
 const USAGE_READ_TIMEOUT: Duration.Duration = Duration.seconds(10);
 
 /** Lets tests set a timeout short enough to wait for. */
-export const UsageReadTimeout = Context.Reference<Duration.Duration>(
-  "hercule/controller/provider-accounts/UsageReadTimeout",
+export const ProviderUsageEndpointTimeout = Context.Reference<Duration.Duration>(
+  "hercule/controller/provider-accounts/ProviderUsageEndpointTimeout",
   { defaultValue: (): Duration.Duration => USAGE_READ_TIMEOUT },
 );
 
@@ -41,35 +41,34 @@ export const UsageReadTimeout = Context.Reference<Duration.Duration>(
  *
  * - `readings`: the provider accepted the key and gave these readings, taken
  *   at the time its answer arrived. There may be none.
- * - `refused`: the provider rejected the key, with its own words. Either it
- *   answered 401, or its plugin read the answer as a rejection.
+ * - `refused`: the provider rejected the key, with its own words in
+ *   `message`. Either it answered 401, or its plugin read the answer as a
+ *   rejection.
  * - `unavailable`: the read told nothing about the key (no answer, any other
  *   status, a body the plugin could not read). `reason` is for the log.
  */
 export type UsageEndpointOutcome =
   | { readonly _tag: "readings"; readonly readings: ReadonlyArray<UsageReading> }
-  | { readonly _tag: "refused"; readonly reason: string }
+  | { readonly _tag: "refused"; readonly message: string }
   | { readonly _tag: "unavailable"; readonly reason: string };
-
-/** The `msg` field that Z.ai and other providers put in the body of a refusal: `{"msg":"..."}`. */
-const decodeMessageBody = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ msg: Schema.String })),
-);
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json));
 
 /**
- * Returns the reason a provider gave with a 401: the `error.message` or the
- * `msg` of its JSON body, cleaned, or `Unauthorized` when the body holds
- * neither.
+ * What a plugin's parser must return: the readings, or the provider's words
+ * when it read the answer as a refusal. The plugin is third-party code, so its
+ * result is checked and not trusted.
  */
-const readUnauthorizedReason = (body: string): string => {
-  const message = Option.match(decodeMessageBody(body), {
-    onNone: () => "",
-    onSome: (decoded) => cleanRefusalMessage(decoded.msg),
-  });
-  return readRefusalReason(body, message === "" ? "Unauthorized" : message);
-};
+const decodeParsedUsage = Schema.decodeUnknownOption(
+  Schema.Union([
+    Schema.Struct({ readings: Schema.Array(UsageReading) }),
+    Schema.Struct({ refused: Schema.String }),
+  ]),
+);
+
+/** Returns the text of a thrown value, cleaned for the log. */
+const describeThrown = (error: unknown): string =>
+  cleanRefusalMessage(error instanceof Error ? error.message : String(error));
 
 const make = Effect.gen(function* () {
   // Each read runs in a scope of its own, and closing the scope aborts a
@@ -84,9 +83,11 @@ const make = Effect.gen(function* () {
      * - A 2xx answer with a JSON body goes to `parse`, with the time the
      *   answer arrived. The outcome is its readings, or `refused` when it
      *   returns `{ refused }` (cleaned like any provider's words, because the
-     *   user reads them). When `parse` throws, the plugin is at fault and the
-     *   outcome is `unavailable`.
-     * - A 401 is `refused`, with the provider's own words or `Unauthorized`.
+     *   user reads them). When `parse` throws, or returns anything but one of
+     *   those two shapes or a reading that is not valid, the plugin is at
+     *   fault and the outcome is `unavailable`.
+     * - A 401 is `refused`, with the `error.message` of the provider's body or
+     *   `Unauthorized`.
      * - Anything else (403, 429, 5xx, a redirect, no answer within 10
      *   seconds, a 2xx body that is not JSON) is `unavailable`. A 403 or 429
      *   does not show that the key is wrong, so it is not a refusal.
@@ -97,11 +98,11 @@ const make = Effect.gen(function* () {
       apiKey: Redacted.Redacted<string>,
     ): Effect.Effect<UsageEndpointOutcome> =>
       Effect.gen(function* () {
-        const timeout = yield* UsageReadTimeout;
+        const timeout = yield* ProviderUsageEndpointTimeout;
         return yield* sendKeyRequest(
           client,
           request,
-          Redacted.value(apiKey),
+          apiKey,
           timeout,
           (response): Effect.Effect<UsageEndpointOutcome> =>
             Effect.gen(function* () {
@@ -109,7 +110,7 @@ const make = Effect.gen(function* () {
               if (status === 401) {
                 return {
                   _tag: "refused",
-                  reason: readUnauthorizedReason(yield* readBoundedBody(response)),
+                  message: readRefusalMessage(yield* readBoundedBody(response), "Unauthorized"),
                 };
               }
               if (status < 200 || status >= 300) {
@@ -122,14 +123,22 @@ const make = Effect.gen(function* () {
               const takenAt = new Date(yield* Clock.currentTimeMillis).toISOString();
               return yield* Effect.try({
                 try: () => parse(body.value, takenAt),
-                catch: (error) => (error instanceof Error ? error.message : String(error)),
+                catch: describeThrown,
               }).pipe(
                 Effect.map((parsed): UsageEndpointOutcome => {
-                  if ("refused" in parsed) {
-                    const reason = cleanRefusalMessage(parsed.refused);
-                    return { _tag: "refused", reason: reason === "" ? "Unauthorized" : reason };
+                  const checked = decodeParsedUsage(parsed);
+                  if (Option.isNone(checked)) {
+                    return {
+                      _tag: "unavailable",
+                      reason:
+                        "the plugin returned something that is neither readings nor a refusal, or a reading that is not valid",
+                    };
                   }
-                  return { _tag: "readings", readings: parsed.readings };
+                  if ("refused" in checked.value) {
+                    const message = cleanRefusalMessage(checked.value.refused);
+                    return { _tag: "refused", message: message === "" ? "Unauthorized" : message };
+                  }
+                  return { _tag: "readings", readings: checked.value.readings };
                 }),
                 Effect.catch((message) =>
                   Effect.succeed<UsageEndpointOutcome>({

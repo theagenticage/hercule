@@ -107,7 +107,13 @@ import {
   STANDARD_TIER,
   type AppServer,
 } from "./probe";
-import { buildUsageReadings, pickUpdatedSnapshot } from "./usage";
+import {
+  buildUsageReadings,
+  completeWindowDurations,
+  createWindowDurations,
+  pickUpdatedSnapshot,
+  type WindowDurations,
+} from "./usage";
 import {
   decideTextGenerationOutcome,
   buildTextGenerationThread,
@@ -261,6 +267,8 @@ interface Held {
    * answered must not open a second time.
    */
   readonly seenAsyncQuestionItems: Set<string>;
+  /** The window lengths the session's rate-limit updates have given so far, to complete sparse updates. */
+  readonly windowDurations: WindowDurations;
 }
 
 /**
@@ -1084,7 +1092,10 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   const reportUsage = (held: Held, params: AccountRateLimitsUpdatedNotification): void => {
     const snapshot = pickUpdatedSnapshot(params);
     if (snapshot === undefined) return;
-    const [first, ...rest] = buildUsageReadings(snapshot, now());
+    const [first, ...rest] = buildUsageReadings(
+      completeWindowDurations(snapshot, held.windowDurations),
+      now(),
+    );
     if (first === undefined) return;
     PubSub.publishUnsafe(publishedUsage, {
       sessionId: held.binding.sessionId,
@@ -1824,10 +1835,10 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
 
     // Every shipped harness's config schema is empty, so the Codex adapter
     // takes nothing from it and does not name the argument.
-    probe: (ctx: HarnessRunnerContext, options?: ProbeOptions): Effect.Effect<ProbeResult> =>
+    probe: (ctx: HarnessRunnerContext, options: ProbeOptions): Effect.Effect<ProbeResult> =>
       ctx.binary === undefined
         ? Effect.succeed(buildFailedProbe(null, `no ${CODEX_BINARY} on this machine`))
-        : probe(ctx, ctx.binary, options?.readUsage === true),
+        : probe(ctx, ctx.binary, options),
 
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
@@ -1885,6 +1896,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           modelArgument: ctx.modelArgument,
           asyncQuestions: new Map(),
           seenAsyncQuestionItems: new Set(),
+          windowDurations: createWindowDurations(),
           threads: makeCodexThreads({
             sessionId,
             rootThreadId: opened,

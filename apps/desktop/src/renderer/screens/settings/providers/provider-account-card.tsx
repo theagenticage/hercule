@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import type {
   AccountFix,
   AccountState,
-  AccountUsage,
+  AccountUsageGauge,
   ProviderAccountIdentityLine,
 } from "@hercule/client-core";
 import { FleetIcon } from "../../../icons/fleet";
@@ -75,14 +75,15 @@ export function ProviderAccountCard({
   readonly name: string;
   readonly identity: ProviderAccountIdentityLine;
   readonly machines: ReadonlyArray<MachinePip> | null;
-  readonly usage: AccountUsage | null;
+  readonly usage: AccountUsageGauge | null;
   readonly state: AccountState;
   readonly onOpen: () => void;
   readonly onFix: (fix: AccountFix) => void;
 }): JSX.Element {
   const fix = state.kind === "ok" ? null : state.fix;
+  const tone = state.kind === "ok" ? null : state.tone;
   return (
-    <div className={state.kind === "ok" ? "pa-card" : `pa-card is-${state.tone}`}>
+    <div className={tone === null ? "pa-card" : `pa-card is-${tone}`}>
       <button
         type="button"
         className={fix === null ? "pa-card-open" : "pa-card-open has-foot"}
@@ -107,13 +108,9 @@ export function ProviderAccountCard({
           usage !== null && <UsageGauge usage={usage} />
         )}
       </button>
-      {fix !== null && (
+      {fix !== null && tone !== null && (
         <div className="pa-card-foot">
-          <button
-            type="button"
-            className={`pa-card-fix is-${state.kind === "ok" ? "fail" : state.tone}`}
-            onClick={() => onFix(fix)}
-          >
+          <button type="button" className={`pa-card-fix is-${tone}`} onClick={() => onFix(fix)}>
             {fix.label}
           </button>
         </div>

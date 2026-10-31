@@ -10,9 +10,8 @@ import "./providers.css";
  * credential expires, then the `button` that replaces it, "Replace key" or
  * "Make a new token".
  *
- * `expiry` is such as "Expires 31 Oct 2027", or `null` when the credential
- * does not expire. A state that is about the expiry already says it, so the
- * line shows only beside another state or none.
+ * `expiry` is such as "Expires 31 Oct 2027", or `null` when there is nothing
+ * to add: the credential does not expire, or the `state` already says it.
  */
 export function SheetCredential({
   state,
@@ -23,7 +22,6 @@ export function SheetCredential({
   readonly expiry: string | null;
   readonly button: { readonly label: string; readonly onPress: () => void };
 }): JSX.Element {
-  const expiryIsTheState = state.kind === "expired" || state.kind === "expiring";
   return (
     <div className="pa-cred">
       {state.kind !== "ok" && <AccountStateLine state={state} />}
@@ -32,7 +30,7 @@ export function SheetCredential({
           {state.message}
         </p>
       )}
-      {expiry !== null && !expiryIsTheState && <p className="pa-cred-expiry">{expiry}</p>}
+      {expiry !== null && <p className="pa-cred-expiry">{expiry}</p>}
       <button type="button" className="btn btn--sm" onClick={button.onPress}>
         {button.label}
       </button>

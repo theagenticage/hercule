@@ -140,6 +140,12 @@ export interface StoredSession {
   readonly toolCalls: number;
   readonly createdAt: string;
   readonly startedAt: string | null;
+  /**
+   * When dispatch last started the session's process, which is when the
+   * process got its credentials. A resume sets it again. It is `null` for a
+   * session started before the column existed (migration 0099).
+   */
+  readonly processStartedAt: string | null;
   readonly exitedAt: string | null;
   /**
    * Why the session last exited, kept like `exitedAt` through a resume. It is
@@ -285,6 +291,7 @@ interface SessionRow {
   readonly tool_calls: number;
   readonly created_at: string;
   readonly started_at: string | null;
+  readonly process_started_at: string | null;
   readonly exited_at: string | null;
   readonly exit_reason: string | null;
   readonly last_activity_at: string;
@@ -310,7 +317,7 @@ const buildColumnList = (): string =>
   // Read to compute `unenforced`: the tool families this session's spec disallowed.
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
-  "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
+  "open_requests, usage, usage_process, tool_calls, created_at, started_at, process_started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, done_at, done_by, reopened_at, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
@@ -370,6 +377,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   toolCalls: row.tool_calls,
   createdAt: row.created_at,
   startedAt: row.started_at,
+  processStartedAt: row.process_started_at,
   exitedAt: row.exited_at,
   exitReason: row.exit_reason as SessionEndReason | null,
   lastActivityAt: row.last_activity_at,
@@ -1124,14 +1132,16 @@ const make = Effect.gen(function* () {
      * Moves the session to `starting` for dispatch, and stores the hash of the
      * token created for that start. It is one statement rather than a status
      * change plus a write, because the row may hold a token only while it is
-     * starting or running, and the two must never be out of step. Like
-     * `moved`, it never changes an exited session.
+     * starting or running, and the two must never be out of step. It also
+     * stores `at` as the time the process started and got its credentials.
+     * Like `moved`, it never changes an exited session.
      */
     started: (sessionId: string, tokenHash: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE sessions SET
           status = 'starting',
           last_activity_at = ${at},
+          process_started_at = ${at},
           token_hash = ${tokenHash}
         WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
       `),

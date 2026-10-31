@@ -118,6 +118,7 @@ describe("parseQuotaBody", () => {
       parseQuotaBody(
         answerWith([
           { ...FIVE_HOUR, number: 1 },
+          { ...WEEKLY, number: 2 },
           { type: "TOKENS_LIMIT", unit: 5, number: 1, percentage: 5 },
           { type: "CREDIT_LIMIT", percentage: 50 },
         ]),

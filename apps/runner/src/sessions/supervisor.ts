@@ -116,6 +116,13 @@ interface RunningStep {
 const SETTLED_STEP_REFUSAL =
   "The step ended before its prompt was delivered, so the prompt was not run.";
 
+/**
+ * How long a usage report that repeats the last one is held back, in
+ * milliseconds. The controller counts a reading older than five minutes as
+ * stale, so an unchanged reading is sent again at that age.
+ */
+const USAGE_REPORT_REFRESH_MS = 5 * 60 * 1000;
+
 /** Builds the error for a start that the runner refuses because it is shutting down. */
 const buildShuttingDown = (): AdapterFailed =>
   buildAdapterFailed("The runner is shutting down, so the session was not started.");
@@ -178,6 +185,12 @@ interface Live {
   readonly inactivityMs: number;
   /** Clock time of the last event of this session while a turn was open. */
   lastEventAt: number;
+  /**
+   * The last usage report sent for this session: its readings without their
+   * `takenAt`, as text, and the clock time it was sent. Undefined until one
+   * is sent. Lets the supervisor skip a report that repeats the last one.
+   */
+  lastUsageReport: { readonly readings: string; readonly sentAt: number } | undefined;
   /**
    * The fiber that stops the session once `inactivityMs` has passed since
    * `lastEventAt`. Undefined while the session is not watched.
@@ -1008,18 +1021,38 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
    * the session's events and outside their numbering. Drops the report when no
    * connection is attached, or when this runner does not host the session: the
    * report is best effort, and the next one replaces it.
+   *
+   * Also drops a report whose readings equal the last one sent for the
+   * session, ignoring `takenAt`, because harnesses report after every turn
+   * whether or not anything changed. The same readings are sent again once the
+   * last report is `USAGE_REPORT_REFRESH` old: the controller counts a reading
+   * older than that as stale.
    */
   const forwardUsageReport = (report: SessionUsageReport): Effect.Effect<void> =>
-    Effect.suspend(() => {
+    Effect.gen(function* () {
       const connection = attached;
-      if (connection === undefined || !live.has(report.sessionId)) return Effect.void;
-      return Effect.ignoreCause(
-        connection.send({
+      const held = live.get(report.sessionId);
+      if (connection === undefined || held === undefined) return;
+      const readings = JSON.stringify(report.readings, (key: string, value: unknown): unknown =>
+        key === "takenAt" ? undefined : value,
+      );
+      const sentAt = yield* Clock.currentTimeMillis;
+      const last = held.lastUsageReport;
+      if (last?.readings === readings && sentAt - last.sentAt < USAGE_REPORT_REFRESH_MS) return;
+      yield* connection
+        .send({
           _tag: "accountUsageReported",
           sessionId: report.sessionId,
           readings: report.readings,
-        }),
-      );
+        })
+        .pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              held.lastUsageReport = { readings, sentAt };
+            }),
+          ),
+          Effect.ignoreCause,
+        );
     });
 
   /**
@@ -1567,6 +1600,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
           // Not used until the session is watched: `sendSequenced` sets it
           // together with `inactivity`, on the event that starts the watch.
           lastEventAt: 0,
+          lastUsageReport: undefined,
           inactivity: undefined,
           openTurns: new Set(),
           parkedRequests: new Map(),

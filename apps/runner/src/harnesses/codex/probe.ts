@@ -4,6 +4,7 @@
  * installs Codex. A probe starts its own app-server and kills it afterwards,
  * so nothing here touches a thread.
  */
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -17,9 +18,9 @@ import {
   type ProbeResult,
   type UsageReading,
 } from "@hercule/protocol";
-import type { InstallOutcome, HarnessRunnerContext } from "../index";
+import type { InstallOutcome, HarnessRunnerContext, ProbeOptions } from "../index";
 import { makeInstall } from "../install";
-import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
+import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "../probe";
 import type { Run } from "../process";
 import { now } from "../../report";
 import { truncateFact } from "../text";
@@ -75,19 +76,12 @@ export const readAccount = (host: AppServer): Effect.Effect<GetAccountResponse, 
   Effect.map(host.rpc.request("account/read", {}), (answer) => answer as GetAccountResponse);
 
 /**
- * How long a probe waits for `account/rateLimits/read`. It is shorter than
- * the probe's own deadline, so a slow rate-limit read costs the probe its
- * usage and nothing else.
- */
-export const USAGE_READ_DEADLINE = Duration.seconds(5);
-
-/**
  * Reads the account's rate limits and returns them as usage readings. Returns
- * `null` when the read fails or takes longer than `USAGE_READ_DEADLINE`, or
- * when the reply has no `codex` limit, and logs why. A failed read never fails
- * the probe, so this never fails. Only valid for a ChatGPT sign-in: the
- * app-server refuses the call for an API key. `excludeResetCreditDetails`
- * skips a second lookup the readings do not use.
+ * `null` when the read fails or the reply has no `codex` limit, and logs why.
+ * A failed read never fails the probe, so this never fails. Only valid for a
+ * ChatGPT sign-in: the app-server refuses the call for an API key.
+ * `excludeResetCreditDetails` skips a second lookup the readings do not use.
+ * The caller bounds the time it takes (`readUsageWithinProbeBudget`).
  */
 export const readUsage = (host: AppServer): Effect.Effect<ReadonlyArray<UsageReading> | null> =>
   host.rpc
@@ -99,8 +93,6 @@ export const readUsage = (host: AppServer): Effect.Effect<ReadonlyArray<UsageRea
         const snapshot = pickCodexSnapshot(answer as GetAccountRateLimitsResponse);
         return snapshot === undefined ? null : buildUsageReadings(snapshot, now());
       }),
-      Effect.timeoutOption(USAGE_READ_DEADLINE),
-      Effect.map(Option.getOrNull),
       Effect.catch((error) =>
         Effect.as(
           Effect.logWarning(`Did not read the Codex rate limits: ${describeRpcError(host, error)}`),
@@ -243,60 +235,64 @@ export const makeProbe =
   (
     openHost: (ctx: HarnessRunnerContext, binary: string) => Effect.Effect<AppServer, AdapterError>,
   ) =>
-  (ctx: HarnessRunnerContext, binary: string, readsUsage: boolean): Effect.Effect<ProbeResult> => {
-    // A probe starts its own process and kills it when done. Sharing a
-    // session's connection would keep an app-server alive for a Fleet page
-    // nobody is looking at any more.
-    const gather = Effect.acquireUseRelease(
-      openHost(ctx, binary),
-      (host) =>
-        Effect.matchEffect(initializeAppServer(host), {
-          onFailure: (error) =>
-            Effect.succeed(buildFailedProbe(null, describeRpcError(host, error))),
-          onSuccess: (initialized) =>
-            Effect.match(
-              Effect.gen(function* () {
-                const account = yield* readAccount(host);
-                const hasApiKey = ctx.credential !== undefined;
-                // Only a ChatGPT sign-in has rate limits to read.
-                const canReadUsage =
-                  readsUsage && !hasApiKey && account.account?.type === "chatgpt";
-                const [models, usage] = yield* Effect.all(
-                  [
-                    host.rpc.request("model/list", {}),
-                    canReadUsage ? readUsage(host) : Effect.succeed(null),
-                  ],
-                  { concurrency: "unbounded" },
-                );
-                return { account, hasApiKey, models: models as ModelListResponse, usage };
-              }),
-              {
-                onFailure: (error) =>
-                  buildFailedProbe(
-                    parseVersion(initialized.userAgent),
-                    describeRpcError(host, error),
-                  ),
-                onSuccess: ({ account, hasApiKey, models, usage }) => ({
-                  harnessVersion: parseVersion(initialized.userAgent),
-                  auth: buildAuth(account, hasApiKey),
-                  models: buildCatalog(models.data),
-                  usage,
+  (ctx: HarnessRunnerContext, binary: string, options: ProbeOptions): Effect.Effect<ProbeResult> =>
+    Effect.gen(function* () {
+      const startedAt = yield* Clock.currentTimeMillis;
+      // A probe starts its own process and kills it when done. Sharing a
+      // session's connection would keep an app-server alive for a Fleet page
+      // nobody is looking at any more.
+      const gather = Effect.acquireUseRelease(
+        openHost(ctx, binary),
+        (host) =>
+          Effect.matchEffect(initializeAppServer(host), {
+            onFailure: (error) =>
+              Effect.succeed(buildFailedProbe(null, describeRpcError(host, error))),
+            onSuccess: (initialized) =>
+              Effect.match(
+                Effect.gen(function* () {
+                  const account = yield* readAccount(host);
+                  const hasApiKey = ctx.credential !== undefined;
+                  // Only a ChatGPT sign-in has rate limits to read.
+                  const canReadUsage =
+                    options.readUsage && !hasApiKey && account.account?.type === "chatgpt";
+                  const [models, usage] = yield* Effect.all(
+                    [
+                      host.rpc.request("model/list", {}),
+                      canReadUsage
+                        ? readUsageWithinProbeBudget(startedAt, readUsage(host))
+                        : Effect.succeed(null),
+                    ],
+                    { concurrency: "unbounded" },
+                  );
+                  return { account, hasApiKey, models: models as ModelListResponse, usage };
                 }),
-              },
-            ),
-        }),
-      (host) => Effect.sync(() => host.kill()),
-    ).pipe(Effect.catch((error) => Effect.succeed(buildFailedProbe(null, error.message))));
-    return Effect.map(
-      Effect.timeoutOption(gather, PROBE_DEADLINE),
-      Option.getOrElse(() =>
-        buildFailedProbe(
-          null,
-          `the app-server did not reply within ${Duration.format(PROBE_DEADLINE)}`,
+                {
+                  onFailure: (error) =>
+                    buildFailedProbe(
+                      parseVersion(initialized.userAgent),
+                      describeRpcError(host, error),
+                    ),
+                  onSuccess: ({ account, hasApiKey, models, usage }) => ({
+                    harnessVersion: parseVersion(initialized.userAgent),
+                    auth: buildAuth(account, hasApiKey),
+                    models: buildCatalog(models.data),
+                    usage,
+                  }),
+                },
+              ),
+          }),
+        (host) => Effect.sync(() => host.kill()),
+      ).pipe(Effect.catch((error) => Effect.succeed(buildFailedProbe(null, error.message))));
+      return yield* Effect.map(
+        Effect.timeoutOption(gather, PROBE_DEADLINE),
+        Option.getOrElse(() =>
+          buildFailedProbe(
+            null,
+            `the app-server did not reply within ${Duration.format(PROBE_DEADLINE)}`,
+          ),
         ),
-      ),
-    );
-  };
+      );
+    });
 
 /**
  * Builds the Codex installer. The script URL is pinned to the release tag, so

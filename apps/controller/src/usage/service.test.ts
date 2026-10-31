@@ -3,7 +3,7 @@
  * they were taken, and an active read is claimed at most every 15 minutes.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { TestClock } from "effect/testing";
 import type { UsageReading } from "@hercule/protocol";
@@ -36,8 +36,9 @@ const credit = (remaining: number, takenAt: string): UsageReading => ({
   takenAt,
 });
 
-/** Runs an effect with the controller's clock held at `NOW` and returns it with the announcements. */
+/** Runs an effect with the controller's clock held at `NOW` and returns it with the announcements and the log lines. */
 const setup = () => {
+  const logged: Array<{ readonly level: string; readonly message: string }> = [];
   const recorder = buildAnnouncementRecorder();
   const layer = AccountUsageLayer.pipe(
     Layer.provideMerge(recorder.listener),
@@ -48,9 +49,19 @@ const setup = () => {
       Effect.gen(function* () {
         yield* TestClock.setTime(Date.parse(NOW));
         return yield* effect;
-      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+      }).pipe(
+        Effect.provide(layer),
+        Effect.provide(
+          Logger.layer([
+            Logger.make<unknown, void>(({ logLevel, message }) => {
+              logged.push({ level: logLevel, message: String(message) });
+            }),
+          ]),
+        ),
+        Effect.provide(TestClock.layer()),
+      ),
     );
-  return { run, announced: recorder.announced };
+  return { run, announced: recorder.announced, logged };
 };
 
 /** Inserts a Provider Account row, which the usage tables reference, and returns its id. */
@@ -99,20 +110,97 @@ describe("recording readings", () => {
     expect(usage.final).toMatchObject([{ usedPercent: 60, source: "session" }]);
   });
 
-  it("stores a reading dated in the future as taken now, so a later real reading replaces it", async () => {
-    const [afterFuture, afterReal] = await run(
+  it("keeps a reading's own time, so a slightly early clock cannot outrank a later real reading", async () => {
+    const [afterEarly, afterReal] = await run(
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
         const id = yield* addAccount;
-        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(60))], "session");
-        const afterFuture = yield* accountUsage.read(id);
-        yield* TestClock.adjust(60_000);
-        yield* accountUsage.record(id, [fiveHour(45, minutesFromNow(1))], "read");
-        return [afterFuture, yield* accountUsage.read(id)] as const;
+        // Taken 3 minutes ahead of the controller's clock: within the allowed difference.
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(3))], "session");
+        const afterEarly = yield* accountUsage.read(id);
+        yield* TestClock.adjust(5 * 60_000);
+        yield* accountUsage.record(id, [fiveHour(45, minutesFromNow(5))], "read");
+        return [afterEarly, yield* accountUsage.read(id)] as const;
       }),
     );
-    expect(afterFuture).toMatchObject([{ usedPercent: 40, takenAt: NOW }]);
-    expect(afterReal).toMatchObject([{ usedPercent: 45, takenAt: minutesFromNow(1) }]);
+    expect(afterEarly).toMatchObject([{ usedPercent: 40, takenAt: minutesFromNow(3) }]);
+    expect(afterReal).toMatchObject([{ usedPercent: 45, takenAt: minutesFromNow(5) }]);
+  });
+
+  it("never lets an older reading replace a newer one, also when both are dated after now", async () => {
+    const stored = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        // At 12:00, a reading taken at 12:04 (the runner's clock is 4 minutes ahead).
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(4))], "session");
+        // At 12:01, a reading taken at 12:03 is older than the stored one.
+        yield* TestClock.adjust(60_000);
+        yield* accountUsage.record(id, [fiveHour(30, minutesFromNow(3))], "session");
+        return yield* accountUsage.read(id);
+      }),
+    );
+    expect(stored).toMatchObject([{ usedPercent: 40, takenAt: minutesFromNow(4) }]);
+  });
+
+  it("drops readings dated more than 5 minutes ahead and logs one warning that names the account", async () => {
+    const { run, logged } = setup();
+    const [id, stored] = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-1))], "read");
+        const changed = yield* accountUsage.record(
+          id,
+          [fiveHour(50, minutesFromNow(20)), weekly(60, minutesFromNow(30)), credit(1, NOW)],
+          "session",
+        );
+        return [id, { changed, readings: yield* accountUsage.read(id) }] as const;
+      }),
+    );
+    expect(stored.changed).toBe(true);
+    expect(stored.readings).toMatchObject([
+      { kind: "window", window: "five-hour", usedPercent: 40 },
+      { kind: "credit", remaining: 1 },
+    ]);
+    const warnings = logged.filter((line) => line.level === "Warn");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toContain(id);
+    expect(warnings[0]!.message).toContain("30 minutes ahead");
+  });
+
+  it("does not let a reading from the future raise the time of the newest session report", async () => {
+    const claim = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(4))], "session");
+        yield* TestClock.adjust(15 * 60_000);
+        return yield* accountUsage.claimRead(id);
+      }),
+    );
+    expect(claim).toBe(true);
+  });
+
+  it("stores only the newest of several readings of one window in a report", async () => {
+    const [changed, stored] = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        const changed = yield* accountUsage.record(
+          id,
+          [
+            fiveHour(10, minutesFromNow(-3)),
+            fiveHour(30, minutesFromNow(-1)),
+            fiveHour(20, minutesFromNow(-2)),
+          ],
+          "session",
+        );
+        return [changed, yield* accountUsage.read(id)] as const;
+      }),
+    );
+    expect(changed).toBe(true);
+    expect(stored).toMatchObject([{ usedPercent: 30, takenAt: minutesFromNow(-1) }]);
   });
 
   it("keeps the stored reading when a reading is taken at the same time", async () => {
@@ -181,7 +269,7 @@ describe("recording readings", () => {
     expect(all.all.has(all.none)).toBe(false);
   });
 
-  it("announces the account after it commits only when a reading changed", async () => {
+  it("announces the account after it commits only when a reading was stored and changed", async () => {
     const { run, announced } = setup();
     const id = await run(
       Effect.gen(function* () {
@@ -193,6 +281,64 @@ describe("recording readings", () => {
       }),
     );
     expect(announced).toEqual([{ _tag: "record", topic: "provider", id, kind: "updated" }]);
+  });
+
+  it("stores a newer reading of the same value without announcing it", async () => {
+    const { run, announced } = setup();
+    let before = 0;
+    const stored = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
+        before = announced.length;
+        yield* TestClock.adjust(60_000);
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(1))], "session");
+        return yield* accountUsage.read(id);
+      }),
+    );
+    expect(announced.slice(before)).toEqual([]);
+    expect(stored).toMatchObject([
+      { usedPercent: 40, takenAt: minutesFromNow(1), source: "session" },
+    ]);
+  });
+
+  it("announces a newer reading whose value changed", async () => {
+    const { run, announced } = setup();
+    let before = 0;
+    const id = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
+        before = announced.length;
+        yield* TestClock.adjust(60_000);
+        yield* accountUsage.record(id, [fiveHour(41, minutesFromNow(1))], "session");
+        return id;
+      }),
+    );
+    expect(announced.slice(before)).toEqual([
+      { _tag: "record", topic: "provider", id, kind: "updated" },
+    ]);
+  });
+
+  it("announces a reading of the same value when the stored one is more than 5 minutes older", async () => {
+    const { run, announced } = setup();
+    let before = 0;
+    const id = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], "read");
+        before = announced.length;
+        yield* TestClock.adjust(6 * 60_000);
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(6))], "session");
+        return id;
+      }),
+    );
+    expect(announced.slice(before)).toEqual([
+      { _tag: "record", topic: "provider", id, kind: "updated" },
+    ]);
   });
 
   it("ignores readings for an account that no longer exists", async () => {
@@ -252,6 +398,109 @@ describe("clearing readings", () => {
     expect(result.cleared).toEqual([]);
     expect(result.untouched).toHaveLength(1);
     expect(result.claimedAgain).toBe(false);
+  });
+});
+
+describe("a session report after the credential was replaced", () => {
+  const { run } = setup();
+
+  it("is dropped when the session's process started before the replacement, and kept when it started after", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        const oldProcess = minutesFromNow(-30);
+        yield* accountUsage.clear(id);
+        yield* TestClock.adjust(60_000);
+        const fromOld = yield* accountUsage.record(
+          id,
+          [fiveHour(70, minutesFromNow(1))],
+          "session",
+          {
+            credentialSince: oldProcess,
+          },
+        );
+        const afterOld = yield* accountUsage.read(id);
+        const fromNew = yield* accountUsage.record(
+          id,
+          [fiveHour(10, minutesFromNow(1))],
+          "session",
+          {
+            credentialSince: minutesFromNow(1),
+          },
+        );
+        return { fromOld, afterOld, fromNew, afterNew: yield* accountUsage.read(id) };
+      }),
+    );
+    expect(outcome.fromOld).toBe(false);
+    expect(outcome.afterOld).toEqual([]);
+    expect(outcome.fromNew).toBe(true);
+    expect(outcome.afterNew).toMatchObject([{ usedPercent: 10, source: "session" }]);
+  });
+
+  it("is dropped when the process start is unknown, but only for an account whose credential was replaced", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const replaced = yield* addAccount;
+        const untouched = yield* addAccount;
+        yield* accountUsage.clear(replaced);
+        yield* TestClock.adjust(60_000);
+        yield* accountUsage.record(replaced, [fiveHour(70, minutesFromNow(1))], "session", {
+          credentialSince: null,
+        });
+        yield* accountUsage.record(untouched, [fiveHour(20, minutesFromNow(1))], "session", {
+          credentialSince: null,
+        });
+        return {
+          replaced: yield* accountUsage.read(replaced),
+          untouched: yield* accountUsage.read(untouched),
+        };
+      }),
+    );
+    expect(outcome.replaced).toEqual([]);
+    expect(outcome.untouched).toHaveLength(1);
+  });
+
+  it("does not stop an active read from storing its readings", async () => {
+    const stored = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.clear(id);
+        yield* TestClock.adjust(60_000);
+        yield* accountUsage.record(id, [fiveHour(70, minutesFromNow(1))], "read");
+        return yield* accountUsage.read(id);
+      }),
+    );
+    expect(stored).toHaveLength(1);
+  });
+});
+
+describe("listing the accounts that are due for an active read", () => {
+  const { run } = setup();
+
+  it("lists the accounts a claim would succeed for, in the order given, and claims nothing", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const fresh = yield* addAccount;
+        const claimed = yield* addAccount;
+        const reported = yield* addAccount;
+        yield* accountUsage.claimRead(claimed);
+        yield* accountUsage.record(reported, [fiveHour(40, minutesFromNow(-5))], "session");
+        const due = yield* accountUsage.listDueAccounts([reported, claimed, fresh]);
+        const dueAgain = yield* accountUsage.listDueAccounts([fresh]);
+        const claim = yield* accountUsage.claimRead(fresh);
+        yield* TestClock.adjust(15 * 60_000);
+        const later = yield* accountUsage.listDueAccounts([reported, claimed, fresh]);
+        return { due, dueAgain, claim, later, ids: { fresh, claimed, reported } };
+      }),
+    );
+    expect(outcome.due).toEqual([outcome.ids.fresh]);
+    expect(outcome.dueAgain).toEqual([outcome.ids.fresh]);
+    expect(outcome.claim).toBe(true);
+    expect(outcome.later).toEqual([outcome.ids.reported, outcome.ids.claimed, outcome.ids.fresh]);
   });
 });
 

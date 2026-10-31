@@ -125,13 +125,14 @@ describe("migrations", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* runMigrations();
-        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (99, 'from-the-future')`;
+        const future = binaryVersion + 1;
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${future}, 'from-the-future')`;
         return yield* migrate({ backupsDir, databaseExisted: true });
       }),
     );
     expect(Exit.isFailure(exit)).toBe(true);
     const message = Exit.isFailure(exit) ? String(exit.cause) : "";
-    expect(message).toContain("99");
+    expect(message).toContain(String(binaryVersion + 1));
     expect(message).toContain(`version ${binaryVersion}`);
   });
 

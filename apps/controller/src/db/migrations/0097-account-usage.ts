@@ -12,9 +12,12 @@
  *   instants.
  * - `account_usage_reads` holds, per account, what limits how often the
  *   controller reads usage actively: when the last active read was claimed,
- *   and the newest time at which a running session reported usage. It is kept
- *   apart from the readings so that replacing a key, which deletes the
- *   readings, does not reset the 15-minute limit.
+ *   and the newest time at which a running session reported usage. It also
+ *   holds when the readings were last cleared, because a key or token was
+ *   replaced: a report from a session whose process started before then used
+ *   the old credential and is dropped. It is kept apart from the readings so
+ *   that replacing a key, which deletes the readings, does not reset the
+ *   15-minute limit.
  *
  * Both tables are new and empty, so the migration rewrites no row.
  */
@@ -38,7 +41,8 @@ export default Effect.gen(function* () {
     CREATE TABLE account_usage_reads (
       provider_account_id BLOB PRIMARY KEY NOT NULL REFERENCES provider_accounts (id) ON DELETE CASCADE,
       read_started_at TEXT,
-      reported_at TEXT
+      reported_at TEXT,
+      cleared_at TEXT
     )
   `;
 });

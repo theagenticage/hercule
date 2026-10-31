@@ -19,6 +19,7 @@ import type * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClient from "effect/http/HttpClient";
 import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -62,11 +63,11 @@ export const cleanRefusalMessage = (message: string): string =>
     .slice(0, MAX_REFUSAL_LENGTH);
 
 /**
- * Returns the reason a provider gave for refusing a key: the `error.message`
+ * Returns the words a provider gave for refusing a key: the `error.message`
  * of its JSON body, cleaned by `cleanRefusalMessage`. Returns `fallback` when
  * the body holds no such message.
  */
-export const readRefusalReason = (body: string, fallback: string): string => {
+export const readRefusalMessage = (body: string, fallback: string): string => {
   const message = Option.match(decodeRefusalBody(body), {
     onNone: () => "",
     onSome: (decoded) => cleanRefusalMessage(decoded.error.message),
@@ -100,15 +101,17 @@ export const isHeaderSafe = (apiKey: string): boolean => !/[^!-~]/.test(apiKey);
 /** Returns the headers with `{apiKey}` in each value replaced by the key. */
 const substituteApiKey = (
   headers: Readonly<Record<string, string>>,
-  apiKey: string,
-): Record<string, string> =>
-  Object.fromEntries(
+  apiKey: Redacted.Redacted<string>,
+): Record<string, string> => {
+  const key = Redacted.value(apiKey);
+  return Object.fromEntries(
     Object.entries(headers).map(([name, value]) => [
       name,
       // A function, so a `$` in the key is not read as a replacement pattern.
-      value.replaceAll(API_KEY_PLACEHOLDER, () => apiKey),
+      value.replaceAll(API_KEY_PLACEHOLDER, () => key),
     ]),
   );
+};
 
 /**
  * Sends the GET request with the key in its headers, and runs `handle` on the
@@ -126,7 +129,7 @@ const substituteApiKey = (
 export const sendKeyRequest = <A, E>(
   client: HttpClient.HttpClient.With<HttpClientError.HttpClientError, Scope.Scope>,
   request: KeyRequest,
-  apiKey: string,
+  apiKey: Redacted.Redacted<string>,
   timeout: Duration.Duration,
   handle: (response: HttpClientResponse.HttpClientResponse) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E | KeyRequestUnreachable> =>

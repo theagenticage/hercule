@@ -11,6 +11,7 @@ import { mkdtempSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -115,7 +116,7 @@ import {
   type ClaudeUsageAnswer,
 } from "./claude-code-usage";
 import { makeInstall } from "./install";
-import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "./probe";
 import type { LoginCommand } from "./login";
 import { SETUP_TOKEN_FOLDER_PREFIX } from "./setup-token-folder";
 import { runProcess, type Run } from "./process";
@@ -1617,15 +1618,13 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
     });
 
   /**
-   * Reads the account's usage on a probe's query. Returns `null` when the read
-   * fails or takes longer than `CONTROL_DEADLINE`, and logs why: the probe's
-   * auth and models are worth more than the usage and must survive its failure.
+   * Reads the account's usage on a probe's query. Returns `null` when the
+   * account has no plan limits or the read fails, and logs why: the probe's
+   * auth and models are worth more than the usage and must survive its
+   * failure. The caller bounds the time it takes (`readUsageWithinProbeBudget`).
    */
-  const readUsageOrNull = (
-    session: ClaudeSession,
-  ): Effect.Effect<ReadonlyArray<UsageReading> | null> =>
+  const readUsage = (session: ClaudeSession): Effect.Effect<ReadonlyArray<UsageReading> | null> =>
     Effect.tryPromise({ try: () => session.readUsage(), catch: describeErrorAsFact }).pipe(
-      Effect.timeout(CONTROL_DEADLINE),
       Effect.map((answer) => buildUsageAnswerReadings(answer, now())),
       Effect.catch((error) =>
         Effect.as(
@@ -1638,7 +1637,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
   const queryHarness = (
     ctx: HarnessRunnerContext,
     binary: string,
-    readUsage: boolean,
+    options: ProbeOptions,
+    probeStartedAt: number,
   ): Effect.Effect<
     {
       account: Account;
@@ -1659,7 +1659,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
             try: () => session.supportedModels(),
             catch: describeErrorAsFact,
           });
-          const usage = readUsage ? yield* readUsageOrNull(session) : null;
+          const usage = options.readUsage
+            ? yield* readUsageWithinProbeBudget(probeStartedAt, readUsage(session))
+            : null;
           return {
             account: account as Account,
             models: models as ReadonlyArray<Model>,
@@ -1945,14 +1947,15 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
 
     // Every shipped harness's config schema is empty, so the Claude adapter
     // does not read the config and leaves out that parameter.
-    probe: (ctx: HarnessRunnerContext, options?: ProbeOptions): Effect.Effect<ProbeResult> => {
+    probe: (ctx: HarnessRunnerContext, options: ProbeOptions): Effect.Effect<ProbeResult> => {
       const binary = ctx.binary;
       if (binary === undefined) {
         return Effect.succeed(buildFailedProbe(null, `no ${CLAUDE_BINARY} on this machine`));
       }
       const gather = Effect.gen(function* () {
+        const startedAt = yield* Clock.currentTimeMillis;
         const harnessVersion = yield* readVersion(ctx, binary);
-        return yield* Effect.match(queryHarness(ctx, binary, options?.readUsage === true), {
+        return yield* Effect.match(queryHarness(ctx, binary, options, startedAt), {
           onFailure: (message) => buildFailedProbe(harnessVersion, message),
           onSuccess: ({ account, models, usage }) => ({
             harnessVersion,

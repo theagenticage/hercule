@@ -5,7 +5,7 @@
  *
  * This catches migrations that are correct on an empty database but fail on
  * real data. The fixture is one representative conversation of several owner
- * turns, the three Provider Accounts the edge boot seeds, one session with a few persisted
+ * turns, three Provider Accounts (one per vendor), one session with a few persisted
  * turns and the audit entry of its creation, the timezone first-run setup
  * persisted, a project name and a repository remote, two user settings that
  * migration 60 deletes, the shipped permission profiles, which migration 65
@@ -41,11 +41,14 @@
  * that one reports fresh facts as soon as it reconnects.
  *
  * The edge binary already ran migration 95, so its database holds Provider
- * Accounts (spec 04 "Provider account rows"). The edge boot seeds one account
- * per vendor (Anthropic, OpenAI and Z.ai) and has no way to add another, so
- * the fixture labels the Anthropic account `work`, gives it the person the
- * stand-in `claude` also reports, and stores a real encrypted Z.ai key on the
- * Z.ai account through `provider-account update`. Besides the session of the
+ * Accounts (spec 04 "Provider account rows"). The edge boot seeds none, so the
+ * fixture creates one per vendor (Anthropic, OpenAI and Z.ai) and labels the
+ * Anthropic account `work` and gives it the person the stand-in `claude` also
+ * reports. The Anthropic and OpenAI accounts are subscriptions that sign in on
+ * each machine, which `provider-account create` makes without credentials. A
+ * Z.ai account takes an API key that the create command checks against
+ * api.z.ai, so the fixture writes that account and its encrypted key into the
+ * database directly. Besides the session of the
  * conversation, the database holds a session on OpenAI without a native
  * session id, an exited Anthropic thread with a native session id, an Agent on
  * OpenAI, the assistant on the oldest account, a `textGeneration.model` choice
@@ -406,7 +409,7 @@ interface SeededAgent {
   readonly harnessId: string | null;
 }
 
-/** The harness ids of the three accounts the edge boot seeds. */
+/** The harness ids of the three accounts the fixture creates. */
 const QUALIFIED_HARNESS_IDS = ["claude-code/claude-code", "codex/codex", "pi/pi"] as const;
 
 /** The native session id in the seeded session's `session.started` event. */
@@ -891,6 +894,73 @@ function persistAccountIdentity(
   }
 }
 
+/**
+ * Returns the controller's Master Key for the Hercule Home `home`, as AES-GCM
+ * key bytes. On macOS it sits in the login keychain, under the home's path;
+ * elsewhere it is the base64 text of `<home>/master.key`.
+ */
+function readMasterKey(home: string): Buffer {
+  const encoded =
+    process.platform === "darwin"
+      ? Bun.spawnSync([
+          "security",
+          "find-generic-password",
+          "-s",
+          "Hercule",
+          "-a",
+          home,
+          "-w",
+        ]).stdout.toString()
+      : readFileSync(join(home, "master.key"), "utf8");
+  return Buffer.from(encoded.trim(), "base64");
+}
+
+/**
+ * Adds a Z.ai Provider Account to the database the edge binary created, with
+ * its API key stored the way the edge binary stores a credential: encrypted
+ * with AES-GCM under the Master Key, owned by the account, with the owner and
+ * name as associated data. Returns the id of the account.
+ */
+async function persistZaiAccount(home: string, apiKey: string): Promise<string> {
+  const id = Bun.randomUUIDv7();
+  const now = new Date().toISOString();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new Uint8Array(readMasterKey(home)),
+    "AES-GCM",
+    false,
+    ["encrypt"],
+  );
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: nonce,
+      additionalData: new TextEncoder().encode(`provider-account|${id}|apiKey`),
+    },
+    key,
+    new TextEncoder().encode(apiKey),
+  );
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    database
+      .query(
+        `INSERT INTO provider_accounts (id, provider_id, kind, default_harness_id, created_at, updated_at)
+         VALUES (?, 'zai/zai', 'api-key', 'pi/pi', ?, ?)`,
+      )
+      .run(uuidBlob(id), now, now);
+    database
+      .query(
+        `INSERT INTO secrets (id, owner_kind, owner_id, name, nonce, ciphertext, created_at)
+         VALUES (?, 'provider-account', ?, 'apiKey', ?, ?, ?)`,
+      )
+      .run(uuidBlob(Bun.randomUUIDv7()), id, nonce, new Uint8Array(ciphertext), now);
+  } finally {
+    database.close();
+  }
+  return id;
+}
+
 /** The stand-in harness programs the upgraded controller's runner finds on its `PATH`. */
 interface StandIns {
   /** The folder to put in front of the `PATH`. */
@@ -1332,21 +1402,42 @@ describe("upgrading from the previous edge release", () => {
 
       const runnerId = await waitForEnrolledRunner(edge);
 
+      // The edge boot seeds no account, so the fixture creates one per vendor,
+      // oldest first. A subscription that signs in on each machine takes no
+      // credentials, so the controller checks no key with a real provider.
+      const createSubscriptionAccount = async (provider: string): Promise<ListedAccount> => {
+        const created = await runCli(
+          [
+            "provider-account",
+            "create",
+            "--provider",
+            provider,
+            "--kind",
+            "subscription-per-machine",
+            "--json",
+          ],
+          edge,
+        );
+        expect(created.code, `${created.stdout}\n${created.stderr}`).toBe(0);
+        return expectJson<ListedAccount>(created);
+      };
+      const claudeAccount = await createSubscriptionAccount("anthropic/anthropic");
+      const codexAccount = await createSubscriptionAccount("openai/openai");
+      // A Z.ai account takes an API key, which `provider-account create` checks
+      // against api.z.ai before it stores anything, and a fixture key fails
+      // that check. So the account and its encrypted key are written into the
+      // database the edge binary created, in the shape that binary stores them.
+      const piAccountId = await persistZaiAccount(home, ZAI_API_KEY);
+
       const edgeAccounts = readListedItems<ListedAccount>(
         await runCli(["provider-account", "list", "--json"], edge),
       );
-      // The edge boot seeds one account per vendor and offers no way to add one.
       expect(new Set(edgeAccounts.map((account) => account.defaultHarnessId))).toEqual(
         new Set(QUALIFIED_HARNESS_IDS),
       );
-      const findSeededAccount = (providerId: string): ListedAccount => {
-        const found = edgeAccounts.find((account) => account.providerId === providerId);
-        if (found === undefined) throw new Error(`the edge boot seeded no ${providerId} account`);
-        return found;
-      };
-      const claudeAccount = findSeededAccount("anthropic/anthropic");
-      const codexAccount = findSeededAccount("openai/openai");
-      const piAccount = findSeededAccount("zai/zai");
+      const piAccount = edgeAccounts.find((account) => account.id === piAccountId);
+      if (piAccount === undefined)
+        throw new Error("the edge binary does not list the Z.ai account");
 
       // The label is the one thing a user changes on the Anthropic account here.
       const labelled = expectJson<ListedAccount>(
@@ -1356,15 +1447,6 @@ describe("upgrading from the previous edge release", () => {
         ),
       );
       expect(labelled.label).toBe(ACCOUNT_LABEL);
-
-      // The Z.ai key is stored the way the edge binary stores any credential
-      // of an account: encrypted under the Master Key, owned by the account.
-      // On stdin, so the key is never on a command line.
-      const keyStored = await runCli(
-        ["provider-account", "update", piAccount.id, "--credentials-stdin", "--json"],
-        { ...edge, stdin: JSON.stringify({ apiKey: ZAI_API_KEY }) },
-      );
-      expect(keyStored.code, `${keyStored.stdout}\n${keyStored.stderr}`).toBe(0);
 
       const profiles = readListedItems<SeededProfile>(
         await runCli(["profile", "list", "--json"], edge),

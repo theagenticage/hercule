@@ -4275,6 +4275,38 @@ describe("the usage a harness reports for a session's account", () => {
     ]);
   });
 
+  it("is not sent again while it repeats the last report, until that report is five minutes old", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const later = "2026-10-19T13:00:00.000Z";
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* awaitForwarded(sent, 1);
+        fake.reportUsage({ sessionId: SESSION, readings: [WINDOW] });
+        yield* waitOnWallClock("sent the first", () => listUsageFrames(sent).length === 1);
+
+        // Only `takenAt` differs, so this is skipped. The report after it
+        // differs, and once that is sent the skipped one has been handled.
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, takenAt: later }] });
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 50 }] });
+        yield* waitOnWallClock("sent the changed one", () => listUsageFrames(sent).length === 2);
+
+        yield* TestClock.adjust(Duration.minutes(5));
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 50 }] });
+        yield* waitOnWallClock("sent the refresh", () => listUsageFrames(sent).length === 3);
+      }),
+    );
+
+    expect(listUsageFrames(sent).map((frame) => frame.readings)).toEqual([
+      [WINDOW],
+      [{ ...WINDOW, usedPercent: 50 }],
+      [{ ...WINDOW, usedPercent: 50 }],
+    ]);
+  });
+
   it("is dropped for a session this runner does not host", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);

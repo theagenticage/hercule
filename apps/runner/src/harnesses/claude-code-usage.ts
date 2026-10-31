@@ -10,6 +10,7 @@
  */
 import type { SDKControlGetUsageResponse, SDKRateLimitInfo } from "@anthropic-ai/claude-agent-sdk";
 import type { UsageReading } from "@hercule/protocol";
+import { clampPercent, convertEpochSecondsToTimestamp } from "./usage-values";
 
 /** The part of the SDK's usage answer the probe reads. */
 export type ClaudeUsageAnswer = Pick<
@@ -32,22 +33,12 @@ const findWindow = (rateLimitType: string | undefined): UsageWindowName | undefi
   }
 };
 
-/** Converts a number of seconds since the epoch to a protocol timestamp, or `null` if it is not a time. */
-const convertSecondsToTimestamp = (seconds: unknown): string | null => {
-  if (typeof seconds !== "number") return null;
-  const at = new Date(seconds * 1000);
-  return Number.isNaN(at.getTime()) ? null : at.toISOString();
-};
-
 /** Converts an ISO-8601 text to a protocol timestamp, or `null` if it is not a time. */
 const convertTextToTimestamp = (text: unknown): string | null => {
   if (typeof text !== "string") return null;
   const at = new Date(text);
   return Number.isNaN(at.getTime()) ? null : at.toISOString();
 };
-
-/** Limits a share to the 0 to 100 the protocol allows. Claude can report more than 100. */
-const clampPercent = (percent: number): number => Math.min(100, Math.max(0, percent));
 
 /**
  * Builds the readings of one `rate_limit_event`: one reading for a five-hour
@@ -73,7 +64,7 @@ export const buildRateLimitReadings = (
       kind: "window",
       window,
       usedPercent: clampPercent(utilization * 100),
-      resetsAt: convertSecondsToTimestamp(info.resetsAt),
+      resetsAt: convertEpochSecondsToTimestamp(info.resetsAt),
       hit: info.status === "rejected",
       takenAt,
     },

@@ -23,6 +23,17 @@ const buildWindow = (
   ...fields,
 });
 
+const buildCredit = (fields: {
+  remaining: number;
+  limit: number | null;
+  takenAt?: string;
+}): AccountUsageReading => ({
+  kind: "credit",
+  takenAt: TAKEN_AT,
+  source: "read",
+  ...fields,
+});
+
 const describe_ = (usage: ReadonlyArray<AccountUsageReading>) =>
   describeAccountUsage({ usage }, "UTC", NOW);
 
@@ -45,6 +56,7 @@ describe("describeAccountUsage", () => {
         fillPercent: 61,
         tone: "normal",
         resetsText: "resets 14:00",
+        tooltip: "61% used, 5-hour window, resets 14:00",
       },
       {
         kind: "window",
@@ -53,6 +65,7 @@ describe("describeAccountUsage", () => {
         fillPercent: 38,
         tone: "normal",
         resetsText: "resets Mon 09:00",
+        tooltip: "38% used, Weekly window, resets Mon 09:00",
       },
     ]);
   });
@@ -74,28 +87,73 @@ describe("describeAccountUsage", () => {
   it("shows a window that is hit as full, in the fail tone, whatever its share", () => {
     const [line] = describe_([buildWindow("five-hour", { usedPercent: 97, hit: true })])!.lines;
 
-    expect(line).toMatchObject({ valueText: "Hit", fillPercent: 100, tone: "fail" });
+    expect(line).toMatchObject({
+      valueText: "Hit",
+      fillPercent: 100,
+      tone: "fail",
+      tooltip: "Limit reached, 5-hour window, resets 14:00",
+    });
   });
 
   it("leaves the reset time out when the reporter gave none", () => {
     const [line] = describe_([buildWindow("monthly", { resetsAt: null })])!.lines;
 
-    expect(line).toMatchObject({ label: "Monthly", resetsText: null });
+    expect(line).toMatchObject({
+      label: "Monthly",
+      resetsText: null,
+      tooltip: "40% used, Monthly window",
+    });
   });
 
   it("draws the credit as a number, with its limit when there is one", () => {
-    const credit = (limit: number | null): AccountUsageReading => ({
-      kind: "credit",
-      remaining: 1240.5,
-      limit,
-      takenAt: TAKEN_AT,
-      source: "read",
-    });
-
-    expect(describe_([credit(2000)])?.lines).toEqual([
-      { kind: "credit", label: "Credits", remainingText: "1,240.5", limitText: "of 2,000" },
+    expect(describe_([buildCredit({ remaining: 1240.5, limit: 2000 })])?.lines).toEqual([
+      {
+        kind: "credit",
+        label: "Credits",
+        remainingText: "1,240.5",
+        suffixText: "of 2,000 credits left",
+        text: "1,240.5 of 2,000 credits left",
+      },
     ]);
-    expect(describe_([credit(null)])?.lines[0]).toMatchObject({ limitText: null });
+    expect(describe_([buildCredit({ remaining: 1240, limit: null })])?.lines).toEqual([
+      {
+        kind: "credit",
+        label: "Credits",
+        remainingText: "1,240",
+        suffixText: "credits left",
+        text: "1,240 credits left",
+      },
+    ]);
+  });
+
+  it("draws no line for a credit of zero with no limit, and shows zero beside a limit", () => {
+    expect(describe_([buildCredit({ remaining: 0, limit: null })])).toBeNull();
+    expect(describe_([buildCredit({ remaining: 0, limit: 2000 })])?.lines).toMatchObject([
+      { text: "0 of 2,000 credits left" },
+    ]);
+  });
+
+  it("keeps the other lines when a zero credit is left out, and takes the as-of time from the lines drawn", () => {
+    const gauge = describe_([
+      buildWindow("weekly", { takenAt: "2026-10-31T10:30:00.000Z" }),
+      buildCredit({ remaining: 0, limit: null, takenAt: TAKEN_AT }),
+    ]);
+
+    expect(gauge?.lines.map((line) => line.label)).toEqual(["Weekly"]);
+    expect(gauge?.asOf).toBe("10:30");
+  });
+
+  it("writes a large credit short, so it cannot widen the card", () => {
+    const text = (remaining: number, limit: number | null = null): string | undefined => {
+      const [line] = describe_([buildCredit({ remaining, limit })])?.lines ?? [];
+      return line?.kind === "credit" ? line.text : undefined;
+    };
+
+    expect(text(999_999)).toBe("999,999 credits left");
+    expect(text(1_234_567)).toBe("1.2M credits left");
+    expect(text(1_500_000_000, 2_000_000_000)).toBe("1.5B of 2B credits left");
+    expect(text(1e308)).toBe("1E308 credits left");
+    expect(text(Number.MAX_VALUE)).toBe("1.8E308 credits left");
   });
 
   it("takes the as-of time from the newest reading, with its date when it is not today", () => {

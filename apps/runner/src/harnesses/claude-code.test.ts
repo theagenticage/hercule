@@ -179,7 +179,7 @@ const buildStubSeam = (answers: {
 
 const probeWith = (
   answers: Parameters<typeof buildStubSeam>[0] = {},
-  options?: ProbeOptions,
+  options: ProbeOptions = { readUsage: false },
 ): {
   readonly result: Promise<ProbeResult>;
   readonly calls: Array<Call>;
@@ -366,11 +366,9 @@ describe("probing for the account's usage", () => {
     ]);
     expect(probed.auth.status).toBe("ok");
 
-    for (const options of [{ readUsage: false }, undefined]) {
-      const notAsked = probeWith({ readUsage: () => Promise.resolve(USAGE) }, options);
-      expect((await notAsked.result).usage).toBeNull();
-      expect(notAsked.usageReads()).toBe(0);
-    }
+    const notAsked = probeWith({ readUsage: () => Promise.resolve(USAGE) });
+    expect((await notAsked.result).usage).toBeNull();
+    expect(notAsked.usageReads()).toBe(0);
   });
 
   it("has no usage when plan limits do not apply to the account", async () => {
@@ -414,6 +412,37 @@ describe("probing for the account's usage", () => {
     expect(probed.usage).toBeNull();
     expect(probed.auth.status).toBe("ok");
   });
+
+  it("gives the usage read only the time the probe has left, so a slow models read does not cost the auth and the models", async () => {
+    let releaseModels: (models: ReadonlyArray<unknown>) => void = () => undefined;
+    const slowModels = new Promise<ReadonlyArray<unknown>>((resolve) => {
+      releaseModels = resolve;
+    });
+    const { seam } = buildStubSeam({
+      supportedModels: () => slowModels,
+      readUsage: () => new Promise<never>(() => undefined),
+    });
+    const probed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const running = yield* Effect.forkChild(
+            makeClaudeCodeAdapter(seam).probe(CONTEXT, { readUsage: true }),
+          );
+          yield* TestClock.adjust(Duration.seconds(12));
+          releaseModels(MODELS);
+          yield* TestClock.adjust(Duration.zero);
+          // The read had the 5 seconds of its own deadline, but only 2 are left.
+          yield* TestClock.adjust(Duration.seconds(2));
+          return yield* Fiber.join(running);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(probed.usage).toBeNull();
+    expect(probed.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
+    expect(probed.models.length).toBeGreaterThan(0);
+  });
 });
 
 describe("probing when the probe does not finish", () => {
@@ -436,7 +465,9 @@ describe("probing when the probe does not finish", () => {
     const probed = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const running = yield* Effect.forkChild(makeClaudeCodeAdapter(seam).probe(CONTEXT));
+          const running = yield* Effect.forkChild(
+            makeClaudeCodeAdapter(seam).probe(CONTEXT, { readUsage: false }),
+          );
           yield* TestClock.adjust(Duration.zero);
           yield* TestClock.adjust(PROBE_DEADLINE);
           return yield* Fiber.join(running);
@@ -508,7 +539,7 @@ describe("the runner's own sign-in variables", () => {
     const context = { ...CONTEXT, env: AMBIENT };
 
     const stub = buildStubSeam({});
-    await Effect.runPromise(makeClaudeCodeAdapter(stub.seam).probe(context));
+    await Effect.runPromise(makeClaudeCodeAdapter(stub.seam).probe(context, { readUsage: false }));
     const probeEnv = stub.calls[0]!.params.options["env"] as Record<string, string>;
 
     const run = createDriving();

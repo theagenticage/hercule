@@ -125,7 +125,7 @@ describe("launching pi for a session", () => {
     };
 
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, ctx));
-    await Effect.runPromise(run.adapter.probe(ctx));
+    await Effect.runPromise(run.adapter.probe(ctx, { readUsage: false }));
 
     // Otherwise a session would run on the machine's key, and a probe would
     // report the account as logged in on it.
@@ -144,7 +144,7 @@ describe("launching pi for a session", () => {
     };
 
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, ctx));
-    const probed = await Effect.runPromise(run.adapter.probe(ctx));
+    const probed = await Effect.runPromise(run.adapter.probe(ctx, { readUsage: false }));
 
     // Otherwise the account would run on the machine's key, and report itself
     // as logged in.
