@@ -81,16 +81,17 @@ const findFocusAfterSave = (list: HTMLElement, after: FocusAfterSave): HTMLEleme
   const { saved } = after;
   const target =
     saved.kind === "add"
-      ? [...(lane?.querySelectorAll<HTMLElement>("button[data-entry-key]") ?? [])].find((entry) => {
-          const key = entry.dataset["entryKey"] ?? "";
-          return key.startsWith(`${saved.providerAccountId}/`) && key.endsWith(`/${after.model}`);
-        })
+      ? [...(lane?.querySelectorAll<HTMLElement>("button[data-model]") ?? [])].find(
+          (entry) =>
+            entry.dataset["accountId"] === saved.providerAccountId &&
+            entry.dataset["model"] === after.model,
+        )
       : saved.nextModel === null
         ? undefined
         : findNewModelRow(lane, saved.nextModel)?.querySelector<HTMLElement>(".line-action");
   return (
     target ??
-    lane?.querySelector<HTMLElement>("button[data-entry-key]") ??
+    lane?.querySelector<HTMLElement>("button[data-model]") ??
     list.querySelector<HTMLElement>("input, button:not([data-unready])")
   );
 };
@@ -189,11 +190,10 @@ export function ModelMenuList({
       .join(" · ");
     const { problem } = row;
     const signIn = problem?.signIn ?? null;
-    const entryKey = formatProfileEntryKey(row);
     return (
       <MenuLine
-        key={entryKey}
-        entryKey={entryKey}
+        key={formatProfileEntryKey(row)}
+        entry={row}
         glyph={options.mark === true ? renderMark(row.providerId) : null}
         name={row.name}
         detail={detail === "" ? null : detail}

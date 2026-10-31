@@ -167,12 +167,16 @@ export function ModelProfileSection({
     if (element === undefined || element === null) return;
     refocus.current = null;
     // The user may have moved on while the save ran: take the focus back only
-    // when the move dropped it, or left it in one of the section's rows.
+    // when it fell to the page. After a move of a row, the focus may also be
+    // in one of the section's rows, because the browser drops the focus of a
+    // row that moves, and the row it is in may be the moved one. A "New" row's
+    // save moves no row, so a row that has the focus got it from the user.
     const { activeElement } = document;
     const dropped =
       activeElement === null ||
       activeElement === document.body ||
-      [...rowElements.current.values()].some(({ element: row }) => row.contains(activeElement));
+      (pending.newModel === undefined &&
+        [...rowElements.current.values()].some(({ element: row }) => row.contains(activeElement)));
     if (dropped) element.focus({ preventScroll: true });
   }, [layoutText, section.newModels]);
 

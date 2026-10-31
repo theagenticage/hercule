@@ -609,6 +609,21 @@ describe("the focus after a New row leaves the menu", () => {
     });
   });
 
+  it("finds the added entry by its exact model, not by the end of another model's slug", async () => {
+    const user = userEvent.setup();
+    const foo = { ...OPUS_5_6, model: "foo", name: "Foo" };
+    const vendorFoo = claudeEntry("vendor/foo", "Vendor Foo");
+    renderMenuThatRedraws(buildProfile([vendorFoo], [foo]), () =>
+      buildProfile([vendorFoo, claudeEntry("foo", "Foo")], []),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Foo" }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Foo" }));
+    });
+  });
+
   it("moves to the Add button of the next New row after Not now, else to the lane's first row", async () => {
     const user = userEvent.setup();
     let dismissals = 0;

@@ -2735,7 +2735,7 @@ export const CLI = {
     errors: {
       conflict: "the profile is at another revision than --expected-revision; read it again",
       validation:
-        "another profile has the name, an account does not exist or appears twice, an entry sits under another account's section or appears twice, a harness is one the account cannot run in, a new entry's model is not in the list its harness gave for the account, the default entry is not one of the entries, or a list is over its limit (64 accounts, 256 entries in a section, 1024 dismissed models)",
+        "another profile has the name, an account does not exist or appears twice, an entry sits under another account's section or appears twice, a harness is one the account cannot run in, a new entry's model is not in the list its harness gave for the account, the default entry is not one of the entries, or a list is over its limit (64 accounts, 256 entries in a section, 2048 dismissed models sent, or more than 1024 left after the ones that can never matter are dropped)",
     },
   },
 

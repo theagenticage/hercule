@@ -48,8 +48,17 @@ export const MAX_MODEL_PROFILE_ACCOUNTS = 64;
 /** The most entries one section of a `modelProfile.update` may send. */
 export const MAX_MODEL_PROFILE_SECTION_ENTRIES = 256;
 
-/** The most dismissed models one `modelProfile.update` may send. */
+/** The most dismissed models a profile stores. `modelProfile.update` is refused `validation` when it would store more. */
 export const MAX_DISMISSED_NEW_MODELS = 1024;
+
+/**
+ * The most dismissed models one `modelProfile.update` may send. It is twice
+ * the stored bound, because the controller drops the dismissals that can never
+ * matter (`MAX_DISMISSED_NEW_MODELS` bounds what is left). Without the room, a
+ * profile that stores 1024 could not take out one more model, although the
+ * write would store no more than 1024.
+ */
+export const MAX_DISMISSED_NEW_MODELS_SENT = 2 * MAX_DISMISSED_NEW_MODELS;
 
 /**
  * A qualified harness id a client writes into a profile. It is at most as long
@@ -252,14 +261,16 @@ export type ModelProfileAccountInput = Schema.Schema.Type<typeof ModelProfileAcc
  *
  * The lists are bounded: at most `MAX_MODEL_PROFILE_ACCOUNTS` sections, at
  * most `MAX_MODEL_PROFILE_SECTION_ENTRIES` entries in a section, and at most
- * `MAX_DISMISSED_NEW_MODELS` dismissed models.
+ * `MAX_DISMISSED_NEW_MODELS_SENT` dismissed models. The stored dismissals are
+ * bounded by `MAX_DISMISSED_NEW_MODELS`, checked after the controller drops
+ * the ones that can never matter.
  */
 export const ModelProfileUpdateInput = Schema.Struct({
   expectedRevision: Schema.Int,
   name: ModelProfileName,
   accounts: atMost(ModelProfileAccountInput, MAX_MODEL_PROFILE_ACCOUNTS),
   defaultEntry: Schema.NullOr(ModelProfileEntry),
-  dismissedNewModels: atMost(DismissedNewModel, MAX_DISMISSED_NEW_MODELS),
+  dismissedNewModels: atMost(DismissedNewModel, MAX_DISMISSED_NEW_MODELS_SENT),
 });
 
 export type ModelProfileUpdateInput = Schema.Schema.Type<typeof ModelProfileUpdateInput>;

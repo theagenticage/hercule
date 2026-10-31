@@ -7,6 +7,7 @@
  */
 import {
   isModelMissingFromHarness,
+  MAX_DISMISSED_NEW_MODELS,
   type DismissedNewModel,
   type Issue,
   type ModelProfileAccountInput,
@@ -260,7 +261,8 @@ const dropUnannounceableDismissals = (
  *   with every selected model, and the harness's gaps show as
  *   `harness-lacks-model` on read.
  * - The dismissed models are stored without those that can never be
- *   announced (`dropUnannounceableDismissals`).
+ *   announced (`dropUnannounceableDismissals`). What is left is refused when
+ *   it is over `MAX_DISMISSED_NEW_MODELS`.
  * - A `defaultEntry` of `null` is allowed only when every entry of the
  *   profile comes from a Default Selection filled in this write. The default
  *   then becomes the first filled section's default model, else the first
@@ -333,6 +335,16 @@ export const buildProfileBody = (
     }
   });
 
+  const dismissedNewModels = dropUnannounceableDismissals(input.dismissedNewModels, world);
+  if (dismissedNewModels.length > MAX_DISMISSED_NEW_MODELS) {
+    issues.push(
+      buildIssue(
+        ["dismissedNewModels"],
+        `This profile has dismissed ${String(dismissedNewModels.length)} new models, the most it keeps (${String(MAX_DISMISSED_NEW_MODELS)}). Add some of them to the profile, or take them out of the dismissed list with \`hercule model-profile update\`.`,
+      ),
+    );
+  }
+
   const entries = sections.flatMap((section) => section.entries ?? []);
   const chosenDefault = input.defaultEntry;
   let defaultEntry: ModelProfileEntry | null = chosenDefault;
@@ -374,7 +386,7 @@ export const buildProfileBody = (
         body: {
           accounts: sections,
           defaultEntry,
-          dismissedNewModels: dropUnannounceableDismissals(input.dismissedNewModels, world),
+          dismissedNewModels,
         },
       };
 };

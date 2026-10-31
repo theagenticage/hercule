@@ -19,9 +19,10 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
  * - `inert` draws the row faded and not as a button, for a row that cannot
  *   be picked. Its reason is in `note` or `sub`, because a row is "dimmed
  *   with the reason, never hidden" (spec 14 §The composer).
- * - `entryKey` names the entry the row stands for (`formatProfileEntryKey`),
- *   in a `data-entry-key` attribute, so that code that moves the focus can
- *   find the row without reading its text.
+ * - `entry` names the model entry the row stands for. Its account and model
+ *   are in `data-account-id` and `data-model` attributes, each on its own
+ *   because a model slug may contain "/", so that code that moves the focus
+ *   can find the row by exact values and not by its text.
  * - `action` is a link at the right of an inert row that fixes the reason,
  *   such as Sign in. It stays at full strength while the rest of the row is
  *   faded. Only an inert row has one.
@@ -37,7 +38,7 @@ export function MenuLine({
   chevron = false,
   multiple = false,
   inert = false,
-  entryKey,
+  entry,
   action = null,
   onPick,
 }: {
@@ -51,7 +52,7 @@ export function MenuLine({
   readonly chevron?: boolean;
   readonly multiple?: boolean;
   readonly inert?: boolean;
-  readonly entryKey?: string | undefined;
+  readonly entry?: { readonly providerAccountId: string; readonly model: string } | undefined;
   readonly action?: { readonly label: string; readonly onAct: () => void } | null;
   readonly onPick: () => void;
 }): JSX.Element {
@@ -73,7 +74,8 @@ export function MenuLine({
     return (
       <div
         className={action === null ? "line line--dimmed" : "line line--dimmed line--acting"}
-        data-entry-key={entryKey}
+        data-account-id={entry?.providerAccountId}
+        data-model={entry?.model}
       >
         {body}
         {action === null ? null : (
@@ -88,7 +90,8 @@ export function MenuLine({
     <button
       type="button"
       className="line"
-      data-entry-key={entryKey}
+      data-account-id={entry?.providerAccountId}
+      data-model={entry?.model}
       aria-current={multiple ? undefined : current || undefined}
       aria-pressed={multiple ? current : undefined}
       onClick={onPick}

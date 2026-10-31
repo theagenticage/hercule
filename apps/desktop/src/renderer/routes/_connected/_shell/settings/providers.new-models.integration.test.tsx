@@ -11,7 +11,7 @@
  * the profile has not dismissed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   ANTHROPIC_IDENTITY as CLIENT_ANTHROPIC,
@@ -391,6 +391,23 @@ describe("Settings > Providers > Models > a section's New rows", () => {
         within(getSection("Anthropic")).getAllByRole("listitem")[0],
       );
     });
+  });
+
+  it("leaves the focus alone when the user focused an entry while the save ran", async () => {
+    const { release } = await openModels({ hold: true });
+
+    await userEvent.click(screen.getByRole("button", { name: "Add Opus 5.6" }));
+    const entry = within(getSection("Anthropic")).getAllByRole("listitem")[1]!;
+    act(() => {
+      entry.focus();
+    });
+
+    await release();
+
+    await waitFor(() => {
+      expect(listEntries("Anthropic")).toEqual(["Opus 5.5", "Sonnet 5.5", "Opus 5.6"]);
+    });
+    expect(document.activeElement).toBe(entry);
   });
 
   it("shows a refusal above the sections, keeps the row, and gives its buttons back", async () => {

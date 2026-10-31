@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { Clock, Effect, Option } from "effect";
 import {
   MAX_DISMISSED_NEW_MODELS,
+  MAX_DISMISSED_NEW_MODELS_SENT,
   MAX_MODEL_PROFILE_ACCOUNTS,
   MAX_MODEL_PROFILES,
   MAX_MODEL_PROFILE_SECTION_ENTRIES,
@@ -246,9 +247,9 @@ describe("modelProfile.update", () => {
       expect(failure).toMatchObject({ error: { code: "validation" } });
     });
 
-    it("refuses more dismissed models than the limit", async () => {
+    it("refuses more dismissed models than a request may carry", async () => {
       const failure = await refusedFor((accountId) => ({
-        dismissedNewModels: tooMany(MAX_DISMISSED_NEW_MODELS + 1).map((_, index) => ({
+        dismissedNewModels: tooMany(MAX_DISMISSED_NEW_MODELS_SENT + 1).map((_, index) => ({
           providerAccountId: accountId,
           model: `model-${String(index)}`,
         })),
@@ -1823,6 +1824,63 @@ describe("announcing new models", () => {
     );
 
     expect(written.dismissedNewModels.map((one) => one.model)).toEqual(["fresh", "future"]);
+  });
+
+  describe("the bound on stored dismissals", () => {
+    const dismissals = (accountId: string, prefix: string, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        providerAccountId: accountId,
+        model: `${prefix}-${String(index)}`,
+      }));
+
+    it("counts what is stored, so a request may carry dismissals that are dropped on top of a full list", async () => {
+      const written = await runWithProfiles(
+        Effect.gen(function* () {
+          const accountId = yield* addReadyKeyAccount("work");
+          return yield* update(yield* readMain, {
+            accounts: [{ providerAccountId: accountId, harnessId: null, entries: [] }],
+            defaultEntry: null,
+            dismissedNewModels: [
+              // The 1025th is a model of the first read, which could never be announced.
+              ...dismissals(accountId, "future", MAX_DISMISSED_NEW_MODELS),
+              { providerAccountId: accountId, model: "second" },
+            ],
+          });
+        }),
+      );
+
+      expect(written.dismissedNewModels).toHaveLength(MAX_DISMISSED_NEW_MODELS);
+    });
+
+    it("refuses a list that keeps more than the bound, saying what to do", async () => {
+      const failure = await runWithProfiles(
+        Effect.gen(function* () {
+          const accountId = yield* addReadyKeyAccount("work");
+          return yield* Effect.flip(
+            update(yield* readMain, {
+              accounts: [{ providerAccountId: accountId, harnessId: null, entries: [] }],
+              defaultEntry: null,
+              dismissedNewModels: dismissals(accountId, "future", MAX_DISMISSED_NEW_MODELS + 1),
+            }),
+          );
+        }),
+      );
+
+      expect(failure).toMatchObject({
+        error: {
+          code: "validation",
+          details: {
+            issues: [
+              {
+                path: ["dismissedNewModels"],
+                message:
+                  "This profile has dismissed 1025 new models, the most it keeps (1024). Add some of them to the profile, or take them out of the dismissed list with `hercule model-profile update`.",
+              },
+            ],
+          },
+        },
+      });
+    });
   });
 
   it("stores no dismissal for a provider whose Default Selection is none", async () => {
