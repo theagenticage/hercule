@@ -3,12 +3,15 @@
  * prints, whether pi finds a Z.ai key, and the models pi offers. Also builds
  * the install command that puts pi on a machine.
  *
- * The version and the key check are one-shot commands. The model catalog needs
- * a pi that has loaded its providers, so it is read from a child process with
- * no session, which is killed as soon as it has responded.
+ * The version and the key check are one-shot commands. When a key is set, the
+ * probe first refreshes pi's stored model list with `pi update --models`; every
+ * other pi process stays `--offline` and reads that stored list. The catalog
+ * needs a pi that has loaded its providers, so it is read from a child process
+ * with no session, which is killed as soon as it has responded.
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import {
   MAX_FACT_ITEMS,
@@ -24,11 +27,34 @@ import type { Ran, Run } from "../process";
 import { truncateFact } from "../text";
 import { makeRpc, type PiSpawn } from "./rpc";
 
+/**
+ * The Z.ai key: its secret name in the instance config, and the environment
+ * variable pi reads it from. The runner cannot import the pi plugin, so the
+ * pi adapter owns this mapping, the same way the Claude adapter owns
+ * `CLAUDE_CONFIG_DIR`.
+ */
+export const ZAI_KEY = { secret: "zaiApiKey", variable: "ZAI_API_KEY" };
+
 /** The only pi provider Hercule uses; no other provider is offered or checked. */
 export const ZAI = "zai";
 
 /** The thinking level a session uses when the user picked none. */
 export const DEFAULT_THINKING = "low";
+
+/**
+ * How long the probe waits for the model store refresh before it reads the
+ * catalog pi has stored. The whole probe gets `PROBE_DEADLINE` (15 seconds),
+ * and the version, the key check and the catalog read need the rest of it.
+ */
+const MODEL_STORE_REFRESH_WAIT: Duration.Duration = Duration.seconds(8);
+
+/**
+ * How long a model store refresh may run before Hercule gives up on it. pi
+ * stops its own refresh after 15 seconds, so this only reaches a stuck pi, for
+ * example one whose child keeps its pipes open. At the limit Hercule sends pi a
+ * stop signal and does not wait for it to exit.
+ */
+const MODEL_STORE_REFRESH_LIMIT: Duration.Duration = Duration.seconds(30);
 
 /** A model as pi's catalog lists it. */
 interface PiModel {
@@ -133,11 +159,101 @@ const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescri
     }));
 
 /**
+ * The environment variables the model store refresh keeps. `pi update
+ * --models` refreshes every provider pi finds credentials for and cannot be
+ * limited to one, while a session uses the instance's own key or none. So the
+ * refresh must not see the runner's other keys (for example `OPENROUTER_API_KEY`
+ * or AWS credentials). The proxy and TLS variables keep pi working behind a
+ * corporate proxy.
+ */
+const REFRESH_ENV_VARIABLES: ReadonlySet<string> = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LANG",
+  "TMPDIR",
+  ...["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"].flatMap((name) => [
+    name,
+    name.toLowerCase(),
+  ]),
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  "PI_CODING_AGENT_DIR",
+  "PI_SKIP_VERSION_CHECK",
+  ZAI_KEY.variable,
+]);
+
+/**
+ * Returns the part of a probe's environment that the model store refresh may
+ * use. `PI_OFFLINE` is never in it, and pi turns the network off when that
+ * variable is set to any value, `0` included.
+ */
+const buildRefreshEnv = (
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string | undefined> =>
+  Object.fromEntries(Object.entries(env).filter(([name]) => REFRESH_ENV_VARIABLES.has(name)));
+
+/**
+ * Refreshes the model list that pi stores in the instance's home, by running
+ * `pi update --models`, and waits for it at most `MODEL_STORE_REFRESH_WAIT`.
+ * Never fails: a refresh that fails or is not finished in time is logged as a
+ * warning, and the probe goes on with the list pi has stored, or the one
+ * bundled in its release.
+ *
+ * The refresh is its own command because, in RPC mode, pi answers before its
+ * background refresh ends. It runs in a detached fiber and only the wait is
+ * bounded: interrupting pi while it writes its store can corrupt the file or
+ * leave a lock that blocks readers for 30 seconds. A refresh that ends after
+ * the wait is seen by the next probe or session. Two probes of one home close
+ * together each start a refresh. pi's lock keeps the store whole, but the
+ * refresh that ends last wins even if it fetched a little earlier, which is
+ * accepted.
+ */
+const refreshModelStore = (
+  run: Run,
+  binary: string,
+  home: string,
+  env: Readonly<Record<string, string | undefined>>,
+): Effect.Effect<void> => {
+  const refresh = Effect.suspend(() =>
+    run([binary, "update", "--models"], buildRefreshEnv(env)),
+  ).pipe(
+    Effect.timeoutOption(MODEL_STORE_REFRESH_LIMIT),
+    // The warnings are written here, in the fiber that ran the command, so a
+    // refresh that fails after its probe has returned is still reported.
+    Effect.flatMap(
+      Option.match({
+        onNone: () =>
+          Effect.logWarning(
+            `pi did not refresh its model list in ${home} within ${Duration.format(MODEL_STORE_REFRESH_LIMIT)}, so Hercule sent it a stop signal`,
+          ),
+        onSome: (ran) =>
+          ran.code === 0
+            ? Effect.void
+            : Effect.logWarning(
+                `pi could not refresh its model list in ${home}: ${readComplaint(ran)}`,
+              ),
+      }),
+    ),
+  );
+  return Effect.gen(function* () {
+    const refreshing = yield* Effect.forkDetach(refresh);
+    const finished = yield* Effect.timeoutOption(Fiber.await(refreshing), MODEL_STORE_REFRESH_WAIT);
+    if (Option.isNone(finished)) {
+      yield* Effect.logWarning(
+        `pi has not refreshed its model list in ${home} within ${Duration.format(MODEL_STORE_REFRESH_WAIT)}, so the probe reads the list stored so far`,
+      );
+    }
+  });
+};
+
+/**
  * Reads the model catalog from a separate pi process that saves nothing and
- * makes no network calls. Fails with an error message when pi cannot be
- * started or does not respond. The process is killed as soon as it has
- * responded: left running, it would keep the user's key in its environment
- * long after anyone looked at the Fleet page.
+ * makes no network calls, so it returns the list pi has stored. Fails with an
+ * error message when pi cannot be started or does not respond. The process is
+ * killed as soon as it has responded: left running, it would keep the user's
+ * key in its environment long after anyone looked at the Fleet page.
  */
 const fetchCatalog = (
   spawn: PiSpawn,
@@ -186,6 +302,7 @@ export const makeProbe =
   (spawn: PiSpawn, run: Run) =>
   (
     binary: string,
+    home: string,
     env: Readonly<Record<string, string | undefined>>,
   ): Effect.Effect<ProbeResult> => {
     const gather = Effect.gen(function* () {
@@ -198,6 +315,7 @@ export const makeProbe =
       // pi lists only the providers it has a key for, so a machine with no key
       // has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [] };
+      yield* refreshModelStore(run, binary, home, env);
       return yield* Effect.match(fetchCatalog(spawn, binary, env), {
         onFailure: (message) => buildFailedProbe(harnessVersion, message),
         onSuccess: (models) => ({ harnessVersion, auth, models }),

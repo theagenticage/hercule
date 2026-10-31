@@ -242,6 +242,13 @@ const answerAuthCheck = (env: Readonly<Record<string, string | undefined>>): Ran
         stderr: "",
       };
 
+/** What `pi update --models` prints in pi 1.3.0 once it has stored a fresh model list. */
+export const MODEL_STORE_REFRESHED: Ran = {
+  code: 0,
+  stdout: "Model catalogs refreshed\n",
+  stderr: "",
+};
+
 /** A one-shot command the adapter ran, and the environment it ran with. */
 interface RunCall {
   readonly command: ReadonlyArray<string>;
@@ -251,11 +258,13 @@ interface RunCall {
 export interface FakePiBehaviour {
   /** Responses to RPC commands, replacing the defaults above. */
   readonly answers?: Answers;
-  /** Results for one-shot commands, checked before the `pi --version` and `pi auth check` defaults. */
+  /** Results for one-shot commands, checked before the defaults of `pi --version`, `pi auth check` and `pi update --models`. */
   readonly ran?: (
     command: ReadonlyArray<string>,
     env: Readonly<Record<string, string | undefined>>,
   ) => Ran | undefined;
+  /** How `pi update --models` ends, replacing the default of a model list refreshed at once. */
+  readonly refresh?: Effect.Effect<Ran>;
   /** A pi that exits at once without responding, like a broken install. */
   readonly dies?: boolean;
   /** A pi that keeps running after its stdin closes, like one waiting on an approval. */
@@ -373,6 +382,8 @@ export const buildFakePiSeam = (
       if (args === "--version")
         return Effect.succeed({ code: 0, stdout: `${FAKE_PI_VERSION}\n`, stderr: "" });
       if (args === "auth check --provider zai --json") return Effect.succeed(answerAuthCheck(env));
+      if (args === "update --models")
+        return behaviour.refresh ?? Effect.succeed(MODEL_STORE_REFRESHED);
       return Effect.succeed({ code: 1, stdout: "", stderr: `unknown command: ${args}` });
     },
     // A fake pi starts no bash call, so no process holds its file. The file is
