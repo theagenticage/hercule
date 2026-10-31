@@ -1,12 +1,12 @@
 /**
  * The Codex adapter. It talks to Codex only through app-server connections,
- * and every file an app-server uses lives under the instance's own home
+ * and every file an app-server uses lives under the account's own Harness Home
  * directory. Using the developer's own Codex directory would mix Hercule's
  * sessions with the user's login, skills and memory. A session's skills come
  * from its own library skills folder and the repository skills folders staged
  * for it, never from the user's. A Thread on the
  * local runner is the one session that sees the user's own instructions, and
- * even then nothing is written into the instance's Codex directory.
+ * even then nothing is written into the Harness Home's Codex directory.
  */
 import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -44,6 +44,7 @@ import {
   SteerRefused,
   type AdapterError,
 } from "@hercule/protocol";
+import { applyCredential, formatModelArgument } from "../account";
 import type { LoginCommand } from "../login";
 import type {
   AdapterTurnInput,
@@ -245,6 +246,8 @@ interface Held {
   readonly threads: CodexThreads;
   /** How the session reports its commands to the edit watch, or null when its edits are not observed. */
   readonly editMarks: EditMarks | null;
+  /** How the session's account names a model to Codex (`ctx.modelArgument`). */
+  readonly modelArgument: string;
   /** The async questions of the root agent that can still be answered, by Request id. */
   readonly asyncQuestions: Map<string, AsyncQuestion>;
   /**
@@ -410,7 +413,7 @@ const UNREACHABLE_TOKEN_LIMIT = "9223372036854775807";
  *   turns those off. The controller rotates well before 95%.
  *
  * These are arguments of the session's own app-server, never lines in the
- * instance's `config.toml`, because every session of the instance reads that
+ * Harness Home's `config.toml`, because every session of the account reads that
  * file.
  */
 const buildCompactionOverrides = (spec: SessionSpec): ReadonlyArray<string> =>
@@ -479,7 +482,7 @@ const buildStartMarkHookOverrides = (ctx: HarnessRunnerContext): ReadonlyArray<s
  * real `HOME`, or none for any other session and for a Thread whose runner
  * has no `HOME` set.
  *
- * Every Codex process runs with an empty `HOME` of its instance's own (see
+ * Every Codex process runs with an empty `HOME` of its own (see
  * `prepareEnv`), so that Codex does not find the user's `.agents/skills`.
  * `shell_environment_policy.set` changes only the environment of the
  * commands Codex runs, not the environment of Codex itself. Under the real
@@ -681,7 +684,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   const published = Effect.runSync(PubSub.unbounded<HarnessEvent>());
   const sessions = new Map<string, Held>();
   /**
-   * One app-server per session, not per instance. The session's own token is
+   * One app-server per session, not per account. The session's own token is
    * in the environment its process was started with, and every shell command
    * that process runs inherits it. If a second session shared the host, its
    * work would run under the first session's credential, grants and actor
@@ -758,11 +761,11 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   };
 
   /**
-   * Builds the environment for a Codex process, creating the instance's
+   * Builds the environment for a Codex process, creating the account's
    * `codex` and `home` directories if they are missing. `CODEX_HOME` alone
    * does not isolate a session: Codex also reads skills from `.agents/skills`
    * in the user's home directory, so `HOME` is moved to an empty directory of
-   * the instance's own. Every process gets the moved `HOME`, a Thread
+   * the account's own. Every process gets the moved `HOME`, a Thread
    * included: a Thread's skills come from its library skills folder (see
    * `setSkillRoots`), and the user's `.agents/skills` would put a second skill
    * of the same name beside them.
@@ -781,14 +784,17 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     mkdirSync(neutral, { recursive: true, mode: 0o700 });
     // The gate's hook reads the marks directory from the app-server's
     // environment, which every hook inherits.
-    return {
-      ...ctx.env,
-      CODEX_HOME: codexHome,
-      HOME: neutral,
-      ...(ctx.editMarks === null
-        ? {}
-        : { [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks.sessionMarksDir }),
-    };
+    return applyCredential(
+      {
+        ...ctx.env,
+        CODEX_HOME: codexHome,
+        HOME: neutral,
+        ...(ctx.editMarks === null
+          ? {}
+          : { [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks.sessionMarksDir }),
+      },
+      ctx.credential,
+    );
   };
 
   const startHost = (
@@ -1409,7 +1415,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
         input: buildUserInput(input, skillItems),
-        ...buildModelParams(input.modelSelection),
+        ...buildModelParams(input.modelSelection, held.modelArgument),
         // The cast is safe because nothing here reads the value back. The
         // schema crosses the wire as the JSON the controller stored, and
         // Codex's own JSON type is the mutable type ts-rs writes.
@@ -1630,12 +1636,13 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
    */
   const buildModelParams = (
     selection: ModelSelection | undefined,
+    modelArgument: string,
   ): Pick<TurnStartParams, "model" | "effort" | "serviceTier"> => {
     if (selection === undefined) return {};
     const effort = selection.options["effort"];
     const tier = readServiceTier(selection.options["serviceTier"]);
     return {
-      model: selection.model,
+      model: formatModelArgument(modelArgument, selection.model),
       ...(typeof effort === "string" ? { effort } : {}),
       ...(tier === undefined ? {} : { serviceTier: tier }),
     };
@@ -1650,9 +1657,9 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
    * in stays empty.
    *
    * The user's instructions go in the developer instructions rather than into
-   * the instance's Codex directory. Codex reads an `AGENTS.md` there for every
+   * the Harness Home's Codex directory. Codex reads an `AGENTS.md` there for every
    * session and has no setting to turn that off, and every session of the
-   * instance shares that directory, so a file there would reach assistant
+   * account shares that directory, so a file there would reach assistant
    * sessions and workflow steps too.
    *
    * Nothing in this adapter reads `disallowedTools`. Codex cannot restrict
@@ -1676,7 +1683,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
     return {
       cwd: ctx.cwd,
-      model: spec.modelSelection.model,
+      model: formatModelArgument(ctx.modelArgument, spec.modelSelection.model),
       developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
@@ -1690,7 +1697,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
    * including when the runner stops the call at its deadline, and this
    * returns only after its process has exited.
    *
-   * It uses the instance's Codex directory for the login, like a session. The
+   * It uses the Harness Home's Codex directory for the login, like a session. The
    * thread is ephemeral, so nothing of the call is saved there. The thread
    * runs in the call's scratch directory, `ctx.cwd`.
    */
@@ -1713,7 +1720,10 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           yield* Effect.mapError(initializeAppServer(host), (error) => error.message);
           const opened = yield* Effect.mapError(
             Effect.flatMap(
-              host.rpc.request("thread/start", buildTextGenerationThread(spec, ctx.cwd)),
+              host.rpc.request(
+                "thread/start",
+                buildTextGenerationThread(spec, ctx.cwd, ctx.modelArgument),
+              ),
               readThreadOpenedReply("thread/start"),
             ),
             (error) => error.message,
@@ -1784,7 +1794,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         const binding: SessionBinding = {
           sessionId,
           nativeSessionId: opened,
-          instanceId: spec.instanceId,
+          providerAccountId: spec.providerAccountId,
         };
         const reports = {
           reportUnknownMessage: yield* captureUnknownItemReporter("Codex", sessionId),
@@ -1794,6 +1804,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           binding,
           host,
           editMarks: ctx.editMarks,
+          modelArgument: ctx.modelArgument,
           asyncQuestions: new Map(),
           seenAsyncQuestionItems: new Set(),
           threads: makeCodexThreads({
@@ -1959,13 +1970,13 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
-    generateText: (ctx, _config, spec) => generateText(ctx, spec),
+    generateText: generateText,
 
     /**
      * Uses the device login rather than the browser login: the machine the
      * harness runs on usually has no browser, and the device login prints a
      * code the user can type into a browser anywhere. The login uses the
-     * instance's own home directories, like a session does, so the credential
+     * account's own home directories, like a session does, so the credential
      * is saved where the app-server looks for it.
      */
     login: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({

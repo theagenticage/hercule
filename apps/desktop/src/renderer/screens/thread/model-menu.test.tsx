@@ -14,18 +14,21 @@ import {
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import type { ProviderInstance } from "@hercule/contract";
-import { FIXTURE_INSTANCE, SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
+import type { ProviderAccount } from "@hercule/contract";
+import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
+import { FIXTURE_ACCOUNT, SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
 import { ModelMenu } from "./model-menu";
 
-/** The fixture instance's one snapshot, from moss. */
-const SNAPSHOT = FIXTURE_INSTANCE.snapshots[0]!;
+/** The fixture account's one snapshot, from moss. */
+const SNAPSHOT = FIXTURE_ACCOUNT.snapshots[0]!;
 
 /** A second Claude Code account on moss, which only a Draft Thread can switch to. */
-const WORK_INSTANCE: ProviderInstance = {
-  ...FIXTURE_INSTANCE,
+const WORK_ACCOUNT: ProviderAccount = {
+  ...FIXTURE_ACCOUNT,
   id: "01a06d02-7600-7000-8000-000000000002",
-  name: "work",
+  label: "work",
+  identity: "work@example.com",
+  planLabel: "Claude Pro",
   snapshots: [
     {
       ...SNAPSHOT,
@@ -43,9 +46,9 @@ const WORK_INSTANCE: ProviderInstance = {
   ],
 };
 
-/** The fixture instance with five more models, so the accounts hold more than eight. */
-const MANY_INSTANCE: ProviderInstance = {
-  ...FIXTURE_INSTANCE,
+/** The fixture account with five more models, so the accounts hold more than eight. */
+const MANY_ACCOUNT: ProviderAccount = {
+  ...FIXTURE_ACCOUNT,
   snapshots: [
     {
       ...SNAPSHOT,
@@ -62,24 +65,26 @@ const MANY_INSTANCE: ProviderInstance = {
   ],
 };
 
-/** The idle fixture thread's config: Claude Sonnet 5, on the fixture instance. */
+/** The idle fixture thread's config: Claude Sonnet 5, on the fixture account. */
 const CONFIG = readThreadConfig({ kind: "active", session: THREAD_FIXTURES.finished.session });
 
-/** Returns the catalogs with `instances` on moss. */
-const buildCatalogs = (instances: readonly ProviderInstance[]): ThreadCatalogs => ({
-  instances,
+/** Returns the catalogs with `accounts` on moss. */
+const buildCatalogs = (accounts: readonly ProviderAccount[]): ThreadCatalogs => ({
+  accounts,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
   runners: SIDEBAR_FIXTURE.runners,
   thisMacRunnerId: null,
 });
 
 /** Renders the menu and returns the function that received each choice. */
 const renderMenu = ({
-  instances = [FIXTURE_INSTANCE, WORK_INSTANCE],
+  accounts = [FIXTURE_ACCOUNT, WORK_ACCOUNT],
   config = CONFIG,
   kind = "active",
   recent = [],
 }: {
-  readonly instances?: readonly ProviderInstance[];
+  readonly accounts?: readonly ProviderAccount[];
   readonly config?: ThreadConfig;
   readonly kind?: ThreadKind;
   readonly recent?: readonly RecentModel[];
@@ -87,7 +92,7 @@ const renderMenu = ({
   const onChoose = vi.fn<(choice: ThreadChoice) => void>();
   render(
     <ModelMenu
-      catalogs={buildCatalogs(instances)}
+      catalogs={buildCatalogs(accounts)}
       config={config}
       kind={kind}
       readRecent={() => recent}
@@ -111,18 +116,18 @@ describe("the model menu", () => {
   it("lists Recent, the thread's account, then the other accounts, dimmed because the account is fixed", () => {
     renderMenu({
       recent: [
-        { instanceId: WORK_INSTANCE.id, model: "claude-haiku-5" },
-        { instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" },
+        { providerAccountId: WORK_ACCOUNT.id, model: "claude-haiku-5" },
+        { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" },
       ],
     });
 
     expect(readSections()).toEqual([
-      ["Recent", "Claude Haiku 5 · workaccount fixed", "Claude Opus 5 · personal"],
-      ["personal", "Claude Sonnet 5", "Claude Opus 5", "older models (1)"],
-      ["work · work@example.com · Claude Proaccount fixed"],
+      ["Recent", "Claude Haiku 5 · Anthropic · workaccount fixed", "Claude Opus 5 · Anthropic"],
+      ["Anthropic", "Claude Sonnet 5", "Claude Opus 5", "older models (1)"],
+      ["Anthropic · work · work@example.com · Claude Proaccount fixed"],
     ]);
     expect(readPickable()).toEqual([
-      "Claude Opus 5 · personal",
+      "Claude Opus 5 · Anthropic",
       "Claude Sonnet 5",
       "Claude Opus 5",
       "older models (1)",
@@ -143,58 +148,62 @@ describe("the model menu", () => {
   it("shows the older models on request, and hands each row's model choice to onChoose", async () => {
     const user = userEvent.setup();
     const onChoose = renderMenu({
-      recent: [{ instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" }],
+      recent: [{ providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" }],
     });
 
     await user.click(screen.getByRole("button", { name: "older models (1)" }));
     expect(readSections()[1]).toEqual([
-      "personal",
+      "Anthropic",
       "Claude Sonnet 5",
       "Claude Opus 5",
       "Claude Sonnet 4",
     ]);
-    await user.click(screen.getByRole("button", { name: "Claude Opus 5 · personal" }));
+    await user.click(screen.getByRole("button", { name: "Claude Opus 5 · Anthropic" }));
     await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
 
     expect(onChoose.mock.calls).toEqual([
-      [{ kind: "model", instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" }],
-      [{ kind: "model", instanceId: FIXTURE_INSTANCE.id, model: "claude-sonnet-4" }],
+      [{ kind: "model", providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" }],
+      [{ kind: "model", providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-sonnet-4" }],
     ]);
   });
 
   it("offers a filter once the accounts hold more than eight models, focused, which narrows every section", async () => {
     const user = userEvent.setup();
-    renderMenu({ instances: [MANY_INSTANCE, WORK_INSTANCE] });
+    renderMenu({ accounts: [MANY_ACCOUNT, WORK_ACCOUNT] });
 
     const filter = screen.getByRole("textbox", { name: "Filter models" });
     expect(document.activeElement).toBe(filter);
     await user.type(filter, "haiku 4.2");
 
-    expect(readSections().slice(1)).toEqual([["personal", "Claude Haiku 4.2"]]);
+    expect(readSections().slice(1)).toEqual([["Anthropic", "Claude Haiku 4.2"]]);
   });
 
   it("lets a Draft Thread switch to another account, which chooses the account alone", async () => {
     const user = userEvent.setup();
     const onChoose = renderMenu({ kind: "draft" });
 
-    expect(readSections()[1]).toEqual(["work · work@example.com · Claude Pro1 model"]);
+    expect(readSections()[1]).toEqual(["Anthropic · work · work@example.com · Claude Pro1 model"]);
     await user.click(
-      screen.getByRole("button", { name: "work · work@example.com · Claude Pro1 model" }),
+      screen.getByRole("button", {
+        name: "Anthropic · work · work@example.com · Claude Pro1 model",
+      }),
     );
 
-    expect(onChoose.mock.calls).toEqual([[{ kind: "account", instanceId: WORK_INSTANCE.id }]]);
+    expect(onChoose.mock.calls).toEqual([
+      [{ kind: "account", providerAccountId: WORK_ACCOUNT.id }],
+    ]);
   });
 
   it("lists another account's matching models on a Draft Thread, each choosing the account and the model together", async () => {
     const user = userEvent.setup();
-    const onChoose = renderMenu({ kind: "draft", instances: [MANY_INSTANCE, WORK_INSTANCE] });
+    const onChoose = renderMenu({ kind: "draft", accounts: [MANY_ACCOUNT, WORK_ACCOUNT] });
 
     await user.type(screen.getByRole("textbox", { name: "Filter models" }), "haiku 5");
-    expect(readSections().slice(1)).toEqual([["work", "Claude Haiku 5 · default"]]);
+    expect(readSections().slice(1)).toEqual([["Anthropic · work", "Claude Haiku 5 · default"]]);
     await user.click(screen.getByRole("button", { name: "Claude Haiku 5 · default" }));
 
     expect(onChoose.mock.calls).toEqual([
-      [{ kind: "model", instanceId: WORK_INSTANCE.id, model: "claude-haiku-5" }],
+      [{ kind: "model", providerAccountId: WORK_ACCOUNT.id, model: "claude-haiku-5" }],
     ]);
   });
 });

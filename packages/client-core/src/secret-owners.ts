@@ -1,12 +1,14 @@
 /**
  * Which secrets the user may write on the Secrets screen. The API refuses a
- * set, a rotate or a delete for two owner kinds, so the screen offers none of
- * them there:
+ * set, a rotate or a delete for three owner kinds, so the screen offers none
+ * of them there:
  *
  * - `core` holds the controller's own key material, such as its signing key.
  * - `connection` holds a connection's credentials. New credentials must belong
  *   to the account the connection already signs in as, and only a reconnect
  *   or `connection.setCredentials` checks that.
+ * - `provider-account` holds a Provider Account's key or token. Only
+ *   `providerAccount.update` and `providerAccount.signIn` write it.
  */
 import type { OwnerKind } from "@hercule/contract";
 
@@ -14,7 +16,6 @@ import type { OwnerKind } from "@hercule/contract";
 export const WRITABLE_OWNER_KINDS = [
   "plugin",
   "runner",
-  "provider-instance",
 ] as const satisfies ReadonlyArray<OwnerKind>;
 
 /**
@@ -28,7 +29,7 @@ const READ_ONLY_NOTES: Readonly<Record<OwnerKind, string | null>> = {
   connection: "connection credential",
   plugin: null,
   runner: null,
-  "provider-instance": null,
+  "provider-account": "account credential",
 };
 
 /**

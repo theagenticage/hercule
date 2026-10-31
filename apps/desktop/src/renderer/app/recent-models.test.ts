@@ -11,20 +11,32 @@ describe("the Recent list", () => {
 
   it("puts the latest pick first and keeps three", () => {
     for (const model of ["a", "b", "c", "d"]) {
-      rememberRecentModel(HOME, { instanceId: "claude", model });
+      rememberRecentModel(HOME, { providerAccountId: "claude", model });
     }
-    rememberRecentModel(HOME, { instanceId: "claude", model: "c" });
+    rememberRecentModel(HOME, { providerAccountId: "claude", model: "c" });
     expect(readRecentModels(HOME).map((each) => each.model)).toEqual(["c", "d", "b"]);
   });
 
   it("keeps each controller's list apart", () => {
-    rememberRecentModel(HOME, { instanceId: "claude", model: "opus" });
+    rememberRecentModel(HOME, { providerAccountId: "claude", model: "opus" });
     expect(readRecentModels(WORK)).toEqual([]);
+  });
+
+  it("keeps the list a release before Provider Accounts stored under the key instanceId", () => {
+    localStorage.setItem(
+      `recent-models:${HOME}`,
+      JSON.stringify([{ instanceId: "claude", model: "a" }]),
+    );
+    rememberRecentModel(HOME, { providerAccountId: "claude", model: "b" });
+    expect(readRecentModels(HOME)).toEqual([
+      { providerAccountId: "claude", model: "b" },
+      { providerAccountId: "claude", model: "a" },
+    ]);
   });
 
   it("starts again from an unreadable stored list", () => {
     localStorage.setItem(`recent-models:${HOME}`, "not json");
-    rememberRecentModel(HOME, { instanceId: "claude", model: "opus" });
-    expect(readRecentModels(HOME)).toEqual([{ instanceId: "claude", model: "opus" }]);
+    rememberRecentModel(HOME, { providerAccountId: "claude", model: "opus" });
+    expect(readRecentModels(HOME)).toEqual([{ providerAccountId: "claude", model: "opus" }]);
   });
 });

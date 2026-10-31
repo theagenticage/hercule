@@ -4,12 +4,12 @@
  * secret is only ever a reference.
  */
 export { type SecretDecryptError } from "./cipher";
-export { readInstanceSecrets } from "./instances";
 export {
   MasterKey,
   masterKeyLayer,
   createMasterKey,
   defaultBackend,
+  openExistingMasterKey,
   openKeyStore,
   type MasterKeyBackend,
   type MasterKeyError,
@@ -17,7 +17,7 @@ export {
 } from "./masterKey";
 export {
   CORE_OWNER,
-  buildProviderInstanceOwner,
+  buildProviderAccountOwner,
   Secrets,
   secretsLayer,
   type SecretNameError,

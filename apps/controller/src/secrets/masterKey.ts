@@ -33,6 +33,7 @@ import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
@@ -351,36 +352,82 @@ const secretCount: Effect.Effect<number, SqlError, SqlClient.SqlClient> = Effect
 });
 
 /**
+ * Builds the error for a machine that lost its key while its database
+ * still holds `secrets` encrypted rows. Minting a new key there would make the
+ * rows unreadable, so the controller stops instead.
+ */
+const buildLostKeyError = (
+  store: KeyStore,
+  home: HerculeHome["Service"],
+  secrets: number,
+): MasterKeyError =>
+  new MasterKeyError({
+    message:
+      `${store.describe} holds no master key, but ${home.databaseFile} holds ${secrets} ` +
+      `encrypted secret ${secrets === 1 ? "row" : "rows"}. Minting a new key would make ` +
+      `${secrets === 1 ? "it" : "them"} unreadable. ` +
+      `Restore the key this machine had, or start from an empty Hercule Home.`,
+  });
+
+/**
+ * Opens this machine's Master Key if it has one, and returns `undefined` if it
+ * has none and the database holds no secrets. Never mints a key. Fails with
+ * `MasterKeyError` when a key is stored but cannot be used (a wrong file mode,
+ * the wrong size, a locked keychain), and when there is no key but the
+ * database holds encrypted secrets.
+ *
+ * The boot calls it on the writer-only client, before the migrations, because
+ * a migration may encrypt secrets again (spec 04, boot order). So a controller
+ * that cannot open its key stops before it changes the database.
+ */
+export const openExistingMasterKey = (
+  backend: MasterKeyBackend = defaultBackend,
+  run: SecurityRunner = spawnSecurity,
+): Effect.Effect<
+  CryptoKey | undefined,
+  MasterKeyError | SqlError,
+  HerculeHome | SqlClient.SqlClient
+> =>
+  Effect.gen(function* () {
+    const home = yield* HerculeHome;
+    const store = openKeyStore(home, backend, run);
+    const bytes = yield* store.read;
+    if (bytes !== undefined) return yield* importMasterKey(bytes);
+    const secrets = yield* secretCount;
+    if (secrets > 0) return yield* buildLostKeyError(store, home, secrets);
+    return undefined;
+  });
+
+/**
  * Reads this machine's master key, minting and storing one on first run, and
  * provides it as a non-extractable AES-256-GCM key.
  *
  * The backend is explicit so a test drives the file store in a temporary home
  * without ever touching the developer's real keychain. `run` is the `security`
  * CLI the keychain store uses; tests pass a fake so Linux CI can cover a
- * macOS-to-Linux promotion.
+ * macOS-to-Linux promotion. `opened` is the key the boot already opened before
+ * the migrations; when it holds one, the layer provides it and reads nothing.
  */
 export const masterKeyLayer = (
   backend: MasterKeyBackend = defaultBackend,
   run: SecurityRunner = spawnSecurity,
+  opened?: Ref.Ref<CryptoKey | undefined>,
 ): Layer.Layer<MasterKey, MasterKeyError | SqlError, HerculeHome | SqlClient.SqlClient> =>
   Layer.effect(
     MasterKey,
     Effect.gen(function* () {
+      // The boot opens an existing key before the migrations and keeps it
+      // here, so the keychain is read once.
+      const alreadyOpen = opened === undefined ? undefined : yield* Ref.get(opened);
+      if (alreadyOpen !== undefined) return MasterKey.of({ key: alreadyOpen });
+
       const home = yield* HerculeHome;
       const store = openKeyStore(home, backend, run);
 
       let bytes = yield* store.read;
       if (bytes === undefined) {
         const secrets = yield* secretCount;
-        if (secrets > 0) {
-          return yield* new MasterKeyError({
-            message:
-              `${store.describe} holds no master key, but ${home.databaseFile} holds ${secrets} ` +
-              `encrypted secret ${secrets === 1 ? "row" : "rows"}. Minting a new key would make ` +
-              `${secrets === 1 ? "it" : "them"} unreadable. ` +
-              `Restore the key this machine had, or start from an empty Hercule Home.`,
-          });
-        }
+        if (secrets > 0) return yield* buildLostKeyError(store, home, secrets);
         // The store returns the key it holds, which is another boot's key if
         // that boot minted first; the key minted here is then never used.
         bytes = yield* store.write(crypto.getRandomValues(new Uint8Array(MASTER_KEY_BYTES)));

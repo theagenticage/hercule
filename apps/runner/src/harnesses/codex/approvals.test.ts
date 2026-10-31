@@ -754,7 +754,7 @@ describe("an approval resolved while the turn is still running", () => {
     const opened = await awaitOpenedRequest(run);
 
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([
-      { sessionId: SESSION, nativeSessionId: THREAD, instanceId: SPEC.instanceId },
+      { sessionId: SESSION, nativeSessionId: THREAD, providerAccountId: SPEC.providerAccountId },
     ]);
 
     await Effect.runPromise(

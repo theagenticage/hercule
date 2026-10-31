@@ -29,7 +29,7 @@ import type {
   ModelOption,
   Profile,
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -67,34 +67,20 @@ import {
 
 /**
  * Fixtures for the composer tests:
- * - A provider instance, a runner and a profile with `SESSION`'s ids,
+ * - A Provider Account, a runner and a profile with `SESSION`'s ids,
  *   which the started thread's read-only fields and model menu read.
- * - A second instance, runner and profile, which exist only to prove that
+ * - A second account, runner and profile, which exist only to prove that
  *   they never show up in a started thread's read-only fields or its
- *   other-instance groups.
+ *   other-account groups.
  */
-const DECLARED: ProviderInstance["declared"] = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-};
-
-const buildInstanceSnapshot = (
+const buildProviderAccountSnapshot = (
   runnerId: string,
   identity: string,
   planLabel: string,
-  models: ProviderInstance["snapshots"][number]["models"],
-): ProviderInstance["snapshots"][number] => ({
+  models: ProviderAccount["snapshots"][number]["models"],
+): ProviderAccount["snapshots"][number] => ({
   runnerId,
+  harnessId: "claude-code/claude-code",
   probedAt: "2026-09-08T09:50:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
@@ -102,17 +88,16 @@ const buildInstanceSnapshot = (
   models,
 });
 
-const INSTANCE_STARTED: ProviderInstance = {
-  id: SESSION.instanceId,
-  harnessId: "claude-code/claude-code",
-  secretFields: [],
-  name: "personal",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: DECLARED,
+const ACCOUNT_STARTED: ProviderAccount = {
+  id: SESSION.providerAccountId,
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: "personal",
+  identity: "rogier@example.com",
+  planLabel: "Claude Max",
+  defaultHarnessId: "claude-code/claude-code",
   snapshots: [
-    buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
@@ -129,8 +114,8 @@ const INSTANCE_STARTED: ProviderInstance = {
 
 /**
  * The same descriptor `new.integration.test.tsx` uses, for the model option
- * tests. Only `INSTANCE_OPTIONS` offers it, not
- * `INSTANCE_STARTED`, so the tests that are not about options see a pill with
+ * tests. Only `ACCOUNT_OPTIONS` offers it, not
+ * `ACCOUNT_STARTED`, so the tests that are not about options see a pill with
  * no options selector.
  */
 const EFFORT: ModelOption = {
@@ -145,11 +130,11 @@ const EFFORT: ModelOption = {
   default: "medium",
 };
 
-/** The session's instance, with `effort` offered on both of its models. */
-const INSTANCE_OPTIONS: ProviderInstance = {
-  ...INSTANCE_STARTED,
+/** The session's account, with `effort` offered on both of its models. */
+const ACCOUNT_OPTIONS: ProviderAccount = {
+  ...ACCOUNT_STARTED,
   snapshots: [
-    buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
@@ -167,12 +152,14 @@ const INSTANCE_OPTIONS: ProviderInstance = {
   ],
 };
 
-const INSTANCE_OTHER: ProviderInstance = {
-  ...INSTANCE_STARTED,
+const ACCOUNT_OTHER: ProviderAccount = {
+  ...ACCOUNT_STARTED,
   id: "01a06d02-1000-7000-8000-000000000099",
-  name: "work",
+  label: "work",
+  identity: "work@example.com",
+  planLabel: "Claude Pro",
   snapshots: [
-    buildInstanceSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
+    buildProviderAccountSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
       {
         slug: "claude-haiku-5",
         name: "Claude Haiku 5",
@@ -223,7 +210,7 @@ const PROFILE_OTHER: Profile = {
 /**
  * Builds the stubbed controller routes for the app and for the thread of
  * `fixture`, with no subagents, the transcript `rows`, and the composer's
- * instances, runners and profiles. `extra` is added over them.
+ * accounts, runners and profiles. `extra` is added over them.
  */
 const buildThreadRoutes = (
   fixture: Session,
@@ -234,7 +221,7 @@ const buildThreadRoutes = (
     { session: fixture, subagents: [] },
     {
       [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
-      "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
+      "GET /api/v1/provider-accounts": { body: [ACCOUNT_STARTED, ACCOUNT_OTHER] },
       "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
       "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
       ...extra,
@@ -2329,14 +2316,14 @@ describe("Thread: composer read-only fields and model switch", () => {
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
 
     expect(readPageText()).toContain("account fixed");
-    // The current instance's other model can still be picked, unlike the
-    // other instance's group.
+    // The current account's other model can still be picked, unlike the
+    // other account's group.
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
   });
 
   // Picking a model does not patch the session. The pick is draft state that
   // is sent with the next submission.
-  it("shows the picked model in the pill without sending anything when a model of the same instance is chosen", async () => {
+  it("shows the picked model in the pill without sending anything when a model of the same account is chosen", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
@@ -2697,16 +2684,16 @@ describe("Thread: stop control", () => {
  * picks are draft state that stays in the browser until the next submission.
  * After the server stores them, the pill shows the stored session values.
  *
- * These tests return `INSTANCE_OPTIONS` from `GET /api/v1/providers`, the
+ * These tests return `ACCOUNT_OPTIONS` from `GET /api/v1/providers`, the
  * only fixture whose models have an `effort` descriptor.
  */
 describe("Thread: model options are sent with the submission", () => {
-  const providers = { body: [INSTANCE_OPTIONS, INSTANCE_OTHER] };
+  const providers = { body: [ACCOUNT_OPTIONS, ACCOUNT_OTHER] };
 
   it("sends nothing when an option is picked, and carries the pick on the next input", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
       },
@@ -2743,7 +2730,7 @@ describe("Thread: model options are sent with the submission", () => {
   it("keeps the picked option when another model that offers it is picked, and never patches the session", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
       },
@@ -2780,10 +2767,10 @@ describe("Thread: model options are sent with the submission", () => {
 
   it("brings a picked option back when the model that offers it is picked again", async () => {
     const user = userEvent.setup();
-    const [snapshot] = INSTANCE_OPTIONS.snapshots;
+    const [snapshot] = ACCOUNT_OPTIONS.snapshots;
     // A third model that offers no options.
-    const withPlainModel: ProviderInstance = {
-      ...INSTANCE_OPTIONS,
+    const withPlainModel: ProviderAccount = {
+      ...ACCOUNT_OPTIONS,
       snapshots: [
         {
           ...snapshot!,
@@ -2800,7 +2787,7 @@ describe("Thread: model options are sent with the submission", () => {
       ],
     };
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": { body: [withPlainModel] },
+      "GET /api/v1/provider-accounts": { body: [withPlainModel] },
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
       },
@@ -2839,7 +2826,7 @@ describe("Thread: model options are sent with the submission", () => {
         modelSelection: { model: "claude-sonnet-5", options: { effort: "high" } },
       }),
       buildTwoCompletedTurns(),
-      { "GET /api/v1/providers": providers },
+      { "GET /api/v1/provider-accounts": providers },
     );
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
@@ -2863,7 +2850,7 @@ describe("Thread: model options are sent with the submission", () => {
     // from that stored value.
     let stored: Record<string, string> = {};
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({
         body: buildSession({
           status: "idle",
@@ -2911,7 +2898,7 @@ describe("Thread: model options are sent with the submission", () => {
     });
     let holding = false;
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       // The session read that follows the input is held back, so the user
       // can pick again while the send has not finished.
       [`GET /api/v1/sessions/${SESSION_ID}`]: async () => {
@@ -2974,7 +2961,7 @@ describe("Thread: model options are sent with the submission", () => {
     let holding = false;
 
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       [`GET /api/v1/sessions/${SESSION_ID}`]: async () => {
         if (holding) await held;
         return { body: buildSession({ status: "idle", modelSelection: stored }) };
@@ -3043,7 +3030,7 @@ describe("Thread: model options are sent with the submission", () => {
         modelSelection: { model: "claude-sonnet-5", options: { effort: "high" } },
       }),
       buildTwoCompletedTurns(),
-      { "GET /api/v1/providers": providers },
+      { "GET /api/v1/provider-accounts": providers },
     );
 
     await waitFor(() => {
@@ -4536,7 +4523,8 @@ const ADA: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Ada",
   systemPrompt: "You are a helpful assistant.",
-  instanceId: SESSION.instanceId,
+  providerAccountId: SESSION.providerAccountId,
+  harnessId: null,
   permissionProfileId: SESSION.permissionProfileId,
   accessMode: "approval-required",
   model: null,

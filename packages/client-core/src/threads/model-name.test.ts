@@ -1,13 +1,21 @@
 /**
- * Tests `findModelName(instance, slug)` and `describeAgent(instance, model)`,
- * which name a thread's model from its instance's catalogs.
+ * Tests `findModelName(account, harnessId, slug)` and `describeAgent(providers,
+ * account, harnessId, model)`, which name a thread's model from its Provider
+ * Account's catalogs.
  */
 import { describe, expect, it } from "vitest";
-import { buildInstance, buildSnapshot, CLAUDE_CODE_IDENTITY } from "../providers.testing";
+import {
+  ANTHROPIC_IDENTITY,
+  PROVIDERS,
+  buildProviderAccount,
+  buildSnapshot,
+} from "../providers.testing";
 import { describeAgent, findModelName } from "./model-name";
 
-/** An instance with a catalog on two runners; only the second lists Opus. */
-const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
+const HARNESS = ANTHROPIC_IDENTITY.harnessId;
+
+/** An account with a catalog on two runners; only the second lists Opus. */
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
   buildSnapshot({
     runnerId: "atlas",
     models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],
@@ -21,25 +29,38 @@ const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
 ]);
 
 describe("findModelName", () => {
-  it("finds the name in any runner's catalog of the instance", () => {
-    expect(findModelName(CLAUDE, "claude-opus-5-5")).toBe("Opus 5.5");
+  it("finds the name in any runner's catalog of the account", () => {
+    expect(findModelName(CLAUDE, HARNESS, "claude-opus-5-5")).toBe("Opus 5.5");
+  });
+
+  it("reads only the snapshots of the harness the thread runs in", () => {
+    expect(findModelName(CLAUDE, "pi/pi", "claude-opus-5-5")).toBe("claude-opus-5-5");
   });
 
   it("returns the slug when no catalog lists it", () => {
-    expect(findModelName(CLAUDE, "claude-haiku-4-5")).toBe("claude-haiku-4-5");
+    expect(findModelName(CLAUDE, HARNESS, "claude-haiku-4-5")).toBe("claude-haiku-4-5");
   });
 
-  it("returns the slug when the instance is gone", () => {
-    expect(findModelName(undefined, "claude-opus-5-5")).toBe("claude-opus-5-5");
+  it("returns the slug when the account is gone", () => {
+    expect(findModelName(undefined, HARNESS, "claude-opus-5-5")).toBe("claude-opus-5-5");
   });
 });
 
 describe("describeAgent", () => {
-  it("joins the instance's display name and the model's name", () => {
-    expect(describeAgent(CLAUDE, "claude-opus-5-5")).toBe("Claude Code · Opus 5.5");
+  it("joins the account's name and the model's name", () => {
+    expect(describeAgent(PROVIDERS, CLAUDE, HARNESS, "claude-opus-5-5")).toBe(
+      "Anthropic · Opus 5.5",
+    );
   });
 
-  it("leaves out the instance's name when the instance is gone", () => {
-    expect(describeAgent(undefined, "claude-opus-5-5")).toBe("claude-opus-5-5");
+  it("includes the label of a labelled account", () => {
+    const work = { ...CLAUDE, label: "work" };
+    expect(describeAgent(PROVIDERS, work, HARNESS, "claude-opus-5-5")).toBe(
+      "Anthropic · work · Opus 5.5",
+    );
+  });
+
+  it("leaves out the account's name when the account is gone", () => {
+    expect(describeAgent(PROVIDERS, undefined, HARNESS, "claude-opus-5-5")).toBe("claude-opus-5-5");
   });
 });

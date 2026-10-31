@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { StartingRevision } from "@hercule/contract";
 import { buildBranchField } from "./branch-menu";
+import { HARNESSES, PROVIDERS } from "../providers.testing";
 import type { ThreadCatalogs } from "./config";
 import { resolveThreadConfig } from "./resolve-thread";
 import { buildSubmission } from "./submission";
@@ -25,7 +26,8 @@ const around = { workspaces: [PRIMARY], runnerId: MOSS.id };
 const draft = {
   kind: "draft" as const,
   config: {
-    instanceId: null,
+    providerAccountId: null,
+    harnessId: null,
     model: null,
     options: {},
     accessMode: "approval-required" as const,
@@ -34,7 +36,13 @@ const draft = {
   },
 };
 
-const NO_CATALOGS: ThreadCatalogs = { instances: [], runners: [], thisMacRunnerId: null };
+const NO_CATALOGS: ThreadCatalogs = {
+  accounts: [],
+  runners: [],
+  thisMacRunnerId: null,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
+};
 
 it("defaults a coding project to separate files while honoring each explicit stored choice", () => {
   expect(decideDefaultWorkspacePick([WEBSHOP], null)).toEqual({

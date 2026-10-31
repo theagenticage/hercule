@@ -1,6 +1,6 @@
 /**
- * The options of a select that picks a record by its id, such as a provider
- * instance, a permission profile or a Connection.
+ * The options of a select that picks a record by its id, such as a Provider
+ * Account, a permission profile or a Connection.
  *
  * A select whose value matches none of its options shows its first option
  * instead, so the screen would claim a choice that is not stored. The stored

@@ -1,7 +1,7 @@
 /**
- * A provider's row, with the login that runs on the row's runner. The first
- * run's providers step lists one per provider, and the draft's Log in
- * button opens one in a dialog (spec 17, The first run, step 2).
+ * A Provider Account's row, with the sign-in that runs on the row's runner.
+ * The first run's providers step lists one per account, and the draft's Sign
+ * in button opens one in a dialog (spec 17, The first run, step 2).
  */
 import { useEffect, useEffectEvent, useRef, useState, type JSX } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,46 +17,47 @@ import {
   type DeviceLogin,
   type HerculeClient,
   type ProviderRow,
-  type SecretFieldOffer,
+  type CredentialFieldOffer,
 } from "@hercule/client-core";
 import { useMinutesLeft } from "../../app/age-clock";
-import { providersQuery } from "../../app/queries";
+import { providerAccountsQuery } from "../../app/queries";
 import { ExternalIcon } from "../../icons/external";
 import { DeviceCodeSteps, DoneMark, FormField, MarkedRow, NumberedStep, WaitLine } from "../step";
 import { HarnessLogo } from "../thread/harness-logo";
 
 /**
- * Renders `row`, the provider instance as its runner `runnerId` sees it: its
- * mark, its name, where the harness is on the runner, and the action it
- * offers at the end:
+ * Renders `row`, the account as its runner `runnerId` sees it: the mark of
+ * its harness, its name, the harness and where it is on the runner, and the
+ * action it offers at the end:
  *
- * - "Logged in" once the harness is logged in;
+ * - "Signed in" once the account is signed in;
  * - Install, when the runner can install the harness (`runner.installHarness`);
- * - Log in, which starts the vendor's login on the runner;
- * - a button per secret field, for a provider whose credential is typed in,
- *   such as pi's API key.
+ * - Sign in, which starts the vendor's sign-in on the runner
+ *   (`providerAccount.signIn`);
+ * - a button per credential field, for an account whose credential is typed
+ *   in, such as a Z.ai API key.
  *
- * While a login runs, its steps show under the row and the action is
- * Cancel. Cancel only clears the steps: the login on the runner ends by
+ * While a sign-in runs, its steps show under the row and the action is
+ * Cancel. Cancel only clears the steps: the sign-in on the runner ends by
  * itself when its code expires.
  *
- * A login takes one of two forms, which the vendor's tool decides:
+ * A sign-in takes one of two forms, which the vendor's tool decides:
  *
  * - Paste-back (Claude Code): the vendor's page shows a code, which the user
- *   pastes here. The login ends when the controller accepts the code.
+ *   pastes here. The sign-in ends when the controller accepts the code.
  * - Device code (Codex): the user copies a code here and enters it on the
  *   vendor's page. Nothing comes back through the app. The controller probes
- *   the instance when the vendor's login ends and announces the new
- *   snapshot on the `provider` live topic, and the login ends when a fresh
- *   snapshot shows the harness logged in. The screen does not poll, so
+ *   the account when the vendor's sign-in ends and announces the new
+ *   snapshot on the `provider` live topic, and the sign-in ends when a fresh
+ *   snapshot shows the account signed in. The screen does not poll, so
  *   whoever mounts this row must keep the live connection open.
  *
- * `onLoggedIn` is called once when a login started here ends with the
- * harness logged in, and when a secret field is saved.
+ * `onSignedIn` is called once when a sign-in started here ends with the
+ * account signed in, and when a credential is saved.
  *
- * With `startOnOpen`, the login starts as soon as the row mounts, when the
- * row offers one. The login dialog uses it because the user opened the
- * dialog with a Log in button already, and a second Log in would be one
+ * With `startOnOpen`, the sign-in starts as soon as the row mounts, when the
+ * row offers one. The sign-in dialog uses it because the user opened the
+ * dialog with a Sign in button already, and a second Sign in would be one
  * click too many.
  *
  * `client` is the client of the controller the runner belongs to. It is
@@ -68,34 +69,34 @@ export function ProviderLogin({
   row,
   runnerId,
   startOnOpen = false,
-  onLoggedIn,
+  onSignedIn,
 }: {
   readonly client: HerculeClient;
   readonly row: ProviderRow;
   readonly runnerId: string;
   readonly startOnOpen?: boolean;
-  readonly onLoggedIn?: () => void;
+  readonly onSignedIn?: () => void;
 }): JSX.Element {
   const { bridge } = useRouteContext({ from: "__root__" });
   const queryClient = useQueryClient();
   const [code, setCode] = useState("");
-  const [secretField, setSecretField] = useState<SecretFieldOffer | null>(null);
+  const [credentialField, setCredentialField] = useState<CredentialFieldOffer | null>(null);
 
   const start = useMutation({
     mutationFn: () => startProviderLogin(client, row.id, runnerId),
   });
   const submit = useMutation({
     mutationFn: () =>
-      client.provider.submitLoginCode({
+      client.providerAccount.submitSignInCode({
         params: { id: row.id },
         // A pasted code often has a stray space or newline, and the vendor
         // would treat it as a different code.
         payload: { runnerId, code: code.trim() },
       }),
-    // The row stays on its steps until the providers are read again, so it
-    // goes straight to "Logged in" without showing Log in for a moment.
+    // The row stays on its steps until the accounts are read again, so it
+    // goes straight to "Signed in" without showing Sign in for a moment.
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
       endLogin();
     },
   });
@@ -108,48 +109,49 @@ export function ProviderLogin({
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.runners() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.providers() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.harnesses() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() }),
       ]),
   });
 
-  /** Clears the steps of a login or a secret field, and any error they showed. */
+  /** Clears the steps of a sign-in or a credential field, and any error they showed. */
   const clearLoginSteps = (): void => {
     setCode("");
-    setSecretField(null);
+    setCredentialField(null);
     start.reset();
     submit.reset();
   };
-  /** Ends a login that logged the harness in. */
+  /** Ends a sign-in that signed the account in. */
   const endLogin = (): void => {
     clearLoginSteps();
-    onLoggedIn?.();
+    onSignedIn?.();
   };
 
   // React runs a mount effect twice in development. A second login would
   // stop the first on the runner, so the first run of the effect is marked.
   const startedOnOpenRef = useRef(false);
   useEffect(() => {
-    if (!startOnOpen || startedOnOpenRef.current || !row.logIn || row.loggedIn) return;
+    if (!startOnOpen || startedOnOpenRef.current || !row.signIn || row.signedIn) return;
     startedOnOpenRef.current = true;
     start.mutate();
-  }, [startOnOpen, row.logIn, row.loggedIn, start]);
+  }, [startOnOpen, row.signIn, row.signedIn, start]);
 
   const started = start.data;
-  const busy = started !== undefined || secretField !== null;
+  const busy = started !== undefined || credentialField !== null;
 
   return (
     <MarkedRow
       mark={<HarnessLogo harnessId={row.harnessId} size={18} />}
       name={row.name}
-      detail={row.location}
+      detail={`${row.harnessName} · ${row.location}`}
       detailMono={row.path !== null}
       end={
         busy ? (
           <button type="button" className="btn btn--sm btn--quiet" onClick={clearLoginSteps}>
             Cancel
           </button>
-        ) : row.loggedIn ? (
-          <DoneMark>Logged in</DoneMark>
+        ) : row.signedIn ? (
+          <DoneMark>Signed in</DoneMark>
         ) : row.install === "offered" ? (
           <button
             type="button"
@@ -159,24 +161,24 @@ export function ProviderLogin({
           >
             {install.isPending ? "Installing…" : "Install"}
           </button>
-        ) : row.logIn ? (
+        ) : row.signIn ? (
           <button
             type="button"
             className="btn btn--sm"
-            // Starting a second login would stop the first one on the runner.
+            // Starting a second sign-in would stop the first one on the runner.
             disabled={start.isPending}
             onClick={() => start.mutate()}
           >
-            Log in
+            {row.signInLabel}
           </button>
-        ) : row.secretFields.length > 0 ? (
+        ) : row.credentialFields.length > 0 ? (
           <span className="row">
-            {row.secretFields.map((field) => (
+            {row.credentialFields.map((field) => (
               <button
                 key={field.name}
                 type="button"
                 className="btn btn--sm"
-                onClick={() => setSecretField(field)}
+                onClick={() => setCredentialField(field)}
               >
                 {field.label}
               </button>
@@ -212,11 +214,11 @@ export function ProviderLogin({
             }
           />
         )
-      ) : secretField !== null ? (
-        <SecretFieldEntry
+      ) : credentialField !== null ? (
+        <CredentialFieldEntry
           client={client}
-          instanceId={row.id}
-          field={secretField}
+          providerAccountId={row.id}
+          field={credentialField}
           onSaved={endLogin}
         />
       ) : start.error !== null ? (
@@ -332,11 +334,11 @@ function SignInPageButton({
 /**
  * Renders the end of a device login: the wait line with the minutes
  * the code has left, or, once the code has expired, that line and Start
- * again. Calls `onDone` once when a fresh snapshot shows the harness
- * logged in, which never happens for a harness that was logged in when the
- * login started (`DeviceLogin.loggedInAtStart`); the user presses Cancel.
+ * again. Calls `onDone` once when a fresh snapshot shows the account
+ * signed in, which never happens for an account that was signed in when the
+ * sign-in started (`DeviceLogin.signedInAtStart`); the user presses Cancel.
  *
- * It reads the instances from the cache, which the `provider` live topic
+ * It reads the accounts from the cache, which the `provider` live topic
  * keeps current. The minutes move on with the age clock.
  */
 function DeviceLoginWait({
@@ -350,8 +352,8 @@ function DeviceLoginWait({
   readonly onDone: () => void;
   readonly onRestart: () => void;
 }): JSX.Element {
-  const instances = useQuery(providersQuery(client)).data ?? [];
-  const step = decideDeviceLoginStep(login, instances, useMinutesLeft(login.expiresAt));
+  const accounts = useQuery(providerAccountsQuery(client)).data ?? [];
+  const step = decideDeviceLoginStep(login, accounts, useMinutesLeft(login.expiresAt));
 
   const endLogin = useEffectEvent(onDone);
   useEffect(() => {
@@ -361,7 +363,7 @@ function DeviceLoginWait({
   if (step.kind === "expired") {
     return (
       <span className="fl-err" role="alert">
-        The code expired before the login finished.
+        The code expired before the sign-in finished.
         <br />
         <button type="button" className="btn btn--sm" onClick={onRestart}>
           Start again
@@ -370,37 +372,38 @@ function DeviceLoginWait({
     );
   }
   // A login that is done shows so until `onDone` clears the steps.
-  return <WaitLine text={step.kind === "done" ? "Logged in." : describeDeviceLoginWait(step)} />;
+  return <WaitLine text={step.kind === "done" ? "Signed in." : describeDeviceLoginWait(step)} />;
 }
 
 /**
- * Renders the entry of a secret field, such as pi's API key: the field's
- * description, a password field and Save. The value is stored as a secret of
- * the instance and never read back. Calls `onSaved` once it is stored.
+ * Renders the entry of a credential field of the account's kind, such as the
+ * Z.ai API key: the field's description, a password field and Save. The value
+ * is sent with `providerAccount.update` and never read back. Calls `onSaved`
+ * once it is stored.
  */
-function SecretFieldEntry({
+function CredentialFieldEntry({
   client,
-  instanceId,
+  providerAccountId,
   field,
   onSaved,
 }: {
   readonly client: HerculeClient;
-  readonly instanceId: string;
-  readonly field: SecretFieldOffer;
+  readonly providerAccountId: string;
+  readonly field: CredentialFieldOffer;
   readonly onSaved: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [value, setValue] = useState("");
   const save = useMutation({
     mutationFn: () =>
-      client.secret.set({
-        params: { ownerKind: "provider-instance", ownerId: instanceId, name: field.name },
+      client.providerAccount.update({
+        params: { id: providerAccountId },
         // A pasted credential often has a stray space or newline, and the
         // vendor would treat it as a different credential.
-        payload: { value: value.trim() },
+        payload: { credentials: { [field.name]: value.trim() } },
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
       onSaved();
     },
   });

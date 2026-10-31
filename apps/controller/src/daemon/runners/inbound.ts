@@ -25,7 +25,7 @@ import { withTransaction } from "../../db";
 import { ConnectionTypes } from "../../connections";
 import { SessionTokens } from "../../permissions";
 import { PromotionState } from "../../promotion";
-import { ProviderProbes } from "../../providers";
+import { ProviderAccountProbes } from "../../provider-accounts";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
 import { Secrets } from "../../secrets";
@@ -44,7 +44,7 @@ const make = Effect.gen(function* () {
   const runs = yield* RunService;
   const promotion = yield* PromotionState;
   const workspaceSteps = yield* WorkspaceSteps;
-  const probes = yield* ProviderProbes;
+  const probes = yield* ProviderAccountProbes;
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
@@ -137,12 +137,13 @@ const make = Effect.gen(function* () {
         );
       case "loginEnded":
         // A device login reads nothing back, so its end carries no outcome.
-        // A fresh probe of the instance on that runner tells whether the user
-        // finished it, and announces the new snapshot to everyone watching.
+        // A fresh probe of the account in that harness on that runner tells
+        // whether the user finished it, and announces the new snapshot to
+        // everyone watching.
         // Forked, because the probe waits on the runner. The probe runs only
         // for a login this controller started.
         return forkAndAbsorbFailures(
-          "Probing an instance after its login ended failed",
+          "Probing a provider account after its sign-in ended failed",
           probes.probeAfterLoginEnd(traffic.runnerId, traffic.ended.requestId),
         );
       case "placementsChanged":
@@ -293,7 +294,7 @@ export const InboundLayer: Layer.Layer<
   | WorkspaceService
   | RunService
   | WorkspaceSteps
-  | ProviderProbes
+  | ProviderAccountProbes
   | PromotionState
   | Dispatch
   | Live

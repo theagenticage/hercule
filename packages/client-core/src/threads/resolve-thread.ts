@@ -12,10 +12,11 @@ import type {
   CapabilitySnapshot,
   ModelDescriptor,
   ModelOption,
-  ProviderInstance,
+  ProviderAccount,
   Runner,
   Workspace,
 } from "@hercule/contract";
+import { resolveThreadHarnessId } from "../provider-accounts";
 import { findSnapshotOn } from "./catalog";
 import {
   readThreadConfig,
@@ -103,11 +104,11 @@ const keepOfferedOptions = (
  * Returns the runner id a draft runs on, when no existing workspace decides
  * it. In order:
  *
- * 1. The runner the user picked, while the account has a snapshot there. A
- *    snapshot means the account is installed on that runner, whatever its
- *    availability: when the runner is offline, draining or the account is
- *    logged out, the draft keeps the runner and the composer says why it
- *    cannot start.
+ * 1. The runner the user picked, while the account has a snapshot there in the
+ *    draft's harness. A snapshot means the harness is installed on that
+ *    runner, whatever its availability: when the runner is offline, draining
+ *    or the account is signed out, the draft keeps the runner and the
+ *    composer says why it cannot start.
  * 2. The draft's own runner, for the account the draft started with.
  * 3. The default runner of another account, which may be `null`.
  */
@@ -115,14 +116,16 @@ const decideDraftRunnerId = (
   catalogs: ThreadCatalogs,
   base: ThreadConfig,
   picks: ThreadPicks,
-  instance: ProviderInstance | undefined,
+  account: ProviderAccount | undefined,
+  harnessId: string | null,
 ): string | null => {
-  if (instance === undefined) return picks.runnerId ?? base.runnerId;
-  if (picks.runnerId != null && findSnapshotOn(instance, picks.runnerId) !== undefined)
+  if (account === undefined || harnessId === null) return picks.runnerId ?? base.runnerId;
+  if (picks.runnerId != null && findSnapshotOn(account, harnessId, picks.runnerId) !== undefined)
     return picks.runnerId;
-  return instance.id === base.instanceId
+  return account.id === base.providerAccountId
     ? base.runnerId
-    : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, instance).defaultRunnerId;
+    : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, account, harnessId)
+        .defaultRunnerId;
 };
 
 const resolveDraft = (
@@ -130,8 +133,12 @@ const resolveDraft = (
   base: ThreadConfig,
   picks: ThreadPicks,
 ): ResolvedDraft => {
-  const instanceId = picks.instanceId ?? base.instanceId;
-  const instance = catalogs.instances.find((each) => each.id === instanceId);
+  const providerAccountId = picks.providerAccountId ?? base.providerAccountId;
+  const account = catalogs.accounts.find((each) => each.id === providerAccountId);
+  // The harness named for the draft's own account stays. Another account runs
+  // in its default harness, because the named one belonged to the first.
+  const namedHarnessId = account?.id === base.providerAccountId ? base.harnessId : null;
+  const harnessId = account === undefined ? null : resolveThreadHarnessId(account, namedHarnessId);
   const workspace =
     picks.workspace ??
     base.workspace ??
@@ -145,15 +152,16 @@ const resolveDraft = (
       : undefined;
   // An existing workspace is on one runner and never moves, so joining it
   // decides the runner.
-  const runnerId = joined?.runnerId ?? decideDraftRunnerId(catalogs, base, picks, instance);
+  const runnerId =
+    joined?.runnerId ?? decideDraftRunnerId(catalogs, base, picks, account, harnessId);
   const model =
     picks.model !== undefined
       ? picks.model
-      : instanceId === base.instanceId
+      : providerAccountId === base.providerAccountId
         ? base.model
-        : instance === undefined
+        : account === undefined || harnessId === null
           ? null
-          : findDefaultModel(instance, runnerId);
+          : findDefaultModel(account, harnessId, runnerId);
 
   const runner = catalogs.runners.find((each) => each.id === runnerId);
   const diagnosticRunner =
@@ -161,13 +169,16 @@ const resolveDraft = (
       ? findReferenceRunner(catalogs.runners, runnerId, catalogs.thisMacRunnerId)
       : undefined;
   const snapshot =
-    instance === undefined ? undefined : findSnapshotOn(instance, (runner ?? diagnosticRunner)?.id);
+    account === undefined || harnessId === null
+      ? undefined
+      : findSnapshotOn(account, harnessId, (runner ?? diagnosticRunner)?.id);
   const descriptor = snapshot?.models.find((each) => each.slug === model);
   return {
     kind: "draft",
     config: {
       ...base,
-      instanceId,
+      providerAccountId,
+      harnessId: namedHarnessId,
       runnerId,
       model,
       accessMode: picks.accessMode ?? base.accessMode,
@@ -189,10 +200,12 @@ const resolveActive = (
 ): ResolvedActive => {
   const { session } = thread;
   const stored = readThreadConfig(thread);
-  const instance = catalogs.instances.find((each) => each.id === session.instanceId);
+  const account = catalogs.accounts.find((each) => each.id === session.providerAccountId);
   const runner = catalogs.runners.find((each) => each.id === session.runnerId);
   const snapshot =
-    instance === undefined ? undefined : findSnapshotOn(instance, session.runnerId ?? undefined);
+    account === undefined
+      ? undefined
+      : findSnapshotOn(account, session.harnessId, session.runnerId ?? undefined);
   const model = picks.model ?? stored.model;
   const descriptor = snapshot?.models.find((each) => each.slug === model);
 

@@ -85,10 +85,10 @@ export const buildDraftView = (
   address: DraftAddress,
   picks: ThreadPicks,
 ): DraftView => {
-  const { instances, runners, thisMacRunnerId, resources, workspaces, sessions } = reads;
+  const { accounts, runners, thisMacRunnerId, resources, workspaces, sessions } = reads;
   const base = buildDraftConfig({
     settingsUser: reads.settings.user,
-    instances,
+    accounts,
     runners,
     profiles: reads.profiles,
     thisMacRunnerId,

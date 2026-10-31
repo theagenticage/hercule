@@ -1,12 +1,12 @@
 /**
- * Tests the login drawer on its own, against a stubbed API. It covers two
+ * Tests the sign-in drawer on its own, against a stubbed API. It covers two
  * flows:
  *
  * - the vendor gives the user a code in the browser, which the user pastes
  *   back here;
  * - the vendor printed a one-time code, and the browser completes the login
  *   on its own. The drawer shows the code, sends nothing, and closes once a
- *   snapshot taken after the login started says the harness is logged in.
+ *   snapshot taken after the login started says the account is signed in.
  *
  * It also checks that the login address is a link only when it is a web
  * address.
@@ -21,20 +21,21 @@ import { expectInDocumentOrder, readPageText, stubApi, type Handler } from "../a
 
 const BASE = "http://controller.test";
 
-const INSTANCE = "01a06d02-1000-7000-8000-000000000001";
+const ACCOUNT = "01a06d02-1000-7000-8000-000000000001";
 const RUNNER = "01a06d02-1000-7000-8000-0000000000aa";
 
 const PASTE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 const DEVICE_URL = "https://auth.openai.com/codex/device";
 const USER_CODE = "CH61-0FI2N";
 
-const LOGIN = `POST /api/v1/providers/${INSTANCE}/login`;
-const LOGIN_CODE = `POST /api/v1/providers/${INSTANCE}/login-code`;
-const PROVIDERS = "GET /api/v1/providers";
+const LOGIN = `POST /api/v1/provider-accounts/${ACCOUNT}/sign-in`;
+const LOGIN_CODE = `POST /api/v1/provider-accounts/${ACCOUNT}/sign-in-code`;
+const ACCOUNTS = "GET /api/v1/provider-accounts";
 
-/** The probe result the login code endpoint returns; the drawer only needs it to be valid. */
+/** A snapshot of the account; the drawer only needs it to be valid. */
 const SNAPSHOT = {
   runnerId: RUNNER,
+  harnessId: "codex/codex",
   probedAt: "2026-09-14T09:10:00.000Z",
   harnessVersion: "0.154.0",
   versionVerdict: "ok",
@@ -43,40 +44,26 @@ const SNAPSHOT = {
 };
 
 const listSentCodes = (api: ReturnType<typeof stubApi>) =>
-  api.calls.filter((call) => call.path.endsWith("/login-code"));
+  api.calls.filter((call) => call.path.endsWith("/sign-in-code"));
 
-/** Returns the Codex instance as the controller lists it, with `snapshot` as its only snapshot. */
+/** Returns the OpenAI account as the controller lists it, with `snapshot` as its only snapshot. */
 const buildCodex = (snapshot: object) => ({
-  id: INSTANCE,
-  harnessId: "codex/codex",
-  name: "Codex",
-  config: {},
-  displayName: "Codex",
-  binaryName: "codex",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
+  id: ACCOUNT,
+  providerId: "openai/openai",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: "codex/codex",
   snapshots: [snapshot],
   createdAt: "2026-09-14T09:00:00.000Z",
   updatedAt: "2026-09-14T09:00:00.000Z",
 });
 
-/** The snapshot from before the login started: the harness is logged out. */
-const LOGGED_OUT = { ...SNAPSHOT, auth: { status: "unauthenticated" } };
+/** The snapshot from before the login started: the account is signed out. */
+const SIGNED_OUT = { ...SNAPSHOT, auth: { status: "unauthenticated" } };
 /** The snapshot the probe takes after the vendor's login ended. */
-const LOGGED_IN = { ...SNAPSHOT, probedAt: "2026-09-14T09:12:00.000Z" };
+const SIGNED_IN = { ...SNAPSHOT, probedAt: "2026-09-14T09:12:00.000Z" };
 
 /**
  * Returns a live connection that only records subscriptions. `announce`
@@ -106,11 +93,11 @@ const buildFakeLive = (): { live: Live; announce: (keys: readonly LiveQueryKey[]
   };
 };
 
-/** Renders the Log in button and clicks it to start a login. */
+/** Renders the Sign in button and clicks it to start a sign-in. */
 const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
   const api = stubApi(handlers);
   const { live, announce } = buildFakeLive();
-  const onLoggedIn = vi.fn();
+  const onSignedIn = vi.fn();
   const user = userEvent.setup();
   render(
     <QueryClientProvider
@@ -119,16 +106,16 @@ const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
       <ProviderLogin
         client={createClient({ baseUrl: BASE, fetch: api.fetch, token: "held" })}
         live={live}
-        instanceId={INSTANCE}
+        providerAccountId={ACCOUNT}
         runnerId={RUNNER}
         subject="Codex on moss"
-        label="Log in"
-        onLoggedIn={onLoggedIn}
+        label="Sign in"
+        onSignedIn={onSignedIn}
       />
     </QueryClientProvider>,
   );
-  await user.click(screen.getByRole("button", { name: "Log in" }));
-  return { api, user, onLoggedIn, announce };
+  await user.click(screen.getByRole("button", { name: "Sign in" }));
+  return { api, user, onSignedIn, announce };
 };
 
 /** Returns the instant a code expires, `minutesFromNow` minutes from now; negative is in the past. */
@@ -136,27 +123,29 @@ const buildExpiresAt = (minutesFromNow: number): string =>
   new Date(Date.now() + minutesFromNow * 60_000).toISOString();
 
 /**
- * Answers the providers read with the `before` snapshot, logged out unless
- * given, until `loggedIn` is called, and with the fresh logged-in one after
+ * Answers the accounts read with the `before` snapshot, signed out unless
+ * given, until `signedIn` is called, and with the fresh signed-in one after
  * that.
  */
-const stubProviders = (before: object = LOGGED_OUT): { handler: Handler; loggedIn: () => void } => {
+const stubProviderAccounts = (
+  before: object = SIGNED_OUT,
+): { handler: Handler; signedIn: () => void } => {
   let snapshot: object = before;
   return {
     handler: () => ({ body: [buildCodex(snapshot)] }),
-    loggedIn: () => {
-      snapshot = LOGGED_IN;
+    signedIn: () => {
+      snapshot = SIGNED_IN;
     },
   };
 };
 
 describe("a login with a one-time code from the vendor", () => {
-  it("shows the code, asks for no input, and closes once a fresh snapshot is logged in", async () => {
-    const providers = stubProviders();
-    const { api, onLoggedIn, announce } = await openLoginPanel({
+  it("shows the code, asks for no input, and closes once a fresh snapshot is signed in", async () => {
+    const accounts = stubProviderAccounts();
+    const { api, onSignedIn, announce } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(15) } },
       [LOGIN_CODE]: { body: SNAPSHOT },
-      [PROVIDERS]: providers.handler,
+      [ACCOUNTS]: accounts.handler,
     });
 
     await waitFor(() => {
@@ -173,7 +162,7 @@ describe("a login with a one-time code from the vendor", () => {
     expect(screen.queryByLabelText("Code", { exact: true })).toBeNull();
     expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
     // A second login would kill the process whose code is on screen.
-    expect(screen.getByRole("button", { name: "Log in" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Sign in" })).toHaveProperty("disabled", true);
 
     // Nothing is sent: the browser and the vendor complete the login between
     // them. The drawer waits for the controller to announce the result.
@@ -184,28 +173,28 @@ describe("a login with a one-time code from the vendor", () => {
     });
     expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
     expect(listSentCodes(api)).toEqual([]);
-    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(onSignedIn).not.toHaveBeenCalled();
 
-    // An announcement while the harness is still logged out keeps the drawer open.
+    // An announcement while the account is still signed out keeps the drawer open.
     const countProviderReads = () =>
-      api.calls.filter((call) => call.path === "/api/v1/providers").length;
+      api.calls.filter((call) => call.path === "/api/v1/provider-accounts").length;
     const before = countProviderReads();
     act(() => {
-      announce([queryKeys.providers()]);
+      announce([queryKeys.providerAccounts()]);
     });
     await waitFor(() => {
       expect(countProviderReads()).toBeGreaterThan(before);
     });
     expect(screen.getByRole("dialog")).toBeDefined();
 
-    providers.loggedIn();
+    accounts.signedIn();
     act(() => {
-      announce([queryKeys.providers()]);
+      announce([queryKeys.providerAccounts()]);
     });
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
-    expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    expect(onSignedIn).toHaveBeenCalledTimes(1);
     expect(listSentCodes(api)).toEqual([]);
   });
 
@@ -216,7 +205,7 @@ describe("a login with a one-time code from the vendor", () => {
     try {
       await openLoginPanel({
         [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(2) } },
-        [PROVIDERS]: stubProviders().handler,
+        [ACCOUNTS]: stubProviderAccounts().handler,
       });
       await waitFor(() => {
         expect(screen.getByRole("status").textContent).toContain("The code expires in 2 minutes.");
@@ -229,50 +218,50 @@ describe("a login with a one-time code from the vendor", () => {
         vi.advanceTimersByTime(60_000);
       });
       expect(screen.getByRole("alert").textContent).toBe(
-        "The code expired before the login finished.",
+        "The code expired before the sign-in finished.",
       );
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("stays open when the user logs in again, since no snapshot can tell the login ended", async () => {
-    // Logged in before the login started: the old credential still checks as
-    // logged in, so a fresh snapshot that says so proves nothing.
-    const providers = stubProviders(SNAPSHOT);
-    const { onLoggedIn, announce } = await openLoginPanel({
+  it("stays open when the user signs in again, since no snapshot can tell the login ended", async () => {
+    // Signed in before the login started: the old credential still checks as
+    // signed in, so a fresh snapshot that says so proves nothing.
+    const accounts = stubProviderAccounts(SNAPSHOT);
+    const { onSignedIn, announce } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(15) } },
-      [PROVIDERS]: providers.handler,
+      [ACCOUNTS]: accounts.handler,
     });
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toBe(
-        "Waiting for you to finish signing in. The code expires in 15 minutes. You were logged in already, so Hercule cannot tell when you finish. Close this once you have.",
+        "Waiting for you to finish signing in. The code expires in 15 minutes. You were signed in already, so Hercule cannot tell when you finish. Close this once you have.",
       );
     });
 
-    providers.loggedIn();
+    accounts.signedIn();
     act(() => {
-      announce([queryKeys.providers()]);
+      announce([queryKeys.providerAccounts()]);
     });
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toContain("Close this once you have.");
     });
     expect(screen.getByRole("dialog")).toBeDefined();
-    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(onSignedIn).not.toHaveBeenCalled();
   });
 
   it("says the code expired and offers to start again", async () => {
-    const providers = stubProviders();
+    const accounts = stubProviderAccounts();
     const { user, api } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(-1) } },
-      [PROVIDERS]: providers.handler,
+      [ACCOUNTS]: accounts.handler,
     });
 
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("The code expired before the login finished.");
+    expect(alert.textContent).toBe("The code expired before the sign-in finished.");
     await user.click(screen.getByRole("button", { name: "Start again" }));
     await waitFor(() => {
-      expect(api.calls.filter((call) => call.path.endsWith("/login"))).toHaveLength(2);
+      expect(api.calls.filter((call) => call.path.endsWith("/sign-in"))).toHaveLength(2);
     });
   });
 });

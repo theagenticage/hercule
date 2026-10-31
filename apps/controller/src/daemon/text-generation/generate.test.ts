@@ -8,16 +8,14 @@
  */
 import { describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
-import type * as SqlClient from "effect/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
-import { TestDatabase } from "../../db/testing";
-import { AuditLogLayer } from "../../events";
+import { uuidFromString, withTransaction } from "../../db";
 import { readEventsOfKind } from "../../events/testing";
 import { PluginHost } from "../../plugins";
-import { ServingPromotionStateLayer } from "../../promotion/testing";
-import type { StoredInstance } from "../../providers";
+import { buildPluginStack } from "../../plugins/testing";
+import { HarnessAccountsLayer } from "../../provider-accounts";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
-import { Secrets } from "../../secrets";
 import {
   LastTextGenerationFailure,
   LastTextGenerationFailureLayer,
@@ -26,25 +24,38 @@ import {
   type TextGenerationCall,
   type TextGenerationTarget,
 } from "../../text-generation";
+import { buildTextGenerationPlugins } from "../../text-generation/testing";
 import { TextGenerationDeadline, TextGenerationLayer } from "./generate";
 import { TextGenerationTargetChanges, TextGenerationTargetChangesLayer } from "./target-changes";
 
 const FAILURE_KEY = "test-key";
 
-const INSTANCE: StoredInstance = {
-  id: "instance-1",
-  harnessId: "codex/codex",
-  name: "Codex",
-  config: {},
-  createdAt: "2026-10-11T10:00:00.000Z",
-  updatedAt: "2026-10-11T10:00:00.000Z",
-};
+/** The id of the OpenAI account that `arrangeAccount` inserts, which `TARGET` names. */
+const ACCOUNT_ID = "0199f0b7-2000-7000-8000-000000000001";
+
+/**
+ * Boots the plugins of the text generation fixtures and inserts the OpenAI
+ * account `TARGET` names, so a call can build the frame's `HarnessAccount`
+ * from a real account row.
+ */
+const arrangeAccount = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* Effect.flatMap(PluginHost, (host) => host.boot(buildTextGenerationPlugins()));
+  yield* withTransaction(
+    sql,
+    sql`INSERT INTO provider_accounts (id, provider_id, kind, default_harness_id, created_at, updated_at)
+        VALUES (${uuidFromString(ACCOUNT_ID)}, 'openai/openai', 'subscription-per-machine',
+                'codex/codex', '2026-10-11T10:00:00.000Z', '2026-10-11T10:00:00.000Z')`,
+  );
+});
 
 const TARGET: TextGenerationTarget = {
   _tag: "resolved",
   failureKey: FAILURE_KEY,
-  instance: INSTANCE,
-  model: "codex-mini",
+  providerAccountId: ACCOUNT_ID,
+  providerAccountName: "OpenAI",
+  harnessId: "codex/codex",
+  model: "gpt-6-luna",
   runnerIds: ["runner-1"],
 };
 
@@ -102,13 +113,15 @@ interface Stubs {
 
 /**
  * Builds the service with a connection whose `sendRequest` does what the test
- * says, on the database, audit log and promotion state of the caller.
+ * says, on the database, plugin host, secrets, audit log and promotion state
+ * of the caller.
  */
 const buildServiceLayer = (
   sendRequest: SendRequest,
   { target = Ref.makeUnsafe<TextGenerationTarget>(TARGET), disconnected = [] }: Stubs,
 ) =>
   TextGenerationLayer.pipe(
+    Layer.provideMerge(HarnessAccountsLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         LastTextGenerationFailureLayer,
@@ -117,12 +130,6 @@ const buildServiceLayer = (
           sendRequest,
           holdsConnection: (id: string) => Effect.succeed(!disconnected.includes(id)),
         } as unknown as RunnerConnections["Service"]),
-        Layer.succeed(Secrets, {
-          values: () => Effect.succeed([]),
-        } as unknown as Secrets["Service"]),
-        Layer.succeed(PluginHost, {
-          harnesses: () => Effect.succeed([]),
-        } as unknown as PluginHost["Service"]),
         Layer.succeed(LocalRunnerId, { read: () => undefined }),
       ),
     ),
@@ -131,11 +138,7 @@ const buildServiceLayer = (
 
 /** Builds the service, as `buildServiceLayer` does, on a database of its own. */
 const buildLayer = (sendRequest: SendRequest, stubs: Stubs) =>
-  buildServiceLayer(sendRequest, stubs).pipe(
-    Layer.provideMerge(ServingPromotionStateLayer),
-    Layer.provideMerge(AuditLogLayer),
-    Layer.provideMerge(TestDatabase),
-  );
+  buildServiceLayer(sendRequest, stubs).pipe(Layer.provideMerge(buildPluginStack()));
 
 /** Runs `body` against the layer, with the deadline set to `deadline`. */
 const runWithLayer = <A, E>(
@@ -149,7 +152,7 @@ const runWithLayer = <A, E>(
   stubs: Stubs = {},
 ) =>
   Effect.runPromise(
-    body.pipe(
+    Effect.andThen(arrangeAccount, body).pipe(
       Effect.provide(buildLayer(sendRequest, stubs)),
       Effect.provideService(TextGenerationDeadline, deadline),
       Effect.orDie,
@@ -205,6 +208,53 @@ describe("the choice of a runner", () => {
 
     expect(exit).toEqual(Exit.succeed({ title: "Fix it" }));
     expect(asked).toEqual(["runner-2"]);
+  });
+});
+
+describe("the request sent to the runner", () => {
+  it("names the harness and carries the account's home and model argument", async () => {
+    const requests: Array<TextGenerationRequest> = [];
+    await runWithLayer(
+      (_, request) => {
+        requests.push(request);
+        return Effect.succeed(buildAnswer(request, OK));
+      },
+      Effect.flatMap(TextGeneration, (service) => service.generate(CALL)),
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      harnessId: "codex/codex",
+      harnessAccount: {
+        providerAccountId: ACCOUNT_ID,
+        harnessHome: `providers/homes/${ACCOUNT_ID}/codex/codex`,
+        modelArgument: "{model}",
+      },
+      spec: { model: "gpt-6-luna" },
+    });
+  });
+
+  it("fails as failed, with the reason, when the account was deleted since the setting resolved", async () => {
+    const { exit, lastFailure } = await runWithLayer(
+      () => Effect.die("no frame is sent"),
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(
+          sql,
+          sql`DELETE FROM provider_accounts WHERE id = ${uuidFromString(ACCOUNT_ID)}`,
+        );
+        const exit = yield* Effect.exit(
+          Effect.flatMap(TextGeneration, (service) => service.generate(CALL)),
+        );
+        return { exit, lastFailure: yield* (yield* LastTextGenerationFailure).read(FAILURE_KEY) };
+      }),
+    );
+
+    expect(exit).toMatchObject({
+      _tag: "Failure",
+      cause: { reasons: [{ error: { reason: "failed", message: "no such provider account" } }] },
+    });
+    expect(lastFailure).toMatchObject({ reason: "failed" });
   });
 });
 
@@ -426,7 +476,7 @@ describe("a call that queues for a slot", () => {
 
     expect(result.exit).toEqual(Exit.succeed({ title: "Fix it" }));
     expect(result.requests.map((request) => request.spec.model)).toEqual([
-      ...Array.from({ length: PERMITS }, () => "codex-mini"),
+      ...Array.from({ length: PERMITS }, () => "gpt-6-luna"),
       "codex-max",
     ]);
   });
@@ -444,6 +494,7 @@ describe("a call that queues for a slot", () => {
           scope,
         );
         yield* Effect.gen(function* () {
+          yield* arrangeAccount;
           const service = yield* TextGeneration;
           yield* Effect.forEach(Array.from({ length: PERMITS }), () =>
             Effect.forkChild(Effect.exit(service.generate(CALL))),
@@ -456,14 +507,7 @@ describe("a call that queues for a slot", () => {
         // Stopping interrupts every slot's holder, the withdrawn call's too.
         yield* Scope.close(scope, Exit.void);
         return yield* readEventsOfKind("textGeneration.failed");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(ServingPromotionStateLayer, AuditLogLayer).pipe(
-            Layer.provideMerge(TestDatabase),
-          ),
-        ),
-        Effect.orDie,
-      ),
+      }).pipe(Effect.provide(buildPluginStack()), Effect.orDie),
     );
 
     // The ten sent calls end without an answer, and each is recorded once.

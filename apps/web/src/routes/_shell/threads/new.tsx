@@ -3,10 +3,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { buildDraftConfig, buildSiblingTabs } from "@hercule/client-core";
 import {
+  ensureProviderAccountReads,
   localRunnerQuery,
   profilesQuery,
   projectsQuery,
-  providersQuery,
+  providerAccountsQuery,
   resourcesQuery,
   runnersQuery,
   sessionsQuery,
@@ -48,7 +49,7 @@ export const Route = createFileRoute("/_shell/threads/new")({
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
+      ensureProviderAccountReads(context.queryClient, context.client),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
       context.queryClient.ensureQueryData(settingsQuery(context.client)),
       // The lists the workspace menu reads. They are prefetched rather than
@@ -70,7 +71,7 @@ export const Route = createFileRoute("/_shell/threads/new")({
 function NewThread(): JSX.Element {
   const { client, detectLocalRunner } = Route.useRouteContext();
   const search = Route.useSearch();
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
@@ -85,7 +86,7 @@ function NewThread(): JSX.Element {
   // workspace uses.
   const config = buildDraftConfig({
     settingsUser: settings.user,
-    instances,
+    accounts,
     runners,
     profiles,
     thisMacRunnerId,

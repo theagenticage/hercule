@@ -1,8 +1,8 @@
 /**
  * The records the sidebar specimen seeds its query cache with, as the
  * controller would return them: the threads of the Bureau book's
- * session-active.html sidebar, their projects, their runner, the provider
- * instances whose catalogs name their models, and the signed-in user.
+ * session-active.html sidebar, their projects, their runner, the Provider
+ * Accounts whose catalogs name their models, and the signed-in user.
  *
  * The app's test fixtures (`SIDEBAR_FIXTURE` in app/testing.tsx) cannot be
  * used here: that module imports vitest and Testing Library, which do not
@@ -17,7 +17,7 @@ import type {
   ModelOption,
   OpenRequest,
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Runner,
   Session,
 } from "@hercule/contract";
@@ -46,11 +46,13 @@ export const FIX_THREAD_ID = "01a0ec64-6e80-7000-8000-000000000024";
 export const MIGRATE_THREAD_ID = "01a0ec64-6e80-7000-8000-000000000019";
 
 /**
- * A model a thread runs: the provider instance, the model's slug, the name
- * its catalog gives it, and the options its catalog offers.
+ * A model a thread runs: the Provider Account and the harness it runs in,
+ * the model's slug, the name its catalog gives it, and the options its
+ * catalog offers.
  */
 export interface SpecimenModel {
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  readonly harnessId: string;
   readonly slug: string;
   readonly name: string;
   readonly imageInput: ModelDescriptor["imageInput"];
@@ -58,7 +60,8 @@ export interface SpecimenModel {
 }
 
 export const CLAUDE_SONNET: SpecimenModel = {
-  instanceId: "i-claude",
+  providerAccountId: "a-claude",
+  harnessId: "claude-code/claude-code",
   slug: "claude-sonnet-5",
   name: "Claude Sonnet 5",
   imageInput: { maxBytes: null },
@@ -67,7 +70,8 @@ export const CLAUDE_SONNET: SpecimenModel = {
 
 /** The model of the thread the thread specimen opens, with the effort option Claude Code reports. */
 export const CLAUDE_OPUS: SpecimenModel = {
-  instanceId: "i-claude",
+  providerAccountId: "a-claude",
+  harnessId: "claude-code/claude-code",
   slug: "claude-opus-5-5",
   name: "Opus 5.5",
   imageInput: { maxBytes: null },
@@ -87,7 +91,8 @@ export const CLAUDE_OPUS: SpecimenModel = {
 };
 
 export const GPT: SpecimenModel = {
-  instanceId: "i-codex",
+  providerAccountId: "a-codex",
+  harnessId: "codex/codex",
   slug: "gpt-5.4",
   name: "GPT-5.4",
   imageInput: { maxBytes: null },
@@ -222,38 +227,28 @@ const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
   },
 ];
 
-/** Returns a provider instance whose one capability snapshot lists `models`. */
-export const buildInstance = (
+/**
+ * Returns a Provider Account that signs in on each machine, at `providerId`,
+ * whose one capability snapshot lists `models` in the account's default
+ * harness `harnessId`.
+ */
+export const buildSpecimenProviderAccount = (
   id: string,
+  providerId: string,
   harnessId: string,
-  displayName: string,
-  binaryName: string,
   models: ReadonlyArray<SpecimenModel>,
-): ProviderInstance => ({
+): ProviderAccount => ({
   id,
-  harnessId,
-  name: displayName,
-  config: {},
-  displayName,
-  binaryName,
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
+  providerId,
+  kind: "subscription-per-machine",
+  label: null,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: harnessId,
   snapshots: [
     {
       runnerId: STUDIO_MAC.id,
+      harnessId,
       probedAt: new Date(SPECIMEN_NOW).toISOString(),
       harnessVersion: null,
       versionVerdict: "unknown",
@@ -270,13 +265,15 @@ export const buildInstance = (
   updatedAt: new Date(SPECIMEN_NOW).toISOString(),
 });
 
-/** The two provider instances, whose catalogs give the threads' models their names. */
-export const SPECIMEN_INSTANCES: ReadonlyArray<ProviderInstance> = [
-  buildInstance(CLAUDE_SONNET.instanceId, "claude-code/claude-code", "Claude Code", "claude", [
-    CLAUDE_SONNET,
-    CLAUDE_OPUS,
-  ]),
-  buildInstance(GPT.instanceId, "codex/codex", "Codex", "codex", [GPT]),
+/** The two Provider Accounts, whose catalogs give the threads' models their names. */
+export const SPECIMEN_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
+  buildSpecimenProviderAccount(
+    CLAUDE_SONNET.providerAccountId,
+    "anthropic/anthropic",
+    CLAUDE_SONNET.harnessId,
+    [CLAUDE_SONNET, CLAUDE_OPUS],
+  ),
+  buildSpecimenProviderAccount(GPT.providerAccountId, "openai/openai", GPT.harnessId, [GPT]),
 ];
 
 /**
@@ -298,7 +295,8 @@ export const buildSpecimenSession = ({
   const at = new Date(SPECIMEN_NOW - minutesAgo * 60_000).toISOString();
   return buildSession({
     runnerId: STUDIO_MAC.id,
-    instanceId: model.instanceId,
+    providerAccountId: model.providerAccountId,
+    harnessId: model.harnessId,
     modelSelection: { model: model.slug, options: {} },
     createdAt: at,
     lastActivityAt: at,
@@ -318,6 +316,6 @@ export const SPECIMEN_RECORDS: SidebarRecords = {
   workspaces: [],
   resources: [],
   runners: [STUDIO_MAC],
-  instances: SPECIMEN_INSTANCES,
+  accounts: SPECIMEN_ACCOUNTS,
   user: { username: "Rogier" },
 };

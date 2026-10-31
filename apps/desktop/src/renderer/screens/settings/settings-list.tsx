@@ -56,7 +56,7 @@ const SETTINGS_GROUPS: ReadonlyArray<{
         to: CONNECTIONS_SECTION,
         carriesConnectionDot: true,
       },
-      { label: "Providers", Icon: CpuIcon, to: null },
+      { label: "Providers", Icon: CpuIcon, to: "/settings/providers" },
       { label: "Machines", Icon: FleetIcon, to: MACHINES_SECTION },
     ],
   },

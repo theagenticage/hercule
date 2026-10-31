@@ -29,7 +29,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -60,7 +60,7 @@ const REMOTE = "git@github.com:rogier/shop.git";
  */
 const buildControllerInfo = (
   localRunnerId: string | null,
-  model: { instanceId: string; model: string } | null = null,
+  model: { providerAccountId: string; harnessId: string; model: string } | null = null,
 ) => ({
   id: "01a06d02-7800-7000-8000-000000000001",
   publicKey: "controller-key",
@@ -712,7 +712,7 @@ describe("the first run's steps", () => {
         handlers: {
           "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
           "GET /api/v1/runners": { body: { items: [MOSS] } },
-          "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+          "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] },
           "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
@@ -728,9 +728,13 @@ describe("the first run's steps", () => {
     });
 
     it("names the model that makes text generations, read again when All set opens", async () => {
-      // The first run reads the record before the user logs in, when no model can be chosen yet.
+      // The first run reads the record before the user signs in, when no model can be chosen yet.
       let reads = 0;
-      const sonnet = { instanceId: FIXTURE_INSTANCE.id, model: "claude-sonnet-5" };
+      const sonnet = {
+        providerAccountId: FIXTURE_ACCOUNT.id,
+        harnessId: "claude-code/claude-code",
+        model: "claude-sonnet-5",
+      };
       await openSignedIn({
         firstRun: { putOff: [] },
         handlers: {
@@ -739,23 +743,23 @@ describe("the first run's steps", () => {
             return { body: buildControllerInfo(MOSS!.id, reads === 1 ? null : sonnet) };
           },
           "GET /api/v1/runners": { body: { items: [MOSS] } },
-          "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+          "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] },
           "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
       });
 
-      expect(await screen.findByText("Claude Code · Claude Sonnet 5")).toBeTruthy();
+      expect(await screen.findByText("Anthropic · Claude Sonnet 5")).toBeTruthy();
       expect(screen.getByText("Text generation")).toBeTruthy();
     });
 
-    it("says that no model is available when a logged-in provider offers none", async () => {
+    it("says that no model is available when a signed-in account offers none", async () => {
       await openSignedIn({
         firstRun: { putOff: [] },
         handlers: {
           "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
           "GET /api/v1/runners": { body: { items: [MOSS] } },
-          "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] },
+          "GET /api/v1/provider-accounts": { body: [FIXTURE_ACCOUNT] },
           "GET /api/v1/connections": { body: { items: [FIXTURE_GITHUB_CONNECTION] } },
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
@@ -780,7 +784,7 @@ describe("the first run's steps", () => {
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
       });
-      await user.click(screen.getByRole("button", { name: "Log in to a provider" }));
+      await user.click(screen.getByRole("button", { name: "Sign in to an account" }));
       await waitFor(() => {
         expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
       });
@@ -806,26 +810,26 @@ describe("the first run's steps", () => {
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
       });
-      await user.click(screen.getByRole("button", { name: "Log in to a provider" }));
+      await user.click(screen.getByRole("button", { name: "Sign in to an account" }));
       expect(await screen.findByText("settings are down")).toBeTruthy();
       expect(fake.firstRunWrites).toEqual([]);
       expect(router.state.location.pathname).toBe("/first-run");
 
       failSettings = false;
-      await user.click(screen.getByRole("button", { name: "Log in to a provider" }));
+      await user.click(screen.getByRole("button", { name: "Sign in to an account" }));
       await waitFor(() => {
         expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
       });
       expect(fake.firstRunWrites).toEqual([null]);
     });
 
-    it("offers a provider login, and Do it now, for a step put off", async () => {
+    it("offers a sign-in to an account, and Do it now, for a step put off", async () => {
       const user = userEvent.setup();
       const { fake, router } = await openSignedIn({
         firstRun: { putOff: ["providers", "github"] },
         handlers: { "GET /api/v1/projects": { body: { items: [WEBSHOP] } } },
       });
-      expect(screen.getByText("No provider yet")).toBeTruthy();
+      expect(screen.getByText("No account yet")).toBeTruthy();
       expect(screen.queryByText("Text generation")).toBeNull();
       const [doProviders] = screen.getAllByRole("button", { name: "Do it now" });
       await user.click(doProviders!);
@@ -833,7 +837,7 @@ describe("the first run's steps", () => {
       // The step stays put off until the user acts on it again.
       expect(fake.firstRunWrites).toEqual([]);
       await user.click(screen.getByRole("button", { name: "Do this later" }));
-      await user.click(await screen.findByRole("button", { name: "Log in to a provider" }));
+      await user.click(await screen.findByRole("button", { name: "Sign in to an account" }));
       await waitFor(() => {
         expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
       });

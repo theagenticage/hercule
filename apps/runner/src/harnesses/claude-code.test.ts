@@ -77,7 +77,7 @@ const CONTEXT: HarnessRunnerContext = {
   home: "/var/hercule/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
-  secrets: {},
+  modelArgument: "{model}",
   herculeTool: HERCULE_TOOL,
   attachmentUploader: testing.NO_CONTROLLER_UPLOADER,
 };
@@ -168,7 +168,7 @@ const probeWith = (
 } => {
   const { seam, calls, closed } = buildStubSeam(answers);
   return {
-    result: Effect.runPromise(makeClaudeCodeAdapter(seam).probe(CONTEXT, {})),
+    result: Effect.runPromise(makeClaudeCodeAdapter(seam).probe(CONTEXT)),
     calls,
     closed,
   };
@@ -346,7 +346,7 @@ describe("probing when the probe does not finish", () => {
     const probed = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const running = yield* Effect.forkChild(makeClaudeCodeAdapter(seam).probe(CONTEXT, {}));
+          const running = yield* Effect.forkChild(makeClaudeCodeAdapter(seam).probe(CONTEXT));
           yield* TestClock.adjust(Duration.zero);
           yield* TestClock.adjust(PROBE_DEADLINE);
           return yield* Fiber.join(running);
@@ -388,7 +388,7 @@ describe("the SDK query a probe runs", () => {
     expect(threw.closed()).toBe(1);
   });
 
-  it("points the harness at the instance's own home and never at the user's", async () => {
+  it("points the harness at the account's own home and never at the user's", async () => {
     const { result, calls } = probeWith({});
     await result;
 
@@ -398,7 +398,7 @@ describe("the SDK query a probe runs", () => {
     // a version nobody chose, while the probe is reporting which version it has.
     expect(env["DISABLE_AUTOUPDATER"]).toBe("1");
     // `HOME` must never be overridden: the CLI would then read and write the
-    // wrong account's credential and report it as this instance's.
+    // wrong account's credential and report it as this account's.
     expect(Object.keys(env)).not.toContain("HOME");
     expect(env["PATH"]).toBe(CONTEXT.env["PATH"]);
   });
@@ -426,7 +426,7 @@ describe("the pinned CLI version", () => {
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const SPEC: SessionSpec = {
-  instanceId: "0199e0e7-0000-7000-8000-00000000000a",
+  providerAccountId: "0199e0e7-0000-7000-8000-00000000000a",
   workspaceId: null,
   modelSelection: { model: "claude-haiku-4-5", options: { effort: "high", fastMode: false } },
   accessMode: "auto-accept-edits",
@@ -437,7 +437,7 @@ const WORKING: HarnessRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/sc
 
 /**
  * The context of a Thread that sees User Material. For Claude the paths are
- * empty: the runner links the material into the instance's home instead, and
+ * empty: the runner links the material into the Harness Home instead, and
  * the field being present is what marks the session.
  */
 const THREAD: HarnessRunnerContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
@@ -638,7 +638,7 @@ describe("a Claude Code session", () => {
     const binding = await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     expect(binding.sessionId).toBe(SESSION);
-    expect(binding.instanceId).toBe(SPEC.instanceId);
+    expect(binding.providerAccountId).toBe(SPEC.providerAccountId);
     // Hercule creates the native session id instead of waiting for it: in
     // streaming-input mode the CLI sends nothing until the first turn.
     expect(binding.nativeSessionId).not.toBe(SESSION);
@@ -682,7 +682,7 @@ describe("a Claude Code session", () => {
     });
   });
 
-  it("runs a workspace-less session in its scratch cwd, with the instance's home and no setting source", async () => {
+  it("runs a workspace-less session in its scratch cwd, with the Harness Home and no setting source", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
@@ -710,7 +710,7 @@ describe("a Claude Code session", () => {
     const [options] = run.options;
     expect(options?.cwd).toBe("/home/me/repo");
     // Only the project source: this session is not a Thread that sees User
-    // Material, so it never reads the instance's home as the user source
+    // Material, so it never reads the Harness Home as the user source
     // (spec 06 section 9.1).
     expect(options?.settingSources).toEqual(["project"]);
     expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(CONTEXT.home);
@@ -1018,14 +1018,14 @@ describe("a Claude Code session", () => {
     }
   });
 
-  it("loads the user source for a Thread that sees User Material, so it reads the links in the instance's home", async () => {
+  it("loads the user source for a Thread that sees User Material, so it reads the links in the Harness Home", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, THREAD));
 
     const [options] = run.options;
     expect(options?.cwd).toBe(THREAD.cwd);
     expect(options?.settingSources).toEqual(["user"]);
-    // The user source is the config directory, which stays the instance's
+    // The user source is the config directory, which stays the account's
     // home: the runner linked the user's material there (spec 06 section 9.1).
     expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(THREAD.home);
     // User Material is skills and instructions only. MCP servers and auto
@@ -3921,7 +3921,7 @@ describe("a text generation", () => {
   ): Promise<TextGenerationOutcome> =>
     Effect.runPromise(
       Effect.catch(
-        adapter.generateText(testing.buildTextGenerationContext(context), {}, GENERATION),
+        adapter.generateText(testing.buildTextGenerationContext(context), GENERATION),
         (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
       ),
     );
@@ -4078,7 +4078,7 @@ describe("a text generation", () => {
       ]);
     });
 
-    it("gets the instance's config directory and credentials as a session does", async () => {
+    it("gets the Harness Home and credentials as a session does", async () => {
       const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
       await generate(adapter, { ...CONTEXT, env: { PATH: "/usr/bin", ANTHROPIC_API_KEY: "key" } });
 
@@ -4092,7 +4092,7 @@ describe("a text generation", () => {
     it("runs in the scratch directory the runner made for the call", async () => {
       const { adapter, queries } = createGenerating([{ ...RESULT, structured_output: TITLE }]);
       const ctx = testing.buildTextGenerationContext(CONTEXT);
-      await Effect.runPromise(adapter.generateText(ctx, {}, GENERATION));
+      await Effect.runPromise(adapter.generateText(ctx, GENERATION));
 
       expect(queries[0]!.options.cwd).toBe(ctx.cwd);
     });
@@ -4131,7 +4131,7 @@ describe("a text generation", () => {
       const { adapter, queries } = createGenerating("hangs");
       const outcome = await Effect.runPromise(
         adapter
-          .generateText(testing.buildTextGenerationContext(CONTEXT), {}, GENERATION)
+          .generateText(testing.buildTextGenerationContext(CONTEXT), GENERATION)
           .pipe(Effect.timeoutOption("50 millis")),
       );
 

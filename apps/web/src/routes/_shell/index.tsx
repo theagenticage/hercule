@@ -1,10 +1,17 @@
 import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, EmptyState } from "@hercule/ui";
-import { queryKeys, decideSessionsEmptyState, readErrorMessage } from "@hercule/client-core";
+import { queryKeys, decideSessionsEmptyState } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
-import { localRunnerQuery, providersQuery, runnersQuery } from "../../app/queries";
+import {
+  ensureProviderAccountReads,
+  harnessesQuery,
+  localRunnerQuery,
+  providerAccountsQuery,
+  providersQuery,
+  runnersQuery,
+} from "../../app/queries";
 import { CreateThreadLink } from "../../screens/create-thread-link";
 import { ProviderKeyEntry, ProviderLogin } from "../../screens/provider-login";
 
@@ -15,7 +22,7 @@ export const Route = createFileRoute("/_shell/")({
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
+      ensureProviderAccountReads(context.queryClient, context.client),
     ]);
     await context.queryClient.ensureQueryData(
       localRunnerQuery(context.detectLocalRunner, runners.items),
@@ -26,7 +33,7 @@ export const Route = createFileRoute("/_shell/")({
 
 /**
  * The home screen, which also finishes onboarding: it tells the user what to
- * do next. Until a logged-in harness is ready, the Create new thread button is
+ * do next. Until a signed-in account is ready, the Create new thread button is
  * shown disabled, with the reason above it, rather than hidden.
  */
 function Sessions(): JSX.Element {
@@ -36,33 +43,25 @@ function Sessions(): JSX.Element {
   useLiveInvalidation(live, queryClient, "provider");
 
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   const local = runners.find((runner) => runner.id === localId) ?? null;
 
-  const state = decideSessionsEmptyState(local, instances);
+  const state = decideSessionsEmptyState(local, accounts, providers, harnesses);
+  // The controller probes the account when a sign-in ends and pushes the new
+  // snapshot on the `provider` topic. This read only shows it sooner.
   const reread = (): void => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
   };
-  // A login writes a credential that the stored provider snapshot does not
-  // know about, so ask the machine to probe the instance again before this
-  // screen treats it as logged in.
-  const probe = useMutation({
-    mutationFn: (asked: { readonly runnerId: string; readonly instanceId: string }) =>
-      client.runner.probe({
-        params: { id: asked.runnerId },
-        payload: { instanceId: asked.instanceId },
-      }),
-    onSuccess: reread,
-  });
-
   // The state alone already covers `local === null`; the check is here so
   // TypeScript narrows `local` for the code below.
   if (local === null || state.kind === "no-runner") {
     return (
       <Screen
         headline="No runner has been detected on this machine."
-        lead="A thread runs on a machine. Start a runner here and Hercule will look for the harnesses installed on it - Claude Code, Codex, pi - and offer to log in to them."
+        lead="A thread runs on a machine. Start a runner here and Hercule will look for the harnesses installed on it - Claude Code, Codex, pi - and offer to sign in to them."
         fine={
           <>
             Run{" "}
@@ -80,7 +79,7 @@ function Sessions(): JSX.Element {
     return (
       <Screen
         headline="No coding harness was found on this machine."
-        lead="A thread runs on a coding harness - Claude Code, Codex or pi. Install one on this machine and Hercule will offer to log in to it."
+        lead="A thread runs on a coding harness - Claude Code, Codex or pi. Install one on this machine and Hercule will offer to sign in to it."
         fine={
           <Link to="/fleet/$runnerId" params={{ runnerId: local.id }} className="underline">
             Install one from Fleet
@@ -93,11 +92,11 @@ function Sessions(): JSX.Element {
   if (state.kind === "sign-in") {
     return (
       <Screen
-        headline={describeFoundHarnesses(state.offers.map((row) => row.name))}
+        headline={describeFoundHarnesses(state.offers.map((row) => row.harnessName))}
         lead={state.lead}
         fine={
           <>
-            A thread needs a harness that is logged in, so starting one waits on this. Small
+            A thread needs an account that is signed in, so starting one waits on this. Small
             background tasks like naming a thread use a text generation model - change it in{" "}
             <Link to="/settings/system" className="underline">
               Settings &gt; System
@@ -105,36 +104,31 @@ function Sessions(): JSX.Element {
             .
           </>
         }
-        failure={probe.error === null ? null : readErrorMessage(probe.error)}
       >
         {state.offers.flatMap((row) => {
-          const probeOfferedInstance = () => {
-            probe.mutate({ runnerId: local.id, instanceId: row.id });
-          };
-          // A provider that authenticates with a value the user supplies, such
+          // An account that authenticates with a value the user supplies, such
           // as an API key, has no vendor login page, so ask for the value here.
-          return row.secretFields.length === 0
+          return row.credentialFields.length === 0
             ? [
                 <ProviderLogin
                   key={row.id}
                   client={client}
                   live={live}
-                  instanceId={row.id}
+                  providerAccountId={row.id}
                   runnerId={local.id}
                   subject={`${row.name} on this machine`}
-                  label={`Log in to ${row.name}`}
+                  label={`Sign in to ${row.name}`}
                   variant="primary"
-                  onLoggedIn={probeOfferedInstance}
+                  onSignedIn={reread}
                 />,
               ]
-            : row.secretFields.map((field) => (
+            : row.credentialFields.map((field) => (
                 <ProviderKeyEntry
                   key={`${row.id}:${field.name}`}
                   client={client}
-                  instanceId={row.id}
+                  providerAccountId={row.id}
                   field={field}
                   variant="primary"
-                  onSaved={probeOfferedInstance}
                 />
               ));
         })}
@@ -156,7 +150,6 @@ function Screen({
   lead,
   fine,
   ready = false,
-  failure = null,
   children,
 }: {
   readonly headline: string;
@@ -164,8 +157,6 @@ function Screen({
   readonly fine?: ReactNode;
   /** Whether a thread can actually be started from here yet. */
   readonly ready?: boolean;
-  /** The error message of the last action on this screen, if it failed. */
-  readonly failure?: string | null;
   readonly children?: ReactNode;
 }): JSX.Element {
   return (
@@ -180,11 +171,6 @@ function Screen({
           </Button>
         )}
       </div>
-      {failure === null ? null : (
-        <p className="text-fine text-fail" role="alert">
-          {failure}
-        </p>
-      )}
     </EmptyState>
   );
 }

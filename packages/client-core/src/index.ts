@@ -188,6 +188,7 @@ export {
   ApiError,
   ConnectionError,
   isConflict,
+  isInvalidState,
   isNotFound,
   readErrorMessage,
   readValidationIssues,
@@ -539,7 +540,24 @@ export { matchYourWork, type YourWork } from "./your-work";
 export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
-export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
+export {
+  listProviderAccountMachines,
+  type ProviderAccountMachine,
+} from "./provider-account-machines";
+export { buildProviderRows, type CredentialFieldOffer, type ProviderRow } from "./provider-rows";
+export {
+  buildProviderAccountName,
+  describeProviderAccountIdentity,
+  type ProviderAccountIdentityLine,
+  findDefaultHarnessSnapshot,
+  findProviderAccountKind,
+  findProviderAccountNameIfAmbiguous,
+  findProviderPluginId,
+  listProviderAccountCredentialFields,
+  listSignedInDefaultHarnessSnapshots,
+  requiresSignInPerMachine,
+  resolveThreadHarnessId,
+} from "./provider-accounts";
 export {
   decideDeviceLoginStep,
   describeDeviceLoginWait,
@@ -556,7 +574,7 @@ export {
 } from "./minutes-left";
 export { isLoginCodeRejected } from "./login-code";
 export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
-export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
+export { decideSessionsEmptyState, hasSignedInRunner } from "./sessions-empty-state";
 export {
   createProjectWithRepositories,
   findProjectLocalRunner,
@@ -717,7 +735,7 @@ export {
   type ResolvedDraft,
   type ResolvedThread,
 } from "./threads/resolve-thread";
-export type { LoginTarget } from "./threads/catalog";
+export type { SignInTarget } from "./threads/catalog";
 export {
   buildComposerFields,
   buildPendingModelNote,
@@ -753,7 +771,7 @@ export {
 } from "./threads/message-time";
 export { buildThreadModelField } from "./threads/model-field";
 export { buildModelMenu, type ModelMenu } from "./threads/model-menu";
-export { describeAccountRow, describeModelRow } from "./threads/model-menu-details";
+export { describeProviderAccountRow, describeModelRow } from "./threads/model-menu-details";
 export { findOpenItem } from "./threads/open-item";
 export {
   canSteerQueuedInputs,
@@ -938,7 +956,7 @@ export {
 } from "./threads/starter-threads";
 export {
   buildDraftConfig,
-  computeInstanceDefaults,
+  computeProviderAccountDefaults,
   computeThreadDefaults,
 } from "./threads/thread-defaults";
 export {

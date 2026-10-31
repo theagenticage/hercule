@@ -13,7 +13,7 @@ import { useDoneMoves } from "../../app/done-moves";
 import {
   liveAgentSessionsQuery,
   projectsQuery,
-  providersQuery,
+  providerAccountsQuery,
   runnersQuery,
   threadAndAgentSessionsQuery,
   workspacesQuery,
@@ -90,7 +90,7 @@ export const ThreadHeader = memo(function ThreadHeader({
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
 
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
   const isStepSession = session.kind === "run";
@@ -100,7 +100,7 @@ export const ThreadHeader = memo(function ThreadHeader({
     listWorkspaceSessionTabs(session, [...threadsAndPartners, ...agentSessions], {
       workspaces,
       runners,
-      instances,
+      accounts,
     });
   // The row's project is the work's project, and it may be null: a lead with no project. The
   // open session's own project must not stand in for it, or a partner in another project would

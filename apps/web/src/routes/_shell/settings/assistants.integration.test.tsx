@@ -20,7 +20,7 @@ import {
   type MemoryDocument,
   type MemoryWriteInput,
   type Profile,
-  type ProviderInstance,
+  type ProviderAccount,
 } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -35,42 +35,22 @@ import {
 
 const AT = "2026-09-25T09:00:00.000Z";
 
-const buildProviderInstance = (id: string, displayName: string): ProviderInstance => ({
+const buildAccount = (id: string, label: string | null): ProviderAccount => ({
   id,
-  harnessId: "claude-code/claude-code",
-  secretFields: [],
-  name: displayName,
-  config: {},
-  displayName,
-  binaryName: "claude",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: "claude-code/claude-code",
   snapshots: [],
   createdAt: AT,
   updatedAt: AT,
 });
 
-const INSTANCE_PERSONAL = buildProviderInstance(
-  "01a06d02-1000-7000-8000-000000000001",
-  "Claude Code",
-);
-const INSTANCE_WORK = buildProviderInstance(
-  "01a06d02-1000-7000-8000-000000000002",
-  "Claude Code (work)",
-);
-const INSTANCES: readonly ProviderInstance[] = [INSTANCE_PERSONAL, INSTANCE_WORK];
+const ACCOUNT_PERSONAL = buildAccount("01a06d02-1000-7000-8000-000000000001", null);
+const ACCOUNT_WORK = buildAccount("01a06d02-1000-7000-8000-000000000002", "work");
+const ACCOUNTS: readonly ProviderAccount[] = [ACCOUNT_PERSONAL, ACCOUNT_WORK];
 
 const buildProfile = (id: string, name: string): Profile => ({
   id,
@@ -89,7 +69,8 @@ const buildAssistant = (
   fields: Pick<Assistant, "id" | "name" | "systemPrompt" | "mainConversationId"> &
     Partial<Assistant>,
 ): Assistant => ({
-  instanceId: INSTANCE_PERSONAL.id,
+  providerAccountId: ACCOUNT_PERSONAL.id,
+  harnessId: null,
   permissionProfileId: PROFILE_ASSISTANT.id,
   accessMode: "auto-accept-edits",
   // No model, so a form without a Model field never has one to send.
@@ -116,7 +97,7 @@ const BOB = buildAssistant({
   mainConversationId: "01a06d02-c000-7000-8000-000000000002",
   name: "Bob",
   systemPrompt: "You are Bob. Answer at length.",
-  instanceId: INSTANCE_WORK.id,
+  providerAccountId: ACCOUNT_WORK.id,
   permissionProfileId: PROFILE_UNRESTRICTED.id,
   accessMode: "auto",
   reply: "segments",
@@ -323,7 +304,7 @@ const buildController = (
         },
       },
     },
-    "GET /api/v1/providers": { body: INSTANCES },
+    "GET /api/v1/provider-accounts": { body: ACCOUNTS },
     "GET /api/v1/profiles": { body: { items: PROFILES } },
     "GET /api/v1/runners": { body: { items: [] } },
     "GET /api/v1/assistants": () => ({ body: { items: list } }),
@@ -430,11 +411,12 @@ describe("Settings > Assistants: the list and the form", () => {
     expect(persona.tagName).toBe("TEXTAREA");
     expect(persona.value).toBe(BOB.systemPrompt);
 
-    const instance = screen.getByLabelText<HTMLSelectElement>("Provider instance");
-    expect([...instance.options].map((option) => option.textContent)).toEqual(
-      INSTANCES.map((each) => each.displayName),
-    );
-    expect(instance.value).toBe(INSTANCE_WORK.id);
+    const account = screen.getByLabelText<HTMLSelectElement>("Account");
+    expect([...account.options].map((option) => option.textContent)).toEqual([
+      "Anthropic",
+      "Anthropic · work",
+    ]);
+    expect(account.value).toBe(ACCOUNT_WORK.id);
 
     const profile = screen.getByLabelText<HTMLSelectElement>("Permission profile");
     expect([...profile.options].map((option) => option.textContent)).toEqual(
@@ -496,7 +478,7 @@ describe("Settings > Assistants: the list and the form", () => {
     expect(write?.body).toEqual({ name: "Ada Lovelace", reply: "segments" });
   });
 
-  it("saves only the changed persona, provider instance, permission profile and access mode", async () => {
+  it("saves only the changed persona, account, permission profile and access mode", async () => {
     const user = userEvent.setup();
     const { api } = await openScreen([ADA, BOB]);
     await selectAssistant(user, "Ada");
@@ -504,7 +486,7 @@ describe("Settings > Assistants: the list and the form", () => {
     const persona = screen.getByLabelText("Persona");
     await user.clear(persona);
     await user.type(persona, "You are Ada.{Enter}Answer in Dutch.");
-    await user.selectOptions(screen.getByLabelText("Provider instance"), INSTANCE_WORK.displayName);
+    await user.selectOptions(screen.getByLabelText("Account"), "Anthropic · work");
     await user.selectOptions(
       screen.getByLabelText("Permission profile"),
       PROFILE_UNRESTRICTED.name,
@@ -523,7 +505,7 @@ describe("Settings > Assistants: the list and the form", () => {
     expect(`${write?.method} ${write?.path}`).toBe(`PATCH /api/v1/assistants/${ADA.id}`);
     expect(write?.body).toEqual({
       systemPrompt: "You are Ada.\nAnswer in Dutch.",
-      instanceId: INSTANCE_WORK.id,
+      providerAccountId: ACCOUNT_WORK.id,
       permissionProfileId: PROFILE_UNRESTRICTED.id,
       accessMode: "full-access",
     });
@@ -856,19 +838,19 @@ describe("Settings > Assistants: saving", () => {
     expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
   });
 
-  it("shows a stored instance and profile that are no longer listed as not found, and never sends them", async () => {
+  it("shows a stored account and profile that are no longer listed as not found, and never sends them", async () => {
     const user = userEvent.setup();
     const orphan = {
       ...ADA,
-      instanceId: "01a06d02-1000-7000-8000-0000000000ff",
+      providerAccountId: "01a06d02-1000-7000-8000-0000000000ff",
       permissionProfileId: "01a06d02-3000-7000-8000-0000000000ee",
     };
     const { api } = await openScreen([orphan, BOB]);
     await selectAssistant(user, "Ada");
 
-    const instance = screen.getByLabelText<HTMLSelectElement>("Provider instance");
-    expect(instance.value).toBe(orphan.instanceId);
-    expect(instance.selectedOptions[0]?.textContent).toBe("000000ff (not found)");
+    const account = screen.getByLabelText<HTMLSelectElement>("Account");
+    expect(account.value).toBe(orphan.providerAccountId);
+    expect(account.selectedOptions[0]?.textContent).toBe("000000ff (not found)");
     const profile = screen.getByLabelText<HTMLSelectElement>("Permission profile");
     expect(profile.value).toBe(orphan.permissionProfileId);
     expect(profile.selectedOptions[0]?.textContent).toBe("000000ee (not found)");

@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ProviderInstance, Runner, Task, Workspace } from "@hercule/contract";
+import type { ProviderAccount, Runner, Task, Workspace } from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
 import {
@@ -22,7 +22,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   holdAnswer,
   readFieldText,
   renderApp,
@@ -58,13 +58,13 @@ const CART_TASK: Task = {
 
 /**
  * Opens the app signed in at `path`, with the sidebar fixture and the
- * provider instance, and returns the app once the draft's message field
+ * Provider Account, and returns the app once the draft's message field
  * shows. The controller starts every thread as `STARTED` and has no open
  * task, unless `handlers` say otherwise.
  */
 const openDraft = async (path: string, handlers: Readonly<Record<string, Handler>> = {}) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
     ...buildThreadHandlers(STARTED),
     "POST /api/v1/sessions": { body: STARTED.session },
     ...handlers,
@@ -164,15 +164,15 @@ describe("the new-thread screen", () => {
       },
     });
     const studio = withPort(buildRunner("01a06d02-7700-7000-8000-0000000000ab", "studio"), 4940);
-    const [snapshot] = FIXTURE_INSTANCE.snapshots;
+    const [snapshot] = FIXTURE_ACCOUNT.snapshots;
     stubApi({
       ...buildSidebarHandlers({
         ...SIDEBAR_FIXTURE,
         runners: [withPort(moss, 4939), studio],
-        providers: [
+        accounts: [
           {
-            ...FIXTURE_INSTANCE,
-            snapshots: [...FIXTURE_INSTANCE.snapshots, { ...snapshot!, runnerId: studio.id }],
+            ...FIXTURE_ACCOUNT,
+            snapshots: [...FIXTURE_ACCOUNT.snapshots, { ...snapshot!, runnerId: studio.id }],
           },
         ],
       }),
@@ -191,13 +191,13 @@ describe("the new-thread screen", () => {
   });
 
   it("says why the draft cannot start, sends nothing, and starts once the reason is gone", async () => {
-    let providers: readonly ProviderInstance[] = [];
+    let accounts: readonly ProviderAccount[] = [];
     const { calls, field, live } = await openDraft(`/?project=${WEBSHOP.id}`, {
-      "GET /api/v1/providers": () => ({ body: providers }),
+      "GET /api/v1/provider-accounts": () => ({ body: accounts }),
     });
 
     expect(screen.getByText("Can't start yet.").parentElement?.textContent).toBe(
-      "Can't start yet. No provider instance is set up.",
+      "Can't start yet. No account is set up.",
     );
     const send = screen.getByRole("button", { name: "Start thread" });
     expect(send.getAttribute("aria-disabled")).toBe("true");
@@ -205,9 +205,9 @@ describe("the new-thread screen", () => {
     await userEvent.click(send);
     expect(readFieldText(field)).toBe("Fix the cart");
 
-    // A provider is set up elsewhere, and the draft can start. The one start
+    // An account is set up elsewhere, and the draft can start. The one start
     // the controller receives is this one, so neither key above sent any.
-    providers = [FIXTURE_INSTANCE];
+    accounts = [FIXTURE_ACCOUNT];
     live.pushInvalidation("provider");
     await waitFor(() => {
       expect(send.getAttribute("aria-disabled")).toBeNull();
@@ -229,7 +229,7 @@ describe("the new-thread screen", () => {
     expect(readSpawns(calls).map((call) => call.body)).toEqual([
       {
         prompt: "Fix the cart",
-        instanceId: FIXTURE_INSTANCE.id,
+        providerAccountId: FIXTURE_ACCOUNT.id,
         model: "claude-sonnet-5",
         options: {},
         accessMode: "approval-required",
@@ -349,7 +349,7 @@ describe("the new-thread screen", () => {
 
   it("reads the settings and the profiles once each time it opens", async () => {
     const calls = stubApi({
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
       ...buildThreadHandlers(STARTED),
     });
     const { router, context } = await renderApp(
@@ -508,7 +508,7 @@ describe("the new-thread screen", () => {
 describe("the machine of a joined workspace", () => {
   it("starts on the machine of an existing workspace the user joined, though only the workspace was picked", async () => {
     const studio = buildRunner("01a06d02-7700-7000-8000-0000000000ab", "studio");
-    const [snapshot] = FIXTURE_INSTANCE.snapshots;
+    const [snapshot] = FIXTURE_ACCOUNT.snapshots;
     const [primary, other] = SIDEBAR_FIXTURE.workspaces as [Workspace, Workspace];
     const joined = { ...other, runnerId: studio.id };
     const calls = stubApi({
@@ -516,10 +516,10 @@ describe("the machine of a joined workspace", () => {
         ...SIDEBAR_FIXTURE,
         runners: [...SIDEBAR_FIXTURE.runners, studio],
         workspaces: [primary, joined],
-        providers: [
+        accounts: [
           {
-            ...FIXTURE_INSTANCE,
-            snapshots: [...FIXTURE_INSTANCE.snapshots, { ...snapshot!, runnerId: studio.id }],
+            ...FIXTURE_ACCOUNT,
+            snapshots: [...FIXTURE_ACCOUNT.snapshots, { ...snapshot!, runnerId: studio.id }],
           },
         ],
       }),

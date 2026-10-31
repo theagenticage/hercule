@@ -56,6 +56,20 @@ export interface CompleteInput {
   readonly timezone: string;
 }
 
+/**
+ * Returns whether first run is done. A database that has not been booted yet
+ * has no `setup_state` row, which also means not done.
+ */
+export const readSetupComplete: Effect.Effect<boolean, SqlError, SqlClient.SqlClient> = Effect.gen(
+  function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{
+      readonly completed_at: string | null;
+    }>`SELECT completed_at FROM setup_state WHERE singleton = 1`;
+    return rows[0]?.completed_at != null;
+  },
+);
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const users = yield* Users;
@@ -93,7 +107,7 @@ const make = Effect.gen(function* () {
      * returns a bearer token, so the caller is logged in when this returns.
      * The transport gate verifies the setup token before this runs. Fails
      * with `InvalidState` when setup is already complete, or when there is no
-     * provider instance for the assistant to run on, and with `Validation`
+     * Provider Account for the assistant to run on, and with `Validation`
      * when the timezone is not an IANA zone name. Every failure writes
      * nothing, so setup can be tried again.
      */

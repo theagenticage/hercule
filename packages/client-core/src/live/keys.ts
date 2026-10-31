@@ -251,7 +251,17 @@ export const queryKeys = {
   plugins: (): LiveQueryKey => ["plugins"],
   /** Not a live topic: secret references change only through this browser's own writes. */
   secrets: (): LiveQueryKey => ["secrets"],
+  /** The Provider Accounts with their snapshots. Pushed on the `provider` topic. */
+  providerAccounts: (): LiveQueryKey => ["provider-accounts"],
+  /** Not a live topic: the providers a build registers change only with the build. */
   providers: (): LiveQueryKey => ["providers"],
+  /**
+   * The harnesses a build registers, and for each runner whether it has the
+   * harness installed and its version. The registered set changes only with
+   * the build; the per-runner install state changes with a runner, so a push
+   * on the `runner` topic refetches this read.
+   */
+  harnesses: (): LiveQueryKey => ["harnesses"],
   controller: (): LiveQueryKey => ["controller"],
   workflows: (): LiveQueryKey => ["workflows"],
   workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
@@ -436,10 +446,18 @@ export const buildQueryKeys = (
   // facts, starts or stops accepting placements, or is changed by a user,
   // never on a timer. And only a screen that shows the controller's read
   // refetches it.
+  //
+  // The harness list is refetched too, because it holds each runner's install
+  // state and version of every harness, which the runner's facts change.
   if (topic === "runner") {
     return ids.length === 0
-      ? [queryKeys.runners(), queryKeys.runner(), queryKeys.controller()]
-      : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id)), queryKeys.controller()];
+      ? [queryKeys.runners(), queryKeys.runner(), queryKeys.harnesses(), queryKeys.controller()]
+      : [
+          queryKeys.runners(),
+          ...ids.map((id) => queryKeys.runner(id)),
+          queryKeys.harnesses(),
+          queryKeys.controller(),
+        ];
   }
   if (topic === "workspace") {
     return ids.length === 0
@@ -576,11 +594,11 @@ export const buildQueryKeys = (
   if (topic === "plugin") {
     return [queryKeys.plugins(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS];
   }
-  // Provider instances are read as one list (there is one per shipped
-  // harness), so the whole list is refetched whichever instance changed.
-  // The controller's own read is refetched too: whether a text generation
-  // can run now depends on which runners are logged in to which instance.
-  if (topic === "provider") return [queryKeys.providers(), queryKeys.controller()];
+  // Provider Accounts are read as one list, so the whole list is refetched
+  // whichever account changed. The controller's own read is refetched too:
+  // whether a text generation can run now depends on which runners are signed
+  // in to which account.
+  if (topic === "provider") return [queryKeys.providerAccounts(), queryKeys.controller()];
   return [];
 };
 

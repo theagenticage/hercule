@@ -22,7 +22,7 @@ import { prepareSessionPresentation, type SessionPresentation } from "@hercule/c
 import { useRelatedReads } from "./related-reads";
 import {
   projectsQuery,
-  providersQuery,
+  providerAccountsQuery,
   resourcesQuery,
   runnersQuery,
   sessionQuery,
@@ -80,7 +80,7 @@ export function SessionPresentationProvider({
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const presentation = useMemo(
     () =>
       prepareSessionPresentation({
@@ -90,9 +90,9 @@ export function SessionPresentationProvider({
         workspaces,
         resources,
         runners,
-        instances,
+        accounts,
       }),
-    [listedSessions, openSession, projects, workspaces, resources, runners, instances],
+    [listedSessions, openSession, projects, workspaces, resources, runners, accounts],
   );
   useRelatedReads(presentation.sessions, projects, workspaces);
   const latest = useRef(presentation);

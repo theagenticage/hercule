@@ -39,6 +39,7 @@ export {
   type ResolvedSortKey,
   type SortColumn,
 } from "./page";
+export { MigrationMasterKey } from "./migration-master-key";
 export { nowIso } from "./time";
 export {
   backupBeforeMigration,

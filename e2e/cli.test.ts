@@ -23,7 +23,7 @@ import {
 } from "../scripts/controller-process";
 import {
   readApiKey,
-  listInstances,
+  listProviderAccounts,
   parseJsonOutput,
   createTemporaryHome,
   type TemporaryHome,
@@ -162,7 +162,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     }
   }, 30_000);
 
-  it("lists the five shipped plugins, each one active", async () => {
+  it("lists the eight shipped plugins, each one active", async () => {
     // There is no CLI command for this, so the route is called the way the
     // web app calls it: over HTTP, with the key the login above created.
     const response = await fetch(`${url}/api/v1/plugins`, {
@@ -179,6 +179,9 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "claude-code",
       "codex",
       "pi",
+      "anthropic",
+      "openai",
+      "zai",
       "github",
       "sentry",
       "linear",
@@ -186,7 +189,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
-    // The three harness plugins have no capabilities asserted here. github is the connection type, the
+    // The three harness plugins and the three provider plugins have no capabilities asserted here. github is the connection type, the
     // event source with the GitHub event kinds it emits, the reader of the
     // linked repo Resources it watches, and the GitHub workflow actions.
     // sentry is the same without Resources, and linear is sentry without
@@ -239,12 +242,12 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
 interface AssistantRow {
   readonly id: string;
   readonly name: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
   readonly reply: string;
 }
 
 describe("assistants through the binary", () => {
-  it("lists the default assistant, then a created one after it, each with its instance and reply mode", async () => {
+  it("lists the default assistant, then a created one after it, each with its account and reply mode", async () => {
     const first = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
       items: ReadonlyArray<AssistantRow>;
     };
@@ -259,24 +262,24 @@ describe("assistants through the binary", () => {
       items: ReadonlyArray<AssistantRow>;
     };
     expect(second.items.map((assistant) => assistant.name)).toEqual(["Hercule", "Ada"]);
-    const instances = await listInstances({ url, apiKey: readApiKey(state.home) });
+    const accounts = await listProviderAccounts({ url, apiKey: readApiKey(state.home) });
     for (const assistant of second.items) {
       expect(
-        instances.map((instance) => instance.id),
+        accounts.map((account) => account.id),
         assistant.name,
-      ).toContain(assistant.instanceId);
+      ).toContain(assistant.providerAccountId);
       expect(assistant.reply, assistant.name).toBe("turn-end");
     }
 
     // The table a person reads shows the same: one row per assistant, oldest
-    // first, with the tail of its instance and its reply mode.
+    // first, with the tail of its account and its reply mode.
     const table = await runLoggedInCli(["assistant", "list"]);
     expect(table.code, table.stderr).toBe(0);
     const rows = table.stdout.split("\n").filter((line) => /Hercule|Ada/.test(line));
     expect(rows).toHaveLength(2);
     for (const [index, assistant] of second.items.entries()) {
       expect(rows[index], assistant.name).toContain(assistant.name);
-      expect(rows[index], assistant.name).toContain(assistant.instanceId.slice(-8));
+      expect(rows[index], assistant.name).toContain(assistant.providerAccountId.slice(-8));
       expect(rows[index], assistant.name).toContain("turn-end");
     }
   }, 60_000);

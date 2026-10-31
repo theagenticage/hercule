@@ -289,7 +289,7 @@ describe("a command's fields against the schema", () => {
       "plugin",
       "runner",
       "core",
-      "provider-instance",
+      "provider-account",
     ]);
   });
 
@@ -327,6 +327,11 @@ describe("the placeholders a usage line shows", () => {
     "transcript read": "<session-id>",
     "session subagent list": "<session-id>",
     "session skill list": "<session-id>",
+    "provider-account read": "<account-id>",
+    "provider-account update": "<account-id>",
+    "provider-account delete": "<account-id>",
+    "provider-account sign-in": "<account-id>",
+    "provider-account submit-sign-in-code": "<account-id>",
     "assistant read": "<assistant-id>",
     "assistant update": "<assistant-id>",
     "assistant delete": "<assistant-id>",

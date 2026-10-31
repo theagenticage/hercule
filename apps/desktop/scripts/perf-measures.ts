@@ -42,6 +42,10 @@ export const BUDGET = {
   // updating only the threads the nudge names.
   rendererMainThreadPerNudgeMs: 16,
   transcriptPaintMs: 800,
+  // Settings › Providers: from the click on its row to its cards on screen.
+  // Its reads are the shell's, so nothing is waited for (spec 17 §The
+  // Providers page's budgets).
+  providersPaintMs: 150,
   streamingTaskMs: 50,
 } as const;
 

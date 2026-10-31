@@ -4,7 +4,7 @@
  *
  * The probe sends no prompt and uses the SDK's control requests instead,
  * because a real prompt would bill the user's account just for opening a Fleet
- * page. The adapter uses only the instance's own config directory, never the
+ * page. The adapter uses only the account's own Harness Home, never the
  * user's `~/.claude`.
  */
 import { mkdir, writeFile } from "node:fs/promises";
@@ -52,6 +52,7 @@ import {
   type TextGenerationOutcome,
   type TextGenerationSpec,
 } from "@hercule/protocol";
+import { applyCredential, formatModelArgument } from "./account";
 import { createChildOwner } from "./claude-code-child";
 import {
   decideTextGenerationOutcome,
@@ -316,7 +317,7 @@ const hasCredentialSource = (source: string | undefined): boolean =>
 
 /**
  * Checks whether the harness has a usable login. That is not the same as
- * knowing the account. A login stored in the instance's own config
+ * knowing the account. A login stored in the account's own config
  * directory reports an email. A credential passed in through the environment,
  * an OAuth token or an API key, reports only where it came from, and works
  * just as well (spec 06 section 3.2).
@@ -353,23 +354,27 @@ const buildAuth = (account: Account): ProbeResult["auth"] => {
 };
 
 /**
- * Returns the environment for the CLI, pointed at the instance's config
- * directory. `HOME` is not changed, because overriding it makes the CLI report
- * the login of a different account.
+ * Returns the environment for the CLI, pointed at the account's Harness Home,
+ * with the account's credential when it has one. `HOME` is not changed,
+ * because overriding it makes the CLI report the login of a different account.
  */
-const buildEnv = (ctx: HarnessRunnerContext): Record<string, string | undefined> => ({
-  ...ctx.env,
-  CLAUDE_CONFIG_DIR: ctx.home,
-  // Without this, the harness could update itself during a probe and install
-  // a version nobody chose, while the probe is reporting which version it has.
-  DISABLE_AUTOUPDATER: "1",
-});
+const buildEnv = (ctx: HarnessRunnerContext): Record<string, string | undefined> =>
+  applyCredential(
+    {
+      ...ctx.env,
+      CLAUDE_CONFIG_DIR: ctx.home,
+      // Without this, the harness could update itself during a probe and install
+      // a version nobody chose, while the probe is reporting which version it has.
+      DISABLE_AUTOUPDATER: "1",
+    },
+    ctx.credential,
+  );
 
 /**
  * Returns the SDK options for a probe. The user's own settings and MCP servers
  * are not loaded, because a probe only reads the account and the model list.
  * The CLI still writes into its config directory, which is why the probe uses
- * the instance's own directory.
+ * the account's own Harness Home.
  */
 const buildProbeOptions = (ctx: HarnessRunnerContext, binary: string): Options => ({
   pathToClaudeCodeExecutable: binary,
@@ -585,7 +590,7 @@ const buildTextGenerationOptions = (
   persistSession: false,
   settingSources: [],
   strictMcpConfig: true,
-  model: spec.model,
+  model: formatModelArgument(ctx.modelArgument, spec.model),
   thinking: { type: "disabled" },
   effort: "low",
   maxTurns: TEXT_GENERATION_MAX_TURNS,
@@ -912,12 +917,12 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
 /**
  * Returns the SDK options for a session. Unlike a probe, a session runs the
  * user's work, so it gets the workspace as its working directory. Its config
- * directory is always the instance's home, which every session of the
- * instance shares. The setting sources it loads depend on the session:
+ * directory is always the Harness Home, which every session of the
+ * account shares. The setting sources it loads depend on the session:
  *
  * - A Thread that sees User Material loads the user source, which the CLI
  *   reads from its config directory. The runner links the user's own agents,
- *   commands, rules and `CLAUDE.md` into the instance's home, so this is how
+ *   commands, rules and `CLAUDE.md` into the Harness Home, so this is how
  *   the Thread finds them (spec 06 section 9.1). A Thread's skills are not
  *   among them: they come from its library skills folder, a plugin
  *   (`buildPlugins`). Every other session leaves the user source out, so an
@@ -1026,7 +1031,7 @@ const buildSessionOptions = (
     forwardSubagentText: true,
     // `perTaskStopAffordance` stays unset, so `interrupt()` also stops
     // background subagents (spec 06 section 13.4).
-    model: spec.modelSelection.model,
+    model: formatModelArgument(ctx.modelArgument, spec.modelSelection.model),
     ...(effort === undefined ? {} : { effort }),
     permissionMode: PERMISSION_MODES[spec.accessMode],
     // The callback is passed in every mode. The harness leaves out the
@@ -1109,6 +1114,8 @@ interface Live {
   stopping: ExitReason | undefined;
   /** The model the harness is using. It starts as the model in the session spec. */
   model: string;
+  /** How the session's account names a model to the harness (`ctx.modelArgument`). */
+  readonly modelArgument: string;
   /** Counts Stops so an input waiting for a model change cannot continue after its Stop. */
   inputGeneration: number;
 }
@@ -1523,7 +1530,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
         const binding: SessionBinding = {
           sessionId,
           nativeSessionId: native.nativeSessionId,
-          instanceId: spec.instanceId,
+          providerAccountId: spec.providerAccountId,
         };
         const input = createPushable<SDKUserMessage>();
         const reportUnknownMessage = yield* captureUnknownItemReporter("Claude", sessionId);
@@ -1574,6 +1581,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
           stopping: undefined,
           inputGeneration: 0,
           model: spec.modelSelection.model,
+          modelArgument: ctx.modelArgument,
         };
         live.set(sessionId, held);
         void pumpEvents(sessionId, held);
@@ -1608,7 +1616,10 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
         // the model, the input fails: sending it under the old model would run
         // a turn the caller did not ask for.
         if (model !== undefined && model !== before.model && before.state.turnId === undefined) {
-          const failure = yield* sendControlRequest(before, before.stream.setModel(model));
+          const failure = yield* sendControlRequest(
+            before,
+            before.stream.setModel(formatModelArgument(before.modelArgument, model)),
+          );
           if (failure !== undefined) {
             return yield* Effect.fail(
               failure._tag === "Refused"
@@ -1743,7 +1754,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
     // The config is empty for every shipped harness, so it is not read.
-    generateText: (ctx, _config, spec) =>
+    generateText: (ctx, spec) =>
       // The harness is closed, and its exit awaited, before the runner
       // removes its working directory and frees the call's slot, so nothing is
       // still writing into the directory. The stream stops the CLI itself if

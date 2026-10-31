@@ -280,7 +280,13 @@ export const Session = Schema.Struct({
   runId: Schema.NullOr(Id),
   /** The id, in that run's plan, of the agent step this session runs; `null` when `runId` is. */
   stepId: Schema.NullOr(Schema.String),
-  instanceId: Id,
+  /**
+   * The Provider Account the session runs on. An ended session keeps the id
+   * after the account is deleted, as history.
+   */
+  providerAccountId: Id,
+  /** The qualified id of the harness the session runs in. It never changes. */
+  harnessId: Schema.String,
   /** The runner the session started on. A session never moves to another runner. */
   runnerId: Id,
   workspaceId: Schema.NullOr(Id),
@@ -360,7 +366,7 @@ export const Session = Schema.Struct({
   reopenedAt: Schema.optionalKey(Timestamp),
   /**
    * The fields this session was spawned with that its harness ignores.
-   * Computed from the instance's declared capabilities every time the session
+   * Computed from the harness's declared capabilities every time the session
    * is read.
    */
   unenforced: Schema.Array(UnenforcedSpecField),
@@ -535,13 +541,15 @@ export const SessionSpawnInput = closedStruct({
   role: Schema.optionalKey(SessionRole),
   /**
    * The Agent to spawn from. Its fields take the place of the Thread's
-   * defaults, with the same precedence. `instanceId` and `permissionProfileId`
-   * are rejected with it, because the Agent sets both.
+   * defaults, with the same precedence. `providerAccountId`, `harnessId` and
+   * `permissionProfileId` are rejected with it, because the Agent sets them.
    */
   agentId: Schema.optionalKey(Id),
   /** What every turn of this session must return. A schema outside the subset all harnesses support is rejected. */
   outputSchema: Schema.optionalKey(OutputSchema),
-  instanceId: Schema.optionalKey(Id),
+  providerAccountId: Schema.optionalKey(Id),
+  /** The harness to run in; left out, the account's default harness. */
+  harnessId: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(Schema.NonEmptyString),
   /** The per-model choices this session opens with; a choice the model does not offer is rejected. */
   options: Schema.optionalKey(ModelSelection.fields.options),
@@ -754,7 +762,7 @@ export type SessionRespondToQuestionInput = Schema.Schema.Type<
 /**
  * Branching a session: `fork` opens a second harness-native session from the
  * one the parent left behind, and leaves the parent's own history untouched.
- * It runs on the parent's runner and provider instance, because that is where
+ * It runs on the parent's runner, Provider Account and harness, because that is where
  * the native state is. Continuing the parent itself is not done here: an
  * exited session that still has its transcript is resumed in place by its next
  * input.

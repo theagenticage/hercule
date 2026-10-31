@@ -5,6 +5,7 @@ import type {
   HarnessDefinition,
   WorkflowActionContribution,
 } from "./contributions";
+import type { ProviderDefinition } from "./providers";
 import type {
   ConnectionRegistration,
   ConnectionsRuntime,
@@ -23,6 +24,10 @@ export interface HarnessRegistration {
   readonly register: (definition: HarnessDefinition) => Effect.Effect<void, PluginError>;
 }
 
+export interface ProviderRegistration {
+  readonly register: (definition: ProviderDefinition) => Effect.Effect<void, PluginError>;
+}
+
 export interface EventSourceRegistration {
   readonly register: (contribution: EventSourceContribution) => Effect.Effect<void, PluginError>;
 }
@@ -39,6 +44,7 @@ export interface WorkflowActionRegistration {
  */
 export interface RegistrationHost {
   readonly harnesses?: HarnessRegistration;
+  readonly providers?: ProviderRegistration;
   readonly connections?: ConnectionRegistration;
   readonly eventSources?: EventSourceRegistration;
   readonly workflowActions?: WorkflowActionRegistration;
@@ -90,7 +96,7 @@ export interface Plugin {
  * Every service on `RegistrationHost` is optional, because the host builds one
  * only for a capability the manifest lists. A plugin still has to handle the
  * missing case, and the right handling is always the same: fail, with a
- * message the user reads in Settings. The three functions below do the same
+ * message the user reads in Settings. The functions below do the same
  * for the other registration services.
  */
 export const registerHarness = (
@@ -100,6 +106,14 @@ export const registerHarness = (
   host.harnesses === undefined
     ? Effect.fail(new PluginError({ message: "the harnesses capability was not granted" }))
     : host.harnesses.register(definition);
+
+export const registerProvider = (
+  host: RegistrationHost,
+  definition: ProviderDefinition,
+): Effect.Effect<void, PluginError> =>
+  host.providers === undefined
+    ? Effect.fail(new PluginError({ message: "the providers capability was not granted" }))
+    : host.providers.register(definition);
 
 export const registerConnectionType = (
   host: RegistrationHost,

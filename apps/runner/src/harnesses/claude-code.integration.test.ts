@@ -109,12 +109,12 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
         home: createTemporaryHome(),
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "" },
-        secrets: {},
+        modelArgument: "{model}",
         herculeTool: prepareTool(),
       };
 
       const started = Date.now();
-      const probed = await Effect.runPromise(claudeCode.probe(context, {}));
+      const probed = await Effect.runPromise(claudeCode.probe(context));
       const took = Date.now() - started;
 
       // Not `error`: an empty config directory means nobody has logged in, and
@@ -153,7 +153,7 @@ const wanted = process.env["HERCULE_LIVE_SESSION_TEST"] !== undefined;
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 
 const SPEC: SessionSpec = {
-  instanceId: "0199e0e7-0000-7000-8000-00000000000a",
+  providerAccountId: "0199e0e7-0000-7000-8000-00000000000a",
   workspaceId: null,
   // The cheapest model, and no tools: these tests check the session's events,
   // not what the model can do.
@@ -192,20 +192,17 @@ const authed =
     ? false
     : (
         await Effect.runPromise(
-          claudeCode.probe(
-            {
-              cwd: null,
-              attachmentsDir: null,
-              editMarks: null,
-              attachmentUploader: NO_CONTROLLER_UPLOADER,
-              home: CONFIG_DIR,
-              binary,
-              env: process.env,
-              secrets: {},
-              herculeTool: prepareTool(),
-            },
-            {},
-          ),
+          claudeCode.probe({
+            cwd: null,
+            attachmentsDir: null,
+            editMarks: null,
+            attachmentUploader: NO_CONTROLLER_UPLOADER,
+            home: CONFIG_DIR,
+            binary,
+            env: process.env,
+            modelArgument: "{model}",
+            herculeTool: prepareTool(),
+          }),
         )
       ).auth.status === "ok";
 
@@ -323,7 +320,7 @@ const buildContext = (
       ? {}
       : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
   },
-  secrets: {},
+  modelArgument: "{model}",
   herculeTool,
 });
 
@@ -656,7 +653,7 @@ const ISOLATED_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0a";
 const CHECKOUT_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0c";
 
 /**
- * Checks that the real CLI loads User Material from the instance's home only
+ * Checks that the real CLI loads User Material from the Harness Home only
  * for a Thread that sees it, and that a Thread's skills come from its skills
  * folder, never from the user's disk. The home is laid out the way the runner
  * lays it out now: `CLAUDE.md` is a symlink to the user's `~/.claude/CLAUDE.md`,
@@ -673,7 +670,7 @@ const CHECKOUT_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0c";
  */
 describe.skipIf(binary === undefined)("User Material in a real Claude Code session", () => {
   /**
-   * Lays out a user's material, an instance home that links to it, and a
+   * Lays out a user's material, a Harness Home that links to it, and a
    * session skills folder with one library skill. Returns the paths of all
    * three.
    */
@@ -695,7 +692,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     symlinkSync("../../.agents/skills/user-skill", join(claudeDir, "skills", "user-skill"));
     writeFileSync(join(claudeDir, "CLAUDE.md"), "# Personal\n\nThe user's own instructions.\n");
 
-    const home = join(root, "instance");
+    const home = join(root, "harness-home");
     mkdirSync(home);
     symlinkSync(join(claudeDir, "CLAUDE.md"), join(home, "CLAUDE.md"));
 
@@ -802,7 +799,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
         HOME: join(root, "user"),
         ANTHROPIC_API_KEY: "sk-ant-placeholder",
       },
-      secrets: {},
+      modelArgument: "{model}",
       herculeTool: prepareTool(),
       ...(session.thread ? { userMaterial: NO_USER_MATERIAL_PATHS, librarySkillsFolder } : {}),
       ...(repository === undefined
@@ -960,7 +957,7 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
     const repositorySkillsFolders = ["a", "b"].map((name) =>
       layOutCheckoutInRoot(root, workspaceRoot, name),
     );
-    const home = join(root, "instance");
+    const home = join(root, "harness-home");
     mkdirSync(home);
     if (options.boundary) {
       await Effect.runPromise(ensureRootBoundary(workspaceRoot));
@@ -995,7 +992,7 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
         HOME: userHome,
         ANTHROPIC_API_KEY: "sk-ant-placeholder",
       },
-      secrets: {},
+      modelArgument: "{model}",
       herculeTool: prepareTool(),
       repositorySkillsFolders,
     };
@@ -1250,7 +1247,7 @@ describe.skipIf(binary === undefined)(
       writeFileSync(join(web, "src", "a.ts"), "export {};\n");
       lay({ web, userHome });
       await Effect.runPromise(ensureRootBoundary(workspaceRoot));
-      const home = join(root, "instance");
+      const home = join(root, "harness-home");
       mkdirSync(home);
 
       // The first request that offers tools asks for one `Read`; the next
@@ -1274,7 +1271,7 @@ describe.skipIf(binary === undefined)(
           ANTHROPIC_API_KEY: "sk-ant-placeholder",
           ANTHROPIC_BASE_URL: mock.url,
         },
-        secrets: {},
+        modelArgument: "{model}",
         herculeTool: prepareTool(),
         sessionSkillsFolder: join(root, "session-skills"),
         ...(listCheckouts ? { checkoutPaths: [web, join(workspaceRoot, "api")] } : {}),
@@ -1426,7 +1423,7 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
       attachmentsDir: null,
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
-      home: join(root, "instance"),
+      home: join(root, "harness-home"),
       binary: binary!,
       env: {
         PATH: process.env["PATH"] ?? "",
@@ -1434,7 +1431,7 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
         ANTHROPIC_API_KEY: "sk-ant-placeholder",
         ANTHROPIC_BASE_URL: mock.url,
       },
-      secrets: {},
+      modelArgument: "{model}",
       herculeTool: prepareTool(),
     };
     mkdirSync(context.home);
@@ -1770,7 +1767,7 @@ const replayFixture = async (
         home: "/var/hercule/runner/providers/replay",
         binary: "/usr/local/bin/claude",
         env: { PATH: "/usr/bin" },
-        secrets: {},
+        modelArgument: "{model}",
         herculeTool: {
           orientation: "",
           skill: "",
@@ -2305,7 +2302,7 @@ describe.skipIf(binary === undefined)(
           );
           symlinkSync(skillFolder, join(pluginFolder, "skills", folder));
         }
-        const home = join(root, "instance");
+        const home = join(root, "harness-home");
         mkdirSync(home);
         let running: Query | undefined;
         const adapter = makeClaudeCodeAdapter({
@@ -2337,7 +2334,7 @@ describe.skipIf(binary === undefined)(
             HOME: userHome,
             ANTHROPIC_API_KEY: "sk-ant-placeholder",
           },
-          secrets: {},
+          modelArgument: "{model}",
           herculeTool: prepareTool(),
           repositorySkillsFolders: [pluginFolder],
         };

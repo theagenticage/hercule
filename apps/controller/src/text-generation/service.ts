@@ -5,8 +5,8 @@
  * no tools, no workspace, no transcript and no turn, and nothing is stored but
  * the audit entry, so a call lost to a restart leaves nothing to clean up.
  *
- * The controller holds no provider login, so it cannot call a model itself:
- * every call runs on a runner, through a harness that is logged in there. The
+ * The controller holds no sign-in to a provider, so it cannot call a model itself:
+ * every call runs on a runner, through a harness that is signed in there. The
  * controller daemon owns the wire to the runners, so it implements this
  * service; the domains, such as the runs engine, only call it.
  */
@@ -73,11 +73,11 @@ const TextGenerationErrorReason = Schema.Union([
  *
  * - `off`: text generation is off in Settings. No runner was asked.
  * - `unavailable`: no runner can take the call now, and the caller asked to
- *   fail rather than wait. The chosen instance is logged in on no placeable
+ *   fail rather than wait. The chosen account is signed in on no placeable
  *   runner, or the runner went away before it answered. The same call may
  *   work once a runner can take it.
  * - `failed`: a runner took the call and it failed there, or the controller
- *   could not send it, for example because the instance's credentials could
+ *   could not send it, for example because the account's credentials could
  *   not be read. Calling again at once is not expected to help.
  * - `timeout`: no answer came in time. The deadline is 60 seconds from the
  *   moment the call holds a slot on the runner; the wait for a free slot

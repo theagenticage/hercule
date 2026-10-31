@@ -10,9 +10,9 @@
  * other session, probe, install or login can reach the user's material by
  * accident.
  *
- * Claude Code gets directory symlinks inside its instance home, because that
+ * Claude Code gets directory symlinks inside its Harness Home, because that
  * is where it reads the user's material from. Codex and pi get nothing
- * written: their instance homes are shared by every session of the instance,
+ * written: their Harness Homes are shared by every session of the account,
  * so a link there would leak into sessions that are not Threads. Their
  * adapters pass the paths returned here to the harness instead.
  */
@@ -34,7 +34,7 @@ import { CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../harnesses";
 
 /**
  * User Material with no paths. A Claude Code Thread always gets it, because
- * Claude reads the user's material through links in its instance home. Any
+ * Claude reads the user's material through links in its Harness Home. Any
  * other Thread gets it when the runner finds none of the user's material.
  */
 const NO_PATHS: UserMaterial = {
@@ -114,7 +114,7 @@ const findInstructionsFile = (
  * The link is made under a unique temporary name and renamed over the
  * target. A rename is atomic, so a harness starting at the same moment sees
  * either the old link or the new one, never no link at all. Two sessions of
- * the same instance can also start at once without tripping over each other.
+ * the same account can also start at once without tripping over each other.
  */
 const linkEntry = (source: string, target: string): string | undefined => {
   const existing = lstatSync(target, { throwIfNoEntry: false });
@@ -140,15 +140,15 @@ const linkEntry = (source: string, target: string): string | undefined => {
 };
 
 /**
- * Removes the `skills` link an earlier runner made in the instance home,
+ * Removes the `skills` link an earlier runner made in the Harness Home,
  * which pointed at the user's `~/.claude/skills`. Without this, the link
  * would stay, because only the entries `CLAUDE_ENTRIES` names are visited,
  * and Claude would keep loading the user's skills beside the library's.
  * A real directory there, or a link that points anywhere else, is left alone:
  * the runner did not make it. Throws when the filesystem fails.
  */
-const removeRetiredSkillsLink = (home: string, instanceHome: string): void => {
-  const target = join(instanceHome, "skills");
+const removeRetiredSkillsLink = (home: string, harnessHome: string): void => {
+  const target = join(harnessHome, "skills");
   const existing = lstatSync(target, { throwIfNoEntry: false });
   if (existing?.isSymbolicLink() && readlinkSync(target) === join(home, ".claude", "skills")) {
     unlinkSync(target);
@@ -157,34 +157,34 @@ const removeRetiredSkillsLink = (home: string, instanceHome: string): void => {
 
 /**
  * Links each entry of the user's `.claude` directory that exists into the
- * instance home, and removes links whose source is gone. Returns a warning
+ * Harness Home, and removes links whose source is gone. Returns a warning
  * for each entry the user has that it did not link, including one a
  * filesystem error stopped.
  *
  * Claude Code loads these entries only when its settings sources include the
  * user's, which the adapter asks for only for a Thread. Other sessions of the
- * instance share the same home but never see the links.
+ * account share the same home but never see the links.
  *
  * The links point at whole directories, so symlinks inside them, like the
  * relative ones a skill manager makes, resolve as they do for the user.
  */
-const linkClaudeMaterial = (home: string, instanceHome: string): ReadonlyArray<string> => {
+const linkClaudeMaterial = (home: string, harnessHome: string): ReadonlyArray<string> => {
   const warnings: Array<string> = [];
   try {
-    removeRetiredSkillsLink(home, instanceHome);
+    removeRetiredSkillsLink(home, harnessHome);
   } catch (error) {
     if (!isMissingPath(error)) {
       const reason = error instanceof Error ? error.message : String(error);
-      warnings.push(`Did not remove the old skills link from ${instanceHome}: ${reason}`);
+      warnings.push(`Did not remove the old skills link from ${harnessHome}: ${reason}`);
     }
   }
   for (const name of CLAUDE_ENTRIES) {
     const source = join(home, ".claude", name);
     try {
-      const warning = linkEntry(source, join(instanceHome, name));
+      const warning = linkEntry(source, join(harnessHome, name));
       if (warning !== undefined) warnings.push(warning);
     } catch (error) {
-      // A broken instance home fails every entry, but only the entries the
+      // a broken Harness Home fails every entry, but only the entries the
       // user has are worth a warning.
       if (!existsSync(source)) continue;
       const reason = error instanceof Error ? error.message : String(error);
@@ -266,7 +266,7 @@ const findPiMaterial = (home: string): FoundMaterial => {
  * Provisions the user's material for one Thread of `harnessId`, read from the
  * default locations under `env.HOME`, and returns the paths the adapter
  * passes to the harness. For Claude Code it writes links to that material
- * into `instanceHome` and returns no paths; for every other harness it
+ * into `harnessHome` and returns no paths; for every other harness it
  * writes nothing. Returns no paths when `env` has no `HOME` or the harness
  * has no material.
  *
@@ -276,7 +276,7 @@ const findPiMaterial = (home: string): FoundMaterial => {
  */
 export const provisionUserMaterial = (
   harnessId: string,
-  instanceHome: string,
+  harnessHome: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Effect.Effect<UserMaterial> =>
   Effect.gen(function* () {
@@ -285,7 +285,7 @@ export const provisionUserMaterial = (
     const found = yield* Effect.sync((): FoundMaterial => {
       switch (harnessId) {
         case CLAUDE_CODE:
-          return { material: NO_PATHS, warnings: linkClaudeMaterial(home, instanceHome) };
+          return { material: NO_PATHS, warnings: linkClaudeMaterial(home, harnessHome) };
         case CODEX:
           return findCodexMaterial(home, env);
         case PI:

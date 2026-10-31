@@ -295,18 +295,59 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns whether a provider instance with this id exists. Used to check a
-     * setting that names an instance. The query is here, not in the providers
-     * domain, because the providers domain imports the runners domain, which
-     * imports settings, so settings cannot import the provider repository
-     * without a cycle.
+     * Lists the value of one user setting for every user that has set it. A
+     * stored value this version cannot read is left out, as `allForUser`
+     * reads it as unset. Used to find what still names a record, for example
+     * the Provider Accounts that users have as their default.
      */
-    hasProviderInstance: (instanceId: string): Effect.Effect<boolean, SqlError> =>
+    listUserValues: <K extends SettingKey<"user">>(
+      key: K,
+    ): Effect.Effect<ReadonlyArray<SettingValue<"user", K>>, SqlError> =>
+      Effect.flatMap(
+        sql<KeyValueRow>`SELECT key, value FROM user_settings WHERE key = ${key}`,
+        (rows) =>
+          Effect.map(
+            Effect.forEach(rows, (row) => Effect.option(decode("user", key, row.value))),
+            (decoded) => decoded.flatMap(Option.toArray) as Array<SettingValue<"user", K>>,
+          ),
+      ),
+
+    /**
+     * Returns what is needed to decide which harnesses the Provider Account
+     * with this id can run in (its provider, its account kind and its default
+     * harness), or `None` when there is no such account. Used to check a
+     * setting that names an account.
+     *
+     * The query is here, not in the provider-accounts domain, because that
+     * domain imports the runners domain, which imports settings, so settings
+     * cannot import the account repository without a cycle. It reads three
+     * plain columns, so it does not duplicate the account domain's rules.
+     */
+    readProviderAccountKind: (
+      providerAccountId: string,
+    ): Effect.Effect<
+      Option.Option<{
+        readonly providerId: string;
+        readonly kind: string;
+        readonly defaultHarnessId: string;
+      }>,
+      SqlError
+    > =>
       Effect.map(
-        sql<{ readonly one: number }>`
-          SELECT 1 AS one FROM provider_instances WHERE id = ${uuidFromString(instanceId)}
+        sql<{
+          readonly provider_id: string;
+          readonly kind: string;
+          readonly default_harness_id: string;
+        }>`
+          SELECT provider_id, kind, default_harness_id FROM provider_accounts
+          WHERE id = ${uuidFromString(providerAccountId)}
         `,
-        (rows) => rows.length > 0,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            providerId: row.provider_id,
+            kind: row.kind,
+            defaultHarnessId: row.default_harness_id,
+          })),
       ),
 
     /**

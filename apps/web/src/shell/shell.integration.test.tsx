@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Assistant, ProviderInstance, Session, Workspace } from "@hercule/contract";
+import type { Assistant, ProviderAccount, Session, Workspace } from "@hercule/contract";
 import { formatAge } from "@hercule/client-core";
 import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
@@ -47,7 +47,8 @@ const BASE_SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
+  providerAccountId: "01a06d02-1000-7000-8000-000000000001",
+  harnessId: "claude-code/claude-code",
   runnerId: "01a06d02-beff-7037-9f5b-042822015952",
   workspaceId: null,
   projectId: null,
@@ -628,7 +629,7 @@ const withProjects = (user: Record<string, unknown> = {}): Readonly<Record<strin
   "GET /api/v1/workspaces": { body: { items: [W_PRIMARY, W_THREAD_3F1] } },
   // What the draft route below loads; nothing here is what it asserts on.
   "GET /api/v1/runners": { body: { items: [MOSS] } },
-  "GET /api/v1/providers": { body: [] },
+  "GET /api/v1/provider-accounts": { body: [] },
   "GET /api/v1/profiles": { body: { items: [] } },
 });
 
@@ -776,7 +777,8 @@ const BASE_ASSISTANT: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Ada",
   systemPrompt: "You are a helpful assistant.",
-  instanceId: BASE_SESSION.instanceId,
+  providerAccountId: BASE_SESSION.providerAccountId,
+  harnessId: null,
   permissionProfileId: BASE_SESSION.permissionProfileId,
   accessMode: "full-access",
   model: null,
@@ -1030,33 +1032,20 @@ describe("the Threads face's Assistants group", () => {
   });
 });
 
-/** A Claude Code instance, logged in on moss when `loggedIn` is true and never probed otherwise. */
-const buildClaudeCode = (loggedIn: boolean): ProviderInstance => ({
+/** An Anthropic account, signed in on moss when `signedIn` is true and never probed otherwise. */
+const buildClaudeCode = (signedIn: boolean): ProviderAccount => ({
   id: "01a06d02-1000-7000-8000-000000000001",
-  harnessId: "claude-code/claude-code",
-  name: "Claude Code",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
-  snapshots: loggedIn
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: "claude-code/claude-code",
+  snapshots: signedIn
     ? [
         {
           runnerId: MOSS.id,
+          harnessId: "claude-code/claude-code",
           probedAt: "2026-09-05T09:14:00.000Z",
           harnessVersion: "2.1.263",
           versionVerdict: "ok",
@@ -1070,24 +1059,24 @@ const buildClaudeCode = (loggedIn: boolean): ProviderInstance => ({
 });
 
 describe("the Threads face with no threads", () => {
-  const HINT = "A thread needs a runner with a provider login on it.";
+  const HINT = "A thread needs a runner with a signed-in account on it.";
 
-  it("says what a thread needs while no runner has a logged-in harness", async () => {
+  it("says what a thread needs while no runner has a signed-in account", async () => {
     const routes = {
       ...buildShellRoutes(),
       "GET /api/v1/runners": { body: { items: [MOSS] } },
-      "GET /api/v1/providers": { body: [buildClaudeCode(false)] },
+      "GET /api/v1/provider-accounts": { body: [buildClaudeCode(false)] },
     };
     await renderApp({ path: "/", api: stubApi(routes).fetch, token: "held" });
 
     expect(await getThreadsNav().findByText(HINT)).toBeDefined();
   });
 
-  it("leaves the hint out once a runner has a logged-in harness", async () => {
+  it("leaves the hint out once a runner has a signed-in account", async () => {
     const routes = {
       ...buildShellRoutes(),
       "GET /api/v1/runners": { body: { items: [MOSS] } },
-      "GET /api/v1/providers": { body: [buildClaudeCode(true)] },
+      "GET /api/v1/provider-accounts": { body: [buildClaudeCode(true)] },
     };
     await renderApp({ path: "/", api: stubApi(routes).fetch, token: "held" });
 

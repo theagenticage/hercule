@@ -24,10 +24,10 @@ const insertAgent = (name: string, permissionProfileId: string, at: string) =>
       sql,
       agents.insert({
         kind: "agent",
-        harnessId: "claude-code/claude-code",
         name,
         systemPrompt: "do the work",
-        instanceId: mintId(),
+        providerAccountId: mintId(),
+        harnessId: "claude-code/claude-code",
         permissionProfileId,
         accessMode: "full-access",
         model: null,

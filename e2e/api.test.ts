@@ -218,11 +218,13 @@ describe("the first run and everything after it", () => {
       // fleet's first member and so the one placement falls back to.
       defaultRunnerId: expect.any(String) as string,
       localRunnerId: expect.any(String) as string,
-      // No provider is logged in on a fresh machine, so no text generation
+      // No account is signed in on a fresh machine, so no text generation
       // model resolves, the status says why, and no call has failed yet.
       textGeneration: {
         model: null,
-        unavailableReason: expect.stringMatching(/^no up-to-date runner is logged in/) as string,
+        unavailableReason: expect.stringMatching(
+          /^no model is available for text generation; sign in to an account that offers OpenAI's, Z\.ai's or Anthropic's small model/,
+        ) as string,
         lastFailure: null,
       },
     });

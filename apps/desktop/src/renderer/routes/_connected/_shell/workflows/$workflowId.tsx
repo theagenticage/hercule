@@ -15,7 +15,7 @@ import { throwScreenNotFound } from "../../../../app/last-screen";
 import {
   agentsQuery,
   pluginsQuery,
-  providersQuery,
+  providerAccountsQuery,
   readOnOpen,
   settingsQuery,
   triggersQuery,
@@ -82,7 +82,7 @@ const validateWorkflowSearch = (search: Record<string, unknown>): WorkflowSearch
  *   each time a workflow opens because no topic covers them;
  * - the Runs tab's first page of runs, or the day its timeline shows.
  *
- * The triggers, the settings, the plugins and the provider instances are
+ * The triggers, the settings, the plugins and the Provider Accounts are
  * read by the Workflows layout and the shell, and are cached already.
  * Stepping the day or switching the view runs the loader again, with
  * `cause` "stay", and reads only the runs it has not read.
@@ -118,7 +118,7 @@ export const Route = createFileRoute("/_connected/_shell/workflows/$workflowId")
       await Promise.all([
         queryClient.ensureQueryData(workflowQuery(client, workflowId)),
         queryClient.ensureQueryData(triggersQuery(client)),
-        queryClient.ensureQueryData(providersQuery(client)),
+        queryClient.ensureQueryData(providerAccountsQuery(client)),
         cause === "stay"
           ? queryClient.ensureQueryData(agentsQuery(client))
           : readOnOpen(queryClient, agentsQuery(client)),
@@ -190,7 +190,7 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const { data: agents } = useSuspenseQuery(agentsQuery(client));
   const { data: actions } = useSuspenseQuery(workflowActionsQuery(client));
-  const { data: instances } = useSuspenseQuery(providersQuery(client));
+  const { data: accounts } = useSuspenseQuery(providerAccountsQuery(client));
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
 
@@ -240,7 +240,7 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
             triggers,
             agents,
             actions,
-            instances,
+            accounts,
             workflow: shownWorkflow,
           })
         }

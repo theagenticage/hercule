@@ -19,7 +19,7 @@
  * - `CODEX_HOME` must name the directory to copy the login from. The
  *   developer's own Codex home is never searched for or read.
  *
- * The login is copied into a throwaway instance home, because the session
+ * The login is copied into a throwaway Harness Home, because the session
  * runs under that home.
  *
  * The third suite drives real native subagents and approvals against a local
@@ -97,7 +97,7 @@ const createScratchDir = (label: string): string => {
 };
 
 /**
- * Creates an instance home with the copied login in it. The adapter points
+ * Creates a Harness Home with the copied login in it. The adapter points
  * `CODEX_HOME` at the home's own `codex/` directory, so the credential must be
  * there for the session to be logged in.
  */
@@ -117,7 +117,7 @@ const buildContext = (home: string): HarnessRunnerContext => ({
   home,
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
-  secrets: {},
+  modelArgument: "{model}",
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
@@ -167,7 +167,7 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
   /**
    * Creates a stand-in for the user's home directory: one skill in
    * `.agents/skills`, and an `AGENTS.md` in its `.codex` directory. The
-   * adapter points `CODEX_HOME` at the instance's own directory, so Codex must
+   * adapter points `CODEX_HOME` at the account's own Harness Home, so Codex must
    * never read that `AGENTS.md` by itself.
    */
   const createUserHome = (): string => {
@@ -198,7 +198,7 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
     // `.agents/skills` would put a second skill of the same name beside them.
     expect(prompt).not.toContain(SKILL);
     expect(prompt).toContain(INSTRUCTIONS);
-    // The user's `.codex/AGENTS.md` stays out: Codex reads its instance's own
+    // The user's `.codex/AGENTS.md` stays out: Codex reads its account's own
     // CODEX_HOME, so the instructions reach the Thread only through the
     // developer instructions.
     expect(prompt).not.toContain(GLOBAL);
@@ -355,7 +355,7 @@ const buildFixtureProviderConfig = (baseUrl: string): string =>
   ].join("\n");
 
 /**
- * Creates an instance home whose Codex uses a model provider that needs no
+ * Creates a Harness Home whose Codex uses a model provider that needs no
  * login, and returns its path. For a test that starts a session and runs no
  * turn, so the provider's address is never called.
  */
@@ -575,12 +575,12 @@ const ready =
  */
 const probed = !ready
   ? undefined
-  : await Effect.runPromise(codex.probe(buildContext(createHomeWithLogin()), {}));
+  : await Effect.runPromise(codex.probe(buildContext(createHomeWithLogin())));
 
 const authed = probed?.auth.status === "ok";
 
 const SESSION_SPEC: SessionSpec = {
-  instanceId: "0199e0e7-0000-7000-8000-00000000000a",
+  providerAccountId: "0199e0e7-0000-7000-8000-00000000000a",
   workspaceId: null,
   modelSelection: {
     model: (probed?.models.find((model) => model.isDefault) ?? probed?.models[0])?.slug ?? "",

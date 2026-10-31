@@ -10,7 +10,7 @@
  */
 import type {
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -170,7 +170,7 @@ export interface GroupRowSources {
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
-  readonly instances: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
 }
 
 /**
@@ -258,13 +258,13 @@ export const describeGroupRows = ({
   workspaces,
   resources,
   runners,
-  instances,
+  accounts,
 }: GroupRowSources): readonly GroupRow[] => {
   const listedProjectIds = new Set(projects.map((each) => each.id));
   const projectNames = new Map(projects.map((each) => [each.id, each.name]));
   const workspacesById = new Map(workspaces.map((each) => [each.id, each]));
   const runnersById = new Map(runners.map((each) => [each.id, each]));
-  const instancesById = new Map(instances.map((each) => [each.id, each]));
+  const accountsById = new Map(accounts.map((each) => [each.id, each]));
 
   return groups.map((group): GroupRow => {
     const labels = labelWorkspaceSessions(group.sessions);
@@ -277,7 +277,7 @@ export const describeGroupRows = ({
         label: labels.get(session.id) ?? session.title,
         pose,
         runner: runnersById.get(session.runnerId),
-        instance: instancesById.get(session.instanceId),
+        account: accountsById.get(session.providerAccountId),
       });
       return {
         ...tab,

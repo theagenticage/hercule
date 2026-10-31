@@ -2,13 +2,13 @@
  * The harness adapters built into this runner.
  */
 import type * as Effect from "effect/Effect";
-import type * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
 import type {
   AdapterError,
   AnswerNotDelivered,
   ApprovalDecision,
   ExitReason,
+  HarnessCredential,
   ProbeResult,
   TextGenerationOutcome,
   TextGenerationSpec,
@@ -40,26 +40,33 @@ export interface HarnessRunnerContext {
    */
   readonly cwd: string | null;
   /**
-   * The instance's own config directory, created with mode 0700. Never the user's own config
-   * directory.
+   * The account's Harness Home on this machine, created with mode 0700. Never the user's own
+   * config directory.
    */
   readonly home: string;
   readonly binary: string | undefined;
   /**
    * The complete environment the harness is spawned with. The runner builds it
-   * once, in layers: its own environment, then the instance config's, then
-   * Hercule's own keys (spec 06 section 4). It never overrides `HOME`.
+   * once, in layers: its own environment, then Hercule's own keys (spec 06 section 4). It
+   * never overrides `HOME`, and it holds no credential: the adapter adds that.
    */
   readonly env: Readonly<Record<string, string | undefined>>;
   /**
-   * The instance's secret config fields, keyed by the name the plugin gave each.
-   * The controller decrypts them and sends them inline on the frame that
-   * requested this operation. They stay in this process's memory only while the
-   * operation runs. They are never written to disk, never logged, and never
-   * added to `env` here, because each adapter decides which variable a
-   * credential belongs in.
+   * How the harness names a model for this account's provider, with `{model}`
+   * where the model id goes (`{model}`, `zai/{model}`). The adapter formats
+   * every model it passes to the harness with it (`formatModelArgument`).
    */
-  readonly secrets: Readonly<Record<string, string>>;
+  readonly modelArgument: string;
+  /**
+   * The variable the harness reads the account's key or token from, and the
+   * key, sent inline on the frame that requested this operation. `value` is
+   * absent when the account has no key stored. The whole field is absent for
+   * an account whose login is in the Harness Home. The key stays in this
+   * process's memory only while the operation runs. It is never written to
+   * disk, never logged, and never added to `env` here: the adapter applies it
+   * to the environment of the harness process only (`applyCredential`).
+   */
+  readonly credential?: HarnessCredential;
   /**
    * Hercule as a tool for the agent, resolved once by the runner. Each adapter
    * installs it in its harness's own way (spec 06 section 9.3). It holds the
@@ -214,7 +221,7 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
  * for it; a source that does not exist is left out.
  *
  * Every field is empty for a harness that reads the material through links
- * in its instance home instead. Claude Code is that harness: it reads the
+ * in its Harness Home instead. Claude Code is that harness: it reads the
  * links only when the adapter asks it to load the user's settings.
  *
  * Skills are not User Material: a session's skills come from the Skill
@@ -238,10 +245,10 @@ export interface HarnessAdapter {
   /** The harness binary's name on `PATH`, used to resolve `binary`. */
   readonly binaryName: string;
   /** Side-effect free: makes no API call and writes nothing outside `ctx.home`. */
-  readonly probe: (ctx: HarnessRunnerContext, config: Schema.Json) => Effect.Effect<ProbeResult>;
+  readonly probe: (ctx: HarnessRunnerContext) => Effect.Effect<ProbeResult>;
   /**
    * Takes an environment rather than a context, because an install is per machine, not per
-   * instance.
+   * account.
    */
   readonly install?: (
     env: Readonly<Record<string, string | undefined>>,
@@ -270,7 +277,6 @@ export interface HarnessAdapter {
    */
   readonly generateText: (
     ctx: TextGenerationContext,
-    config: Schema.Json,
     spec: TextGenerationSpec,
   ) => Effect.Effect<TextGenerationOutcome, string>;
 

@@ -10,22 +10,22 @@ import { applyThreadChoice } from "./thread-choice";
 
 describe("applyThreadChoice", () => {
   it("records a model together with its account", () => {
-    expect(applyThreadChoice({}, { kind: "model", instanceId: "i-codex", model: "gpt-5" })).toEqual(
-      { instanceId: "i-codex", model: "gpt-5" },
-    );
+    expect(
+      applyThreadChoice({}, { kind: "model", providerAccountId: "a-openai", model: "gpt-5" }),
+    ).toEqual({ providerAccountId: "a-openai", model: "gpt-5" });
   });
 
   it("replaces the account and model of an earlier model choice, and keeps the other picks", () => {
     const held: ThreadPicks = {
-      instanceId: "i-claude",
+      providerAccountId: "a-anthropic",
       model: "claude-opus-5",
       runnerId: "r-remote",
       options: { effort: "max" },
     };
     expect(
-      applyThreadChoice(held, { kind: "model", instanceId: "i-codex", model: "gpt-5" }),
+      applyThreadChoice(held, { kind: "model", providerAccountId: "a-openai", model: "gpt-5" }),
     ).toEqual({
-      instanceId: "i-codex",
+      providerAccountId: "a-openai",
       model: "gpt-5",
       runnerId: "r-remote",
       options: { effort: "max" },
@@ -35,10 +35,10 @@ describe("applyThreadChoice", () => {
   it("records an account and removes the model pick, because a model belongs to its account", () => {
     expect(
       applyThreadChoice(
-        { instanceId: "i-claude", model: "claude-opus-5", runnerId: "r-remote" },
-        { kind: "account", instanceId: "i-codex" },
+        { providerAccountId: "a-anthropic", model: "claude-opus-5", runnerId: "r-remote" },
+        { kind: "account", providerAccountId: "a-openai" },
       ),
-    ).toEqual({ instanceId: "i-codex", runnerId: "r-remote" });
+    ).toEqual({ providerAccountId: "a-openai", runnerId: "r-remote" });
   });
 
   it("merges an option into the options already picked, and keeps an explicit false", () => {

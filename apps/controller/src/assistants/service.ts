@@ -11,7 +11,7 @@
  *
  * A create needs only a name. Every other field takes a default from
  * `defaults.ts`, except two that depend on what this controller holds: the
- * provider instance is the oldest one whose harness this build carries, and
+ * Provider Account is the oldest one whose default harness this build carries, and
  * the permission profile is the shipped `assistant` profile.
  *
  * Every assistant gets its main conversation in the transaction that creates
@@ -71,7 +71,7 @@ import { AuditLog } from "../events";
 import { memoryRepository } from "../memory";
 import { PermissionProfiles, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
-import { providerRepository } from "../providers";
+import { providerAccountRepository } from "../provider-accounts";
 import { SessionService, sessionRepository } from "../sessions";
 import { validateTimezone } from "../settings";
 import {
@@ -117,7 +117,7 @@ const ASSISTANT_DELETED = "the assistant was deleted";
 
 /**
  * The errors every operation can fail with. `SchemaError` comes from the
- * harness catalog, which every operation reads to report `unenforced`.
+ * account check, which decodes the account's stored snapshots.
  */
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
@@ -180,7 +180,7 @@ const make = Effect.gen(function* () {
   const agents = yield* agentRepository;
   const assistants = yield* assistantRepository;
   const memory = yield* memoryRepository;
-  const instances = yield* providerRepository;
+  const accounts = yield* providerAccountRepository;
   const host = yield* PluginHost;
   const profiles = yield* PermissionProfiles;
   const conversations = yield* ConversationService;
@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* AssistantSessions;
   const sessionService = yield* SessionService;
   const sessionRows = yield* sessionRepository;
-  const { buildAgentRecordComposer, readHarnessIdOrFail, validateAgentProfile } =
+  const { buildAgentRecordComposer, validateAgentProviderAccountHarness, validateAgentProfile } =
     yield* buildAgentFieldChecks;
 
   /**
@@ -230,30 +230,30 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the oldest provider instance whose harness this build carries,
-   * the one an assistant uses when its create names none. An instance of a
-   * harness the build no longer carries is skipped, because no session could
-   * start on it. Fails with `InvalidState` when there is none: the user can
-   * reach that by deleting every instance.
+   * Returns the id of the oldest Provider Account whose default harness this
+   * build carries, the account an assistant uses when its create names none.
+   * An account whose default harness the build no longer carries is skipped,
+   * because no session could start on it. Fails with `InvalidState` when
+   * there is none: the user can reach that by deleting every account.
    */
-  const readDefaultInstanceOrFail: Effect.Effect<
-    { readonly id: string; readonly harnessId: string },
-    InvalidState | SqlError | Schema.SchemaError
-  > = Effect.gen(function* () {
-    const carried = new Set((yield* host.harnesses()).map((definition) => definition.id));
-    const [oldest] = (yield* instances.list())
-      .filter((instance) => carried.has(instance.harnessId))
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-    if (oldest === undefined) {
-      return yield* Effect.fail(
-        createInvalidStateError(
-          "there is no provider instance to run the assistant on; " +
-            "add a provider instance first, then try again",
-        ),
+  const readDefaultProviderAccountIdOrFail: Effect.Effect<string, InvalidState | SqlError> =
+    Effect.gen(function* () {
+      const carried = new Set((yield* host.harnesses()).map((definition) => definition.id));
+      // `list` returns the accounts oldest first.
+      const oldest = (yield* accounts.list()).find((account) =>
+        carried.has(account.defaultHarnessId),
       );
-    }
-    return { id: oldest.id, harnessId: oldest.harnessId };
-  });
+      if (oldest === undefined) {
+        return yield* Effect.fail(
+          createInvalidStateError(
+            "there is no provider account to run the assistant on, and this version cannot add " +
+              "one yet. Until first-run setup is complete, restarting the controller creates " +
+              "the default provider accounts again",
+          ),
+        );
+      }
+      return oldest.id;
+    });
 
   /** Records a change to the assistant, so every client showing it reads it again. */
   const nudge = (id: string, kind: "created" | "updated" | "deleted"): Effect.Effect<void> =>
@@ -337,8 +337,9 @@ const make = Effect.gen(function* () {
      * Creates an assistant and its web conversation, and returns the
      * assistant. Fails with:
      *
-     * - `Validation` if a named instance or profile does not exist;
-     * - `InvalidState` if no instance or profile is named and there is none
+     * - `Validation` if a named account or profile does not exist, or the
+     *   account cannot run in the named harness;
+     * - `InvalidState` if no account or profile is named and there is none
      *   to default to;
      * - `Forbidden` when a session would put the assistant on a profile that
      *   holds a grant only the user gives, the default profile included.
@@ -353,15 +354,11 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Every read is inside the write set, so an instance or a profile
+            // Every read is inside the write set, so an account or a profile
             // cannot be deleted between its check and the insert.
-            const instance =
-              decoded.instanceId === undefined
-                ? yield* readDefaultInstanceOrFail
-                : {
-                    id: decoded.instanceId,
-                    harnessId: yield* readHarnessIdOrFail(decoded.instanceId),
-                  };
+            const providerAccountId =
+              decoded.providerAccountId ?? (yield* readDefaultProviderAccountIdOrFail);
+            yield* validateAgentProviderAccountHarness(providerAccountId, decoded.harnessId);
             const permissionProfileId =
               decoded.permissionProfileId ?? (yield* readDefaultProfileIdOrFail);
             // The default is checked as a named profile is, because the
@@ -371,10 +368,10 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const agent = yield* agents.insert({
               kind: "assistant",
-              harnessId: instance.harnessId,
               name: decoded.name,
               systemPrompt: decoded.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-              instanceId: instance.id,
+              providerAccountId,
+              harnessId: decoded.harnessId ?? null,
               permissionProfileId,
               accessMode: decoded.accessMode ?? DEFAULT_ACCESS_MODE,
               model: selection ?? null,
@@ -411,7 +408,7 @@ const make = Effect.gen(function* () {
               payload: {
                 agentId: agent.id,
                 name: agent.name,
-                instanceId: instance.id,
+                providerAccountId,
                 permissionProfileId,
               },
               at,
@@ -424,8 +421,8 @@ const make = Effect.gen(function* () {
     /**
      * Updates an assistant and returns it. Fails with:
      *
-     * - `Validation` if no field is set or a named instance or profile does
-     *   not exist;
+     * - `Validation` if no field is set, a named account or profile does
+     *   not exist, or the account cannot run in the harness;
      * - `NotFound` if the assistant does not exist;
      * - `Forbidden` when a session names a profile that holds a grant only the
      *   user gives.
@@ -457,10 +454,25 @@ const make = Effect.gen(function* () {
             // Read first, so that an unknown id fails with `not_found` before
             // its fields are checked, instead of an update that changes no
             // rows and reports success.
-            const { fields: stored } = yield* readAssistantOrFail(id);
+            const { agent: current, fields: stored } = yield* readAssistantOrFail(id);
             yield* validateScheduleTimezones({ heartbeat, rotation }, stored);
-            if (agentEdit.instanceId !== undefined) {
-              yield* readHarnessIdOrFail(agentEdit.instanceId);
+            // Moving the assistant to another account without naming a harness
+            // puts it on that account's default harness. Keeping the old
+            // harness would refuse most moves, since a harness usually runs
+            // only the providers of the account it was chosen for.
+            const written =
+              agentEdit.providerAccountId !== undefined &&
+              agentEdit.providerAccountId !== current.providerAccountId &&
+              agentEdit.harnessId === undefined
+                ? { ...agentEdit, harnessId: null }
+                : agentEdit;
+            // Checks the pair the assistant will have afterwards, so a
+            // harness the new account cannot run is refused instead of kept.
+            if (written.providerAccountId !== undefined || written.harnessId !== undefined) {
+              yield* validateAgentProviderAccountHarness(
+                written.providerAccountId ?? current.providerAccountId,
+                written.harnessId === undefined ? current.harnessId : written.harnessId,
+              );
             }
             if (agentEdit.permissionProfileId !== undefined) {
               yield* validateAgentProfile(actor, agentEdit.permissionProfileId);
@@ -468,7 +480,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             // The agent row is written even when only assistant fields
             // change, because the assistant's `updatedAt` is the agent row's.
-            yield* agents.update(id, agentEdit, at);
+            yield* agents.update(id, written, at);
             if (Object.keys(fieldsEdit).length > 0) yield* assistants.update(id, fieldsEdit);
             yield* nudge(id, "updated");
             yield* audit.append({

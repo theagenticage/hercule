@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatAge, formatStamp } from "@hercule/client-core";
-import type { ProviderSecretField, Session } from "@hercule/contract";
+import type { ProviderAccount, Session } from "@hercule/contract";
 import {
   buildErrorBody,
   expectInDocumentOrder,
@@ -44,55 +44,37 @@ const BARE: Fixture = {
   facts: { ...ONLINE.facts!, harnesses: [{ name: "claude", present: false }] },
 };
 
-/** Provider declarations every instance needs; this page does not test them. */
-const DECLARED = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-} as const;
+type Snapshot = ProviderAccount["snapshots"][number];
 
-interface Snapshot {
-  readonly runnerId: string;
-  readonly probedAt: string;
-  readonly harnessVersion: string | null;
-  readonly versionVerdict: string;
-  readonly auth: Readonly<Record<string, string>>;
-  readonly models: ReadonlyArray<{ slug: string; name: string; options: readonly never[] }>;
-}
-
-const buildProviderInstance = (
+const buildProviderAccount = (
   id: string,
-  harnessId: string,
-  displayName: string,
-  binaryName: string,
+  providerId: string,
+  kind: string,
+  defaultHarnessId: string,
   snapshots: readonly Snapshot[],
-) => ({
+): ProviderAccount => ({
   id,
-  harnessId,
-  name: displayName,
-  config: {},
-  displayName,
-  binaryName,
-  declared: DECLARED,
-  secretFields: [] as ReadonlyArray<ProviderSecretField>,
+  providerId,
+  kind,
+  label: null,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId,
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-const buildModel = (slug: string, name: string) => ({ slug, name, options: [] as const });
+const buildModel = (slug: string, name: string) => ({
+  slug,
+  name,
+  imageInput: null,
+  options: [] as const,
+});
 
 const buildSnapshot = (fields: Partial<Snapshot> & Pick<Snapshot, "auth">): Snapshot => ({
   runnerId: MOSS.id,
+  harnessId: "claude-code/claude-code",
   probedAt: "2026-09-05T09:14:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
@@ -100,13 +82,14 @@ const buildSnapshot = (fields: Partial<Snapshot> & Pick<Snapshot, "auth">): Snap
   ...fields,
 });
 
-const LOGGED_IN = buildSnapshot({
+const SIGNED_IN = buildSnapshot({
   auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
 });
 
-const NOT_LOGGED_IN = buildSnapshot({ auth: { status: "unauthenticated" }, models: [] });
+const NOT_SIGNED_IN = buildSnapshot({ auth: { status: "unauthenticated" }, models: [] });
 
 const NO_ADAPTER = buildSnapshot({
+  harnessId: "codex/codex",
   harnessVersion: null,
   versionVerdict: "unknown",
   auth: { status: "error", message: "no adapter for codex in this runner build" },
@@ -116,23 +99,35 @@ const NO_ADAPTER = buildSnapshot({
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 const CODEX_ID = "01a06d02-1000-7000-8000-000000000002";
 
-const buildClaudeCodeInstance = (snapshots: readonly Snapshot[]) =>
-  buildProviderInstance(CLAUDE_ID, "claude-code/claude-code", "Claude Code", "claude", snapshots);
+const buildClaudeCodeProviderAccount = (snapshots: readonly Snapshot[]) =>
+  buildProviderAccount(
+    CLAUDE_ID,
+    "anthropic/anthropic",
+    "subscription-per-machine",
+    "claude-code/claude-code",
+    snapshots,
+  );
 
-const CODEX = buildProviderInstance(CODEX_ID, "codex/codex", "Codex", "codex", [NO_ADAPTER]);
+const CODEX = buildProviderAccount(
+  CODEX_ID,
+  "openai/openai",
+  "subscription-per-machine",
+  "codex/codex",
+  [NO_ADAPTER],
+);
 
-const INSTANCES = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
+const ACCOUNTS = [buildClaudeCodeProviderAccount([SIGNED_IN]), CODEX];
 
 /** Builds a stub controller that returns its own record, `runner`, and the handlers in `extra`. */
 const buildController = (
   runner: Fixture,
   options: {
     readonly defaultRunnerId?: string | null;
-    readonly instances?: ReadonlyArray<ReturnType<typeof buildProviderInstance>>;
+    readonly accounts?: ReadonlyArray<ProviderAccount>;
     readonly extra?: Readonly<Record<string, Handler>>;
   } = {},
 ): Readonly<Record<string, Handler>> => ({
-  "GET /api/v1/providers": { body: options.instances ?? INSTANCES },
+  "GET /api/v1/provider-accounts": { body: options.accounts ?? ACCOUNTS },
   "GET /api/v1/setup": { body: { complete: true } },
   // The shell's thread list reads this on every page; the session tests
   // override it with a real list.
@@ -161,7 +156,7 @@ const openApp = async (
   runner: Fixture,
   options: {
     readonly defaultRunnerId?: string | null;
-    readonly instances?: ReadonlyArray<ReturnType<typeof buildProviderInstance>>;
+    readonly accounts?: ReadonlyArray<ProviderAccount>;
     readonly extra?: Readonly<Record<string, Handler>>;
   } = {},
 ) => {
@@ -579,12 +574,12 @@ describe("Runner > providers", () => {
 
   const INVALID = "Invalid code. Please make sure the full code was copied.";
 
-  const findInstanceRow = (name: string): Promise<HTMLElement> =>
+  const findProviderAccountRow = (name: string): Promise<HTMLElement> =>
     screen.findByRole("group", { name });
 
-  const findClaudeRow = () => findInstanceRow("Claude Code");
+  const findClaudeRow = () => findProviderAccountRow("Anthropic");
 
-  it("shows what each instance last reported on this machine", async () => {
+  it("shows what each account last reported on this machine", async () => {
     await openApp(ONLINE);
 
     const claude = readPageText(await findClaudeRow());
@@ -595,17 +590,17 @@ describe("Runner > providers", () => {
     // A version inside the tested range gets no remark.
     expect(claude).not.toMatch(/below|above|untested/i);
 
-    expect(readPageText(await findInstanceRow("Codex"))).toContain("no adapter");
+    expect(readPageText(await findProviderAccountRow("OpenAI"))).toContain("no adapter");
   });
 
   it("marks a harness older than the version this build was tested with", async () => {
     await openApp(ONLINE, {
-      instances: [
-        buildClaudeCodeInstance([
+      accounts: [
+        buildClaudeCodeProviderAccount([
           buildSnapshot({
             harnessVersion: "2.0.9",
             versionVerdict: "below-floor",
-            auth: LOGGED_IN.auth,
+            auth: SIGNED_IN.auth,
           }),
         ]),
         CODEX,
@@ -617,50 +612,50 @@ describe("Runner > providers", () => {
     expect(claude).toMatch(/below/i);
   });
 
-  it("offers Log in again and Probe now for a harness on the machine", async () => {
+  it("offers Sign in again and Probe now for a harness on the machine", async () => {
     await openApp(ONLINE);
 
     const claude = within(await findClaudeRow());
-    expect(claude.getByRole("button", { name: /log in again/i })).toBeDefined();
+    expect(claude.getByRole("button", { name: /sign in again/i })).toBeDefined();
     expect(claude.getByRole("button", { name: /probe now/i })).toBeDefined();
     // No Install button: the machine reported the binary.
     expect(claude.queryByRole("button", { name: /install/i })).toBeNull();
   });
 
   it("offers to install a missing harness, and disables Install for a harness with no adapter", async () => {
-    await openApp(BARE, { instances: [buildClaudeCodeInstance([]), CODEX] });
+    await openApp(BARE, { accounts: [buildClaudeCodeProviderAccount([]), CODEX] });
 
     const claude = within(await findClaudeRow());
     expect(claude.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(false);
-    // No Log in button until the harness is on the machine.
-    expect(claude.queryByRole("button", { name: /log in/i })).toBeNull();
+    // No Sign in button until the harness is on the machine.
+    expect(claude.queryByRole("button", { name: /sign in/i })).toBeNull();
 
-    const codexRow = await findInstanceRow("Codex");
+    const codexRow = await findProviderAccountRow("OpenAI");
     const codex = within(codexRow);
     expect(codex.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(true);
     // The reason is shown up front, rather than found out when an install fails.
     expect(readPageText(codexRow)).toMatch(/no adapter/i);
   });
 
-  it("logs in through the dialog and shows the account the machine then reports", async () => {
+  it("signs in through the dialog and shows the account the machine then reports", async () => {
     const user = userEvent.setup();
-    let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
+    let held = [buildClaudeCodeProviderAccount([NOT_SIGNED_IN]), CODEX];
     const { api } = await openApp(ONLINE, {
-      instances: held,
+      accounts: held,
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
-        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
-        [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: (call: Call) => {
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in-code`]: (call: Call) => {
           if ((call.body as { code: string }).code !== "the-whole-code") {
             return { status: 400, body: buildErrorBody("validation", INVALID) };
           }
-          held = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
-          return { body: LOGGED_IN };
+          held = [buildClaudeCodeProviderAccount([SIGNED_IN]), CODEX];
+          return { body: held[0] };
         },
       },
     });
 
-    await user.click(within(await findClaudeRow()).getByRole("button", { name: /log in/i }));
+    await user.click(within(await findClaudeRow()).getByRole("button", { name: /sign in/i }));
 
     // The URL is shown on this screen so the user can open it wherever they
     // like: the machine running the harness may have no browser at all.
@@ -670,7 +665,7 @@ describe("Runner > providers", () => {
     // The page also names the site the user will sign in at, because that is
     // the one part of a long opaque URL they can check first.
     expect(readPageText()).toContain("You will sign in at claude.ai");
-    expect(api.calls.filter((call) => call.path.endsWith("/login"))[0]?.body).toEqual({
+    expect(api.calls.filter((call) => call.path.endsWith("/sign-in"))[0]?.body).toEqual({
       runnerId: ONLINE.id,
     });
 
@@ -696,14 +691,14 @@ describe("Runner > providers", () => {
 
   it("finishes a device login by itself once the controller announces the new snapshot", async () => {
     const user = userEvent.setup();
-    let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
+    let held = [buildClaudeCodeProviderAccount([NOT_SIGNED_IN]), CODEX];
     // Probed after the login started, so it is proof the login worked.
-    const fresh = buildSnapshot({ probedAt: "2026-09-05T09:20:00.000Z", auth: LOGGED_IN.auth });
+    const fresh = buildSnapshot({ probedAt: "2026-09-05T09:20:00.000Z", auth: SIGNED_IN.auth });
     const { api, live } = await openApp(ONLINE, {
-      instances: held,
+      accounts: held,
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
-        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: {
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: {
           body: {
             url: AUTHORIZE_URL,
             userCode: "CH61-0FI2N",
@@ -713,7 +708,7 @@ describe("Runner > providers", () => {
       },
     });
 
-    await user.click(within(await findClaudeRow()).getByRole("button", { name: /log in/i }));
+    await user.click(within(await findClaudeRow()).getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => {
       expect(readPageText()).toContain("CH61-0FI2N");
@@ -723,7 +718,7 @@ describe("Runner > providers", () => {
     // The user finishes the login with the vendor in their browser. The
     // runner reports that the vendor's login ended, and the controller probes
     // the machine again and announces the new snapshot.
-    held = [buildClaudeCodeInstance([fresh]), CODEX];
+    held = [buildClaudeCodeProviderAccount([fresh]), CODEX];
     act(() => {
       live.push("provider", { _tag: "invalidate", ids: [CLAUDE_ID], kind: "updated" });
     });
@@ -732,19 +727,19 @@ describe("Runner > providers", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(readPageText()).toContain("rogier@example.com");
-    expect(api.calls.filter((call) => call.path.endsWith("/login-code"))).toEqual([]);
+    expect(api.calls.filter((call) => call.path.endsWith("/sign-in-code"))).toEqual([]);
     expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 
-  it("probes one instance on demand and shows the result", async () => {
+  it("probes one account on demand and shows the result", async () => {
     const user = userEvent.setup();
-    const fresh = buildSnapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth });
-    let held = INSTANCES;
+    const fresh = buildSnapshot({ harnessVersion: "2.1.300", auth: SIGNED_IN.auth });
+    let held = ACCOUNTS;
     const { api } = await openApp(ONLINE, {
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
         [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => {
-          held = [buildClaudeCodeInstance([fresh]), CODEX];
+          held = [buildClaudeCodeProviderAccount([fresh]), CODEX];
           return { body: fresh };
         },
       },
@@ -756,22 +751,24 @@ describe("Runner > providers", () => {
       expect(readPageText()).toContain("2.1.300");
     });
     const asked = api.calls.filter((call) => call.path.endsWith("/probe"));
-    // Only that instance, not all of the machine's: the button is on its row.
+    // Only that account, not all of the machine's: the button is on its row.
     expect(asked).toHaveLength(1);
-    expect(asked[0]?.body).toEqual({ instanceId: CLAUDE_ID });
+    expect(asked[0]?.body).toEqual({ providerAccountId: CLAUDE_ID });
   });
 
   it("fetches the card again when a snapshot changes elsewhere", async () => {
-    let held = INSTANCES;
+    let held = ACCOUNTS;
     const { live } = await openApp(ONLINE, {
-      extra: { "GET /api/v1/providers": () => ({ body: held }) },
+      extra: { "GET /api/v1/provider-accounts": () => ({ body: held }) },
     });
 
     await waitFor(() => {
       expect(live.topics()).toContain("provider");
     });
     held = [
-      buildClaudeCodeInstance([buildSnapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth })]),
+      buildClaudeCodeProviderAccount([
+        buildSnapshot({ harnessVersion: "2.1.300", auth: SIGNED_IN.auth }),
+      ]),
       CODEX,
     ];
     act(() => {
@@ -919,22 +916,23 @@ describe("Runner > sessions", () => {
 });
 
 /**
- * Tests for a provider whose config has a secret field. The key is a paid
+ * Tests for an account whose kind has a credentials step. The key is a paid
  * credential, so:
  *
  * - the field is masked;
- * - the key is written through `secret.set`, never through the instance;
- * - the row never reads the value back, only whether one is set.
+ * - the key is sent through `providerAccount.update`, never through
+ *   `secret.set`, which refuses the account's secrets;
+ * - the row never reads the value back; it offers to replace a key once the
+ *   machine reports the account signed in.
  */
-describe("Runner > a provider that needs a key", () => {
+describe("Runner > an account that needs a key", () => {
   const PI_ID = "01a06d02-1000-7000-8000-000000000003";
-  const KEY_TITLE = "Z.ai API key";
-  const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
+  const KEY_TITLE = "API key";
   const KEY_VALUE = "a-paid-credential-nobody-else-holds";
 
-  const SECRET_PATH = `PUT /api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`;
+  const UPDATE_PATH = `PATCH /api/v1/provider-accounts/${PI_ID}`;
 
-  /** A runner with pi installed, so the pi row offers actions. */
+  /** A runner with pi installed, so the Z.ai row offers actions. */
   const WITH_PI: Fixture = {
     ...ONLINE,
     facts: {
@@ -948,58 +946,49 @@ describe("Runner > a provider that needs a key", () => {
   };
 
   const PI_SNAPSHOT = buildSnapshot({
+    harnessId: "pi/pi",
     harnessVersion: "0.85.1",
     auth: { status: "unauthenticated" },
     models: [],
   });
 
-  const buildPiInstance = (set: boolean) => ({
-    ...buildProviderInstance(PI_ID, "pi/pi", "pi", "pi", [PI_SNAPSHOT]),
-    secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
-  });
+  const buildPiProviderAccount = (signedIn: boolean) =>
+    buildProviderAccount(PI_ID, "zai/zai", "api-key", "pi/pi", [
+      signedIn
+        ? { ...PI_SNAPSHOT, auth: { status: "ok" as const, identity: "rogier@example.com" } }
+        : PI_SNAPSHOT,
+    ]);
 
-  const findPiRow = () => screen.findByRole("group", { name: "pi" });
+  const findPiRow = () => screen.findByRole("group", { name: "Z.ai" });
 
   /** Returns the requests that wrote the key. */
   const listKeyWrites = (api: { readonly calls: readonly Call[] }) =>
     api.calls.filter(
-      (call) =>
-        call.method === "PUT" &&
-        call.path === `/api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`,
+      (call) => call.method === "PATCH" && call.path === `/api/v1/provider-accounts/${PI_ID}`,
     );
 
-  it("asks for the key in the plugin's own words, masked, and saves it as a secret", async () => {
+  it("asks for the key in the kind's own words, masked, and sends it to the account", async () => {
     const user = userEvent.setup();
-    let held: ReadonlyArray<ReturnType<typeof buildProviderInstance>> = [buildPiInstance(false)];
+    let held: ReadonlyArray<ProviderAccount> = [buildPiProviderAccount(false)];
     const { api } = await openApp(WITH_PI, {
-      instances: held,
+      accounts: held,
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
-        [SECRET_PATH]: () => {
-          held = [buildPiInstance(true)];
-          return {
-            body: {
-              ownerKind: "provider-instance",
-              ownerId: PI_ID,
-              name: "zaiApiKey",
-              createdAt: "2026-09-19T09:00:00.000Z",
-            },
-          };
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
+        [UPDATE_PATH]: () => {
+          held = [buildPiProviderAccount(true)];
+          return { body: held[0] };
         },
-        // The key is on the controller but the stored snapshot is older, so
-        // the machine is probed again.
-        [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({ body: PI_SNAPSHOT }),
       },
     });
 
     await user.click(
-      within(await findPiRow()).getByRole("button", { name: new RegExp(KEY_TITLE, "i") }),
+      within(await findPiRow()).getByRole("button", {
+        name: new RegExp(`Enter ${KEY_TITLE}`, "i"),
+      }),
     );
 
-    // The dialog holds just the field: the plugin's title is its heading, and
-    // the plugin's description says where to get a key.
+    // The dialog holds just the field: the kind's field label is its heading.
     const form = await screen.findByRole("dialog", { name: KEY_TITLE });
-    expect(readPageText(form)).toContain(KEY_DESCRIPTION);
 
     const field = within(form).getByLabelText<HTMLInputElement>(KEY_TITLE, { exact: true });
     // A paid credential is never shown in plain text.
@@ -1017,16 +1006,12 @@ describe("Runner > a provider that needs a key", () => {
     await waitFor(() => {
       expect(listKeyWrites(api)).toHaveLength(1);
     });
-    expect(listKeyWrites(api)[0]?.body).toEqual({ value: KEY_VALUE });
+    expect(listKeyWrites(api)[0]?.body).toEqual({ credentials: { apiKey: KEY_VALUE } });
+    // The key never goes through the generic secrets API.
+    expect(api.calls.filter((call) => call.path.startsWith("/api/v1/secrets"))).toEqual([]);
 
-    const listProbeCalls = () => api.calls.filter((call) => call.path.endsWith("/probe"));
-    await waitFor(() => {
-      expect(listProbeCalls()).toHaveLength(1);
-    });
-    expect(listProbeCalls()[0]?.body).toEqual({ instanceId: PI_ID });
-
-    // The dialog closes, and the row now shows that the key is set and
-    // offers to replace it.
+    // The dialog closes, and the row now shows the account signed in and
+    // offers to replace the key.
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: KEY_TITLE })).toBeNull();
     });
@@ -1037,15 +1022,18 @@ describe("Runner > a provider that needs a key", () => {
     });
     // The value itself never comes back to the page.
     expect(readPageText()).not.toContain(KEY_VALUE);
+    // The controller probes the account after it stores a key, so the page
+    // asks the runner for nothing.
+    expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 
-  it("offers to replace a key that is already set", async () => {
-    await openApp(WITH_PI, { instances: [buildPiInstance(true)] });
+  it("offers to replace a key on an account that is signed in", async () => {
+    await openApp(WITH_PI, { accounts: [buildPiProviderAccount(true)] });
 
     const row = within(await findPiRow());
     expect(row.getByRole("button", { name: `Replace ${KEY_TITLE}` })).toBeDefined();
-    // The OAuth login is another provider's flow; pi has no vendor to redirect
-    // to, so the row must not offer one.
-    expect(row.queryByRole("button", { name: /^log in/i })).toBeNull();
+    // The browser sign-in is another kind's flow; a key account has no vendor
+    // to redirect to, so the row must not offer one.
+    expect(row.queryByRole("button", { name: /^sign in/i })).toBeNull();
   });
 });

@@ -295,9 +295,8 @@ const DEADLINE = Duration.millis(500);
 const PATIENT = Duration.minutes(1);
 
 /** Only the session tests start a session, and they use directories of their own, so none of these is ever created. */
-const PROVIDERS_DIR = "/nonexistent/hercule-runner-providers";
-const SCRATCH_DIR = "/nonexistent/hercule-runner-scratch";
 const STORAGE_DIR = "/nonexistent/hercule-runner-storage";
+const SCRATCH_DIR = "/nonexistent/hercule-runner-scratch";
 const BIN_DIR = "/nonexistent/hercule-runner-bin";
 const HERCULE_TOOL = {
   orientation: "",
@@ -345,7 +344,7 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         facts: FACTS,
         probe: Effect.succeed(FACTS),
         headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
-        providersDir: PROVIDERS_DIR,
+        storageDir: STORAGE_DIR,
         scratchDir: SCRATCH_DIR,
         attachmentsDir: "/nonexistent/hercule-runner-attachments",
         editMarksDir: "/nonexistent/hercule-runner-edit-marks",
@@ -951,10 +950,12 @@ describe("a controller asking a runner to probe a harness it has no adapter for"
   const REQUEST: ProbeRequest = {
     _tag: "probeRequest",
     requestId: "01999999-0000-7000-8000-0000000000c1",
-    instanceId: "01999999-0000-7000-8000-0000000000c2",
     harnessId: "a-harness-nobody-wrote-an-adapter-for",
-    config: {},
-    secrets: {},
+    harnessAccount: {
+      providerAccountId: "01999999-0000-7000-8000-0000000000c2",
+      harnessHome: "providers/01999999-0000-7000-8000-0000000000c2",
+      modelArgument: "{model}",
+    },
   };
 
   const findProbeReport = (stub: Stub): ProbeReport | undefined =>
@@ -974,9 +975,9 @@ describe("a controller asking a runner to probe a harness it has no adapter for"
     await waitUntil(() => findProbeReport(stub) !== undefined);
     const report = findProbeReport(stub);
     // Matched by request id, because probes, logins and installs for several
-    // instances can run on one connection at once.
+    // accounts can run on one connection at once.
     expect(report?.requestId).toBe(REQUEST.requestId);
-    expect(report?.instanceId).toBe(REQUEST.instanceId);
+    expect(report?.providerAccountId).toBe(REQUEST.harnessAccount.providerAccountId);
     expect(report?.result.auth.status).toBe("error");
     expect(report?.result.auth.message).toContain(
       'does not support the harness "a-harness-nobody-wrote-an-adapter-for"',
@@ -1089,7 +1090,11 @@ describe("session frames on one connection", () => {
           Effect.andThen(
             fake.startGates.get(sessionId)?.pass ?? Effect.void,
             Effect.sync(() => {
-              const binding = { sessionId, nativeSessionId: sessionId, instanceId: INSTANCE };
+              const binding = {
+                sessionId,
+                nativeSessionId: sessionId,
+                providerAccountId: ACCOUNT_ID,
+              };
               held.set(sessionId, binding);
               return binding;
             }),
@@ -1140,7 +1145,7 @@ describe("session frames on one connection", () => {
     return fake;
   };
 
-  const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
+  const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
 
   /** Builds a start. A second start of the same session needs a request id of its own. */
   const buildStart = (
@@ -1152,10 +1157,13 @@ describe("session frames on one connection", () => {
     sessionId,
     input: { text: `start ${sessionId}` },
     harnessId: HARNESS_ID,
-    config: {},
-    secrets: {},
+    harnessAccount: {
+      providerAccountId: ACCOUNT_ID,
+      harnessHome: `providers/${ACCOUNT_ID}`,
+      modelArgument: "{model}",
+    },
     spec: {
-      instanceId: INSTANCE,
+      providerAccountId: ACCOUNT_ID,
       workspaceId: null,
       modelSelection: { model: "fast", options: {} },
       accessMode: "approval-required",
@@ -1263,7 +1271,7 @@ describe("session frames on one connection", () => {
     const stub = await stubController();
     const storageDir = joinPath(root, "storage");
     const pending = runConnection(buildPin(stub), {
-      providersDir: joinPath(root, "providers"),
+      storageDir,
       scratchDir: joinPath(root, "scratch"),
       attachmentsDir: joinPath(root, "attachments"),
       sessions,

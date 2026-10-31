@@ -22,7 +22,7 @@ import {
   markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
-  type LoginTarget,
+  type SignInTarget,
   type RecentModel,
   type ShelfItem,
   type ThreadChoice,
@@ -45,7 +45,7 @@ import { StartCards } from "./start-cards";
 import "../session/composer.css";
 import "./new-thread.css";
 
-// The login dialog is loaded the first time Log in opens it, so its code is
+// The sign-in dialog is loaded the first time Sign in opens it, so its code is
 // not part of the first screen's scripts (spec 17 §Performance).
 const ProviderLoginDialog = lazy(() =>
   import("../provider-login").then((module) => ({ default: module.ProviderLoginDialog })),
@@ -76,8 +76,9 @@ interface SentDraft {
  *   has a row in the sidebar, the work's name and the lines of that row;
  * - a face and a question, "What should the agent do in webshop?", then the
  *   lead: where the thread will work and on which machine, or why it cannot
- *   start yet. When the reason is a provider instance that is not logged in,
- *   a Log in button follows it and opens the login in a dialog;
+ *   start yet. When the reason is an account that is not signed in on the
+ *   draft's machine, a Sign in button follows it and opens the sign-in in a
+ *   dialog;
  * - the composer, see `DraftComposer`;
  * - the start cards, or the starter threads while the project has no open
  *   task, when the draft is in a project, see `StartCards`.
@@ -168,8 +169,8 @@ export function DraftScreen({
   // Whether the column is scrolled away from its top, so part of it is under
   // the header. Only then does it fade under the header (../session/floating-header.css).
   const [scrolled, setScrolled] = useState(false);
-  // The login the Log in button opened, while its dialog is open.
-  const [login, setLogin] = useState<LoginTarget | null>(null);
+  // The sign-in the Sign in button opened, while its dialog is open.
+  const [signIn, setSignIn] = useState<SignInTarget | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const images = useComposerImages({
@@ -249,15 +250,15 @@ export function DraftScreen({
             ) : (
               <p>
                 <b className="newbie-blocked">Can&apos;t start yet.</b> {fields.blocked.reason}.
-                {fields.blocked.login === null ? null : (
+                {fields.blocked.signIn === null ? null : (
                   <>
                     {" "}
                     <button
                       type="button"
                       className="link"
-                      onClick={() => setLogin(fields.blocked?.login ?? null)}
+                      onClick={() => setSignIn(fields.blocked?.signIn ?? null)}
                     >
-                      Log in
+                      Sign in
                     </button>
                   </>
                 )}
@@ -308,14 +309,15 @@ export function DraftScreen({
           )}
         </div>
       </div>
-      {login === null ? null : (
+      {signIn === null ? null : (
         // Without its own boundary, the dialog's load would suspend the draft
         // behind it.
         <Suspense fallback={null}>
           <ProviderLoginDialog
-            target={login}
+            providerAccountId={signIn.providerAccountId}
+            runnerId={signIn.runnerId}
             onClose={() => {
-              setLogin(null);
+              setSignIn(null);
               fieldRef.current?.focus();
             }}
           />

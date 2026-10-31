@@ -67,7 +67,7 @@ const arrange = Effect.gen(function* () {
             '2026-09-15T10:00:00.000Z', '2026-09-15T10:00:00.000Z')
   `;
       yield* sql`
-    INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
+    INSERT INTO sessions (id, permission_profile_id, provider_account_id, runner_id,
                           requested_access_mode, access_mode, spec, title, status,
                           created_at, last_activity_at, token_hash)
     VALUES (unhex(${SESSION}), unhex(${PROFILE}), unhex(${PROFILE}), unhex(${PROFILE}),

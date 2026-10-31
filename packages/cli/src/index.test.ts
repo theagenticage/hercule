@@ -836,40 +836,30 @@ describe("id tails", () => {
   });
 
   it("resolves a tail through a list that is returned whole", async () => {
-    // The provider instance list is returned whole rather than as a page,
-    // because there is one instance per harness and only a few harnesses.
-    const instance = {
+    // The Provider Account list is returned whole rather than as a page,
+    // because there are only a few accounts.
+    const account = {
       id: buildId("cccccccc"),
-      harnessId: "claude-code/claude-code",
-      name: "Claude Code",
-      config: {},
-      displayName: "Claude Code",
-      binaryName: "claude",
-      secretFields: [],
-      declared: {
-        steering: "native",
-        fork: "native",
-        modelSwitch: "in-session",
-        accessModes: {
-          "approval-required": "native",
-          "auto-accept-edits": "native",
-          auto: "native",
-          "full-access": "native",
-        },
-        mcpPassthrough: "native",
-        disallowedTools: "native",
-        structuredOutput: "supported",
-      },
+      providerId: "anthropic/anthropic",
+      kind: "subscription-per-machine",
+      label: null,
+      identity: null,
+      planLabel: null,
+      defaultHarnessId: "claude-code/claude-code",
       snapshots: [],
       createdAt: "2026-09-07T00:00:00.000Z",
       updatedAt: "2026-09-07T00:00:00.000Z",
     };
     const fetch = stubFetch((request) =>
-      request.path === "/api/v1/providers" && request.method === "GET" ? [instance] : instance,
+      request.path === "/api/v1/provider-accounts" && request.method === "GET"
+        ? [account]
+        : account,
     );
     const stub = stubEnvIo(fetch);
-    expect(await main(["--home", home, "provider", "read", "cccccccc", "--json"], stub)).toBe(0);
-    expect(fetch.calls[1]?.path).toBe(`/api/v1/providers/${buildId("cccccccc")}`);
+    expect(
+      await main(["--home", home, "provider-account", "read", "cccccccc", "--json"], stub),
+    ).toBe(0);
+    expect(fetch.calls[1]?.path).toBe(`/api/v1/provider-accounts/${buildId("cccccccc")}`);
   });
 
   it("reports conflict when a tail matches more than one id", async () => {
@@ -1094,7 +1084,8 @@ const buildAgentRecord = (agentId: string, name: string) => ({
   id: agentId,
   name,
   systemPrompt: "You assess tasks.",
-  instanceId: buildId("cccccccc"),
+  providerAccountId: buildId("cccccccc"),
+  harnessId: null,
   permissionProfileId: buildId("dddddddd"),
   accessMode: "full-access",
   model: null,
@@ -1121,7 +1112,8 @@ describe("hercule session spawn --agent", () => {
     conversationId: null,
     runId: null,
     stepId: null,
-    instanceId: AGENT.instanceId,
+    providerAccountId: AGENT.providerAccountId,
+    harnessId: "claude-code/claude-code",
     runnerId: buildId("ffffffff"),
     workspaceId: null,
     projectId: null,

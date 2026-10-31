@@ -13,7 +13,7 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createValidationError, type Validation } from "@hercule/contract";
 import { ATTACHMENTS_CAPABILITY, type ModelDescriptor } from "@hercule/protocol";
-import { providerRepository } from "../providers";
+import { providerAccountRepository } from "../provider-accounts";
 import { runnerRepository } from "../runners";
 
 /** What the controller knows about where a turn would run. */
@@ -22,8 +22,8 @@ export interface AttachmentRecipient {
   /** The capabilities the runner and the controller agreed on at its last hello. */
   readonly capabilities: ReadonlyArray<string>;
   /**
-   * The models the runner last reported for the session's provider instance.
-   * Empty when it has reported none.
+   * The models the runner last reported for the session's provider account in
+   * the session's harness. Empty when it has reported none.
    */
   readonly models: ReadonlyArray<ModelDescriptor>;
   /** The slug of the model the turn runs on. */
@@ -39,7 +39,8 @@ export interface AttachmentSize {
 /** Where one turn runs, and the attachments it carries. */
 export interface AttachmentTurn {
   readonly runnerId: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  readonly harnessId: string;
   /** The slug of the model the turn runs on. */
   readonly model: string;
   readonly attachments: ReadonlyArray<AttachmentSize>;
@@ -113,7 +114,7 @@ export const describeAttachmentRefusal = (
  *
  * The runner's capabilities are the ones it agreed to at its last hello, and
  * its models are the ones it last reported for the session's provider
- * instance. Both are read from the database, so the check also works while
+ * account in the session's harness. Both are read from the database, so the check also works while
  * the runner is offline. A snapshot that no longer decodes counts as no
  * models reported, so the turn is refused with the message for a model that
  * is not in the list: an unknown answer never counts as yes.
@@ -125,8 +126,8 @@ export const findAttachmentRefusal = (
     if (turn.attachments.length === 0) return undefined;
     // A session's runner row is never deleted while the session exists.
     const runner = Option.getOrThrow(yield* (yield* runnerRepository).read(turn.runnerId));
-    const snapshot = yield* (yield* providerRepository)
-      .readSnapshot(turn.instanceId, turn.runnerId)
+    const snapshot = yield* (yield* providerAccountRepository)
+      .readSnapshot(turn.providerAccountId, turn.harnessId, turn.runnerId)
       .pipe(Effect.catchTag("SchemaError", () => Effect.succeed(Option.none())));
     return describeAttachmentRefusal(
       {

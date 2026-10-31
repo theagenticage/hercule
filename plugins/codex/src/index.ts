@@ -15,9 +15,6 @@ const definition: HarnessDefinition = {
   id: "codex",
   displayName: "Codex",
   binaryName: "codex",
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({}),
-  defaultConfig: {},
   declared: {
     steering: "native",
     fork: "native",
@@ -33,10 +30,17 @@ const definition: HarnessDefinition = {
     disallowedTools: "unsupported",
     structuredOutput: "supported",
   },
-  // Codex lists this model from release 0.162 on. On an older release it is
-  // not in the instance's model list, so Automatic passes over Codex rather
-  // than ask for a model that is not there.
-  suggestedTextGenerationModel: "gpt-6-luna",
+  // The login of a ChatGPT subscription lives in the Harness Home, so the
+  // kind has no credential variable, and Codex accepts every model the account
+  // lists under its own id.
+  runs: [
+    {
+      providerId: "openai/openai",
+      kinds: [{ kind: "subscription-per-machine" }],
+      modelArgument: "{model}",
+      models: "all",
+    },
+  ],
 };
 
 export const codex: Plugin = {

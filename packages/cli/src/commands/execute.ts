@@ -64,8 +64,8 @@ interface Page {
 }
 
 /**
- * Converts a list response into a page. Small fixed lists (plugins, provider
- * instances) return the whole array, which becomes a single, last page.
+ * Converts a list response into a page. Small fixed lists (plugins, Provider
+ * Accounts) return the whole array, which becomes a single, last page.
  */
 const toPage = (answer: unknown): Page =>
   Array.isArray(answer)

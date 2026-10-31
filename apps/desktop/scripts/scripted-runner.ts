@@ -9,8 +9,12 @@
  * It answers the controller on its own, the way a healthy runner does:
  *
  * - a ping with a pong;
- * - a probe with a logged-in report that offers two models, each with a
- *   reasoning effort and a fast mode;
+ * - a probe with a signed-in report that offers two models, each with a
+ *   reasoning effort and a fast mode, or, after `setSignedIn(false)`, with a
+ *   report that the harness has no login;
+ * - a login start with the URL of a sign-in page where the user pastes a
+ *   code back, so a sign-in dialog opens without a vendor's login running.
+ *   A pasted code is never answered: nothing signs in;
  * - a workspace provision with `ready`, and a dispose with `deleted`;
  * - a session start with `session.started`, and then the input the start
  *   carries as it answers any other input;
@@ -85,7 +89,7 @@ const MAX_REPORTED_SESSIONS = 256;
 
 /**
  * A Mac with Claude Code installed. The fleet places threads on the Claude
- * Code instance, so the facts say its harness is present, and a screen that
+ * Code account, so the facts say its harness is present, and a screen that
  * checks for it shows the runner as healthy. The identity port is the
  * caller's to choose; see `enlistScriptedRunner`.
  */
@@ -119,7 +123,7 @@ const MODEL_OPTIONS: ReadonlyArray<ModelOption> = [
 ];
 
 /**
- * A logged-in report with two models, so a test can pick a model other than
+ * A signed-in report with two models, so a test can pick a model other than
  * the default, and options on both, so it can pick an option.
  */
 const PROBE_RESULT: ProbeResult = {
@@ -141,6 +145,16 @@ const PROBE_RESULT: ProbeResult = {
     },
   ],
 };
+
+/** The report of a probe after `setSignedIn(false)`: the harness holds no login and lists no models. */
+const SIGNED_OUT_PROBE_RESULT: ProbeResult = {
+  harnessVersion: "1.0.0",
+  auth: { status: "unauthenticated" },
+  models: [],
+};
+
+/** The sign-in page a login start reports. Nothing serves it, and no test opens it. */
+const SIGN_IN_URL = "https://sign-in.scripted-runner.invalid/authorize";
 
 const APPROVAL_DECISIONS = ["allow", "allow_always", "deny", "cancel"] as const;
 
@@ -324,7 +338,7 @@ interface ParkedRequest {
 /** A session the runner holds: its start has arrived and it has not exited. */
 interface HostedSession {
   readonly sessionId: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
   /** The credential the controller minted for the session's start, which an agent calls the API with. */
   readonly token: string;
   /** The sequence number of the last event sent. A new process numbers from 1 again. */
@@ -406,6 +420,13 @@ export interface ScriptedRunner {
    * lists no repository skills and translates no Skill Reference.
    */
   readonly setSkills: (skills: ScriptedSkills) => void;
+  /**
+   * Chooses what the runner's later probes report: a login in every account's
+   * harness (the default), or none. A probe that already ran keeps its
+   * report, so the caller asks the controller to probe again to see the
+   * change.
+   */
+  readonly setSignedIn: (signedIn: boolean) => void;
 }
 
 /** The skills a scripted runner knows about; see `ScriptedRunner.setSkills`. */
@@ -457,6 +478,7 @@ export async function enlistScriptedRunner(
   const sessions = new Map<string, HostedSession>();
   const workspaces = new Map<string, WorkspaceReport>();
   let skills: ScriptedSkills = { repository: [], names: [] };
+  let signedIn = true;
   let socket: WebSocket;
   /** The code and reason of the last close, so a send on a closed connection can say why. */
   let lastClose: string | undefined;
@@ -1126,9 +1148,11 @@ export async function enlistScriptedRunner(
         return send({
           _tag: "probeReport",
           requestId: frame.requestId,
-          instanceId: frame.instanceId,
-          result: PROBE_RESULT,
+          providerAccountId: frame.harnessAccount.providerAccountId,
+          result: signedIn ? PROBE_RESULT : SIGNED_OUT_PROBE_RESULT,
         });
+      case "loginStart":
+        return send({ _tag: "loginUrl", requestId: frame.requestId, url: SIGN_IN_URL });
       case "workspaceProvision": {
         const report: WorkspaceReport = {
           _tag: "workspaceReport",
@@ -1178,7 +1202,7 @@ export async function enlistScriptedRunner(
       case "sessionStart": {
         const session: HostedSession = {
           sessionId: frame.sessionId,
-          instanceId: frame.spec.instanceId,
+          providerAccountId: frame.spec.providerAccountId,
           token: frame.token,
           seq: 0,
           main: {
@@ -1290,7 +1314,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 14 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 15 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
@@ -1366,6 +1390,9 @@ export async function enlistScriptedRunner(
     setSkills: (next) => {
       skills = next;
     },
+    setSignedIn: (next) => {
+      signedIn = next;
+    },
     goOffline: async () => {
       if (socket.readyState === WebSocket.OPEN) send({ _tag: "goodbye" });
       await closeSocket();
@@ -1374,7 +1401,7 @@ export async function enlistScriptedRunner(
       const bindings: Array<SessionBinding> = [...sessions].map(([sessionId, session]) => ({
         sessionId,
         nativeSessionId: buildNativeSessionId(sessionId),
-        instanceId: session.instanceId,
+        providerAccountId: session.providerAccountId,
       }));
       if (bindings.length > MAX_REPORTED_SESSIONS) {
         throw new Error(

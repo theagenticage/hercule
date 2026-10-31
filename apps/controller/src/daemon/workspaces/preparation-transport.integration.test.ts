@@ -86,7 +86,7 @@ const bootstrapRunner = async (
           JSON.stringify({
             _tag: "probeReport",
             requestId: frame.requestId,
-            instanceId: frame.instanceId,
+            providerAccountId: frame.harnessAccount.providerAccountId,
             result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models: MODELS },
           }),
         );
@@ -95,10 +95,10 @@ const bootstrapRunner = async (
   });
   try {
     await waitUntil("probed the proof runner", async () => {
-      const providers = (await (
-        await get(arranged.harness.base, "/api/v1/providers", arranged.token)
+      const accounts = (await (
+        await get(arranged.harness.base, "/api/v1/provider-accounts", arranged.token)
       ).json()) as ReadonlyArray<{ readonly snapshots: ReadonlyArray<unknown> }>;
-      return providers.every((provider) => provider.snapshots.length === 2) ? true : undefined;
+      return accounts.every((account) => account.snapshots.length === 2) ? true : undefined;
     });
   } catch (error) {
     socket.close();
@@ -159,7 +159,7 @@ describe("preparation after a real runner process dies", () => {
         yield* connect({
           pin, facts, probe: Effect.succeed(facts),
           headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1024 ** 3 }),
-          providersDir: storageDir + "/providers", scratchDir: storageDir + "/scratch",
+          storageDir, scratchDir: storageDir + "/scratch",
           workspaces, workspaceSteps: makeWorkspaceSteps({ storageDir, workspaces, socketPath, baseEnv: process.env }),
           socketPath, credentials: makeCredentialRelay(), harnessLogins, sessions,
           binDir: storageDir + "/bin", herculeTool: { skill: "# fixture", claudePluginDir: storageDir + "/claude-plugin" }

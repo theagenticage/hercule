@@ -14,6 +14,13 @@ import { migrations } from "./index";
 /** The migrations before the one under test. */
 const BEFORE = migrations.filter(([id]) => id < 94);
 
+/**
+ * The migrations up to and including the one under test. Migration 95 drops
+ * `provider_instances` and refuses the made-up harness this test stores, so
+ * the test stops at 94.
+ */
+const UP_TO_QUALIFIED_HARNESS_IDS = migrations.filter(([id]) => id <= 94);
+
 const at = "2026-10-30T00:00:00.000Z";
 const SESSION = new Uint8Array(16).fill(7);
 
@@ -125,7 +132,7 @@ const seedAndMigrate = (): Promise<Migrated> =>
       yield* sql`INSERT INTO session_stream (session_id, position, runner_seq, at, event)
                  VALUES (${SESSION}, 4, 4, ${at}, '{"_tag": "x", "providerRefs": {"nativeSessionId": "spaced"}}')`;
 
-      yield* runMigrations();
+      yield* runMigrations(UP_TO_QUALIFIED_HARNESS_IDS);
 
       const instances = yield* sql<{
         readonly name: string;

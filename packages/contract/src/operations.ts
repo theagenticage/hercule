@@ -477,24 +477,39 @@ const TABLE = {
     path: "/api/v1/plugins/:id/intake",
   },
 
+  "harness.query": { requires: "infra.read", method: "GET", path: "/api/v1/harnesses" },
+
   "provider.query": { requires: "infra.read", method: "GET", path: "/api/v1/providers" },
-  "provider.read": { requires: "infra.read", method: "GET", path: "/api/v1/providers/:id" },
-  "provider.create": { requires: "infra.write", method: "POST", path: "/api/v1/providers" },
-  "provider.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/providers/:id" },
-  "provider.login": {
-    requires: "infra.write",
-    method: "POST",
-    path: "/api/v1/providers/:id/login",
+
+  "providerAccount.query": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/provider-accounts",
   },
-  "provider.submitLoginCode": {
-    requires: "infra.write",
-    method: "POST",
-    path: "/api/v1/providers/:id/login-code",
+  "providerAccount.read": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/provider-accounts/:id",
   },
-  "provider.delete": {
+  "providerAccount.update": {
+    requires: "infra.write",
+    method: "PATCH",
+    path: "/api/v1/provider-accounts/:id",
+  },
+  "providerAccount.delete": {
     requires: "infra.write",
     method: "DELETE",
-    path: "/api/v1/providers/:id",
+    path: "/api/v1/provider-accounts/:id",
+  },
+  "providerAccount.signIn": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/provider-accounts/:id/sign-in",
+  },
+  "providerAccount.submitSignInCode": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/provider-accounts/:id/sign-in-code",
   },
 
   "connection.query": { requires: "connection.read", method: "GET", path: "/api/v1/connections" },
@@ -803,7 +818,7 @@ export const readRequirement = (id: OperationId): Requirement => TABLE[id].requi
  * value. These are the operations that need:
  *
  * - a grant of the `credential` or `secret` family;
- * - a grant of the `infra` family, because a provider is created with its API
+ * - a grant of the `infra` family, because a Provider Account is given its API
  *   keys;
  * - `connection.manage`, because a Connection is created with its
  *   credentials;

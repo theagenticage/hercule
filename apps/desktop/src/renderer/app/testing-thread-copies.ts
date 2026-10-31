@@ -25,7 +25,7 @@ export const buildThreadCopyFixture = (
     id,
     projectId,
     permissionProfileId: buildId(800),
-    instanceId: buildId(801),
+    providerAccountId: buildId(801),
     runnerId: buildId(802),
   }),
   subagents: [{ id: "a1", sessionId: id, status: "running", toolCalls: 0, startedAt: AT }],

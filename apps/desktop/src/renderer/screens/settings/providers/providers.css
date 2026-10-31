@@ -1,0 +1,283 @@
+/* Settings > Providers, from the prototype `prototype/desktop-settings-
+   providers`, variant I (docs/design/providers-directions/). Its measurements
+   decide; the rules below carry them. The Accounts section is `.provider-
+   accounts`; the account sheet is `.account-sheet`. Class names start with
+   `pa-` so no rule collides with another screen's short names. */
+
+/* The prototype widens the column from Settings' 760px to 1000px and spaces
+   its parts 30px apart, as Connections does for its table. */
+.set-col:has(> .provider-accounts) {
+  gap: 30px;
+  width: min(1000px, 100%);
+}
+
+/* ---------- The section ---------- */
+.provider-accounts > h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+/* Settings' lead rule (`.set-sec > p`) is 13px with a 12px gap under it. The
+   prototype's lead is 12px with 2px over it, and its head is a 2px grid, so
+   the cards start 12px under the lead. */
+.provider-accounts > .pa-lead {
+  margin: 2px 0 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pa-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 8px;
+}
+.pa-empty {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- A card ---------- */
+/* One button. The prototype's card is a box with the button inside it, and a
+   foot under the button that comes with the profiles. Without a foot the
+   box and the button are the same shape, so there is only the button. The
+   card has no hover style: hovering a card lights nothing. */
+.pa-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  padding: 11px 12px 10px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+  text-align: left;
+}
+.pa-card-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.pa-card-top > .br {
+  flex: none;
+}
+.pa-card-top b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Under the name: mark (15px) and the gap (7px) over, to line up with it. */
+.pa-card-identity {
+  padding-left: 22px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pa-card-reach {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 22px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+
+/* The identity and the plan on one line. The identity gives way first. */
+.pa-identity {
+  display: flex;
+  min-width: 0;
+  white-space: pre;
+}
+.pa-identity-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pa-identity-plan {
+  flex: none;
+}
+
+/* ---------- Pips: one per machine ---------- */
+.pa-pips {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 3px;
+}
+.pa-pips > .ic {
+  margin-right: 2px;
+  color: var(--faint);
+}
+.pa-pip {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ink) 58%, transparent);
+}
+.pa-pip.is-you {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--you);
+}
+
+/* ---------- The account sheet ---------- */
+/* On the glass dialog, but the prototype's sheet sits 11vh from the top
+   where `.glass-dialog` sits 18vh, is 500px wide, and is as tall as its
+   content up to 78vh, which the body scrolls inside. */
+.glass-dialog.account-sheet {
+  width: 500px;
+  max-height: 78vh;
+  margin-top: 11vh;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.pa-sheet-h {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px 12px;
+}
+.pa-sheet-h .icon-btn {
+  margin-left: auto;
+}
+.pa-sheet-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--ink);
+}
+.pa-sheet-title {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.pa-sheet-title h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.pa-sheet-identity {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pa-sheet-b {
+  min-height: 0;
+  padding: 2px 18px 16px;
+  overflow: auto;
+}
+.pa-sheet-f {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.pa-sec {
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.pa-sec:first-child {
+  padding-top: 4px;
+  border-top: 0;
+}
+.pa-sec h3 {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* The Name field. The prototype's field is a grid of the field and a hint
+   6px apart. */
+.pa-name {
+  display: grid;
+  gap: 6px;
+}
+.pa-name .field {
+  width: 100%;
+}
+.pa-hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.pa-name .fl-err {
+  margin: 0;
+}
+
+/* A machine: icon, name, status, action. The status column also holds who
+   the account is signed in as, which the prototype's 130px column was too
+   narrow for. */
+.pa-machine {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 190px) minmax(70px, auto);
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: var(--t-13);
+}
+.pa-machine > .ic {
+  color: var(--muted);
+}
+.pa-machine-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.pa-machine-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-machine-name small {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pa-machine-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pa-machine-status.is-you {
+  color: var(--you-ink);
+}
+.pa-machine-status > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-machine-act {
+  justify-self: end;
+}
+.pa-machine-err {
+  margin: 0 0 4px 28px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}

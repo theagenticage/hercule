@@ -81,4 +81,33 @@ describe("the confirm dialog", () => {
     );
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep running" }));
   });
+
+  it("offers only the closing button, with the reason, after a refusal", async () => {
+    const onConfirm = vi.fn<() => void>();
+    const onClose = vi.fn<() => void>();
+    render(
+      <ConfirmDialog
+        dialogRef={createRef<HTMLDialogElement>()}
+        title="Delete Anthropic?"
+        actionLabel="Delete"
+        actionClass="danger"
+        refusal="Anthropic is still used by the assistant Ada."
+        onConfirm={onConfirm}
+        onClose={onClose}
+      >
+        <input aria-label="Name" />
+      </ConfirmDialog>,
+    );
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Anthropic is still used by the assistant Ada.",
+    );
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    // Enter in a field has no action to press.
+    await userEvent.click(screen.getByRole("textbox", { name: "Name" }));
+    await userEvent.keyboard("{Enter}");
+    expect(onConfirm).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

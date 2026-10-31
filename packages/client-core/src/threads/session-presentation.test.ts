@@ -15,6 +15,7 @@
  */
 import type { OpenRequest, Project, Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
+import { ANTHROPIC_IDENTITY, OPENAI_IDENTITY, buildProviderAccount } from "../providers.testing";
 import type { Waiting } from "../waiting";
 import type { DraftPlace } from "./groups";
 import { findGroupRow, findWorkspaceGroupRow } from "./group-row";
@@ -77,10 +78,13 @@ const lone = (id: string, minute: number, over: Partial<Session> = {}): Session 
 
 const done = (minute: number): Pick<Session, "done"> => ({ done: { at: at(minute), by: "user" } });
 
-const INSTANCES = [
-  { id: "i-claude", harnessId: "claude-code/claude-code", snapshots: [] },
-  { id: "i-codex", harnessId: "codex/codex", snapshots: [] },
-] as unknown as Parameters<typeof prepareSessionPresentation>[0]["instances"];
+const ACCOUNTS = [
+  buildProviderAccount(ANTHROPIC_IDENTITY),
+  buildProviderAccount(OPENAI_IDENTITY),
+] satisfies Parameters<typeof prepareSessionPresentation>[0]["accounts"];
+
+/** The fields that put a session on the OpenAI account, in Codex. */
+const ON_CODEX = { providerAccountId: OPENAI_IDENTITY.id, harnessId: OPENAI_IDENTITY.harnessId };
 
 /** Returns the presentation of `sessions`, with the fixture's projects, workspaces and machine. */
 const prepare = (
@@ -94,7 +98,7 @@ const prepare = (
     workspaces: [PRIMARY, THREAD_3F1],
     resources: [WEBSHOP],
     runners: [MOSS],
-    instances: INSTANCES,
+    accounts: ACCOUNTS,
     ...over,
   });
 
@@ -353,7 +357,7 @@ describe("a group's row", () => {
 
   describe("the second line", () => {
     const reviewer = (over: Partial<Session> = {}): Session =>
-      agent("s-review", { role: "review", instanceId: "i-codex", ...over });
+      agent("s-review", { role: "review", ...ON_CODEX, ...over });
 
     it("names the asking session by its role, and leads with its harness", () => {
       const row = describeOnly([thread("s-1"), reviewer({ openRequests: [ask("r-1")] })]);
@@ -1127,7 +1131,7 @@ describe("a header tab and a row's line", () => {
       thread("s-lead", { role: "build", status: "busy", ...done(40) }),
       agent("s-reviewer", { role: "review", openRequests: [ask("r-1")] }),
       agent("s-ended", { role: "review", status: "exited", exitedAt: at(6), createdAt: at(6) }),
-      thread("s-codex", { instanceId: "i-codex", createdAt: at(3) }),
+      thread("s-codex", { ...ON_CODEX, createdAt: at(3) }),
     ];
     const workspace = { ...THREAD_3F1, id: "w-1", sessionIds: sessions.map(({ id }) => id) };
     const { groupRows } = prepare(sessions);
@@ -1137,7 +1141,7 @@ describe("a header tab and a row's line", () => {
       const tabs = listWorkspaceSessionTabs(session, sessions, {
         workspaces: [workspace],
         runners: [MOSS],
-        instances: INSTANCES,
+        accounts: ACCOUNTS,
       });
       const tab = tabs.find(({ sessionId }) => sessionId === session.id)!;
       const member = members.find(({ sessionId }) => sessionId === session.id)!;

@@ -1,77 +1,86 @@
 /**
  * The Provider field of Settings > Assistants: one menu that picks both the
- * provider instance an assistant runs on and the model it uses there.
+ * Provider Account an assistant runs on and the model it uses there.
  */
-import { toIdTail, type ProviderInstance } from "@hercule/contract";
-import { buildInstanceLabel } from "../threads/catalog";
+import { toIdTail, type Provider, type ProviderAccount } from "@hercule/contract";
+import { buildProviderAccountName, resolveThreadHarnessId } from "../provider-accounts";
 import { buildThreadModelField } from "../threads/model-field";
 import type { AssistantDraft } from "./form";
 
-/** One choice in the Provider field: an instance and a model on it. */
+/** One choice in the Provider field: an account and a model on it. */
 interface AssistantProviderChoice {
-  readonly instanceId: string;
-  /** The model's slug, or `null` for the instance's default model. */
+  readonly providerAccountId: string;
+  /**
+   * The harness the choice runs in: the assistant's own harness for its own
+   * account, else `null` for the account's default harness.
+   */
+  readonly harnessId: string | null;
+  /** The model's slug, or `null` for the account's default model. */
   readonly model: string | null;
-  /** The choice's text, such as `Claude Code · Sonnet 5`. */
+  /** The choice's text, such as `Anthropic · Sonnet 5`. */
   readonly label: string;
 }
 
-/** The choices of one provider instance, shown as one group of the menu. */
+/** The choices of one Provider Account, shown as one group of the menu. */
 interface AssistantProviderGroup {
-  readonly instanceId: string;
+  readonly providerAccountId: string;
   readonly label: string;
   readonly choices: readonly AssistantProviderChoice[];
 }
 
 interface AssistantProviderField {
   readonly groups: readonly AssistantProviderGroup[];
-  /** The harness of the assistant's instance, for its logo, or `null` when the instance is gone. */
+  /** The harness the assistant runs in, for its logo, or `null` when its account is gone. */
   readonly harnessId: string | null;
   /**
-   * The account the assistant's instance is logged in as, else the instance's
-   * display name, or "" when the instance is gone.
+   * The identity the assistant's account is signed in as, else the account's
+   * name, or "" when the account is gone.
    */
   readonly hint: string;
 }
 
 /**
- * Builds the Provider field for `assistant`, the instance and model it runs
- * on, from every provider instance.
+ * Builds the Provider field for `assistant`, the account and model it runs
+ * on, from every Provider Account.
  *
- * Each instance is one group: first its default model, then each model its
- * catalog offers. The catalog is read from the instance's first snapshot,
- * because an assistant is not tied to one runner. An instance that has no
- * logged-in snapshot offers only its default model.
+ * Each account is one group: first its default model, then each model its
+ * catalog offers. The catalog is read from the account's first snapshot in the
+ * harness the assistant would run in, because an assistant is not tied to one
+ * runner. An account that has no signed-in snapshot offers only its default
+ * model.
  *
  * A select whose value matches none of its options shows its first option
  * instead, so the assistant's own choice is always an option:
- * - a model the catalog does not offer, or that a logged-out instance cannot
- *   list, is added at the end of its instance's group;
- * - an instance that no longer exists is added as a last group, named by its
+ * - a model the catalog does not offer, or that a signed-out account cannot
+ *   list, is added at the end of its account's group;
+ * - an account that no longer exists is added as a last group, named by its
  *   id tail and "(not found)", holding only the assistant's choice.
  */
 export const buildAssistantProviderField = (
-  instances: readonly ProviderInstance[],
-  assistant: Pick<AssistantDraft, "instanceId" | "model">,
+  accounts: readonly ProviderAccount[],
+  providers: readonly Provider[],
+  assistant: Pick<AssistantDraft, "providerAccountId" | "harnessId" | "model">,
 ): AssistantProviderField => {
   const buildGroup = (
-    instanceId: string,
+    providerAccountId: string,
+    harnessId: string | null,
     label: string,
     slugs: ReadonlyArray<{ readonly slug: string; readonly name: string }>,
   ): AssistantProviderGroup => {
     const models =
-      instanceId === assistant.instanceId &&
+      providerAccountId === assistant.providerAccountId &&
       assistant.model !== null &&
       !slugs.some(({ slug }) => slug === assistant.model)
         ? [...slugs, { slug: assistant.model, name: assistant.model }]
         : slugs;
     return {
-      instanceId,
+      providerAccountId,
       label,
       choices: [
-        { instanceId, model: null, label: `${label} · Default model` },
+        { providerAccountId, harnessId, model: null, label: `${label} · Default model` },
         ...models.map((model) => ({
-          instanceId,
+          providerAccountId,
+          harnessId,
           model: model.slug,
           label: `${label} · ${model.name}`,
         })),
@@ -79,30 +88,45 @@ export const buildAssistantProviderField = (
     };
   };
 
-  const groups = instances.map((instance) =>
+  const findHarnessId = (account: ProviderAccount): string | null =>
+    account.id === assistant.providerAccountId ? assistant.harnessId : null;
+
+  const groups = accounts.map((account) =>
     buildGroup(
-      instance.id,
-      buildInstanceLabel(instances, instance),
-      buildThreadModelField(instance, null, undefined).options,
+      account.id,
+      findHarnessId(account),
+      buildProviderAccountName(providers, account),
+      buildThreadModelField(
+        account,
+        resolveThreadHarnessId(account, findHarnessId(account)),
+        null,
+        undefined,
+      ).options,
     ),
   );
-  const instance = instances.find(({ id }) => id === assistant.instanceId);
-  if (instance === undefined) {
-    const { instanceId, model } = assistant;
-    const label = `${toIdTail(instanceId)} (not found)`;
+  const account = accounts.find(({ id }) => id === assistant.providerAccountId);
+  if (account === undefined) {
+    const { providerAccountId, harnessId, model } = assistant;
+    const label = `${toIdTail(providerAccountId)} (not found)`;
     groups.push({
-      instanceId,
+      providerAccountId,
       label,
-      choices: [{ instanceId, model, label: `${label} · ${model ?? "Default model"}` }],
+      choices: [
+        {
+          providerAccountId,
+          harnessId,
+          model,
+          label: `${label} · ${model ?? "Default model"}`,
+        },
+      ],
     });
   }
   return {
     groups,
-    harnessId: instance?.harnessId ?? null,
+    harnessId: account === undefined ? null : resolveThreadHarnessId(account, assistant.harnessId),
     hint:
-      instance === undefined
+      account === undefined
         ? ""
-        : (instance.snapshots.find(({ auth }) => auth.identity !== undefined)?.auth.identity ??
-          instance.displayName),
+        : (account.identity ?? buildProviderAccountName(providers, account)),
   };
 };

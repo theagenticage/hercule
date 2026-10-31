@@ -17,13 +17,15 @@ import {
   PluginError,
   registerConnectionType,
   registerEventSource,
-  secret,
   type FeedDeclaration,
   type Plugin,
   type PluginCapability,
+  type ProviderDefinition,
   type HarnessDefinition,
+  type HarnessProviderSupport,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
+import { HarnessHome } from "@hercule/protocol";
 import { withTransaction } from "../db";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
@@ -35,6 +37,7 @@ import {
   notesPlugin,
   buildPluginStack,
   buildHarnessDefinition,
+  buildProviderDefinition,
   IDLE_FEEDS,
   IDLE_INGEST_OPEN,
 } from "./testing";
@@ -46,15 +49,29 @@ const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost | SqlClient.Sq
 const findDetail = <T extends { readonly id: string }>(details: ReadonlyArray<T>, id: string) =>
   details.find((detail) => detail.id === id);
 
+/** What two fixture harnesses run, so a test can tell their catalog rows apart. */
+const RUNS_ALPHA: HarnessProviderSupport = {
+  providerId: "vendor/vendor",
+  kinds: [{ kind: "api-key", credentialVariable: "ALPHA_KEY" }],
+  modelArgument: "{model}",
+  models: "all",
+};
+const RUNS_BETA: HarnessProviderSupport = {
+  providerId: "vendor/vendor",
+  kinds: [{ kind: "api-key", credentialVariable: "BETA_KEY" }],
+  modelArgument: "beta/{model}",
+  models: "own-list",
+};
+
 describe("PluginHost.boot on an empty database", () => {
   it("lists every registry plugin enabled, unconfigured, with its one contribution", async () => {
     const alpha = createPluginFixture({
       id: "alpha",
-      definitions: [buildHarnessDefinition("alpha", { model: "alpha-default" })],
+      definitions: [buildHarnessDefinition("alpha", [RUNS_ALPHA])],
     });
     const beta = createPluginFixture({
       id: "beta",
-      definitions: [buildHarnessDefinition("beta", { model: "beta-default" })],
+      definitions: [buildHarnessDefinition("beta", [RUNS_BETA])],
     });
 
     const details = await run(
@@ -66,9 +83,9 @@ describe("PluginHost.boot on an empty database", () => {
 
     expect(details.map((detail) => detail.id)).toEqual(["alpha", "beta"]);
 
-    for (const [id, model] of [
-      ["alpha", "alpha-default"],
-      ["beta", "beta-default"],
+    for (const [id, runs] of [
+      ["alpha", RUNS_ALPHA],
+      ["beta", RUNS_BETA],
     ] as const) {
       const detail = findDetail(details, id);
       expect(detail?.enabled).toBe(true);
@@ -77,15 +94,7 @@ describe("PluginHost.boot on an empty database", () => {
       const contribution = detail?.contributions[0];
       expect(contribution?.extensionPoint).toBe("harness");
       expect(contribution?.id).toBe(`${id}/${id}`);
-      const definition = contribution?.definition as {
-        readonly configSchema: unknown;
-        readonly defaultConfig: unknown;
-      };
-      expect(definition.configSchema).toMatchObject({
-        type: "object",
-        properties: { token: { type: "string" } },
-      });
-      expect(definition.defaultConfig).toEqual({ model });
+      expect(contribution?.definition).toMatchObject({ id: `${id}/${id}`, runs: [runs] });
     }
   });
 });
@@ -164,8 +173,6 @@ describe("a plugin built against another host API version", () => {
 describe("a plugin the host cannot load", () => {
   it("gets the refused status for an unimplemented capability and for a config schema no form can render", async () => {
     const channels = createPluginFixture({ id: "channels-plugin", capabilities: ["channels"] });
-    // `providers` is a valid capability name that no host implements yet.
-    const providers = createPluginFixture({ id: "providers-plugin", capabilities: ["providers"] });
     const nested = createPluginFixture({
       id: "nested-plugin",
       configSchema: Schema.Struct({ server: Schema.Struct({ host: Schema.String }) }),
@@ -174,9 +181,8 @@ describe("a plugin the host cannot load", () => {
     const statuses = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.boot([channels.plugin, providers.plugin, nested.plugin]);
+        yield* host.boot([channels.plugin, nested.plugin]);
         return {
-          providers: yield* host.status("providers-plugin"),
           channels: yield* host.status("channels-plugin"),
           nested: yield* host.status("nested-plugin"),
         };
@@ -186,11 +192,6 @@ describe("a plugin the host cannot load", () => {
     expect(Option.getOrNull(statuses.channels)).toEqual({
       _tag: "refused",
       reason: { kind: "unimplementedCapability", capability: "channels" },
-    });
-
-    expect(Option.getOrNull(statuses.providers)).toEqual({
-      _tag: "refused",
-      reason: { kind: "unimplementedCapability", capability: "providers" },
     });
 
     const nestedStatus = Option.getOrNull(statuses.nested) as {
@@ -236,8 +237,8 @@ describe("a plugin whose register fails", () => {
 
   it("is errored, naming the path, when a contribution contains a function", async () => {
     const definition = {
-      ...buildHarnessDefinition("callback", {}),
-      defaultConfig: { onStart: () => undefined } as unknown as Schema.Json,
+      ...buildHarnessDefinition("callback"),
+      displayName: (() => undefined) as unknown as string,
     };
     const callback = createPluginFixture({ id: "callback", definitions: [definition] });
 
@@ -257,7 +258,7 @@ describe("a plugin whose register fails", () => {
       readonly message: string;
     } | null;
     expect(errored?._tag).toBe("errored");
-    expect(errored?.message).toContain("defaultConfig");
+    expect(errored?.message).toContain("displayName");
     expect(detail.contributions).toEqual([]);
     expect(callback.calls).toEqual([]);
   });
@@ -265,7 +266,7 @@ describe("a plugin whose register fails", () => {
   it("is errored, keeping every other plugin's rows, when it registers one id twice", async () => {
     const twice = createPluginFixture({
       id: "twice",
-      definitions: [buildHarnessDefinition("same", {}), buildHarnessDefinition("same", {})],
+      definitions: [buildHarnessDefinition("same"), buildHarnessDefinition("same")],
     });
     const other = createPluginFixture({ id: "other" });
 
@@ -294,11 +295,11 @@ describe("a plugin whose register fails", () => {
   it("loads two plugins that register the same harness word, under distinct qualified ids", async () => {
     const first = createPluginFixture({
       id: "first",
-      definitions: [buildHarnessDefinition("claude-code", { model: "first-default" })],
+      definitions: [buildHarnessDefinition("claude-code", [RUNS_ALPHA])],
     });
     const second = createPluginFixture({
       id: "second",
-      definitions: [buildHarnessDefinition("claude-code", { model: "second-default" })],
+      definitions: [buildHarnessDefinition("claude-code", [RUNS_BETA])],
     });
 
     const { statuses, catalogIds, live } = await run(
@@ -317,44 +318,17 @@ describe("a plugin whose register fails", () => {
     expect(statuses).toEqual(["active", "active"]);
     expect(catalogIds).toEqual(["first/claude-code", "second/claude-code"]);
     // The live definitions carry the same ids as the catalog rows, so a stored
-    // instance finds its definition by either.
-    expect(live.map((definition) => [definition.id, definition.defaultConfig])).toEqual([
-      ["first/claude-code", { model: "first-default" }],
-      ["second/claude-code", { model: "second-default" }],
+    // account finds its definition by either.
+    expect(live.map((definition) => [definition.id, definition.runs])).toEqual([
+      ["first/claude-code", [RUNS_ALPHA]],
+      ["second/claude-code", [RUNS_BETA]],
     ]);
   });
 
-  it("is errored when its harness has a config schema no form can render", async () => {
-    const unrenderable = createPluginFixture({
-      id: "unrenderable",
-      definitions: [
-        {
-          ...buildHarnessDefinition("deep", {}),
-          configSchema: Schema.Struct({ server: Schema.Struct({ host: Schema.String }) }),
-        },
-      ],
-    });
-
-    const status = await run(
-      Effect.gen(function* () {
-        const host = yield* PluginHost;
-        yield* host.boot([unrenderable.plugin]);
-        return yield* host.status("unrenderable");
-      }),
-    );
-
-    const errored = Option.getOrNull(status) as {
-      readonly _tag: string;
-      readonly message: string;
-    } | null;
-    expect(errored?._tag).toBe("errored");
-    expect(errored?.message).toContain("unrenderable/deep");
-  });
-
-  it("is errored when its harness's display name is longer than an instance name allows", async () => {
+  it("is errored when its harness's display name is longer than the catalog allows", async () => {
     const shouty = createPluginFixture({
       id: "shouty",
-      definitions: [{ ...buildHarnessDefinition("shouty", {}), displayName: "S".repeat(129) }],
+      definitions: [{ ...buildHarnessDefinition("shouty"), displayName: "S".repeat(129) }],
     });
 
     const detail = await run(
@@ -370,15 +344,16 @@ describe("a plugin whose register fails", () => {
   });
 
   it("accepts a qualified harness id of exactly the longest allowed length and refuses one character more", async () => {
-    // "boundary/" is 9 characters, so a 119 character word makes a 128
-    // character id, the length of the column that stores it.
+    // A plugin id and a harness word may each be 64 characters, so the
+    // longest qualified id is 129 characters, one more than the 128 the
+    // column that stores it holds.
     const fits = createPluginFixture({
-      id: "boundary",
-      definitions: [{ ...buildHarnessDefinition("a".repeat(119)), displayName: "Fits" }],
+      id: "p".repeat(63),
+      definitions: [{ ...buildHarnessDefinition("a".repeat(64)), displayName: "Fits" }],
     });
     const tooLong = createPluginFixture({
-      id: "overlong",
-      definitions: [{ ...buildHarnessDefinition("a".repeat(120)), displayName: "Too long" }],
+      id: "q".repeat(64),
+      definitions: [{ ...buildHarnessDefinition("a".repeat(64)), displayName: "Too long" }],
     });
     const other = createPluginFixture({ id: "other" });
 
@@ -400,8 +375,52 @@ describe("a plugin whose register fails", () => {
     expect(refusal?._tag === "errored" ? refusal.message : "").toContain(
       "129 characters long, and the limit is 128",
     );
-    expect(harnessIds).toEqual([`boundary/${"a".repeat(119)}`, "other/other"]);
+    expect(harnessIds).toEqual([`${"p".repeat(63)}/${"a".repeat(64)}`, "other/other"]);
     expect(contributions).toEqual([1, 0, 1]);
+  });
+
+  it.each([
+    ["a space", "my harness"],
+    ["a leading dash", "-harness"],
+    ["a leading dot", ".harness"],
+    ["a path separator", "a/b"],
+    ["an accent", "hârness"],
+    ["65 characters", "a".repeat(65)],
+  ])("is errored when the harness id has %s, because it names a folder", async (_label, word) => {
+    const message = await bootAndReadError(
+      createPluginFixture({ id: "folder", definitions: [buildHarnessDefinition(word)] }).plugin,
+    );
+
+    expect(message).toContain("Harness Home");
+  });
+
+  it("is errored when the plugin id is too long to name a folder, and says so", async () => {
+    const message = await bootAndReadError(
+      createPluginFixture({ id: "p".repeat(65), definitions: [buildHarnessDefinition("pi")] })
+        .plugin,
+    );
+
+    expect(message).toContain("65 characters long");
+    expect(message).toContain("Harness Home");
+  });
+
+  it("gives every accepted harness id a path the runner accepts as a Harness Home", async () => {
+    const dotted = createPluginFixture({
+      id: "my-plugin2",
+      definitions: [buildHarnessDefinition("Claude_Code.v2-x")],
+    });
+
+    const live = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([dotted.plugin]);
+        return yield* host.harnesses();
+      }),
+    );
+
+    expect(live).toHaveLength(1);
+    const home = `providers/homes/account-1/${live[0]!.id}`;
+    expect(Schema.is(HarnessHome)(home)).toBe(true);
   });
 
   it("is errored when its contribution has a key the host does not know", async () => {
@@ -409,7 +428,7 @@ describe("a plugin whose register fails", () => {
       id: "extra",
       definitions: [
         {
-          ...buildHarnessDefinition("extra", {}),
+          ...buildHarnessDefinition("extra"),
           onStart: () => undefined,
         } as HarnessDefinition,
       ],
@@ -425,6 +444,217 @@ describe("a plugin whose register fails", () => {
 
     expect(detail.status._tag).toBe("errored");
     expect(detail.contributions).toEqual([]);
+  });
+});
+
+/** Boots one plugin and returns its status message when it errored, or `undefined` when it loaded. */
+const bootAndReadError = (plugin: Plugin): Promise<string | undefined> =>
+  run(
+    Effect.gen(function* () {
+      const host = yield* PluginHost;
+      yield* host.boot([plugin]);
+      const status = Option.getOrNull(yield* host.status(plugin.manifest.id));
+      return status?._tag === "errored" ? status.message : undefined;
+    }),
+  );
+
+describe("what a harness declares it runs", () => {
+  const harnessWith = (runs: HarnessDefinition["runs"]) =>
+    createPluginFixture({ id: "runner", definitions: [buildHarnessDefinition("runner", runs)] })
+      .plugin;
+
+  it("is errored when a provider is not named by its qualified id", async () => {
+    const message = await bootAndReadError(harnessWith([{ ...RUNS_ALPHA, providerId: "vendor" }]));
+
+    expect(message).toContain("providerId");
+  });
+
+  it("is errored when a provider is listed twice, naming the harness and the provider", async () => {
+    const message = await bootAndReadError(harnessWith([RUNS_ALPHA, RUNS_BETA]));
+
+    expect(message).toContain("runner/runner");
+    expect(message).toContain("vendor/vendor more than once");
+  });
+
+  it("is errored when an account kind of one provider is listed twice", async () => {
+    const message = await bootAndReadError(
+      harnessWith([{ ...RUNS_ALPHA, kinds: [{ kind: "api-key" }, { kind: "api-key" }] }]),
+    );
+
+    expect(message).toContain("the account kind api-key of vendor/vendor");
+  });
+
+  it("is errored, naming the field, when the model argument does not hold {model} exactly once", async () => {
+    for (const modelArgument of ["vendor/model", "{model}/{model}"]) {
+      const message = await bootAndReadError(harnessWith([{ ...RUNS_ALPHA, modelArgument }]));
+
+      expect(message, modelArgument).toContain("runs.0.modelArgument");
+    }
+  });
+});
+
+describe("a plugin that registers a provider", () => {
+  const providerPlugin = (id: string, providers: ReadonlyArray<ProviderDefinition>) =>
+    createPluginFixture({ id, capabilities: ["providers"], definitions: [], providers }).plugin;
+
+  it("is listed in registry order under its qualified id, in the catalog and in the host", async () => {
+    const vendor = providerPlugin("vendor", [
+      buildProviderDefinition("vendor", ["alpha/alpha"]),
+      buildProviderDefinition("second"),
+    ]);
+    const other = providerPlugin("other", [buildProviderDefinition("vendor")]);
+
+    const { details, live } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([vendor, other]);
+        return {
+          details: yield* Effect.flatMap(Plugins, (plugins) => plugins.query()),
+          live: yield* host.providers(),
+        };
+      }),
+    );
+
+    expect(details.map((detail) => detail.status._tag)).toEqual(["active", "active"]);
+    // The catalog lists a plugin's contributions sorted by id; the host keeps registration order.
+    expect(details.flatMap((detail) => detail.contributions.map((one) => one.id))).toEqual([
+      "vendor/second",
+      "vendor/vendor",
+      "other/vendor",
+    ]);
+    expect(details[0]?.contributions[0]?.extensionPoint).toBe("provider");
+    expect(live.map((provider) => provider.id)).toEqual([
+      "vendor/vendor",
+      "vendor/second",
+      "other/vendor",
+    ]);
+    // An account kind keeps the provider's own word, and the harnesses it lists keep their qualified ids.
+    expect(live[0]?.kinds.map((kind) => [kind.id, kind.harnesses])).toEqual([
+      ["api-key", ["alpha/alpha"]],
+    ]);
+  });
+
+  it("is registered even while the plugin is disabled, like a harness", async () => {
+    const vendor = providerPlugin("vendor", [buildProviderDefinition("vendor")]);
+
+    const live = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([vendor]);
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(sql, sql`UPDATE plugins SET enabled = 0 WHERE id = 'vendor'`);
+        yield* host.boot([vendor]);
+        return yield* host.providers();
+      }),
+    );
+
+    expect(live.map((provider) => provider.id)).toEqual(["vendor/vendor"]);
+  });
+
+  it("is errored when a harness of an account kind is not named by its qualified id", async () => {
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [buildProviderDefinition("vendor", ["alpha"])]),
+    );
+
+    expect(message).toContain("harnesses");
+  });
+
+  it("is errored when an account kind is declared twice", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        { ...definition, kinds: [definition.kinds[0], definition.kinds[0]] },
+      ]),
+    );
+
+    expect(message).toContain("vendor/vendor");
+    expect(message).toContain("the account kind api-key more than once");
+  });
+
+  it("is errored, with no contributions kept, when it registers one id twice", async () => {
+    const twice = providerPlugin("twice", [
+      buildProviderDefinition("same"),
+      buildProviderDefinition("same"),
+    ]);
+
+    const { message, live } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([twice]);
+        const status = Option.getOrNull(yield* host.status("twice"));
+        return {
+          message: status?._tag === "errored" ? status.message : undefined,
+          live: yield* host.providers(),
+        };
+      }),
+    );
+
+    expect(message).toContain("twice/same");
+    expect(live).toEqual([]);
+  });
+
+  it("is errored when the qualified id is longer than the catalog allows", async () => {
+    // "overlong/" is 9 characters, so a 120 character word makes a 129 character id.
+    const message = await bootAndReadError(
+      providerPlugin("overlong", [
+        { ...buildProviderDefinition("a".repeat(120)), displayName: "Too long" },
+      ]),
+    );
+
+    expect(message).toContain("the provider id");
+    expect(message).toContain("129 characters long, and the limit is 128");
+  });
+
+  it("is errored when the definition has a key the host does not know", async () => {
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...buildProviderDefinition("vendor"),
+          catalogSource: "provider-api",
+        } as ProviderDefinition,
+      ]),
+    );
+
+    expect(message).toContain("catalogSource");
+  });
+
+  it("is errored, naming the fields, when a credentials step is not exactly one field named apiKey", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const withFields = (fields: ReadonlyArray<{ name: string; label: string }>) =>
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [{ ...definition.kinds[0], setup: [{ kind: "credentials", fields }] }],
+        },
+      ]);
+
+    for (const fields of [
+      [{ name: "token", label: "Token" }],
+      [
+        { name: "apiKey", label: "API key" },
+        { name: "orgId", label: "Organization" },
+      ],
+    ]) {
+      const message = await bootAndReadError(withFields(fields));
+
+      expect(message).toContain(
+        `the fields ${fields.map((field) => field.name).join(", ")}; a credentials step must have exactly one field, named apiKey`,
+      );
+    }
+  });
+
+  it("is errored when an account kind has a setup step the core cannot draw", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [{ ...definition.kinds[0], setup: [{ kind: "ssh" }] }],
+        } as unknown as ProviderDefinition,
+      ]),
+    );
+
+    expect(message).toContain("setup");
   });
 });
 
@@ -533,84 +763,6 @@ describe("Plugins.read on an unknown plugin id", () => {
 });
 
 /**
- * A secret field is entered per provider instance and stored under that
- * instance as its owner. The two other places a plugin can declare a config
- * schema have nowhere to store one. So both are rejected at registration,
- * where the author sees the reason, rather than showing a form whose value
- * nothing would store.
- */
-describe("a secret field declared outside a harness", () => {
-  it("gives the plugin the refused status when declared in its own config, and says where one belongs", async () => {
-    const keyed = createPluginFixture({
-      id: "keyed-plugin",
-      configSchema: Schema.Struct({
-        apiKey: secret({ title: "API key", description: "The vendor's own." }),
-      }),
-    });
-
-    const status = await run(
-      Effect.gen(function* () {
-        const host = yield* PluginHost;
-        yield* host.boot([keyed.plugin]);
-        return yield* host.status("keyed-plugin");
-      }),
-    );
-
-    const refused = Option.getOrNull(status) as {
-      readonly _tag: string;
-      readonly reason: { readonly kind: string; readonly message: string };
-    } | null;
-    expect(refused?._tag).toBe("refused");
-    expect(refused?.reason.kind).toBe("unsupportedConfigSchema");
-    expect(refused?.reason.message).toContain("harness definition only");
-    expect(keyed.hosts).toEqual([]);
-  });
-
-  it("marks the plugin errored when declared in a connection type, naming the type", async () => {
-    const plugin: Plugin = {
-      manifest: {
-        id: "keyed-connection",
-        displayName: "Plugin keyed-connection",
-        hostApi: HOST_API,
-        capabilities: ["connections"],
-        configSchema: Schema.Struct({}),
-      },
-      register: (host) =>
-        registerConnectionType(host, {
-          type: "vault",
-          displayName: "Vault",
-          setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
-          configSchema: Schema.Struct({
-            apiKey: secret({ title: "API key", description: "The vendor's own." }),
-          }),
-          validate: () => Effect.succeed({ displayName: "Vault", accountId: "vault-1" }),
-        }),
-      activate: () => Effect.succeed(Effect.void),
-    };
-
-    const { status, detail } = await run(
-      Effect.gen(function* () {
-        const host = yield* PluginHost;
-        yield* host.boot([plugin]);
-        return {
-          status: yield* host.status("keyed-connection"),
-          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("keyed-connection")),
-        };
-      }),
-    );
-
-    const errored = Option.getOrNull(status) as {
-      readonly _tag: string;
-      readonly message: string;
-    } | null;
-    expect(errored?._tag).toBe("errored");
-    expect(errored?.message).toContain("keyed-connection/vault");
-    expect(errored?.message).toContain("harness definition only");
-    expect(detail.contributions).toEqual([]);
-  });
-});
-
-/**
  * A config field marked `choices` loads its values from the external account
  * through the connection type's `listChoices`. Registration refuses a mark
  * with no loader behind it, and a mark anywhere a Connection's form is not
@@ -702,34 +854,6 @@ describe("a config field that loads its choices from the account", () => {
     expect(status?.message).toContain("teams/desk");
     expect(status?.message).toContain('"team"');
     expect(status?.message).toContain("must be optional");
-    expect(detail.contributions).toEqual([]);
-  });
-
-  it("marks the plugin errored when a harness definition marks a field, naming the harness", async () => {
-    const choosy = createPluginFixture({
-      id: "choosy",
-      definitions: [
-        {
-          ...buildHarnessDefinition("choosy", {}),
-          configSchema: TEAM_FIELD,
-        },
-      ],
-    });
-
-    const { status, detail } = await run(
-      Effect.gen(function* () {
-        const host = yield* PluginHost;
-        yield* host.boot([choosy.plugin]);
-        return {
-          status: Option.getOrNull(yield* host.status("choosy")),
-          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("choosy")),
-        };
-      }),
-    );
-
-    if (status?._tag !== "errored") throw new Error("the plugin should have failed to start");
-    expect(status.message).toContain("choosy/choosy");
-    expect(status.message).toContain("connection type only");
     expect(detail.contributions).toEqual([]);
   });
 

@@ -61,7 +61,10 @@ describe("signing in", () => {
     const { page } = await launchForTest(first.userDataDir);
 
     await page.getByRole("main").waitFor();
-    expect(await page.getByRole("button", { name: "Sign in" }).count()).toBe(0);
+    // The password field is the sign-in screen's own. A "Sign in" button is
+    // not, because the new-thread screen has one too when its draft cannot
+    // start for want of a signed-in account.
+    expect(await page.getByLabel("Password", { exact: true }).count()).toBe(0);
   });
 
   it("drops the token when a different controller is saved", async () => {

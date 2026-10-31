@@ -12,7 +12,7 @@
  * changed records, and only key builders that both sides share can turn those
  * records into the keys the cache uses.
  */
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import {
   isNotFound,
   queryKeys,
@@ -336,11 +336,38 @@ export const connectionChoicesQuery = (
     refetchOnWindowFocus: false,
   });
 
+/** Reads every Provider Account with what each runner last learned about it. */
+export const providerAccountsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.providerAccounts(),
+    queryFn: () => client.providerAccount.query(),
+  });
+
+/** Reads the providers the controller's plugins register, whose names name the accounts. */
 export const providersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),
     queryFn: () => client.provider.query(),
   });
+
+/** Reads the harnesses the controller's plugins register, with what each declares it can do. */
+export const harnessesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.harnesses(),
+    queryFn: () => client.harness.query(),
+  });
+
+/**
+ * Loads the three reads that describe the accounts: the accounts, their
+ * providers and the harnesses. A screen that names or lists accounts calls it
+ * in its loader, so nothing below the route suspends.
+ */
+export const ensureProviderAccountReads = (queryClient: QueryClient, client: HerculeClient) =>
+  Promise.all([
+    queryClient.ensureQueryData(providerAccountsQuery(client)),
+    queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(harnessesQuery(client)),
+  ]);
 
 /**
  * Reads every session in a single page. The sidebar and All sessions both read

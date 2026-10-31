@@ -1,5 +1,5 @@
 import { useState, type JSX, type ReactNode } from "react";
-import type { LoginTarget, ModelMenu, ModelPill, ThreadChoice } from "@hercule/client-core";
+import type { SignInTarget, ModelMenu, ModelPill, ThreadChoice } from "@hercule/client-core";
 import { PillLabel } from "./controls";
 import { ModelList } from "./model-list";
 import { SelectorShell } from "./selector-shell";
@@ -21,7 +21,7 @@ export function ModelSelector({
   open,
   onOpenChange,
   onChoose,
-  loginSlot,
+  signInSlot,
 }: {
   /** The model list; null while the menu is closed, because it is built only when open. */
   readonly menu: ModelMenu | null;
@@ -32,7 +32,7 @@ export function ModelSelector({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onChoose: (choice: ThreadChoice) => void;
-  readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
+  readonly signInSlot: (target: SignInTarget, className: string) => ReactNode;
 }): JSX.Element {
   const [older, setOlder] = useState(false);
   const forwardThreadChoice = (choice: ThreadChoice): void => {
@@ -74,13 +74,13 @@ export function ModelSelector({
             }}
             // Each row belongs to an account, so picking a row found through
             // the filter or Recent switches the account and the model together.
-            onPickModel={(instanceId, model) => {
-              forwardThreadChoice({ kind: "model", instanceId, model });
+            onPickModel={(providerAccountId, model) => {
+              forwardThreadChoice({ kind: "model", providerAccountId, model });
             }}
-            onPickInstance={(instanceId) => {
-              forwardThreadChoice({ kind: "account", instanceId });
+            onPickProviderAccount={(providerAccountId) => {
+              forwardThreadChoice({ kind: "account", providerAccountId });
             }}
-            loginSlot={loginSlot}
+            signInSlot={signInSlot}
           />
         </>
       )}

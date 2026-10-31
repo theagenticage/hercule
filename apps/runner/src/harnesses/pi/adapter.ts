@@ -1,7 +1,7 @@
 /**
  * The pi adapter. It runs one pi process per session, plus one per running
  * subagent, and talks to each in pi's RPC mode. Everything the processes read
- * or write lives under the instance's own agent directory. If pi used the
+ * or write lives under the account's own agent directory. If pi used the
  * developer's own directory, Hercule's sessions would mix with the user's
  * login, skills and settings. Two exceptions are named on the command line:
  *
@@ -70,6 +70,7 @@ import {
 import { readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
 import { joinInstructions } from "../prompt";
+import { applyCredential, formatModelArgument } from "../account";
 import { buildFailedProbe } from "../probe";
 import {
   isExecutableNotFound,
@@ -106,7 +107,8 @@ import {
   type RunningTool,
 } from "./normalize";
 import { readPiHome } from "./edited-path";
-import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI, ZAI_KEY } from "./probe";
+import { DEFAULT_THINKING, makePiInstall, makeProbe } from "./probe";
+import { readPiProvider } from "./provider";
 import {
   describeError,
   makeRpc,
@@ -354,7 +356,7 @@ interface Held {
   /**
    * The file the session's instructions were written to, if it has any.
    * Nothing reads the file after the session's pi is gone, so it is deleted
-   * with the session instead of piling up in the instance's home.
+   * with the session instead of piling up in the Harness Home.
    */
   readonly systemPromptFile: string | undefined;
   /** Whether `stopSession` is stopping this session. The stop then reports the exit. */
@@ -554,7 +556,7 @@ const owesAnswer = (state: Normalizing): boolean =>
   state.stopped.state === "completed";
 
 /**
- * Returns the directory for session transcripts inside the instance's home.
+ * Returns the directory for session transcripts inside the Harness Home.
  * pi names each transcript after the session's start time and id.
  */
 const buildSessionsDir = (home: string): string => join(home, "sessions");
@@ -702,7 +704,7 @@ const buildArgv = (
     // `AGENTS.md` or `CLAUDE.md` in the workspace and in every directory above
     // it, which is accepted. A session without one runs in an empty scratch
     // directory and reads no context file, so no stray file on this runner can
-    // reach it. Either way the agent directory pi also reads is the instance's
+    // reach it. Either way the agent directory pi also reads is the account's
     // home, never the user's own (spec 06 section 9.1). A Thread that sees the
     // user's material gets the user's instructions file through its own flag,
     // after the Agent's own system prompt.
@@ -731,7 +733,7 @@ const buildArgv = (
             : []),
         ]),
     "--model",
-    `${ZAI}/${selection.model}`,
+    formatModelArgument(ctx.modelArgument, selection.model),
     "--thinking",
     getSessionThinkingLevel(selection),
     // Added after pi's own system prompt, never replacing it, and passed as
@@ -742,8 +744,8 @@ const buildArgv = (
     // The `--no-*` flags above stop pi's own discovery, but pi still loads a
     // directory named with `--skill` or `--prompt-template` under them. Both
     // exceptions below use that, and both go on this process's command line,
-    // not into the instance's agent directory, because every session of the
-    // instance reads that directory.
+    // not into the Harness Home's agent directory, because every session of the
+    // account reads that directory.
     //
     // A session with a library skills folder loads the skills in it, which
     // come from the Skill Library (spec 06 section 9.4). A subagent loads them
@@ -792,6 +794,7 @@ const buildArgv = (
  */
 const buildTextGenerationArgv = (
   spec: TextGenerationSpec,
+  modelArgument: string,
   extensionFile: string,
   instructionsFile: string,
 ): ReadonlyArray<string> => [
@@ -811,7 +814,7 @@ const buildTextGenerationArgv = (
   "-e",
   extensionFile,
   "--model",
-  `${ZAI}/${spec.model}`,
+  formatModelArgument(modelArgument, spec.model),
   "--thinking",
   "off",
   "--system-prompt",
@@ -1024,7 +1027,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * Closes a subagent's pi: aborts whatever it is running, closes its stdin,
    * which makes pi exit, and kills it if it is still running after
    * `STOP_DEADLINE`. A subagent keeps no transcript, so nothing is lost either
-   * way, but a pi left running would keep the instance's key and its model
+   * way, but a pi left running would keep the account's key and its model
    * calls.
    */
   const closeProcess = (child: PiChild): void => {
@@ -1217,7 +1220,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     sessions.delete(sessionId);
     // Delete the session's instructions file. pi read it at start, and a
     // resume writes it again. Without this, the home would keep one file for
-    // every session ever started in this instance.
+    // every session ever started in this account.
     const instructions = held.systemPromptFile;
     if (instructions !== undefined) attempt(() => rmSync(instructions, { force: true }));
     // A subagent never outlives its session. No event is made up for its
@@ -1490,7 +1493,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
   };
 
   /**
-   * Prepares the instance's home for a session: creates the sessions
+   * Prepares the Harness Home for a session: creates the sessions
    * directory and writes the session's instructions, when it has any. Throws
    * when a write fails.
    */
@@ -1509,7 +1512,6 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     ctx: HarnessRunnerContext,
     extra: Readonly<Record<string, string | undefined>> = {},
   ): Record<string, string | undefined> => {
-    const key = ctx.secrets[ZAI_KEY.secret];
     const env: Record<string, string | undefined> = {
       ...ctx.env,
       PI_CODING_AGENT_DIR: ctx.home,
@@ -1521,16 +1523,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     // An extra variable given as undefined is removed, even when the
     // runner's own environment sets it.
     for (const [name, value] of Object.entries(extra)) if (value === undefined) delete env[name];
-    // Use the instance's key or no key at all. The runner's own environment
-    // may contain a key, and an instance with no key entered would then run on
-    // that key and report itself as logged in.
-    if (key === undefined || key === "") delete env[ZAI_KEY.variable];
-    else env[ZAI_KEY.variable] = key;
-    return env;
+    return applyCredential(env, ctx.credential);
   };
 
   /**
-   * Builds the environment of one agent's pi process: the instance's own, plus
+   * Builds the environment of one agent's pi process: the account's own, plus
    * what the extension reads. Every agent gets the session's access mode, and
    * the `subagent` tool unless it runs at `MAX_SUBAGENT_DEPTH`. Only the
    * session's own agent gets the output schema, because only it answers with
@@ -1588,7 +1585,13 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     Effect.gen(function* () {
       const root = held.root;
       yield* root.rpc
-        .send({ type: "set_model", provider: ZAI, modelId: selection.model })
+        .send({
+          type: "set_model",
+          // Does not throw: `startSession` already read the provider from this
+          // model argument when it built pi's command line.
+          provider: readPiProvider(held.ctx.modelArgument),
+          modelId: selection.model,
+        })
         .pipe(Effect.mapError(buildModelChangeFailure));
       // Record the model now, not after the level: pi has already switched
       // model, and if pi then rejected the level, turns would report the old
@@ -1646,12 +1649,15 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           }
           const released = Promise.withResolvers<void>();
           const child = spawnAgent(
-            [ctx.binary, ...buildTextGenerationArgv(spec, extensionFile, instructionsFile)],
+            [
+              ctx.binary,
+              ...buildTextGenerationArgv(spec, ctx.modelArgument, extensionFile, instructionsFile),
+            ],
             buildEnv(ctx, {
               // pi writes bookkeeping files into its agent directory even with
               // `--no-session`. Pointing it at the scratch directory removes
               // them with the call. It also keeps out whatever a session may
-              // have written into the instance's home, such as an
+              // have written into the Harness Home, such as an
               // `APPEND_SYSTEM.md`, which pi would append to the instructions.
               // The key comes from the environment, not from this directory.
               PI_CODING_AGENT_DIR: ctx.cwd,
@@ -1754,7 +1760,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           );
           return yield* Deferred.await(settled);
         }),
-      // A pi left running would keep the instance's key and go on with its
+      // A pi left running would keep the account's key and go on with its
       // model call. The runner removes the scratch directory and frees the
       // call's slot after this, so it waits until pi has really exited and
       // `spawnAgent` has deleted the extension copy in that directory. A
@@ -1770,12 +1776,22 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
 
     events: Stream.fromPubSub(published),
 
-    // The pi plugin's config holds the Z.ai key as a secret, which reaches the
-    // adapter in the context. The adapter uses nothing else from that config.
-    probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> =>
-      ctx.binary === undefined
-        ? Effect.succeed(buildFailedProbe(null, `no ${PI_BINARY} on this machine`))
-        : probe(ctx.binary, ctx.home, buildEnv(ctx)),
+    probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> => {
+      const binary = ctx.binary;
+      if (binary === undefined) {
+        return Effect.succeed(buildFailedProbe(null, `no ${PI_BINARY} on this machine`));
+      }
+      return Effect.try({
+        try: () => readPiProvider(ctx.modelArgument),
+        catch: (error) => describeError(error),
+      }).pipe(
+        Effect.matchEffect({
+          onFailure: (message) => Effect.succeed(buildFailedProbe(null, message)),
+          onSuccess: (provider) =>
+            probe(binary, ctx.home, buildEnv(ctx), provider, ctx.credential?.variable),
+        }),
+      );
+    },
 
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
@@ -1872,7 +1888,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         );
         state.model = spec.modelSelection.model;
         state.automaticCompactionCancelled = cancelsAutomaticCompaction(spec, 0);
-        const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };
+        const binding: SessionBinding = {
+          sessionId,
+          nativeSessionId,
+          providerAccountId: spec.providerAccountId,
+        };
         const root: RunningAgent = {
           child,
           rpc: makeRpc(child, (line, frame) => onLine(held, root, line, frame)),
@@ -2059,7 +2079,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         // pi already exited, and that exit already ended this session.
         if (held === undefined) return;
         held.stopping = true;
-        // The subagents hold the instance's key too, and keep no transcript,
+        // The subagents hold the account's key too, and keep no transcript,
         // so they are closed first and not waited for.
         endAllSubagents(held);
         const child = held.root.child;
@@ -2076,7 +2096,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           return;
         }
         // pi did not exit, so kill it: nothing else will make it exit, and it
-        // holds the instance's key for as long as it runs.
+        // holds the account's key for as long as it runs.
         attempt(() => child.kill());
         // Wait for the exit, because the session entry is what stops a second
         // pi from starting on this transcript. Removing it while the first pi
@@ -2091,7 +2111,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
-    generateText: (ctx, _config, spec) => generateText(ctx, spec),
+    generateText: generateText,
 
     install: makePiInstall(seam.run),
   };

@@ -4,13 +4,14 @@
  *
  * The agent operations use them, and so does the assistants domain, because
  * an assistant is an agent with more fields. Keeping them in one place means
- * an agent and an assistant cannot disagree about which instance, profile or
+ * an agent and an assistant cannot disagree about which account, harness, profile or
  * model selection is acceptable, or about who may choose the profile.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
+import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ModelSelection } from "@hercule/protocol";
 import {
@@ -22,12 +23,11 @@ import {
 import type { Actor } from "../actor";
 import { PermissionProfiles, requireMayAssignAgentProfile, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
-import { providerRepository, listUnenforcedFields } from "../providers";
+import { listUnenforcedFields } from "../harnesses";
+import { resolveProviderAccountHarness } from "../provider-accounts";
 import type { StoredAgent } from "./repository";
 
 const NO_SUCH_PROFILE = "no such permission profile";
-
-const NO_SUCH_INSTANCE = "no such provider instance";
 
 /** The message for options sent without a model, and what to send instead. */
 const NO_MODEL_FOR_OPTIONS =
@@ -38,7 +38,7 @@ const NO_MODEL_FOR_OPTIONS =
  * Combines the two API fields, `model` and `options`, into the one selection
  * the record stores. Returns `undefined` when the call sets neither: on an
  * update the stored selection stays as it was, and on a create the agent uses
- * the instance's default model. Returns null when `model` is null.
+ * the account's default model. Returns null when `model` is null.
  *
  * Fails with `Validation` if options are sent without a model. A choice
  * belongs to the model that offers it. If the choice were kept and moved to
@@ -62,9 +62,11 @@ export const buildModelSelection = (
  * reads what it needs when it is called, so one build serves every request.
  */
 export const buildAgentFieldChecks = Effect.gen(function* () {
-  const instances = yield* providerRepository;
   const host = yield* PluginHost;
   const profiles = yield* PermissionProfiles;
+  // What `resolveProviderAccountHarness` reads, captured here so the checks below
+  // need nothing from their caller.
+  const accountServices = yield* Effect.context<SqlClient.SqlClient | PluginHost>();
 
   return {
     /**
@@ -77,44 +79,33 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
       host.harnesses(),
       (definitions) =>
         (stored: StoredAgent): Agent => ({
-          ...Struct.omit(stored, ["harnessId", "kind"]),
-          unenforced: listUnenforcedFields(definitions, stored.harnessId, stored.disallowedTools),
+          ...Struct.omit(stored, ["effectiveHarnessId", "kind"]),
+          unenforced: listUnenforcedFields(
+            definitions,
+            stored.effectiveHarnessId,
+            stored.disallowedTools,
+          ),
         }),
     ),
 
     /**
-     * Returns the harness id of the instance an agent names. Fails with
-     * `Validation` if the instance does not exist, or if this build does not
-     * include its harness. It does not check what the machines that host the
-     * harness can do now: an agent is a stored configuration, not a
-     * placement.
+     * Checks that an agent may run in this account and harness before the
+     * pair is written. `harnessId` left out or `null` means the account's
+     * default harness. Fails with `Validation` if there is no such account,
+     * if this build carries no such harness, or if the account cannot run in
+     * it. It does not check what the machines that host the harness can do
+     * now: an agent is a stored configuration, not a placement.
      */
-    readHarnessIdOrFail: (
-      instanceId: string,
-    ): Effect.Effect<string, Validation | SqlError | Schema.SchemaError> =>
-      Effect.gen(function* () {
-        const instance = yield* instances.one(instanceId);
-        if (Option.isNone(instance)) {
-          return yield* Effect.fail(
-            createValidationError([{ path: ["instanceId"], message: NO_SUCH_INSTANCE }]),
-          );
-        }
-        const harnessId = instance.value.harnessId;
-        const definitions = yield* host.harnesses();
-        if (!definitions.some((definition) => definition.id === harnessId)) {
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: ["instanceId"],
-                message:
-                  `this build carries no ${harnessId} harness; ` +
-                  "name an instance of a harness this build carries",
-              },
-            ]),
-          );
-        }
-        return harnessId;
-      }),
+    validateAgentProviderAccountHarness: (
+      providerAccountId: string,
+      harnessId: string | null | undefined,
+    ): Effect.Effect<void, Validation | SqlError | Schema.SchemaError> =>
+      Effect.asVoid(
+        Effect.provideContext(
+          resolveProviderAccountHarness(providerAccountId, harnessId),
+          accountServices,
+        ),
+      ),
 
     /**
      * Checks that an agent may be put on the permission profile with this id,

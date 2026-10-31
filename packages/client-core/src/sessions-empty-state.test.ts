@@ -1,27 +1,28 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderInstance } from "@hercule/contract";
 import {
   decideSessionsEmptyState,
-  hasLoggedInRunner,
+  hasSignedInRunner,
   type SessionsEmptyState,
 } from "./sessions-empty-state";
 import {
   BARE,
-  buildInstance,
+  HARNESSES,
+  PROVIDERS,
+  buildProviderAccount,
   buildSnapshot,
-  CLAUDE_CODE_IDENTITY,
-  CODEX_IDENTITY,
-  PI_IDENTITY,
+  ANTHROPIC_IDENTITY,
+  OPENAI_IDENTITY,
+  ZAI_IDENTITY,
   WITH_CLAUDE,
 } from "./providers.testing";
 
-const waiting = buildInstance(CLAUDE_CODE_IDENTITY, [
+const waiting = buildProviderAccount(ANTHROPIC_IDENTITY, [
   buildSnapshot({ auth: { status: "unauthenticated" } }),
 ]);
 
-const loggedIn = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshot()]);
+const signedIn = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot()]);
 
-const undrivable = buildInstance(CODEX_IDENTITY, [
+const undrivable = buildProviderAccount(OPENAI_IDENTITY, [
   buildSnapshot({
     auth: { status: "error", message: "no adapter for codex in this runner build" },
   }),
@@ -32,9 +33,9 @@ const listOfferedLabels = (state: SessionsEmptyState): ReadonlyArray<string> =>
   state.kind !== "sign-in"
     ? []
     : state.offers.flatMap((row) =>
-        row.secretFields.length > 0
-          ? row.secretFields.map((field) => field.label)
-          : [row.logInLabel],
+        row.credentialFields.length > 0
+          ? row.credentialFields.map((field) => field.label)
+          : [row.signInLabel],
       );
 
 const readLead = (state: SessionsEmptyState): string =>
@@ -42,30 +43,44 @@ const readLead = (state: SessionsEmptyState): string =>
 
 describe("decideSessionsEmptyState", () => {
   it("returns no-runner when there is no local runner", () => {
-    expect(decideSessionsEmptyState(null, [waiting])).toEqual({ kind: "no-runner" });
+    expect(decideSessionsEmptyState(null, [waiting], PROVIDERS, HARNESSES)).toEqual({
+      kind: "no-runner",
+    });
   });
 
   it("treats a local runner that is not online as no runner", () => {
-    // A login runs on the runner's machine, so an offline runner is as
-    // useless for logging in as no runner at all.
+    // A sign-in runs on the runner's machine, so an offline runner is as
+    // useless for signing in as no runner at all.
     expect(
-      decideSessionsEmptyState({ ...WITH_CLAUDE, connectivity: "offline" }, [waiting]),
+      decideSessionsEmptyState(
+        { ...WITH_CLAUDE, connectivity: "offline" },
+        [waiting],
+        PROVIDERS,
+        HARNESSES,
+      ),
     ).toEqual({
       kind: "no-runner",
     });
   });
 
   it("returns no-harness when the runner reported no harness", () => {
-    expect(decideSessionsEmptyState(BARE, [waiting, undrivable])).toEqual({ kind: "no-harness" });
+    expect(decideSessionsEmptyState(BARE, [waiting, undrivable], PROVIDERS, HARNESSES)).toEqual({
+      kind: "no-harness",
+    });
   });
 
-  it("offers a login for every installed harness that is not logged in", () => {
-    const state = decideSessionsEmptyState(WITH_CLAUDE, [waiting, undrivable]);
+  it("offers a login for every installed harness that is not signed in", () => {
+    const state = decideSessionsEmptyState(
+      WITH_CLAUDE,
+      [waiting, undrivable],
+      PROVIDERS,
+      HARNESSES,
+    );
 
     expect(state.kind).toBe("sign-in");
-    expect(listOfferedLabels(state)).toEqual(["Log in"]);
+    expect(listOfferedLabels(state)).toEqual(["Sign in"]);
     expect(readLead(state)).toContain("runs on this machine");
-    expect(readLead(state)).toContain("Log in to use it in Hercule.");
+    expect(readLead(state)).toContain("Sign in to use it in Hercule.");
   });
 
   it("says `them` when more than one harness is offered", () => {
@@ -82,46 +97,48 @@ describe("decideSessionsEmptyState", () => {
         ],
       },
     };
-    const second = buildInstance(CODEX_IDENTITY, [
+    const second = buildProviderAccount(OPENAI_IDENTITY, [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
-    const state = decideSessionsEmptyState(machine, [waiting, second]);
+    const state = decideSessionsEmptyState(machine, [waiting, second], PROVIDERS, HARNESSES);
 
-    expect(listOfferedLabels(state)).toEqual(["Log in", "Log in"]);
-    expect(readLead(state)).toContain("Log in to use them in Hercule.");
+    expect(listOfferedLabels(state)).toEqual(["Sign in", "Sign in"]);
+    expect(readLead(state)).toContain("Sign in to use them in Hercule.");
   });
 
   it("still offers the login when the last probe of an installed harness failed", () => {
     // A failed probe does not mean the harness is missing, so an install
     // prompt would not help.
-    const stale = buildInstance(CLAUDE_CODE_IDENTITY, [
+    const stale = buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshot({
         auth: { status: "error", message: "the harness did not answer within 15s" },
       }),
     ]);
-    const state = decideSessionsEmptyState(WITH_CLAUDE, [stale]);
+    const state = decideSessionsEmptyState(WITH_CLAUDE, [stale], PROVIDERS, HARNESSES);
 
     expect(state.kind).toBe("sign-in");
-    expect(listOfferedLabels(state)).toEqual(["Log in"]);
+    expect(listOfferedLabels(state)).toEqual(["Sign in"]);
   });
 
-  it("is ready once one instance on the local runner is logged in", () => {
-    expect(decideSessionsEmptyState(WITH_CLAUDE, [loggedIn])).toEqual({
+  it("is ready once one account on the local runner is signed in", () => {
+    expect(decideSessionsEmptyState(WITH_CLAUDE, [signedIn], PROVIDERS, HARNESSES)).toEqual({
       kind: "ready",
-      name: "Claude Code",
+      name: "Anthropic",
     });
   });
 
-  it("is ready even when another instance is still waiting for a login", () => {
-    // One usable harness is enough for this screen; the others are managed on
-    // the Fleet screen. A "log in" headline when a harness works looks broken.
-    const second = buildInstance(CODEX_IDENTITY, [
+  it("is ready even when another account is still waiting for a sign-in", () => {
+    // One usable account is enough for this screen; the others are managed on
+    // the Fleet screen. A "sign in" headline when an account works looks broken.
+    const second = buildProviderAccount(OPENAI_IDENTITY, [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
-    expect(decideSessionsEmptyState(WITH_CLAUDE, [second, loggedIn])).toEqual({
-      kind: "ready",
-      name: "Claude Code",
-    });
+    expect(decideSessionsEmptyState(WITH_CLAUDE, [second, signedIn], PROVIDERS, HARNESSES)).toEqual(
+      {
+        kind: "ready",
+        name: "Anthropic",
+      },
+    );
   });
 });
 
@@ -131,17 +148,9 @@ describe("decideSessionsEmptyState", () => {
  * controller, not on the machine the thread runs on.
  */
 describe("decideSessionsEmptyState for a harness that signs in with a key", () => {
-  const FIELD = {
-    name: "zaiApiKey",
-    title: "Z.ai API key",
-    description: "From your Z.ai Coding Plan subscription.",
-    set: false,
-  };
-
-  const keyed: ProviderInstance = {
-    ...buildInstance(PI_IDENTITY, [buildSnapshot({ auth: { status: "unauthenticated" } })]),
-    secretFields: [FIELD],
-  };
+  const keyed = buildProviderAccount(ZAI_IDENTITY, [
+    buildSnapshot({ auth: { status: "unauthenticated" } }),
+  ]);
 
   const WITH_PI = {
     ...WITH_CLAUDE,
@@ -153,18 +162,42 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
   };
 
   it("offers the key, and says where the key is stored", () => {
-    const state = decideSessionsEmptyState(WITH_PI, [keyed]);
+    const state = decideSessionsEmptyState(WITH_PI, [keyed], PROVIDERS, HARNESSES);
 
-    expect(listOfferedLabels(state)).toEqual(["Enter Z.ai API key"]);
+    expect(listOfferedLabels(state)).toEqual(["Enter API key"]);
     expect(readLead(state)).toContain("kept by the controller");
     expect(readLead(state)).not.toContain("stays there");
     expect(readLead(state)).toContain("Enter its key to use it in Hercule.");
   });
 
   it("asks for the keys in the plural when two harnesses want one", () => {
-    const other: ProviderInstance = {
-      ...buildInstance(CODEX_IDENTITY, [buildSnapshot({ auth: { status: "unauthenticated" } })]),
-      secretFields: [{ ...FIELD, name: "codexApiKey", title: "Codex API key" }],
+    // OpenAI offers a key here too, so two accounts each want one.
+    const providers = PROVIDERS.map((provider) =>
+      provider.id === "openai/openai"
+        ? {
+            ...provider,
+            kinds: [
+              {
+                id: "api-key",
+                title: "API key",
+                description: "An OpenAI API key.",
+                setup: [
+                  {
+                    kind: "credentials" as const,
+                    fields: [{ name: "apiKey", label: "Codex API key" }],
+                  },
+                ],
+                harnesses: ["codex/codex"],
+              },
+            ],
+          }
+        : provider,
+    );
+    const other = {
+      ...buildProviderAccount(OPENAI_IDENTITY, [
+        buildSnapshot({ auth: { status: "unauthenticated" } }),
+      ]),
+      kind: "api-key",
     };
     const machine = {
       ...WITH_PI,
@@ -177,9 +210,9 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
         ],
       },
     };
-    const state = decideSessionsEmptyState(machine, [keyed, other]);
+    const state = decideSessionsEmptyState(machine, [keyed, other], providers, HARNESSES);
 
-    expect(listOfferedLabels(state)).toEqual(["Enter Z.ai API key", "Enter Codex API key"]);
+    expect(listOfferedLabels(state)).toEqual(["Enter API key", "Enter Codex API key"]);
     expect(readLead(state)).toContain("Enter their keys to use them in Hercule.");
   });
 
@@ -196,9 +229,11 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
         },
       },
       [keyed, waiting],
+      PROVIDERS,
+      HARNESSES,
     );
 
-    expect(listOfferedLabels(state)).toEqual(["Enter Z.ai API key", "Log in"]);
+    expect(listOfferedLabels(state)).toEqual(["Enter API key", "Sign in"]);
     expect(readLead(state)).toContain("stays there");
     expect(readLead(state)).toContain("kept by the controller");
     // Offering both kinds needs at least two harnesses, so this lead is plural.
@@ -206,20 +241,22 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
   });
 });
 
-describe("hasLoggedInRunner", () => {
-  it("is true when an online runner has a logged-in harness", () => {
-    expect(hasLoggedInRunner([BARE], [loggedIn])).toBe(true);
+describe("hasSignedInRunner", () => {
+  it("is true when an online runner has a signed-in harness", () => {
+    expect(hasSignedInRunner([BARE], [signedIn], PROVIDERS, HARNESSES)).toBe(true);
   });
 
-  it("is false when no harness is logged in", () => {
-    expect(hasLoggedInRunner([BARE], [waiting])).toBe(false);
+  it("is false when no harness is signed in", () => {
+    expect(hasSignedInRunner([BARE], [waiting], PROVIDERS, HARNESSES)).toBe(false);
   });
 
   it("is false when the runner with the login is offline", () => {
-    expect(hasLoggedInRunner([{ ...BARE, connectivity: "offline" }], [loggedIn])).toBe(false);
+    expect(
+      hasSignedInRunner([{ ...BARE, connectivity: "offline" }], [signedIn], PROVIDERS, HARNESSES),
+    ).toBe(false);
   });
 
   it("is false with no runners", () => {
-    expect(hasLoggedInRunner([], [loggedIn])).toBe(false);
+    expect(hasSignedInRunner([], [signedIn], PROVIDERS, HARNESSES)).toBe(false);
   });
 });

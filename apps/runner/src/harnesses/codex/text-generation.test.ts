@@ -122,7 +122,7 @@ const runGeneration = (
   adapter: ReturnType<typeof makeCodexAdapter>,
   ctx: ReturnType<typeof buildTextGenerationContext>,
 ): Effect.Effect<TextGenerationOutcome> =>
-  Effect.catch(adapter.generateText(ctx, {}, SPEC), (message) =>
+  Effect.catch(adapter.generateText(ctx, SPEC), (message) =>
     Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
   );
 
@@ -394,7 +394,7 @@ describe("codex generateText: what is asked of Codex", () => {
     const adapter = makeCodexAdapter(scripted.seam);
     const call = Effect.runPromise(
       adapter
-        .generateText(buildTextGenerationContext(buildContext(createCodexHome())), {}, SPEC)
+        .generateText(buildTextGenerationContext(buildContext(createCodexHome())), SPEC)
         .pipe(Effect.timeoutOption("50 millis")),
     );
     await waitUntil("sent turn/start", () =>

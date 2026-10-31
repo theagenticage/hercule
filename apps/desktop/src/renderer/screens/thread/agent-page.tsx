@@ -26,6 +26,7 @@ import type { Session, Subagent } from "@hercule/contract";
 import { isOpenedAtLaunch } from "../../app/last-screen";
 import {
   forgetGoneThread,
+  providerAccountsQuery,
   providersQuery,
   queuedInputsQuery,
   runnersQuery,
@@ -146,7 +147,8 @@ export function AgentPage({
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const transcript = useSuspenseQuery(transcriptQuery(client, sessionId, subagentId));
   const rows = transcript.data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
   const subagent =
@@ -247,7 +249,7 @@ export function AgentPage({
   }
   const runner =
     session.runnerId === null ? undefined : runners.find((each) => each.id === session.runnerId);
-  const instance = instances.find((each) => each.id === session.instanceId);
+  const account = accounts.find((each) => each.id === session.providerAccountId);
   const subagentParts =
     subagent === undefined || drawSubagentParts === undefined
       ? undefined
@@ -266,7 +268,7 @@ export function AgentPage({
             ? decideThreadPose(session, runner)
             : decideSubagentPose(subagent.status, isSubagentWaiting(subagent, session.openRequests))
         }
-        describeAgent={(model) => describeAgent(instance, model)}
+        describeAgent={(model) => describeAgent(providers, account, session.harnessId, model)}
         attachOpenParagraph={attachOpenParagraph}
         composerStack={shrunk ? null : composerStack}
         onBottomChange={setAtBottom}

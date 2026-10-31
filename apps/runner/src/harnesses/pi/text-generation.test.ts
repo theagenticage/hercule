@@ -62,7 +62,7 @@ const generate = (
   home: string = createPiHome(),
 ): Effect.Effect<TextGenerationOutcome> =>
   Effect.catch(
-    adapter.generateText(buildTextGenerationContext(buildContext(home)), {}, SPEC),
+    adapter.generateText(buildTextGenerationContext(buildContext(home)), SPEC),
     (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
   );
 
@@ -357,7 +357,7 @@ describe("launching pi for a text generation", () => {
     expect(child.kills()).toBe(1);
   });
 
-  it("gives pi the model catalog the probe stored in the instance's home", async () => {
+  it("gives pi the model catalog the probe stored in the Harness Home", async () => {
     const { seam, spawns } = buildFakePiSeam();
     const home = createPiHome();
     const catalog = '{"models":["a-model-newer-than-pi"]}';
@@ -374,7 +374,7 @@ describe("launching pi for a text generation", () => {
     await outcome;
   });
 
-  it("starts pi when the instance's home holds no stored model catalog", async () => {
+  it("starts pi when the Harness Home holds no stored model catalog", async () => {
     const { outcome, child } = await startGeneration();
 
     expect(existsSync(join(child.cwd!, "models-store.json"))).toBe(false);
@@ -383,7 +383,7 @@ describe("launching pi for a text generation", () => {
     await expect(outcome).resolves.toMatchObject({ outcome: "ok" });
   });
 
-  it("writes nothing into the instance's home", async () => {
+  it("writes nothing into the Harness Home", async () => {
     const { seam, spawns } = buildFakePiSeam();
     const home = createPiHome();
     const outcome = Effect.runPromise(generate(makePiAdapter(seam), home));
@@ -400,7 +400,7 @@ describe("launching pi for a text generation", () => {
     const adapter = makePiAdapter(seam);
     const call = Effect.runPromise(
       adapter
-        .generateText(buildTextGenerationContext(buildContext(createPiHome())), {}, SPEC)
+        .generateText(buildTextGenerationContext(buildContext(createPiHome())), SPEC)
         .pipe(Effect.timeoutOption("50 millis")),
     );
     await waitUntil("launched a pi", () => spawns.length === 1);

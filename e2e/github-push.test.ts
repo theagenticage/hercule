@@ -251,22 +251,25 @@ interface Session {
   readonly workspaceId: string | null;
 }
 
-/** Checks whether any machine reports a logged-in claude-code instance to spawn on. */
+/** Checks whether any machine reports a logged-in claude-code account to spawn on. */
 const isClaudeLoggedIn = async (): Promise<boolean> => {
-  const response = await fetch(`${url}/api/v1/providers`, {
+  const response = await fetch(`${url}/api/v1/provider-accounts`, {
     headers: { authorization: `Bearer ${readApiKey(state.home)}` },
   });
   const body = await response.text();
   expect(response.status, body).toBe(200);
   return (
     JSON.parse(body) as ReadonlyArray<{
-      harnessId: string;
-      snapshots: ReadonlyArray<{ auth: { status: string } }>;
+      defaultHarnessId: string;
+      snapshots: ReadonlyArray<{ harnessId: string; auth: { status: string } }>;
     }>
   ).some(
     (one) =>
-      one.harnessId === "claude-code/claude-code" &&
-      one.snapshots.some((snapshot) => snapshot.auth.status === "ok"),
+      one.defaultHarnessId === "claude-code/claude-code" &&
+      one.snapshots.some(
+        (snapshot) =>
+          snapshot.harnessId === "claude-code/claude-code" && snapshot.auth.status === "ok",
+      ),
   );
 };
 
@@ -477,8 +480,8 @@ describe.skipIf(!wanted)("pushes to GitHub with only Hercule's credential", () =
     async (ctx) => {
       if (!(await isClaudeLoggedIn())) {
         ctx.skip(
-          "no machine reports a logged-in claude-code instance. A session runs against the " +
-            "instance's own CLAUDE_CONFIG_DIR under this throwaway home, which is empty, so " +
+          "no machine reports a logged-in claude-code account. A session runs against the " +
+            "account's own Harness Home under this throwaway home, which is empty, so " +
             "this case needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN on the environment.",
         );
         return;

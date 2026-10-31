@@ -32,6 +32,7 @@ import {
 import {
   createDecodeValidationError,
   createInvalidStateError,
+  createValidationError,
   findNearestSupportedAccessMode,
   Id,
   InvalidState,
@@ -54,9 +55,9 @@ import { CurrentActor, currentStamp, currentStampOrSystem, requireGrant } from "
 import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
-import type { PluginHost } from "../../plugins";
+import { PluginHost, type RegisteredHarness } from "../../plugins";
 import { PromotionState } from "../../promotion";
-import { providerRepository, resolvedInstance } from "../../providers";
+import { providerAccountRepository } from "../../provider-accounts";
 import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
@@ -194,8 +195,8 @@ const make = Effect.gen(function* () {
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
   const dedupKeys = yield* dedupKeyRepository;
-  const instances = yield* providerRepository;
-  const resolved = yield* resolvedInstance;
+  const providerAccounts = yield* providerAccountRepository;
+  const host = yield* PluginHost;
   const resumableNativeSession = yield* resumable;
   const connections = yield* RunnerConnections;
   const settings = yield* Settings;
@@ -209,6 +210,22 @@ const make = Effect.gen(function* () {
   // controller, not domain state, so it is not stored: a restart ends the
   // wait with it.
   const answersOnTheirWay = new Set<string>();
+
+  /**
+   * Returns the definition of the harness a session runs in. Fails with a
+   * validation error when this build carries no such harness.
+   */
+  const readHarness = (harnessId: string): Effect.Effect<RegisteredHarness, Validation> =>
+    Effect.flatMap(host.harnesses(), (registered) => {
+      const found = registered.find((candidate) => candidate.id === harnessId);
+      return found === undefined
+        ? Effect.fail(
+            createValidationError([
+              { path: ["harnessId"], message: `this build carries no ${harnessId} harness` },
+            ]),
+          )
+        : Effect.succeed(found);
+    });
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -228,9 +245,16 @@ const make = Effect.gen(function* () {
       const model = given.model ?? session.modelSelection.model;
       const picks = given.options ?? {};
       if (Object.keys(picks).length > 0) {
-        const snapshots = yield* instances.listSnapshots(session.instanceId);
-        const snapshot = snapshots.find((one) => one.runnerId === session.runnerId);
-        yield* validateOptions(snapshot?.models ?? [], model, picks);
+        const snapshot = yield* providerAccounts.readSnapshot(
+          session.providerAccountId,
+          session.harnessId,
+          session.runnerId,
+        );
+        yield* validateOptions(
+          Option.match(snapshot, { onNone: () => [], onSome: (found) => found.models }),
+          model,
+          picks,
+        );
       }
       const carried = model === session.modelSelection.model ? session.modelSelection.options : {};
       return { model, options: { ...carried, ...picks } };
@@ -274,7 +298,8 @@ const make = Effect.gen(function* () {
       // changed since the input was stored.
       const refusal = yield* findAttachmentRefusal({
         runnerId: session.runnerId,
-        instanceId: session.instanceId,
+        providerAccountId: session.providerAccountId,
+        harnessId: session.harnessId,
         model: session.modelSelection.model,
         attachments: row.attachments,
       }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
@@ -376,7 +401,7 @@ const make = Effect.gen(function* () {
       if (Option.isNone(found))
         return yield* Effect.die("a conversation's session has no assistant");
       const assistant = found.value;
-      const { definition } = yield* resolved(session.instanceId);
+      const definition = yield* readHarness(session.harnessId);
       const accessMode = findNearestSupportedAccessMode(
         assistant.accessMode,
         definition.declared.accessModes,
@@ -769,7 +794,7 @@ const make = Effect.gen(function* () {
     InvalidState | NotFound | Validation | SqlError | Schema.SchemaError
   > =>
     Effect.gen(function* () {
-      const { definition } = yield* resolved(session.instanceId);
+      const definition = yield* readHarness(session.harnessId);
       if (definition.declared.steering !== "native") {
         const stillWaiting = yield* sessions.queuedInput(session.id, row.id).pipe(
           Effect.as(true),

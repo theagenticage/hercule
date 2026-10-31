@@ -15,8 +15,8 @@ import { OutputSchema } from "./output-schema";
 import { MAX_SKILLS, LibrarySkillRevision } from "./skills";
 import {
   Fact,
-  InstanceId,
-  InstanceSecrets,
+  HarnessAccount,
+  ProviderAccountId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
@@ -140,7 +140,7 @@ export const DisallowedTool = Schema.String.check(
  * arrives with the feature that needs it.
  */
 export const SessionSpec = Schema.Struct({
-  instanceId: InstanceId,
+  providerAccountId: ProviderAccountId,
   /** `null` for a session without a workspace: the runner gives it a scratch working directory. */
   workspaceId: Schema.NullOr(Fact),
   modelSelection: ModelSelection,
@@ -190,7 +190,7 @@ export const SessionSpec = Schema.Struct({
   outputSchema: Schema.optionalKey(OutputSchema),
   /**
    * The harness-native session this one continues from, on the same runner
-   * and the same instance (spec 06 section 4.1). A resume continues that
+   * and the same Provider Account (spec 06 section 4.1). A resume continues that
    * native session; a fork branches off it, leaving the original untouched.
    *
    * `subagents` lists the subagents the controller already has records of,
@@ -235,7 +235,7 @@ export type SessionSpec = Schema.Schema.Type<typeof SessionSpec>;
 export const SessionBinding = Schema.Struct({
   sessionId: SessionId,
   nativeSessionId: Fact,
-  instanceId: InstanceId,
+  providerAccountId: ProviderAccountId,
 });
 
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
@@ -1144,8 +1144,8 @@ export type GitIdentity = Schema.Schema.Type<typeof GitIdentity>;
 
 /**
  * Starts one session, or resumes it, and hands its harness the session's
- * first input. It carries the instance's decoded config, as a probe does,
- * because the runner holds no Hercule state and cannot look it up.
+ * first input. It carries the Provider Account's `HarnessAccount`, as a probe
+ * does, because the runner holds no Hercule state and cannot look it up.
  *
  * The runner answers the input with a `SessionInputResult` under
  * `requestId`, exactly as it answers a `SessionInput`. It answers on every
@@ -1162,9 +1162,7 @@ export const SessionStart = Schema.Struct({
   /** The input the session starts with: its oldest waiting Queued Input row. */
   input: TurnInput,
   harnessId: Fact,
-  config: Schema.Json,
-  /** The instance's credentials, which its config never holds; `{}` when none. */
-  secrets: InstanceSecrets,
+  harnessAccount: HarnessAccount,
   spec: SessionSpec,
   /**
    * The session's own credential for the public API, created for this start.

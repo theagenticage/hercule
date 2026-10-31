@@ -14,7 +14,7 @@ import { get, post, send } from "../http/testing";
 import {
   waitForFrames,
   reportEvent,
-  findInstanceId,
+  findProviderAccountId,
   readProfileNamed,
   spawnSessionOrFail,
   waitUntil,
@@ -67,7 +67,7 @@ const spawnAutomaticIn = async (
     {
       name: `sweep-worker-${count}`,
       systemPrompt: "Complete this automatic work.",
-      instanceId: findInstanceId(arranged, "harnesses/test"),
+      providerAccountId: findProviderAccountId(arranged, "harnesses/test"),
       permissionProfileId: profile.id,
     },
     arranged.token,

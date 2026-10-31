@@ -12,9 +12,9 @@ import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createInvalidStateError, type InvalidState } from "@hercule/contract";
-import { isLoggedIn, NO_PLACEMENT, providerRepository } from "../../providers";
+import { isSignedIn, NO_PLACEMENT, providerAccountRepository } from "../../provider-accounts";
 import { DRAINING, RETIRED, runnerRepository } from "../../runners";
-import type { StoredSession } from "../../sessions";
+import { ACCOUNT_DELETED, type StoredSession } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 
 const STILL_LIVE = "that session is still live; stop it first";
@@ -52,7 +52,9 @@ const describeWorkspaceGone = (status: string): string =>
  * - its workspace is gone;
  * - its runner is retired, or is draining and takes no new sessions even
  *   though the transcript is still there;
- * - its runner is no longer logged in to the session's provider instance.
+ * - the session's Provider Account was deleted;
+ * - its runner is no longer signed in to the session's account in the
+ *   session's harness.
  */
 export const resumable: Effect.Effect<
   (session: StoredSession) => Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError>,
@@ -61,7 +63,7 @@ export const resumable: Effect.Effect<
 > = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const runners = yield* runnerRepository;
-  const instances = yield* providerRepository;
+  const accounts = yield* providerAccountRepository;
 
   return (session: StoredSession) =>
     Effect.gen(function* () {
@@ -71,6 +73,12 @@ export const resumable: Effect.Effect<
         return yield* Effect.fail(createInvalidStateError(CONVERSATION_DELETED));
       if (session.nativeSessionId === null)
         return yield* Effect.fail(createInvalidStateError(NO_TRANSCRIPT));
+      // A session keeps its account id after the account is deleted, as
+      // history. Without this check the refusal below would blame the runner,
+      // which is not what the user needs to fix.
+      if (Option.isNone(yield* accounts.one(session.providerAccountId))) {
+        return yield* Effect.fail(createInvalidStateError(ACCOUNT_DELETED));
+      }
       if (!session.resumable) {
         // A transcript belongs to the workspace it ran in, so a session whose
         // workspace is gone cannot be resumed. The error then names the
@@ -94,8 +102,12 @@ export const resumable: Effect.Effect<
       }
       // Check the snapshot of the runner that holds the native state, not of
       // the whole fleet, because the transcript exists only on that runner.
-      const snapshots = yield* instances.listSnapshots(session.instanceId);
-      if (!snapshots.some((one) => isLoggedIn(one) && one.runnerId === session.runnerId)) {
+      const snapshot = yield* accounts.readSnapshot(
+        session.providerAccountId,
+        session.harnessId,
+        session.runnerId,
+      );
+      if (Option.isNone(snapshot) || !isSignedIn(snapshot.value)) {
         return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       }
       return session.nativeSessionId;

@@ -18,10 +18,7 @@ export {
 export {
   deriveConfigJsonSchema,
   decodeAgainst,
-  secret,
-  listSecretFields,
   listChoiceFields,
-  excludeSecretFields,
   UnsupportedConfigSchema,
 } from "./config-schema";
 
@@ -55,6 +52,10 @@ export {
   MAX_CONTRIBUTION_NAME_LENGTH,
   MAX_EMITTED_FIELD_BYTES,
   HarnessDefinition,
+  HarnessWord,
+  MAX_HARNESS_HOME_SEGMENT_LENGTH,
+  HarnessProviderSupport,
+  QualifiedContributionId,
   SignalDraft,
   SignalDraftAction,
   WorkflowActionNames,
@@ -79,6 +80,8 @@ export {
   type WorkflowActionContribution,
   type WorkflowStepAction,
 } from "./contributions";
+
+export { AccountKind, AccountSetupStep, HarnessLoginStep, ProviderDefinition } from "./providers";
 
 export { checkEmittedEvent } from "./check-event";
 
@@ -111,6 +114,7 @@ export {
   registerConnectionType,
   registerEventSource,
   registerHarness,
+  registerProvider,
   registerWorkflowAction,
   type ActivationContext,
   type Deactivate,
@@ -119,6 +123,7 @@ export {
   type Plugin,
   type PluginSecrets,
   type HarnessRegistration,
+  type ProviderRegistration,
   type RegistrationHost,
   type WorkflowActionRegistration,
 } from "./plugin";

@@ -55,7 +55,7 @@ const CARD_SHOTS: { readonly [Card in FirstRunCard]: RoomShot } = {
  *
  * Which step shows is decided from the controller's state when the step
  * opens, and then it stays until the user moves on, even when its fact turns
- * true: a provider logged in on the providers step leaves the user there to
+ * true: an account signed in on the providers step leaves the user there to
  * press Continue. Continue, Do this later, Skip for now and a project added
  * decide again.
  *
@@ -175,7 +175,9 @@ export function ControllerFirstRun({
           client={client}
           origin={url}
           localRunner={data.reads.localRunner}
-          instances={data.reads.instances}
+          accounts={data.reads.accounts}
+          providers={data.reads.providers}
+          harnesses={data.reads.harnesses}
           ready={doneSteps.providers}
           onContinue={decideAgain}
           onPutOff={() => {

@@ -1,9 +1,9 @@
 /**
- * The Recent list: the last three (instance, model) pairs the user picked,
+ * The Recent list: the last three (Provider Account, model) pairs the user picked,
  * which the model menu shows first.
  *
  * The list is kept in `localStorage`, one entry per controller URL, because
- * an instance id means nothing to another controller. A thread adds its
+ * a Provider Account id means nothing to another controller. A thread adds its
  * model to the list when a submission with a picked model is accepted.
  */
 import { parseRecentModels, pushRecent, type RecentModel } from "@hercule/client-core";

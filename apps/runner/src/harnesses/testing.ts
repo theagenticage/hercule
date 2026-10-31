@@ -130,7 +130,7 @@ export const filterByTag = <Tag extends HarnessEvent["_tag"]>(
 /**
  * User Material with no paths: what a Thread gets when its user has none of
  * the material, and what a Claude Code Thread always gets, because Claude
- * reads the user's material through links in its instance home.
+ * reads the user's material through links in its Harness Home.
  */
 export const NO_USER_MATERIAL_PATHS: UserMaterial = {
   promptTemplateDirs: [],

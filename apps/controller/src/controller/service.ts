@@ -96,7 +96,11 @@ const make = Effect.gen(function* () {
         textGeneration: {
           model:
             target._tag === "resolved"
-              ? { instanceId: target.instance.id, model: target.model }
+              ? {
+                  providerAccountId: target.providerAccountId,
+                  harnessId: target.harnessId,
+                  model: target.model,
+                }
               : null,
           unavailableReason: buildTextGenerationUnavailableReason(target),
           lastFailure: yield* lastTextGenerationFailure.read(target.failureKey),

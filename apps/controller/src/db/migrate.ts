@@ -23,6 +23,7 @@ import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator";
+import { MigrationMasterKey } from "./migration-master-key";
 import { migrations } from "./migrations/index";
 
 /** The Migrator's table of applied migrations. Its highest id is the database's schema version. */
@@ -162,19 +163,30 @@ export const backupBeforeMigration = (
  * may refuse a database on purpose, such as one holding rows it cannot
  * convert, so that death is turned back into a failure the boot can explain.
  * Any other defect passes through unchanged.
+ *
+ * `masterKey` is the Master Key, when the machine already has one. A migration
+ * that re-encrypts secrets reads it as `MigrationMasterKey`; a database with
+ * nothing to re-encrypt never needs it.
  */
 export const runMigrations = (
   set: ReadonlyArray<Migrator.ResolvedMigration> = migrations,
+  masterKey?: CryptoKey,
 ): Effect.Effect<
   ReadonlyArray<readonly [id: number, name: string]>,
   SqlError | Migrator.MigrationError,
   SqlClient.SqlClient
-> =>
-  Effect.suspend(() => SqliteMigrator.run({ loader: Effect.succeed(set) })).pipe(
+> => {
+  const running = Effect.suspend(() => SqliteMigrator.run({ loader: Effect.succeed(set) }));
+  const withKey =
+    masterKey === undefined
+      ? running
+      : Effect.provideService(running, MigrationMasterKey, { key: masterKey });
+  return withKey.pipe(
     Effect.catchDefect((defect) =>
       defect instanceof Migrator.MigrationError ? Effect.fail(defect) : Effect.die(defect),
     ),
   );
+};
 
 /** Returns the schema version of a migration set: the highest id in it. */
 const findHighestId = (set: ReadonlyArray<Migrator.ResolvedMigration>): number =>
@@ -196,12 +208,14 @@ const findHighestId = (set: ReadonlyArray<Migrator.ResolvedMigration>): number =
  *   behind.
  *
  * `migrations` is the embedded set; a test passes a longer one to exercise a
- * pending migration against a database that already exists.
+ * pending migration against a database that already exists. `masterKey` is
+ * handed to the migrations, see {@link runMigrations}.
  */
 export const migrate = (options: {
   readonly backupsDir: string;
   readonly databaseExisted: boolean;
   readonly migrations?: ReadonlyArray<Migrator.ResolvedMigration>;
+  readonly masterKey?: CryptoKey;
 }): Effect.Effect<
   ReadonlyArray<readonly [id: number, name: string]>,
   SqlError | Migrator.MigrationError | SchemaVersionError | SkippedMigrationError | PlatformError,
@@ -243,5 +257,5 @@ export const migrate = (options: {
     if (options.databaseExisted && version < target) {
       yield* backupBeforeMigration(options.backupsDir);
     }
-    return yield* runMigrations(set);
+    return yield* runMigrations(set, options.masterKey);
   });

@@ -7,9 +7,11 @@ import { useRouteContext } from "@tanstack/react-router";
 import { buildDraftView, type DraftAddress, type DraftView } from "@hercule/client-core";
 import { buildDraftKey } from "./pending-submissions";
 import {
+  harnessesQuery,
   localRunnerQuery,
   profilesQuery,
   projectsQuery,
+  providerAccountsQuery,
   providersQuery,
   resourcesQuery,
   runnersQuery,
@@ -44,7 +46,9 @@ export function useDraftThread(address: DraftAddress | null): DraftView | null {
   const settings = useQuery({ ...settingsQuery(client), enabled: open }).data;
   const profiles = useQuery({ ...profilesQuery(client), enabled: open }).data;
   const lists = {
-    instances: useSuspenseQuery(providersQuery(client)).data,
+    accounts: useSuspenseQuery(providerAccountsQuery(client)).data,
+    providers: useSuspenseQuery(providersQuery(client)).data,
+    harnesses: useSuspenseQuery(harnessesQuery(client)).data,
     runners,
     thisMacRunnerId: useQuery({ ...localRunnerQuery(bridge, runners), enabled: open }).data ?? null,
     projects: useSuspenseQuery(projectsQuery(client)).data,

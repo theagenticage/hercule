@@ -11,13 +11,24 @@
  * Nothing here imports vitest, so the specimen can run it in a plain page.
  */
 import type { FetchLike } from "@hercule/client-core";
-import { createApiStub, type Answer, type Handler } from "@hercule/client-core/testing";
+import {
+  ANTHROPIC_IDENTITY,
+  createApiStub,
+  HARNESSES,
+  OPENAI_IDENTITY,
+  PROVIDERS,
+  ZAI_IDENTITY,
+  buildProviderAccount,
+  type ProviderAccountIdentity,
+  type Answer,
+  type Handler,
+} from "@hercule/client-core/testing";
 import { buildProject, buildRepo, buildRunner } from "@hercule/client-core/threads/testing";
 import {
   GITHUB_CONNECTION_TYPE,
   type Assistant,
   type Connection,
-  type ProviderInstance,
+  type ProviderAccount,
   type Project,
   type Resource,
   type Runner,
@@ -90,47 +101,17 @@ const BARE_STUDIO: Runner = {
   },
 };
 
-/** Returns a provider instance with one snapshot on studio-mac, logged in or not. */
-const buildInstance = (
-  id: string,
+/** Returns a snapshot of an account on studio-mac, in its default harness, signed in or not. */
+const buildSnapshot = (
   harnessId: string,
-  displayName: string,
-  binaryName: string,
-  loggedIn: boolean,
-): ProviderInstance => ({
-  id,
-  harnessId,
-  name: displayName,
-  config: {},
-  displayName,
-  binaryName,
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
-  snapshots: [buildSnapshot(loggedIn)],
-  createdAt: AT,
-  updatedAt: AT,
-});
-
-/** Returns a snapshot of an instance on studio-mac, logged in or not. */
-const buildSnapshot = (loggedIn: boolean): ProviderInstance["snapshots"][number] => ({
+  signedIn: boolean,
+): ProviderAccount["snapshots"][number] => ({
   runnerId: STUDIO.id,
+  harnessId,
   probedAt: AT,
   harnessVersion: "1.0.0",
   versionVerdict: "ok",
-  auth: loggedIn ? { status: "ok", identity: "rogier@example.com" } : { status: "unauthenticated" },
+  auth: signedIn ? { status: "ok", identity: "rogier@example.com" } : { status: "unauthenticated" },
   models: [],
 });
 
@@ -138,17 +119,15 @@ const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 const CODEX_ID = "01a06d02-1000-7000-8000-000000000002";
 const PI_ID = "01a06d02-1000-7000-8000-000000000003";
 
-/** Returns the three instances setup creates, with the ones in `loggedIn` logged in. */
-const buildInstances = (loggedIn: readonly string[] = []): ProviderInstance[] => [
-  buildInstance(
-    CLAUDE_ID,
-    "claude-code/claude-code",
-    "Claude Code",
-    "claude",
-    loggedIn.includes(CLAUDE_ID),
-  ),
-  buildInstance(CODEX_ID, "codex/codex", "Codex", "codex", loggedIn.includes(CODEX_ID)),
-  buildInstance(PI_ID, "pi/pi", "pi", "pi", loggedIn.includes(PI_ID)),
+/** Returns an account of `identity` with one snapshot on studio-mac, signed in or not. */
+const buildAccount = (identity: ProviderAccountIdentity, signedIn: boolean): ProviderAccount =>
+  buildProviderAccount(identity, [buildSnapshot(identity.harnessId, signedIn)]);
+
+/** Returns the three accounts setup creates, with the ones in `signedIn` signed in. */
+const buildProviderAccounts = (signedIn: readonly string[] = []): ProviderAccount[] => [
+  buildAccount({ ...ANTHROPIC_IDENTITY, id: CLAUDE_ID }, signedIn.includes(CLAUDE_ID)),
+  buildAccount({ ...OPENAI_IDENTITY, id: CODEX_ID }, signedIn.includes(CODEX_ID)),
+  buildAccount({ ...ZAI_IDENTITY, id: PI_ID }, signedIn.includes(PI_ID)),
 ];
 
 /** Hercule, the assistant setup creates. */
@@ -156,7 +135,8 @@ const HERCULE: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Hercule",
   systemPrompt: "You are Hercule.",
-  instanceId: CLAUDE_ID,
+  providerAccountId: CLAUDE_ID,
+  harnessId: null,
   permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
   accessMode: "auto-accept-edits",
   model: null,
@@ -197,16 +177,16 @@ const WEBSHOP_REPO: Resource = buildRepo(
 /** What the stubbed controller holds once the user has an account. A scene's clicks may change it. */
 interface ControllerRecords {
   localRunner: Runner | null;
-  instances: ProviderInstance[];
+  accounts: ProviderAccount[];
   connections: Connection[];
   projects: Project[];
   resources: Resource[];
 }
 
-/** Returns the records of a controller just set up on studio-mac: no login, no GitHub, no project. */
+/** Returns the records of a controller just set up on studio-mac: no sign-in, no GitHub, no project. */
 const buildRecords = (records: Partial<ControllerRecords> = {}): ControllerRecords => ({
   localRunner: STUDIO,
-  instances: buildInstances(),
+  accounts: buildProviderAccounts(),
   connections: [],
   projects: [],
   resources: [],
@@ -233,7 +213,9 @@ const buildSignedInHandlers = (records: ControllerRecords): Record<string, Handl
   "GET /api/v1/runners": () => ({
     body: { items: records.localRunner === null ? [] : [records.localRunner] },
   }),
-  "GET /api/v1/providers": () => ({ body: records.instances }),
+  "GET /api/v1/provider-accounts": () => ({ body: records.accounts }),
+  "GET /api/v1/providers": { body: PROVIDERS },
+  "GET /api/v1/harnesses": { body: HARNESSES },
   "GET /api/v1/connections": () => ({ body: { items: records.connections } }),
   "GET /api/v1/projects": () => ({ body: { items: records.projects } }),
   "GET /api/v1/resources": () => ({ body: { items: records.resources } }),
@@ -430,32 +412,37 @@ const waitForText = async (text: string): Promise<void> => {
   await waitFor(() => (document.body.textContent.includes(text) ? true : null), `"${text}"`);
 };
 
-/** Logs Claude Code in by pasting a code, and waits until its row says Logged in. */
-const logInClaudeByPaste = async (): Promise<void> => {
-  await clickInProviderRow("Claude Code", "Log in");
+/** Signs the Anthropic account in by pasting a code, and waits until its row says Signed in. */
+const signInClaudeByPaste = async (): Promise<void> => {
+  await clickInProviderRow("Anthropic", "Sign in");
   await fillField("Code", "4f9a-77c1");
   await clickButton("Submit");
   await waitFor(
-    () => (findProviderRow("Claude Code")?.textContent.includes("Logged in") ? true : null),
-    "Claude Code logged in",
+    () => (findProviderRow("Anthropic")?.textContent.includes("Signed in") ? true : null),
+    "Anthropic signed in",
   );
 };
 
 /**
- * Returns the controller's answers to a login of the instance `id` that
- * hands out a page to paste a code from, and logs the instance in in
+ * Returns the controller's answers to a sign-in of the account `id` that
+ * hands out a page to paste a code from, and signs the account in in
  * `records` when the code arrives.
  */
-const buildPasteLoginHandlers = (
+const buildPasteSignInHandlers = (
   records: ControllerRecords,
   id: string,
 ): Record<string, Handler> => ({
-  [`POST /api/v1/providers/${id}/login`]: { body: { url: "https://claude.ai/oauth/authorize" } },
-  [`POST /api/v1/providers/${id}/login-code`]: () => {
-    records.instances = records.instances.map((instance) =>
-      instance.id === id ? { ...instance, snapshots: [buildSnapshot(true)] } : instance,
-    );
-    return { body: buildSnapshot(true) };
+  [`POST /api/v1/provider-accounts/${id}/sign-in`]: {
+    body: { url: "https://claude.ai/oauth/authorize" },
+  },
+  [`POST /api/v1/provider-accounts/${id}/sign-in-code`]: () => {
+    const account = records.accounts.find((each) => each.id === id)!;
+    const signedIn = {
+      ...account,
+      snapshots: [buildSnapshot(account.defaultHarnessId, true)],
+    };
+    records.accounts = records.accounts.map((each) => (each.id === id ? signedIn : each));
+    return { body: signedIn };
   },
 });
 
@@ -480,7 +467,7 @@ const buildGitHubEndingScene = (ending: {
 }): FirstRunScene =>
   buildSignedInScene(
     {
-      records: buildRecords({ instances: buildInstances([CLAUDE_ID, CODEX_ID]) }),
+      records: buildRecords({ accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]) }),
       handlers: {
         "POST /api/v1/oauth/device/start": () => buildGitHubDeviceStart(1),
         "POST /api/v1/oauth/device/poll": { body: ending },
@@ -493,13 +480,13 @@ const buildGitHubEndingScene = (ending: {
     },
   );
 
-/** Returns the records of the GitHub step: both providers logged in, nothing else yet. */
+/** Returns the records of the GitHub step: both accounts signed in, nothing else yet. */
 const buildGitHubRecords = (): ControllerRecords =>
-  buildRecords({ instances: buildInstances([CLAUDE_ID, CODEX_ID]) });
+  buildRecords({ accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]) });
 
-/** Returns the records of the project step: logged in and GitHub connected. */
+/** Returns the records of the project step: signed in and GitHub connected. */
 const buildProjectRecords = (): ControllerRecords =>
-  buildRecords({ instances: buildInstances([CLAUDE_ID, CODEX_ID]), connections: [GITHUB] });
+  buildRecords({ accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]), connections: [GITHUB] });
 
 /** Returns a project step scene where the folder dialog answers `outcome`, after a click on Choose a folder. */
 const buildPickedScene = (
@@ -510,7 +497,7 @@ const buildPickedScene = (
     {
       records: gitHub
         ? buildProjectRecords()
-        : buildRecords({ instances: buildInstances([CLAUDE_ID, CODEX_ID]) }),
+        : buildRecords({ accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]) }),
       firstRun: gitHub ? putOff() : putOff("github"),
       pickFolder: () => Promise.resolve(outcome),
     },
@@ -565,25 +552,25 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
   "providers-claude-paste": () => {
     const records = buildRecords();
     return buildSignedInScene(
-      { records, handlers: buildPasteLoginHandlers(records, CLAUDE_ID) },
-      () => clickInProviderRow("Claude Code", "Log in"),
+      { records, handlers: buildPasteSignInHandlers(records, CLAUDE_ID) },
+      () => clickInProviderRow("Anthropic", "Sign in"),
     );
   },
   "providers-claude-error": () =>
     buildSignedInScene(
       {
         handlers: {
-          [`POST /api/v1/providers/${CLAUDE_ID}/login`]: {
+          [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: {
             body: { url: "https://claude.ai/oauth/authorize" },
           },
-          [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: buildValidationError(
+          [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in-code`]: buildValidationError(
             "The vendor did not accept the code.",
             ["code"],
           ),
         },
       },
       async () => {
-        await clickInProviderRow("Claude Code", "Log in");
+        await clickInProviderRow("Anthropic", "Sign in");
         await fillField("Code", "4f9a");
         await clickButton("Submit");
         await waitForText("That code wasn’t accepted.");
@@ -595,8 +582,8 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
       {
         records,
         handlers: {
-          ...buildPasteLoginHandlers(records, CLAUDE_ID),
-          [`POST /api/v1/providers/${CODEX_ID}/login`]: () => ({
+          ...buildPasteSignInHandlers(records, CLAUDE_ID),
+          [`POST /api/v1/provider-accounts/${CODEX_ID}/sign-in`]: () => ({
             body: {
               url: "https://auth.openai.com/codex/device",
               userCode: "K7QF-2MXD",
@@ -606,8 +593,8 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
         },
       },
       async () => {
-        await logInClaudeByPaste();
-        await clickInProviderRow("Codex", "Log in");
+        await signInClaudeByPaste();
+        await clickInProviderRow("OpenAI", "Sign in");
         await waitForText("K7QF-2MXD");
       },
     );
@@ -618,18 +605,18 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
       {
         records,
         handlers: {
-          ...buildPasteLoginHandlers(records, CLAUDE_ID),
-          ...buildPasteLoginHandlers(records, CODEX_ID),
+          ...buildPasteSignInHandlers(records, CLAUDE_ID),
+          ...buildPasteSignInHandlers(records, CODEX_ID),
         },
       },
       async () => {
-        await logInClaudeByPaste();
-        await clickInProviderRow("Codex", "Log in");
+        await signInClaudeByPaste();
+        await clickInProviderRow("OpenAI", "Sign in");
         await fillField("Code", "9c2e-41d0");
         await clickButton("Submit");
         await waitFor(
-          () => (findProviderRow("Codex")?.textContent.includes("Logged in") ? true : null),
-          "Codex logged in",
+          () => (findProviderRow("OpenAI")?.textContent.includes("Signed in") ? true : null),
+          "OpenAI signed in",
         );
       },
     );
@@ -748,7 +735,7 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
   "done-default": () =>
     buildSignedInScene({
       records: buildRecords({
-        instances: buildInstances([CLAUDE_ID, CODEX_ID]),
+        accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]),
         connections: [GITHUB],
         projects: [WEBSHOP],
         resources: [WEBSHOP_REPO],

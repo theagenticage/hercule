@@ -11,7 +11,7 @@
  */
 import { Schema } from "effect";
 import { Capabilities, Fact, RunnerFacts, RunnerWatermark } from "@hercule/protocol";
-import { CapabilitySnapshot } from "./provider";
+import { CapabilitySnapshot } from "./provider-account";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
@@ -224,7 +224,10 @@ export const runner = HttpApiGroup.make("runner")
     }),
     HttpApiEndpoint.post("probe", "/runners/:id/probe", {
       params: { id: Id },
-      payload: Schema.Struct({ instanceId: Id }),
+      payload: Schema.Struct({
+        providerAccountId: Id,
+        harnessId: Schema.optionalKey(Schema.String),
+      }),
       success: CapabilitySnapshot,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

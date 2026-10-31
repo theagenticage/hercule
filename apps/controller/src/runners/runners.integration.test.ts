@@ -14,7 +14,7 @@ import { uuidFromString, withTransaction } from "../db";
 import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
 import { SETUP_TOKEN, completeSetup, del, get, post, send, withServer } from "../http/testing";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   listFrames,
   waitForFrames,
@@ -1260,12 +1260,7 @@ const FLEET_BUDGET_MS = WAIT_DEADLINE_MS * 3 + 10_000;
 
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   sharedWithFleet(body, {
-    plugins: [
-      createPluginFixture({
-        id: "harnesses",
-        definitions: [buildHarnessDefinition("full", { token: "t" })],
-      }).plugin,
-    ],
+    plugins: [buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("full")])],
     facts: FLEET_FACTS,
     models: [
       {

@@ -22,8 +22,8 @@ import {
   type Plugin,
 } from "@hercule/plugin-host";
 import { withTransaction } from "../db";
-import { get, post } from "../http/testing";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { get, post, TEST_HARNESS_ID } from "../http/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   reportEvent,
   spawnSessionOrFail,
@@ -43,7 +43,9 @@ export const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
   harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["harnesses/test"],
+  // The test controller also registers the `test` harness and an account that
+  // runs in it, and an account is probed only on a runner with its harness.
+  adapters: ["harnesses/test", TEST_HARNESS_ID],
   identityPort: 4939,
 };
 
@@ -63,7 +65,7 @@ export interface WorkspaceFleetOptions {
 }
 
 /**
- * Runs `body` against a controller with one enrolled, connected, logged-in
+ * Runs `body` against a controller with one enrolled, connected, signed-in
  * runner and a harness on it.
  */
 export const withFleet = (
@@ -72,10 +74,7 @@ export const withFleet = (
 ): Promise<void> =>
   withRunnerFleet(body, {
     plugins: [
-      createPluginFixture({
-        id: "harnesses",
-        definitions: [buildHarnessDefinition("test")],
-      }).plugin,
+      buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("test")]),
       ...(options.plugins ?? []),
     ],
     facts: FACTS,
@@ -316,7 +315,7 @@ export const bindTranscript = async (arranged: Arranged, session: Session): Prom
       {
         sessionId: session.id,
         nativeSessionId: "native-1",
-        instanceId: arranged.instances[0]!.id,
+        providerAccountId: arranged.accounts[0]!.id,
       },
     ],
   });

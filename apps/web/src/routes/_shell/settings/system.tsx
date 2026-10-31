@@ -8,7 +8,12 @@ import {
 } from "@hercule/client-core";
 import { ACCESS_MODE_CHAIN } from "@hercule/contract";
 import { EmptyState, FormCard, Row, Select } from "@hercule/ui";
-import { controllerQuery, providersQuery, settingsQuery } from "../../../app/queries";
+import {
+  controllerQuery,
+  providerAccountsQuery,
+  providersQuery,
+  settingsQuery,
+} from "../../../app/queries";
 import { SaveStatus } from "../../../screens/save-status";
 import { useSaveSettings } from "./-form";
 
@@ -17,6 +22,7 @@ export const Route = createFileRoute("/_shell/settings/system")({
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(controllerQuery(context.client)),
+      context.queryClient.ensureQueryData(providerAccountsQuery(context.client)),
       context.queryClient.ensureQueryData(providersQuery(context.client)),
     ]);
   },
@@ -36,12 +42,13 @@ export const Route = createFileRoute("/_shell/settings/system")({
 function System(): JSX.Element {
   const { client } = Route.useRouteContext();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
   const controller = useSuspenseQuery(controllerQuery(client)).data;
   const { save, saved, failure } = useSaveSettings(client);
 
   const stored = settings.controller["textGeneration.model"];
-  const field = buildTextGenerationField(stored, instances, controller.textGeneration);
+  const field = buildTextGenerationField(stored, providers, accounts, controller.textGeneration);
   const lastFailure = describeTextGenerationFailure(stored, controller.textGeneration, new Date());
 
   return (

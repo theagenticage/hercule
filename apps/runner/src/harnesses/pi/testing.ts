@@ -17,7 +17,7 @@
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
-import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
+import type { HarnessCredential, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import type { HarnessRunnerContext } from "../index";
 import type { Ran } from "../process";
 import {
@@ -46,10 +46,14 @@ export const createPiHome = (): string => createScratchHome("pi");
 /** A placeholder, not a real key: no provider would accept it, on purpose. */
 export const TEST_ZAI_KEY = "zai-key-for-a-test-only";
 
+/** The credential of the test account: the variable pi reads its Z.ai key from. */
+export const TEST_CREDENTIAL: HarnessCredential = { variable: "ZAI_API_KEY", value: TEST_ZAI_KEY };
+
+/** Builds a pi context for the Z.ai test account. `credential` is null for an account with no key. */
 export const buildContext = (
   home: string,
   cwd: string | null = null,
-  secrets: Readonly<Record<string, string>> = { zaiApiKey: TEST_ZAI_KEY },
+  credential: HarnessCredential | null = TEST_CREDENTIAL,
 ): HarnessRunnerContext => ({
   cwd,
   attachmentsDir: null,
@@ -58,14 +62,15 @@ export const buildContext = (
   home,
   binary: "/usr/local/bin/pi",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },
-  secrets,
+  modelArgument: "zai/{model}",
+  ...(credential === null ? {} : { credential }),
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
 export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 
 export const SPEC: SessionSpec = {
-  instanceId: "0199e0e7-0000-7000-8000-00000000000a",
+  providerAccountId: "0199e0e7-0000-7000-8000-00000000000a",
   workspaceId: null,
   modelSelection: { model: "glm-5.3", options: { thinking: "high" } },
   accessMode: "approval-required",

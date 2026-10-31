@@ -4,7 +4,7 @@
  * sorting by activity, and a draft that joins the workspace is the last tab.
  * It also tests the label each tab shows: a role, numbered when it repeats.
  */
-import type { ProviderInstance, Session, Workspace } from "@hercule/contract";
+import type { ProviderAccount, Session, Workspace } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import type { Pose } from "./pose";
 import {
@@ -26,7 +26,7 @@ const tabOf = (over: Partial<Session> & { id: string }, pose: Pose = "idle"): Se
     label: "x",
     pose,
     runner: undefined,
-    instance: undefined,
+    account: undefined,
   });
 
 const SESSIONS = [
@@ -96,11 +96,11 @@ describe("listWorkspaceSessionTabs", () => {
   const HELD = SESSIONS.map((session) => ({ ...session, ...IN_3F1 }));
   const INSTANCES = [
     { id: "i-claude", harnessId: "claude-code/claude-code", snapshots: [] },
-  ] as unknown as readonly ProviderInstance[];
+  ] as unknown as readonly ProviderAccount[];
   const reads = (workspaces: readonly Workspace[] = [THREAD_3F1]) => ({
     workspaces,
     runners: [MOSS],
-    instances: INSTANCES,
+    accounts: INSTANCES,
   });
   const listIds = (tabs: readonly SessionTab[]): string[] => tabs.map((tab) => tab.sessionId);
 
@@ -307,7 +307,7 @@ describe("describeSessionTab", () => {
       label,
       pose,
       runner: undefined,
-      instance: undefined,
+      account: undefined,
     });
 
   it("reads a role from the session, and a title that repeats the label as no role", () => {

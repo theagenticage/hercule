@@ -7,7 +7,7 @@ import {
   answeredAssistantQuery,
   localRunnerQuery,
   projectsQuery,
-  providersQuery,
+  ensureProviderAccountReads,
   resourcesQuery,
   runnersQuery,
   sessionQuery,
@@ -29,7 +29,7 @@ import { SubagentsSurface } from "../../../../screens/subagents/subagents-surfac
  *
  * The loader fetches what every agent's page shows before the route renders,
  * so the first paint is never a spinner over an empty column: the session,
- * its subagents, and the provider instances and the runners, because the
+ * its subagents, and the accounts and the runners, because the
  * composer needs them for its model menu and its locked fields as soon as
  * the thread shows. For an assistant's session it fetches the assistant,
  * whose name the card in the composer's place shows. An assistant deleted
@@ -42,7 +42,7 @@ export const Route = createFileRoute("/_shell/threads/$sessionId")({
       context.queryClient.ensureQueryData(sessionQuery(context.client, params.sessionId)),
       context.queryClient.ensureQueryData(subagentsQuery(context.client, params.sessionId)),
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
+      ensureProviderAccountReads(context.queryClient, context.client),
       // The header shows the thread's project and the other threads in its
       // workspace. These lists are prefetched rather than ensured: if the
       // controller cannot list them, the header is plainer, but the screen

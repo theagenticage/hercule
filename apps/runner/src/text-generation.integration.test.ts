@@ -37,10 +37,12 @@ const CLAUDE_HARNESS = join(import.meta.dirname, "text-generation-claude-harness
 const REQUEST: TextGenerationRequest = {
   _tag: "textGenerationRequest",
   requestId: "request-1",
-  instanceId: "instance-1",
   harnessId: "pi/pi",
-  config: {},
-  secrets: {},
+  harnessAccount: {
+    providerAccountId: "account-1",
+    harnessHome: "providers/account-1",
+    modelArgument: "{model}",
+  },
   spec: {
     model: "fake-model",
     instructions: "Write a title.",
@@ -127,7 +129,7 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
       home: root,
       binary: "pi",
       env: { PATH: process.env["PATH"] ?? "" },
-      secrets: {},
+      modelArgument: "{model}",
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
@@ -235,7 +237,7 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
         HARNESS_ANSWER: behaviour.answer,
         HARNESS_ON_STDIN_END: behaviour.onStdinEnd,
       },
-      secrets: {},
+      modelArgument: "{model}",
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
@@ -343,27 +345,23 @@ describe("a Claude Code text generation with the real SDK and a CLI that ignores
     expect(result.stillRunning).toEqual([]);
   });
 
-  it(
-    "starts the CLI in the call's scratch folder with the instance's config directory",
-    SLOW,
-    async () => {
-      const result = await generateWithClaude({
-        answer: "submit",
-        onStdinEnd: "exit",
-        deadlineMillis: 10_000,
-      });
+  it("starts the CLI in the call's scratch folder with the Harness Home", SLOW, async () => {
+    const result = await generateWithClaude({
+      answer: "submit",
+      onStdinEnd: "exit",
+      deadlineMillis: 10_000,
+    });
 
-      const launch = JSON.parse(
-        readFileSync(join(proofDir, `launch-${String(result.pids[0])}`), "utf8"),
-      ) as {
-        readonly cwd: string;
-        readonly configDir: string;
-        readonly autoMemoryDisabled: string;
-      };
-      expect(launch.configDir).toBe(root);
-      expect(launch.autoMemoryDisabled).toBe("1");
-      // `realpathSync` because macOS reports a temporary folder through /private.
-      expect(dirname(launch.cwd)).toBe(realpathSync(scratchDir));
-    },
-  );
+    const launch = JSON.parse(
+      readFileSync(join(proofDir, `launch-${String(result.pids[0])}`), "utf8"),
+    ) as {
+      readonly cwd: string;
+      readonly configDir: string;
+      readonly autoMemoryDisabled: string;
+    };
+    expect(launch.configDir).toBe(root);
+    expect(launch.autoMemoryDisabled).toBe("1");
+    // `realpathSync` because macOS reports a temporary folder through /private.
+    expect(dirname(launch.cwd)).toBe(realpathSync(scratchDir));
+  });
 });

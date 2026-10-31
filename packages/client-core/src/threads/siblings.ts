@@ -14,7 +14,7 @@
  *   name are.
  * - `labelWorkspaceSessions` names the sessions of one workspace.
  */
-import type { ProviderInstance, Runner, Session, Workspace } from "@hercule/contract";
+import type { ProviderAccount, Runner, Session, Workspace } from "@hercule/contract";
 import { findModelName } from "./model-name";
 import {
   decideThreadPose,
@@ -98,8 +98,8 @@ export interface SessionTab {
   readonly activityAt: string;
   /** Whether the session is a Thread marked Done. */
   readonly done: boolean;
-  /** The harness of the session's instance, such as `claude-code/claude-code`, or `null` when the instance is unknown. */
-  readonly harnessId: string | null;
+  /** The harness the session runs in, such as `claude-code/claude-code`. */
+  readonly harnessId: string;
   /** The display name of the model the session runs on. */
   readonly model: string;
 }
@@ -143,8 +143,8 @@ export const describeHiddenTabs = (tabs: readonly SessionTab[]): string => {
 /**
  * Describes `session` with the fields a header tab and a sidebar line share.
  * `pose` is passed in because the sidebar decides every pose once, for all of
- * its readers. `runner` and `instance` are the records of the session's
- * runner and provider instance, or `undefined` when the caller does not hold
+ * its readers. `runner` and `account` are the records of the session's
+ * runner and Provider Account, or `undefined` when the caller does not hold
  * them.
  */
 export const describeSessionTab = ({
@@ -152,13 +152,13 @@ export const describeSessionTab = ({
   label,
   pose,
   runner,
-  instance,
+  account,
 }: {
   readonly session: Session;
   readonly label: string;
   readonly pose: Pose;
   readonly runner: Runner | undefined;
-  readonly instance: ProviderInstance | undefined;
+  readonly account: ProviderAccount | undefined;
 }): SessionTab => {
   const hasRoleLabel =
     session.kind === "run" ? session.stepId !== null : (session.role?.trim() ?? "") !== "";
@@ -177,8 +177,8 @@ export const describeSessionTab = ({
     status: decideThreadRowStatus(session, runner),
     activityAt: session.lastActivityAt,
     done,
-    harnessId: instance?.harnessId ?? null,
-    model: findModelName(instance, session.modelSelection.model),
+    harnessId: session.harnessId,
+    model: findModelName(account, session.harnessId, session.modelSelection.model),
   };
 };
 
@@ -210,11 +210,11 @@ export const listWorkspaceSessionTabs = (
   {
     workspaces,
     runners,
-    instances,
+    accounts,
   }: {
     readonly workspaces: readonly Workspace[];
     readonly runners: readonly Runner[];
-    readonly instances: readonly ProviderInstance[];
+    readonly accounts: readonly ProviderAccount[];
   },
 ): readonly SessionTab[] => {
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
@@ -233,7 +233,7 @@ export const listWorkspaceSessionTabs = (
       label: labels.get(each.id) ?? each.title,
       pose: decideThreadPose(each, runner),
       runner,
-      instance: instances.find((candidate) => candidate.id === each.instanceId),
+      account: accounts.find((candidate) => candidate.id === each.providerAccountId),
     });
   });
 };

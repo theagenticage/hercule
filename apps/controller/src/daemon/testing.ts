@@ -27,8 +27,8 @@ import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
 import { withTransaction } from "../db";
 import { appendIngestedEvent } from "../events";
-import { get, post, type ServerHarness } from "../http/testing";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { get, post, TEST_HARNESS_ID, type ServerHarness } from "../http/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   spawnThreadWithGrants,
   at,
@@ -87,7 +87,7 @@ export const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
  */
 export const READS_RAW = "event.raw != null";
 
-export const HARNESS = buildHarnessDefinition("full", { token: "t" });
+export const HARNESS = buildHarnessDefinition("full");
 
 export const FACTS: RunnerFacts = {
   os: "darwin",
@@ -96,7 +96,9 @@ export const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [],
   harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["harnesses/full"],
+  // The test controller also registers the `test` harness and an account that
+  // runs in it, and an account is probed only on a runner with its harness.
+  adapters: ["harnesses/full", TEST_HARNESS_ID],
   identityPort: 4939,
 };
 
@@ -105,7 +107,7 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 export const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "harnesses", definitions: [HARNESS] }).plugin,
+  buildPluginWithProviderPerHarness("harnesses", [HARNESS]),
   github,
 ];
 

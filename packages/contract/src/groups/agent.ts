@@ -2,8 +2,8 @@
  * Agents: the named, reusable configuration a session is spawned from.
  *
  * An Agent is an identity and a set of defaults, and nothing else: a prompt, a
- * provider instance, a permission profile, an access mode, a model and a list
- * of tool restrictions. It holds no state, it has no status axis, and it runs
+ * Provider Account and harness, a permission profile, an access mode, a model
+ * and a list of tool restrictions. It holds no state, it has no status axis, and it runs
  * nothing itself. A spawn copies every value it uses onto the Session and
  * never reads back through the Agent afterwards, so an edit changes only the
  * sessions spawned after the edit (ADR 0030).
@@ -42,7 +42,7 @@ const AgentName = bounded(1, MAX_AGENT_NAME_LENGTH);
 
 const SystemPrompt = bounded(1, MAX_SYSTEM_PROMPT_LENGTH);
 
-/** The model a session opens on, by the slug its provider instance lists. */
+/** The model a session opens on, by the slug its Provider Account lists. */
 const ModelSlug = Schema.NonEmptyString;
 
 /**
@@ -58,12 +58,14 @@ export const Agent = Schema.Struct({
   name: AgentName,
   /** Appended to the harness's own system prompt on every session spawned from this agent. */
   systemPrompt: SystemPrompt,
-  instanceId: Id,
+  providerAccountId: Id,
+  /** The harness its sessions run in; `null` runs in the account's default harness. */
+  harnessId: Schema.NullOr(Schema.String),
   /** The Permission Profile every session spawned from this agent carries. */
   permissionProfileId: Id,
   /** What its sessions may do unasked; agents work unattended, so the default is full access. */
   accessMode: AccessMode,
-  /** `null` runs on whatever model the instance offers by default. */
+  /** `null` runs on whatever model the account offers by default. */
   model: Schema.NullOr(ModelSelection),
   disallowedTools: Schema.Array(DisallowedTool),
   /** Which of the fields above this agent's harness ignores; usually empty. */
@@ -87,10 +89,12 @@ export const AGENT_SORT_FIELDS = ["createdAt"] as const;
 export const AgentCreateInput = Schema.Struct({
   name: AgentName,
   systemPrompt: SystemPrompt,
-  instanceId: Id,
+  providerAccountId: Id,
+  /** When absent, its sessions run in the account's default harness. */
+  harnessId: Schema.optionalKey(Schema.String),
   permissionProfileId: Id,
   accessMode: Schema.optionalKey(AccessMode),
-  /** When absent, its sessions run on the instance's default model. */
+  /** When absent, its sessions run on the account's default model. */
   model: Schema.optionalKey(ModelSlug),
   /** The choices that model opens with. Rejected when `model` is absent. */
   options: Schema.optionalKey(ModelSelection.fields.options),
@@ -103,11 +107,13 @@ export type AgentCreateInput = Schema.Schema.Type<typeof AgentCreateInput>;
 export const AgentUpdateInput = Schema.Struct({
   name: Schema.optionalKey(AgentName),
   systemPrompt: Schema.optionalKey(SystemPrompt),
-  instanceId: Schema.optionalKey(Id),
+  providerAccountId: Schema.optionalKey(Id),
+  /** `null` puts the agent back on the account's default harness. */
+  harnessId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   permissionProfileId: Schema.optionalKey(Id),
   accessMode: Schema.optionalKey(AccessMode),
   /**
-   * `null` puts the agent back on the instance's default model. A model given
+   * `null` puts the agent back on the account's default model. A model given
    * here replaces the stored choices with the `options` given with it, or with
    * no choices at all, because the stored choices belonged to the old model.
    */

@@ -90,15 +90,17 @@ import {
 } from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
-import { createPluginFixture } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
-  ensureProviderInstances,
-  ProviderLoginDeadline,
-  ProviderProbeDeadline,
-  ProviderProbeInterval,
-  ProviderProbesLayer,
-  ProviderServiceLayer,
-} from "../providers";
+  providerAccountRepository,
+  ProviderAccountProbeDeadline,
+  ProviderAccountProbeInterval,
+  HarnessAccountsLayer,
+  ProviderAccountProbesLayer,
+  ProviderAccountServiceLayer,
+  ProviderAccountSignInDeadline,
+  seedProviderAccounts,
+} from "../provider-accounts";
 import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
@@ -122,6 +124,7 @@ import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../pr
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
+import { readSetupComplete } from "../setup";
 import { operationLayers } from "./routes";
 import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
@@ -151,7 +154,7 @@ const buildServices = (
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
-        ProviderServiceLayer,
+        ProviderAccountServiceLayer,
         // Observed by the assistants and runs domains, as in the real boot,
         // so a session's replies and notices reach its conversation, and an
         // agent step whose turn no runner will report fails.
@@ -182,7 +185,8 @@ const buildServices = (
     // service must use the same `RunnerConnections`. The catalog is provided
     // to the probe driver, which reads harness definitions from it.
     Layer.provideMerge(
-      ProviderProbesLayer.pipe(
+      ProviderAccountProbesLayer.pipe(
+        Layer.provideMerge(HarnessAccountsLayer),
         Layer.provideMerge(RunnerConnectionsLayer),
         Layer.provideMerge(
           PluginHostLayer.pipe(
@@ -234,17 +238,54 @@ const buildServices = (
     ),
   );
 
+/** The qualified id of the harness the test controller adds, and of its provider. */
+export const TEST_HARNESS_ID = "test/test";
+
 /**
- * Returns the plugins a test controller boots: the test's own, plus a
- * harness plugin when none of the test's plugins offers harnesses. Setup
- * creates the default assistant, which needs a provider instance, so a
- * controller with no harness cannot finish setup. The harness plugin is
+ * Returns the plugins a test controller boots: the test's own, plus a plugin
+ * with one provider and one harness when none of the test's plugins offers a
+ * provider. Setup creates the default assistant, which needs a Provider
+ * Account, so a controller with no provider cannot finish setup. The plugin is
  * built per call, so it holds nothing from a controller that has finished.
  */
 const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plugin> =>
-  plugins.some((plugin) => plugin.manifest.capabilities.includes("harnesses"))
+  plugins.some((plugin) => plugin.manifest.capabilities.includes("providers"))
     ? plugins
-    : [...plugins, createPluginFixture({ id: "test" }).plugin];
+    : [...plugins, buildPluginWithProviderPerHarness("test", [buildHarnessDefinition("test")])];
+
+/**
+ * Gives a test controller one account when the shipped defaults created none,
+ * so setup can create the default assistant. The account is of the first
+ * registered provider's first account kind that has a registered harness to
+ * run in, and that harness is its default. Runs after `seedProviderAccounts`,
+ * like the real boot.
+ */
+const seedTestProviderAccount = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const accounts = yield* providerAccountRepository;
+  const host = yield* PluginHost;
+  if (yield* accounts.hasAny()) return;
+  const harnesses = yield* host.harnesses();
+  for (const provider of yield* host.providers()) {
+    for (const kind of provider.kinds) {
+      const harnessId = kind.harnesses.find((id) => harnesses.some((one) => one.id === id));
+      if (harnessId === undefined) continue;
+      yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          yield* accounts.insert({
+            providerId: provider.id,
+            kind: kind.id,
+            label: null,
+            defaultHarnessId: harnessId,
+            at: yield* nowIso,
+          });
+        }),
+      );
+      return;
+    }
+  }
+});
 
 /**
  * The GitHub a test controller reads when the test gives none: every read
@@ -491,7 +532,8 @@ export const withServer = (
             host.boot(buildPluginRegistry(options.plugins ?? [])),
           );
           yield* revalidateStoredWorkflowsOrLog;
-          yield* ensureProviderInstances;
+          yield* seedProviderAccounts(yield* readSetupComplete);
+          yield* seedTestProviderAccount;
         });
         yield* bootSteps;
         // A restart first interrupts every run's fiber and waits until they
@@ -628,9 +670,9 @@ const provideTimings =
     };
     provideIfSet(RunnerPingSchedule, options.pings);
     provideIfSet(RunnerFactsDeadline, options.factsDeadline);
-    provideIfSet(ProviderProbeDeadline, options.probeDeadline);
-    provideIfSet(ProviderProbeInterval, options.probeInterval);
-    provideIfSet(ProviderLoginDeadline, options.loginDeadline);
+    provideIfSet(ProviderAccountProbeDeadline, options.probeDeadline);
+    provideIfSet(ProviderAccountProbeInterval, options.probeInterval);
+    provideIfSet(ProviderAccountSignInDeadline, options.loginDeadline);
     provideIfSet(SessionInputDeadline, options.inputDeadline);
     provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
     provideIfSet(AttachmentSweepInterval, options.attachmentSweepInterval);

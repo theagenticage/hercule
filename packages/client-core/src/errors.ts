@@ -111,6 +111,15 @@ export const isConflict = (error: unknown): boolean =>
   error instanceof ApiError && error.code === "conflict";
 
 /**
+ * Returns true when the error is an `invalid_state` response from the
+ * controller: the request is fine, but the record is in a state that does not
+ * allow it, such as deleting an account a session still runs on. Asking again
+ * changes nothing until the state does.
+ */
+export const isInvalidState = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === "invalid_state";
+
+/**
  * Returns the issues of a `validation` error response, in order, or
  * `undefined` for any other error. Only a `validation` response lists what was
  * wrong with the request.

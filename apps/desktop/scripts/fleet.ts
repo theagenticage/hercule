@@ -10,8 +10,8 @@
  * runs it on plain Node; that is also why its imports name the `.ts` file.
  *
  * Every thread is pinned to a scripted runner and to the Claude Code
- * instance. The controller also starts a runner of its own, on this machine,
- * which may be logged in to a real provider: a thread that lands there would
+ * account. The controller also starts a runner of its own, on this machine,
+ * which may be signed in to a real provider: a thread that lands there would
  * run a real agent.
  *
  * A thread can also play a script: the turn its prompt opens reports the work
@@ -22,7 +22,7 @@ import type {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Session,
   SpawnWorkspace,
@@ -89,7 +89,7 @@ export interface Fleet {
   /**
    * Enlists a scripted runner under `name` and returns it once the controller
    * can place threads on it: it is online, and its probe of the Claude Code
-   * instance reported a login.
+   * account reported a sign-in.
    *
    * - `maxConcurrentSessions` overrides the cap the controller derives from
    *   the runner's memory, which is 32.
@@ -157,10 +157,10 @@ export async function connectFleet(url: string): Promise<Fleet> {
     callApi<T>(url, token, method, path, body);
 
   const runners: Array<ScriptedRunner> = [];
-  let instanceId: string | undefined;
+  let providerAccountId: string | undefined;
   let spawned = 0;
 
-  /** Spawns one thread with `prompt`, pinned to the placement's runner and the Claude Code instance. */
+  /** Spawns one thread with `prompt`, pinned to the placement's runner and the Claude Code account. */
   const spawnThread = (
     prompt: string,
     { runner, projectId, workspace }: ThreadPlacement,
@@ -168,7 +168,7 @@ export async function connectFleet(url: string): Promise<Fleet> {
     call<Session>("POST", "/sessions", {
       prompt,
       runnerId: runner.runnerId,
-      instanceId,
+      providerAccountId,
       ...(projectId === undefined ? {} : { projectId }),
       ...(workspace === undefined ? {} : { workspace }),
     });
@@ -203,7 +203,7 @@ export async function connectFleet(url: string): Promise<Fleet> {
       const runner = await enlistScriptedRunner(url, joinToken.token, identityPort);
       runners.push(runner);
       await call("PATCH", `/runners/${runner.runnerId}`, { name, ...settings });
-      instanceId = await waitForLoggedInProbe(call, runner.runnerId);
+      providerAccountId = await waitForSignedInProbe(call, runner.runnerId);
       return runner;
     },
     createProject: (name) => call<Project>("POST", "/projects", { name }),
@@ -247,25 +247,29 @@ export async function connectFleet(url: string): Promise<Fleet> {
 }
 
 /**
- * Waits until the Claude Code instance has a logged-in snapshot from the given
- * runner, and returns the instance's id. The controller probes every instance
- * on a runner when it connects, and places a thread only on a runner whose
- * snapshot shows a login. Fails at once when the controller has no Claude
- * Code instance, and after 10 s when the probe has not reported a login.
+ * Waits until the Anthropic account has a signed-in snapshot in Claude Code
+ * from the given runner, and returns the account's id. The controller probes
+ * every account on a runner when it connects, and places a thread only on a
+ * runner whose snapshot shows a sign-in. Fails at once when the controller has
+ * no account whose default harness is Claude Code, and after 10 s when the
+ * probe has not reported a sign-in.
  */
-function waitForLoggedInProbe(
+function waitForSignedInProbe(
   call: <T>(method: string, path: string) => Promise<T>,
   runnerId: string,
 ): Promise<string> {
   return pollUntil(
     async () => {
-      const instances = await call<ReadonlyArray<ProviderInstance>>("GET", "/providers");
-      const claudeCode = instances.find(
-        (instance) => instance.harnessId === "claude-code/claude-code",
+      const accounts = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
+      const claudeCode = accounts.find(
+        (account) => account.defaultHarnessId === "claude-code/claude-code",
       );
-      if (claudeCode === undefined) throw new Error("the controller has no Claude Code instance");
+      if (claudeCode === undefined) throw new Error("the controller has no Claude Code account");
       const probed = claudeCode.snapshots.some(
-        (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",
+        (snapshot) =>
+          snapshot.runnerId === runnerId &&
+          snapshot.harnessId === "claude-code/claude-code" &&
+          snapshot.auth.status === "ok",
       );
       return probed ? claudeCode.id : undefined;
     },

@@ -1,13 +1,10 @@
 /**
  * Tests what the pi plugin declares about itself, as the catalog reads it:
- * the definition it registers, and the JSON Schema derived from its config.
- *
- * The key is a paid credential, so the plugin itself names, describes and
- * marks the field it is entered in - never the runner, never the UI.
+ * the definition it registers, and the provider it runs.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Result } from "effect";
-import { deriveConfigJsonSchema, type HarnessDefinition } from "@hercule/plugin-host";
+import { Effect } from "effect";
+import type { HarnessDefinition } from "@hercule/plugin-host";
 import { pi } from "./index";
 
 /** Returns the definition the plugin gives the catalog, captured from its registration. */
@@ -29,21 +26,15 @@ const captureHarnessDefinition = (): HarnessDefinition => {
   return definitions[0]!;
 };
 
-describe("the pi harness's config", () => {
-  it("declares the Z.ai key as its one secret-valued field", () => {
-    const result = deriveConfigJsonSchema(captureHarnessDefinition().configSchema);
-
-    expect(Result.isSuccess(result)).toBe(true);
-    if (!Result.isSuccess(result)) return;
-
-    const properties = result.success.properties as Record<string, Record<string, unknown>>;
-    expect(Object.keys(properties)).toEqual(["zaiApiKey"]);
-    const field = properties["zaiApiKey"]!;
-    expect(field["type"]).toBe("string");
-    expect(field["x-secret"]).toBe(true);
-    // The title is the vendor's, not the harness's: the key is Z.ai's.
-    expect(field["title"]).toBe("Z.ai API key");
-    expect(String(field["description"])).toContain("Coding Plan");
-    expect(String(field["title"])).not.toContain("pi");
+describe("the pi harness", () => {
+  it("runs Z.ai API keys from ZAI_API_KEY, under the model argument zai/{model}, with its own model list", () => {
+    expect(captureHarnessDefinition().runs).toEqual([
+      {
+        providerId: "zai/zai",
+        kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
+        modelArgument: "zai/{model}",
+        models: "own-list",
+      },
+    ]);
   });
 });

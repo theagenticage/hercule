@@ -24,7 +24,6 @@ import {
   withServer,
   type ServerHarness,
 } from "../http/testing";
-import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 import { Settings, SettingsLayer } from "../settings";
 import { PasswordCost, TEST_PASSWORD_PARAMS, Users, UsersLayer, verifyPassword } from "../users";
 import { Setup, SetupLayer } from "./service";
@@ -45,7 +44,7 @@ afterEach(() => {
 /**
  * Stands in for the assistant service. These unit tests cover the user, the
  * token and the setup state; the default assistant needs the provider
- * instances of a booted controller, so the tests over HTTP below cover it.
+ * accounts of a booted controller, so the tests over HTTP below cover it.
  */
 const AssistantStub = Layer.mock(AssistantService)({
   create: () => Effect.succeed({} as Assistant),
@@ -236,20 +235,12 @@ describe("setup.complete", () => {
 
 /*
  * The tests below cover the default assistant setup creates. They run the whole
- * controller over HTTP, with three provider instances, because the assistant's
- * defaults come from the provider instances and permission profiles a booted
+ * controller over HTTP, with a Provider Account, because the assistant's
+ * defaults come from the Provider Accounts and permission profiles a booted
  * controller has.
  */
-const HARNESSES = [
-  buildHarnessDefinition("claude", { token: "t" }),
-  buildHarnessDefinition("codex", { token: "t" }),
-  buildHarnessDefinition("pi", { token: "t" }),
-];
-
 const withProviders = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
-  withServer(body, {
-    plugins: [createPluginFixture({ id: "harnesses", definitions: HARNESSES }).plugin],
-  });
+  withServer(body);
 
 /** Sends `setup.complete` with the setup token, as the onboarding screen does. */
 const requestSetup = (harness: ServerHarness): Promise<Response> =>
@@ -360,19 +351,19 @@ describe("the default assistant", () => {
     });
   });
 
-  it("fails setup with invalid_state when there is no provider instance, and writes nothing", async () => {
+  it("fails setup with invalid_state when there is no provider account, and writes nothing", async () => {
     await withProviders(async (harness) => {
-      // The boot opens one instance per harness, so the test deletes them
-      // all to stand for a build that opened none.
+      // The test controller opens one account, so the test deletes it to
+      // stand for an install with none.
       await Effect.runPromise(
-        Effect.orDie(withTransaction(harness.sql, harness.sql`DELETE FROM provider_instances`)),
+        Effect.orDie(withTransaction(harness.sql, harness.sql`DELETE FROM provider_accounts`)),
       );
 
       const refused = await requestSetup(harness);
       expect(refused.status).toBe(409);
       const error = await readErrorBody(refused);
       expect(error.code).toBe("invalid_state");
-      expect(error.message).toContain("add a provider instance first");
+      expect(error.message).toContain("this version cannot add one yet");
 
       const state = await get(harness.base, "/api/v1/setup");
       expect(await state.json()).toEqual({ complete: false });

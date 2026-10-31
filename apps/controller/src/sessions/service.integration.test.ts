@@ -24,11 +24,12 @@ import {
   SteerRefused,
   type AdapterError,
   type ModelSelection,
+  type HarnessAccount,
   type HarnessEvent,
   type SessionInputResult,
   type SessionStart,
 } from "@hercule/protocol";
-import type { Passage } from "@hercule/contract";
+import { createInvalidStateError, createNotFoundError, type Passage } from "@hercule/contract";
 import { buildSessionStamp, CurrentActor, type Actor, type SessionActor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
@@ -56,6 +57,7 @@ import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
+import { providerAccountRepository } from "../provider-accounts";
 import { sessionRepository } from "./repository";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver } from "./observer";
@@ -179,40 +181,21 @@ const mintId = () => uuidToString(mintUuid());
 /** Encodes a spec the way `create` stores it on a queued row. */
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
-const buildSpec = (instanceId: string, model: string): SessionSpec => ({
-  instanceId,
+const buildSpec = (providerAccountId: string, model: string): SessionSpec => ({
+  providerAccountId,
   workspaceId: null,
   modelSelection: { model, options: {} },
   accessMode: "approval-required",
   timeouts: { inactivityMs: 60_000, absoluteMs: 3_600_000 },
 });
 
-/**
- * Inserts a provider instance row. A start frame's `harnessId` and `config`
- * come from this row, which `oldestQueued` joins in.
- */
-const insertInstance = (
-  harnessId: string,
-  config: Readonly<Record<string, unknown>>,
-): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const id = mintUuid();
-    yield* withTransaction(
-      sql,
-      sql`
-        INSERT INTO provider_instances (id, provider_id, name, config, created_at, updated_at)
-        VALUES (${id}, ${harnessId}, 'an instance', ${JSON.stringify(config)}, ${at}, ${at})
-      `,
-    );
-    return uuidToString(id);
-  });
-
 /** Inserts one queued session on a runner, the way `create` stores one. */
 const insertQueuedSession = (
   runnerId: string,
   options: {
-    readonly instanceId: string;
+    readonly providerAccountId: string;
+    /** The harness the session runs in. Without it, `an-adapter`. */
+    readonly harnessId?: string;
     readonly spec: SessionSpec;
     /** Stores this string as the spec, as is, instead of encoding `spec`. */
     readonly storedSpec?: string;
@@ -247,7 +230,8 @@ const insertQueuedSession = (
           agentId: options.agentId,
           conversationId: undefined,
           step: undefined,
-          instanceId: options.instanceId,
+          providerAccountId: options.providerAccountId,
+          harnessId: options.harnessId ?? HARNESS_ID,
           runnerId,
           workspaceId: null,
           projectId: undefined,
@@ -349,8 +333,20 @@ const aGithubConnection = Effect.gen(function* () {
   );
 });
 
-/** Returns no credentials, for the instance these sessions run on. */
-const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({});
+/** The harness the sessions of these tests run in unless a test names another. */
+const HARNESS_ID = "an-adapter";
+
+/** The home, model argument and credential the start frame carries for an account. */
+const buildHarnessAccountFor = (providerAccountId: string): HarnessAccount => ({
+  providerAccountId,
+  harnessHome: `providers/${providerAccountId}`,
+  modelArgument: "{model}",
+  credential: { variable: "AN_API_KEY", value: "a-key" },
+});
+
+/** Prepares the account the way the controller daemon does, with no database read. */
+const prepareAccount = (providerAccountId: string): Effect.Effect<HarnessAccount> =>
+  Effect.succeed(buildHarnessAccountFor(providerAccountId));
 
 /**
  * Calls `claimStarts` the way the controller daemon does: inside the caller's
@@ -371,7 +367,7 @@ const claimStarting = (
       sessions.claimStarts(runnerId, room, {
         readGithubAccount: () => Effect.succeed(undefined),
         readGitIdentity: () => Effect.succeed(undefined),
-        readSecrets: NO_SECRETS,
+        prepareHarnessAccount: prepareAccount,
         buildCoordination: () => Effect.succeed(coordination),
         runner: { name: "a runner", negotiatedCapabilities: [] },
         localRunnerId: undefined,
@@ -407,23 +403,21 @@ describe("SessionService.claimStarts", () => {
     const result = await run(
       Effect.gen(function* () {
         const rows = yield* sessionRepository;
-        const instanceId = yield* insertInstance("an-adapter", {
-          token: "t",
-          baseUrl: "https://api",
-        });
+        const providerAccountId = mintId();
         const runnerId = mintId();
-        const specOnBranch = buildSpec(instanceId, "clever");
-        const specPlain = buildSpec(instanceId, "fast");
+        const specOnBranch = buildSpec(providerAccountId, "clever");
+        const specPlain = buildSpec(providerAccountId, "fast");
         const onBranch = yield* insertQueuedSession(runnerId, {
-          instanceId,
+          providerAccountId,
           spec: specOnBranch,
           checkoutBranch: "feature-x",
         });
-        const plain = yield* insertQueuedSession(runnerId, { instanceId, spec: specPlain });
+        const plain = yield* insertQueuedSession(runnerId, { providerAccountId, spec: specPlain });
         const claimed = yield* claimStarting(runnerId, 2);
         const inputs = yield* inputRepository;
         return {
           claimed,
+          providerAccountId,
           onBranch,
           plain,
           specOnBranch,
@@ -445,7 +439,7 @@ describe("SessionService.claimStarts", () => {
     const branch = frames.get(result.onBranch)!;
     expect(branch._tag).toBe("sessionStart");
     expect(branch.harnessId).toBe("an-adapter");
-    expect(branch.config).toEqual({ token: "t", baseUrl: "https://api" });
+    expect(branch.harnessAccount).toEqual(buildHarnessAccountFor(result.providerAccountId));
     // Decoded from the spec the row stores, not built again from other fields.
     expect(branch.spec).toStrictEqual(result.specOnBranch);
     expect(branch.checkoutBranch).toBe("feature-x");
@@ -476,14 +470,79 @@ describe("SessionService.claimStarts", () => {
     );
   });
 
+  it("ends a queued session, with the reason, when its account cannot be prepared", async () => {
+    // A refusal never passes by itself: retrying it on every pass would only
+    // log it again and keep the account from being deleted.
+    const refusals = [
+      createInvalidStateError("the key could not be decrypted"),
+      createNotFoundError("no such provider account"),
+    ];
+    for (const refusal of refusals) {
+      const result = await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const sessions = yield* SessionService;
+          const runnerId = mintId();
+          const refusedAccountId = mintId();
+          const fineAccountId = mintId();
+          const refused = yield* insertQueuedSession(runnerId, {
+            providerAccountId: refusedAccountId,
+            spec: buildSpec(refusedAccountId, "clever"),
+          });
+          // Claimed in the same pass: a refusal ends one session, not the batch.
+          const fine = yield* insertQueuedSession(runnerId, {
+            providerAccountId: fineAccountId,
+            spec: buildSpec(fineAccountId, "clever"),
+          });
+          const claimed = yield* withTransaction(
+            sql,
+            sessions.claimStarts(runnerId, 2, {
+              readGithubAccount: () => Effect.succeed(undefined),
+              readGitIdentity: () => Effect.succeed(undefined),
+              prepareHarnessAccount: (id) =>
+                id === refusedAccountId ? Effect.fail(refusal) : prepareAccount(id),
+              buildCoordination: () => Effect.succeed(undefined),
+              runner: { name: "a runner", negotiatedCapabilities: [] },
+              localRunnerId: undefined,
+            }),
+          );
+          const again = yield* claimStarting(runnerId, 2);
+          const exitRows = yield* sql<{ readonly event: string }>`
+            SELECT event FROM session_stream WHERE session_id = ${uuidFromString(refused)}
+          `;
+          const inputRows = yield* sql<{ readonly status: string; readonly reason: string | null }>`
+            SELECT status, reason FROM session_inputs WHERE session_id = ${uuidFromString(refused)}
+          `;
+          return {
+            claimed: claimed.map((claim) => claim.sessionId),
+            again,
+            refused,
+            fine,
+            refusedStatus: yield* readStatus(refused),
+            fineStatus: yield* readStatus(fine),
+            exitRows,
+            inputRows,
+          };
+        }),
+      );
+
+      expect(result.claimed).toEqual([result.fine]);
+      expect(result.fineStatus).toBe("starting");
+      expect(result.refusedStatus).toBe("exited");
+      expect(result.again).toEqual([]);
+      expect(JSON.stringify(result.exitRows)).toContain(refusal.error.message);
+      expect(result.inputRows).toEqual([{ status: "cancelled", reason: refusal.error.message }]);
+    }
+  });
+
   it("adds the coordination paragraph to the spec the frame carries", async () => {
     const coordination = "Other agent sessions may work on the same repositories as you.";
     const result = await run(
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         const runnerId = mintId();
-        const spec = buildSpec(instanceId, "clever");
-        yield* insertQueuedSession(runnerId, { instanceId, spec });
+        const spec = buildSpec(providerAccountId, "clever");
+        yield* insertQueuedSession(runnerId, { providerAccountId, spec });
         return { spec, claimed: yield* claimStarting(runnerId, 1, coordination) };
       }),
     );
@@ -500,16 +559,16 @@ describe("SessionService.claimStarts", () => {
       Effect.provide(
         Effect.gen(function* () {
           const rows = yield* sessionRepository;
-          const instanceId = yield* insertInstance("an-adapter", {});
+          const providerAccountId = mintId();
           const runnerId = mintId();
           const legacy = yield* insertQueuedSession(runnerId, {
-            instanceId,
-            spec: buildSpec(instanceId, "clever"),
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
             withoutInput: true,
           });
           const current = yield* insertQueuedSession(runnerId, {
-            instanceId,
-            spec: buildSpec(instanceId, "clever"),
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
           });
           const claimed = yield* claimStarting(runnerId, 2);
           // Every later dispatch pass reads the row again.
@@ -542,7 +601,7 @@ describe("SessionService.claimStarts", () => {
         const sql = yield* SqlClient.SqlClient;
         const rows = yield* sessionRepository;
         const workspaces = yield* WorkspaceService;
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         // A runner that is not retired, a ready workspace on it and a known
         // transcript: everything the session needs to read as resumable.
         const arranged = yield* withTransaction(
@@ -561,17 +620,17 @@ describe("SessionService.claimStarts", () => {
           VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(runnerId)}, 'ephemeral',
                   'ready', ${at})
         `;
-            const spec = JSON.stringify(encodeSpec(buildSpec(instanceId, "clever")));
+            const spec = JSON.stringify(encodeSpec(buildSpec(providerAccountId, "clever")));
             const sessionId = yield* insertQueuedSession(runnerId, {
-              instanceId,
-              spec: buildSpec(instanceId, "clever"),
+              providerAccountId,
+              spec: buildSpec(providerAccountId, "clever"),
               withoutInput: true,
             });
             yield* sql`
           UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
           WHERE id = ${uuidFromString(sessionId)}
         `;
-            yield* rows.bind(sessionId, runnerId, instanceId, "native-1");
+            yield* rows.bind(sessionId, runnerId, providerAccountId, "native-1");
             const holder = { kind: "session", id: sessionId } as const;
             yield* workspaces.acquire(holder, workspaceId, exitedAt);
             const { lastActivityAt: lastActiveBeforeExit } = Option.getOrThrow(
@@ -638,15 +697,15 @@ describe("SessionService.claimStarts", () => {
   it("creates a new token and stores only its hash on the row", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         const runnerId = mintId();
         const first = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
         });
         const second = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
         });
         const claimed = yield* claimStarting(runnerId, 2);
         return {
@@ -674,7 +733,7 @@ describe("SessionService.claimStarts", () => {
   it("leaves any number of undecodable rows queued and starts the row behind them, even with room for one", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         const runnerId = mintId();
         // Valid JSON that the current `SessionSpec` schema fails to decode.
         // This is what a queued row looks like after the schema changed
@@ -683,15 +742,15 @@ describe("SessionService.claimStarts", () => {
         for (let i = 0; i < 6; i += 1) {
           poisoned.push(
             yield* insertQueuedSession(runnerId, {
-              instanceId,
-              spec: buildSpec(instanceId, "clever"),
+              providerAccountId,
+              spec: buildSpec(providerAccountId, "clever"),
               storedSpec: "{}",
             }),
           );
         }
         const good = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
         });
         const claimed = yield* claimStarting(runnerId, 1);
         return {
@@ -754,12 +813,12 @@ describe("SessionService.claimStarts", () => {
           const rows = yield* sessionRepository;
           const sessions = yield* SessionService;
           const accounts = yield* githubAccounts;
-          const instanceId = yield* insertInstance("an-adapter", {});
+          const providerAccountId = mintId();
           const runnerId = mintId();
           const connectionId = yield* aGithubConnection;
           const sessionId = yield* insertQueuedSession(runnerId, {
-            instanceId,
-            spec: buildSpec(instanceId, "clever"),
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
             githubConnectionId: connectionId,
           });
           const claim = withTransaction(
@@ -767,7 +826,7 @@ describe("SessionService.claimStarts", () => {
             sessions.claimStarts(runnerId, 1, {
               readGithubAccount: accounts.readGithubAccount,
               readGitIdentity: accounts.readGitIdentity,
-              readSecrets: NO_SECRETS,
+              prepareHarnessAccount: prepareAccount,
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },
               localRunnerId: undefined,
@@ -852,10 +911,10 @@ const insertRunningSession = (
     return yield* withTransaction(
       sql,
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         const sessionId = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
           permissionProfileId: yield* aProfile,
         });
         const [claim] = yield* claimStarting(runnerId, 1);
@@ -1103,6 +1162,95 @@ const openedAnswer = (requestId: string): SessionInputResult => ({
  * twice: the send waiting for it records it (`recordInputAnswer`), and the session's
  * ordered traffic applies it (`applyInputResult`). Either can run first.
  */
+describe("SessionService.resume", () => {
+  /**
+   * Exits a session that has a waiting input on a runner that is not retired,
+   * and returns its ids. Whether its account exists is up to the caller.
+   */
+  const arrangeExitedSession = (providerAccountId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sessionRepository;
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const runnerId = mintId();
+          yield* sql`
+            INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                                 credential_hash, created_at, updated_at)
+            VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                    'a hash', ${at}, ${at})
+          `;
+          const sessionId = yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
+          });
+          yield* rows.bind(sessionId, runnerId, providerAccountId, "native-1");
+          yield* rows.moved(sessionId, "exited", at);
+          return sessionId;
+        }),
+      );
+    });
+
+  const resumeNow = (sessionId: string, providerAccountId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      return yield* withTransaction(
+        sql,
+        sessions.resume(
+          sessionId,
+          () => Effect.succeed(JSON.stringify(encodeSpec(buildSpec(providerAccountId, "clever")))),
+          at,
+          false,
+        ),
+      ).pipe(Effect.exit);
+    });
+
+  it("refuses to queue a session whose account was deleted, and leaves it exited", async () => {
+    // The caller checked the account before the transaction. An account
+    // deleted since then must not leave a queued session that dispatch can
+    // never prepare.
+    const result = await run(
+      Effect.gen(function* () {
+        const providerAccountId = mintId();
+        const sessionId = yield* arrangeExitedSession(providerAccountId);
+        const exit = yield* resumeNow(sessionId, providerAccountId);
+        return { exit, status: yield* readStatus(sessionId) };
+      }),
+    );
+
+    expect(Exit.isFailure(result.exit)).toBe(true);
+    expect(JSON.stringify(result.exit)).toContain("The account this thread ran on was deleted.");
+    expect(result.status).toBe("exited");
+  });
+
+  it("queues a session whose account exists", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const account = yield* withTransaction(
+          sql,
+          accounts.insert({
+            providerId: "a-provider",
+            kind: "a-kind",
+            label: null,
+            defaultHarnessId: HARNESS_ID,
+            at,
+          }),
+        );
+        const sessionId = yield* arrangeExitedSession(account.id);
+        const exit = yield* resumeNow(sessionId, account.id);
+        return { exit, status: yield* readStatus(sessionId) };
+      }),
+    );
+
+    expect(Exit.isSuccess(result.exit) && result.exit.value).toBe(true);
+    expect(result.status).toBe("queued");
+  });
+});
+
 describe("SessionService.claimInput", () => {
   it("claims a waiting input in a transaction of its own, and refuses a second claim", async () => {
     const result = await run(
@@ -1662,18 +1810,26 @@ describe("SessionService.queryPassages", () => {
    */
   const seed = Effect.gen(function* () {
     const sessions = yield* sessionRepository;
-    const instanceId = yield* insertInstance("an-adapter", {});
-    const spec = buildSpec(instanceId, "clever");
+    const providerAccountId = mintId();
+    const spec = buildSpec(providerAccountId, "clever");
     const runnerId = mintId();
-    const thread = yield* insertQueuedSession(runnerId, { instanceId, spec });
-    const agentRun = yield* insertQueuedSession(runnerId, { instanceId, spec, agentId: agentA });
+    const thread = yield* insertQueuedSession(runnerId, { providerAccountId, spec });
+    const agentRun = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec,
+      agentId: agentA,
+    });
     const child = yield* insertQueuedSession(runnerId, {
-      instanceId,
+      providerAccountId,
       spec,
       agentId: agentA,
       createdBy: buildSessionStamp(thread),
     });
-    const other = yield* insertQueuedSession(runnerId, { instanceId, spec, agentId: agentB });
+    const other = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec,
+      agentId: agentB,
+    });
     const base = { eventId: "e", sessionId: "native", at: t[0]! };
     const userMessage = (text: string) =>
       ({

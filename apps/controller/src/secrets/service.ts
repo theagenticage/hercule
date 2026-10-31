@@ -8,8 +8,8 @@
  *
  * The transport cannot enforce these two rules, so this service does:
  *
- * - **`core` and `connection` are not writable.** A set or delete for either
- *   owner kind fails with `validation` on the `ownerKind` field:
+ * - **`core`, `connection` and `provider-account` are not writable.** A set or
+ *   delete for any of them fails with `validation` on the `ownerKind` field:
  *   - The `core` owner holds the controller's own key material - its Ed25519
  *     signing key is `core`/`controller.signing-key` - and overwriting it
  *     would break the controller's identity and, with it, every runner's
@@ -18,6 +18,9 @@
  *     same account, and only the Connection operations check that. A write
  *     here would skip the check and could quietly move the Connection, with
  *     its triggers and Resources, to another account.
+ *   - A Provider Account's key is replaced with `providerAccount.update`,
+ *     which stores only the fields the account's kind declares and probes the
+ *     account again. Its Secrets are deleted with `providerAccount.delete`.
  *
  *   Their references are still listed: hiding a row that exists would be
  *   worse than showing one the API does not let you change.
@@ -97,6 +100,8 @@ const REFUSAL_BY_OWNER_KIND: Partial<Record<OwnerKind, string>> = {
   core: "the `core` owner holds the controller's own key material and is not writable through the API",
   connection:
     "a Connection's credentials are not writable through the secret operations, because new credentials must be checked to belong to the same account; replace them with `connection.setCredentials` or by reconnecting the Connection, and remove them by deleting the Connection",
+  "provider-account":
+    "a Provider Account's credentials are not writable through the secret operations, because the account's kind decides which fields it takes; replace them with `hercule provider-account update <account-id> --credentials-stdin`, and remove them by deleting the account",
 };
 
 /** Succeeds when the API may write secrets of this owner kind, and fails with `validation` when it may not. */

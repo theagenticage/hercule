@@ -24,7 +24,7 @@
  */
 import type {
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -244,7 +244,7 @@ export const buildThreadGroups = ({
   workspaces,
   resources,
   runners,
-  instances = [],
+  accounts = [],
   mode,
   draft = null,
 }: {
@@ -253,8 +253,8 @@ export const buildThreadGroups = ({
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
-  /** The instances whose catalogs give a `meta` row its model name. */
-  readonly instances?: readonly ProviderInstance[];
+  /** The accounts whose catalogs give a `meta` row its model name. */
+  readonly accounts?: readonly ProviderAccount[];
   readonly mode: ThreadRows;
   readonly draft?: DraftPlace | null;
 }): readonly ProjectGroup[] => {
@@ -262,7 +262,7 @@ export const buildThreadGroups = ({
   // Agent: an assistant's session shows under Assistants, and a workflow
   // step's session under its run.
   const threads = sessions.filter((session) => session.kind === "thread");
-  const rows = buildThreadRows(threads, mode, runners, instances);
+  const rows = buildThreadRows(threads, mode, runners, accounts);
   const sessionsById = new Map(threads.map((session) => [session.id, session]));
   const listedProjectIds = new Set(projects.map((each) => each.id));
   // A draft for a project the list does not hold joins the threads with no

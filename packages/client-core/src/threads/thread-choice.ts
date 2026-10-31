@@ -13,9 +13,9 @@ import type { WorkspacePick } from "./workspaces";
 /** One selector choice. A menu row emits exactly one choice. */
 export type ThreadChoice =
   /** A model row. It always carries its account, because a model belongs to one account. */
-  | { readonly kind: "model"; readonly instanceId: string; readonly model: string }
+  | { readonly kind: "model"; readonly providerAccountId: string; readonly model: string }
   /** An account row that has no model to pick. */
-  | { readonly kind: "account"; readonly instanceId: string }
+  | { readonly kind: "account"; readonly providerAccountId: string }
   | { readonly kind: "runner"; readonly runnerId: string }
   | { readonly kind: "workspace"; readonly workspace: WorkspacePick }
   | { readonly kind: "option"; readonly id: string; readonly value: string | boolean }
@@ -36,11 +36,11 @@ export type ThreadChoice =
 export const applyThreadChoice = (picks: ThreadPicks, choice: ThreadChoice): ThreadPicks => {
   switch (choice.kind) {
     case "model":
-      return { ...picks, instanceId: choice.instanceId, model: choice.model };
+      return { ...picks, providerAccountId: choice.providerAccountId, model: choice.model };
     case "account":
       return {
         ...Object.fromEntries(Object.entries(picks).filter(([key]) => key !== "model")),
-        instanceId: choice.instanceId,
+        providerAccountId: choice.providerAccountId,
       };
     case "runner":
       return { ...picks, runnerId: choice.runnerId };

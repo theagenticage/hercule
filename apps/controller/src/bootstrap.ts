@@ -8,7 +8,7 @@
  * - the database and its migrations;
  * - the shipped defaults and the master key;
  * - the controller identity;
- * - one provider instance per shipped harness plugin;
+ * - on a fresh install only, the three default Provider Accounts;
  * - the one-time setup URL.
  *
  * Every later boot runs the same sequence. Every step is idempotent, so a
@@ -17,6 +17,7 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import type { PlatformError } from "effect/PlatformError";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as Migrator from "effect/sql/Migrator";
@@ -69,6 +70,7 @@ import {
 import {
   MasterKey,
   masterKeyLayer,
+  openExistingMasterKey,
   Secrets,
   secretsLayer,
   type MasterKeyBackend,
@@ -103,13 +105,16 @@ import {
   registry,
 } from "./plugins";
 import {
-  ensureProviderInstances,
-  ProviderProbes,
-  ProviderProbesLayer,
-  ProviderService,
-  ProviderServiceLayer,
-} from "./providers";
+  HarnessAccounts,
+  HarnessAccountsLayer,
+  ProviderAccountProbes,
+  ProviderAccountProbesLayer,
+  ProviderAccountService,
+  ProviderAccountServiceLayer,
+  seedProviderAccounts,
+} from "./provider-accounts";
 import { seed } from "./seed";
+import { readSetupComplete } from "./setup";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
@@ -169,11 +174,7 @@ const ensureSetupUrl = (
 ): Effect.Effect<string | undefined, SqlError | HerculeHomeError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql<{
-      readonly completed_at: string | null;
-    }>`SELECT completed_at FROM setup_state WHERE singleton = 1`;
-
-    if (rows[0]?.completed_at != null) {
+    if (yield* readSetupComplete) {
       // Once setup is complete no token is outstanding, so clear both the file
       // and the row: the column holds a hash only while a token is outstanding.
       yield* withTransaction(
@@ -259,8 +260,9 @@ export type ControllerServices =
   | IngestLoops
   | ConnectionTypes
   | RunnerConnections
-  | ProviderProbes
-  | ProviderService
+  | HarnessAccounts
+  | ProviderAccountProbes
+  | ProviderAccountService
   | SessionService
   | WorkspaceService
   | WorkspaceStepActivity
@@ -302,6 +304,9 @@ export const bootWith = <A, E>(
     // If the file did not exist before the driver created it, there is nothing
     // for a pre-migration copy to preserve.
     const databaseExisted = existsSync(paths.databaseFile);
+    // Filled by the set-up below, which opens an existing Master Key before the
+    // migrations, and read by the Master Key layer so the key is read once.
+    const openedMasterKey = yield* Ref.make<CryptoKey | undefined>(undefined);
 
     // The secrets repository is merged into the output rather than only
     // provided to the layers above it: `secret.*` are public operations, so
@@ -330,7 +335,11 @@ export const bootWith = <A, E>(
           ),
         ).pipe(
           Layer.provideMerge(
-            secretsLayer.pipe(Layer.provideMerge(masterKeyLayer(options.masterKeyBackend))),
+            secretsLayer.pipe(
+              Layer.provideMerge(
+                masterKeyLayer(options.masterKeyBackend, undefined, openedMasterKey),
+              ),
+            ),
           ),
         ),
       ),
@@ -357,7 +366,8 @@ export const bootWith = <A, E>(
      * the controller daemon and the sweep after a hello all use the same
      * `RunnerConnections`.
      */
-    const withFleet = ProviderProbesLayer.pipe(
+    const withFleet = ProviderAccountProbesLayer.pipe(
+      Layer.provideMerge(HarnessAccountsLayer),
       Layer.provideMerge(RunnerConnectionsLayer),
       Layer.provideMerge(catalog),
     );
@@ -401,7 +411,7 @@ export const bootWith = <A, E>(
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
-      ProviderServiceLayer,
+      ProviderAccountServiceLayer,
       sessionService,
       ConnectionServiceWithReferencesLayer,
     ).pipe(
@@ -460,9 +470,10 @@ export const bootWith = <A, E>(
         // plugins. A plugin may have changed while the controller was stopped.
         // A failure is logged and the boot goes on.
         yield* revalidateStoredWorkflowsOrLog;
-        // After the catalog, because a provider instance is created only for
-        // a harness this build registered.
-        yield* ensureProviderInstances;
+        // After the catalog, because a default account is created only for a
+        // provider this build registered. Temporary: ticket #934 adds
+        // `providerAccount.create` and removes this seed.
+        yield* seedProviderAccounts(yield* readSetupComplete);
       }
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
@@ -495,7 +506,23 @@ export const bootWith = <A, E>(
           Layer.provideMerge(
             // The migrations run while the database opens, on the writer alone:
             // see `openDatabase`.
-            openDatabase(paths, migrate({ backupsDir: paths.backupsDir, databaseExisted })),
+            openDatabase(
+              paths,
+              // An existing Master Key is opened first, because a migration
+              // encrypts secrets again under it (spec 04, boot order). A key
+              // that cannot be opened stops the boot before the database
+              // changes. A machine with no key yet gets one after the
+              // migrations, in `masterKeyLayer`.
+              Effect.gen(function* () {
+                const masterKey = yield* openExistingMasterKey(options.masterKeyBackend);
+                yield* Ref.set(openedMasterKey, masterKey);
+                return yield* migrate({
+                  backupsDir: paths.backupsDir,
+                  databaseExisted,
+                  ...(masterKey === undefined ? {} : { masterKey }),
+                });
+              }),
+            ),
           ),
         ),
       ),

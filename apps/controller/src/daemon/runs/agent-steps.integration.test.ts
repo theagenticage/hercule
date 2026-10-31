@@ -28,7 +28,7 @@ import { send } from "../../http/testing";
 import { inputRepository } from "../../sessions";
 import { Live } from "../sessions";
 import { WORKSPACE_ACTION_IDS } from "../../plugins";
-import { buildHarnessDefinition, createPluginFixture } from "../../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../../plugins/testing";
 import {
   buildCreateStep,
   findStepRecords,
@@ -40,7 +40,7 @@ import {
 import {
   at,
   carriesInput,
-  findInstanceId,
+  findProviderAccountId,
   listInputs,
   listFrames,
   readProfileNamed,
@@ -117,10 +117,7 @@ const withAgentStepFleet = (
 ): Promise<void> =>
   withFleet(body, {
     plugins: [
-      createPluginFixture({
-        id: "harnesses",
-        definitions: [buildHarnessDefinition("test")],
-      }).plugin,
+      buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("test")]),
       ...plugins,
     ],
     facts: FACTS,
@@ -1088,7 +1085,7 @@ describe("agent steps over the runner socket", () => {
             {
               sessionId: takenSession,
               nativeSessionId: `native-${takenSession}`,
-              instanceId: findInstanceId(arranged, "harnesses/test"),
+              providerAccountId: findProviderAccountId(arranged, "harnesses/test"),
             },
           ],
         });
@@ -1333,7 +1330,7 @@ describe("agent steps over the runner socket", () => {
               {
                 sessionId,
                 nativeSessionId: `native-${sessionId}`,
-                instanceId: findInstanceId(arranged, "harnesses/test"),
+                providerAccountId: findProviderAccountId(arranged, "harnesses/test"),
               },
             ],
           });

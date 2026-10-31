@@ -3,16 +3,20 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildIdOptions,
-  computeInstanceDefaults,
+  buildProviderAccountName,
+  computeProviderAccountDefaults,
   computeThreadDefaults,
   buildThreadModelField,
+  resolveThreadHarnessId,
   resolveThreadRowsMode,
 } from "@hercule/client-core";
 import type { ThreadRows, ThreadWorkspace } from "@hercule/contract";
 import { FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hercule/ui";
 import {
+  ensureProviderAccountReads,
   localRunnerQuery,
   profilesQuery,
+  providerAccountsQuery,
   providersQuery,
   runnersQuery,
   settingsQuery,
@@ -37,7 +41,7 @@ export const Route = createFileRoute("/_shell/settings/threads")({
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
+      ensureProviderAccountReads(context.queryClient, context.client),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
     ]);
     await context.queryClient.ensureQueryData(
@@ -56,7 +60,8 @@ export const Route = createFileRoute("/_shell/settings/threads")({
 function Threads(): JSX.Element {
   const { client, detectLocalRunner } = Route.useRouteContext();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
@@ -66,15 +71,21 @@ function Threads(): JSX.Element {
 
   // Every default below comes from `computeThreadDefaults`, the same function
   // the composer uses to prefill a new thread:
-  // - a stored id of an instance that no longer exists falls back to another;
-  // - the model is read from the runner the instance would be placed on;
+  // - a stored id of an account that no longer exists falls back to another;
+  // - the model is read from the runner the account would be placed on, in
+  //   the harness the thread runs in;
   // - "nothing picked" is null.
-  const defaults = computeThreadDefaults(settings.user, instances, runners, profiles, localId);
-  const instance = instances.find((each) => each.id === defaults.instanceId);
+  const defaults = computeThreadDefaults(settings.user, accounts, runners, profiles, localId);
+  const account = accounts.find((each) => each.id === defaults.providerAccountId);
   const modelField =
-    instance === undefined
+    account === undefined
       ? { dimmed: null, options: [] }
-      : buildThreadModelField(instance, defaults.runnerId, settings.user["thread.model"]);
+      : buildThreadModelField(
+          account,
+          resolveThreadHarnessId(account, defaults.harnessId),
+          defaults.runnerId,
+          defaults.model ?? undefined,
+        );
 
   return (
     <div className="flex flex-col gap-4">
@@ -82,34 +93,42 @@ function Threads(): JSX.Element {
         label="Threads · defaults"
         fine="What a new thread starts with, prefilled on the composer."
       >
-        {instances.length === 0 ? (
-          <p className="text-fine text-faint">No provider instance yet.</p>
+        {accounts.length === 0 ? (
+          <p className="text-fine text-faint">No account yet.</p>
         ) : (
           <>
-            <Row label="Provider instance" htmlFor="thread-instance">
+            <Row label="Account" htmlFor="thread-account">
               <Select
-                id="thread-instance"
-                value={defaults.instanceId ?? ""}
+                id="thread-account"
+                value={defaults.providerAccountId ?? ""}
                 onChange={(event) => {
-                  const next = instances.find((each) => each.id === event.target.value);
-                  // The model follows the instance, and is read from the runner
-                  // that instance would be placed on, using the same rule
-                  // (`computeInstanceDefaults`) as the composer.
+                  const next = accounts.find((each) => each.id === event.target.value);
+                  // The model follows the account, and is read from the runner
+                  // that account would be placed on, using the same rule
+                  // (`computeProviderAccountDefaults`) as the composer. A harness
+                  // stored for the previous account does not carry over: the
+                  // new account runs in its default harness.
                   const nextModel =
                     next === undefined
                       ? null
-                      : computeInstanceDefaults(next, runners, localId).model;
+                      : computeProviderAccountDefaults(
+                          next,
+                          next.defaultHarnessId,
+                          runners,
+                          localId,
+                        ).model;
                   save({
                     user: {
-                      "thread.instanceId": event.target.value,
+                      "thread.providerAccountId": event.target.value,
+                      "thread.harnessId": null,
                       ...(nextModel === null ? {} : { "thread.model": nextModel }),
                     },
                   });
                 }}
               >
-                {instances.map((each) => (
+                {accounts.map((each) => (
                   <option key={each.id} value={each.id}>
-                    {each.displayName}
+                    {buildProviderAccountName(providers, each)}
                   </option>
                 ))}
               </Select>
@@ -122,7 +141,18 @@ function Threads(): JSX.Element {
                   id="thread-model"
                   value={defaults.model ?? ""}
                   onChange={(event) => {
-                    save({ user: { "thread.model": event.target.value } });
+                    // The account shown may be a prefilled one: nothing was
+                    // saved, or the saved account was deleted. A saved model
+                    // belongs to its account, so the account is saved with it
+                    // and the default cannot drift to another account later.
+                    save({
+                      user: {
+                        ...(account === undefined
+                          ? {}
+                          : { "thread.providerAccountId": account.id }),
+                        "thread.model": event.target.value,
+                      },
+                    });
                   }}
                 >
                   {modelField.options.map((option) => (

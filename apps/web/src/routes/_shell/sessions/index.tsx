@@ -4,6 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   formatAge,
   buildHeadline,
+  buildProviderAccountName,
   buildLanes,
   buildThreadRows,
   type LaneKind,
@@ -11,7 +12,12 @@ import {
 import type { Session } from "@hercule/contract";
 import { Group, LaneLabel, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { providersQuery, runnersQuery, sessionsQuery } from "../../../app/queries";
+import {
+  providerAccountsQuery,
+  providersQuery,
+  runnersQuery,
+  sessionsQuery,
+} from "../../../app/queries";
 import { CreateThreadLink } from "../../../screens/create-thread-link";
 import { ThreadRowView } from "../../../screens/thread-row";
 import { StepSessionsFold } from "./-step-sessions-fold";
@@ -21,6 +27,7 @@ export const Route = createFileRoute("/_shell/sessions/")({
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(sessionsQuery(context.client)),
+      context.queryClient.ensureQueryData(providerAccountsQuery(context.client)),
       context.queryClient.ensureQueryData(providersQuery(context.client)),
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
     ]);
@@ -56,10 +63,13 @@ function AllSessions(): JSX.Element {
   const now = useMinuteClock();
 
   const sessions = useSuspenseQuery(sessionsQuery(client)).data.items;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
 
-  const providerNames = new Map(instances.map((instance) => [instance.id, instance.displayName]));
+  const accountNames = new Map(
+    accounts.map((account) => [account.id, buildProviderAccountName(providers, account)]),
+  );
   const sessionsById = new Map<string, Session>(sessions.map((session) => [session.id, session]));
 
   // `buildHeadline` returns "No sessions yet" for an empty list, and every lane
@@ -78,8 +88,8 @@ function AllSessions(): JSX.Element {
         <section key={lane.kind}>
           <LaneLabel>{LANE_LABELS[lane.kind]}</LaneLabel>
           <Group>
-            {buildThreadRows(lane.sessions, "plain", runners, instances).map((row) => {
-              const instanceId = sessionsById.get(row.id)?.instanceId;
+            {buildThreadRows(lane.sessions, "plain", runners, accounts).map((row) => {
+              const providerAccountId = sessionsById.get(row.id)?.providerAccountId;
               return (
                 <ThreadRowView
                   key={row.id}
@@ -88,7 +98,9 @@ function AllSessions(): JSX.Element {
                   end={row.end}
                   age={formatAge(row.activityAt, now)}
                   secondLine={
-                    instanceId === undefined ? null : (providerNames.get(instanceId) ?? null)
+                    providerAccountId === undefined
+                      ? null
+                      : (accountNames.get(providerAccountId) ?? null)
                   }
                   sessionId={row.id}
                 />

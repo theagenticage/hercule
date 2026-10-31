@@ -90,7 +90,7 @@ const insertSession = (profileId: string, status: "idle" | "exited") =>
       withTransaction(
         sql,
         sql`
-        INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
+        INSERT INTO sessions (id, permission_profile_id, provider_account_id, runner_id,
                               requested_access_mode, access_mode, spec, title, status,
                               created_at, last_activity_at)
         VALUES (${uuidFromString(id)}, ${profile}, ${profile}, ${profile}, 'auto', 'auto', '{}',

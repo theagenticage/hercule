@@ -1,14 +1,14 @@
 /**
  * The first run's providers step. Presentational: the rows, each with its
- * own login, come in as `children`.
+ * own sign-in, come in as `children`.
  */
 import type { JSX, ReactNode } from "react";
 import { MarkedRows } from "../step";
 import { StepKicker } from "./first-run-frame";
 
 /**
- * Renders the providers step: `heading`, `subheading`, the provider rows in
- * `children`, then Continue and Do this later. Continue waits for a provider
+ * Renders the providers step: `heading`, `subheading`, the account rows in
+ * `children`, then Continue and Do this later. Continue waits for an account
  * to be `ready`; once one is, the step can no longer be put off, so Do this
  * later goes away.
  */

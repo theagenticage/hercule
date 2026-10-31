@@ -24,7 +24,7 @@ import {
 } from "../daemon/testing";
 import {
   createProfile,
-  findInstanceId,
+  findProviderAccountId,
   readSession,
   readSessionToken,
   spawnThreadUnder,
@@ -503,7 +503,7 @@ describe("a grant decided with outcome session", () => {
         {
           name: "deleter",
           systemPrompt: "You delete tasks.",
-          instanceId: findInstanceId(arranged, "harnesses/full"),
+          providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           permissionProfileId: (await createProfile(arranged, "deleter", ["task.delete"])).id,
         },
         arranged.token,

@@ -4,12 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Runner, Session, SessionStatus } from "@hercule/contract";
-import { buildInstance, buildSnapshot, CLAUDE_CODE_IDENTITY } from "../providers.testing";
+import { buildProviderAccount, buildSnapshot, ANTHROPIC_IDENTITY } from "../providers.testing";
 import { buildThreadRows } from "./rows";
 import { buildRunner } from "./workspaces.testing";
 
-/** The instance whose catalog gives rows their model names. It offers two models. */
-const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
+/** The account whose catalog gives rows their model names. It offers two models. */
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
   buildSnapshot({
     models: [
       {
@@ -39,7 +39,8 @@ const BASE: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "instance-claude-code",
+  providerAccountId: ANTHROPIC_IDENTITY.id,
+  harnessId: ANTHROPIC_IDENTITY.harnessId,
   runnerId: "runner-1",
   workspaceId: null,
   projectId: null,
@@ -114,7 +115,7 @@ describe("buildThreadRows", () => {
       [
         buildSession({
           id: "s1",
-          instanceId: CLAUDE.id,
+          providerAccountId: CLAUDE.id,
           modelSelection: { model: "claude-opus-5", options: {} },
         }),
       ],
@@ -130,7 +131,7 @@ describe("buildThreadRows", () => {
       [
         buildSession({
           id: "s1",
-          instanceId: CLAUDE.id,
+          providerAccountId: CLAUDE.id,
           modelSelection: { model: "default", options: {} },
         }),
       ],
@@ -146,7 +147,7 @@ describe("buildThreadRows", () => {
       [
         buildSession({
           id: "s1",
-          instanceId: CLAUDE.id,
+          providerAccountId: CLAUDE.id,
           modelSelection: { model: "claude-opus-4-8", options: {} },
         }),
       ],

@@ -41,18 +41,54 @@ export const Timestamp = Schema.String.check(
 export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
 
 /**
- * A provider instance's id. Stricter than a fact, because the runner uses it as
- * a directory name: the credential a login writes, and the harness home a
- * session runs against, must stay under the instance's own home, with no way
- * for the path to escape it.
+ * A Provider Account's id. Stricter than a fact, because the runner uses it in
+ * the folder of a Harness Home: the credential a sign-in writes, and the home
+ * a session runs against, must stay under that folder, with no way for the
+ * path to escape it.
  */
-export const InstanceId = Schema.String.check(
+export const ProviderAccountId = Schema.String.check(
   Schema.isBetweenLength(1, 64),
-  Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "instance id", description: "an identifier" }),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/, {
+    title: "provider account id",
+    description: "an identifier",
+  }),
 );
 
+export type ProviderAccountId = Schema.Schema.Type<typeof ProviderAccountId>;
+
 /**
- * A session's id. Strict for the same reason as an instance's: the runner uses
+ * The folder a harness runs in for one Provider Account, as a path relative to
+ * the runner's storage directory. The controller names it and the runner joins
+ * it to the storage directory; the runner never works one out from an id. Only
+ * two shapes are accepted, so a value can never leave the storage directory:
+ *
+ * - `providers/<providerAccountId>`: the home of an account carried over from
+ *   an earlier release, for its original harness.
+ * - `providers/homes/<providerAccountId>/<word>/<word>`: every other home,
+ *   where the two words are the harness id's plugin id and its own word.
+ *
+ * A word starts with a letter or digit, so `.` and `..` never match. Each
+ * segment is at most 64 characters, the limit ids have. The
+ * folder `providers/homes` is the parent of the derived homes, never an
+ * account's. The name `homes` is refused in any letter case, because a
+ * case-insensitive disk (macOS) would make `Homes` the same folder.
+ */
+export const HarnessHome = Schema.String.check(
+  Schema.isMaxLength(256),
+  Schema.isPattern(
+    /^providers\/(?:(?![Hh][Oo][Mm][Ee][Ss]$)[A-Za-z0-9_-]{1,64}|homes\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})$/,
+    {
+      title: "harness home",
+      description:
+        "providers/<account id> or providers/homes/<account id>/<word>/<word>, relative to the storage directory",
+    },
+  ),
+);
+
+export type HarnessHome = Schema.Schema.Type<typeof HarnessHome>;
+
+/**
+ * A session's id. Strict for the same reason as a Provider Account's: the runner uses
  * it as a directory name for a session without a workspace, and removes that
  * directory when the session exits. An id that could escape the scratch root
  * would be a path traversal followed by an `rm -rf`.
@@ -101,27 +137,128 @@ export const Sequenced = Schema.Struct({ seq: Seq });
 export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
 
 /**
- * The name a secret is stored under, with the same limits as the secrets
- * table's names, because these keys are those names. `|` is the separator in
- * the associated data that binds a stored value to its owner, so no name may
- * contain one.
+ * The largest secret value, in characters. The contract bounds a secret the
+ * user writes (such as an account's API key) to this length, and the same value
+ * rides in a `HarnessCredential`, so a value the API accepts is always one a
+ * frame can carry. The bound is generous on purpose: a secret may be a private
+ * key or a service-account document. It is still a bound, because it is
+ * caller-controlled text that lands in the database.
  */
-const SecretName = Schema.String.check(
-  Schema.isBetweenLength(1, 256),
-  Schema.isPattern(/^[^|]+$/, { title: "secret name", description: "no `|`" }),
+export const MAX_SECRET_VALUE_LENGTH = 64 * 1024;
+
+/** Variables a credential can never be written to: the harness process depends on them. */
+const RESERVED_CREDENTIAL_VARIABLES: ReadonlyArray<string> = [
+  "PATH",
+  "HOME",
+  "SHELL",
+  "USER",
+  "TMPDIR",
+  "NODE_OPTIONS",
+  "GH_TOKEN",
+  // Where each harness keeps its Harness Home; the runner sets these itself.
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
+  "PI_CODING_AGENT_DIR",
+];
+
+/** Variable name prefixes a credential can never use: they load code or belong to Hercule and git. */
+const RESERVED_CREDENTIAL_PREFIXES: ReadonlyArray<string> = ["LD_", "DYLD_", "HERCULE_", "GIT_"];
+
+/**
+ * The name of the environment variable a harness reads an account's key or
+ * token from: capital letters, digits and underscores, starting with a letter.
+ * Names the runner or the system own are refused, because a credential written
+ * to one of them could redirect the harness or load foreign code:
+ *
+ * - `PATH`, `HOME`, `SHELL`, `USER`, `TMPDIR`, `NODE_OPTIONS`, `GH_TOKEN`;
+ * - anything starting with `LD_`, `DYLD_`, `HERCULE_` or `GIT_`;
+ * - the variables that locate a harness's home: `CLAUDE_CONFIG_DIR`,
+ *   `CODEX_HOME`, `PI_CODING_AGENT_DIR`.
+ *
+ * Plugins check their declarations against this same schema, so a harness
+ * cannot register a variable the wire then refuses.
+ */
+export const CredentialVariable = Schema.String.check(
+  Schema.isPattern(/^[A-Z][A-Z0-9_]*$/, {
+    title: "credential variable",
+    description: "an environment variable name in upper case",
+  }),
+  Schema.isMaxLength(128),
+  Schema.makeFilter<string>((name) =>
+    RESERVED_CREDENTIAL_VARIABLES.includes(name) ||
+    RESERVED_CREDENTIAL_PREFIXES.some((prefix) => name.startsWith(prefix))
+      ? `${name} is reserved for the harness process and cannot hold a credential; choose the variable the provider's own SDK reads, such as ZAI_API_KEY`
+      : undefined,
+  ),
 );
 
 /**
- * The secret config fields of one provider instance, keyed by the name the
- * plugin gave each. The controller decrypts them as it builds the frame, so
- * the plaintext exists on the wire and in the runner's memory for that one
- * operation and nowhere else: never on the machine's disk, never in a log.
- * The field is always present: an instance with no credential stored sends
- * `{}`, so a runner handles one shape rather than two forms of the same state.
+ * How a harness names a model of one provider, with exactly one `{model}`
+ * standing for the model id: `{model}`, or `zai/{model}`. Braces are allowed
+ * only in that placeholder. Plugins check their declarations against this same
+ * schema, so a harness cannot register an argument the wire then refuses.
  */
-export const InstanceSecrets = Schema.Record(SecretName, Schema.String);
+export const ModelArgument = Schema.String.check(
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[^{}]*\{model\}[^{}]*$/, {
+    title: "model argument",
+    description: "text with exactly one `{model}` placeholder and no other braces",
+  }),
+);
 
-export type InstanceSecrets = Schema.Schema.Type<typeof InstanceSecrets>;
+/**
+ * The environment variable a harness reads the key or token of an account
+ * from, and the key itself. The controller sends it whenever the harness
+ * declares a variable for the account's kind. `value` is left out when the
+ * account has no key stored, so the runner removes the variable from the
+ * harness's environment instead of letting a key of the runner's own stand in.
+ *
+ * The controller decrypts the value as it builds the frame, so the plaintext
+ * exists on the wire and in the runner's memory for that one operation and
+ * nowhere else: it is never logged and never written to disk.
+ */
+export const HarnessCredential = Schema.Struct({
+  variable: CredentialVariable,
+  value: Schema.optionalKey(
+    Schema.String.check(Schema.isBetweenLength(1, MAX_SECRET_VALUE_LENGTH)),
+  ),
+});
+
+export type HarnessCredential = Schema.Schema.Type<typeof HarnessCredential>;
+
+/**
+ * What the runner needs to run a harness for one Provider Account, so it never
+ * looks anything up: the account, the folder to run in, how the harness names
+ * a model for this account's provider, and the credential of a key or token
+ * account.
+ *
+ * - `modelArgument` is the harness's form of the model argument, with
+ *   exactly one `{model}` standing for the model id (`{model}`, `zai/{model}`).
+ * - `credential` is absent for an account whose harness declares no variable
+ *   for its kind, such as a per-machine account whose login is in the Harness
+ *   Home.
+ *
+ * The account id inside `harnessHome` must equal `providerAccountId`. Without
+ * that, a frame could point one account's harness at the folder, login and
+ * key of another.
+ */
+export const HarnessAccount = Schema.Struct({
+  providerAccountId: ProviderAccountId,
+  harnessHome: HarnessHome,
+  modelArgument: ModelArgument,
+  credential: Schema.optionalKey(HarnessCredential),
+}).check(
+  Schema.makeFilter((account) => {
+    // The home is `providers/<id>` or `providers/homes/<id>/...`.
+    const [, first, second] = account.harnessHome.split("/");
+    const homeAccountId = first === "homes" ? second : first;
+    return homeAccountId === account.providerAccountId
+      ? undefined
+      : `harnessHome ${account.harnessHome} belongs to Provider Account ${homeAccountId}, not ${account.providerAccountId}`;
+  }),
+);
+
+export type HarnessAccount = Schema.Schema.Type<typeof HarnessAccount>;
 
 /**
  * Identifies one step record of a run: the run, the step's id in the run's

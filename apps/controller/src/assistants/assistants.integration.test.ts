@@ -3,15 +3,16 @@
  * the defaults the server fills in from a name alone, and the web conversation
  * every assistant gets, which its record names as its main conversation.
  *
- * The controller runs with three provider instances, like a fresh install
- * with the three shipped harnesses, so the default instance has a real choice
+ * The controller runs with three Provider Accounts, like a fresh install
+ * with the three shipped harnesses, so the default account has a real choice
  * to make. Setup runs first, so the default assistant `Hercule` is always
  * there too.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { HarnessDefinition } from "@hercule/plugin-host";
-import type { Assistant, Conversation, ProviderInstance } from "@hercule/contract";
+import type { Assistant, Conversation, ProviderAccount } from "@hercule/contract";
 import {
   completeSetup,
   get,
@@ -21,14 +22,15 @@ import {
   withServer,
   type ServerHarness,
 } from "../http/testing";
-import { uuidFromString, withTransaction } from "../db";
-import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
+import { nowIso, uuidFromString, withTransaction } from "../db";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
+import { providerAccountRepository } from "../provider-accounts";
 
 /** Three harnesses, in the order the shipped plugin registry lists the harnesses. */
 const HARNESSES: ReadonlyArray<HarnessDefinition> = [
-  buildHarnessDefinition("claude", { token: "t" }),
-  buildHarnessDefinition("codex", { token: "t" }),
-  buildHarnessDefinition("pi", { token: "t" }),
+  buildHarnessDefinition("claude"),
+  buildHarnessDefinition("codex"),
+  buildHarnessDefinition("pi"),
 ];
 
 /** The system prompt an assistant gets when the create names none. */
@@ -54,14 +56,41 @@ interface Arranged {
   readonly token: string;
 }
 
-/** Runs `body` against a controller with the three provider instances, after setup. */
+/**
+ * Gives the controller an account for each harness after the first. The test
+ * controller seeds one account for the first harness, so these are newer than
+ * it, and the first harness's account is the oldest.
+ */
+const addAccountsForOtherHarnesses = (harness: ServerHarness): Promise<void> =>
+  Effect.runPromise(
+    Effect.orDie(
+      withTransaction(
+        harness.sql,
+        Effect.gen(function* () {
+          const accounts = yield* providerAccountRepository;
+          for (const definition of HARNESSES.slice(1)) {
+            yield* accounts.insert({
+              providerId: `harnesses/${definition.id}`,
+              kind: "subscription",
+              label: null,
+              defaultHarnessId: `harnesses/${definition.id}`,
+              at: yield* nowIso,
+            });
+          }
+        }).pipe(Effect.provideService(SqlClient.SqlClient, harness.sql)),
+      ),
+    ),
+  );
+
+/** Runs `body` against a controller with the three Provider Accounts, after setup. */
 const withAssistants = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   withServer(
     async (harness) => {
+      await addAccountsForOtherHarnesses(harness);
       const token = await completeSetup(harness.base);
       await body({ harness, token });
     },
-    { plugins: [createPluginFixture({ id: "harnesses", definitions: HARNESSES }).plugin] },
+    { plugins: [buildPluginWithProviderPerHarness("harnesses", HARNESSES)] },
   );
 
 const requestCreate = (arranged: Arranged, fields: Record<string, unknown>): Promise<Response> =>
@@ -115,15 +144,15 @@ const listConversations = async (
   return ((await response.json()) as { items: ReadonlyArray<Conversation> }).items;
 };
 
-/** Returns every provider instance, oldest first: by creation time, then by id. */
-const listInstancesOldestFirst = async (
+/** Returns every Provider Account, oldest first: by creation time, then by id. */
+const listAccountsOldestFirst = async (
   arranged: Arranged,
-): Promise<ReadonlyArray<ProviderInstance>> => {
-  const response = await get(arranged.harness.base, "/api/v1/providers", arranged.token);
+): Promise<ReadonlyArray<ProviderAccount>> => {
+  const response = await get(arranged.harness.base, "/api/v1/provider-accounts", arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
-  const instances = (await response.json()) as ReadonlyArray<ProviderInstance>;
-  expect(instances).toHaveLength(HARNESSES.length);
-  return [...instances].sort(
+  const accounts = (await response.json()) as ReadonlyArray<ProviderAccount>;
+  expect(accounts).toHaveLength(HARNESSES.length);
+  return [...accounts].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   );
 };
@@ -145,7 +174,7 @@ const findProfileId = async (arranged: Arranged, name: string): Promise<string> 
 describe("assistant.create", () => {
   it("fills every default from a name alone", async () => {
     await withAssistants(async (arranged) => {
-      const [oldest] = await listInstancesOldestFirst(arranged);
+      const [oldest] = await listAccountsOldestFirst(arranged);
       const profileId = await findProfileId(arranged, "assistant");
 
       const created = await createAssistant(arranged, { name: "Ada" });
@@ -155,7 +184,8 @@ describe("assistant.create", () => {
       );
       expect(created.name).toBe("Ada");
       expect(created.systemPrompt).toBe(SYSTEM_PROMPT);
-      expect(created.instanceId).toBe(oldest!.id);
+      expect(created.providerAccountId).toBe(oldest!.id);
+      expect(created.harnessId).toBeNull();
       expect(created.permissionProfileId).toBe(profileId);
       expect(created.accessMode).toBe("full-access");
       expect(created.model).toBeNull();
@@ -214,7 +244,10 @@ describe("assistant.create", () => {
   it.each([
     { what: "an empty name", fields: { name: "" } },
     { what: "a name of 129 characters", fields: { name: "a".repeat(129) } },
-    { what: "an instance that does not exist", fields: { name: "Ada", instanceId: NOBODY } },
+    {
+      what: "an account that does not exist",
+      fields: { name: "Ada", providerAccountId: NOBODY },
+    },
     {
       what: "a profile that does not exist",
       fields: { name: "Ada", permissionProfileId: NOBODY },
@@ -251,33 +284,64 @@ describe("assistant.create", () => {
     });
   });
 
-  it("skips an instance of a harness this build no longer carries when it picks the default", async () => {
+  it("rejects a harness the named account cannot run, and a harness with no account on the default account", async () => {
     await withAssistants(async (arranged) => {
-      const [oldest, next] = await listInstancesOldestFirst(arranged);
+      const [oldest, next] = await listAccountsOldestFirst(arranged);
+
+      for (const fields of [
+        { name: "Ada", providerAccountId: next!.id, harnessId: oldest!.defaultHarnessId },
+        // The default account is the oldest, which cannot run the next one's harness.
+        { name: "Ada", harnessId: next!.defaultHarnessId },
+      ]) {
+        const refused = await readErrorBody(await requestCreate(arranged, fields));
+        expect(refused.code, refused.text).toBe("validation");
+        expect(refused.text).toContain("harnessId");
+      }
+    });
+  });
+
+  it("stores the harness it is created with", async () => {
+    await withAssistants(async (arranged) => {
+      const [, next] = await listAccountsOldestFirst(arranged);
+
+      const created = await createAssistant(arranged, {
+        name: "Ada",
+        providerAccountId: next!.id,
+        harnessId: next!.defaultHarnessId,
+      });
+
+      expect(created.providerAccountId).toBe(next!.id);
+      expect(created.harnessId).toBe(next!.defaultHarnessId);
+    });
+  });
+
+  it("skips an account whose default harness this build no longer carries when it picks the default", async () => {
+    await withAssistants(async (arranged) => {
+      const [oldest, next] = await listAccountsOldestFirst(arranged);
       // A row left behind by a harness plugin that was removed: no session
-      // could start on it, so the default must not be this instance.
+      // could start on it, so the default must not be this account.
       await Effect.runPromise(
         Effect.orDie(
           withTransaction(
             arranged.harness.sql,
-            arranged.harness.sql`UPDATE provider_instances SET provider_id = 'retired-harness'
+            arranged.harness.sql`UPDATE provider_accounts SET default_harness_id = 'retired/retired'
                                WHERE id = ${uuidFromString(oldest!.id)}`,
           ),
         ),
       );
 
       const created = await createAssistant(arranged, { name: "Ada" });
-      expect(created.instanceId).toBe(next!.id);
+      expect(created.providerAccountId).toBe(next!.id);
     });
   });
 
-  it("fails with invalid_state when there is no provider instance to default to", async () => {
+  it("fails with invalid_state when there is no provider account to default to", async () => {
     await withAssistants(async (arranged) => {
       await Effect.runPromise(
         Effect.orDie(
           withTransaction(
             arranged.harness.sql,
-            arranged.harness.sql`DELETE FROM provider_instances`,
+            arranged.harness.sql`DELETE FROM provider_accounts`,
           ),
         ),
       );
@@ -286,7 +350,7 @@ describe("assistant.create", () => {
       expect(response.status).toBe(409);
       const refused = await readErrorBody(response);
       expect(refused.code, refused.text).toBe("invalid_state");
-      expect(refused.message).toContain("add a provider instance first");
+      expect(refused.message).toContain("this version cannot add one yet");
       expect((await listAssistants(arranged)).map((assistant) => assistant.name)).toEqual([
         "Hercule",
       ]);
@@ -346,11 +410,11 @@ describe("assistant.update", () => {
     {
       what: "every field it takes",
       build: async (arranged: Arranged) => {
-        const instances = await listInstancesOldestFirst(arranged);
+        const accounts = await listAccountsOldestFirst(arranged);
         return {
           name: "Bea",
           systemPrompt: "You keep an eye on the builds.",
-          instanceId: instances.at(-1)!.id,
+          providerAccountId: accounts.at(-1)!.id,
           permissionProfileId: await findProfileId(arranged, "unrestricted"),
           accessMode: "auto",
           reply: "segments",
@@ -422,6 +486,33 @@ describe("assistant.update", () => {
     });
   });
 
+  it("refuses a harness the account cannot run, and an account that cannot run the harness it names", async () => {
+    await withAssistants(async (arranged) => {
+      const [oldest, next] = await listAccountsOldestFirst(arranged);
+      const created = await createAssistant(arranged, {
+        name: "Ada",
+        providerAccountId: oldest!.id,
+        harnessId: oldest!.defaultHarnessId,
+      });
+
+      for (const fields of [
+        { harnessId: next!.defaultHarnessId },
+        { providerAccountId: next!.id, harnessId: oldest!.defaultHarnessId },
+      ]) {
+        const refused = await readErrorBody(await requestUpdate(arranged, created.id, fields));
+        expect(refused.code, refused.text).toBe("validation");
+        expect(refused.text).toContain("harnessId");
+      }
+      expect(await readAssistant(arranged, created.id)).toEqual(created);
+
+      // Moving without naming a harness puts the assistant on the new
+      // account's default harness.
+      const moved = await requestUpdate(arranged, created.id, { providerAccountId: next!.id });
+      expect(moved.status, await moved.clone().text()).toBe(200);
+      expect(await moved.json()).toMatchObject({ providerAccountId: next!.id, harnessId: null });
+    });
+  });
+
   it("keeps a saved zone the runtime does not know editable, and refuses a new one", async () => {
     await withAssistants(async (arranged) => {
       const created = await createAssistant(arranged, { name: "Ada" });
@@ -454,7 +545,7 @@ describe("assistant.update", () => {
 
   it("updates an id that names no assistant as not_found, before it checks the fields", async () => {
     await withAssistants(async (arranged) => {
-      for (const fields of [{ name: "Bea" }, { instanceId: NOBODY }]) {
+      for (const fields of [{ name: "Bea" }, { providerAccountId: NOBODY }]) {
         const response = await requestUpdate(arranged, NOBODY, fields);
         expect(response.status).toBe(404);
         expect((await readErrorBody(response)).code).toBe("not_found");
@@ -509,14 +600,14 @@ describe("assistant.query and assistant.read", () => {
 
   it("reads a plain agent's id as not_found, because a plain agent is not an assistant", async () => {
     await withAssistants(async (arranged) => {
-      const [instance] = await listInstancesOldestFirst(arranged);
+      const [account] = await listAccountsOldestFirst(arranged);
       const agent = await post(
         arranged.harness.base,
         "/api/v1/agents",
         {
           name: "reviewer",
           systemPrompt: "Review the change.",
-          instanceId: instance!.id,
+          providerAccountId: account!.id,
           permissionProfileId: await findProfileId(arranged, "unrestricted"),
         },
         arranged.token,

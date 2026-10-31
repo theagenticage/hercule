@@ -27,7 +27,7 @@ import {
   WAIT_DEADLINE_MS,
   at,
   createProfile,
-  findInstanceId,
+  findProviderAccountId,
   listInputs,
   reportEvent,
   reportTurnCompleted,
@@ -289,7 +289,7 @@ describe("Edit Overlaps", () => {
         {
           name: "editor",
           systemPrompt: "You edit.",
-          instanceId: findInstanceId(arranged, "harnesses/full"),
+          providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           permissionProfileId: profile.id,
         },
         arranged.token,
@@ -318,7 +318,7 @@ describe("Edit Overlaps", () => {
           {
             sessionId: session.id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "harnesses/full"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           },
         ],
       });

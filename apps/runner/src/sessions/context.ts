@@ -1,7 +1,8 @@
 /**
  * Resolves what one session needs on this machine from its start frame. The
  * frame holds ids, and this file turns them into paths and an environment.
- * Only this file resolves the runner's harness homes and working directories.
+ * Only this file resolves the working directories. A Harness Home is the folder
+ * the controller names, joined to the storage directory (`createHarnessHome`).
  * Managed workspace paths stay on the runner; an attached checkout's path is
  * explicitly registered on the controller.
  */
@@ -20,6 +21,7 @@ import {
   type Workspaces,
 } from "../workspaces";
 import type { HarnessRunnerContext } from "../harnesses";
+import { createHarnessHome } from "../harnesses/account";
 import { endSentence } from "../report";
 import {
   listWorkspaceRepositorySkills,
@@ -34,10 +36,10 @@ import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
 /** The facts about this machine that a session's context is built from. */
 export interface Machine {
   /**
-   * `<runner storage>/providers`: one isolated harness home per instance. The folder keeps
-   * its old name, because renaming it would move the logins stored in it.
+   * The runner's storage directory. A Harness Home is a path the controller names, joined to
+   * this directory: one isolated home per Provider Account and harness.
    */
-  readonly providersDir: string;
+  readonly storageDir: string;
   /** Where a workspace-less session's empty cwd is made, one directory per session. */
   readonly scratchDir: string;
   /** `<runner storage>/attachments`: one directory per session for the images of its input. */
@@ -107,38 +109,16 @@ export interface Resolved {
 }
 
 /**
- * Returns the string-valued variables in the `env` object of an instance's
- * config: the "extra environment for the spawned process" (spec 06 section
- * 2.1). No shipped harness declares a `configSchema` field for it yet, so the
- * config is read leniently: anything else is ignored rather than failing the
- * session start.
- *
- * `HOME` is dropped. Moving it makes the Claude CLI report another account's
- * login, or none, because the macOS Keychain item is keyed by the real home
- * (spec 06 section 9.1). `CLAUDE_CONFIG_DIR` isolates the instance instead.
- */
-const readInstanceEnv = (config: unknown): Record<string, string> => {
-  const env = (config as { readonly env?: unknown } | null)?.env;
-  if (typeof env !== "object" || env === null) return {};
-  return Object.fromEntries(
-    Object.entries(env).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[0] !== "HOME",
-    ),
-  );
-};
-
-/**
- * Builds a session's environment in three layers, each overriding the one
- * before it (spec 06 section 4):
+ * Builds a session's environment in two layers, the second overriding the
+ * first (spec 06 section 4):
  *
  * - the runner's own environment, with git's and Hercule's own variables
  *   removed;
- * - the instance's extra environment;
  * - Hercule's variables: the git credential helper, `GH_TOKEN`, the API URL,
  *   the session token, and `PATH`.
  *
- * Hercule's layer comes last, so instance config can never replace the
- * session's token, its controller, or the `hercule` the session calls.
+ * The account's credential is not in it: the adapter adds that to the
+ * environment of the harness process.
  *
  * The token and the git identity come only from the frame. `GH_TOKEN` is the
  * token the caller resolved (see `resolveSessionContext`); the runner never
@@ -155,8 +135,7 @@ const readInstanceEnv = (config: unknown): Record<string, string> => {
  * credential helper set below. The runner's own `HERCULE_*` variables are
  * removed the same way, so the session never inherits the runner's Home or
  * settings. Every `HERCULE_*` variable the session does get is added after
- * that removal: by the instance's extra environment, by the credential
- * helper's variables, or by the lines below.
+ * that removal: by the credential helper's variables, or by the lines below.
  */
 const buildEnv = (
   machine: Machine,
@@ -164,7 +143,6 @@ const buildEnv = (
   githubToken: string | undefined,
 ): Record<string, string | undefined> => ({
   ...buildSubstrateEnv(machine.baseEnv),
-  ...readInstanceEnv(frame.config),
   ...buildGitCredentialEnv({ socketPath: machine.socketPath, identity: frame.gitIdentity }),
   ...(githubToken === undefined ? {} : { GH_TOKEN: githubToken }),
   HERCULE_API_URL: machine.controllerUrl,
@@ -172,9 +150,7 @@ const buildEnv = (
   HERCULE_SESSION: "1",
   // The bin directory goes first, so `which hercule` finds this build, and the
   // machine's own tools still work after it (spec 15 section 2). The rest is
-  // the machine's own `PATH`. A `PATH` in instance config is ignored, because
-  // it could put another directory first and shadow `hercule` with a
-  // different binary. An empty entry in `PATH` means the current directory,
+  // the machine's own `PATH`. An empty entry in `PATH` means the current directory,
   // so when the machine has no `PATH`, the result is the bin directory alone,
   // with no trailing colon.
   PATH:
@@ -321,8 +297,8 @@ const placeSession = (
 
 /**
  * Resolves the context an adapter needs to start a session: its cwd, the
- * instance's harness home, the harness binary, the environment and the
- * secrets. When the frame's `userMaterial` flag is set, the context also
+ * account's Harness Home, the harness binary, the environment, the model
+ * argument and the account's credential. When the frame's `userMaterial` flag is set, the context also
  * carries the user's own material (spec 06 section 9.1). Fails with a message the user can read
  * when the session cannot be placed on this machine.
  *
@@ -346,11 +322,9 @@ export const resolveSessionContext = (
     // Every directory made from here on, so a failure removes exactly these.
     const made: Array<string> = placed.scratch === undefined ? [] : [placed.scratch];
     return yield* Effect.gen(function* () {
-      const home = yield* tryFilesystem(() => {
-        const dir = joinPath(machine.providersDir, frame.spec.instanceId);
-        mkdirSync(dir, { recursive: true, mode: 0o700 });
-        return dir;
-      });
+      const home = yield* tryFilesystem(() =>
+        createHarnessHome(machine.storageDir, frame.harnessAccount.harnessHome),
+      );
       // Created before the harness starts, because Claude takes the directories
       // it may read only as a start option.
       const attachmentsDir = yield* tryFilesystem(() => {
@@ -397,9 +371,12 @@ export const resolveSessionContext = (
           binary: machine.findBinary(binaryName),
           env: buildEnv(machine, frame, githubToken),
           // Passed to the adapter as they are, not added to the environment:
-          // only the adapter knows which variable its harness reads a credential
-          // from.
-          secrets: frame.secrets,
+          // the adapter puts the credential in the environment of the harness
+          // process only.
+          modelArgument: frame.harnessAccount.modelArgument,
+          ...(frame.harnessAccount.credential === undefined
+            ? {}
+            : { credential: frame.harnessAccount.credential }),
           herculeTool: machine.herculeTool,
           attachmentsDir,
           attachmentUploader: machine.attachmentUploader,

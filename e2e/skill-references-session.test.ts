@@ -50,12 +50,12 @@
  *
  * - Claude Code: either of the two routes `e2e/harness.ts` documents.
  * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
- *   into the instance's `CODEX_HOME`. Two live copies of an OAuth login can
+ *   into the account's `CODEX_HOME`. Two live copies of an OAuth login can
  *   rotate each other out, so prefer a file written by `codex login
  *   --with-api-key`, which holds no refresh token. `codex` must be on the
  *   `PATH`.
  * - pi: `ZAI_API_KEY` on the environment, which is stored as the pi
- *   instance's Z.ai key. `pi` must be on the `PATH`.
+ *   account's Z.ai key. `pi` must be on the `PATH`.
  */
 import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -235,7 +235,7 @@ const buildRedPng = (): Buffer => {
   ]);
 };
 
-/** Gives the harness's instance its login, and waits until the runner's probe reports it. */
+/** Gives the harness's account its login, and waits until the runner's probe reports it. */
 const prepareLoggedInHarness = (harness: LiveHarness): Promise<PreparedHarness> =>
   prepareHarness(harness, {
     home: state.home,
@@ -265,8 +265,10 @@ const startThread = async (
       [
         "session",
         "spawn",
-        "--instance",
-        prepared.instanceId,
+        "--account",
+        prepared.providerAccountId,
+        "--harness",
+        prepared.harnessId,
         "--runner",
         runnerId,
         ...(prepared.model === undefined ? [] : ["--model", prepared.model]),

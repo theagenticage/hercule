@@ -1,7 +1,7 @@
 import { Fragment, useState, type JSX } from "react";
 import {
   buildModelMenu,
-  describeAccountRow,
+  describeProviderAccountRow,
   describeModelRow,
   type ModelMenu as ModelMenuModel,
   type RecentModel,
@@ -31,7 +31,7 @@ type ModelRow = ModelMenuModel["current"]["rows"][number];
  * switch: an account's row picks the account and its default model, and
  * while the filter matches an account's models, they are listed under its
  * name and each picks the account and the model together. An account that
- * is not logged in on the machine stays dimmed.
+ * is not signed in on the machine stays dimmed.
  *
  * `readRecent` returns the Recent list as the app stores it, and `config`
  * is what the thread runs with, picks included, so the check marks the model
@@ -62,13 +62,13 @@ export function ModelMenu({
 
   const renderModelRow = (harnessId: string | null, row: ModelRow): JSX.Element => (
     <MenuLine
-      key={`${row.instanceId}:${row.slug}`}
+      key={`${row.providerAccountId}:${row.slug}`}
       glyph={harnessId === null ? null : <HarnessLogo harnessId={harnessId} size={13} />}
       name={row.name}
       detail={describeModelRow(row)}
       current={row.current}
       onPick={() => {
-        onChoose({ kind: "model", instanceId: row.instanceId, model: row.slug });
+        onChoose({ kind: "model", providerAccountId: row.providerAccountId, model: row.slug });
       }}
     />
   );
@@ -96,7 +96,7 @@ export function ModelMenu({
           <div className="q-h">Recent</div>
           {menu.recent.map((row) => (
             <MenuLine
-              key={`${row.instanceId}:${row.model}`}
+              key={`${row.providerAccountId}:${row.model}`}
               glyph={<HarnessLogo harnessId={row.harnessId} size={13} />}
               name={row.name}
               detail={row.account}
@@ -104,7 +104,11 @@ export function ModelMenu({
               current={false}
               inert={row.dimmed !== null}
               onPick={() => {
-                onChoose({ kind: "model", instanceId: row.instanceId, model: row.model });
+                onChoose({
+                  kind: "model",
+                  providerAccountId: row.providerAccountId,
+                  model: row.model,
+                });
               }}
             />
           ))}
@@ -133,24 +137,24 @@ export function ModelMenu({
       )}
       {menu.others.length === 0 ? null : (
         <div className="pop-sec">
-          {menu.others.map((instance) =>
-            instance.dimmed === null && instance.rows.length > 0 ? (
-              <Fragment key={instance.instanceId}>
-                <div className="q-h">{instance.name}</div>
-                {instance.rows.map((row) => renderModelRow(instance.harnessId, row))}
+          {menu.others.map((account) =>
+            account.dimmed === null && account.rows.length > 0 ? (
+              <Fragment key={account.providerAccountId}>
+                <div className="q-h">{account.name}</div>
+                {account.rows.map((row) => renderModelRow(account.harnessId, row))}
               </Fragment>
             ) : (
               <MenuLine
-                key={instance.instanceId}
-                glyph={<HarnessLogo harnessId={instance.harnessId} size={13} />}
-                name={instance.name}
-                detail={describeAccountRow(instance)}
-                note={instance.dimmed ?? instance.models}
+                key={account.providerAccountId}
+                glyph={<HarnessLogo harnessId={account.harnessId} size={13} />}
+                name={account.name}
+                detail={describeProviderAccountRow(account)}
+                note={account.dimmed ?? account.models}
                 current={false}
-                chevron={instance.dimmed === null}
-                inert={instance.dimmed !== null}
+                chevron={account.dimmed === null}
+                inert={account.dimmed !== null}
                 onPick={() => {
-                  onChoose({ kind: "account", instanceId: instance.instanceId });
+                  onChoose({ kind: "account", providerAccountId: account.providerAccountId });
                 }}
               />
             ),

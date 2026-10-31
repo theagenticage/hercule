@@ -31,7 +31,7 @@ const renderStateAndCapacity = (row: MachineRow): JSX.Element => (
 
 /**
  * The lip's right-hand selector: the machine a new thread is placed on,
- * limited to machines for the provider instance picked in the model selector.
+ * limited to machines for the account picked in the model selector.
  *
  * The trigger shows the current machine together with the reason it is dimmed,
  * if any. That reason is what blocks the thread from starting, and it must be

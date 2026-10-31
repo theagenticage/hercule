@@ -48,7 +48,8 @@ import {
 } from "../scripts/controller-process";
 import {
   readApiKey,
-  listInstances,
+  readClaudeAccount,
+  CLAUDE_CODE,
   parseJsonOutputOrFail,
   lendCredential,
   LENT_CREDENTIALS,
@@ -58,7 +59,7 @@ import {
   readSession,
   createTemporaryHome,
   waitForTranscriptTag,
-  type Instance,
+  type ProviderAccount,
   type Session,
   type Snapshot,
   type TemporaryHome,
@@ -128,28 +129,22 @@ const waitForOwnRunner = async (): Promise<string> => {
   }
 };
 
-const findClaudeInstance = async (): Promise<Instance> => {
-  const found = (await listInstances({ url, apiKey })).find(
-    (one) => one.harnessId === "claude-code/claude-code",
-  );
-  if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
-  return found;
-};
+const findClaudeAccount = (): Promise<ProviderAccount> => readClaudeAccount({ url, apiKey });
 
 /**
- * Probes the instance until a machine reports that the copied login works, and
+ * Probes the account in Claude Code until a machine reports that the copied login works, and
  * returns that snapshot. The probe is repeated rather than trusted once: a
  * probe of a directory that was empty a moment ago has been seen to return
  * `unauthenticated`.
  */
-const waitForLoggedInSnapshot = async (runnerId: string, instanceId: string): Promise<Snapshot> => {
+const waitForLoggedInSnapshot = async (runnerId: string, accountId: string): Promise<Snapshot> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   let last: string;
   for (;;) {
-    const ran = await runCli(["runner", "probe", runnerId, "--instance", instanceId, "--json"], {
-      home: state.home,
-      binary,
-    });
+    const ran = await runCli(
+      ["runner", "probe", runnerId, "--account", accountId, "--harness", CLAUDE_CODE, "--json"],
+      { home: state.home, binary },
+    );
     if (ran.code === 0) {
       const snapshot = parseJsonOutputOrFail<Snapshot>(ran);
       if (snapshot.auth.status === "ok") return snapshot;
@@ -223,16 +218,16 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
     async (ctx) => {
       if (!isLoginAvailable()) {
         ctx.skip(
-          "no login for the claude-code instance: name a credentials file in " +
+          "no login for the claude-code account: name a credentials file in " +
             "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
         );
         return;
       }
 
       const runnerId = await waitForOwnRunner();
-      const instance = await findClaudeInstance();
-      if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, instance.id);
-      const snapshot = await waitForLoggedInSnapshot(runnerId, instance.id);
+      const account = await findClaudeAccount();
+      if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, account.id, CLAUDE_CODE);
+      const snapshot = await waitForLoggedInSnapshot(runnerId, account.id);
 
       // The cheapest model that works, when this machine reported one.
       const haiku = snapshot.models.find((model) => model.slug.includes("haiku"))?.slug;

@@ -454,7 +454,11 @@ const SCREENED_MAIL = "Can you sign the venue contract before Friday?";
 
 /** Text generation as the controller reports it while it can run. */
 const TEXT_GENERATION_READY: ControllerInfo["textGeneration"] = {
-  model: { instanceId: CLAUDE_SONNET.instanceId, model: CLAUDE_SONNET.slug },
+  model: {
+    providerAccountId: CLAUDE_SONNET.providerAccountId,
+    harnessId: CLAUDE_SONNET.harnessId,
+    model: CLAUDE_SONNET.slug,
+  },
   lastFailure: null,
   unavailableReason: null,
 };
@@ -549,7 +553,7 @@ const TEXT_GENERATION_RUN_RECORDS = {
     {
       ...TEXT_GENERATION_READY,
       unavailableReason:
-        "no up-to-date runner is logged in to the provider instance Claude Code with the model claude-haiku-5-5",
+        "no up-to-date runner has Anthropic signed in with the model claude-haiku-5-5",
     },
   ),
   "text-generation-off": buildScreenMailRecords(
