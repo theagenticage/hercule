@@ -17,6 +17,7 @@ import { AccountCard } from "./-account-card";
 import type { CredentialFix } from "./-fix-account-dialog";
 import { LazyFixAccountDialog } from "./-lazy-fix-account-dialog";
 import { ModelsSection } from "./-models-section";
+import { useOpenModelProfile, validateProvidersSearch } from "./-open-model-profile";
 import { OpenedProviderAccountSheet } from "./-provider-account-sheet";
 
 /**
@@ -43,8 +44,10 @@ interface FixingAccount {
  * account is signed in on or "Every machine", then its usage or, when it needs
  * the user, its state and the button that fixes it. A click on a card opens the
  * account's sheet, and the header's Add an account opens the sheet that adds
- * one. Under the cards is the Models section, the Model Profile's menu
- * (spec 17 §Settings, Providers).
+ * one. Under the cards is the Models section, the menu of the open Model
+ * Profile (spec 17 §Settings, Providers). The open profile is the URL's
+ * `profile` search parameter (`useOpenModelProfile`); the add-account sheet's
+ * Done adds the account to it.
  *
  * Everything the section reads, the accounts, the profiles, the providers,
  * the harnesses, the runners and the plugins, is a shell read that the live
@@ -56,6 +59,7 @@ interface FixingAccount {
  */
 export const Route = createFileRoute("/_connected/_shell/settings/providers")({
   staticData: { title: "Providers" },
+  validateSearch: validateProvidersSearch,
   loader: async ({ context: { controller, queryClient } }) => {
     const { client } = controller;
     await Promise.all([
@@ -76,6 +80,7 @@ export const Route = createFileRoute("/_connected/_shell/settings/providers")({
 function Providers(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const { profile: openProfile } = useOpenModelProfile(client);
   const [sheet, setSheet] = useState<OpenSheet | null>(null);
   const [adding, setAdding] = useState(false);
   const [fixing, setFixing] = useState<FixingAccount | null>(null);
@@ -135,6 +140,7 @@ function Providers(): JSX.Element {
           <LazyAddProviderAccount
             client={client}
             signInMachines="all"
+            modelProfileId={openProfile?.id}
             onAdded={(account) => {
               setAddedProviderAccountId(account.id);
             }}

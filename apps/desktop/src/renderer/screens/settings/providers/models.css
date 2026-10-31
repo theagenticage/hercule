@@ -21,11 +21,27 @@
   font-size: var(--t-12);
   line-height: 1.45;
 }
+/* The lead's link to the New profile dialog. */
+.pm-link {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+.pm-link:hover {
+  color: var(--ink);
+}
 /* With one profile there is no tab row, so a rule of its own sits above the
    first account's section. */
 .pm-list {
   margin-top: 12px;
   border-top: 1px solid var(--divider);
+}
+/* With tabs, the tab row's bottom edge is that rule. */
+.has-tabs > .pm-list {
+  margin-top: 0;
+  border-top: 0;
 }
 .pm-none {
   margin: 12px 0 0;

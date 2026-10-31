@@ -1,0 +1,83 @@
+/* The New profile dialog, from the prototype `prototype/desktop-settings-
+   providers`, variant I (docs/design/providers-directions/r3.css `.np`, and
+   the `.ov-` rules of providers.css). It is the account sheet's frame
+   (providers.css) at 480px wide. Class names start with `np-`. */
+.glass-dialog.account-sheet.new-profile-dialog {
+  width: 480px;
+}
+.np-lead {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+/* The suggested names, 4px under the field (the field's grid gap adds 6). */
+.np-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.np-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.np-chip:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.np-start {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+}
+.np-error {
+  margin: 12px 0 0;
+}
+
+/* ---------- Start from: radio cards ---------- */
+/* The same cards as the add-account sheet's kinds (add-provider-account-
+   sheet.css), which that sheet's stylesheet keeps to itself. */
+.np-cards {
+  display: grid;
+  gap: 8px;
+}
+.np-card {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 12px 14px 13px;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  cursor: pointer;
+  transition:
+    box-shadow var(--dur-1),
+    background var(--dur-1);
+}
+.np-card:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.np-card:has(input:checked) {
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1.5px var(--ink),
+    var(--shadow-1);
+}
+.np-card > .choice-box {
+  margin-top: 2px;
+}
+.np-card b {
+  overflow-wrap: anywhere;
+  font-weight: var(--w-medium);
+}
+.np-card small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}

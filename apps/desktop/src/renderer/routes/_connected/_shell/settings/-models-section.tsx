@@ -1,44 +1,26 @@
-import { useRef, type JSX } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import {
-  buildModelProfileSections,
-  makeDefaultModelProfileEntry,
-  moveModelProfileAccount,
-  moveModelProfileEntry,
-  readErrorMessage,
-  setModelProfileEntryIncluded,
-  takeOutModelProfileEntry,
-  updateModelProfile,
-  type HerculeClient,
-} from "@hercule/client-core";
-import type { ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
-import {
-  harnessesQuery,
-  modelProfilesQuery,
-  pluginsQuery,
-  providerAccountsQuery,
-  providersQuery,
-} from "../../../../app/queries";
-import { ModelProfileSection } from "../../../../screens/settings/providers/model-profile-section";
-import { ProviderMark } from "../../../../screens/settings/providers/provider-mark";
-import { useDragReorder } from "../../../../screens/settings/providers/use-drag-reorder";
-import { useOptimisticOrder } from "../../../../screens/settings/providers/use-optimistic-order";
+import { useState, type JSX } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import type { HerculeClient } from "@hercule/client-core";
+import type { ModelProfile } from "@hercule/contract";
 import "../../../../screens/settings/providers/models.css";
-import { AccountModelPicker } from "./-models-picker";
+import { addCachedModelProfile } from "./-model-profile-cache";
+import { ModelProfileMenu } from "./-model-profile-menu";
+import { ModelProfileTabs } from "./-model-profile-tabs";
+import { NewModelProfileDialog } from "./-new-model-profile-dialog";
+import { useOpenModelProfile } from "./-open-model-profile";
 
 /**
- * Renders Settings > Providers > Models in its one-profile form: the only
- * Model Profile, one section for each account in it, in the profile's order.
- * Each change the user makes, whether a drop, an Alt+arrow, "Make it the
- * default", "Take out of the menu" or a model picked, is one
- * `modelProfile.update` that carries the revision the page read. When the
- * controller reports a conflict, the profile is read again and the same change
- * is applied to it (`updateModelProfile`). Saves go one after the other, each
- * built from the newest profile the page holds, so quick key presses do not
- * conflict with one another.
+ * Renders Settings > Providers > Models: the lead, the profile tabs when there
+ * are two or more Model Profiles, and the menu of the open profile
+ * (`ModelProfileMenu`). The open profile is the one the URL names, as
+ * `useOpenModelProfile` reads it.
  *
- * `flashProviderAccountId` is the account just added to the profile, whose
- * section flashes once.
+ * The lead's "create several profiles" (with one profile) and the "New
+ * profile" tab both open the New profile dialog, which starts empty or as a
+ * copy of the open profile and opens the new profile's tab.
+ *
+ * `flashProviderAccountId` is the account just added to the open profile,
+ * whose section flashes once.
  *
  * Everything it reads is a shell read that the live connection keeps current,
  * so opening the section sends no request.
@@ -51,140 +33,60 @@ export function ModelsSection({
   readonly flashProviderAccountId: string | null;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
-  const profile = useSuspenseQuery(modelProfilesQuery(client)).data[0];
-  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
-  const providers = useSuspenseQuery(providersQuery(client)).data;
-  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
-  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-
-  const save = useMutation({
-    scope: { id: "model-profile" },
-    mutationFn: ({
-      profileId,
-      buildChange,
-    }: {
-      readonly profileId: string;
-      readonly buildChange: (profile: ModelProfile) => ModelProfileUpdateInput;
-    }) => {
-      // The newest profile the page holds, not the one the user acted on: a
-      // save that ran before this one has changed its revision.
-      const newest = queryClient
-        .getQueryData(modelProfilesQuery(client).queryKey)
-        ?.find(({ id }) => id === profileId);
-      if (newest === undefined) throw new Error("The profile is gone.");
-      return updateModelProfile(client, newest, buildChange);
-    },
-    onSuccess: (saved) => {
-      queryClient.setQueryData(modelProfilesQuery(client).queryKey, (list) =>
-        list?.map((each) => (each.id === saved.id ? saved : each)),
-      );
-    },
-  });
-
-  /** Saves one change and resolves when the save is over, whether it worked or not; a failure shows above the sections. */
-  const change = (
-    buildChange: (profile: ModelProfile) => ModelProfileUpdateInput,
-  ): Promise<void> =>
-    profile === undefined
-      ? Promise.resolve()
-      : save.mutateAsync({ profileId: profile.id, buildChange }).then(
-          () => undefined,
-          () => undefined,
-        );
-  // What the user last asked for each model in the picker, until the save that
-  // carries it is over. A second click before the first save is answered
-  // reads the page as it was drawn, so it would ask for the same thing twice.
-  const wanted = useRef(new Map<string, boolean>());
-  const sections =
-    profile === undefined
-      ? []
-      : buildModelProfileSections(profile, { accounts, providers, harnesses });
-  const order = useOptimisticOrder(sections.map(({ providerAccountId }) => providerAccountId));
-  const moveSection = (providerAccountId: string, toIndex: number): Promise<void> =>
-    order.move(providerAccountId, toIndex, () =>
-      change((current) => moveModelProfileAccount(current, providerAccountId, toIndex)),
-    );
-  const sectionDrag = useDragReorder(order.keys, (providerAccountId, toIndex) => {
-    void moveSection(providerAccountId, toIndex);
-  });
+  const { profile, profiles, openProfile } = useOpenModelProfile(client);
+  const [creating, setCreating] = useState(false);
   if (profile === undefined) return null;
 
-  const byId = new Map(sections.map((section) => [section.providerAccountId, section]));
+  const hasTabs = profiles.length > 1;
   return (
-    <section className="set-sec provider-models">
+    <section className={hasTabs ? "set-sec provider-models has-tabs" : "set-sec provider-models"}>
       <h2>Models</h2>
       <p className="pm-lead">
-        The models you can use in Hercule, in the order the composer shows them.
+        The models you can use in Hercule, in the order the composer shows them.{" "}
+        {hasTabs ? (
+          "Each profile is its own set; you can create as many as you like."
+        ) : (
+          <>
+            You can also{" "}
+            <button
+              type="button"
+              className="pm-link"
+              onClick={() => {
+                setCreating(true);
+              }}
+            >
+              create several profiles
+            </button>
+            , each with its own set.
+          </>
+        )}
       </p>
-      {save.isError ? (
-        <p className="pm-err" role="alert">
-          {`The change was not saved. ${readErrorMessage(save.error)}`}
-        </p>
+      {hasTabs ? (
+        <ModelProfileTabs
+          client={client}
+          onNew={() => {
+            setCreating(true);
+          }}
+        />
       ) : null}
-      {sections.length === 0 ? (
-        <p className="pm-none">{`${profile.name} has no accounts yet. Add one to give the composer models.`}</p>
-      ) : (
-        <div className="pm-list">
-          {order.keys.flatMap((providerAccountId) => {
-            const section = byId.get(providerAccountId);
-            if (section === undefined) return [];
-            const held = new Set(section.sectionHarnessModels);
-            return (
-              <ModelProfileSection
-                key={providerAccountId}
-                section={section}
-                mark={<ProviderMark pluginId={section.pluginId} plugins={plugins} size={13} />}
-                profileName={profile.name}
-                isNew={providerAccountId === flashProviderAccountId}
-                drag={{
-                  headProps: sectionDrag.getSourceProps(providerAccountId),
-                  sectionProps: sectionDrag.getTargetProps(providerAccountId),
-                  dropSide:
-                    sectionDrag.dropMark?.key === providerAccountId
-                      ? sectionDrag.dropMark.side
-                      : null,
-                  onMoveBy: (offset) => {
-                    void moveSection(
-                      providerAccountId,
-                      order.keys.indexOf(providerAccountId) + offset,
-                    );
-                  },
-                }}
-                addModel={
-                  <AccountModelPicker
-                    client={client}
-                    providerAccountId={providerAccountId}
-                    name={section.name}
-                    held={held}
-                    onToggle={(model) => {
-                      // The change is "hold it" or "do not hold it", decided
-                      // here from what the user saw, so a retry on a newer
-                      // profile does the same and never flips it back.
-                      const key = `${providerAccountId}:${model}`;
-                      const included = !(wanted.current.get(key) ?? held.has(model));
-                      wanted.current.set(key, included);
-                      void change((current) =>
-                        setModelProfileEntryIncluded(current, providerAccountId, model, included),
-                      ).then(() => {
-                        if (wanted.current.get(key) === included) wanted.current.delete(key);
-                      });
-                    }}
-                  />
-                }
-                onMoveEntry={(entry, toIndex) =>
-                  change((current) => moveModelProfileEntry(current, entry, toIndex))
-                }
-                onMakeDefault={(entry) => {
-                  void change((current) => makeDefaultModelProfileEntry(current, entry));
-                }}
-                onTakeOut={(entry) => {
-                  void change((current) => takeOutModelProfileEntry(current, entry));
-                }}
-              />
-            );
-          })}
-        </div>
-      )}
+      <ModelProfileMenu
+        key={profile.id}
+        client={client}
+        profile={profile}
+        flashProviderAccountId={flashProviderAccountId}
+      />
+      {creating ? (
+        <NewModelProfileDialog
+          copyOf={profile}
+          onCreated={(created: ModelProfile) => {
+            addCachedModelProfile(queryClient, client, created);
+            openProfile(created.id);
+          }}
+          onClose={() => {
+            setCreating(false);
+          }}
+        />
+      ) : null}
     </section>
   );
 }
