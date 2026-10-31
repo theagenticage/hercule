@@ -4,9 +4,10 @@ import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
 import { MAX_PROJECT_NAME_LENGTH } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { uuidFromString, uuidToString } from "../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
+import { ModelProfileLookupLayer } from "../model-profiles";
 import { NotifierLayer } from "../notifications";
 import { readEventsOfKind } from "../events/testing";
 import { TaskService, TaskServiceLayer } from "../tasks";
@@ -15,6 +16,7 @@ import { ProjectService, ProjectServiceLayer, type ProjectPage, type QueryInput 
 type Deps = ProjectService | TaskService | SqlClient.SqlClient;
 
 const layer = ProjectServiceLayer.pipe(
+  Layer.provideMerge(ModelProfileLookupLayer),
   Layer.provideMerge(TaskServiceLayer),
   Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(Layer.mergeAll(AuditLogLayer, PlatformEventsLayer)),
@@ -479,5 +481,98 @@ describe("updates that change nothing", () => {
     );
     expect(cleared.description).toBeUndefined();
     expect(collectDiffs(entries[0]?.payload)).toEqual([{ old: "d", new: null }]);
+  });
+});
+
+/** Inserts an empty Model Profile and returns its id. */
+const insertModelProfile = (name: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const id = mintUuid();
+    yield* withTransaction(
+      sql,
+      sql`INSERT INTO model_profiles (id, name, revision, body, created_at, updated_at)
+          VALUES (${id}, ${name}, 1,
+                  '{"accounts":[],"defaultEntry":null,"dismissedNewModels":[]}',
+                  '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')`,
+    );
+    return uuidToString(id);
+  });
+
+describe("a project's Model Profile", () => {
+  it("reads without modelProfileId while the project names none", async () => {
+    const read = await run(
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const created = yield* projects.create({ name: "Bare" });
+        return yield* projects.read(created.id);
+      }),
+    );
+    expect("modelProfileId" in read).toBe(false);
+  });
+
+  it("is named on create and on update, and null removes it", async () => {
+    const { created, changed, cleared, entries } = await run(
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const first = yield* insertModelProfile("First");
+        const second = yield* insertModelProfile("Second");
+        const created = yield* projects.create({ name: "Hercule", modelProfileId: first });
+        yield* TestClock.adjust(A_MINUTE);
+        const changed = yield* projects.update({ id: created.id, modelProfileId: second });
+        const cleared = yield* projects.update({ id: created.id, modelProfileId: null });
+        return {
+          created: { project: created, first },
+          changed: { project: changed, second },
+          cleared,
+          entries: yield* readEventsOfKind(UPDATED),
+        };
+      }),
+    );
+    expect(created.project.modelProfileId).toBe(created.first);
+    expect(changed.project.modelProfileId).toBe(changed.second);
+    expect("modelProfileId" in cleared).toBe(false);
+    expect(entries.flatMap((entry) => collectDiffs(entry.payload))).toEqual([
+      { old: created.first, new: changed.second },
+      { old: changed.second, new: null },
+    ]);
+  });
+
+  it("leaves it alone when an update names other fields", async () => {
+    const kept = await run(
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const profile = yield* insertModelProfile("First");
+        const created = yield* projects.create({ name: "Hercule", modelProfileId: profile });
+        const renamed = yield* projects.update({ id: created.id, name: "Renamed" });
+        return { renamed, profile };
+      }),
+    );
+    expect(kept.renamed.modelProfileId).toBe(kept.profile);
+  });
+
+  it("is refused with validation on modelProfileId when no profile has the id, and nothing is written", async () => {
+    const { onCreate, onUpdate, listed } = await run(
+      Effect.gen(function* () {
+        const projects = yield* ProjectService;
+        const created = yield* projects.create({ name: "Hercule" });
+        return {
+          onCreate: yield* Effect.flip(
+            projects.create({ name: "Other", modelProfileId: UNKNOWN_ID }),
+          ),
+          onUpdate: yield* Effect.flip(
+            projects.update({ id: created.id, modelProfileId: UNKNOWN_ID }),
+          ),
+          listed: (yield* projects.query({})).items,
+        };
+      }),
+    );
+    for (const error of [onCreate, onUpdate]) {
+      expect(error).toMatchObject({
+        error: { code: "validation", details: { issues: [{ path: ["modelProfileId"] }] } },
+      });
+    }
+    expect(listed.map((project) => project.name)).toEqual(["Hercule"]);
+    expect("modelProfileId" in listed[0]!).toBe(false);
   });
 });

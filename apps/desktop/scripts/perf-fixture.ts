@@ -44,7 +44,9 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   Assistant,
   Heartbeat,
+  ModelProfile,
   Project,
+  ProviderAccount,
   Runner,
   Session,
 } from "../../../packages/contract/src/index";
@@ -227,14 +229,16 @@ const buildUsageWindow = (
 });
 
 /**
- * Returns the accounts the launch with Settings › Providers open has: five.
- * Each has an identity and a plan. The first is the Anthropic account the
- * fleet makes, which gets them, and the other four are added, two of them with
- * a label, so the cards draw both a name with a label and a name without one.
- * The Claude and Codex accounts have usage readings taken at `now`, so their
- * cards draw gauges and the account sheet a Usage section, and the last, an
- * Anthropic API key, has been refused, so its card draws a state line and a
- * button to fix it.
+ * Returns the accounts the launch with Settings › Providers open has: seven,
+ * the number spec 17's reference setup names. The first is the Anthropic
+ * account the fleet makes, which gets an identity and a plan, and the others
+ * are added, some with a label, so the cards draw both a name with a label and
+ * a name without one. The Claude and Codex subscription accounts have usage
+ * readings taken at `now`, so their cards draw gauges and the account sheet a
+ * Usage section. The Anthropic API key has been refused, so its card draws a
+ * state line and a button to fix it. The last two, a Z.ai key and an OpenAI
+ * key, have nothing to show. The reference setup's OpenRouter account with 466
+ * models is not here, because no runner can read a catalog in this fixture.
  */
 const buildProviderAccountFixtures = (now: number): ReadonlyArray<ProviderAccountFixture> => [
   {
@@ -282,7 +286,83 @@ const buildProviderAccountFixtures = (now: number): ReadonlyArray<ProviderAccoun
     defaultHarnessId: "claude-code/claude-code",
     failureMessage: "401 Unauthorized: invalid x-api-key",
   },
+  {
+    providerId: "zai/zai",
+    kind: "api-key",
+    defaultHarnessId: "pi/pi",
+  },
+  {
+    providerId: "openai/openai",
+    kind: "api-key",
+    label: "Key",
+    defaultHarnessId: "codex/codex",
+  },
 ];
+
+/**
+ * The Model Profiles the launch with Settings › Providers open has besides
+ * "Main", by name, with the accounts each holds as positions in the list of
+ * `buildProviderAccountFixtures`. "Main" holds every account. Spec 17's
+ * reference setup has four profiles, so the tabs, the account cards' faces
+ * and the pointer all have several to draw.
+ */
+const EXTRA_PROFILE_ACCOUNTS: ReadonlyArray<readonly [string, ReadonlyArray<number>]> = [
+  ["Work", [2, 3, 5]],
+  ["Review", [0, 1]],
+  ["Cheap", [4, 5, 6]],
+];
+
+/**
+ * Makes the Model Profiles of the Providers launch through the API of the
+ * running controller: puts every account in "Main", then creates the profiles
+ * of `EXTRA_PROFILE_ACCOUNTS`, each with its accounts. The sections have no
+ * entries, because no catalog is read in this fixture (the scripted runners
+ * probe only the fleet's account). `resetProviderAccounts` undoes it.
+ */
+const makeModelProfiles = async (
+  call: <T>(method: string, path: string, body?: unknown) => Promise<T>,
+): Promise<void> => {
+  const accounts = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
+  const [main] = await call<ReadonlyArray<ModelProfile>>("GET", "/model-profiles");
+  const held = new Set(main!.accounts.map((section) => section.providerAccountId));
+  await call("PATCH", `/model-profiles/${main!.id}`, {
+    expectedRevision: main!.revision,
+    name: main!.name,
+    accounts: [
+      ...main!.accounts.map(({ providerAccountId, harnessId, selectionPending, entries }) => ({
+        providerAccountId,
+        harnessId,
+        ...(selectionPending
+          ? {}
+          : {
+              entries: entries.map(({ model, harnessId: entryHarnessId }) => ({
+                providerAccountId,
+                model,
+                harnessId: entryHarnessId,
+              })),
+            }),
+      })),
+      ...accounts
+        .filter((account) => !held.has(account.id))
+        .map((account) => ({ providerAccountId: account.id, harnessId: null })),
+    ],
+    defaultEntry: main!.defaultEntry,
+    dismissedNewModels: main!.dismissedNewModels,
+  });
+  for (const [name, positions] of EXTRA_PROFILE_ACCOUNTS) {
+    const created = await call<ModelProfile>("POST", "/model-profiles", { name });
+    await call("PATCH", `/model-profiles/${created.id}`, {
+      expectedRevision: created.revision,
+      name,
+      accounts: positions.map((position) => ({
+        providerAccountId: accounts[position]!.id,
+        harnessId: null,
+      })),
+      defaultEntry: null,
+      dismissedNewModels: [],
+    });
+  }
+};
 
 /** What the user asks in each turn `growTranscript` plays. */
 const LONG_THREAD_QUESTION = "The checkout test fails again. Can you find out why?";
@@ -750,6 +830,7 @@ export async function runWithThreadFixture<T>(
             `runner ${runner.runnerId} online`,
           );
         }
+        if (providerAccounts) await makeModelProfiles(call);
         // A runner is online once the controller answers its hello, before the
         // controller has matched the sessions the runner reports to its threads.
         await waitForCensus(listThreads, {

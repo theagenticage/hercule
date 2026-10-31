@@ -37,27 +37,51 @@
 }
 
 /* ---------- A card ---------- */
-/* The prototype's card is a box with the button inside it, and a foot under
+/* The prototype's card is a box with the button inside it, and feet under
    the button. The box is `.pa-card`; the button that opens the sheet is
-   `.pa-card-open`. The foot holds the button that fixes the card's state, and
-   a card in good standing has none, so there the button is the whole box. The
-   card has no hover style: hovering a card lights nothing. */
+   `.pa-card-open`. One foot holds the button that fixes the card's state; the
+   other, `.pa-card-profiles`, tells which profiles use the account. A card
+   with neither has no foot, so there the button is the whole box. Hovering a
+   card lights nothing else on the page. */
 .pa-card {
   position: relative;
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: 1fr;
+  grid-auto-rows: auto;
   min-width: 0;
   border-radius: var(--r-md);
   background: var(--raised);
   box-shadow:
     inset 0 0 0 1px var(--line-soft),
     var(--shadow-1);
+  transition:
+    box-shadow var(--dur-2),
+    background var(--dur-2);
 }
-/* A card that needs the user takes the state's tint, as the prototype's does. */
-.pa-card.is-attention {
+/* The accounts the open profile holds are lit with a ring; the ones it does
+   not hold wait, dimmed, with no fill. */
+.pa-card.is-member {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in oklab, var(--ink) 70%, transparent),
+    var(--shadow-1);
+}
+.pa-card.is-out {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.pa-card.is-out > .pa-card-open {
+  opacity: 0.55;
+  transition: opacity var(--dur-2);
+}
+.pa-card.is-out:hover > .pa-card-open {
+  opacity: 0.85;
+}
+/* A card that needs the user takes the state's tint, as the prototype's does,
+   unless the open profile leaves it out. */
+.pa-card.is-attention:not(.is-out) {
   background: color-mix(in oklab, var(--you-tint) 60%, var(--raised));
 }
-.pa-card.is-fail {
+.pa-card.is-fail:not(.is-out) {
   background: color-mix(in oklab, var(--fail-tint) 70%, var(--raised));
 }
 .pa-card-open {
@@ -208,13 +232,15 @@
 .pa-card-foot {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 6px;
   min-height: 30px;
   padding: 0 8px 0 12px;
   border-top: 1px solid var(--line-soft);
 }
 .pa-card-fix {
   display: inline-flex;
+  margin-left: auto;
   align-items: center;
   gap: 4px;
   height: 22px;
@@ -232,6 +258,55 @@
 }
 .pa-card-fix:hover {
   background: var(--hover);
+}
+
+/* The profile foot: the faces of the profiles that hold the account at the
+   left, and at the right whether the open profile holds it. These are the
+   prototype's `.vi-used`, `.vi-out`, `.vi-in` and `.vi-use`. */
+.pa-card-faces {
+  display: inline-flex;
+  align-items: center;
+}
+.pa-card-faces > .profile-face + .profile-face {
+  margin-left: -4px;
+}
+.pa-card-out {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pa-card-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pa-card-use {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pa-card-use:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.pa-card-err {
+  margin: 0;
+  padding: 0 12px 8px;
+  color: var(--fail-ink);
+  font-size: var(--t-11);
+  line-height: 1.45;
 }
 
 /* The identity and the plan on one line. The identity gives way first. */

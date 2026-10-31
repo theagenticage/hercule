@@ -52,6 +52,8 @@ import { useThreadHover } from "./use-thread-hover";
  *   Done shelf, and the arrow keys, with the group's key and whether to
  *   unfold it (true) or fold it (false).
  * - `onShowQuiet`: an unfolded group's "n quiet" line, with the group's key.
+ * - `onOpenProjectMenu`: a right-click on a project's heading, with the
+ *   project's id and the point clicked, in window coordinates.
  */
 export interface SidebarListActions {
   readonly onExpand: (section: SectionKey) => void;
@@ -61,6 +63,7 @@ export interface SidebarListActions {
   readonly onToggleDoneShelf: () => void;
   readonly onToggleGroup: (groupKey: string, unfold: boolean) => void;
   readonly onShowQuiet: (groupKey: string) => void;
+  readonly onOpenProjectMenu: (projectId: string, x: number, y: number) => void;
 }
 
 /**
@@ -87,7 +90,7 @@ const renderItem = (
     case "waiting-run-row":
       return <WaitingRunRow key={item.key} item={item} officeOpen={officeOpen} />;
     case "project-header":
-      return <ProjectHeader key={item.key} item={item} />;
+      return <ProjectHeader key={item.key} item={item} onOpenMenu={actions.onOpenProjectMenu} />;
     case "group-row":
       return (
         <GroupRow

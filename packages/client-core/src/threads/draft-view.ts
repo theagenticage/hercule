@@ -8,6 +8,7 @@ import { buildBranchField, type BranchField } from "./branch-menu";
 import { buildComposerFields, type ComposerFields } from "./composer-fields";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { decideDraftPlaceForPick, type DraftPlace } from "./groups";
+import type { RecentModel } from "./recent";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { resolveThreadConfig, type ResolvedDraft } from "./resolve-thread";
 import { buildDraftConfig } from "./thread-defaults";
@@ -27,6 +28,12 @@ import {
 export interface DraftReads extends Required<ThreadCatalogs> {
   readonly settings: SettingsState;
   readonly profiles: readonly Profile[];
+  /**
+   * The entries the user picked, newest first, which the client keeps per
+   * device. A draft in a project that names a Model Profile starts on the
+   * newest one the profile holds.
+   */
+  readonly recent: readonly RecentModel[];
 }
 
 /** Where a Draft Thread is: its project, and the workspace it joins. Either can be `null`. */
@@ -93,6 +100,8 @@ export const buildDraftView = (
     profiles: reads.profiles,
     thisMacRunnerId,
     modelProfiles: reads.modelProfiles,
+    projects: reads.projects,
+    recent: reads.recent,
     ...address,
   });
   const resolved = resolveThreadConfig(reads, { kind: "draft", config: base }, picks);

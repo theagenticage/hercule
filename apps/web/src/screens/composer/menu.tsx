@@ -158,6 +158,44 @@ export function Lane({
   );
 }
 
+/**
+ * The head of a Model Profile in the model menu: its name as a lane label
+ * with a chevron at the right, pointing down while the profile is unfolded.
+ * Clicking it unfolds the profile.
+ */
+export function ProfileHead({
+  label,
+  unfolded,
+  onOpen,
+}: {
+  readonly label: string;
+  readonly unfolded: boolean;
+  readonly onOpen: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      aria-expanded={unfolded}
+      onClick={onOpen}
+      className={cn(
+        "mt-1.5 flex w-full cursor-pointer items-center gap-1.5 rounded-[6px] border-t border-line-soft px-2 pt-2 pb-[3px] text-left first:mt-0 first:border-t-0 first:pt-1 [input+&]:mt-0 [input+&]:border-t-0 [input+&]:pt-1",
+        "text-faint hover:text-ink aria-expanded:text-ink",
+        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
+      )}
+    >
+      <span className="min-w-0 truncate text-label font-emph tracking-[0.1em] uppercase">
+        {label}
+      </span>
+      <span
+        aria-hidden="true"
+        className={cn("ml-auto text-fine transition-transform", unfolded && "rotate-90")}
+      >
+        ›
+      </span>
+    </button>
+  );
+}
+
 /** Wraps a harness's logo for a row's marker column, in place of the dot. */
 export const renderMarker = (mark: ReactNode): ReactNode => (
   <span className="flex w-4 justify-center opacity-85">{mark}</span>

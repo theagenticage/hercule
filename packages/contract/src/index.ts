@@ -253,10 +253,12 @@ export {
   MAX_MODEL_PROFILE_ACCOUNTS,
   MAX_MODEL_PROFILE_NAME_LENGTH,
   MAX_MODEL_PROFILE_SECTION_ENTRIES,
+  MAX_MODEL_PROFILES,
   ModelProfile,
   ModelProfileAccountInput,
   ResolvedModelProfileAccount,
   ModelProfileEntry,
+  ModelProfileCreateInput,
   ModelProfileUpdateInput,
   ResolvedModelProfileEntry,
 } from "./groups/model-profile";

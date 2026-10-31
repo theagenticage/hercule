@@ -769,6 +769,7 @@ export {
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
+  renameModelProfile,
   setModelProfileEntryIncluded,
   takeOutModelProfileEntry,
 } from "./model-profiles/profile-edits";
@@ -778,6 +779,14 @@ export {
   type ModelSectionRow,
 } from "./model-profiles/profile-sections";
 export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
+export {
+  findModelProfileOrFirst,
+  findProjectModelProfile,
+  listAccountModelProfiles,
+  listProjectsOfModelProfile,
+} from "./model-profiles/profile-lookup";
+export { countProfileEntries } from "./model-profiles/profile-entries";
+export { buildModelProfileCopyName } from "./model-profiles/profile-tabs";
 export { updateModelProfile } from "./model-profiles/update-profile";
 export {
   resolveThreadConfig,

@@ -50,7 +50,7 @@ export function ConnectionRowMenu({
       >
         <button
           type="button"
-          {...buildItemProps("reconnect", onReconnect === undefined)}
+          {...buildItemProps("reconnect", { disabled: onReconnect === undefined })}
           title={
             onReconnect === undefined
               ? "This Connection's plugin is not installed, so it cannot sign in again."

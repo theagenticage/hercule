@@ -11,8 +11,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { uuidFromString, uuidToString } from "../db";
-import { StoredProfileBody } from "./profile-body";
+import { mintUuid, uuidFromString, uuidToString } from "../db";
+import { findNamedHarnessId, StoredProfileBody } from "./profile-body";
 
 /** A profile as it is stored. */
 export interface StoredModelProfile {
@@ -34,6 +34,14 @@ interface ModelProfileRow {
   readonly updated_at: string;
 }
 
+/** The entry a new Thread starts on, as placement applies it. */
+export interface StartingEntry {
+  readonly providerAccountId: string;
+  /** The entry's own or its section's harness; `undefined` means the account's default harness. */
+  readonly harnessId: string | undefined;
+  readonly model: string;
+}
+
 const decodeBody = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredProfileBody));
 
 const encodeBody = Schema.encodeEffect(Schema.fromJsonString(StoredProfileBody));
@@ -53,7 +61,7 @@ const toStoredProfile = (
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  return {
+  const repository = {
     /** Returns every profile, in the order they were created. */
     list: (): Effect.Effect<ReadonlyArray<StoredModelProfile>, SqlError | Schema.SchemaError> =>
       Effect.flatMap(
@@ -79,14 +87,84 @@ const make = Effect.gen(function* () {
             : Effect.map(toStoredProfile(rows[0]), Option.some),
       ),
 
-    /** Returns whether a profile other than `exceptId` already has this name. */
-    isNameTaken: (name: string, exceptId: string): Effect.Effect<boolean, SqlError> =>
+    /**
+     * Returns the entry a new Thread starts on for the profile: its default
+     * entry, with the harness the entry or its section names. Returns `None`
+     * when the profile does not exist or has no default entry. It reads the
+     * rows and checks no grant, because the caller is starting a Thread, not
+     * reading the profile.
+     */
+    readStartingEntry: (
+      id: string,
+    ): Effect.Effect<Option.Option<StartingEntry>, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const profile = yield* repository.one(id);
+        if (Option.isNone(profile)) return Option.none();
+        const { accounts, defaultEntry } = profile.value.body;
+        if (defaultEntry === null) return Option.none();
+        const section = accounts.find(
+          (candidate) => candidate.providerAccountId === defaultEntry.providerAccountId,
+        );
+        return Option.some({
+          providerAccountId: defaultEntry.providerAccountId,
+          harnessId:
+            (section === undefined
+              ? defaultEntry.harnessId
+              : findNamedHarnessId(defaultEntry, section)) ?? undefined,
+          model: defaultEntry.model,
+        });
+      }),
+
+    /** Returns whether a profile with this id exists. */
+    exists: (id: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly one: number }>`
-          SELECT 1 AS one FROM model_profiles WHERE name = ${name} AND id <> ${uuidFromString(exceptId)} LIMIT 1
+          SELECT 1 AS one FROM model_profiles WHERE id = ${uuidFromString(id)} LIMIT 1
         `,
         (rows) => rows.length > 0,
       ),
+
+    /** Returns how many profiles there are. */
+    count: (): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly total: number }>`SELECT COUNT(*) AS total FROM model_profiles`,
+        (rows) => rows[0]?.total ?? 0,
+      ),
+
+    /**
+     * Returns whether a profile other than `exceptId` already has this name.
+     * With no `exceptId`, any profile counts (`id IS NOT NULL` holds for
+     * every row).
+     */
+    isNameTaken: (name: string, exceptId?: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly one: number }>`
+          SELECT 1 AS one FROM model_profiles
+          WHERE name = ${name} AND id IS NOT ${exceptId === undefined ? null : uuidFromString(exceptId)}
+          LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /** Inserts a new profile at revision 1 and returns its id. */
+    insert: (profile: {
+      readonly name: string;
+      readonly body: StoredProfileBody;
+      readonly at: string;
+    }): Effect.Effect<string, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const id = mintUuid();
+        const body = yield* encodeBody(profile.body);
+        yield* sql`
+          INSERT INTO model_profiles (id, name, revision, body, created_at, updated_at)
+          VALUES (${id}, ${profile.name}, 1, ${body}, ${profile.at}, ${profile.at})
+        `;
+        return uuidToString(id);
+      }),
+
+    /** Deletes the profile. The caller has already cleared it from the projects that name it. */
+    delete: (id: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`DELETE FROM model_profiles WHERE id = ${uuidFromString(id)}`),
 
     /**
      * Replaces the name and the body of a profile and raises its revision by
@@ -107,6 +185,7 @@ const make = Effect.gen(function* () {
         `;
       }),
   };
+  return repository;
 });
 
 export const modelProfileRepository = make;

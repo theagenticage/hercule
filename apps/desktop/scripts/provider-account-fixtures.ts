@@ -138,9 +138,10 @@ export function writeProviderAccounts(
  * fleet leaves them (`connectFleet` in `fleet.ts` makes one unlabelled
  * Anthropic account, which every thread it spawns runs on): that account stays,
  * every other account is deleted, with its Capability Snapshots, and the
- * account that stays loses its identity, plan, usage readings and refusal. It undoes
- * `writeProviderAccounts`, for a measurement that wants the accounts only in
- * some launches. The controller must be stopped, as for
+ * account that stays loses its identity, plan, usage readings and refusal. Every Model
+ * Profile but "Main" is deleted, and "Main" keeps only the section of the account that
+ * stays. It undoes `writeProviderAccounts` and the profiles that the Providers launch
+ * makes, for a measurement that wants the accounts only in some launches. The controller must be stopped, as for
  * `writeProviderAccounts`. Fails when the write fails, which includes an
  * account that a session or an Agent still uses and that is not the one that
  * stays.
@@ -157,6 +158,24 @@ export function resetProviderAccounts(home: string): void {
       "UPDATE provider_accounts SET identity = NULL, plan_label = NULL, " +
         "failure_message = NULL, failed_at = NULL",
     );
+    database.exec("DELETE FROM model_profiles WHERE name <> 'Main'");
+    const kept = new Set(
+      (
+        database.prepare("SELECT lower(hex(id)) AS id FROM provider_accounts").all() as {
+          id: string;
+        }[]
+      ).map(({ id }) => id.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5")),
+    );
+    const main = database.prepare("SELECT body FROM model_profiles WHERE name = 'Main'").get() as
+      | { body: string }
+      | undefined;
+    if (main !== undefined) {
+      const body = JSON.parse(main.body) as { accounts: { providerAccountId: string }[] };
+      body.accounts = body.accounts.filter(({ providerAccountId }) => kept.has(providerAccountId));
+      database
+        .prepare("UPDATE model_profiles SET body = ? WHERE name = 'Main'")
+        .run(JSON.stringify(body));
+    }
     database.exec("COMMIT");
   } finally {
     database.close();

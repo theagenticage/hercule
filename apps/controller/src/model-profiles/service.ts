@@ -1,6 +1,6 @@
 /**
  * The Model Profile operations: reading the profiles with every entry
- * resolved, and replacing a whole profile.
+ * resolved, replacing a whole profile, creating a profile and deleting one.
  *
  * A stored entry names only an account, a model and maybe a harness. What a
  * menu needs to draw it (the model's name, its options, whether it can run now)
@@ -22,12 +22,16 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   createConflictError,
   createDecodeValidationError,
+  createInvalidStateError,
   createNotFoundError,
   createValidationError,
   Id,
+  MAX_MODEL_PROFILES,
+  ModelProfileCreateInput,
   ModelProfileUpdateInput,
   type Conflict,
   type Forbidden,
+  type InvalidState,
   type ModelProfile,
   type NotFound,
   type Unauthenticated,
@@ -37,10 +41,12 @@ import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { PluginHost } from "../plugins";
+import { ProjectService } from "../projects";
 import { ModelCatalogs, ProviderAccountService } from "../provider-accounts";
 import { runnerRepository } from "../runners";
 import { buildProfileBody } from "./build-profile-body";
 import { resolveProfile, type ResolutionWorld } from "./resolve-profile";
+import type { StoredProfileBody } from "./profile-body";
 import { modelProfileRepository, type StoredModelProfile } from "./repository";
 
 const UpdateInput = Schema.Struct({ id: Id, ...ModelProfileUpdateInput.fields });
@@ -48,6 +54,15 @@ const UpdateInput = Schema.Struct({ id: Id, ...ModelProfileUpdateInput.fields })
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
+const decodeCreate = Schema.decodeUnknownEffect(ModelProfileCreateInput);
+
+/** The body of a profile that holds no account, no entry and no dismissed model. */
+const EMPTY_BODY: StoredProfileBody = { accounts: [], defaultEntry: null, dismissedNewModels: [] };
+
+const LAST_PROFILE_REFUSAL =
+  "This is your only Model Profile. Create another before you delete this one.";
+
+const TOO_MANY_PROFILES = `There are already ${String(MAX_MODEL_PROFILES)} Model Profiles, the most there can be. Delete one before you create another.`;
 
 const NO_SUCH_PROFILE = "no such model profile";
 
@@ -61,6 +76,25 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
+  const projects = yield* ProjectService;
+
+  /** Fails with `Validation` on `name` when another profile has the name. */
+  const requireFreeName = (
+    name: string,
+    exceptId: string | undefined,
+  ): Effect.Effect<void, Validation | SqlError> =>
+    Effect.flatMap(profiles.isNameTaken(name, exceptId), (taken) =>
+      taken
+        ? Effect.fail(
+            createValidationError([
+              {
+                path: ["name"],
+                message: `another Model Profile is already named "${name}"; choose another name`,
+              },
+            ]),
+          )
+        : Effect.void,
+    );
 
   /**
    * Reads everything resolving needs, once: the accounts with their readiness
@@ -127,6 +161,85 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Creates a profile and returns it resolved, at revision 1. It starts
+     * empty, or as a copy of the profile `copyFromId` names. A copy takes the
+     * source's stored body as it is: its sections (including any still waiting
+     * for a first catalog read), entries, harness choices, default entry and
+     * dismissed models. The copy shares nothing with the source afterwards.
+     *
+     * - `Validation` when another profile has the name.
+     * - `NotFound` when `copyFromId` names no profile.
+     * - `InvalidState` when there are already `MAX_MODEL_PROFILES` profiles.
+     */
+    create: (
+      input: ModelProfileCreateInput,
+    ): Effect.Effect<ModelProfile, ReadError | Validation | NotFound | InvalidState> =>
+      Effect.gen(function* () {
+        yield* requireGrant("modelProfile.create");
+        const request = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            if ((yield* profiles.count()) >= MAX_MODEL_PROFILES) {
+              return yield* Effect.fail(createInvalidStateError(TOO_MANY_PROFILES));
+            }
+            yield* requireFreeName(request.name, undefined);
+            const body =
+              request.copyFromId === undefined
+                ? EMPTY_BODY
+                : (yield* readStoredOrFail(request.copyFromId)).body;
+            const id = yield* profiles.insert({ name: request.name, body, at });
+            yield* audit.append({
+              kind: "modelProfile.created",
+              actor: yield* currentStamp,
+              payload: {
+                modelProfileId: id,
+                name: request.name,
+                ...(request.copyFromId === undefined ? {} : { copyFromId: request.copyFromId }),
+              },
+              record: { topic: "provider", id },
+              at,
+            });
+            return resolveProfile(yield* readStoredOrFail(id), yield* readResolutionWorld());
+          }),
+        );
+      }),
+
+    /**
+     * Deletes a profile and returns an empty object. Every project that names
+     * it is left with no profile, and each of those changes is recorded as a
+     * `project.updated` event, in the same transaction.
+     *
+     * - `NotFound` when there is no such profile.
+     * - `InvalidState` for the last profile, because the composer needs one.
+     */
+    delete: (id: Id): Effect.Effect<Record<string, never>, ReadError | NotFound | InvalidState> =>
+      Effect.gen(function* () {
+        yield* requireGrant("modelProfile.delete");
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const doomed = yield* readStoredOrFail(id);
+            if ((yield* profiles.count()) <= 1) {
+              return yield* Effect.fail(createInvalidStateError(LAST_PROFILE_REFUSAL));
+            }
+            yield* projects.clearModelProfile(id, at);
+            yield* profiles.delete(id);
+            yield* audit.append({
+              kind: "modelProfile.deleted",
+              actor: yield* currentStamp,
+              payload: { modelProfileId: id, name: doomed.name },
+              record: { topic: "provider", id },
+              at,
+            });
+            return {};
+          }),
+        );
+      }),
+
+    /**
      * Replaces the whole profile and returns it resolved. The stored profile
      * becomes exactly what is sent, and its revision goes up by one. Needs
      * `infra.write` only: the accounts it reads are read without the
@@ -168,16 +281,7 @@ const make = Effect.gen(function* () {
                 ),
               );
             }
-            if (yield* profiles.isNameTaken(request.name, id)) {
-              return yield* Effect.fail(
-                createValidationError([
-                  {
-                    path: ["name"],
-                    message: `another Model Profile is already named "${request.name}"; choose another name`,
-                  },
-                ]),
-              );
-            }
+            yield* requireFreeName(request.name, id);
             const world = yield* readResolutionWorld();
             const built = buildProfileBody(request, current.body, world);
             if (built._tag === "refused") {
@@ -208,5 +312,10 @@ export class ModelProfileService extends Context.Service<
 export const ModelProfileServiceLayer: Layer.Layer<
   ModelProfileService,
   never,
-  SqlClient.SqlClient | ProviderAccountService | ModelCatalogs | PluginHost | AuditLog
+  | SqlClient.SqlClient
+  | ProviderAccountService
+  | ModelCatalogs
+  | PluginHost
+  | AuditLog
+  | ProjectService
 > = Layer.effect(ModelProfileService)(make);

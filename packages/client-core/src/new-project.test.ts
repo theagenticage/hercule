@@ -83,6 +83,15 @@ describe("createProjectWithRepositories", () => {
     expect(isNewProjectCreated(next)).toBe(true);
   });
 
+  it("creates the project with the Model Profile it names", async () => {
+    const { api, client } = buildController();
+    const modelProfileId = "01a06d02-7300-7000-8000-000000000009";
+
+    await createProjectWithRepositories(client, { ...FORM, modelProfileId, repositories: [] });
+
+    expect(listWrites(api)).toEqual([["/api/v1/projects", { name: "webshop", modelProfileId }]]);
+  });
+
   it("sends no setup command and no Connection when there is none", async () => {
     const { api, client } = buildController();
 
@@ -132,6 +141,31 @@ describe("createProjectWithRepositories", () => {
     expect(next.failure).toBe("the database is locked");
     expect(next.projectId).toBeNull();
     expect(listWrites(api)).toHaveLength(1);
+  });
+
+  it("returns a refused Model Profile apart from the project's failure", async () => {
+    const reason = "no Model Profile has the id 01a06d02-7800-7000-8000-000000000009";
+    const { client } = buildController({
+      "POST /api/v1/projects": {
+        status: 400,
+        body: {
+          error: {
+            code: "validation",
+            message: "the request is not valid",
+            details: { issues: [{ path: ["modelProfileId"], message: reason }] },
+          },
+        },
+      },
+    });
+
+    const next = await createProjectWithRepositories(client, {
+      ...FORM,
+      modelProfileId: "01a06d02-7800-7000-8000-000000000009",
+    });
+
+    expect(next.failure).toBeNull();
+    expect(next.modelProfileFailure).toBe(reason);
+    expect(next.projectId).toBeNull();
   });
 
   it("keeps the project when a repository is refused, and sends only that repository again", async () => {

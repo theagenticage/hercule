@@ -78,6 +78,7 @@ const READS: DraftReads = {
   resources: [WEBSHOP, INFRA, RUNBOOKS],
   workspaces: [PRIMARY, THREAD_3F1],
   sessions: [],
+  recent: [],
 };
 
 /** Returns the parts of a draft the lip and the sidebar row show. */

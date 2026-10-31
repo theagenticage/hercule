@@ -4396,6 +4396,7 @@ const buildThreadWorldRoutes = (
   sessions: readonly Session[],
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
+  [`GET /api/v1/projects/${WEBSHOP.id}`]: { body: WEBSHOP },
   "GET /api/v1/resources": { body: { items: [R_WEBSHOP] } },
   "GET /api/v1/workspaces": { body: { items: workspaces } },
   "GET /api/v1/sessions": { body: { items: sessions } },

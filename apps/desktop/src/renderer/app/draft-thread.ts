@@ -6,6 +6,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { buildDraftView, type DraftAddress, type DraftView } from "@hercule/client-core";
 import { buildDraftKey } from "./pending-submissions";
+import { readRecentModels } from "./recent-models";
 import {
   harnessesQuery,
   localRunnerQuery,
@@ -64,5 +65,6 @@ export function useDraftThread(address: DraftAddress | null): DraftView | null {
     () => pendingSubmissions.read(key).picks,
   );
   if (address === null || settings === undefined || profiles === undefined) return null;
-  return buildDraftView({ ...lists, settings, profiles }, address, picks);
+  const recent = readRecentModels(controller.url);
+  return buildDraftView({ ...lists, settings, profiles, recent }, address, picks);
 }

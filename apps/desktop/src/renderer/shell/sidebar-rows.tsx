@@ -361,11 +361,17 @@ export const WaitingRunRow = memo(function WaitingRunRow({
  * are `null`) draws an empty outline where a project's tile sits, so its name
  * lines up with the other projects' names. Its `+` opens a new thread in no
  * project.
+ *
+ * A right-click on a project's heading calls `onOpenMenu` with the project's
+ * id and the point clicked, in window coordinates. The heading of the
+ * threads in no project opens no menu.
  */
 export const ProjectHeader = memo(function ProjectHeader({
   item,
+  onOpenMenu,
 }: {
   readonly item: SidebarItemOf<"project-header">;
+  readonly onOpenMenu: (projectId: string, x: number, y: number) => void;
 }): JSX.Element {
   const { projectId, name, tint, waitingCount } = item;
   return (
@@ -374,6 +380,14 @@ export const ProjectHeader = memo(function ProjectHeader({
       data-key={item.key}
       tabIndex={-1}
       style={{ marginTop: item.leading, height: buildItemHeight("project-header") }}
+      onContextMenu={
+        projectId === null
+          ? undefined
+          : (event) => {
+              event.preventDefault();
+              onOpenMenu(projectId, event.clientX, event.clientY);
+            }
+      }
     >
       <ProjectTile tint={tint} name={name} />
       {/* The space keeps the heading's name "webshop 2 need you", not

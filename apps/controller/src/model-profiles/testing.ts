@@ -31,11 +31,15 @@ import { RunnerConnectionsLayer } from "../runners";
 import { SettingsLayer } from "../settings";
 import { AccountUsageLayer } from "../usage";
 import * as SqlClient from "effect/sql/SqlClient";
+import { ProjectService, ProjectServiceLayer } from "../projects";
+import { ModelProfileLookupLayer } from "./lookup";
 import { ModelProfileMembershipLayer } from "./membership";
 import { ModelProfileService, ModelProfileServiceLayer } from "./service";
 
 const buildStack = (providerApi: HttpClient.HttpClient) =>
   ModelProfileServiceLayer.pipe(
+    Layer.provideMerge(ProjectServiceLayer),
+    Layer.provideMerge(ModelProfileLookupLayer),
     Layer.provideMerge(ProviderAccountServiceLayer),
     Layer.provideMerge(ProviderKeyRequestsLayer),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
@@ -51,7 +55,11 @@ const buildStack = (providerApi: HttpClient.HttpClient) =>
     Layer.provideMerge(buildPluginStack()),
   );
 
-export type ProfileServices = AccountServices | ModelProfileService | ModelProfileMembership;
+export type ProfileServices =
+  | AccountServices
+  | ModelProfileService
+  | ModelProfileMembership
+  | ProjectService;
 
 /**
  * Runs an effect as the user on a fresh database, after the fixture plugins

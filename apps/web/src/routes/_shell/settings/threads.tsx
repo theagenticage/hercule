@@ -75,14 +75,14 @@ function Threads(): JSX.Element {
   // - a stored id of an account that no longer exists falls back to the open
   //   profile's default entry;
   // - "nothing picked" is null.
-  const defaults = computeThreadDefaults(
-    settings.user,
+  const defaults = computeThreadDefaults({
+    settingsUser: settings.user,
     accounts,
     runners,
     profiles,
-    localId,
+    thisMacRunnerId: localId,
     modelProfiles,
-  );
+  });
   const modelField = buildThreadModelField(
     { accounts, providers, harnesses, modelProfiles, runners, thisMacRunnerId: localId },
     defaults,
@@ -126,15 +126,24 @@ function Threads(): JSX.Element {
                       No model chosen
                     </option>
                   ) : null}
-                  {modelField.options.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.missing
-                        ? `${option.label} (not offered)`
-                        : option.problem === null
-                          ? option.label
-                          : `${option.label} (${option.problem})`}
-                    </option>
-                  ))}
+                  {modelField.groups.map((group) => {
+                    const options = group.options.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.missing
+                          ? `${option.label} (not offered)`
+                          : option.problem === null
+                            ? option.label
+                            : `${option.label} (${option.problem})`}
+                      </option>
+                    ));
+                    return group.label === null ? (
+                      options
+                    ) : (
+                      <optgroup key={group.label} label={group.label}>
+                        {options}
+                      </optgroup>
+                    );
+                  })}
                 </Select>
               )}
               <p className="text-fine text-faint">

@@ -43,6 +43,7 @@ export interface ProjectPageRequest {
 export interface NewProject {
   readonly name: string;
   readonly description: string | undefined;
+  readonly modelProfileId?: string | undefined;
   readonly at: string;
 }
 
@@ -50,18 +51,20 @@ export interface NewProject {
 export interface ProjectEdit {
   readonly name?: string;
   readonly description?: string | null;
+  readonly modelProfileId?: string | null;
 }
 
 interface ProjectRow {
   readonly id: Uint8Array;
   readonly name: string;
   readonly description: string | null;
+  readonly model_profile_id: Uint8Array | null;
   readonly created_at: string;
   readonly updated_at: string;
   readonly deleted_at: string | null;
 }
 
-const COLUMNS = "id, name, description, created_at, updated_at, deleted_at";
+const COLUMNS = "id, name, description, model_profile_id, created_at, updated_at, deleted_at";
 
 /** How a project list sorts by each of its sortable fields. */
 const PROJECT_SORT_COLUMNS: Record<ProjectSortField, SortColumn<Project>> = {
@@ -82,6 +85,7 @@ const toProject = (row: ProjectRow): Project => ({
   id: uuidToString(row.id),
   name: row.name,
   ...(row.description === null ? {} : { description: row.description }),
+  ...(row.model_profile_id === null ? {} : { modelProfileId: uuidToString(row.model_profile_id) }),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   ...(row.deleted_at === null ? {} : { deletedAt: row.deleted_at }),
@@ -104,14 +108,18 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
-          INSERT INTO projects (id, name, description, created_at, updated_at)
+          INSERT INTO projects (id, name, description, model_profile_id, created_at, updated_at)
           VALUES (${id}, ${project.name}, ${project.description ?? null},
+                  ${project.modelProfileId === undefined ? null : uuidFromString(project.modelProfileId)},
                   ${project.at}, ${project.at})
         `;
         return {
           id: uuidToString(id),
           name: project.name,
           ...(project.description === undefined ? {} : { description: project.description }),
+          ...(project.modelProfileId === undefined
+            ? {}
+            : { modelProfileId: project.modelProfileId }),
           createdAt: project.at,
           updatedAt: project.at,
         };
@@ -122,10 +130,34 @@ const make = Effect.gen(function* () {
       const sets = [sql`updated_at = ${at}`];
       if (edit.name !== undefined) sets.push(sql`name = ${edit.name}`);
       if (edit.description !== undefined) sets.push(sql`description = ${edit.description}`);
+      if (edit.modelProfileId !== undefined) {
+        sets.push(
+          sql`model_profile_id = ${edit.modelProfileId === null ? null : uuidFromString(edit.modelProfileId)}`,
+        );
+      }
       return Effect.asVoid(
         sql`UPDATE projects SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );
     },
+
+    /**
+     * Clears the Model Profile from every project row that names it, deleted
+     * projects included, and sets their `updated_at`. Returns the ids of the
+     * projects that are not deleted, which are the ones whose change is
+     * recorded.
+     */
+    clearModelProfile: (
+      modelProfileId: string,
+      at: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly deleted_at: string | null }>`
+          UPDATE projects SET model_profile_id = NULL, updated_at = ${at}
+          WHERE model_profile_id = ${uuidFromString(modelProfileId)}
+          RETURNING id, deleted_at
+        `,
+        (rows) => rows.filter((row) => row.deleted_at === null).map((row) => uuidToString(row.id)),
+      ),
 
     /**
      * Marks the project deleted. The row stays, and so does every task and

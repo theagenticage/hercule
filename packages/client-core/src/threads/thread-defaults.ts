@@ -1,7 +1,13 @@
 /**
- * Computes what a new thread starts with: the `thread.*` settings the user
- * has set, then the open Model Profile's default entry, and built-in defaults
- * for the rest (spec 02 §Thread, spec 06 §17.9). The rule is written once here
+ * Computes what a new thread starts with (spec 02 §Thread, spec 06 §17.9).
+ * The model comes from the first of these that applies:
+ *
+ * - in a project that names a Model Profile, the entry of the Recent list that
+ *   profile holds, else the profile's default entry;
+ * - the `thread.*` settings the user has set;
+ * - the first Model Profile's default entry.
+ *
+ * Built-in defaults fill the rest. The rule is written once here
  * because two screens use it: the composer prefills a new thread from it, and
  * Settings > Threads shows it as the form's state. Two copies of a rule drift
  * apart.
@@ -20,16 +26,22 @@ import type {
   AccessMode,
   ModelProfile,
   Profile,
+  Project,
   ProviderAccount,
   ResolvedModelProfileEntry,
   Runner,
   SettingsState,
 } from "@hercule/contract";
 import {
+  buildProfileEntryKey,
   findAccountDefaultEntry,
   findProfileDefaultEntry,
+  isSameProfileEntry,
+  listProfileEntries,
 } from "../model-profiles/profile-entries";
+import { findProjectModelProfile } from "../model-profiles/profile-lookup";
 import type { ThreadConfig } from "./config";
+import type { RecentModel } from "./recent";
 import { resolveThreadHarnessId } from "../provider-accounts";
 import { findDefaultProviderAccountId } from "./default-provider-account";
 import { buildRunnerMenu } from "./runner-menu";
@@ -56,6 +68,16 @@ interface StartingEntry {
 }
 
 /**
+ * The Model Profile a project names and the entries the user picked lately,
+ * which together decide where a new thread in that project starts.
+ */
+interface ProjectStart {
+  readonly modelProfile: ModelProfile;
+  /** The entries the user picked, newest first. */
+  readonly recent: readonly RecentModel[];
+}
+
+/**
  * Returns the starting entry that runs the profile `entry` on `account`, in
  * the harness the entry resolved to, so the thread runs where the menu showed.
  */
@@ -65,15 +87,39 @@ const buildStartingEntry = (
 ): StartingEntry => ({ account, harnessId: entry.resolvedHarnessId, model: entry.model });
 
 /**
+ * Returns the entry a new thread in a project with a profile starts on: the
+ * newest entry of `recent` that the profile holds, else the profile's default
+ * entry. Returns `undefined` when the profile holds no entry to start on, or
+ * the entry's account no longer exists, and then the thread default applies.
+ */
+const chooseProjectStartingEntry = (
+  accounts: readonly ProviderAccount[],
+  { modelProfile, recent }: ProjectStart,
+): StartingEntry | undefined => {
+  const entries = listProfileEntries(modelProfile);
+  const picked = recent
+    .map((pick) => entries.find((entry) => isSameProfileEntry(buildProfileEntryKey(entry), pick)))
+    .find((entry) => entry !== undefined);
+  const entry = picked ?? findProfileDefaultEntry(modelProfile);
+  const account = accounts.find((each) => each.id === entry?.providerAccountId);
+  return entry === undefined || account === undefined
+    ? undefined
+    : buildStartingEntry(account, entry);
+};
+
+/**
  * Returns the account, harness and model a new thread starts on:
  *
- * - the stored `thread.*` settings, when the stored account still exists. A
+ * - in a project that names a profile, the entry
+ *   `chooseProjectStartingEntry` returns, when it returns one;
+ * - otherwise the thread default, which is the first of these that applies.
+ *   The stored `thread.*` settings, when the stored account still exists. A
  *   stored harness and model belong to the stored account. With no stored
- *   model, the open profile's entry for that account applies;
- * - otherwise (nothing stored, or the stored account is gone) the open
- *   profile's default entry. A model stored without an account is ignored,
- *   because it belonged to no account that exists;
- * - otherwise the first account that is ready, with no model.
+ *   model, the open profile's entry for that account applies. When nothing
+ *   is stored, or the stored account is gone, the open profile's default
+ *   entry applies. A model stored without an account is ignored, because it
+ *   belonged to no account that exists. When there is no such entry, the
+ *   first account that is ready, with no model.
  *
  * A stored model that no profile holds is still the user's choice. It stays
  * picked and the menu shows it is not offered, rather than silently replacing
@@ -83,7 +129,11 @@ const chooseStartingEntry = (
   settingsUser: SettingsState["user"],
   accounts: readonly ProviderAccount[],
   openProfile: ModelProfile | undefined,
+  projectStart: ProjectStart | undefined,
 ): StartingEntry => {
+  const projectEntry =
+    projectStart === undefined ? undefined : chooseProjectStartingEntry(accounts, projectStart);
+  if (projectEntry !== undefined) return projectEntry;
   const storedAccount = accounts.find(
     (each) => each.id === settingsUser["thread.providerAccountId"],
   );
@@ -115,22 +165,40 @@ const chooseStartingEntry = (
   };
 };
 
+/** What `computeThreadDefaults` reads. */
+interface ThreadDefaultsInput {
+  readonly settingsUser: SettingsState["user"];
+  readonly accounts: readonly ProviderAccount[];
+  readonly runners: readonly Runner[];
+  readonly profiles: readonly Profile[];
+  readonly thisMacRunnerId: string | null;
+  /** The user's Model Profiles; the first is the open one. */
+  readonly modelProfiles: readonly ModelProfile[];
+  /**
+   * Given for a thread in a project that names a profile. It decides the model
+   * before the settings do.
+   */
+  readonly projectStart?: ProjectStart | undefined;
+}
+
 /**
  * Returns the defaults for a new thread, from the user's settings, the open
  * Model Profile (the first one) and the available runners.
  */
-export const computeThreadDefaults = (
-  settingsUser: SettingsState["user"],
-  accounts: readonly ProviderAccount[],
-  runners: readonly Runner[],
-  profiles: readonly Profile[],
-  thisMacRunnerId: string | null,
-  modelProfiles: readonly ModelProfile[],
-): ThreadDefaults => {
+export const computeThreadDefaults = ({
+  settingsUser,
+  accounts,
+  runners,
+  profiles,
+  thisMacRunnerId,
+  modelProfiles,
+  projectStart,
+}: ThreadDefaultsInput): ThreadDefaults => {
   const { account, harnessId, model } = chooseStartingEntry(
     settingsUser,
     accounts,
     modelProfiles[0],
+    projectStart,
   );
   const runnerId =
     account === undefined
@@ -159,7 +227,9 @@ export const computeThreadDefaults = (
 /**
  * Returns what a Draft Thread runs with before the user picks anything: the
  * defaults of `computeThreadDefaults`, no model options, the draft's project,
- * and the workspace it joins. `workspaceId` is `null` for a draft that joins
+ * and the workspace it joins. When the project names a Model Profile that
+ * still exists, the model is the newest entry of `recent` that the profile
+ * holds, else the profile's default entry. `workspaceId` is `null` for a draft that joins
  * no workspace; the composer then opens it where the stored `thread.workspace`
  * setting says, which the config carries along.
  *
@@ -174,6 +244,8 @@ export const buildDraftConfig = ({
   profiles,
   thisMacRunnerId,
   modelProfiles,
+  projects,
+  recent,
   projectId,
   workspaceId,
 }: {
@@ -183,19 +255,26 @@ export const buildDraftConfig = ({
   readonly profiles: readonly Profile[];
   readonly thisMacRunnerId: string | null;
   readonly modelProfiles: readonly ModelProfile[];
+  readonly projects: readonly Project[];
+  /** The entries the user picked, newest first. */
+  readonly recent: readonly RecentModel[];
   readonly projectId: string | null;
   readonly workspaceId: string | null;
-}): ThreadConfig => ({
-  ...computeThreadDefaults(
-    settingsUser,
-    accounts,
-    runners,
-    profiles,
-    thisMacRunnerId,
-    modelProfiles,
-  ),
-  options: {},
-  projectId,
-  workspace: workspaceId === null ? null : { kind: "existing", workspaceId },
-  preferredWorkspace: settingsUser["thread.workspace"] ?? null,
-});
+}): ThreadConfig => {
+  const modelProfile = findProjectModelProfile(projects, modelProfiles, projectId);
+  return {
+    ...computeThreadDefaults({
+      settingsUser,
+      accounts,
+      runners,
+      profiles,
+      thisMacRunnerId,
+      modelProfiles,
+      projectStart: modelProfile === undefined ? undefined : { modelProfile, recent },
+    }),
+    options: {},
+    projectId,
+    workspace: workspaceId === null ? null : { kind: "existing", workspaceId },
+    preferredWorkspace: settingsUser["thread.workspace"] ?? null,
+  };
+};

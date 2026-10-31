@@ -3628,6 +3628,36 @@ describe("restoring Codex subagent counters before continuation", () => {
     ]);
   });
 
+  it("does not baseline a child with turns at zero when the completed replay contains no usage report", async () => {
+    const run = createDriving({
+      "thread/resume": (params) => {
+        const metadata = readSubagentMetadata(params);
+        return { thread: { ...metadata.thread, turns: [{ id: "old-turn", status: "completed" }] } };
+      },
+      "thread/read": readSubagentMetadata,
+    });
+    await Effect.runPromise(run.adapter.startSession(SESSION, buildResumedChildSpec(), run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("usage is incomplete");
+    pushNativeTurn(run.spawns[0]!, CHILD, "child-turn");
+    pushChildCounterReport(run.spawns[0]!, buildChildCounterReport(600, 20));
+    pushChildCounterReport(run.spawns[0]!, buildChildCounterReport(900, 30));
+    await waitUntil(
+      "reported incomplete baseline and growth",
+      () =>
+        filterByTag(run.seen, "session.usage.updated").filter((event) => event.subagentId === CHILD)
+          .length === 3,
+    );
+    const reports = filterByTag(run.seen, "session.usage.updated")
+      .filter((event) => event.subagentId === CHILD)
+      .slice(1);
+    expect(reports.map((event) => event.usage)).toEqual([undefined, undefined]);
+    expect(reports.map((event) => event.usageReport?.counts)).toEqual([
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 300, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
   it("continues with visibly incomplete usage when a missing child counter cannot be restored", async () => {
     const run = createDriving({
       "thread/read": readSubagentMetadata,

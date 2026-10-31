@@ -97,7 +97,7 @@ import {
   type MasterKeyBackend,
   type SecurityRunner,
 } from "../secrets";
-import { ModelProfileMembershipLayer } from "../model-profiles";
+import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "../model-profiles";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import {
   findCredentialSecretName,
@@ -232,6 +232,8 @@ const buildServices = (
         PlatformEventsLayer,
         // As in the real boot: Provider Accounts declares this port.
         ModelProfileMembershipLayer,
+        // Projects declares this port as well, to check that a profile exists.
+        ModelProfileLookupLayer,
         controllerIdentityLayer,
         JoinTokensLayer,
         SessionTokensLayer,

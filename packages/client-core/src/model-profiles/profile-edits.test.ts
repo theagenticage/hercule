@@ -22,6 +22,7 @@ import {
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
+  renameModelProfile,
   setModelProfileEntryIncluded,
   takeOutModelProfileEntry,
 } from "./profile-edits";
@@ -464,5 +465,21 @@ describe("addModelProfileAccount", () => {
 
   it("does not add an account twice", () => {
     expect(addModelProfileAccount(PROFILE, CODEX).accounts).toHaveLength(2);
+  });
+});
+
+describe("renameModelProfile", () => {
+  it("sends the profile as read, with the revision it was read at, under the new name", () => {
+    const renamed = renameModelProfile(PROFILE, "Client work");
+
+    expect(renamed).toEqual({
+      ...moveModelProfileAccount(PROFILE, CLAUDE, 0),
+      name: "Client work",
+    });
+    expect(renamed.expectedRevision).toBe(7);
+  });
+
+  it("does not trim or check the name, so the controller's refusal is what the user reads", () => {
+    expect(renameModelProfile(PROFILE, "  ").name).toBe("  ");
   });
 });

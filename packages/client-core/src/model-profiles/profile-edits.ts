@@ -233,3 +233,16 @@ export const addModelProfileAccount = (
     ? input
     : { ...input, accounts: [...input.accounts, { providerAccountId, harnessId: null }] };
 };
+
+/**
+ * Returns the profile renamed to `name`, as typed. The name is not trimmed
+ * or checked: a blank name, or one another profile has, is refused by the
+ * controller, and its message is what the user reads.
+ */
+export const renameModelProfile = (
+  profile: ModelProfile,
+  name: string,
+): ModelProfileUpdateInput => ({
+  ...toUpdateInput(profile),
+  name,
+});

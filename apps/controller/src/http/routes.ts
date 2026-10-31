@@ -685,9 +685,11 @@ const modelProfileRoutes = HttpApiBuilder.group(api, "modelProfile", (handlers) 
     return handlers
       .handle("query", () => withApiErrors(modelProfiles.query()))
       .handle("read", ({ params }) => withApiErrors(modelProfiles.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(modelProfiles.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(modelProfiles.update({ id: params.id, ...payload })),
-      );
+      )
+      .handle("delete", ({ params }) => withApiErrors(modelProfiles.delete(params.id)));
   }),
 );
 
@@ -950,7 +952,9 @@ const operationServices = Layer.mergeAll(
   SettingsOperationsLayer,
   HarnessServiceLayer,
   ProviderServiceLayer,
-  ModelProfileServiceLayer,
+  // Deleting a Model Profile clears it from the projects that name it, so the
+  // project service is provided to it rather than merged next to it.
+  ModelProfileServiceLayer.pipe(Layer.provideMerge(ProjectServiceLayer)),
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
@@ -959,7 +963,6 @@ const operationServices = Layer.mergeAll(
   MemoryServiceLayer,
   WikiPageServiceLayer,
   SkillServiceLayer,
-  ProjectServiceLayer,
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),

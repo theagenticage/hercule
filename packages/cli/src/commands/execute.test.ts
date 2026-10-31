@@ -242,6 +242,82 @@ describe("a positional whose row resolves tails", () => {
   });
 });
 
+// A Model Profile is named by a tail wherever a command takes one.
+describe("a flag that names a Model Profile", () => {
+  const AT = "2026-10-31T09:00:00.000Z";
+  const profile = {
+    id: buildId("aaaaaaa1"),
+    name: "Main",
+    revision: 1,
+    accounts: [],
+    defaultEntry: null,
+    dismissedNewModels: [],
+    createdAt: AT,
+    updatedAt: AT,
+  };
+  const project = { id: buildId("bbbbbbb2"), name: "Hercule v1", createdAt: AT, updatedAt: AT };
+
+  /** Answers the list of Model Profiles with one whose id ends in `aaaaaaa1`, and any write with a valid record. */
+  const stubServer = () =>
+    stubClient((request) => {
+      if (request.path === "/api/v1/model-profiles" && request.method === "GET") return [profile];
+      return request.path.startsWith("/api/v1/projects") ? project : profile;
+    });
+
+  it("resolves the tail of --copy-from and sends the full id", async () => {
+    const { fetch, client } = stubServer();
+    const command = lookUpCommand("model-profile", "create");
+    const args = await parseArguments(
+      command,
+      ["--name", "Review", "--copy-from", "0aaaaaaa1"],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/model-profiles" });
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/model-profiles",
+      body: { name: "Review", copyFromId: profile.id },
+    });
+  });
+
+  it("resolves the tail of --model-profile on project create", async () => {
+    const { fetch, client } = stubServer();
+    const command = lookUpCommand("project", "create");
+    const args = await parseArguments(
+      command,
+      ["--name", "Hercule v1", "--model-profile", "0aaaaaaa1"],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/projects",
+      body: { name: "Hercule v1", modelProfileId: profile.id },
+    });
+  });
+
+  it("still clears the profile of a project with --model-profile null, reading no list", async () => {
+    const { fetch, client } = stubServer();
+    const command = lookUpCommand("project", "update");
+    const args = await parseArguments(
+      command,
+      [project.id, "--model-profile", "null"],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls).toMatchObject([
+      { method: "PATCH", path: `/api/v1/projects/${project.id}`, body: { modelProfileId: null } },
+    ]);
+  });
+});
+
 /** Returns a subagent of `sessionId`, as `session subagent list` returns it. */
 const buildSubagent = (id: string, sessionId: string) => ({
   id,

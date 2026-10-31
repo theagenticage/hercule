@@ -69,6 +69,13 @@ export const listProfileEntries = (profile: ModelProfile): readonly ResolvedMode
   profile.accounts.flatMap((section) => section.entries);
 
 /**
+ * Returns how many entries the profile's menu holds, across all its accounts.
+ * An account whose models are still pending counts as none.
+ */
+export const countProfileEntries = (profile: ModelProfile): number =>
+  profile.accounts.reduce((total, section) => total + section.entries.length, 0);
+
+/**
  * Returns the first entry matching `key` in `profiles`, searching the
  * profiles and their sections in order, or `undefined` when no profile holds
  * it.

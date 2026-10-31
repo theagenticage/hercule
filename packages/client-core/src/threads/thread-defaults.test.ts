@@ -4,6 +4,10 @@
  * defaults in a Draft Thread's project. The tests check that:
  *
  * - a stored setting wins over the open Model Profile's default entry;
+ * - in a project that names a Model Profile, a new thread starts on the newest
+ *   entry the user picked that the profile holds, else on the profile's
+ *   default entry; a project with no profile, or a deleted one, starts as
+ *   anywhere else;
  * - the profile's default entry starts the thread with its account, harness
  *   and model together;
  * - a stale account id falls back to the profile's default entry;
@@ -11,7 +15,7 @@
  * - nothing picked is `null`, never an empty string.
  */
 import { describe, expect, it } from "vitest";
-import type { Profile, Runner, SettingsState } from "@hercule/contract";
+import type { Profile, Project, Runner, SettingsState } from "@hercule/contract";
 import {
   ANTHROPIC_IDENTITY,
   OPENAI_IDENTITY,
@@ -21,6 +25,7 @@ import {
   buildProfileSection,
   buildProviderAccount,
 } from "../providers.testing";
+import type { RecentModel } from "./recent";
 import { buildDraftConfig, computeThreadDefaults } from "./thread-defaults";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
@@ -64,14 +69,14 @@ const NO_SETTINGS: SettingsState["user"] = {};
 describe("computeThreadDefaults", () => {
   it("starts on the open profile's default entry when no thread setting is stored", () => {
     expect(
-      computeThreadDefaults(
-        NO_SETTINGS,
-        [CLAUDE, CODEX],
-        [LOCAL],
-        [UNRESTRICTED, WORKER],
-        LOCAL.id,
-        [MAIN],
-      ),
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED, WORKER],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }),
     ).toEqual({
       providerAccountId: CLAUDE.id,
       harnessId: "claude-code/claude-code",
@@ -97,7 +102,14 @@ describe("computeThreadDefaults", () => {
     );
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [codex], [LOCAL], [UNRESTRICTED], LOCAL.id, [profile]),
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [codex],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [profile],
+      }),
     ).toMatchObject({ providerAccountId: codex.id, harnessId: "pi/pi", model: "gpt-6" });
   });
 
@@ -105,9 +117,14 @@ describe("computeThreadDefaults", () => {
     const profile = { ...MAIN, defaultEntry: null };
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [CLAUDE, CODEX], [LOCAL], [UNRESTRICTED], LOCAL.id, [
-        profile,
-      ]),
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [profile],
+      }),
     ).toMatchObject({ providerAccountId: CLAUDE.id, model: "claude-sonnet-5" });
   });
 
@@ -121,9 +138,14 @@ describe("computeThreadDefaults", () => {
     };
 
     expect(
-      computeThreadDefaults(stored, [CLAUDE, CODEX], [LOCAL], [UNRESTRICTED, WORKER], LOCAL.id, [
-        MAIN,
-      ]),
+      computeThreadDefaults({
+        settingsUser: stored,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED, WORKER],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }),
     ).toEqual({
       providerAccountId: CODEX.id,
       harnessId: OPENAI_IDENTITY.harnessId,
@@ -138,7 +160,14 @@ describe("computeThreadDefaults", () => {
     const stored: SettingsState["user"] = { "thread.providerAccountId": CODEX.id };
 
     expect(
-      computeThreadDefaults(stored, [CLAUDE, CODEX], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN]),
+      computeThreadDefaults({
+        settingsUser: stored,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }),
     ).toMatchObject({
       providerAccountId: CODEX.id,
       harnessId: OPENAI_IDENTITY.harnessId,
@@ -150,8 +179,14 @@ describe("computeThreadDefaults", () => {
     const stale: SettingsState["user"] = { "thread.providerAccountId": "account-that-went-away" };
 
     expect(
-      computeThreadDefaults(stale, [CLAUDE, CODEX], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN])
-        .providerAccountId,
+      computeThreadDefaults({
+        settingsUser: stale,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).providerAccountId,
     ).toBe(CLAUDE.id);
   });
 
@@ -163,7 +198,14 @@ describe("computeThreadDefaults", () => {
     };
 
     expect(
-      computeThreadDefaults(stale, [CLAUDE], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN]),
+      computeThreadDefaults({
+        settingsUser: stale,
+        accounts: [CLAUDE],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }),
     ).toMatchObject({
       providerAccountId: CLAUDE.id,
       harnessId: "claude-code/claude-code",
@@ -178,7 +220,14 @@ describe("computeThreadDefaults", () => {
     };
 
     expect(
-      computeThreadDefaults(stored, [CLAUDE], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN]).model,
+      computeThreadDefaults({
+        settingsUser: stored,
+        accounts: [CLAUDE],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).model,
     ).toBe("claude-haiku-5");
   });
 
@@ -191,9 +240,14 @@ describe("computeThreadDefaults", () => {
     const empty = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]);
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [first, CODEX], [LOCAL], [UNRESTRICTED], LOCAL.id, [
-        empty,
-      ]),
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [first, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [empty],
+      }),
     ).toMatchObject({ providerAccountId: CODEX.id, harnessId: null, model: null });
   });
 
@@ -206,9 +260,14 @@ describe("computeThreadDefaults", () => {
     );
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [claude], [LOCAL, REMOTE], [UNRESTRICTED], LOCAL.id, [
-        MAIN,
-      ]).runnerId,
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [claude],
+        runners: [LOCAL, REMOTE],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).runnerId,
     ).toBe(REMOTE.id);
   });
 
@@ -220,19 +279,41 @@ describe("computeThreadDefaults", () => {
     );
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN])
-        .runnerId,
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [claude],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).runnerId,
     ).toBeNull();
   });
 
   it("takes the first profile when none is named unrestricted", () => {
     expect(
-      computeThreadDefaults(NO_SETTINGS, [CLAUDE], [LOCAL], [WORKER], LOCAL.id, [MAIN]).profileId,
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [CLAUDE],
+        runners: [LOCAL],
+        profiles: [WORKER],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).profileId,
     ).toBe(WORKER.id);
   });
 
   it("returns null for every field when there is nothing to pick", () => {
-    expect(computeThreadDefaults(NO_SETTINGS, [], [], [], null, [])).toEqual({
+    expect(
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [],
+        runners: [],
+        profiles: [],
+        thisMacRunnerId: null,
+        modelProfiles: [],
+      }),
+    ).toEqual({
       providerAccountId: null,
       harnessId: null,
       model: null,
@@ -250,6 +331,8 @@ describe("buildDraftConfig", () => {
     profiles: [UNRESTRICTED],
     thisMacRunnerId: LOCAL.id,
     modelProfiles: [MAIN],
+    projects: [],
+    recent: [],
   };
 
   it("starts a draft in its project from the defaults, joining no workspace, with the stored workspace setting", () => {
@@ -287,5 +370,139 @@ describe("buildDraftConfig", () => {
       workspace: { kind: "existing", workspaceId: "w-shared" },
       preferredWorkspace: null,
     });
+  });
+});
+
+describe("a new thread in a project with a Model Profile", () => {
+  const AT = "2026-09-05T09:00:00.000Z";
+  const buildProject = (id: string, modelProfileId?: string): Project => ({
+    id,
+    name: id,
+    createdAt: AT,
+    updatedAt: AT,
+    ...(modelProfileId === undefined ? {} : { modelProfileId }),
+  });
+
+  /** Holds Codex's GPT, with a Claude entry besides; GPT is the default. */
+  const WORK = buildModelProfile(
+    [buildProfileSection(OPENAI_IDENTITY, [GPT]), buildProfileSection(ANTHROPIC_IDENTITY, [OPUS])],
+    {
+      id: "profile-work",
+      name: "Work",
+      defaultEntry: { providerAccountId: CODEX.id, model: "gpt-6", harnessId: null },
+    },
+  );
+  const OPUS_PICK = {
+    providerAccountId: CLAUDE.id,
+    harnessId: ANTHROPIC_IDENTITY.harnessId,
+    model: "claude-opus-5",
+  };
+  const SONNET_PICK = { ...OPUS_PICK, model: "claude-sonnet-5" };
+
+  const draftIn = (
+    project: Project,
+    options: {
+      readonly recent?: readonly RecentModel[];
+      readonly settingsUser?: SettingsState["user"];
+    } = {},
+  ) =>
+    buildDraftConfig({
+      settingsUser: options.settingsUser ?? NO_SETTINGS,
+      accounts: [CLAUDE, CODEX],
+      runners: [LOCAL],
+      profiles: [UNRESTRICTED],
+      thisMacRunnerId: LOCAL.id,
+      modelProfiles: [MAIN, WORK],
+      projects: [project],
+      recent: options.recent ?? [],
+      projectId: project.id,
+      workspaceId: null,
+    });
+
+  it("starts on the newest entry the user picked that the profile holds, in the config the spawn sends", () => {
+    // Sonnet is newer but only Main holds it; the profile Work holds Opus.
+    const config = draftIn(buildProject("p-work", WORK.id), {
+      recent: [SONNET_PICK, OPUS_PICK],
+    });
+
+    expect(config).toMatchObject({
+      providerAccountId: CLAUDE.id,
+      harnessId: ANTHROPIC_IDENTITY.harnessId,
+      model: "claude-opus-5",
+      runnerId: LOCAL.id,
+    });
+  });
+
+  it("starts on the profile's default entry when the user picked none of its entries", () => {
+    const config = draftIn(buildProject("p-work", WORK.id), { recent: [SONNET_PICK] });
+
+    expect(config).toMatchObject({
+      providerAccountId: CODEX.id,
+      harnessId: OPENAI_IDENTITY.harnessId,
+      model: "gpt-6",
+    });
+  });
+
+  it("starts on the profile's entry before a stored thread setting", () => {
+    const config = draftIn(buildProject("p-work", WORK.id), {
+      settingsUser: {
+        "thread.providerAccountId": CLAUDE.id,
+        "thread.harnessId": ANTHROPIC_IDENTITY.harnessId,
+        "thread.model": "claude-sonnet-5",
+      },
+    });
+
+    expect(config).toMatchObject({ providerAccountId: CODEX.id, model: "gpt-6" });
+  });
+
+  it("starts on the thread default in a project with no profile", () => {
+    const config = draftIn(buildProject("p-plain"), { recent: [OPUS_PICK] });
+
+    expect(config).toMatchObject({ providerAccountId: CLAUDE.id, model: "claude-sonnet-5" });
+  });
+
+  it("starts on the thread default in a project whose profile was deleted", () => {
+    const config = draftIn(buildProject("p-gone", "profile-deleted"), { recent: [OPUS_PICK] });
+
+    expect(config).toMatchObject({ providerAccountId: CLAUDE.id, model: "claude-sonnet-5" });
+  });
+
+  it("starts on the thread default when the project's profile holds no entry", () => {
+    const empty = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])], {
+      id: "profile-empty",
+      name: "Empty",
+    });
+
+    const config = buildDraftConfig({
+      settingsUser: NO_SETTINGS,
+      accounts: [CLAUDE],
+      runners: [LOCAL],
+      profiles: [UNRESTRICTED],
+      thisMacRunnerId: LOCAL.id,
+      modelProfiles: [MAIN, empty],
+      projects: [buildProject("p-empty", empty.id)],
+      recent: [],
+      projectId: "p-empty",
+      workspaceId: null,
+    });
+
+    expect(config).toMatchObject({ providerAccountId: CLAUDE.id, model: "claude-sonnet-5" });
+  });
+
+  it("starts on the thread default outside any project, whatever was picked", () => {
+    const config = buildDraftConfig({
+      settingsUser: NO_SETTINGS,
+      accounts: [CLAUDE, CODEX],
+      runners: [LOCAL],
+      profiles: [UNRESTRICTED],
+      thisMacRunnerId: LOCAL.id,
+      modelProfiles: [MAIN, WORK],
+      projects: [buildProject("p-work", WORK.id)],
+      recent: [OPUS_PICK],
+      projectId: null,
+      workspaceId: null,
+    });
+
+    expect(config).toMatchObject({ providerAccountId: CLAUDE.id, model: "claude-sonnet-5" });
   });
 });

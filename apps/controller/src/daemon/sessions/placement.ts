@@ -53,8 +53,10 @@ import {
 } from "../../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
 import { memoryRepository, renderSessionMemory } from "../../memory";
+import { modelProfileRepository } from "../../model-profiles";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
 import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
+import { projectRepository } from "../../projects";
 import { PromotionState } from "../../promotion";
 import {
   buildRunnerRefusal,
@@ -370,6 +372,8 @@ const make = Effect.gen(function* () {
   const recordComposer = yield* sessionRecordComposer;
   const workspaces = yield* WorkspaceService;
   const resources = yield* resourceRepository;
+  const projectRows = yield* projectRepository;
+  const modelProfiles = yield* modelProfileRepository;
   const providerAccounts = yield* providerAccountRepository;
   const accountRunners = yield* ProviderAccountRunners;
   const host = yield* PluginHost;
@@ -771,6 +775,37 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Returns the thread defaults with the account, harness, model and options
+   * of the Model Profile's default entry in their place, as one selection.
+   * Returns the defaults unchanged when the project names no profile
+   * (`modelProfileId` is `undefined`), names one that no longer exists, or
+   * names an empty one (no default entry).
+   *
+   * The harness is the one the entry or its section names, else undefined,
+   * which means the account's default harness. The user's or the calling
+   * session's options are dropped because they belong to another model. The
+   * entry stays the choice even when it cannot run now, so no other entry
+   * runs in its place. Placement then applies its ordinary account, harness
+   * and runner checks to the entry, as to any model source. It does not check
+   * that the model is in the account's Model Catalog, for any source (an
+   * explicit model, the thread default, an Agent's model or this entry). A
+   * client greys the entry out from its resolved problem before the start.
+   *
+   * This checks no grant, because the caller is starting a Thread, not
+   * reading the profile.
+   */
+  const applyProjectDefaultEntry = (
+    defaults: ThreadDefaults,
+    modelProfileId: string | undefined,
+  ): Effect.Effect<ThreadDefaults, SqlError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      if (modelProfileId === undefined) return defaults;
+      const entry = yield* modelProfiles.readStartingEntry(modelProfileId);
+      if (Option.isNone(entry)) return defaults;
+      return { ...defaults, ...entry.value, options: undefined };
+    });
+
+  /**
    * Checks whether two requested harnesses are the same harness on one
    * account. `undefined` means the account's default harness, so it equals a
    * harness id that names that default. Returns `false` when the account does
@@ -830,17 +865,6 @@ const make = Effect.gen(function* () {
         onSome: (profile) => Effect.succeed(profile.id),
       }),
     );
-
-  /** Fails with a validation error when `projectId` names no live project. */
-  const validateLiveProject = (projectId: string): Effect.Effect<void, Validation | SqlError> =>
-    Effect.gen(function* () {
-      const live = yield* resources.liveProjects([projectId]);
-      if (live.length === 0) {
-        return yield* Effect.fail(
-          createValidationError([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
-        );
-      }
-    });
 
   /**
    * Writes the workspace and the session in one transaction, joining the
@@ -1248,7 +1272,11 @@ const make = Effect.gen(function* () {
      * 2. the Agent's value, or for a Thread the Thread's defaults
      *    (`readUserThreadDefaults`, `copyCallerThreadDefaults`): the user's
      *    `thread.*` settings when the user starts it, the calling session's
-     *    own values when a session does;
+     *    own values when a session does. When the call names no model and the
+     *    Thread's project has a Model Profile with a default entry, that entry
+     *    replaces the Thread defaults' account, harness, model and options
+     *    (`applyProjectDefaultEntry`), whoever starts the Thread. An Agent
+     *    keeps its own entry;
      * 3. the account's default (for the harness), or for the account the
      *    oldest account that is signed in on some runner.
      *
@@ -1354,8 +1382,29 @@ const make = Effect.gen(function* () {
             }
           }
           const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
-          if (decoded.projectId !== undefined) yield* validateLiveProject(decoded.projectId);
           const projectId = decoded.projectId ?? threadDefaults?.projectId;
+          // A project the call names must be live. One inherited from the
+          // caller was checked when its defaults were copied.
+          const project =
+            projectId === undefined ? Option.none() : yield* projectRows.live(projectId);
+          if (decoded.projectId !== undefined && Option.isNone(project)) {
+            return yield* Effect.fail(
+              createValidationError([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
+            );
+          }
+          // A Thread that names no model starts on its project's default entry
+          // when the project has a profile (spec 06 section 17.9). An Agent
+          // keeps its own entry.
+          if (
+            threadDefaults !== undefined &&
+            decoded.model === undefined &&
+            Option.isSome(project)
+          ) {
+            threadDefaults = yield* applyProjectDefaultEntry(
+              threadDefaults,
+              project.value.modelProfileId,
+            );
+          }
           // A session's spawn runs on the caller's runner and in the caller's
           // workspace unless the call names its own. The user's and the
           // system's spawns name everything they want, and placement chooses

@@ -659,7 +659,8 @@ export const makeCodexThreads = (options: {
             } satisfies ThreadReadParams);
             if (preparation !== work || phase !== "live") return;
             if ((barrier as ThreadReadResponse | undefined)?.thread?.id !== threadId) return;
-            if (!initializeUsageBaseline(discovery.thread.state)) return;
+            const threadHasTurns = ((resumed as ThreadReadResponse).thread.turns?.length ?? 0) > 0;
+            if (!initializeUsageBaseline(discovery.thread.state, threadHasTurns)) return;
             restoreIds.delete(threadId);
           }),
         ),

@@ -51,6 +51,16 @@ export const isSameEntry = (left: ModelProfileEntry, right: ModelProfileEntry): 
   left.model === right.model &&
   left.harnessId === right.harnessId;
 
+/**
+ * Returns the harness an entry runs in when it or its section names one: the
+ * entry's own, else the section's. Returns `null` when neither does, which
+ * means the entry follows the account's default harness.
+ */
+export const findNamedHarnessId = (
+  entry: ModelProfileEntry,
+  section: Pick<StoredSection, "harnessId">,
+): string | null => entry.harnessId ?? section.harnessId;
+
 /** Returns the entries of every section that has them, in menu order. */
 export const listEntries = (body: StoredProfileBody): ReadonlyArray<ModelProfileEntry> =>
   body.accounts.flatMap((section) => section.entries ?? []);

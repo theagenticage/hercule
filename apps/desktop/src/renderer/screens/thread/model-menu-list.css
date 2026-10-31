@@ -1,0 +1,89 @@
+/* The model menu's list. The composer's menu is a flex column of the filter,
+   this list, and for a thread that has started, its foot; the list scrolls
+   inside it, so the filter stays in view, and the whole menu is at most 60%
+   of the window's height (spec 17 §The composer). */
+.model-menu {
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+}
+.model-menu-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The rule between the filter and the list that follows it. */
+.pop-sec:has(> .menu-filter) + .model-menu-list {
+  border-top: 1px solid var(--divider);
+}
+
+/* A Model Profile's head: its face, its name in the UI body size, the number
+   of entries and a chevron that points down while the profile is unfolded. It
+   is Bureau's lane label (`.q-h`) made a button and set larger, because it
+   stands one level above the lanes. The book draws no accordion, so this
+   follows the prototype's `.ac-h` (r3.css), which is 34px high and sets the
+   profiles apart with a rule between them. What an unfolded profile holds is
+   indented by 10px, as the prototype's `.ac-b` is, so the lanes read as its
+   children. */
+.ac + .ac {
+  border-top: 1px solid var(--divider);
+}
+.ac-head {
+  padding: 2px 8px;
+}
+.ac-head .q-h {
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding-block: 0;
+  border-radius: var(--r-md);
+  font-size: var(--t-13);
+  text-align: left;
+}
+.ac-head .q-h:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ac-head .q-h[aria-expanded="true"] {
+  color: var(--ink);
+}
+.ac-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The number of entries sits at the right, before the chevron. */
+.ac-count {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.ac-head .q-h > svg {
+  flex: none;
+  /* Lines the chevron's tip up with the check mark of the rows below. */
+  margin-right: -1px;
+  color: var(--faint);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.ac-head .q-h[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+/* Under its head, the first section needs no rule above it, and sits 3px
+   lower, which puts its label 12px under the head as the prototype's does. */
+.ac-head + .pop-sec {
+  padding-top: 3px;
+  border-top: 0;
+}
+.ac-head ~ .pop-sec,
+.ac-head ~ .menu-note {
+  margin-left: 10px;
+}
+
+/* Not in the book. A lane that a screen outside the composer lights, such as
+   the Providers page's preview when the pointer is on an account card. */
+.pop-sec.is-lit {
+  background: var(--hover);
+}

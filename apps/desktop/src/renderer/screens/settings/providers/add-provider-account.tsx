@@ -17,6 +17,7 @@ import {
   asksForAccountLabel,
   buildProviderAccountCreateInput,
   buildProviderAccountName,
+  findModelProfileOrFirst,
   isAddAccountStepFilled,
   isNotFound,
   listSignInRunnerOptions,
@@ -78,9 +79,11 @@ type Stage =
  * controller the account is added to. It is passed in because the first run
  * renders this outside the routes that hold a saved controller.
  *
- * An account that stays is added to the first Model Profile, the only one
- * there is until profiles can be made, with its provider's Default Selection
- * (`modelProfile.update`), so its models reach the composer's menu. The sheet
+ * An account that stays is added to the Model Profile `modelProfileId`, with
+ * its provider's Default Selection (`modelProfile.update`), so its models
+ * reach the composer's menu. Settings passes the profile that is open on
+ * Models. With no id, or an id of a profile that is gone, the account joins
+ * the first profile, as it does in the first run. The sheet
  * stays open, with the controller's message, when that write fails, and Done
  * tries it again without making the account twice.
  *
@@ -93,11 +96,13 @@ type Stage =
 export function AddProviderAccount({
   client,
   signInMachines,
+  modelProfileId,
   onAdded,
   onClose,
 }: {
   readonly client: HerculeClient;
   readonly signInMachines: "controller" | "all";
+  readonly modelProfileId?: string | undefined;
   readonly onAdded?: (account: ProviderAccount) => void;
   readonly onClose: () => void;
 }): JSX.Element {
@@ -149,7 +154,10 @@ export function AddProviderAccount({
   });
   const addToProfile = useMutation({
     mutationFn: async (account: ProviderAccount) => {
-      const [profile] = await queryClient.ensureQueryData(modelProfilesQuery(client));
+      const profile = findModelProfileOrFirst(
+        await queryClient.ensureQueryData(modelProfilesQuery(client)),
+        modelProfileId,
+      );
       if (profile === undefined) return;
       const saved = await updateModelProfile(client, profile, (current) =>
         addModelProfileAccount(current, account.id),

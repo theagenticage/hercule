@@ -12,7 +12,6 @@ import {
   findExpiredShelfKeys,
   markShelfItemsExpired,
   markShelfItemUploading,
-  parseRecentModels,
   pushRecent,
   queryKeys,
   findResumeBlockedReason,
@@ -34,31 +33,15 @@ import {
   type UploadQueue,
 } from "@hercule/client-core";
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
+import {
+  readLastOpenProfileId,
+  readRecentModels,
+  rememberOpenProfile,
+  writeRecentModels,
+} from "../../app/recent-models";
 import { useComposerDraft } from "../../app/thread-drafts";
 import { useStopAgent } from "../use-stop-agent";
 
-/** The localStorage key for the recently picked models. The API does not store them. */
-const RECENT_KEY = "hercule.recentModels";
-
-/**
- * Returns the recently picked models from localStorage, or an empty list when
- * storage is unavailable or holds something unreadable. Without storage, only
- * the Recent lane is lost.
- */
-const readRecent = (): readonly RecentModel[] => {
-  try {
-    return parseRecentModels(window.localStorage.getItem(RECENT_KEY));
-  } catch {
-    return [];
-  }
-};
-const writeRecent = (recent: readonly RecentModel[]): void => {
-  try {
-    window.localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
-  } catch {
-    // Recent is only a convenience, so a failed write is ignored silently.
-  }
-};
 export interface ComposerModel {
   readonly kind: ThreadKind;
   /** What the thread runs with now, the picks included. */
@@ -74,6 +57,8 @@ export interface ComposerModel {
    */
   readonly menuRunnerId: string | null;
   readonly recent: readonly RecentModel[];
+  /** The Model Profile the user had open last in the model menu on this device, or `null`. */
+  readonly lastOpenProfileId: string | null;
   /** The unsent text and the images on the shelf. */
   readonly message: MessageDraft;
   /**
@@ -99,6 +84,8 @@ export interface ComposerModel {
   readonly removeAttachment: (key: string) => void;
   readonly retryAttachment: (key: string) => void;
   readonly recordThreadChoice: (choice: ThreadChoice) => void;
+  /** Remembers on this device that the user opened the profile `profileId` in the model menu. */
+  readonly rememberOpenProfile: (profileId: string) => void;
   readonly submit: () => void;
   readonly stop: () => void;
 }
@@ -130,7 +117,8 @@ export function useComposerModel(
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [{ message, picks }, changeDraft] = useComposerDraft();
-  const [recent, setRecent] = useState(readRecent);
+  const [recent, setRecent] = useState(readRecentModels);
+  const [lastOpenProfileId, setLastOpenProfileId] = useState(readLastOpenProfileId);
   const [refusal, setRefusal] = useState<string | null>(null);
   const changeShelf = (change: (shelf: readonly ShelfItem[]) => readonly ShelfItem[]): void => {
     changeDraft((draft) => ({
@@ -168,7 +156,7 @@ export function useComposerModel(
     if (pair === null) return;
     const next = pushRecent(recent, pair);
     setRecent(next);
-    writeRecent(next);
+    writeRecentModels(next);
   };
   // Set by `submit` before it calls `mutate`, and cleared when the send
   // settles. `isPending` reaches the render a tick after `mutate`, so a second
@@ -237,6 +225,7 @@ export function useComposerModel(
     picks,
     menuRunnerId: resolved.kind === "draft" ? resolved.menuRunnerId : null,
     recent,
+    lastOpenProfileId,
     message,
     attachmentBlock: describeSendBlock(message.attachments, fields.model),
     refusal,
@@ -281,6 +270,10 @@ export function useComposerModel(
     },
     recordThreadChoice: (choice) => {
       changeDraft((draft) => ({ ...draft, picks: applyThreadChoice(draft.picks, choice) }));
+    },
+    rememberOpenProfile: (profileId) => {
+      setLastOpenProfileId(profileId);
+      rememberOpenProfile(profileId);
     },
     submit: () => {
       // A second Enter or click before the first send settles is ignored, so

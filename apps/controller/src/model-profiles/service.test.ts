@@ -7,19 +7,21 @@
  * runs nothing. The database starts with the profile "Main".
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Clock, Effect, Option } from "effect";
 import {
   MAX_DISMISSED_NEW_MODELS,
   MAX_MODEL_PROFILE_ACCOUNTS,
+  MAX_MODEL_PROFILES,
   MAX_MODEL_PROFILE_SECTION_ENTRIES,
   type ModelProfile,
   type ModelProfileUpdateInput,
 } from "@hercule/contract";
 import * as SqlClient from "effect/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, nowIso, withTransaction } from "../db";
+import { mintUuid, nowIso, uuidFromString, withTransaction } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { ModelProfileMembership, ProviderAccountService } from "../provider-accounts";
+import { ProjectService } from "../projects";
 import {
   addAccount,
   addRunner,
@@ -31,6 +33,7 @@ import {
   storeCredential,
 } from "../provider-accounts/testing";
 import { buildModel, runWithProfiles, storeCatalog } from "./testing";
+import { modelProfileRepository } from "./repository";
 import { ModelProfileService } from "./service";
 
 const MISSING = "0199e0e7-9999-7000-8000-000000000000";
@@ -1026,6 +1029,90 @@ describe("resolving entries", () => {
   });
 });
 
+describe("reading the starting entry", () => {
+  /** Writes one entry of a new account to Main as its default, and reads the starting entry. */
+  const readStartingEntryOf = (options: {
+    readonly defaultHarnessId?: string;
+    readonly sectionHarnessId: string | null;
+    readonly entryHarnessId: string | null;
+  }) =>
+    Effect.gen(function* () {
+      const account = yield* addAccount({
+        kind: KEY_KIND,
+        label: "work",
+        ...(options.defaultHarnessId === undefined
+          ? {}
+          : { defaultHarnessId: options.defaultHarnessId }),
+      });
+      const main = yield* readMain;
+      const chosen = entry(account.id, "current", options.entryHarnessId);
+      yield* update(main, {
+        accounts: [
+          { providerAccountId: account.id, harnessId: options.sectionHarnessId, entries: [chosen] },
+        ],
+        defaultEntry: chosen,
+      });
+      const repository = yield* modelProfileRepository;
+      const starting = yield* repository.readStartingEntry(main.id);
+      return { accountId: account.id, starting };
+    });
+
+  it("starts on the harness the entry names", async () => {
+    const { accountId, starting } = await runWithProfiles(
+      readStartingEntryOf({ sectionHarnessId: null, entryHarnessId: ALPHA_HARNESS_ID }),
+    );
+
+    expect(starting).toEqual(
+      Option.some({ providerAccountId: accountId, harnessId: ALPHA_HARNESS_ID, model: "current" }),
+    );
+  });
+
+  it("starts on the harness the section names when the entry names none", async () => {
+    const { accountId, starting } = await runWithProfiles(
+      readStartingEntryOf({ sectionHarnessId: ALPHA_HARNESS_ID, entryHarnessId: null }),
+    );
+
+    expect(starting).toEqual(
+      Option.some({ providerAccountId: accountId, harnessId: ALPHA_HARNESS_ID, model: "current" }),
+    );
+  });
+
+  it("leaves the harness undefined, the account's default, when neither names one", async () => {
+    const { accountId, starting } = await runWithProfiles(
+      readStartingEntryOf({
+        defaultHarnessId: BETA_HARNESS_ID,
+        sectionHarnessId: null,
+        entryHarnessId: null,
+      }),
+    );
+
+    expect(starting).toEqual(
+      Option.some({ providerAccountId: accountId, harnessId: undefined, model: "current" }),
+    );
+  });
+
+  it("returns none for a profile without a default entry", async () => {
+    const starting = await runWithProfiles(
+      Effect.gen(function* () {
+        const main = yield* readMain;
+        yield* update(main, { accounts: [], defaultEntry: null });
+        const repository = yield* modelProfileRepository;
+        return yield* repository.readStartingEntry(main.id);
+      }),
+    );
+
+    expect(starting).toEqual(Option.none());
+  });
+
+  it("returns none for a profile that does not exist", async () => {
+    const starting = await runWithProfiles(
+      Effect.flatMap(modelProfileRepository, (repository) => repository.readStartingEntry(MISSING)),
+    );
+
+    expect(starting).toEqual(Option.none());
+  });
+});
+
 describe("an account's default harness", () => {
   /** Puts "current" in Main twice: following the account's default, and named in alpha. */
   const putTwoHarnessEntries = (accountId: string) =>
@@ -1134,5 +1221,284 @@ describe("reading while an account is deleted", () => {
     );
 
     for (const outcome of outcomes) expect(outcome.sections).toBe(outcome.entries);
+  });
+});
+
+/** Adds a project that names the profile (or none) and returns its id. */
+const addProject = (name: string, modelProfileId?: string) =>
+  Effect.flatMap(ProjectService, (projects) =>
+    Effect.map(
+      projects.create({ name, ...(modelProfileId === undefined ? {} : { modelProfileId }) }),
+      (project) => project.id,
+    ),
+  );
+
+const createProfile = (name: string, copyFromId?: string) =>
+  Effect.flatMap(ModelProfileService, (profiles) =>
+    profiles.create({ name, ...(copyFromId === undefined ? {} : { copyFromId }) }),
+  );
+
+describe("modelProfile.create", () => {
+  it("creates an empty profile at revision 1 and audits it", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const created = yield* createProfile("Review");
+        const profiles = yield* ModelProfileService;
+        return {
+          created,
+          listed: yield* profiles.query(),
+          audit: yield* readEventsOfKind("modelProfile.created"),
+        };
+      }),
+    );
+
+    expect(outcome.created).toMatchObject({
+      name: "Review",
+      revision: 1,
+      accounts: [],
+      defaultEntry: null,
+      dismissedNewModels: [],
+    });
+    expect(outcome.listed.map((profile) => profile.name)).toEqual(["Main", "Review"]);
+    expect(outcome.audit).toHaveLength(1);
+    expect(outcome.audit[0]).toMatchObject({
+      actor: "user",
+      payload: { modelProfileId: outcome.created.id, name: "Review" },
+    });
+  });
+
+  it("copies the stored body as it is, and the copy is independent of the source", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        const pendingId = (yield* addAccount({ kind: KEY_KIND, label: "pending" })).id;
+        const main = yield* readMain;
+        const source = yield* update(main, {
+          accounts: [
+            {
+              providerAccountId: accountId,
+              harnessId: null,
+              entries: [entry(accountId, "second"), entry(accountId, "current")],
+            },
+            // No entries: this section is still waiting for its first catalog read.
+            { providerAccountId: pendingId, harnessId: null },
+          ],
+          defaultEntry: entry(accountId, "second"),
+          dismissedNewModels: [{ providerAccountId: accountId, model: "old" }],
+        });
+        const copy = yield* createProfile("Copy", source.id);
+        const changedCopy = yield* update(copy, { defaultEntry: entry(accountId, "current") });
+        const sourceAfterCopyChange = yield* readMain;
+        const changedSource = yield* update(sourceAfterCopyChange, { name: "Renamed" });
+        const profiles = yield* ModelProfileService;
+        const copyAfterSourceChange = yield* profiles.read(copy.id);
+        return {
+          source,
+          copy,
+          changedCopy,
+          sourceAfterCopyChange,
+          changedSource,
+          copyAfterSourceChange,
+        };
+      }),
+    );
+
+    expect(outcome.copy).toMatchObject({
+      name: "Copy",
+      revision: 1,
+      accounts: outcome.source.accounts,
+      defaultEntry: outcome.source.defaultEntry,
+      dismissedNewModels: outcome.source.dismissedNewModels,
+    });
+    expect(outcome.copy.accounts[1]?.selectionPending).toBe(true);
+    expect(outcome.sourceAfterCopyChange).toEqual(outcome.source);
+    expect(outcome.copyAfterSourceChange).toEqual(outcome.changedCopy);
+    expect(outcome.changedSource.name).toBe("Renamed");
+  });
+
+  it("refuses a name another profile has with validation on name", async () => {
+    const failure = await runWithProfiles(Effect.flip(createProfile("Main")));
+
+    expect(failure).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["name"] }] } },
+    });
+  });
+
+  it("refuses invalid_state at the limit, naming it, and creates nothing", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        // "Main" is already there.
+        for (let n = 1; n < MAX_MODEL_PROFILES; n++) yield* createProfile(`Profile ${String(n)}`);
+        const failure = yield* Effect.flip(createProfile("One too many"));
+        const profiles = yield* ModelProfileService;
+        const listed = yield* profiles.query();
+        yield* profiles.delete(listed[1]!.id);
+        return { failure, count: listed.length, again: yield* createProfile("One too many") };
+      }),
+    );
+
+    expect(outcome.count).toBe(MAX_MODEL_PROFILES);
+    expect(outcome.failure).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: expect.stringMatching(/32 Model Profiles.*Delete one/) as unknown,
+      },
+    });
+    expect(outcome.again.name).toBe("One too many");
+  });
+
+  it("fails not_found when the profile to copy does not exist, and creates nothing", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const failure = yield* Effect.flip(createProfile("Copy", MISSING));
+        const profiles = yield* ModelProfileService;
+        return { failure, listed: yield* profiles.query() };
+      }),
+    );
+
+    expect(outcome.failure).toMatchObject({ error: { code: "not_found" } });
+    expect(outcome.listed.map((profile) => profile.name)).toEqual(["Main"]);
+  });
+});
+
+describe("modelProfile.delete", () => {
+  it("stamps the cleared projects, their events and its own event with one instant", async () => {
+    // A clock that moves a millisecond on every read, so a second read in the
+    // delete would show as a different instant.
+    let millis = Date.UTC(2026, 9, 31, 12);
+    const withTickingClock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Clock.clockWith((real) =>
+        // The real clock is a class instance, so a spread would drop its methods.
+        Effect.provideService(
+          effect,
+          Clock.Clock,
+          Object.assign(Object.create(real) as Clock.Clock, {
+            currentTimeMillisUnsafe: () => millis++,
+            currentTimeMillis: Effect.sync(() => millis++),
+          }),
+        ),
+      );
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const doomed = yield* createProfile("Review");
+        const projectId = yield* addProject("Using", doomed.id);
+        yield* withTickingClock((yield* ModelProfileService).delete(doomed.id));
+        const sql = yield* SqlClient.SqlClient;
+        return {
+          projectId,
+          project: yield* sql<{ readonly updated_at: string }>`
+            SELECT updated_at FROM projects WHERE id = ${uuidFromString(projectId)}
+          `,
+          cleared: yield* readEventsOfKind("project.updated"),
+          deleted: yield* readEventsOfKind("modelProfile.deleted"),
+        };
+      }),
+    );
+
+    const [deleted] = outcome.deleted;
+    const cleared = outcome.cleared.filter(
+      (event) => event.payload["projectId"] === outcome.projectId,
+    );
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]?.receivedAt).toBe(deleted?.receivedAt);
+    expect(outcome.project[0]?.updated_at).toBe(deleted?.receivedAt);
+  });
+
+  it("removes the profile and audits it", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const created = yield* createProfile("Review");
+        const profiles = yield* ModelProfileService;
+        const result = yield* profiles.delete(created.id);
+        return {
+          created,
+          result,
+          listed: yield* profiles.query(),
+          readFailure: yield* Effect.flip(profiles.read(created.id)),
+          audit: yield* readEventsOfKind("modelProfile.deleted"),
+        };
+      }),
+    );
+
+    expect(outcome.result).toEqual({});
+    expect(outcome.listed.map((profile) => profile.name)).toEqual(["Main"]);
+    expect(outcome.readFailure).toMatchObject({ error: { code: "not_found" } });
+    expect(outcome.audit).toHaveLength(1);
+    expect(outcome.audit[0]).toMatchObject({
+      actor: "user",
+      payload: { modelProfileId: outcome.created.id, name: "Review" },
+    });
+  });
+
+  it("refuses the last profile with invalid_state and keeps it", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const main = yield* readMain;
+        const profiles = yield* ModelProfileService;
+        return {
+          main,
+          failure: yield* Effect.flip(profiles.delete(main.id)),
+          listed: yield* profiles.query(),
+        };
+      }),
+    );
+
+    expect(outcome.failure).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: "This is your only Model Profile. Create another before you delete this one.",
+      },
+    });
+    expect(outcome.listed).toEqual([outcome.main]);
+  });
+
+  it("fails not_found for a profile that does not exist", async () => {
+    const failure = await runWithProfiles(
+      Effect.flatMap(ModelProfileService, (profiles) => Effect.flip(profiles.delete(MISSING))),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("clears the profile from every project that names it and records project.updated for each live one", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const doomed = yield* createProfile("Review");
+        const kept = yield* createProfile("Other");
+        const projects = yield* ProjectService;
+        const usingId = yield* addProject("Using", doomed.id);
+        const otherId = yield* addProject("Other user", kept.id);
+        const retiredId = yield* addProject("Retired", doomed.id);
+        yield* projects.delete(retiredId);
+        yield* (yield* ModelProfileService).delete(doomed.id);
+        const sql = yield* SqlClient.SqlClient;
+        return {
+          doomed,
+          kept,
+          usingId,
+          using: yield* projects.read(usingId),
+          other: yield* projects.read(otherId),
+          retiredRows: yield* sql<{ readonly model_profile_id: Uint8Array | null }>`
+            SELECT model_profile_id FROM projects WHERE id = ${uuidFromString(retiredId)}
+          `,
+          updates: yield* readEventsOfKind("project.updated"),
+        };
+      }),
+    );
+
+    expect("modelProfileId" in outcome.using).toBe(false);
+    expect(outcome.other.modelProfileId).toBe(outcome.kept.id);
+    expect(outcome.retiredRows).toEqual([{ model_profile_id: null }]);
+    const clearing = outcome.updates.filter((event) =>
+      JSON.stringify(event.payload).includes(outcome.doomed.id),
+    );
+    expect(clearing).toHaveLength(1);
+    expect(clearing[0]).toMatchObject({
+      actor: "user",
+      payload: {
+        projectId: outcome.usingId,
+        changes: { modelProfileId: { old: outcome.doomed.id, new: null } },
+      },
+    });
   });
 });

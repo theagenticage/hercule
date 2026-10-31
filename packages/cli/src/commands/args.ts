@@ -14,9 +14,9 @@
  * required one is always read; an optional one only when its `--<flag>-stdin`
  * marker is given, so an empty pipe never clears a field.
  *
- * `hercule user set-password` is the only command that reads two fields, one
- * line each, in the order its schema declares them. Never in the order the
- * markers were written, or the two passwords could silently swap.
+ * `hercule user set-password` and `hercule model-profile update` read two
+ * fields, one line each, in the order their schema declares them. Never in the
+ * order the markers were written, or the two values could silently swap.
  */
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";

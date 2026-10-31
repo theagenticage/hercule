@@ -208,6 +208,8 @@ const COMMANDS: Record<string, string> = {
   "providerAccount.submitSignInCode": "provider-account submit-sign-in-code",
   "providerAccount.readCatalog": "provider-account read-catalog",
   "providerAccount.refresh": "provider-account refresh",
+  "modelProfile.create": "model-profile create",
+  "modelProfile.delete": "model-profile delete",
   "modelProfile.query": "model-profile list",
   "modelProfile.read": "model-profile read",
   "modelProfile.update": "model-profile update",
@@ -291,8 +293,8 @@ const COMMANDS: Record<string, string> = {
 /**
  * Every field whose value is read from stdin rather than given inline, keyed
  * `<operation> <field>`. A command has one stdin channel, so `user.setPassword`
- * is left out here and checked on its own below: it is the one command that
- * reads two fields, one per line.
+ * and `modelProfile.update` are left out here and checked on their own below:
+ * they are the two commands that read two fields, one per line.
  */
 const STDIN_FIELDS = [
   "setup.complete password",
@@ -363,6 +365,8 @@ const RESOLVES: Record<string, string> = {
   "project.read id": "project.query",
   "project.update id": "project.query",
   "project.delete id": "project.query",
+  "project.create modelProfileId": "modelProfile.query",
+  "project.update modelProfileId": "modelProfile.query",
 
   "resource.read id": "resource.query",
   "resource.update id": "resource.query",
@@ -413,6 +417,8 @@ const RESOLVES: Record<string, string> = {
   "providerAccount.readCatalog id": "providerAccount.query",
   "providerAccount.refresh id": "providerAccount.query",
 
+  "modelProfile.create copyFromId": "modelProfile.query",
+  "modelProfile.delete id": "modelProfile.query",
   "modelProfile.read id": "modelProfile.query",
   "modelProfile.update id": "modelProfile.query",
 
@@ -561,7 +567,10 @@ describe("the nouns", () => {
 describe("the stdin fields", () => {
   it("marks exactly the fields the spec lists", () => {
     const marked = listVisibleFields()
-      .filter(([id, , field]) => field.stdin === true && id !== "user.setPassword")
+      .filter(
+        ([id, , field]) =>
+          field.stdin === true && id !== "user.setPassword" && id !== "modelProfile.update",
+      )
       .map(([id, name]) => `${id} ${name}`);
     expect(marked.sort()).toEqual([...STDIN_FIELDS].sort());
   });
@@ -571,6 +580,13 @@ describe("the stdin fields", () => {
       .filter(([, field]) => field.stdin === true)
       .map(([name]) => name);
     expect(marked.sort()).toEqual(["current", "next"]);
+  });
+
+  it("reads the sections and the dismissed models of model-profile update from stdin", () => {
+    const marked = Object.entries(table["modelProfile.update"]?.fields ?? {})
+      .filter(([, field]) => field.stdin === true)
+      .map(([name]) => name);
+    expect(marked.sort()).toEqual(["accounts", "dismissedNewModels"]);
   });
 });
 

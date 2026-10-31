@@ -1,0 +1,72 @@
+/* The composer's menu as Settings > Providers > Models previews it, and the
+   faint stand-in an empty profile shows (prototype `prototype/desktop-
+   settings-providers`, variant I, r3.css `.vh-rail`, `.vi-ghost` and
+   `.vi-dash`, r2.css `.vf-prev-h`). Its measurements decide. */
+.pm-prev-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px;
+  color: var(--muted);
+}
+.pm-prev-h > b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.pm-prev-foot {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.pm-ghost {
+  display: grid;
+  gap: 8px;
+}
+.pm-ghost-menu {
+  padding: 6px 0;
+}
+.pm-ghost-menu .ac-head .q-h {
+  cursor: default;
+}
+.pm-ghost-menu .ac-head .q-h:hover {
+  background: none;
+  color: var(--ink);
+}
+/* Quiet bars where the account heads and the models will be. */
+.pm-dash {
+  display: block;
+  height: 10px;
+  margin: 13px 24px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.pm-dash--head {
+  width: 34%;
+  height: 7px;
+  margin-top: 18px;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+
+/* The real preview: the composer's menu beside the sections, or under them.
+   The menu is 300px wide in both places, as the prototype's rail is. */
+.pm-preview {
+  display: grid;
+  gap: 8px;
+  width: 300px;
+}
+.pm-prev-h > small {
+  overflow: hidden;
+  max-width: 150px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The list scrolls inside the preview, as it does in the composer, but the
+   preview takes more of the page than the composer's 60% of the window. */
+.pm-preview-menu .model-menu {
+  max-height: 520px;
+}

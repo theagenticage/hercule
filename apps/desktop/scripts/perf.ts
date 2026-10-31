@@ -157,9 +157,9 @@
  * and its idle with Providers open. The full run measures the Providers
  * launch with the other sections. Pass `--providers-only` to run only that,
  * on 40 threads: Settings › Profile open, to compare with, then Settings ›
- * Providers open on five accounts, with usage readings on two and a refused
- * key on one. The Providers launch also prints how long the cards took to
- * draw after the click on the section's row. Last, ten usage updates of the
+ * Providers open on seven accounts in four Model Profiles, with usage
+ * readings on two and a refused key on one. The Providers launch also prints
+ * how long the cards took to draw after the click on the section's row. Last, ten usage updates of the
  * Claude account are measured with Providers open (see `perf-providers.ts`):
  *
  *        pnpm --filter @hercule/desktop perf -- --providers-only
@@ -356,7 +356,7 @@ const LONG_THREAD_ROWS = 500;
  * open, by the name that the section's row in the Settings list and its
  * header title show. Only the Connections launch has Connections in the
  * controller: one of each health the table draws. Only the Providers launch
- * has five Provider Accounts, with identities and plans (see `prepareLaunch`
+ * has seven Provider Accounts in four Model Profiles, with identities and plans (see `prepareLaunch`
  * in `perf-fixture.ts`).
  */
 const SETTINGS_SECTIONS = ["Profile", "Assistants", "Intake", "Connections", "Providers"] as const;
@@ -1647,7 +1647,7 @@ async function measureSkills(fixture: ThreadFixture, userDataDir: string): Promi
 
 /**
  * Measures two launches on 40 threads: Settings › Profile open, to compare
- * with, and Settings › Providers open on the fixture's five accounts. Then
+ * with, and Settings › Providers open on the fixture's seven accounts. Then
  * measures what ten usage updates of the Claude account cost while Providers
  * is open (see `measureAccountUsageUpdates`).
  */

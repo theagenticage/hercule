@@ -1766,6 +1766,9 @@ const buildWorldRoutes = (
   overrides: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/projects": { body: { items: PROJECTS } },
+  ...Object.fromEntries(
+    PROJECTS.map((project) => [`GET /api/v1/projects/${project.id}`, { body: project }]),
+  ),
   "GET /api/v1/resources": { body: { items: RESOURCES } },
   "GET /api/v1/workspaces": { body: { items: WORKSPACES } },
   "GET /api/v1/sessions": { body: { items: SESSIONS } },
@@ -2688,5 +2691,169 @@ describe("the draft's search params", () => {
     const { router } = await openDraftAt("/threads/new?project=42&workspace=true");
 
     expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+});
+
+describe("Composer: the model menu as an accordion of profiles", () => {
+  const MAIN_PROFILE = buildMainProfile([ACCOUNT_A]);
+  const WORK_PROFILE: ModelProfile = {
+    ...buildMainProfile([ACCOUNT_B]),
+    id: "01a06d02-4900-7000-8000-000000000002",
+    name: "Work",
+  };
+  const LAST_OPEN_KEY = "hercule.lastOpenModelProfile";
+
+  const openWithProfiles = async (
+    path: string,
+    {
+      extra = {},
+      storage = {},
+      user = {},
+    }: {
+      readonly extra?: Readonly<Record<string, Handler>>;
+      readonly storage?: Readonly<Record<string, string>>;
+      readonly user?: Record<string, unknown>;
+    } = {},
+  ) => {
+    const api = stubApi(
+      buildController(
+        [ACCOUNT_A, ACCOUNT_B],
+        { "thread.workspace": "primary", ...user },
+        buildWorldRoutes({
+          "GET /api/v1/model-profiles": { body: [MAIN_PROFILE, WORK_PROFILE] },
+          ...extra,
+        }),
+      ),
+    );
+    const app = await renderApp({
+      path,
+      api: api.fetch,
+      token: "held",
+      detectLocalRunner: () => Promise.resolve(RUNNER.id),
+      storage,
+    });
+    return { ...app, api };
+  };
+
+  it("unfolds the profile that holds the current entry, and a click on another head unfolds that one instead without changing the model", async () => {
+    const user = userEvent.setup();
+    await openWithProfiles("/threads/new");
+
+    const menu = await openModelMenu(user, /claude sonnet 5/i);
+    expect(within(menu).getByRole("button", { name: "Main" }).ariaExpanded).toBe("true");
+    expect(within(menu).getByRole("button", { name: "Work" }).ariaExpanded).toBe("false");
+    expect(within(menu).queryByRole("button", { name: /claude haiku 5/i })).toBeNull();
+
+    await user.click(within(menu).getByRole("button", { name: "Work" }));
+
+    expect(within(menu).getByRole("button", { name: "Work" }).ariaExpanded).toBe("true");
+    expect(within(menu).getByRole("button", { name: "Main" }).ariaExpanded).toBe("false");
+    expect(within(menu).getByRole("button", { name: /claude haiku 5/i })).toBeDefined();
+    expect(within(menu).queryByRole("button", { name: /claude sonnet 5/i })).toBeNull();
+    // Opening a head picked nothing, so the pill still shows the model it had.
+    expect(
+      screen.getByRole("button", { name: /^Anthropic · personal Claude Sonnet 5/ }),
+    ).toBeDefined();
+    expect(localStorage.getItem(LAST_OPEN_KEY)).toBe(WORK_PROFILE.id);
+  });
+
+  it("unfolds the profile open last when no profile holds the current entry", async () => {
+    const user = userEvent.setup();
+    await openWithProfiles("/threads/new", {
+      storage: { [LAST_OPEN_KEY]: WORK_PROFILE.id },
+      // A stored model that no profile holds is still the user's choice.
+      user: {
+        "thread.providerAccountId": ACCOUNT_A.id,
+        "thread.harnessId": "claude-code/claude-code",
+        "thread.model": "claude-ghost",
+      },
+    });
+
+    const menu = await openModelMenu(user, /claude-ghost/i);
+    expect(within(menu).getByRole("button", { name: "Work" }).ariaExpanded).toBe("true");
+    expect(within(menu).getByRole("button", { name: "Main" }).ariaExpanded).toBe("false");
+  });
+
+  it("starts a thread in a project on the project's profile, and spawns with that entry", async () => {
+    const user = userEvent.setup();
+    const webshop: Project = { ...WEBSHOP, modelProfileId: WORK_PROFILE.id };
+    const { api } = await openWithProfiles(buildProjectDraftPath(webshop.id), {
+      extra: {
+        "GET /api/v1/projects": { body: { items: [webshop, OPS, EDGE, SANDBOX] } },
+        [`GET /api/v1/projects/${webshop.id}`]: { body: webshop },
+        "POST /api/v1/sessions": { body: NEW_SESSION },
+      },
+    });
+
+    const menu = await openModelMenu(user, /claude haiku 5/i);
+    expect(within(menu).getByRole("button", { name: "Work" }).ariaExpanded).toBe("true");
+    expect(within(menu).getByRole("button", { name: /claude haiku 5/i }).textContent).toContain(
+      "✓",
+    );
+    await user.keyboard("{Escape}");
+
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+      ).toBe(true);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toMatchObject({
+      providerAccountId: ACCOUNT_B.id,
+      harnessId: "claude-code/claude-code",
+      model: "claude-haiku-5",
+    });
+  });
+
+  // The project list stops at its first page, so a project beyond it is not
+  // in it. The draft reads the addressed project itself.
+  it("starts a project missing from the project list on that project's profile", async () => {
+    const user = userEvent.setup();
+    const webshop: Project = { ...WEBSHOP, modelProfileId: WORK_PROFILE.id };
+    const { api } = await openWithProfiles(buildProjectDraftPath(webshop.id), {
+      extra: {
+        "GET /api/v1/projects": { body: { items: [OPS, EDGE, SANDBOX] } },
+        [`GET /api/v1/projects/${webshop.id}`]: { body: webshop },
+        "POST /api/v1/sessions": { body: NEW_SESSION },
+      },
+    });
+
+    await openModelMenu(user, /claude haiku 5/i);
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox"), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+      ).toBe(true);
+    });
+    const spawn = api.calls.find(
+      (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+    );
+    expect(spawn?.body).toMatchObject({ model: "claude-haiku-5" });
+  });
+
+  it("shows the read's error and offers no composer when the project cannot be read", async () => {
+    const { api } = await openWithProfiles(buildProjectDraftPath(WEBSHOP.id), {
+      extra: {
+        [`GET /api/v1/projects/${WEBSHOP.id}`]: {
+          status: 500,
+          body: buildErrorBody("internal", "the project could not be read"),
+        },
+      },
+    });
+
+    expect(await screen.findByText("This screen did not load")).toBeDefined();
+    expect(readPageText()).toContain("the project could not be read");
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(
+      api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
+    ).toBe(false);
   });
 });

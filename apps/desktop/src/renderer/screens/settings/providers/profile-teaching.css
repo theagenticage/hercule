@@ -1,0 +1,168 @@
+/* What an empty Model Profile shows: the three steps, a tile for each
+   account, and a faint preview (prototype `prototype/desktop-settings-
+   providers`, variant I, r3.css `.vi-teach`). Its measurements decide. */
+.pm-teach {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 40px;
+  align-items: start;
+  margin-top: 18px;
+  padding: 24px 26px 26px;
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--sunken) 55%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.pm-teach-main > h3 {
+  margin: 0 0 6px;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.pm-teach-main > p {
+  max-width: 520px;
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.55;
+}
+.pm-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+}
+.pm-steps li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--muted);
+}
+.pm-steps i {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.25px var(--line);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-style: normal;
+  font-weight: var(--w-bold);
+}
+.pm-steps li.is-now i {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--surface);
+}
+.pm-steps span {
+  display: grid;
+  gap: 1px;
+}
+.pm-steps b {
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.pm-steps small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 1.4;
+}
+.pm-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+.pm-tile {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+  text-align: left;
+  transition:
+    box-shadow var(--dur-1),
+    transform var(--dur-2) var(--ease-out);
+}
+.pm-tile:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1.5px var(--ink),
+    var(--shadow-2);
+}
+.pm-tile:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.pm-tile-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pm-tile-top > b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pm-tile-plus {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--sunken);
+  color: var(--muted);
+}
+.pm-tile:hover .pm-tile-plus {
+  background: var(--ink);
+  color: var(--surface);
+}
+.pm-tile-identity {
+  padding-left: 23px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pm-newacct {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pm-newacct:hover {
+  color: var(--ink);
+}
+/* Not in the prototype, which draws the page at one width. Without room for
+   the preview beside the steps, it moves under them, and in a narrow body the
+   steps stack. */
+@container (width < 800px) {
+  .pm-teach {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .pm-teach > .pm-ghost {
+    max-width: 300px;
+  }
+}
+@container (width < 560px) {
+  .pm-teach {
+    padding: 18px 18px 20px;
+  }
+  .pm-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

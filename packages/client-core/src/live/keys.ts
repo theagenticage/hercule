@@ -77,6 +77,11 @@ export const queryKeys = {
   yourWork: (): LiveQueryKey => ["your-work"],
   projects: (): LiveQueryKey => ["projects"],
   /**
+   * One project read by its id. It sits under the `projects` prefix, so
+   * invalidating the list reads the project again too.
+   */
+  project: (id: string): LiveQueryKey => ["projects", id],
+  /**
    * No live topic yet: a resource changed elsewhere, such as from the CLI,
    * shows up on the next read.
    */

@@ -1180,9 +1180,10 @@ export const CLI = {
   },
   "project.create": {
     command: "project create",
-    help: "Creates a Project to group related work. It is organisation only: nothing about a task changes because it joins one. The description is markdown.",
+    help: "Creates a Project to group related work. It is organisation only: nothing about a task changes because it joins one. The one default it carries is a Model Profile, which a new thread in the project starts on. The description is markdown.",
     examples: [
       { args: ["--name", "Hercule v1"] },
+      { args: ["--name", "Hercule v1", "--model-profile", "01a2b3c4"] },
       {
         args: ["--name", "Hercule v1", "--description-stdin"],
         stdin: "Everything for the first release.",
@@ -1195,13 +1196,21 @@ export const CLI = {
         flag: "description",
         help: "The project's markdown body.",
       },
+      modelProfileId: {
+        flag: "model-profile",
+        help: "The Model Profile a new thread in this project starts on, by its id or a tail of eight or more characters. Leave it off and a new thread starts on the thread default.",
+        resolves: "modelProfile.query",
+      },
     },
+    errors: { validation: "the name is empty or too long, or --model-profile is no profile" },
   },
   "project.update": {
     command: "project update",
-    help: "Edits a project; a field you leave out is not changed.",
+    help: "Edits a project; a field you leave out is not changed. Changing the Model Profile changes no thread that already exists.",
     examples: [
       { args: ["1f3a9c2e", "--name", "Hercule v1.1"] },
+      { args: ["1f3a9c2e", "--model-profile", "01a2b3c4"] },
+      { args: ["1f3a9c2e", "--model-profile", "null"] },
       {
         args: ["1f3a9c2e", "--description-stdin"],
         stdin: "Shipped; keeping it for the follow-ups.",
@@ -1219,7 +1228,13 @@ export const CLI = {
         flag: "description",
         help: "A replacement markdown body; pipe `null` to take the description off again.",
       },
+      modelProfileId: {
+        flag: "model-profile",
+        help: "The Model Profile a new thread in this project starts on, by its id or a tail of eight or more characters; `null` removes it, and a new thread starts on the thread default.",
+        resolves: "modelProfile.query",
+      },
     },
+    errors: { validation: "the name is empty or too long, or --model-profile is no profile" },
   },
   "project.delete": {
     command: "project delete",
@@ -2649,9 +2664,30 @@ export const CLI = {
       },
     },
   },
+  "modelProfile.create": {
+    command: "model-profile create",
+    help: "Creates a Model Profile. It starts empty, or as an independent copy of another profile: the copy takes every account, entry, harness choice, the default entry and the dismissed models, and changing one profile afterwards never changes the other. Use `hercule model-profile update` to fill an empty one.",
+    examples: [
+      { args: ["--name", "Review"] },
+      { args: ["--name", "Review", "--copy-from", "01a2b3c4"] },
+    ],
+    fields: {
+      name: { flag: "name", help: "The profile's name; unique among the profiles." },
+      copyFromId: {
+        flag: "copy-from",
+        help: "The Model Profile to copy, by its id or a tail of eight or more characters. Leave it off to start empty.",
+        resolves: "modelProfile.query",
+      },
+    },
+    errors: {
+      validation: "another profile has the name",
+      not_found: "--copy-from names no profile",
+      invalid_state: "there are already 32 Model Profiles, the most there can be; delete one first",
+    },
+  },
   "modelProfile.update": {
     command: "model-profile update",
-    help: "Replaces a whole Model Profile: the stored profile becomes exactly what you send. Read it first with `hercule model-profile read` and send every part, changed or not, together with the revision you read. The call fails with `conflict` when the profile changed since; read it again and make your change on that. A section sent without `entries` gets its Provider's default model selection, now if the account's catalog has been read, otherwise when its first read succeeds. `entries: []` means no entries. Every entry carries the account id, the model slug and a harness id or null.",
+    help: "Replaces a whole Model Profile: the stored profile becomes exactly what you send. Read it first with `hercule model-profile read` and send every part, changed or not, together with the revision you read. The call fails with `conflict` when the profile changed since; read it again and make your change on that. The sections and the dismissed models are read from stdin as two lines, each one JSON list written on a single line (`jq -c` does that): the sections first, then the dismissed models. `[]` means none. A section sent without `entries` gets its Provider's default model selection, now if the account's catalog has been read, otherwise when its first read succeeds. `entries: []` means no entries. Every entry carries the account id, the model slug and a harness id or null.",
     examples: [
       {
         args: [
@@ -2660,13 +2696,13 @@ export const CLI = {
           "3",
           "--name",
           "Main",
-          "--accounts",
-          '[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","harnessId":null,"entries":[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","model":"claude-opus-5-5","harnessId":null}]}]',
           "--default-entry",
           '{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","model":"claude-opus-5-5","harnessId":null}',
-          "--dismissed-new-models",
-          "[]",
         ],
+        stdin: [
+          '[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","harnessId":null,"entries":[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","model":"claude-opus-5-5","harnessId":null}]}]',
+          "[]",
+        ].join("\n"),
       },
     ],
     fields: {
@@ -2682,22 +2718,41 @@ export const CLI = {
       },
       name: { flag: "name", help: "The profile's name; unique among the profiles." },
       accounts: {
+        stdin: true,
         flag: "accounts",
-        help: 'The sections in menu order as inline JSON: [{"providerAccountId":"<id>","harnessId":<harness id or null>,"entries":[{"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}]}]. Leave "entries" off a section to give it the Provider\'s default selection.',
+        help: 'The sections in menu order, the first line of stdin, as a JSON list on one line: [{"providerAccountId":"<id>","harnessId":<harness id or null>,"entries":[{"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}]}]. Leave "entries" off a section to give it the Provider\'s default selection.',
       },
       defaultEntry: {
         flag: "default-entry",
-        help: 'The entry new threads start on as inline JSON, {"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}, or null for none. It must be one of the entries.',
+        help: 'The entry new threads start on as inline JSON, {"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}, or the word null for none. It must be one of the entries.',
       },
       dismissedNewModels: {
+        stdin: true,
         flag: "dismissed-new-models",
-        help: 'The models the profile no longer announces as new, as inline JSON: [{"providerAccountId":"<id>","model":"<slug>"}]. Send [] for none.',
+        help: 'The models the profile no longer announces as new, the second line of stdin, as a JSON list on one line: [{"providerAccountId":"<id>","model":"<slug>"}]. Write [] for none.',
       },
     },
     errors: {
       conflict: "the profile is at another revision than --expected-revision; read it again",
       validation:
         "another profile has the name, an account does not exist or appears twice, an entry sits under another account's section or appears twice, a harness is one the account cannot run in, a new entry's model is not in the list its harness gave for the account, the default entry is not one of the entries, or a list is over its limit (64 accounts, 256 entries in a section, 1024 dismissed models)",
+    },
+  },
+
+  "modelProfile.delete": {
+    command: "model-profile delete",
+    help: "Deletes a Model Profile. A project that names it is left with no profile, and its new threads start on the thread default; threads that already exist change nothing. The last profile cannot be deleted.",
+    examples: [{ args: ["01a2b3c4"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "profile-id",
+        help: "The Model Profile's id, or a tail of eight or more characters.",
+        resolves: "modelProfile.query",
+      },
+    },
+    errors: {
+      invalid_state: "this is the only Model Profile; create another before you delete it",
     },
   },
 

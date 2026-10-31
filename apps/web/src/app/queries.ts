@@ -102,6 +102,20 @@ export const projectsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads one project by its id, for a draft thread. The draft needs the
+ * project's Model Profile before it may pick a model, and the project list
+ * stops at its first page, so a project beyond that page would be missing
+ * from it. An error is not retried, because a project that returns 404 once
+ * will keep returning 404.
+ */
+export const projectQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.project(id),
+    queryFn: () => client.project.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
  * Reads every resource in a single page: the repos the workspace menu offers
  * checkouts of. There are only a handful per project, as with projects.
  */

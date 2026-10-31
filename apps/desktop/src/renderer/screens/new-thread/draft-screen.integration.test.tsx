@@ -15,6 +15,7 @@ import userEvent from "@testing-library/user-event";
 import type { ProviderAccount, Runner, Task, Workspace } from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
+import { rememberRecentModel } from "../../app/recent-models";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -546,6 +547,53 @@ describe("the new-thread screen", () => {
         kind: "ephemeral",
         checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
       },
+    });
+  });
+});
+
+describe("the model of a draft in a project with a Model Profile", () => {
+  // The profile's default entry is Opus, and the user's own thread default is
+  // Sonnet, so the model that starts the thread shows which one decided.
+  const OPUS = { providerAccountId: FIXTURE_ACCOUNT.id, harnessId: null, model: "claude-opus-5" };
+  const QUICK = {
+    ...FIXTURE_MODEL_PROFILE,
+    id: "01a06d02-7800-7000-8000-000000000002",
+    name: "Quick",
+    defaultEntry: OPUS,
+  };
+  const handlers = {
+    "GET /api/v1/model-profiles": { body: [FIXTURE_MODEL_PROFILE, QUICK] },
+    "GET /api/v1/projects": { body: { items: [{ ...WEBSHOP, modelProfileId: QUICK.id }, OPS] } },
+  };
+
+  it("starts on the profile's default entry when nothing was picked there lately", async () => {
+    const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`, handlers);
+
+    await userEvent.type(field, "Fix the cart{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]?.body).toMatchObject({ model: "claude-opus-5" });
+  });
+
+  it("starts on the entry of the profile picked last, and sends it", async () => {
+    rememberRecentModel(CONTROLLER_URL, {
+      providerAccountId: FIXTURE_ACCOUNT.id,
+      harnessId: "claude-code/claude-code",
+      model: "claude-sonnet-5",
+    });
+    const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`, handlers);
+
+    await userEvent.type(field, "Fix the cart{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]?.body).toMatchObject({
+      providerAccountId: FIXTURE_ACCOUNT.id,
+      harnessId: "claude-code/claude-code",
+      model: "claude-sonnet-5",
     });
   });
 });
