@@ -1896,8 +1896,10 @@ Any change that alters a resolved entry is announced on the live topic `provider
 ### 17.8 Creating and deleting profiles
 
 - `modelProfile.create` takes a name and, optionally, a profile to copy. Without one, the profile starts empty.
+- *(Amended 2026-10-31, [#936](https://github.com/theagenticage/hercule/issues/936).)* A copy takes the stored profile as it is: its accounts in order, their harness choices and entries, the default entry, the dismissed models, and a section that still waits for its account's first catalog read. The copy shares nothing with the source afterwards. A name another profile has is refused `validation` on `name`, and a copy source that does not exist is refused `not_found`.
 - The last profile cannot be deleted.
 - Deleting a profile that projects use is allowed. Those projects fall back to the thread default, and the client's confirm dialog names them.
+- *(Amended 2026-10-31, [#936](https://github.com/theagenticage/hercule/issues/936).)* The delete clears the profile from every project that names it, in the same transaction, including projects that were deleted softly, so no project row keeps an id that names no profile. Each live project that changed records a `project.updated` event.
 
 ### 17.9 A project's profile, and how a new thread starts
 
@@ -1910,6 +1912,15 @@ A new thread starts on the first of:
 3. the user's thread default (Settings › Threads).
 
 The controller applies this rule when a spawn names no model. A client may preselect, in its draft, the user's most recent entry within the profile, kept by the client per device; that preselection is then the entry the caller names. The rule decides only the start: changing a project's profile later changes no existing thread. An Agent keeps its own entry, and a project never overrides it.
+
+*(Amended 2026-10-31, [#936](https://github.com/theagenticage/hercule/issues/936).)* **Who the rule applies to, and what it replaces.** Step 2 applies to every Thread spawn that names no model and no Agent, including a Thread a session starts. The project is the one the call names, else the calling session's project. When it applies, it takes precedence over copying the calling session's model:
+
+- The project's default entry replaces the account, harness, model and options as one selection, whether they would have come from the user's thread defaults or from the calling session. Options are dropped, because they belong to the model of the other selection. Everything else the Thread copies from its caller is unchanged: access mode, permission profile, project, runner and workspace.
+- A call that names another account, or another harness than the entry's, keeps what it names and drops the entry's model, so the Thread starts on that account's default model. This is the rule for the thread default as well.
+- A default entry that cannot run now stays the choice. The start is refused with the usual reason (section 17.6), and no other entry or default is used in its place.
+- The step is skipped, and the caller's values or the thread default apply as before, when the Thread has no project, the project is deleted, it names no profile, the profile no longer exists, or the profile has no default entry (it is empty).
+
+Spec 14's Settings › Threads row says that a Thread a session starts copies the calling session. Read it as: the calling session's account, harness, model and options still apply when the project names no profile or the profile has no default entry, and never when the rule above applies. Spec 11 section 2 (`session`) lists the same order.
 
 ### 17.10 A thread keeps its account and harness
 
