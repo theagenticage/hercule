@@ -36,7 +36,7 @@ import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 import {
   readLastOpenProfileId,
   readRecentModels,
-  writeLastOpenProfileId,
+  rememberOpenProfile,
   writeRecentModels,
 } from "../../app/recent-models";
 import { useComposerDraft } from "../../app/thread-drafts";
@@ -85,7 +85,7 @@ export interface ComposerModel {
   readonly retryAttachment: (key: string) => void;
   readonly recordThreadChoice: (choice: ThreadChoice) => void;
   /** Remembers on this device that the user opened the profile `profileId` in the model menu. */
-  readonly recordOpenProfile: (profileId: string) => void;
+  readonly rememberOpenProfile: (profileId: string) => void;
   readonly submit: () => void;
   readonly stop: () => void;
 }
@@ -271,9 +271,9 @@ export function useComposerModel(
     recordThreadChoice: (choice) => {
       changeDraft((draft) => ({ ...draft, picks: applyThreadChoice(draft.picks, choice) }));
     },
-    recordOpenProfile: (profileId) => {
+    rememberOpenProfile: (profileId) => {
       setLastOpenProfileId(profileId);
-      writeLastOpenProfileId(profileId);
+      rememberOpenProfile(profileId);
     },
     submit: () => {
       // A second Enter or click before the first send settles is ignored, so

@@ -42,7 +42,7 @@ export const readLastOpenProfileId = (): string | null => {
 };
 
 /** Stores the id of the Model Profile the user opened last. A failed write is ignored. */
-export const writeLastOpenProfileId = (profileId: string): void => {
+export const rememberOpenProfile = (profileId: string): void => {
   try {
     window.localStorage.setItem(LAST_OPEN_PROFILE_KEY, profileId);
   } catch {

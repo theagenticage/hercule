@@ -344,7 +344,7 @@ export function Composer({
                     onFilter={setFilter}
                     onOpenProfile={(profileId) => {
                       setOpenedProfileId(profileId);
-                      model.recordOpenProfile(profileId);
+                      model.rememberOpenProfile(profileId);
                     }}
                     pill={fields.model.pill}
                     disabled={model.readOnly !== null}
