@@ -1,12 +1,6 @@
 import { Suspense, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  buildProviderAccountName,
-  describeProviderAccountIdentity,
-  findProviderPluginId,
-  listProviderAccountMachines,
-} from "@hercule/client-core";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import {
   harnessesQuery,
@@ -16,9 +10,11 @@ import {
   runnersQuery,
 } from "../../../../app/queries";
 import { PlusIcon } from "../../../../icons/plus";
-import { ProviderAccountCard, ProviderMark } from "../../../../screens/settings/providers";
 import { LazyAddProviderAccount } from "../../../../screens/settings/providers/lazy-add-provider-account";
 import { SettingsHeaderActions } from "../../../../screens/settings/settings-frame";
+import { AccountCard } from "./-account-card";
+import type { CredentialFix } from "./-fix-account-dialog";
+import { LazyFixAccountDialog } from "./-lazy-fix-account-dialog";
 import { OpenedProviderAccountSheet } from "./-provider-account-sheet";
 
 /**
@@ -32,11 +28,18 @@ interface OpenSheet {
   readonly name: string;
 }
 
+/** The account whose key or token is being replaced from its card, and how. */
+interface FixingAccount {
+  readonly providerAccountId: string;
+  readonly fix: CredentialFix;
+}
+
 /**
  * Settings > Providers: the Accounts section, one card per Provider Account
  * in the order the accounts were added. A card shows the provider's mark, the
  * account's name, who is signed in and the plan, and either the machines the
- * account is signed in on or "Every machine". A click on a card opens the
+ * account is signed in on or "Every machine", then its usage or, when it needs
+ * the user, its state and the button that fixes it. A click on a card opens the
  * account's sheet, and the header's Add an account opens the sheet that adds
  * one (spec 17 §Settings, Providers).
  *
@@ -45,6 +48,8 @@ interface OpenSheet {
  * keeps current: the `provider` topic for the accounts, which the shell
  * holds, so opening the section sends no request and the section holds no
  * subscription of its own. The loader only makes sure the cache holds them.
+ * Each card reads the lists it draws from, and the page reads only the
+ * accounts.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/providers")({
   staticData: { title: "Providers" },
@@ -67,18 +72,16 @@ export const Route = createFileRoute("/_connected/_shell/settings/providers")({
 function Providers(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
-  const providers = useSuspenseQuery(providersQuery(client)).data;
-  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
-  const runners = useSuspenseQuery(runnersQuery(client)).data;
-  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const [sheet, setSheet] = useState<OpenSheet | null>(null);
   const [adding, setAdding] = useState(false);
+  const [fixing, setFixing] = useState<FixingAccount | null>(null);
   // A sheet closes only itself: a late close of a sheet the user left must
   // not close the one opened since.
   const closeSheet = (closing: OpenSheet): void => {
     setSheet((current) => (current === closing ? null : current));
   };
   const sheetProviderAccount = accounts.find(({ id }) => id === sheet?.providerAccountId);
+  const fixedAccount = accounts.find(({ id }) => id === fixing?.providerAccountId);
 
   return (
     <>
@@ -100,27 +103,20 @@ function Providers(): JSX.Element {
             </p>
           )}
           <div className="pa-cards">
-            {accounts.map((account) => {
-              const name = buildProviderAccountName(providers, account);
-              return (
-                <ProviderAccountCard
-                  key={account.id}
-                  mark={
-                    <ProviderMark
-                      pluginId={findProviderPluginId(providers, account)}
-                      plugins={plugins}
-                      size={15}
-                    />
-                  }
-                  name={name}
-                  identity={describeProviderAccountIdentity(providers, account)}
-                  machines={listProviderAccountMachines(account, runners, providers, harnesses)}
-                  onOpen={() => {
-                    setSheet({ providerAccountId: account.id, name });
-                  }}
-                />
-              );
-            })}
+            {accounts.map((account) => (
+              <AccountCard
+                key={account.id}
+                account={account}
+                onOpen={(providerAccountId, name) => {
+                  setSheet({ providerAccountId, name });
+                }}
+                onFix={(providerAccountId, name, fix) => {
+                  // Signing in is done in the sheet's Machines section.
+                  if (fix.kind === "sign-in") setSheet({ providerAccountId, name });
+                  else setFixing({ providerAccountId, fix });
+                }}
+              />
+            ))}
           </div>
         </section>
       )}
@@ -132,6 +128,17 @@ function Providers(): JSX.Element {
             signInMachines="all"
             onClose={() => {
               setAdding(false);
+            }}
+          />
+        </Suspense>
+      )}
+      {fixing !== null && fixedAccount !== undefined && (
+        <Suspense fallback={null}>
+          <LazyFixAccountDialog
+            account={fixedAccount}
+            fix={fixing.fix}
+            onClose={() => {
+              setFixing(null);
             }}
           />
         </Suspense>

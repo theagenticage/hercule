@@ -52,6 +52,8 @@ import type {
   EditMarks,
   HarnessAdapter,
   HarnessRunnerContext,
+  ProbeOptions,
+  SessionUsageReport,
   TextGenerationContext,
   UserMaterial,
 } from "../index";
@@ -106,6 +108,13 @@ import {
   type AppServer,
 } from "./probe";
 import {
+  buildUsageReadings,
+  completeWindowDurations,
+  createWindowDurations,
+  pickUpdatedSnapshot,
+  type WindowDurations,
+} from "./usage";
+import {
   decideTextGenerationOutcome,
   buildTextGenerationThread,
   buildTextGenerationTurn,
@@ -122,6 +131,7 @@ import {
   type ServerRequestFrame,
 } from "./rpc";
 import type {
+  AccountRateLimitsUpdatedNotification,
   ApprovalsReviewer,
   AskForApproval,
   DynamicToolCallResponse,
@@ -257,6 +267,8 @@ interface Held {
    * answered must not open a second time.
    */
   readonly seenAsyncQuestionItems: Set<string>;
+  /** The window lengths the session's rate-limit updates have given so far, to complete sparse updates. */
+  readonly windowDurations: WindowDurations;
 }
 
 /**
@@ -725,6 +737,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   // run here and keeps `findAdapter` the synchronous lookup every other caller
   // already treats it as.
   const published = Effect.runSync(PubSub.unbounded<HarnessEvent>());
+  const publishedUsage = Effect.runSync(PubSub.unbounded<SessionUsageReport>());
   const sessions = new Map<string, Held>();
   /**
    * One app-server per session, not per account. The session's own token is
@@ -1071,6 +1084,25 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       );
     });
 
+  /**
+   * Publishes the readings of a rate-limit update for the session. An update
+   * that gives no reading, such as one for another limit or one with only
+   * unknown windows, publishes nothing.
+   */
+  const reportUsage = (held: Held, params: AccountRateLimitsUpdatedNotification): void => {
+    const snapshot = pickUpdatedSnapshot(params);
+    if (snapshot === undefined) return;
+    const [first, ...rest] = buildUsageReadings(
+      completeWindowDurations(snapshot, held.windowDurations),
+      now(),
+    );
+    if (first === undefined) return;
+    PubSub.publishUnsafe(publishedUsage, {
+      sessionId: held.binding.sessionId,
+      readings: [first, ...rest],
+    });
+  };
+
   /** Delivers a known thread's frame without letting malformed vendor data stop the reader. */
   const dispatchCodexThreadFrame = (
     held: Held,
@@ -1095,6 +1127,12 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         thread.state.subagentId === undefined &&
         held.seenAsyncQuestionItems.has(asyncItem.id)
       ) {
+        return;
+      }
+      if (frame.method === "account/rateLimits/updated") {
+        // The account's limits are not part of the conversation, so the
+        // notification goes to `usageReports` and never to the transcript.
+        reportUsage(held, frame.params as AccountRateLimitsUpdatedNotification);
         return;
       }
       for (const event of normalize(thread.state, frame)) {
@@ -1793,13 +1831,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     binaryName: CODEX_BINARY,
 
     events: Stream.fromPubSub(published),
+    usageReports: Stream.fromPubSub(publishedUsage),
 
     // Every shipped harness's config schema is empty, so the Codex adapter
     // takes nothing from it and does not name the argument.
-    probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> =>
+    probe: (ctx: HarnessRunnerContext, options: ProbeOptions): Effect.Effect<ProbeResult> =>
       ctx.binary === undefined
         ? Effect.succeed(buildFailedProbe(null, `no ${CODEX_BINARY} on this machine`))
-        : probe(ctx, ctx.binary),
+        : probe(ctx, ctx.binary, options),
 
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
@@ -1857,6 +1896,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           modelArgument: ctx.modelArgument,
           asyncQuestions: new Map(),
           seenAsyncQuestionItems: new Set(),
+          windowDurations: createWindowDurations(),
           threads: makeCodexThreads({
             sessionId,
             rootThreadId: opened,

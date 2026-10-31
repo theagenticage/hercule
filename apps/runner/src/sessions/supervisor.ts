@@ -46,7 +46,12 @@ import {
   type SubagentId,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
-import { describeMissingAdapter, type AdapterTurnInput, type HarnessAdapter } from "../harnesses";
+import {
+  describeMissingAdapter,
+  type AdapterTurnInput,
+  type HarnessAdapter,
+  type SessionUsageReport,
+} from "../harnesses";
 import {
   buildAdapterFailed,
   buildInputStopped,
@@ -111,6 +116,13 @@ interface RunningStep {
 const SETTLED_STEP_REFUSAL =
   "The step ended before its prompt was delivered, so the prompt was not run.";
 
+/**
+ * How long a usage report that repeats the last one is held back, in
+ * milliseconds. The controller counts a reading older than five minutes as
+ * stale, so an unchanged reading is sent again at that age.
+ */
+const USAGE_REPORT_REFRESH_MS = 5 * 60 * 1000;
+
 /** Builds the error for a start that the runner refuses because it is shutting down. */
 const buildShuttingDown = (): AdapterFailed =>
   buildAdapterFailed("The runner is shutting down, so the session was not started.");
@@ -173,6 +185,12 @@ interface Live {
   readonly inactivityMs: number;
   /** Clock time of the last event of this session while a turn was open. */
   lastEventAt: number;
+  /**
+   * The last usage report sent for this session: its readings without their
+   * `takenAt`, as text, and the clock time it was sent. Undefined until one
+   * is sent. Lets the supervisor skip a report that repeats the last one.
+   */
+  lastUsageReport: { readonly readings: string; readonly sentAt: number } | undefined;
   /**
    * The fiber that stops the session once `inactivityMs` has passed since
    * `lastEventAt`. Undefined while the session is not watched.
@@ -435,6 +453,9 @@ export interface Supervising {
    * session table and the timers up to date, saves an agent step's outcome,
    * removes the entry of a session that exited, then numbers the event and
    * sends it on the attached connection, or drops it while none is attached.
+   * It also sends every adapter's usage reports on the attached connection,
+   * and drops them in the same way.
+   *
    * Fork it once when the process starts, before the first connection: an
    * adapter's events are not replayed, so one published before the watch
    * subscribes is lost to the supervisor too. It never returns.
@@ -996,6 +1017,45 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
   };
 
   /**
+   * Sends one adapter's usage report as an `accountUsageReported` frame, beside
+   * the session's events and outside their numbering. Drops the report when no
+   * connection is attached, or when this runner does not host the session: the
+   * report is best effort, and the next one replaces it.
+   *
+   * Also drops a report whose readings equal the last one sent for the
+   * session, ignoring `takenAt`, because harnesses report after every turn
+   * whether or not anything changed. The same readings are sent again once the
+   * last report is `USAGE_REPORT_REFRESH` old: the controller counts a reading
+   * older than that as stale.
+   */
+  const forwardUsageReport = (report: SessionUsageReport): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const connection = attached;
+      const held = live.get(report.sessionId);
+      if (connection === undefined || held === undefined) return;
+      const readings = JSON.stringify(report.readings, (key: string, value: unknown): unknown =>
+        key === "takenAt" ? undefined : value,
+      );
+      const sentAt = yield* Clock.currentTimeMillis;
+      const last = held.lastUsageReport;
+      if (last?.readings === readings && sentAt - last.sentAt < USAGE_REPORT_REFRESH_MS) return;
+      yield* connection
+        .send({
+          _tag: "accountUsageReported",
+          sessionId: report.sessionId,
+          readings: report.readings,
+        })
+        .pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              held.lastUsageReport = { readings, sentAt };
+            }),
+          ),
+          Effect.ignoreCause,
+        );
+    });
+
+  /**
    * Sends a `runtime.error` on the session's own stream, where the user
    * reading the thread sees it. Its class is the error's tag.
    */
@@ -1540,6 +1600,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
           // Not used until the session is watched: `sendSequenced` sets it
           // together with `inactivity`, on the event that starts the watch.
           lastEventAt: 0,
+          lastUsageReport: undefined,
           inactivity: undefined,
           openTurns: new Set(),
           parkedRequests: new Map(),
@@ -2040,12 +2101,24 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
     });
 
   return {
-    watch: Stream.runForEach(
-      Stream.mergeAll(
-        adapters.map((adapter) => adapter.events),
-        { concurrency: "unbounded" },
-      ),
-      forwardEvent,
+    watch: Effect.all(
+      [
+        Stream.runForEach(
+          Stream.mergeAll(
+            adapters.map((adapter) => adapter.events),
+            { concurrency: "unbounded" },
+          ),
+          forwardEvent,
+        ),
+        Stream.runForEach(
+          Stream.mergeAll(
+            adapters.map((adapter) => adapter.usageReports),
+            { concurrency: "unbounded" },
+          ),
+          forwardUsageReport,
+        ),
+      ],
+      { concurrency: "unbounded", discard: true },
     ),
     forConnection,
     shutdown,

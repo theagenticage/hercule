@@ -26,8 +26,8 @@
  *   what runners report, asking a runner for its facts or to install a
  *   harness, and retiring a runner;
  * - `provider-accounts/`: probing the accounts on the runners and keeping their
- *   snapshots fresh, and the operations that sign an account in on a runner or
- *   probe it;
+ *   snapshots fresh, reading the usage of the accounts that need an active
+ *   read, and the operations that sign an account in on a runner or probe it;
  * - `discussions/`: sending a session the Discussion Input that tells it
  *   what it has not been told about its Discussions yet, and recording
  *   the files sessions edit so that sessions that edited one file meet in a
@@ -103,6 +103,7 @@ export {
 } from "./permissions";
 export { thawExpiredFreezes } from "./promotion";
 export {
+  AccountUsageReadingInterval,
   ProviderAccountProbeDeadline,
   ProviderAccountProbeInterval,
   ProviderAccountProbing,
@@ -110,6 +111,7 @@ export {
   ProviderAccountRunnerOperations,
   ProviderAccountRunnerOperationsLayer,
   ProviderAccountSignInDeadline,
+  runAccountUsageReadingLoop,
 } from "./provider-accounts";
 export {
   Arrival,

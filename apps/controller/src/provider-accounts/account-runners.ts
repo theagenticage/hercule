@@ -12,9 +12,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ModelDescriptor } from "@hercule/protocol";
 import { buildVersionKey, harnessRepository } from "../harnesses";
-import { decideProviderAccountHarness, PluginHost } from "../plugins";
+import { decideProviderAccountHarness, findAccountKind, PluginHost } from "../plugins";
 import { runnerRepository } from "../runners";
 import { Secrets } from "../secrets";
+import { AccountUsage } from "../usage";
 import { providerAccountRepository, type StoredSnapshot } from "./repository";
 import {
   decideHarnessOnRunner,
@@ -81,12 +82,30 @@ export interface AccountHarnessPair {
   readonly harnessId: string;
 }
 
+/**
+ * An active read of one account's usage that is due to be tried (spec 06
+ * section 18.2):
+ *
+ * - `endpoint`: the controller reads it from the provider with the account's key.
+ * - `harness`: the controller probes the account in `harnessId` on `runnerId`
+ *   and asks for usage.
+ */
+export type UsageRead =
+  | { readonly _tag: "endpoint"; readonly providerAccountId: string }
+  | {
+      readonly _tag: "harness";
+      readonly providerAccountId: string;
+      readonly harnessId: string;
+      readonly runnerId: string;
+    };
+
 const make = Effect.gen(function* () {
   const accounts = yield* providerAccountRepository;
   const runners = yield* runnerRepository;
   const reportedVersions = yield* harnessRepository;
   const host = yield* PluginHost;
   const secrets = yield* Secrets;
+  const accountUsage = yield* AccountUsage;
 
   /**
    * Lists where each pair can run (see `listMany` of the service below). It
@@ -215,6 +234,53 @@ const make = Effect.gen(function* () {
      */
     listMany,
 
+    /**
+     * Lists the active usage reads to try now: one per account whose kind
+     * declares `usage` with `readBy: "endpoint"`, and one per account whose
+     * kind declares `readBy: "harness"` and that an online runner can run in
+     * that harness (the first such runner; `listMany` already requires a
+     * sign-in on that runner for an account whose login lives on the machine).
+     * An account of the second kind with no such runner is left out, so
+     * nothing is sent and the caller claims nothing. An account whose kind
+     * reads usage from its sessions only, or declares no usage, is not listed.
+     *
+     * Only accounts whose read is due are listed (`AccountUsage.listDueAccounts`).
+     * The rest are left out before the fleet is looked at, so the many ticks
+     * at which nothing is due cost one read of the accounts and no more. Reads
+     * the accounts and the fleet once, however many accounts there are.
+     */
+    listUsageReads: (): Effect.Effect<ReadonlyArray<UsageRead>, SqlError> =>
+      Effect.gen(function* () {
+        const providers = yield* host.providers();
+        // `harnessId` is null for an account read with its key.
+        const candidates: Array<{ id: string; harnessId: string | null }> = [];
+        for (const account of yield* accounts.list()) {
+          const usage = findAccountKind(providers, account)?.usage;
+          if (usage?.readBy === "endpoint") candidates.push({ id: account.id, harnessId: null });
+          else if (usage?.readBy === "harness") {
+            candidates.push({ id: account.id, harnessId: usage.harnessId });
+          }
+        }
+        const due = new Set(yield* accountUsage.listDueAccounts(candidates.map(({ id }) => id)));
+        const reads: Array<UsageRead> = [];
+        const harnessPairs: Array<AccountHarnessPair> = [];
+        for (const { id, harnessId } of candidates) {
+          if (!due.has(id)) continue;
+          if (harnessId === null) reads.push({ _tag: "endpoint", providerAccountId: id });
+          else harnessPairs.push({ providerAccountId: id, harnessId });
+        }
+        if (harnessPairs.length === 0) return reads;
+        const online = new Set(yield* runners.connected());
+        const available = yield* listMany(harnessPairs);
+        harnessPairs.forEach(({ providerAccountId, harnessId }, index) => {
+          const runnerId = available[index]!.runnerIds.find((id) => online.has(id));
+          if (runnerId !== undefined) {
+            reads.push({ _tag: "harness", providerAccountId, harnessId, runnerId });
+          }
+        });
+        return reads;
+      }),
+
     /** Lists the runners that can run one account in one harness (`listMany` with a single pair). */
     list: (providerAccountId: string, harnessId: string): Effect.Effect<AccountRunners, SqlError> =>
       Effect.map(listMany([{ providerAccountId, harnessId }]), ([only]) => only!),
@@ -234,5 +300,5 @@ export class ProviderAccountRunners extends Context.Service<
 export const ProviderAccountRunnersLayer: Layer.Layer<
   ProviderAccountRunners,
   never,
-  SqlClient.SqlClient | PluginHost | Secrets
+  SqlClient.SqlClient | PluginHost | Secrets | AccountUsage
 > = Layer.effect(ProviderAccountRunners)(make);

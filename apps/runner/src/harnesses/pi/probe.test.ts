@@ -42,7 +42,11 @@ const runProbe = (
     ...buildContext(createPiHome(), null, credential),
     ...(binary.length === 0 ? {} : { binary: binary[0] }),
   };
-  return { result: Effect.runPromise(makePiAdapter(seam).probe(ctx)), runs, spawns };
+  return {
+    result: Effect.runPromise(makePiAdapter(seam).probe(ctx, { readUsage: false })),
+    runs,
+    spawns,
+  };
 };
 
 const findModelOption = (
@@ -96,7 +100,7 @@ describe("the pi adapter's probe", () => {
     const { seam, runs } = buildFakePiSeam({});
     const ctx = { ...buildContext(createPiHome()), modelArgument: "openrouter/{model}" };
 
-    const probed = await Effect.runPromise(makePiAdapter(seam).probe(ctx));
+    const probed = await Effect.runPromise(makePiAdapter(seam).probe(ctx, { readUsage: false }));
 
     expect(runs.map((run) => run.command.slice(1))).toContainEqual([
       "auth",
@@ -113,7 +117,7 @@ describe("the pi adapter's probe", () => {
     const { seam, runs } = buildFakePiSeam({});
     const ctx = { ...buildContext(createPiHome()), modelArgument: "{model}" };
 
-    const probed = await Effect.runPromise(makePiAdapter(seam).probe(ctx));
+    const probed = await Effect.runPromise(makePiAdapter(seam).probe(ctx, { readUsage: false }));
 
     expect(probed.auth.status).toBe("error");
     expect(probed.auth.message).toContain("<provider>/{model}");
@@ -271,7 +275,9 @@ describe("the pi adapter's probe", () => {
 
       const { result } = runOnClock(
         Effect.gen(function* () {
-          const probing = yield* Effect.forkChild(makePiAdapter(seam).probe(ctx));
+          const probing = yield* Effect.forkChild(
+            makePiAdapter(seam).probe(ctx, { readUsage: false }),
+          );
           yield* TestClock.adjust(0);
           // The refresh has started and is not over, so the read has not started.
           expect(countRefreshes(runs)).toBe(1);
@@ -304,7 +310,7 @@ describe("the pi adapter's probe", () => {
       const { seam } = buildFakePiSeam({ refresh: Effect.succeed(FAILED) });
       const ctx = buildContext(createPiHome());
 
-      const { result, warnings } = runOnClock(makePiAdapter(seam).probe(ctx));
+      const { result, warnings } = runOnClock(makePiAdapter(seam).probe(ctx, { readUsage: false }));
 
       const probed = await result;
       expect(probed.auth.status).toBe("ok");
@@ -321,7 +327,9 @@ describe("the pi adapter's probe", () => {
 
       const { result, warnings } = runOnClock((collected) =>
         Effect.gen(function* () {
-          const probing = yield* Effect.forkChild(makePiAdapter(seam).probe(ctx));
+          const probing = yield* Effect.forkChild(
+            makePiAdapter(seam).probe(ctx, { readUsage: false }),
+          );
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
           const probed = yield* Fiber.join(probing);
@@ -353,7 +361,7 @@ describe("the pi adapter's probe", () => {
       const { result } = runOnClock(
         Effect.gen(function* () {
           const probings = yield* Effect.forEach([1, 2], () =>
-            Effect.forkChild(adapter.probe(ctx)),
+            Effect.forkChild(adapter.probe(ctx, { readUsage: false })),
           );
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
@@ -374,12 +382,12 @@ describe("the pi adapter's probe", () => {
 
       const { result, warnings } = runOnClock(
         Effect.gen(function* () {
-          const probing = yield* Effect.forkChild(adapter.probe(ctx));
+          const probing = yield* Effect.forkChild(adapter.probe(ctx, { readUsage: false }));
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
           yield* Fiber.join(probing);
           yield* TestClock.adjust(Duration.seconds(25));
-          const second = yield* Effect.forkChild(adapter.probe(ctx));
+          const second = yield* Effect.forkChild(adapter.probe(ctx, { readUsage: false }));
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
           yield* Fiber.join(second);

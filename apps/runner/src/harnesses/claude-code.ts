@@ -11,6 +11,7 @@ import { mkdtempSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -52,6 +53,7 @@ import {
   type SessionBinding,
   type SessionSpec,
   type SubagentId,
+  type UsageReading,
   type TextGenerationOutcome,
   type TextGenerationSpec,
 } from "@hercule/protocol";
@@ -104,10 +106,17 @@ import type {
   EditMarks,
   HarnessAdapter,
   HarnessRunnerContext,
+  ProbeOptions,
+  SessionUsageReport,
   TextGenerationContext,
 } from "./index";
+import {
+  buildRateLimitReadings,
+  buildUsageAnswerReadings,
+  type ClaudeUsageAnswer,
+} from "./claude-code-usage";
 import { makeInstall } from "./install";
-import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "./probe";
 import type { LoginCommand } from "./login";
 import { SETUP_TOKEN_FOLDER_PREFIX } from "./setup-token-folder";
 import { runProcess, type Run } from "./process";
@@ -149,6 +158,12 @@ export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
 export interface ClaudeSession {
   readonly accountInfo: () => Promise<unknown>;
   readonly supportedModels: () => Promise<ReadonlyArray<unknown>>;
+  /**
+   * Reads the account's plan usage from Claude (the SDK's experimental usage
+   * read, without the scan of local transcripts). It calls the provider, so a
+   * probe asks for it only when the controller allows a read.
+   */
+  readonly readUsage: () => Promise<ClaudeUsageAnswer>;
   /** Ends the query. The CLI is a child process, and it does not exit on its own. */
   readonly close: () => void;
 }
@@ -1216,10 +1231,31 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
   // synchronously here. That keeps `findAdapter` a synchronous lookup, which is
   // how every caller already uses it.
   const published = Effect.runSync(PubSub.unbounded<HarnessEvent>());
+  const publishedUsage = Effect.runSync(PubSub.unbounded<SessionUsageReport>());
   const live = new Map<string, Live>();
 
   const emit = (event: HarnessEvent): void => {
     PubSub.publishUnsafe(published, event);
+  };
+
+  /**
+   * Publishes the usage a `rate_limit_event` reports, and does nothing for any
+   * other message. The event also goes through `normalize`, which keeps its
+   * warning. A malformed event is logged like any message the adapter cannot
+   * read, and never ends the session.
+   */
+  const reportUsage = (held: Live, sdk: SDKMessage): void => {
+    if (sdk.type !== "rate_limit_event") return;
+    try {
+      const [first, ...rest] = buildRateLimitReadings(sdk.rate_limit_info, held.state.now());
+      if (first === undefined) return;
+      PubSub.publishUnsafe(publishedUsage, {
+        sessionId: held.binding.sessionId,
+        readings: [first, ...rest],
+      });
+    } catch (error) {
+      held.state.reportUnknownMessage("rate_limit_event", error);
+    }
   };
 
   /**
@@ -1530,6 +1566,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
           replaceToolResultImages(held.attachmentUploader, sessionId, sdk, held.uploads.signal),
         );
         if (held.editMarks !== null) trackShellProcess(held.editMarks, held.shellItems, sdk);
+        reportUsage(held, withReferences);
         publishMessageEvents(held, normalize(held.state, withReferences));
         sendDueStops(held);
         withdrawRequestsOfDroppedSubagents(held);
@@ -1580,10 +1617,36 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
       return printed === "" ? null : printed;
     });
 
+  /**
+   * Reads the account's usage on a probe's query. Returns `null` when the
+   * account has no plan limits or the read fails, and logs why: the probe's
+   * auth and models are worth more than the usage and must survive its
+   * failure. The caller bounds the time it takes (`readUsageWithinProbeBudget`).
+   */
+  const readUsage = (session: ClaudeSession): Effect.Effect<ReadonlyArray<UsageReading> | null> =>
+    Effect.tryPromise({ try: () => session.readUsage(), catch: describeErrorAsFact }).pipe(
+      Effect.map((answer) => buildUsageAnswerReadings(answer, now())),
+      Effect.catch((error) =>
+        Effect.as(
+          Effect.logWarning(`Claude Code usage could not be read: ${describeErrorAsFact(error)}`),
+          null,
+        ),
+      ),
+    );
+
   const queryHarness = (
     ctx: HarnessRunnerContext,
     binary: string,
-  ): Effect.Effect<{ account: Account; models: ReadonlyArray<Model> }, string> =>
+    options: ProbeOptions,
+    probeStartedAt: number,
+  ): Effect.Effect<
+    {
+      account: Account;
+      models: ReadonlyArray<Model>;
+      usage: ReadonlyArray<UsageReading> | null;
+    },
+    string
+  > =>
     Effect.acquireUseRelease(
       Effect.sync(() => seam.query({ options: buildProbeOptions(ctx, binary) })),
       (session) =>
@@ -1596,7 +1659,14 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
             try: () => session.supportedModels(),
             catch: describeErrorAsFact,
           });
-          return { account: account as Account, models: models as ReadonlyArray<Model> };
+          const usage = options.readUsage
+            ? yield* readUsageWithinProbeBudget(probeStartedAt, readUsage(session))
+            : null;
+          return {
+            account: account as Account,
+            models: models as ReadonlyArray<Model>,
+            usage,
+          };
         }),
       (session) => Effect.sync(() => session.close()),
     );
@@ -1606,6 +1676,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
     binaryName: CLAUDE_BINARY,
 
     events: Stream.fromPubSub(published),
+    usageReports: Stream.fromPubSub(publishedUsage),
 
     startSession: (
       sessionId: string,
@@ -1876,19 +1947,21 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
 
     // Every shipped harness's config schema is empty, so the Claude adapter
     // does not read the config and leaves out that parameter.
-    probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> => {
+    probe: (ctx: HarnessRunnerContext, options: ProbeOptions): Effect.Effect<ProbeResult> => {
       const binary = ctx.binary;
       if (binary === undefined) {
         return Effect.succeed(buildFailedProbe(null, `no ${CLAUDE_BINARY} on this machine`));
       }
       const gather = Effect.gen(function* () {
+        const startedAt = yield* Clock.currentTimeMillis;
         const harnessVersion = yield* readVersion(ctx, binary);
-        return yield* Effect.match(queryHarness(ctx, binary), {
+        return yield* Effect.match(queryHarness(ctx, binary, options, startedAt), {
           onFailure: (message) => buildFailedProbe(harnessVersion, message),
-          onSuccess: ({ account, models }) => ({
+          onSuccess: ({ account, models, usage }) => ({
             harnessVersion,
             auth: buildAuth(account),
             models: buildCatalog(models),
+            usage,
           }),
         });
       });
@@ -1962,6 +2035,10 @@ export const claudeCode: HarnessAdapter = makeClaudeCodeAdapter({
     return {
       accountInfo: () => session.accountInfo(),
       supportedModels: () => session.supportedModels(),
+      // Pinned to this SDK version (see `apps/runner/package.json`): the method is
+      // experimental, and an SDK upgrade must check it still answers this shape.
+      readUsage: () =>
+        session.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
       close: () => {
         // The child is usually already gone when close runs, and an unhandled
         // rejection would take the whole daemon down because of one bad probe.

@@ -32,6 +32,8 @@ const ACCOUNT: ProviderAccount = {
   planLabel: null,
   defaultHarnessId: "claude-code/claude-code",
   expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: [],
   createdAt: "2026-09-08T09:00:00.000Z",
   updatedAt: "2026-09-08T09:00:00.000Z",

@@ -10,7 +10,7 @@
  * `providerAccount.update` and never read back.
  */
 import { Schema } from "effect";
-import { ModelDescriptor, SnapshotAuth } from "@hercule/protocol";
+import { ModelDescriptor, SnapshotAuth, UsageCredit, UsageWindow } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import {
@@ -49,6 +49,26 @@ export const CapabilitySnapshot = Schema.Struct({
 
 export type CapabilitySnapshot = Schema.Schema.Type<typeof CapabilitySnapshot>;
 
+/**
+ * Where a stored usage reading came from: `session` when a running session's
+ * harness reported it, `read` when the controller asked for it.
+ */
+export const AccountUsageSource = Schema.Literals(["session", "read"]);
+
+export type AccountUsageSource = Schema.Schema.Type<typeof AccountUsageSource>;
+
+/**
+ * One reading of a Provider Account's usage: a usage window or the credit
+ * left, each as the wire carries it plus the `source` it was stored from.
+ * Built from the protocol shapes so the public shape cannot drift from them.
+ */
+export const AccountUsageReading = Schema.Union([
+  Schema.Struct({ ...UsageWindow.fields, source: AccountUsageSource }),
+  Schema.Struct({ ...UsageCredit.fields, source: AccountUsageSource }),
+]);
+
+export type AccountUsageReading = Schema.Schema.Type<typeof AccountUsageReading>;
+
 export const ProviderAccount = Schema.Struct({
   id: Id,
   /** The qualified id of the Provider, such as `anthropic/anthropic`. */
@@ -69,6 +89,20 @@ export const ProviderAccount = Schema.Struct({
    * for every other kind.
    */
   expiresAt: Schema.NullOr(Timestamp),
+  /**
+   * The account's Account Usage as last reported: one reading per usage
+   * window, then the credit left. Sorted five-hour, weekly, monthly, then the
+   * credit; an account holds at most one credit reading. Empty when nothing
+   * has been reported. It is never an estimate.
+   */
+  usage: Schema.Array(AccountUsageReading),
+  /**
+   * Set when the provider refused the account's credential, with the
+   * provider's own words and when it refused. `null` when it did not, and
+   * again once a read succeeds or a new credential is stored (spec 06
+   * section 15.6).
+   */
+  failure: Schema.NullOr(Schema.Struct({ message: Schema.String, failedAt: Timestamp })),
   snapshots: Schema.Array(CapabilitySnapshot),
   createdAt: Timestamp,
   updatedAt: Timestamp,

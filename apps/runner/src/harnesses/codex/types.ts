@@ -50,3 +50,8 @@ export type { ToolRequestUserInputParams } from "./generated/v2/ToolRequestUserI
 export type { ToolRequestUserInputResponse } from "./generated/v2/ToolRequestUserInputResponse";
 export type { DynamicToolCallResponse } from "./generated/v2/DynamicToolCallResponse";
 export type { JsonValue } from "./generated/serde_json/JsonValue";
+export type { GetAccountRateLimitsParams } from "./generated/v2/GetAccountRateLimitsParams";
+export type { GetAccountRateLimitsResponse } from "./generated/v2/GetAccountRateLimitsResponse";
+export type { AccountRateLimitsUpdatedNotification } from "./generated/v2/AccountRateLimitsUpdatedNotification";
+export type { RateLimitSnapshot } from "./generated/v2/RateLimitSnapshot";
+export type { RateLimitWindow } from "./generated/v2/RateLimitWindow";

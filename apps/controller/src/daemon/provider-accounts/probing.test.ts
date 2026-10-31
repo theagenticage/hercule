@@ -39,6 +39,7 @@ import {
 } from "../../provider-accounts/testing";
 import { RunnerConnections } from "../../runners";
 import { buildProviderAccountOwner, Secrets } from "../../secrets";
+import { AccountUsage, AccountUsageLayer } from "../../usage";
 import { ProviderAccountProbing, ProviderAccountProbingLayer } from "./probing";
 
 interface Sent {
@@ -168,6 +169,7 @@ const run = <A, E>(
     | ProviderAccountProbing
     | ProviderAccountProbes
     | ProviderAccountRunners
+    | AccountUsage
     | SqlClient.SqlClient
     | Secrets
   >,
@@ -186,6 +188,7 @@ const run = <A, E>(
           Layer.provideMerge(ProviderAccountProbesLayer),
           Layer.provideMerge(HarnessAccountsLayer),
           Layer.provideMerge(Layer.succeed(RunnerConnections)(buildFakeConnections(sent))),
+          Layer.provideMerge(AccountUsageLayer),
           Layer.provideMerge(buildPluginStack()),
         ),
       ),
@@ -336,6 +339,176 @@ describe("a probe", () => {
     );
 
     expect(failure).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+/** A usage reading a runner returns with a probe: 40 percent of the five-hour window used. */
+const FIVE_HOUR_READING = {
+  kind: "window" as const,
+  window: "five-hour" as const,
+  usedPercent: 40,
+  resetsAt: null,
+  hit: false,
+  takenAt: new Date().toISOString(),
+};
+
+describe("a probe that reads usage", () => {
+  afterEach(() => {
+    probeResult.current = () => Effect.succeed(SIGNED_IN);
+  });
+
+  it("asks the runner for usage, and stores the readings of the answer as read", async () => {
+    const sent: Array<Sent> = [];
+    probeResult.current = () => Effect.succeed({ ...SIGNED_IN, usage: [FIVE_HOUR_READING] });
+
+    const outcome = await run(
+      sent,
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const usage = yield* AccountUsage;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+
+        const claimed = yield* probing.readUsageByProbe(runner, account.id, ALPHA_HARNESS_ID);
+        return { claimed, readings: yield* usage.read(account.id) };
+      }),
+    );
+
+    expect(outcome.claimed).toBe(true);
+    expect(sent.map((one) => one.request)).toMatchObject([
+      { _tag: "probeRequest", readUsage: true },
+    ]);
+    expect(outcome.readings).toMatchObject([
+      { window: "five-hour", usedPercent: 40, source: "read" },
+    ]);
+  });
+
+  it("sends nothing when the 15 minutes since the last read have not passed", async () => {
+    const sent: Array<Sent> = [];
+
+    const claims = await run(
+      sent,
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+
+        return [
+          yield* probing.readUsageByProbe(runner, account.id, ALPHA_HARNESS_ID),
+          yield* probing.readUsageByProbe(runner, account.id, ALPHA_HARNESS_ID),
+        ];
+      }),
+    );
+
+    expect(claims).toEqual([true, false]);
+    expect(probeRequestsIn(sent)).toBe(1);
+  });
+
+  it("does not ask for usage in any other probe", async () => {
+    const sent: Array<Sent> = [];
+
+    await run(
+      sent,
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+
+        yield* probing.probe(runner, account.id, ALPHA_HARNESS_ID);
+        yield* probing.sweepProviderAccount(account.id);
+      }),
+    );
+
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.map((one) => one.request)).toSatisfy(
+      (requests: ReadonlyArray<ControllerToRunner>) =>
+        requests.every((request) => request._tag === "probeRequest" && !request.readUsage),
+    );
+  });
+
+  it("stores no readings from a probe that did not ask for usage, even when the runner returns some", async () => {
+    probeResult.current = () => Effect.succeed({ ...SIGNED_IN, usage: [FIVE_HOUR_READING] });
+
+    const readings = await run(
+      [],
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const usage = yield* AccountUsage;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+
+        const outcome = yield* probing.probe(runner, account.id, ALPHA_HARNESS_ID);
+        return { stored: outcome._tag, readings: yield* usage.read(account.id) };
+      }),
+    );
+
+    expect(readings).toEqual({ stored: "stored", readings: [] });
+  });
+
+  it("stores no readings from an answer that was superseded", async () => {
+    const sent: Array<Sent> = [];
+
+    const readings = await run(
+      sent,
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const usage = yield* AccountUsage;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        const gate = yield* Deferred.make<void>();
+        // The first probe is answered last, with a reading, after the second
+        // probe's snapshot was stored.
+        probeResult.current = (index) =>
+          index === 0
+            ? Effect.as(Deferred.await(gate), { ...SIGNED_IN, usage: [FIVE_HOUR_READING] })
+            : Effect.succeed(SIGNED_IN);
+
+        const older = yield* Effect.forkChild(probing.probe(runner, account.id, ALPHA_HARNESS_ID));
+        yield* Effect.sleep(Duration.millis(10));
+        yield* probing.probe(runner, account.id, ALPHA_HARNESS_ID);
+        yield* Deferred.succeed(gate, undefined);
+        yield* Fiber.join(older);
+        return yield* usage.read(account.id);
+      }),
+    );
+
+    expect(readings).toEqual([]);
+  });
+
+  it("stores no readings from an answer for a person other than the account's", async () => {
+    const sent: Array<Sent> = [];
+    probeResult.current = () =>
+      Effect.succeed({
+        ...SIGNED_IN,
+        auth: { status: "ok" as const, identity: "someone-else@example.com" },
+        usage: [FIVE_HOUR_READING],
+      });
+
+    const readings = await run(
+      sent,
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const probing = yield* ProviderAccountProbing;
+        const usage = yield* AccountUsage;
+        const accounts = yield* providerAccountRepository;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        yield* withTransaction(
+          sql,
+          accounts.setIdentityIfUnset(
+            account.id,
+            "someone@example.com",
+            undefined,
+            "2026-10-31T00:00:00.000Z",
+          ),
+        );
+        const runner = yield* addRunner("laptop");
+
+        yield* probing.probe(runner, account.id, ALPHA_HARNESS_ID);
+        return yield* usage.read(account.id);
+      }),
+    );
+
+    expect(readings).toEqual([]);
   });
 });
 

@@ -21,7 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Queue, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
@@ -36,6 +36,7 @@ import type {
   SessionSpec,
   SessionStart,
   TurnInput,
+  UsageReading,
   WorkspaceKind,
   WorkspaceStepKey,
   WorkspaceStepResult,
@@ -55,7 +56,7 @@ import {
   type GithubTokenAnswer,
 } from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
-import type { HarnessAdapter, HarnessRunnerContext } from "../harnesses";
+import type { HarnessAdapter, HarnessRunnerContext, SessionUsageReport } from "../harnesses";
 import type { Machine } from "./context";
 
 import { makeWorkspaceSteps } from "../workspace-steps";
@@ -177,6 +178,10 @@ interface Fake {
   /** Every `stopSession` call, with the reason its caller gave. */
   readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
   readonly emit: (event: HarnessEvent) => void;
+  /** Makes the adapter report the usage of a session's account. Kept until the watch reads it. */
+  readonly reportUsage: (report: SessionUsageReport) => void;
+  /** How many reports the watch has begun to read. When it reads one, it has finished the one before. */
+  readonly usageReportsRead: () => number;
   /** The error every later start and input fails with, when set. */
   fails: AdapterError | undefined;
   /** The message every `respondToQuestion` call fails with, when set. */
@@ -192,7 +197,11 @@ interface Fake {
 
 const createFake = (): Fake => {
   const events = Effect.runSync(PubSub.unbounded<HarnessEvent>());
+  // A queue, not a PubSub: the report of a test must not be lost to a watch
+  // that has not subscribed yet.
+  const usageReports = Effect.runSync(Queue.unbounded<SessionUsageReport>());
   let heard = 0;
+  let usageReportsRead = 0;
   let inputsBegun = 0;
   const contexts: Array<HarnessRunnerContext> = [];
   const inputs: Array<TurnInput> = [];
@@ -216,6 +225,10 @@ const createFake = (): Fake => {
     emit: (event) => {
       PubSub.publishUnsafe(events, event);
     },
+    reportUsage: (report) => {
+      Queue.offerUnsafe(usageReports, report);
+    },
+    usageReportsRead: () => usageReportsRead,
     adapter: {
       harnessId: "fake",
       binaryName: "fake-harness",
@@ -231,6 +244,9 @@ const createFake = (): Fake => {
         heard += 1;
         return false;
       }),
+      usageReports: Stream.tap(Stream.fromQueue(usageReports), () =>
+        Effect.sync(() => void (usageReportsRead += 1)),
+      ),
       probe: () => Effect.die("not probed here"),
       listSessions: Effect.sync(() => [...held.values()]),
       generateText: () => Effect.die("no text generation here"),
@@ -4194,6 +4210,119 @@ it("reports current checkout facts after start and resume before any turn ends, 
   expect(readFileSync(setupMarker, "utf8")).toBe("setup\n");
   expect(fake.contexts).toHaveLength(2);
   expect(fake.contexts.map((context) => context.cwd)).toEqual([cwd, cwd]);
+});
+
+describe("the usage a harness reports for a session's account", () => {
+  const WINDOW: UsageReading = {
+    kind: "window",
+    window: "five-hour",
+    usedPercent: 40,
+    resetsAt: null,
+    hit: false,
+    takenAt: at,
+  };
+  const listUsageFrames = (sent: ReadonlyArray<RunnerToController>) =>
+    sent.flatMap((frame) => (frame._tag === "accountUsageReported" ? [frame] : []));
+
+  it("is sent as an accountUsageReported frame while a connection is attached", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("started", () => listSessionEvents(sent).length > 0);
+        fake.reportUsage({ sessionId: SESSION, readings: [WINDOW] });
+        yield* waitUntil("sent the frame", () => listUsageFrames(sent).length === 1);
+        expect(listUsageFrames(sent)[0]).toEqual({
+          _tag: "accountUsageReported",
+          sessionId: SESSION,
+          readings: [WINDOW],
+        });
+      }),
+    );
+  });
+
+  it("is dropped while no connection is attached, and the next report goes out", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("started", () => listSessionEvents(sent).length > 0);
+      }),
+    );
+
+    // The second report is for a session nobody hosts, so it is dropped
+    // whatever is attached. Once the watch reads it, it has finished the first.
+    fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 10 }] });
+    fake.reportUsage({ sessionId: OTHER_SESSION, readings: [WINDOW] });
+    await Effect.runPromise(waitUntil("read both", () => fake.usageReportsRead() === 2));
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 20 }] });
+        yield* waitUntil("sent a frame", () => listUsageFrames(sent).length > 0);
+      }),
+    );
+
+    expect(listUsageFrames(sent).map((frame) => frame.readings)).toEqual([
+      [{ ...WINDOW, usedPercent: 20 }],
+    ]);
+  });
+
+  it("is not sent again while it repeats the last report, until that report is five minutes old", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const later = "2026-10-19T13:00:00.000Z";
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* awaitForwarded(sent, 1);
+        fake.reportUsage({ sessionId: SESSION, readings: [WINDOW] });
+        yield* waitOnWallClock("sent the first", () => listUsageFrames(sent).length === 1);
+
+        // Only `takenAt` differs, so this is skipped. The report after it
+        // differs, and once that is sent the skipped one has been handled.
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, takenAt: later }] });
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 50 }] });
+        yield* waitOnWallClock("sent the changed one", () => listUsageFrames(sent).length === 2);
+
+        yield* TestClock.adjust(Duration.minutes(5));
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 50 }] });
+        yield* waitOnWallClock("sent the refresh", () => listUsageFrames(sent).length === 3);
+      }),
+    );
+
+    expect(listUsageFrames(sent).map((frame) => frame.readings)).toEqual([
+      [WINDOW],
+      [{ ...WINDOW, usedPercent: 50 }],
+      [{ ...WINDOW, usedPercent: 50 }],
+    ]);
+  });
+
+  it("is dropped for a session this runner does not host", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("started", () => listSessionEvents(sent).length > 0);
+        fake.reportUsage({ sessionId: OTHER_SESSION, readings: [WINDOW] });
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 50 }] });
+        yield* waitUntil("sent a frame", () => listUsageFrames(sent).length > 0);
+        expect(listUsageFrames(sent).map((frame) => frame.sessionId)).toEqual([SESSION]);
+      }),
+    );
+  });
 });
 
 describe("an agent step's turn that ends while no connection is attached", () => {

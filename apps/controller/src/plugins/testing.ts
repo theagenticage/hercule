@@ -28,6 +28,7 @@ import {
   type PluginCapability,
   type HarnessDefinition,
   type ProviderDefinition,
+  type ProviderRegistrationOptions,
   type RegistrationHost,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
@@ -221,6 +222,8 @@ export const createPluginFixture = (options: {
   readonly definitions?: ReadonlyArray<HarnessDefinition>;
   /** The providers to register, in order. By default, none. */
   readonly providers?: ReadonlyArray<ProviderDefinition>;
+  /** What the plugin passes beside each provider it registers. By default, nothing. */
+  readonly providerOptions?: ProviderRegistrationOptions;
   /** A message to fail `register` with, after registering, where a plugin's own work would go. */
   readonly registerFails?: string;
   /** How many `activate` calls fail before the first one that succeeds. */
@@ -259,7 +262,8 @@ export const createPluginFixture = (options: {
             if (host.harnesses !== undefined) yield* host.harnesses.register(definition);
           }
           for (const definition of options.providers ?? []) {
-            if (host.providers !== undefined) yield* host.providers.register(definition);
+            if (host.providers !== undefined)
+              yield* host.providers.register(definition, options.providerOptions);
           }
           if (options.registerFails !== undefined) {
             return yield* Effect.fail(new PluginError({ message: options.registerFails }));

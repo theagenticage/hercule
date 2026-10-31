@@ -133,7 +133,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
       };
 
       const started = Date.now();
-      const probed = await Effect.runPromise(claudeCode.probe(context));
+      const probed = await Effect.runPromise(claudeCode.probe(context, { readUsage: false }));
       const took = Date.now() - started;
 
       // Not `error`: an empty config directory means nobody has logged in, and
@@ -211,18 +211,21 @@ const authed =
     ? false
     : (
         await Effect.runPromise(
-          claudeCode.probe({
-            cwd: null,
-            attachmentsDir: null,
-            editMarks: null,
-            attachmentUploader: NO_CONTROLLER_UPLOADER,
-            home: CONFIG_DIR,
-            binary,
-            env: process.env,
-            modelArgument: "{model}",
-            credentialVariables: [],
-            herculeTool: prepareTool(),
-          }),
+          claudeCode.probe(
+            {
+              cwd: null,
+              attachmentsDir: null,
+              editMarks: null,
+              attachmentUploader: NO_CONTROLLER_UPLOADER,
+              home: CONFIG_DIR,
+              binary,
+              env: process.env,
+              modelArgument: "{model}",
+              credentialVariables: [],
+              herculeTool: prepareTool(),
+            },
+            { readUsage: false },
+          ),
         )
       ).auth.status === "ok";
 

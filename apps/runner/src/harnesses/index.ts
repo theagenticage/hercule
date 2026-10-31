@@ -2,6 +2,7 @@
  * The harness adapters built into this runner.
  */
 import type * as Effect from "effect/Effect";
+import type { NonEmptyReadonlyArray } from "effect/Array";
 import type * as Stream from "effect/Stream";
 import type {
   AdapterError,
@@ -22,6 +23,7 @@ import type {
   AttachmentReference,
   SubagentId,
   TurnInput,
+  UsageReading,
 } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
 import type { ResolvedSkillReference } from "../skills";
@@ -243,6 +245,28 @@ export interface UserMaterial {
   readonly instructionsFile: string | undefined;
 }
 
+/**
+ * What a harness reported, unasked, about the usage of the Provider Account a
+ * running session works for (Claude Code's `rate_limit_event`, for example).
+ * `readings` holds only what the harness gave: a window it gave no usage for
+ * has no reading.
+ */
+export interface SessionUsageReport {
+  readonly sessionId: string;
+  readonly readings: NonEmptyReadonlyArray<UsageReading>;
+}
+
+/** What a probe is asked to do besides reading the account and the models. */
+export interface ProbeOptions {
+  /**
+   * Whether to also read the account's usage and return it in
+   * `ProbeResult.usage`. The controller sets it only when its read rule
+   * allows one, because a usage read is a call to the provider. An adapter
+   * with no usage read ignores it and returns `usage: null`.
+   */
+  readonly readUsage: boolean;
+}
+
 export interface InstallOutcome {
   readonly ok: boolean;
   readonly message?: string;
@@ -252,8 +276,11 @@ export interface HarnessAdapter {
   readonly harnessId: string;
   /** The harness binary's name on `PATH`, used to resolve `binary`. */
   readonly binaryName: string;
-  /** Side-effect free: makes no API call and writes nothing outside `ctx.home`. */
-  readonly probe: (ctx: HarnessRunnerContext) => Effect.Effect<ProbeResult>;
+  /**
+   * Side-effect free: writes nothing outside `ctx.home`, and makes no API call
+   * except the usage read that `options.readUsage` asks for.
+   */
+  readonly probe: (ctx: HarnessRunnerContext, options: ProbeOptions) => Effect.Effect<ProbeResult>;
   /**
    * Takes an environment rather than a context, because an install is per machine, not per
    * account.
@@ -306,6 +333,17 @@ export interface HarnessAdapter {
    * subscribes once, at startup.
    */
   readonly events: Stream.Stream<HarnessEvent>;
+
+  /**
+   * The adapter's second output: what its harness reports about the usage of
+   * a hosted session's Provider Account, keyed by `sessionId`. It is outside
+   * `events` because a report is the account's, not a step of the session's
+   * conversation, and losing one costs nothing: the next report replaces it.
+   * Like `events`, the stream is unbounded and does not replay, and the
+   * runner subscribes once, at startup. An adapter whose harness reports no
+   * usage uses `Stream.empty`.
+   */
+  readonly usageReports: Stream.Stream<SessionUsageReport>;
 
   /**
    * Starts one session and returns its binding. The caller passes the Hercule

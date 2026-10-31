@@ -157,8 +157,10 @@
  * and its idle with Providers open. The full run measures the Providers
  * launch with the other sections. Pass `--providers-only` to run only that,
  * on 40 threads: Settings › Profile open, to compare with, then Settings ›
- * Providers open on five accounts. The Providers launch also prints how long
- * the cards took to draw after the click on the section's row:
+ * Providers open on five accounts, with usage readings on two and a refused
+ * key on one. The Providers launch also prints how long the cards took to
+ * draw after the click on the section's row. Last, ten usage updates of the
+ * Claude account are measured with Providers open (see `perf-providers.ts`):
  *
  *        pnpm --filter @hercule/desktop perf -- --providers-only
  *
@@ -342,6 +344,7 @@ import {
   reportWorkflowWork,
   seedWorkflows,
 } from "./perf-workflows.ts";
+import { measureAccountUsageUpdates, reportAccountUsageUpdates } from "./perf-providers.ts";
 import { pollUntil } from "./poll.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
@@ -1644,7 +1647,9 @@ async function measureSkills(fixture: ThreadFixture, userDataDir: string): Promi
 
 /**
  * Measures two launches on 40 threads: Settings › Profile open, to compare
- * with, and Settings › Providers open on the fixture's five accounts.
+ * with, and Settings › Providers open on the fixture's five accounts. Then
+ * measures what ten usage updates of the Claude account cost while Providers
+ * is open (see `measureAccountUsageUpdates`).
  */
 async function measureProviders(fixture: ThreadFixture, userDataDir: string): Promise<void> {
   for (const section of ["Profile", "Providers"] as const) {
@@ -1652,6 +1657,11 @@ async function measureProviders(fixture: ThreadFixture, userDataDir: string): Pr
       settingsSection: section,
     });
   }
+  reportAccountUsageUpdates(
+    await measureAccountUsageUpdates(userDataDir, fixture, (inspectorUrl, pageSocketUrl) =>
+      openSettingsSection(inspectorUrl, pageSocketUrl, "Providers", Date.now() + 10_000),
+    ),
+  );
 }
 
 /**

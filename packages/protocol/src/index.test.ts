@@ -92,6 +92,22 @@ const controllerHello = {
 } as const;
 
 /** What one runner found out about one Provider Account, with every optional key set. */
+const usageWindow = {
+  kind: "window",
+  window: "five-hour",
+  usedPercent: 42.5,
+  resetsAt: "2026-10-31T15:00:00.000Z",
+  hit: false,
+  takenAt: "2026-10-31T10:00:00.000Z",
+} as const;
+
+const usageCredit = {
+  kind: "credit",
+  remaining: 12.5,
+  limit: null,
+  takenAt: "2026-10-31T10:00:00.000Z",
+} as const;
+
 const probeResult = {
   harnessVersion: "2.1.263",
   auth: {
@@ -117,6 +133,7 @@ const probeResult = {
       ],
     },
   ],
+  usage: null,
 } as const;
 
 const REQUEST_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c72";
@@ -194,6 +211,11 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     _tag: "filesEdited",
     sessionId: SESSION_ID,
     editedFiles: [{ resourceId: "repo-1", path: "src/main.ts" }],
+  },
+  {
+    _tag: "accountUsageReported",
+    sessionId: SESSION_ID,
+    readings: [usageWindow, usageCredit],
   },
   { _tag: "githubTokenRequest", requestId: REQUEST_ID, sessionToken: "a-session-token" },
   { _tag: "sessionInputResult", requestId: REQUEST_ID, ok: true, delivery: "steered" },
@@ -303,6 +325,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     requestId: REQUEST_ID,
     harnessId: "pi/pi",
     harnessAccount,
+    readUsage: false,
   },
   { _tag: "installRequest", requestId: REQUEST_ID, harnessId: "claude-code/claude-code" },
   {
@@ -442,8 +465,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 16, the version whose harness account lists its credential variables", () => {
-    expect(PROTOCOL_VERSION).toBe(16);
+  it("is 17, the version that added Account Usage", () => {
+    expect(PROTOCOL_VERSION).toBe(17);
   });
 });
 
@@ -544,6 +567,41 @@ describe("the runner-to-controller catalogue", () => {
       result: { models: [{ imageInput: null }] },
     });
     expect(decodeFromRunner(reportWith({ maxBytes: 0 }))._tag).toBe("Failure");
+  });
+
+  it("carries usage readings on a probe result and on a session's usage report", () => {
+    const readings = [usageWindow, usageCredit];
+    const probed = {
+      _tag: "probeReport",
+      requestId: REQUEST_ID,
+      providerAccountId: PROVIDER_ACCOUNT_ID,
+      result: { ...probeResult, usage: readings },
+    };
+    expect(Schema.decodeUnknownSync(RunnerToController)(probed)).toEqual(probed);
+    expect(decodeFromRunner({ ...probed, result: omitKey(probed.result, "usage") })._tag).toBe(
+      "Failure",
+    );
+  });
+
+  it.each([
+    ["a percentage above 100", { ...usageWindow, usedPercent: 100.1 }],
+    ["a negative percentage", { ...usageWindow, usedPercent: -1 }],
+    ["a percentage that is not finite", { ...usageWindow, usedPercent: Number.NaN }],
+    ["a window with another name", { ...usageWindow, window: "daily" }],
+    ["a reset time that is not a timestamp", { ...usageWindow, resetsAt: "tomorrow" }],
+    ["a negative credit", { ...usageCredit, remaining: -1 }],
+    ["a credit limit of zero", { ...usageCredit, limit: 0 }],
+  ])("refuses a usage report with %s", (_name, reading) => {
+    expect(
+      decodeFromRunner({ _tag: "accountUsageReported", sessionId: SESSION_ID, readings: [reading] })
+        ._tag,
+    ).toBe("Failure");
+  });
+
+  it("refuses a usage report with no readings", () => {
+    expect(
+      decodeFromRunner({ _tag: "accountUsageReported", sessionId: SESSION_ID, readings: [] })._tag,
+    ).toBe("Failure");
   });
 
   it("round-trips a repository skills inspection that failed", () => {

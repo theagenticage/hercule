@@ -5,6 +5,8 @@
  * - three fixture plugins: the provider `acme/acme`, and the harnesses
  *   `alpha/alpha` (which runs both of Acme's account kinds) and `beta/beta`
  *   (which the provider allows for keys but which runs nothing);
+ * - the provider `metered/metered`, whose key kind has a usage endpoint, for
+ *   the suites that read usage;
  * - `runWithAccounts`, which boots them and runs an effect as the user;
  * - functions that insert the rows other domains own (agents, sessions,
  *   settings), which the delete check reads.
@@ -15,7 +17,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { ParseUsageBody, Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { ProbeResult } from "@hercule/protocol";
 import { mintUuid, nowIso, uuidFromString, withTransaction } from "../db";
 import { NotifierLayer } from "../notifications";
@@ -29,9 +31,10 @@ import {
 import { RunnerConnections, RunnerConnectionsLayer, runnerRepository } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { SettingsLayer } from "../settings";
+import { AccountUsage, AccountUsageLayer } from "../usage";
 import { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
 import { ProviderAccountRunners, ProviderAccountRunnersLayer } from "./account-runners";
-import { ProviderKeyCheckLayer } from "./key-check";
+import { ProviderKeyRequestsLayer } from "./provider-key-requests";
 import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 import { ProviderAccountService, ProviderAccountServiceLayer } from "./service";
@@ -110,6 +113,73 @@ export const buildAccountPlugins = (): ReadonlyArray<Plugin> => [
   createPluginFixture({ id: "beta", definitions: [buildHarnessDefinition("beta", [])] }).plugin,
 ];
 
+export const METERED_PROVIDER_ID = "metered/metered";
+export const METERED_USAGE_URL = "https://api.metered.test/v1/usage";
+
+/** The account kind of Metered that holds a key and whose usage is read from an endpoint. */
+export const METERED_KEY_KIND = "api-key";
+
+/** A provider whose one account kind holds a key and reads its usage from `METERED_USAGE_URL`. */
+export const METERED: ProviderDefinition = {
+  id: "metered",
+  displayName: "Metered",
+  kinds: [
+    {
+      id: METERED_KEY_KIND,
+      title: "API key",
+      description: "A key for Metered.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: {
+        url: "https://api.metered.test/v1/models",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+      usage: {
+        readBy: "endpoint",
+        url: METERED_USAGE_URL,
+        headers: { authorization: "{apiKey}" },
+      },
+      harnesses: [ALPHA_HARNESS_ID],
+    },
+  ],
+  defaultHarnessId: ALPHA_HARNESS_ID,
+};
+
+/**
+ * Reads Metered's usage body: `{ "used": 40 }` is a five-hour reading of 40%,
+ * `{ "refuse": "..." }` is a refusal, `{ "nothing": true }` makes the parser
+ * return nothing, and any other body is a defect the parser throws on.
+ */
+const parseMeteredUsageBody: ParseUsageBody = (body, takenAt) => {
+  const answer = body as { used?: number; refuse?: string; nothing?: boolean };
+  if (typeof answer.refuse === "string") return { refused: answer.refuse };
+  if (answer.nothing === true) return undefined as never;
+  if (typeof answer.used !== "number") {
+    throw new Error("not a Metered answer\nsecond line \u001b[31mred");
+  }
+  return {
+    readings: [
+      {
+        kind: "window",
+        window: "five-hour",
+        usedPercent: answer.used,
+        resetsAt: null,
+        hit: false,
+        takenAt,
+      },
+    ],
+  };
+};
+
+/** The plugin that registers Metered, or `provider` in its place when a suite adds account kinds to it. */
+export const buildMeteredPlugin = (provider: ProviderDefinition = METERED): Plugin =>
+  createPluginFixture({
+    id: "metered",
+    capabilities: ["providers"],
+    definitions: [],
+    providers: [provider],
+    providerOptions: { parseUsageBody: { [METERED_KEY_KIND]: parseMeteredUsageBody } },
+  }).plugin;
+
 /** What the fake provider API does with a request: answer it, fail to connect, or never answer. */
 export type FakeProviderAnswer = Response | "unreachable" | "silent";
 
@@ -153,12 +223,13 @@ export const buildFakeProviderApi = (
 
 const buildStack = (providerApi: HttpClient.HttpClient) =>
   ProviderAccountServiceLayer.pipe(
-    Layer.provideMerge(ProviderKeyCheckLayer),
+    Layer.provideMerge(ProviderKeyRequestsLayer),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
     Layer.provideMerge(ProviderAccountProbesLayer),
     Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(HarnessAccountsLayer),
     Layer.provideMerge(SettingsLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(RunnerConnectionsLayer),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(buildPluginStack()),
@@ -166,6 +237,7 @@ const buildStack = (providerApi: HttpClient.HttpClient) =>
 
 export type AccountServices =
   | ProviderAccountService
+  | AccountUsage
   | ProviderAccountProbes
   | ProviderAccountRunners
   | HarnessAccounts
@@ -176,16 +248,18 @@ export type AccountServices =
 
 /**
  * Runs an effect as the user on a fresh database, after the fixture plugins
- * have been booted. Key checks go to `providerApi`, which accepts every key
- * unless the test gives its own.
+ * have been booted. Key checks and usage reads go to `providerApi`, which
+ * accepts every key unless the test gives its own. A test that needs other
+ * providers passes `plugins` in place of the fixture plugins.
  */
 export const runWithAccounts = <A, E>(
   body: Effect.Effect<A, E, AccountServices>,
   providerApi: HttpClient.HttpClient = buildFakeProviderApi().client,
+  plugins: ReadonlyArray<Plugin> = buildAccountPlugins(),
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(buildAccountPlugins()));
+      yield* Effect.flatMap(PluginHost, (host) => host.boot(plugins));
       return yield* body;
     }).pipe(Effect.provide(buildStack(providerApi)), asUser) as Effect.Effect<A, E, never>,
   );
@@ -326,6 +400,7 @@ export const SIGNED_IN: ProbeResult = {
   harnessVersion: "1.2.3",
   auth: { status: "ok", identity: "someone@example.com" },
   models: [{ slug: "model-1", name: "Model 1", imageInput: null, options: [] }],
+  usage: null,
 };
 
 /** Stores a snapshot for an account in a harness on a runner. */

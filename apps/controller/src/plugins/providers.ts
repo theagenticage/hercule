@@ -3,7 +3,9 @@ import {
   PluginError,
   ProviderDefinition,
   type AccountKind,
+  type ParseUsageBody,
   type PluginManifest,
+  type ProviderRegistrationOptions,
 } from "@hercule/plugin-host";
 import { toPluginError } from "./errors";
 import { mintQualifiedId } from "./qualified-id";
@@ -20,6 +22,11 @@ export type RegisteredProvider = Omit<ProviderDefinition, "id"> & {
   readonly id: string;
   /** The id of the plugin that registered the provider. Read it here; never split it off `id`. */
   readonly pluginId: string;
+  /**
+   * The parser of each kind that reads its usage from an endpoint, by kind id.
+   * Code, so it lives here and not in the stored definition.
+   */
+  readonly parseUsageBody: Readonly<Record<string, ParseUsageBody>>;
 };
 
 /**
@@ -54,6 +61,19 @@ export const findCredentialSecretName = (kind: AccountKind): string | undefined 
   }
   return undefined;
 };
+
+/**
+ * Returns the account kind a Provider Account has, or `undefined` when this
+ * build has no such provider or no such kind of it (an account can outlive
+ * the plugin that registered its provider).
+ */
+export const findAccountKind = (
+  providers: ReadonlyArray<RegisteredProvider>,
+  account: { readonly providerId: string; readonly kind: string },
+): AccountKind | undefined =>
+  providers
+    .find((provider) => provider.id === account.providerId)
+    ?.kinds.find((kind) => kind.id === account.kind);
 
 /**
  * Returns what is wrong with the setup steps of a kind, or `undefined` when
@@ -95,13 +115,39 @@ const findCredentialSourceProblem = (kind: AccountKind): string | undefined => {
 };
 
 /**
+ * Returns what is wrong with a request the controller makes with an account's
+ * key, or `undefined` when it is fine. `name` is how the problem names the
+ * request (`keyCheck`, `usage`). The URL must be a fixed `https://` URL
+ * without placeholders, and a header value may hold the placeholder `{apiKey}`
+ * and no other braces. At least one header value must hold `{apiKey}`: a
+ * request that does not send the key would let a public endpoint answer for
+ * every key. The controller sends the key in those headers, so anything else
+ * could send it somewhere it was not meant to go.
+ */
+const findKeyRequestProblem = (
+  name: string,
+  request: { readonly url: string; readonly headers: Readonly<Record<string, string>> },
+): string | undefined => {
+  const url = URL.parse(request.url);
+  if (url === null || url.protocol !== "https:" || /[{}]/.test(request.url)) {
+    return `its ${name} url ${request.url} is not a fixed https:// URL`;
+  }
+  const headers = Object.entries(request.headers);
+  for (const [header, value] of headers) {
+    if (/[{}]/.test(value.replaceAll("{apiKey}", ""))) {
+      return `its ${name} header ${header} holds a placeholder other than {apiKey}`;
+    }
+  }
+  if (!headers.some(([, value]) => value.includes("{apiKey}"))) {
+    return `its ${name} sends no key, so any key would pass; put {apiKey} in a header value, for example authorization: Bearer {apiKey}`;
+  }
+  return undefined;
+};
+
+/**
  * Returns what is wrong with a kind's `keyCheck`, or `undefined` when it is
- * fine. A kind with a `credentials` step must declare one. The URL must be a
- * fixed `https://` URL without placeholders, and a header value may hold the
- * placeholder `{apiKey}` and no other braces. At least one header value must
- * hold `{apiKey}`: a check that does not send the key would let a public
- * endpoint accept every key. The controller sends the key in those headers, so
- * anything else could send it somewhere it was not meant to go.
+ * fine. A kind with a `credentials` step must declare one, and it must pass
+ * `findKeyRequestProblem`.
  */
 const findKeyCheckProblem = (kind: AccountKind): string | undefined => {
   const holdsKey = kind.setup.some((step) => step.kind === "credentials");
@@ -111,20 +157,30 @@ const findKeyCheckProblem = (kind: AccountKind): string | undefined => {
       ? "it takes an API key but declares no keyCheck; a key that cannot be checked is never stored, so declare the request that checks it"
       : undefined;
   }
-  const url = URL.parse(keyCheck.url);
-  if (url === null || url.protocol !== "https:" || /[{}]/.test(keyCheck.url)) {
-    return `its keyCheck url ${keyCheck.url} is not a fixed https:// URL`;
+  return findKeyRequestProblem("keyCheck", keyCheck);
+};
+
+/**
+ * Returns what is wrong with a kind's `usage`, or `undefined` when it is fine
+ * or absent:
+ *
+ * - `harness` must name a harness the kind lists in `harnesses`, because the
+ *   usage is read by probing the account in that harness.
+ * - `endpoint` needs a `credentials` step, because the read is made with the
+ *   account's key, and its request must pass `findKeyRequestProblem`.
+ */
+const findUsageProblem = (kind: AccountKind): string | undefined => {
+  const { usage } = kind;
+  if (usage === undefined || usage.readBy === "sessions") return undefined;
+  if (usage.readBy === "harness") {
+    return kind.harnesses.includes(usage.harnessId)
+      ? undefined
+      : `its usage is read through the harness ${usage.harnessId}, which the kind does not list in harnesses; list it, or read the usage another way`;
   }
-  const headers = Object.entries(keyCheck.headers);
-  for (const [name, value] of headers) {
-    if (/[{}]/.test(value.replaceAll("{apiKey}", ""))) {
-      return `its keyCheck header ${name} holds a placeholder other than {apiKey}`;
-    }
+  if (!kind.setup.some((step) => step.kind === "credentials")) {
+    return "its usage is read from an endpoint with the account's key, but the kind has no credentials step and so holds no key; read the usage through a harness or from sessions";
   }
-  if (!headers.some(([, value]) => value.includes("{apiKey}"))) {
-    return "its keyCheck sends no key, so any key would pass; put {apiKey} in a header value, for example authorization: Bearer {apiKey}";
-  }
-  return undefined;
+  return findKeyRequestProblem("usage", usage);
 };
 
 /** The name of the provider extension point in the catalog. */
@@ -145,7 +201,7 @@ const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
  * credentials step is not exactly one field named `apiKey`, that has an account
  * kind with two credential sources (see `findCredentialSourceProblem`), that has
  * an `oauth`, `device` or `pairing` setup step (see `findUnsupportedStepProblem`), that has
- * a key kind without a valid `keyCheck` (one that sends the key), one of whose account kinds does not list the provider's `defaultHarnessId`,
+ * a key kind without a valid `keyCheck` (one that sends the key), a kind whose `usage` is invalid (see `findUsageProblem`), an `endpoint` kind with no parser or a parser for any other kind, one of whose account kinds does not list the provider's `defaultHarnessId`,
  * or that the plugin registered twice.
  *
  * The harnesses an account kind lists are qualified ids and are not checked
@@ -157,6 +213,7 @@ export const registerProviderContribution = (
   definition: ProviderDefinition,
   declared: Array<NewContribution>,
   live: Array<RegisteredProvider>,
+  options: ProviderRegistrationOptions = {},
 ): Effect.Effect<void, PluginError> =>
   Effect.gen(function* () {
     const decoded = yield* decodeProvider(definition).pipe(Effect.mapError(toPluginError));
@@ -212,6 +269,36 @@ export const registerProviderContribution = (
           }),
         );
       }
+      const usageProblem = findUsageProblem(kind);
+      if (usageProblem !== undefined) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the account kind ${kind.id} of the provider ${id}: ${usageProblem}`,
+          }),
+        );
+      }
+    }
+    // The parsers and the `endpoint` kinds must match one to one: a kind
+    // without its parser could never be read, and a parser for another kind
+    // would never run.
+    const parseUsageBody = options.parseUsageBody ?? {};
+    for (const kind of decoded.kinds) {
+      if (kind.usage?.readBy === "endpoint" && parseUsageBody[kind.id] === undefined) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the account kind ${kind.id} of the provider ${id} reads its usage from an endpoint but registers no parseUsageBody for it; pass a parser for ${kind.id} beside the definition`,
+          }),
+        );
+      }
+    }
+    for (const kindId of Object.keys(parseUsageBody)) {
+      if (decoded.kinds.find((kind) => kind.id === kindId)?.usage?.readBy !== "endpoint") {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the provider ${id} registers a parseUsageBody for ${kindId}, which is not an account kind that reads its usage from an endpoint; remove it, or declare usage readBy endpoint on the kind`,
+          }),
+        );
+      }
     }
     // `providerAccount.create` gives every new account the provider's default
     // harness, whatever its kind, so each kind must allow it.
@@ -236,5 +323,5 @@ export const registerProviderContribution = (
       id,
       definition: { ...decoded, id },
     });
-    live.push({ ...decoded, id, pluginId: manifest.id });
+    live.push({ ...decoded, id, pluginId: manifest.id, parseUsageBody });
   });

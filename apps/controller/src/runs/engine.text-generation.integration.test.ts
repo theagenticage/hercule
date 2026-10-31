@@ -23,6 +23,7 @@ import { buildPluginStack, USER } from "../plugins/testing";
 import { ProviderAccountRunnersLayer } from "../provider-accounts";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
+import { AccountUsageLayer } from "../usage";
 import { TaskServiceLayer } from "../tasks";
 import { TextGeneration, TextGenerationError, type TextGenerationCall } from "../text-generation";
 import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
@@ -89,6 +90,7 @@ const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFib
     Layer.provideMerge(Layer.succeed(AfterCommit)({ publish: () => Effect.void })),
     Layer.provideMerge(textGeneration),
     Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(buildPluginStack()),
   );
   return Effect.runPromise(

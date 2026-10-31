@@ -56,6 +56,8 @@ const buildAccount = (
   planLabel: null,
   defaultHarnessId: "claude-code/claude-code",
   expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",

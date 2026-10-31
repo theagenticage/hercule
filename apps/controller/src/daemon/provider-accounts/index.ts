@@ -10,6 +10,7 @@ export {
   ProviderAccountProbing,
   ProviderAccountProbingLayer,
 } from "./probing";
+export { AccountUsageReadingInterval, runAccountUsageReadingLoop } from "./usage-reading";
 export {
   ProviderAccountRunnerOperations,
   ProviderAccountRunnerOperationsLayer,

@@ -17,10 +17,13 @@ import {
   PluginError,
   registerConnectionType,
   registerEventSource,
+  type AccountKind,
   type FeedDeclaration,
+  type ParseUsageBody,
   type Plugin,
   type PluginCapability,
   type ProviderDefinition,
+  type ProviderRegistrationOptions,
   type HarnessDefinition,
   type HarnessProviderSupport,
   type WorkflowActionContribution,
@@ -494,8 +497,18 @@ describe("what a harness declares it runs", () => {
 });
 
 describe("a plugin that registers a provider", () => {
-  const providerPlugin = (id: string, providers: ReadonlyArray<ProviderDefinition>) =>
-    createPluginFixture({ id, capabilities: ["providers"], definitions: [], providers }).plugin;
+  const providerPlugin = (
+    id: string,
+    providers: ReadonlyArray<ProviderDefinition>,
+    providerOptions?: ProviderRegistrationOptions,
+  ) =>
+    createPluginFixture({
+      id,
+      capabilities: ["providers"],
+      definitions: [],
+      providers,
+      ...(providerOptions === undefined ? {} : { providerOptions }),
+    }).plugin;
 
   it("is listed in registry order under its qualified id, in the catalog and in the host", async () => {
     const vendor = providerPlugin("vendor", [
@@ -741,6 +754,95 @@ describe("a plugin that registers a provider", () => {
       expect(message).toContain("its keyCheck sends no key");
       expect(message).toContain("{apiKey}");
     }
+  });
+
+  it("is errored when a usage read through a harness names a harness the kind does not run in", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [
+            {
+              ...definition.kinds[0],
+              usage: { readBy: "harness", harnessId: "beta/beta" },
+            },
+          ],
+        },
+      ]),
+    );
+
+    expect(message).toContain("the account kind api-key of the provider vendor/vendor");
+    expect(message).toContain("its usage is read through the harness beta/beta");
+  });
+
+  it("is errored when a usage read from an endpoint has no key to send or breaks the key request rules", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const endpoint = {
+      readBy: "endpoint",
+      url: "https://api.example.com/v1/usage",
+      headers: { authorization: "{apiKey}" },
+    } as const;
+    const withUsage = (kind: Record<string, unknown>) =>
+      providerPlugin("vendor", [{ ...definition, kinds: [{ ...definition.kinds[0], ...kind }] }]);
+    const { id, title, description, harnesses } = definition.kinds[0];
+    const tokenKind = {
+      id,
+      title,
+      description,
+      harnesses,
+      setup: [{ kind: "harness-login", method: "create-token" }],
+    } as const;
+
+    expect(
+      await bootAndReadError(
+        providerPlugin("vendor", [{ ...definition, kinds: [{ ...tokenKind, usage: endpoint }] }]),
+      ),
+    ).toContain("the kind has no credentials step");
+    expect(
+      await bootAndReadError(
+        withUsage({ usage: { ...endpoint, url: "http://api.example.com/u" } }),
+      ),
+    ).toContain("its usage url http://api.example.com/u is not a fixed https:// URL");
+    expect(await bootAndReadError(withUsage({ usage: { ...endpoint, headers: {} } }))).toContain(
+      "its usage sends no key",
+    );
+  });
+
+  describe("the parser of a usage endpoint", () => {
+    const endpointKind = (
+      definition: ProviderDefinition,
+      usage: NonNullable<AccountKind["usage"]>,
+    ): ProviderDefinition => ({
+      ...definition,
+      kinds: [{ ...definition.kinds[0], usage }],
+    });
+    const endpoint = {
+      readBy: "endpoint",
+      url: "https://api.example.com/v1/usage",
+      headers: { authorization: "{apiKey}" },
+    } as const;
+    const parseQuota: ParseUsageBody = () => ({ readings: [] });
+
+    it("is errored when a kind reads its usage from an endpoint and registers no parser for it", async () => {
+      const definition = endpointKind(buildProviderDefinition("vendor"), endpoint);
+
+      const message = await bootAndReadError(providerPlugin("vendor", [definition]));
+
+      expect(message).toContain("the account kind api-key of the provider vendor/vendor");
+      expect(message).toContain("registers no parseUsageBody for it");
+    });
+
+    it("is errored when a parser is registered for a kind that does not read its usage from an endpoint", async () => {
+      const definition = buildProviderDefinition("vendor");
+      for (const kindId of ["api-key", "no-such-kind"]) {
+        const message = await bootAndReadError(
+          providerPlugin("vendor", [definition], { parseUsageBody: { [kindId]: parseQuota } }),
+        );
+
+        expect(message, kindId).toContain(`registers a parseUsageBody for ${kindId}`);
+      }
+    });
   });
 
   it("is errored when an account kind declares two credential sources", async () => {

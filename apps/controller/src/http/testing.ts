@@ -112,12 +112,13 @@ import {
   ProviderAccountProbesLayer,
   ProviderAccountRunnersLayer,
   ProviderAccountServiceLayer,
-  ProviderKeyCheckLayer,
+  ProviderKeyRequestsLayer,
 } from "../provider-accounts";
 import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
+import { AccountUsageLayer } from "../usage";
 import { GithubSkillSources } from "../skills";
 import { makeFakeGithub } from "../skills/testing";
 import type { TextGeneration } from "../text-generation";
@@ -214,6 +215,7 @@ const buildServices = (
       ),
     ),
     Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(PromotionStateLayer),
     Layer.provideMerge(
       Layer.mergeAll(
@@ -228,7 +230,7 @@ const buildServices = (
         SessionTokensLayer,
         PromotionTokensLayer,
         Layer.succeed(GithubSkillSources, githubSkillSources),
-        ProviderKeyCheckLayer.pipe(
+        ProviderKeyRequestsLayer.pipe(
           Layer.provide(Layer.succeed(HttpClient.HttpClient, providerKeyHttpClient)),
         ),
       ),

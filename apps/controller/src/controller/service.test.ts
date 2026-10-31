@@ -11,6 +11,7 @@ import { ProviderAccountRunnersLayer } from "../provider-accounts";
 import { LocalRunnerId } from "../runners";
 import { Secrets } from "../secrets";
 import { Settings, SettingsLayer } from "../settings";
+import { AccountUsageLayer } from "../usage";
 import {
   LastTextGenerationFailure,
   LastTextGenerationFailureLayer,
@@ -30,6 +31,7 @@ const buildStack = () =>
   ControllerLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(TextGenerationModelsLayer, LastTextGenerationFailureLayer)),
     Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer)),
     Layer.provideMerge(buildPluginStack()),
   );

@@ -37,6 +37,7 @@ describe("the Anthropic provider", () => {
     expect(kind.id).toBe("subscription-per-machine");
     expect(kind.title).toBe("Claude subscription, signed in on each machine");
     expect(kind.setup).toEqual([{ kind: "harness-login", method: "sign-in" }]);
+    expect(kind.usage).toEqual({ readBy: "harness", harnessId: "claude-code/claude-code" });
     expect(kind.harnesses).toEqual(["claude-code/claude-code"]);
   });
 
@@ -46,6 +47,7 @@ describe("the Anthropic provider", () => {
     expect(kind.id).toBe("subscription-token");
     expect(kind.title).toBe("Claude subscription, every machine");
     expect(kind.setup).toEqual([{ kind: "harness-login", method: "create-token" }]);
+    expect(kind.usage).toEqual({ readBy: "sessions" });
     expect(kind.harnesses).toEqual(["claude-code/claude-code"]);
   });
 
@@ -61,6 +63,7 @@ describe("the Anthropic provider", () => {
       url: "https://api.anthropic.com/v1/models",
       headers: { "x-api-key": "{apiKey}", "anthropic-version": "2023-06-01" },
     });
+    expect(kind.usage).toBeUndefined();
     expect(kind.harnesses).toEqual(["claude-code/claude-code", "pi/pi"]);
   });
 

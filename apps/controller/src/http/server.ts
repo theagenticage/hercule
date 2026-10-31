@@ -104,6 +104,7 @@ import {
   Provisioning,
   checkSchedulerInterval,
   recordDeparturesAfterThaws,
+  runAccountUsageReadingLoop,
   runAttachmentSweepLoop,
   runIngestReconciler,
   runSkillUpdateCheckLoop,
@@ -440,6 +441,10 @@ export const serve = (bundle: WebBundle | undefined) =>
     // rest, so no runner's hello is missed. Probing also runs on a
     // timer, because logins expire and harnesses are upgraded outside Hercule.
     yield* Effect.forkScoped(Effect.flatMap(ProviderAccountProbing, (probing) => probing.driving));
+    // Credentials about to expire are warned about, and the usage of accounts
+    // nobody is running a session for is read, each at most once per 15
+    // minutes. It needs the runners, so it starts beside the probing.
+    yield* Effect.forkScoped(runAccountUsageReadingLoop);
     // A runner that connects is sent the work owed to it: its pending
     // provisioning and its running workspace steps. Forked before the
     // listener binds, like the probing, so no arrival is missed.

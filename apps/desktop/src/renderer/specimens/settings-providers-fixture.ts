@@ -1,6 +1,6 @@
 /**
  * The records the Settings > Providers specimen (settings-providers.tsx)
- * seeds its query cache with, as the controller would return them: five
+ * seeds its query cache with, as the controller would return them: nine
  * Provider Accounts on three machines, in the states the Accounts section
  * draws.
  *
@@ -12,11 +12,27 @@
  * - OpenAI is signed in on studio-mac; OpenAI · Personal is signed in
  *   nowhere and knows no identity yet.
  * - Z.ai is an API key every machine uses. Its label is long, to show the
- *   name ending in an ellipsis.
+ *   name ending in an ellipsis. It reports no usage, so its card has no gauge.
+ * - The usage and the expiry are relative to the time the page loads, so the
+ *   page shows the same states on any day. Anthropic has a five-hour and a
+ *   weekly window; Anthropic · Work has one at 85%, which turns marigold;
+ *   OpenAI has a five-hour window that is hit; OpenAI · Team has a weekly
+ *   window and credit left.
+ * - Anthropic · Token expires in 12 days, and Anthropic · Old token has
+ *   expired. OpenAI · API holds a key OpenAI refused. OpenAI · Personal is
+ *   signed in nowhere, so its card says it is signed out.
  * - Each plugin declares the mark the shipped plugin declares: the book's
  *   brand path scaled by 2/3 onto the 16-unit grid a plugin's mark uses.
  */
-import type { AccountKind, PluginMark, Provider, ProviderAccount, Runner } from "@hercule/contract";
+import { HARNESSES } from "@hercule/client-core/testing";
+import type {
+  AccountKind,
+  Harness,
+  PluginMark,
+  Provider,
+  ProviderAccount,
+  Runner,
+} from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { ProvidersSettingsRecords, SidebarRecords } from "./shell-page";
@@ -37,6 +53,32 @@ const ZAI_MARK: PluginMark = {
 };
 
 const AT = "2026-09-10T09:00:00.000Z";
+
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+/** The time the page loads, which the readings and the expiries are counted from. */
+const LOADED_AT = Date.now();
+const minutesAgo = (minutes: number): string =>
+  new Date(LOADED_AT - minutes * MINUTE_MS).toISOString();
+const inDays = (days: number): string => new Date(LOADED_AT + days * DAY_MS).toISOString();
+const inHours = (hours: number): string =>
+  new Date(LOADED_AT + hours * 60 * MINUTE_MS).toISOString();
+
+/** Returns a usage window as a session reported it eight minutes ago. */
+const buildWindow = (
+  window: "five-hour" | "weekly" | "monthly",
+  usedPercent: number,
+  resetsAt: string,
+  hit = false,
+): ProviderAccount["usage"][number] => ({
+  kind: "window",
+  window,
+  usedPercent,
+  resetsAt,
+  hit,
+  takenAt: minutesAgo(8),
+  source: "session",
+});
 
 /** Returns facts for a machine with the harnesses named `installed` on its PATH, and all three adapters. */
 const buildFacts = (installed: ReadonlyArray<string>): NonNullable<Runner["facts"]> => ({
@@ -100,6 +142,8 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     planLabel: "Max",
     defaultHarnessId: "claude-code/claude-code",
     expiresAt: null,
+    usage: [buildWindow("five-hour", 61, inHours(3)), buildWindow("weekly", 38, inDays(3))],
+    failure: null,
     snapshots: [
       buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@acme.com", "Max"),
       buildSnapshot(ATLAS, "claude-code/claude-code", "rogier@acme.com", "Max"),
@@ -117,6 +161,8 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     planLabel: "Team",
     defaultHarnessId: "claude-code/claude-code",
     expiresAt: null,
+    usage: [buildWindow("five-hour", 85, inHours(1)), buildWindow("weekly", 41, inDays(2))],
+    failure: null,
     snapshots: [
       buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@work.example", "Team"),
       buildSnapshot(ATLAS, "claude-code/claude-code", null),
@@ -133,6 +179,8 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     planLabel: "Pro",
     defaultHarnessId: "codex/codex",
     expiresAt: null,
+    usage: [buildWindow("five-hour", 100, inHours(2), true), buildWindow("weekly", 72, inDays(4))],
+    failure: null,
     snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@acme.com", "Pro")],
     createdAt: AT,
     updatedAt: AT,
@@ -146,6 +194,8 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     planLabel: null,
     defaultHarnessId: "codex/codex",
     expiresAt: null,
+    usage: [],
+    failure: null,
     snapshots: [],
     createdAt: AT,
     updatedAt: AT,
@@ -159,6 +209,71 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     planLabel: null,
     defaultHarnessId: "pi/pi",
     expiresAt: null,
+    usage: [],
+    failure: null,
+    snapshots: [],
+    createdAt: AT,
+    updatedAt: AT,
+  },
+  {
+    id: "a-openai-team",
+    providerId: "openai/openai",
+    kind: "subscription-per-machine",
+    label: "Team",
+    identity: "rogier@platform.example",
+    planLabel: "Business",
+    defaultHarnessId: "codex/codex",
+    expiresAt: null,
+    usage: [
+      buildWindow("weekly", 54, inDays(5)),
+      { kind: "credit", remaining: 1240, limit: 2000, takenAt: minutesAgo(8), source: "read" },
+    ],
+    failure: null,
+    snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@platform.example", "Business")],
+    createdAt: AT,
+    updatedAt: AT,
+  },
+  {
+    id: "a-anthropic-token",
+    providerId: "anthropic/anthropic",
+    kind: "subscription-token",
+    label: "Token",
+    identity: "rogier@acme.com",
+    planLabel: "Max",
+    defaultHarnessId: "claude-code/claude-code",
+    expiresAt: inDays(12),
+    usage: [],
+    failure: null,
+    snapshots: [],
+    createdAt: AT,
+    updatedAt: AT,
+  },
+  {
+    id: "a-anthropic-old-token",
+    providerId: "anthropic/anthropic",
+    kind: "subscription-token",
+    label: "Old token",
+    identity: "rogier@acme.com",
+    planLabel: "Max",
+    defaultHarnessId: "claude-code/claude-code",
+    expiresAt: inDays(-3),
+    usage: [],
+    failure: null,
+    snapshots: [],
+    createdAt: AT,
+    updatedAt: AT,
+  },
+  {
+    id: "a-openai-api",
+    providerId: "openai/openai",
+    kind: "api-key",
+    label: "API",
+    identity: null,
+    planLabel: null,
+    defaultHarnessId: "codex/codex",
+    expiresAt: null,
+    usage: [],
+    failure: { message: "Incorrect API key provided.", failedAt: minutesAgo(40) },
     snapshots: [],
     createdAt: AT,
     updatedAt: AT,
@@ -245,6 +360,28 @@ export const SPECIMEN_PROVIDERS: ReadonlyArray<Provider> = [
 ];
 
 /**
+ * The shared harnesses, with the kinds this page's accounts use added: Claude
+ * Code runs Anthropic's token and key, and Codex runs OpenAI's key. Without
+ * them the account sheet's Default harness would strike out the harness an
+ * account of those kinds runs in.
+ */
+const SPECIMEN_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => {
+  const extraKinds =
+    harness.id === "claude-code/claude-code"
+      ? [
+          { kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" },
+          { kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" },
+        ]
+      : harness.id === "codex/codex"
+        ? [{ kind: "api-key", credentialVariable: "OPENAI_API_KEY" }]
+        : [];
+  return {
+    ...harness,
+    runs: harness.runs.map((run) => ({ ...run, kinds: [...run.kinds, ...extraKinds] })),
+  };
+});
+
+/**
  * The records the specimen draws beside the section: the sidebar of the
  * Bureau book, with the accounts, the machines and the plugins whose marks
  * name the providers.
@@ -265,6 +402,7 @@ export const PROVIDERS_SIDEBAR_RECORDS: SidebarRecords = {
 export const PROVIDERS_SETTINGS_RECORDS: ProvidersSettingsRecords = {
   thisMacRunnerId: STUDIO_MAC.id,
   providers: SPECIMEN_PROVIDERS,
+  harnesses: SPECIMEN_HARNESSES,
   controllerRunnerId: STUDIO_MAC.id,
   createdAccount: {
     id: "01a06d02-8000-7000-8000-0000000000c2",
@@ -275,6 +413,8 @@ export const PROVIDERS_SETTINGS_RECORDS: ProvidersSettingsRecords = {
     planLabel: null,
     defaultHarnessId: "claude-code/claude-code",
     expiresAt: null,
+    usage: [],
+    failure: null,
     snapshots: [],
     createdAt: AT,
     updatedAt: AT,

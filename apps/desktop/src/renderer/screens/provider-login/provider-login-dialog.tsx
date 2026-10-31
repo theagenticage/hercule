@@ -31,6 +31,11 @@ import "./provider-login.css";
  * hold a saved controller. `onSignedIn` is called once when a sign-in started
  * here ends with the account signed in, just before the dialog closes.
  *
+ * With `signInAgain`, the sign-in starts although the account is signed in on
+ * the machine already. The account sheet uses it to make a new token for a
+ * token that is about to expire or was refused: the machine still holds the
+ * old one and counts as signed in.
+ *
  * `onClose` is called whenever the dialog closes, signed in or not. The
  * caller then unmounts it.
  */
@@ -38,12 +43,14 @@ export function ProviderLoginDialog({
   client,
   providerAccountId,
   runnerId,
+  signInAgain = false,
   onSignedIn,
   onClose,
 }: {
   readonly client: HerculeClient;
   readonly providerAccountId: string;
   readonly runnerId: string;
+  readonly signInAgain?: boolean;
   readonly onSignedIn?: () => void;
   readonly onClose: () => void;
 }): JSX.Element {
@@ -55,12 +62,13 @@ export function ProviderLoginDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const runner = runners.find((each) => each.id === runnerId);
   const account = accounts.find((each) => each.id === providerAccountId);
-  const row =
+  const foundRow =
     runner === undefined
       ? undefined
       : buildProviderRows(runner, accounts, providers, harnesses).find(
           (each) => each.id === providerAccountId,
         );
+  const row = signInAgain && foundRow !== undefined ? { ...foundRow, signedIn: false } : foundRow;
   const subject =
     row === undefined || runner === undefined ? "the account" : `${row.name} on ${runner.name}`;
 

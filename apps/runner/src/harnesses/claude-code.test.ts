@@ -55,7 +55,15 @@ import {
 } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import { resolveSkillReferences, type LoadedSkills } from "../skills";
-import type { AdapterTurnInput, EditMarks, HarnessAdapter, HarnessRunnerContext } from "./index";
+import type {
+  AdapterTurnInput,
+  EditMarks,
+  HarnessAdapter,
+  HarnessRunnerContext,
+  ProbeOptions,
+  SessionUsageReport,
+} from "./index";
+import type { ClaudeUsageAnswer } from "./claude-code-usage";
 import * as testing from "./testing";
 import {
   buildAgentCall,
@@ -130,19 +138,27 @@ interface Call {
 const buildStubSeam = (answers: {
   readonly accountInfo?: () => Promise<unknown>;
   readonly supportedModels?: () => Promise<ReadonlyArray<unknown>>;
+  readonly readUsage?: () => Promise<ClaudeUsageAnswer>;
 }): {
   readonly seam: ClaudeSeam;
   readonly calls: Array<Call>;
   readonly closed: () => number;
+  /** How many times the usage read was called. */
+  readonly usageReads: () => number;
 } => {
   const calls: Array<Call> = [];
   let closes = 0;
+  let usageReads = 0;
   const seam: ClaudeSeam = {
     query: (params) => {
       calls.push({ params });
       return {
         accountInfo: answers.accountInfo ?? (() => Promise.resolve(AUTHENTICATED)),
         supportedModels: answers.supportedModels ?? (() => Promise.resolve(MODELS)),
+        readUsage: () => {
+          usageReads += 1;
+          return (answers.readUsage ?? (() => Promise.reject(new Error("no usage here"))))();
+        },
         close: () => {
           closes += 1;
         },
@@ -158,21 +174,24 @@ const buildStubSeam = (answers: {
           : { code: 0, stdout: "", stderr: "" },
       ),
   };
-  return { seam, calls, closed: () => closes };
+  return { seam, calls, closed: () => closes, usageReads: () => usageReads };
 };
 
 const probeWith = (
   answers: Parameters<typeof buildStubSeam>[0] = {},
+  options: ProbeOptions = { readUsage: false },
 ): {
   readonly result: Promise<ProbeResult>;
   readonly calls: Array<Call>;
   readonly closed: () => number;
+  readonly usageReads: () => number;
 } => {
-  const { seam, calls, closed } = buildStubSeam(answers);
+  const { seam, calls, closed, usageReads } = buildStubSeam(answers);
   return {
-    result: Effect.runPromise(makeClaudeCodeAdapter(seam).probe(CONTEXT)),
+    result: Effect.runPromise(makeClaudeCodeAdapter(seam).probe(CONTEXT, options)),
     calls,
     closed,
+    usageReads,
   };
 };
 
@@ -328,6 +347,104 @@ describe("probing a machine with a credential in the environment", () => {
   });
 });
 
+describe("probing for the account's usage", () => {
+  const USAGE: ClaudeUsageAnswer = {
+    rate_limits_available: true,
+    rate_limits: {
+      five_hour: { utilization: 25, resets_at: "2026-10-31T12:00:00.000Z" },
+      seven_day: { utilization: 100, resets_at: "2026-11-02T00:00:00.000Z" },
+    },
+  };
+
+  it("reads the usage only when the request asks for it", async () => {
+    const asked = probeWith({ readUsage: () => Promise.resolve(USAGE) }, { readUsage: true });
+    const probed = await asked.result;
+    expect(asked.usageReads()).toBe(1);
+    expect(probed.usage).toMatchObject([
+      { kind: "window", window: "five-hour", usedPercent: 25, hit: false },
+      { kind: "window", window: "weekly", usedPercent: 100, hit: true },
+    ]);
+    expect(probed.auth.status).toBe("ok");
+
+    const notAsked = probeWith({ readUsage: () => Promise.resolve(USAGE) });
+    expect((await notAsked.result).usage).toBeNull();
+    expect(notAsked.usageReads()).toBe(0);
+  });
+
+  it("has no usage when plan limits do not apply to the account", async () => {
+    const { result } = probeWith(
+      { readUsage: () => Promise.resolve({ rate_limits_available: false, rate_limits: null }) },
+      { readUsage: true },
+    );
+
+    expect((await result).usage).toBeNull();
+  });
+
+  it("keeps the account and the models when the usage read fails", async () => {
+    const { result, closed } = probeWith(
+      { readUsage: () => Promise.reject(new Error("usage endpoint is down")) },
+      { readUsage: true },
+    );
+
+    const probed = await result;
+    expect(probed.usage).toBeNull();
+    expect(probed.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
+    expect(probed.models.length).toBeGreaterThan(0);
+    expect(closed()).toBe(1);
+  });
+
+  it("gives the usage read five seconds, then keeps the account and the models", async () => {
+    const { seam } = buildStubSeam({ readUsage: () => new Promise<never>(() => undefined) });
+    const probed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const running = yield* Effect.forkChild(
+            makeClaudeCodeAdapter(seam).probe(CONTEXT, { readUsage: true }),
+          );
+          yield* TestClock.adjust(Duration.zero);
+          yield* TestClock.adjust(CONTROL_DEADLINE);
+          return yield* Fiber.join(running);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(probed.usage).toBeNull();
+    expect(probed.auth.status).toBe("ok");
+  });
+
+  it("gives the usage read only the time the probe has left, so a slow models read does not cost the auth and the models", async () => {
+    let releaseModels: (models: ReadonlyArray<unknown>) => void = () => undefined;
+    const slowModels = new Promise<ReadonlyArray<unknown>>((resolve) => {
+      releaseModels = resolve;
+    });
+    const { seam } = buildStubSeam({
+      supportedModels: () => slowModels,
+      readUsage: () => new Promise<never>(() => undefined),
+    });
+    const probed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const running = yield* Effect.forkChild(
+            makeClaudeCodeAdapter(seam).probe(CONTEXT, { readUsage: true }),
+          );
+          yield* TestClock.adjust(Duration.seconds(12));
+          releaseModels(MODELS);
+          yield* TestClock.adjust(Duration.zero);
+          // The read had the 5 seconds of its own deadline, but only 2 are left.
+          yield* TestClock.adjust(Duration.seconds(2));
+          return yield* Fiber.join(running);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(probed.usage).toBeNull();
+    expect(probed.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
+    expect(probed.models.length).toBeGreaterThan(0);
+  });
+});
+
 describe("probing when the probe does not finish", () => {
   it("reports the error the SDK threw, so the user sees why instead of a blank row", async () => {
     const { result } = probeWith({
@@ -348,7 +465,9 @@ describe("probing when the probe does not finish", () => {
     const probed = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
-          const running = yield* Effect.forkChild(makeClaudeCodeAdapter(seam).probe(CONTEXT));
+          const running = yield* Effect.forkChild(
+            makeClaudeCodeAdapter(seam).probe(CONTEXT, { readUsage: false }),
+          );
           yield* TestClock.adjust(Duration.zero);
           yield* TestClock.adjust(PROBE_DEADLINE);
           return yield* Fiber.join(running);
@@ -420,7 +539,7 @@ describe("the runner's own sign-in variables", () => {
     const context = { ...CONTEXT, env: AMBIENT };
 
     const stub = buildStubSeam({});
-    await Effect.runPromise(makeClaudeCodeAdapter(stub.seam).probe(context));
+    await Effect.runPromise(makeClaudeCodeAdapter(stub.seam).probe(context, { readUsage: false }));
     const probeEnv = stub.calls[0]!.params.options["env"] as Record<string, string>;
 
     const run = createDriving();
@@ -480,6 +599,8 @@ interface Driving {
   readonly options: Array<Options>;
   readonly sent: Array<SDKUserMessage>;
   readonly seen: Array<HarnessEvent>;
+  /** What the adapter reported about the account's usage, in order. */
+  readonly usageReports: Array<SessionUsageReport>;
   readonly say: (message: unknown) => void;
   readonly end: () => void;
   readonly die: (reason: Error) => void;
@@ -501,6 +622,7 @@ const createDriving = (): Driving => {
   const options: Array<Options> = [];
   const sent: Array<SDKUserMessage> = [];
   const seen: Array<HarnessEvent> = [];
+  const usageReports: Array<SessionUsageReport> = [];
   const queued: Array<unknown> = [];
   const waiting: Array<(result: IteratorResult<unknown>) => void> = [];
   const failing: Array<(reason: Error) => void> = [];
@@ -570,11 +692,18 @@ const createDriving = (): Driving => {
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
 
+  Effect.runFork(
+    Stream.runForEach(adapter.usageReports, (report) =>
+      Effect.sync(() => void usageReports.push(report)),
+    ),
+  );
+
   const harness: Driving = {
     adapter,
     options,
     sent,
     seen,
+    usageReports,
     models,
     refusesModel: false,
     refusesStopTask: false,
@@ -681,6 +810,70 @@ describe("a Claude Code session", () => {
     // report of this runner's sessions is sent only once, at hello.
     expect(run.seen[0]?.harnessRefs).toEqual({ nativeSessionId: binding.nativeSessionId });
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([binding]);
+  });
+
+  describe("the usage a rate_limit_event reports", () => {
+    const buildRateLimit = (info: Readonly<Record<string, unknown>>) => ({
+      type: "rate_limit_event",
+      session_id: "native",
+      rate_limit_info: info,
+    });
+
+    it("is reported for the session, beside the warning that a rejection still raises", async () => {
+      const run = createDriving();
+      await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+      run.say(buildRateLimit({ status: "allowed", rateLimitType: "five_hour", utilization: 0.4 }));
+      run.say(
+        buildRateLimit({
+          status: "rejected",
+          rateLimitType: "seven_day",
+          utilization: 1.2,
+          resetsAt: 1_793_448_000,
+        }),
+      );
+
+      await waitUntil("reported both", () => run.usageReports.length === 2);
+      expect(run.usageReports[0]).toMatchObject({
+        sessionId: SESSION,
+        readings: [{ kind: "window", window: "five-hour", usedPercent: 40, hit: false }],
+      });
+      expect(run.usageReports[1]).toMatchObject({
+        sessionId: SESSION,
+        readings: [
+          { window: "weekly", usedPercent: 100, hit: true, resetsAt: "2026-10-31T12:00:00.000Z" },
+        ],
+      });
+      await waitUntil("warned", () =>
+        run.seen.some(
+          (event) => event._tag === "runtime.warning" && event.message.startsWith("Usage limit"),
+        ),
+      );
+    });
+
+    it("reports nothing for an event without a utilization or for a window it does not map", async () => {
+      const run = createDriving();
+      await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+      run.say(buildRateLimit({ status: "allowed", rateLimitType: "five_hour" }));
+      run.say(
+        buildRateLimit({ status: "allowed", rateLimitType: "seven_day_opus", utilization: 0.5 }),
+      );
+      run.say(buildRateLimit({ status: "allowed", rateLimitType: "five_hour", utilization: 0.1 }));
+
+      await waitUntil("reported the last", () => run.usageReports.length === 1);
+      expect(run.usageReports[0]?.readings).toMatchObject([
+        { window: "five-hour", usedPercent: 10 },
+      ]);
+    });
+
+    it("does not end the session when the event has no info", async () => {
+      const run = createDriving();
+      await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+      run.say({ type: "rate_limit_event", session_id: "native" });
+      run.say(buildRateLimit({ status: "allowed", rateLimitType: "five_hour", utilization: 0.1 }));
+
+      await waitUntil("reported the next", () => run.usageReports.length === 1);
+      expect(run.seen.some((event) => event._tag === "session.exited")).toBe(false);
+    });
   });
 
   describe("the log lines for a message nobody decided how to show", () => {

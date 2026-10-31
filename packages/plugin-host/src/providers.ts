@@ -5,7 +5,7 @@
  * plugin contributes only these facts.
  */
 import { Schema } from "effect";
-import { LoginMethod } from "@hercule/protocol";
+import { LoginMethod, type Timestamp, type UsageReading } from "@hercule/protocol";
 import { SetupStep } from "./connections";
 import { ContributionName, ContributionWord, QualifiedContributionId } from "./contributions";
 
@@ -53,6 +53,46 @@ export const KeyCheck = Schema.Struct({
 export type KeyCheck = Schema.Schema.Type<typeof KeyCheck>;
 
 /**
+ * What a provider's usage endpoint answered, turned into readings or a refusal.
+ * `body` is the parsed JSON of a 2xx answer. `takenAt` is the time the
+ * controller received the answer, and the parser puts it on every reading
+ * unchanged: the controller owns the clock, so a parser is a pure function of
+ * what it is given. `refused` is the provider's own words for why it rejected
+ * the credential (spec 06 section 15.6). A body that is not the expected
+ * shape is a defect of the plugin and is thrown, not returned.
+ */
+export type ParseUsageBody = (
+  body: unknown,
+  takenAt: Timestamp,
+) => { readonly readings: ReadonlyArray<UsageReading> } | { readonly refused: string };
+
+/**
+ * How an Account Kind's Account Usage is read (spec 06 section 18). A kind
+ * that declares none shows no usage, and usage that running sessions report for
+ * it is dropped.
+ *
+ * - `sessions`: the account's running sessions report it. Nothing else reads it.
+ * - `harness`: running sessions report it, and the controller also reads it
+ *   through the probe of the harness `harnessId`.
+ * - `endpoint`: running sessions report it, and the controller also reads it
+ *   with the account's key: one GET request to `url` with `headers`. `url` and
+ *   `headers` follow the rules of `KeyCheck`, and only a kind with a
+ *   `credentials` step can declare this. The function that turns the response
+ *   body into readings is code, not data, so the plugin passes it beside the
+ *   definition when it registers the provider (`ProviderRegistrationOptions`).
+ */
+export const AccountUsageDeclaration = Schema.Union([
+  Schema.Struct({ readBy: Schema.Literal("sessions") }),
+  Schema.Struct({ readBy: Schema.Literal("harness"), harnessId: QualifiedContributionId }),
+  Schema.Struct({
+    readBy: Schema.Literal("endpoint"),
+    ...KeyCheck.fields,
+  }),
+]);
+
+export type AccountUsageDeclaration = Schema.Schema.Type<typeof AccountUsageDeclaration>;
+
+/**
  * One way to hold an account at a provider: an API key, a subscription signed
  * in on each machine, or a subscription token. The user picks a kind when
  * adding an account, so `title` and `description` are the words that choice
@@ -70,6 +110,8 @@ export const AccountKind = Schema.Struct({
    * checked is never stored.
    */
   keyCheck: Schema.optionalKey(KeyCheck),
+  /** How the account's usage is read. Absent when the kind has no usage to show. */
+  usage: Schema.optionalKey(AccountUsageDeclaration),
   /** The qualified ids of the harnesses the provider's terms allow this kind to run in. */
   harnesses: Schema.Array(QualifiedContributionId),
 });

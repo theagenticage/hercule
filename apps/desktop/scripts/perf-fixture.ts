@@ -48,6 +48,7 @@ import type {
   Runner,
   Session,
 } from "../../../packages/contract/src/index";
+import type { UsageReading } from "../../../packages/protocol/src/index";
 import {
   deleteMasterKeyItem,
   findCompiledBinary,
@@ -199,19 +200,53 @@ const FIXTURE_CONNECTIONS: ReadonlyArray<ConnectionFixture> = [
   },
 ];
 
+/** The share of its 5-hour window that the fixture's Claude account has used when the launch starts. */
+const FIXTURE_FIVE_HOUR_PERCENT = 38;
+
+/** How long after being read the usage windows of the fixture's accounts reset, in milliseconds. */
+const FIVE_HOUR_RESET_MS = 3 * 3_600_000;
+const WEEK_RESET_MS = 3 * 86_400_000;
+
 /**
- * The accounts the launch with Settings › Providers open has: four. Each has
- * an identity and a plan. The first is the Anthropic account the fleet makes,
- * which gets them, and the other three are added, two of them with a label, so
- * the cards draw both a name with a label and a name without one.
+ * Returns the usage window `window` of a Provider Account, used by
+ * `usedPercent` as of `takenAt` (epoch milliseconds), which resets
+ * `resetsInMs` later.
  */
-const FIXTURE_PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccountFixture> = [
+const buildUsageWindow = (
+  window: "five-hour" | "weekly",
+  usedPercent: number,
+  takenAt: number,
+  resetsInMs: number,
+): UsageReading => ({
+  kind: "window",
+  window,
+  usedPercent,
+  resetsAt: new Date(takenAt + resetsInMs).toISOString(),
+  hit: false,
+  takenAt: new Date(takenAt).toISOString(),
+});
+
+/**
+ * Returns the accounts the launch with Settings › Providers open has: five.
+ * Each has an identity and a plan. The first is the Anthropic account the
+ * fleet makes, which gets them, and the other four are added, two of them with
+ * a label, so the cards draw both a name with a label and a name without one.
+ * The Claude and Codex accounts have usage readings taken at `now`, so their
+ * cards draw gauges and the account sheet a Usage section, and the last, an
+ * Anthropic API key, has been refused, so its card draws a state line and a
+ * button to fix it.
+ */
+const buildProviderAccountFixtures = (now: number): ReadonlyArray<ProviderAccountFixture> => [
   {
     providerId: "anthropic/anthropic",
     kind: "subscription-per-machine",
     identity: "rogier@example.com",
     planLabel: "Max",
     defaultHarnessId: "claude-code/claude-code",
+    usage: [
+      buildUsageWindow("five-hour", FIXTURE_FIVE_HOUR_PERCENT, now, FIVE_HOUR_RESET_MS),
+      buildUsageWindow("weekly", 18, now, WEEK_RESET_MS),
+    ],
   },
   {
     providerId: "openai/openai",
@@ -219,6 +254,10 @@ const FIXTURE_PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccountFixture> = [
     identity: "rogier@example.com",
     planLabel: "Pro",
     defaultHarnessId: "codex/codex",
+    usage: [
+      buildUsageWindow("five-hour", 12, now, FIVE_HOUR_RESET_MS),
+      buildUsageWindow("weekly", 61, now, WEEK_RESET_MS),
+    ],
   },
   {
     providerId: "anthropic/anthropic",
@@ -235,6 +274,13 @@ const FIXTURE_PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccountFixture> = [
     identity: "rogier@acme.test",
     planLabel: "Team",
     defaultHarnessId: "codex/codex",
+  },
+  {
+    providerId: "anthropic/anthropic",
+    kind: "api-key",
+    label: "Key",
+    defaultHarnessId: "claude-code/claude-code",
+    failureMessage: "401 Unauthorized: invalid x-api-key",
   },
 ];
 
@@ -328,7 +374,7 @@ export interface ThreadFixture {
    * without it none (see `FIXTURE_CONNECTIONS`). With `providerAccounts`,
    * the controller holds the fixture's Provider Accounts for the launch, and
    * without it only the Anthropic account the fleet makes, with no identity
-   * (see `FIXTURE_PROVIDER_ACCOUNTS`). With `signalsAboutThreads`,
+   * (see `buildProviderAccountFixtures`). With `signalsAboutThreads`,
    * that many of the oldest open signals become signals of a plugin's event,
    * each about a thread (see `makeSignalsAboutThreads`). Fails when a thread
    * is not in its expected state afterwards.
@@ -358,6 +404,14 @@ export interface ThreadFixture {
    * makes the controller push one change to the app.
    */
   readonly nudge: () => void;
+  /**
+   * Reports that the Claude account's 5-hour window is `usedPercent` used, as
+   * the harness of a running thread does when Anthropic sends a rate limit
+   * update. The controller stores the reading and pushes the account on the
+   * `provider` topic. Only the Providers launch has the account's readings
+   * (see `buildProviderAccountFixtures`), but the report works in any launch.
+   */
+  readonly reportClaudeFiveHourUsage: (usedPercent: number) => void;
   /** Returns the process ID of the running controller. It changes when `prepareLaunch` restarts the controller. */
   readonly readControllerPid: () => number;
   /**
@@ -686,7 +740,7 @@ export async function runWithThreadFixture<T>(
         // Only the launch with Settings › Providers open has the accounts of
         // the fixture, so every other launch measures what it measured before.
         resetProviderAccounts(home);
-        if (providerAccounts) writeProviderAccounts(home, FIXTURE_PROVIDER_ACCOUNTS);
+        if (providerAccounts) writeProviderAccounts(home, buildProviderAccountFixtures(Date.now()));
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
@@ -733,6 +787,15 @@ export async function runWithThreadFixture<T>(
       };
 
       const readControllerPid = (): number => controller.pid;
+
+      const reportClaudeFiveHourUsage = (usedPercent: number): void => {
+        const id = busyIds[0]!;
+        runnerBySessionId
+          .get(id)!
+          .reportAccountUsage(id, [
+            buildUsageWindow("five-hour", usedPercent, Date.now(), FIVE_HOUR_RESET_MS),
+          ]);
+      };
 
       /** Returns how many rows the transcript of the thread `sessionId` holds. */
       const countTranscriptRows = async (sessionId: string): Promise<number> =>
@@ -783,6 +846,7 @@ export async function runWithThreadFixture<T>(
         growGroups,
         prepareLaunch,
         nudge,
+        reportClaudeFiveHourUsage,
         readControllerPid,
         growTranscript,
         streamTurn,

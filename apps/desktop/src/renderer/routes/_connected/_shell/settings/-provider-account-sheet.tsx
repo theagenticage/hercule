@@ -1,14 +1,19 @@
-import { useRef, useState, type JSX } from "react";
+import { Suspense, useRef, useState, type JSX } from "react";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildProviderAccountName,
+  decideAccountState,
+  describeAccountUsage,
+  describeCredentialExpiry,
   describeProviderAccountIdentity,
+  findCredentialReplacement,
   findProviderPluginId,
   listProviderAccountHarnessChoices,
   listProviderAccountMachines,
   queryKeys,
   readErrorMessage,
+  resolveBrowserTimezone,
   type ProviderAccountMachine,
   type HerculeClient,
 } from "@hercule/client-core";
@@ -31,10 +36,13 @@ import {
   ProviderAccountSheetSection,
   MachineRow,
   ProviderMark,
+  SheetCredential,
+  SheetUsage,
   type MachineAction,
 } from "../../../../screens/settings/providers";
 import { useTextDraft } from "../../../../screens/settings/use-text-draft";
 import { DeleteProviderAccountDialog } from "./-delete-provider-account-dialog";
+import { LazyFixAccountDialog } from "./-lazy-fix-account-dialog";
 
 /**
  * Returns the label field of the account `account`: it saves on every
@@ -79,9 +87,14 @@ function useSavedProviderAccountDefaultHarness(client: HerculeClient, account: P
  * page (spec 17 §Settings, Providers):
  *
  * - Name: the label, edited in place;
+ * - Usage: each window or the credit with its reset time, as on the card,
+ *   for an account that has a reading;
  * - Machines, for an account that signs in on each machine: whether it is
  *   signed in on each runner and as whom, Sign in where it is not (the login
  *   dialog of the first run), and Install where the runner lacks the harness;
+ * - Credential, for a key or token account: what is wrong with it, Replace
+ *   key or Make a new token (the same flows as the card's button), and when
+ *   it expires;
  * - Default harness: every harness, one radio each, with the ones the account
  *   cannot run in struck through and their reason under them;
  * - Delete, which asks first.
@@ -108,6 +121,8 @@ export function OpenedProviderAccountSheet({
   const thisMacRunnerId = useQuery(localRunnerQuery(bridge, runners)).data ?? null;
   const [loginRunnerId, setLoginRunnerId] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [replacingCredential, setReplacingCredential] = useState(false);
+  const [timezone] = useState(() => resolveBrowserTimezone());
   const label = useSavedProviderAccountLabel(client, account);
   const draft = useTextDraft(label.value, label.save);
   const defaultHarness = useSavedProviderAccountDefaultHarness(client, account);
@@ -126,6 +141,10 @@ export function OpenedProviderAccountSheet({
   });
 
   const name = buildProviderAccountName(providers, account);
+  const now = new Date();
+  const usage = describeAccountUsage(account, timezone, now);
+  const replacement = findCredentialReplacement(providers, account);
+  const credentialState = decideAccountState(providers, account, timezone, now);
   const machines = listProviderAccountMachines(account, runners, providers, harnesses);
   // `client-core` decides which action a machine offers; this only draws it
   // and says what pressing it does.
@@ -171,6 +190,11 @@ export function OpenedProviderAccountSheet({
             error={label.error}
           />
         </ProviderAccountSheetSection>
+        {usage !== null && (
+          <ProviderAccountSheetSection heading="Usage">
+            <SheetUsage usage={usage} />
+          </ProviderAccountSheetSection>
+        )}
         {machines !== null && (
           <ProviderAccountSheetSection heading="Machines">
             {machines.map((machine) => (
@@ -188,6 +212,15 @@ export function OpenedProviderAccountSheet({
                 }
               />
             ))}
+          </ProviderAccountSheetSection>
+        )}
+        {replacement !== null && (
+          <ProviderAccountSheetSection heading="Credential">
+            <SheetCredential
+              state={credentialState}
+              expiry={describeCredentialExpiry(account, credentialState, timezone, now)}
+              button={{ label: replacement.label, onPress: () => setReplacingCredential(true) }}
+            />
           </ProviderAccountSheetSection>
         )}
         <ProviderAccountSheetSection heading="Default harness">
@@ -222,6 +255,15 @@ export function OpenedProviderAccountSheet({
           runnerId={loginRunnerId}
           onClose={() => setLoginRunnerId(null)}
         />
+      )}
+      {replacingCredential && replacement !== null && (
+        <Suspense fallback={null}>
+          <LazyFixAccountDialog
+            account={account}
+            fix={replacement}
+            onClose={() => setReplacingCredential(false)}
+          />
+        </Suspense>
       )}
       {confirmingDelete && (
         <DeleteProviderAccountDialog

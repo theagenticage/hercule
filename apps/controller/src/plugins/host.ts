@@ -392,8 +392,8 @@ const buildRegistrationHost = (
   ...(manifest.capabilities.includes("providers")
     ? {
         providers: {
-          register: (definition) =>
-            registerProviderContribution(manifest, definition, declared, liveProviders),
+          register: (definition, options) =>
+            registerProviderContribution(manifest, definition, declared, liveProviders, options),
         },
       }
     : {}),

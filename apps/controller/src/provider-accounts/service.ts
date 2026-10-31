@@ -16,6 +16,7 @@
  * already decoded a request's id against the contract, and a caller inside
  * the controller passes an id it read from a stored row.
  */
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -33,6 +34,7 @@ import {
   Id,
   ProviderAccountCreateInput,
   ProviderAccountUpdateInput,
+  type AccountUsageReading,
   type Conflict,
   type Forbidden,
   type InvalidState,
@@ -45,22 +47,26 @@ import {
 import type { AccountKind } from "@hercule/plugin-host";
 import type { HarnessAccount, LoginMethod } from "@hercule/protocol";
 import { currentStamp, requireGrant } from "../actor";
-import { nowIso, withTransaction } from "../db";
+import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { formatInlineCode, Notifier } from "../notifications";
 import {
   decideProviderAccountHarness,
+  findAccountKind,
   findCredentialSecretName,
   PluginHost,
   type RegisteredHarness,
   type RegisteredProvider,
 } from "../plugins";
+import { PromotionState } from "../promotion";
 import { NO_SUCH_RUNNER, requireAdapter, requireOnline, runnerRepository } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
+import { AccountUsage } from "../usage";
 import type { Settings } from "../settings";
 import { buildVersionKey, harnessRepository } from "../harnesses";
 import { describeSnapshot } from "./describe-snapshot";
 import { HarnessAccounts } from "./harness-account";
-import { ProviderKeyCheck } from "./key-check";
+import { ProviderKeyRequests } from "./provider-key-requests";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
@@ -92,6 +98,14 @@ const computeTokenExpiry = (at: string): string => {
   expiry.setUTCFullYear(expiry.getUTCFullYear() + TOKEN_LIFETIME_YEARS);
   return expiry.toISOString();
 };
+
+/**
+ * How long before a credential stops working the account warns about it:
+ * 14 days (spec 06 section 18.3).
+ */
+const EXPIRY_WARNING_DAYS = 14;
+
+const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** What a sign-in needs to know before the runner is asked. */
 export interface SignInPreparation {
@@ -148,12 +162,35 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const reportedVersions = yield* harnessRepository;
   const secrets = yield* Secrets;
-  const keyCheck = yield* ProviderKeyCheck;
+  const keyRequests = yield* ProviderKeyRequests;
   const harnessAccounts = yield* HarnessAccounts;
+  const notifier = yield* Notifier;
+  const accountUsage = yield* AccountUsage;
+  const promotion = yield* PromotionState;
+
+  const announceAccountChanged = (id: string): Effect.Effect<void> =>
+    announce({ _tag: "record", topic: "provider", id, kind: "updated" });
+
+  /**
+   * Returns what the user does about an expiring credential: make a new
+   * token for a kind whose sign-in makes one, replace the key otherwise.
+   */
+  const describeRenewal = (
+    account: Pick<StoredProviderAccount, "providerId" | "kind">,
+    providers: ReadonlyArray<RegisteredProvider>,
+  ): string => {
+    const makesToken = findAccountKind(providers, account)?.setup.some(
+      (step) => step.kind === "harness-login" && step.method === "create-token",
+    );
+    return makesToken === true
+      ? "make a new token for the account"
+      : "set a new key for the account";
+  };
 
   const buildProviderAccount = (
     stored: StoredProviderAccount,
     snapshots: ReadonlyArray<StoredSnapshot>,
+    usage: ReadonlyArray<AccountUsageReading>,
   ): ProviderAccount => ({
     id: stored.id,
     providerId: stored.providerId,
@@ -163,6 +200,8 @@ const make = Effect.gen(function* () {
     planLabel: stored.planLabel,
     defaultHarnessId: stored.defaultHarnessId,
     expiresAt: stored.credentialExpiresAt,
+    usage,
+    failure: stored.failure,
     snapshots: snapshots
       .filter((snapshot) => snapshot.providerAccountId === stored.id)
       .map(describeSnapshot),
@@ -187,7 +226,11 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<ProviderAccount, NotFound | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       const stored = yield* readStoredOrFail(id);
-      return buildProviderAccount(stored, yield* accounts.listSnapshots(id));
+      return buildProviderAccount(
+        stored,
+        yield* accounts.listSnapshots(id),
+        yield* accountUsage.read(id),
+      );
     });
 
   /**
@@ -326,7 +369,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Asks the provider whether it accepts the key in `credentials`, and fails
-   * as `ProviderKeyCheck.check` does when it does not. The key is the value of
+   * as `ProviderKeyRequests.check` does when it does not. The key is the value of
    * the field named like the kind's credential Secret.
    */
   const checkKey = (
@@ -339,7 +382,7 @@ const make = Effect.gen(function* () {
     // `validateCredentials` has already checked that the kind takes this field.
     return key === undefined
       ? Effect.die(new Error(`the account kind ${kind.id} has no key field to check`))
-      : keyCheck.check(provider, kind, Redacted.make(key));
+      : keyRequests.check(provider, kind, Redacted.make(key));
   };
 
   /**
@@ -392,6 +435,73 @@ const make = Effect.gen(function* () {
       ? `another ${providerName} account already has no label; give that one a label first, or give this one a label`
       : `another ${providerName} account is already labelled "${label}"; choose another label`;
 
+  /**
+   * Records that the provider refused the account's key or token, which a
+   * usage read learned. `credentialGeneration` is the generation the refused
+   * credential was sent under: a refusal of an older credential is ignored,
+   * so it cannot fail the new one, and so is one for an account that was
+   * deleted.
+   *
+   * When the account was not failed, it becomes failed and, in the same
+   * transaction, raises `core.account-failed` with `message` as its body.
+   * When it was failed already, only the stored message is replaced and no
+   * second notification is raised: the account must stop being failed first
+   * (`recordCredentialAccepted`, or a new credential). Announces the account
+   * on the `provider` topic when something was stored.
+   */
+  const recordCredentialRefused = (
+    providerAccountId: string,
+    credentialGeneration: number,
+    message: string,
+  ): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const outcome = yield* accounts.markCredentialRefused(
+          providerAccountId,
+          credentialGeneration,
+          message,
+          yield* nowIso,
+        );
+        if (outcome === "ignored") return;
+        if (outcome === "failed") {
+          const stored = yield* readStoredOrFail(providerAccountId).pipe(Effect.orDie);
+          const name = describeProviderAccount(stored, yield* host.providers());
+          yield* notifier.createCoreNotification({
+            kind: "core.account-failed",
+            title: `${name} stopped working`,
+            // The provider's words are third-party text and the body is
+            // markdown: as inline code they cannot add a link or an image.
+            body: formatInlineCode(message),
+            subject: [{ kind: "providerAccount", id: providerAccountId }],
+          });
+        }
+        yield* announceAccountChanged(providerAccountId);
+      }),
+    );
+
+  /**
+   * Records that the provider accepted the account's key or token. Clears the
+   * account's failure and announces the account on the `provider` topic. Does
+   * nothing when the account is not failed, when `credentialGeneration` is not
+   * the account's current one, or when the account was deleted.
+   */
+  const recordCredentialAccepted = (
+    providerAccountId: string,
+    credentialGeneration: number,
+  ): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const cleared = yield* accounts.clearFailure(
+          providerAccountId,
+          credentialGeneration,
+          yield* nowIso,
+        );
+        if (cleared) yield* announceAccountChanged(providerAccountId);
+      }),
+    );
+
   return {
     /** Returns every account with its snapshots, oldest account first. */
     query: (): Effect.Effect<ReadonlyArray<ProviderAccount>, ReadError> =>
@@ -400,7 +510,10 @@ const make = Effect.gen(function* () {
         const stored = yield* accounts.list();
         // One query for the whole list rather than one per account.
         const snapshots = yield* accounts.listAllSnapshots();
-        return stored.map((account) => buildProviderAccount(account, snapshots));
+        const usage = yield* accountUsage.readAll();
+        return stored.map((account) =>
+          buildProviderAccount(account, snapshots, usage.get(account.id) ?? []),
+        );
       }),
 
     read: (id: Id): Effect.Effect<ProviderAccount, ReadError | NotFound> =>
@@ -423,7 +536,7 @@ const make = Effect.gen(function* () {
      * - `label` is required when another account of the provider exists, and
      *   must differ from theirs (`Conflict`).
      *
-     * A new key is checked with the provider first (see `ProviderKeyCheck`),
+     * A new key is checked with the provider first (see `ProviderKeyRequests.check`),
      * before the write transaction opens, so no transaction waits on the
      * network and a refused key stores nothing. The row, the credential
      * Secret and the audit entry are then written together.
@@ -533,7 +646,7 @@ const make = Effect.gen(function* () {
               record: { topic: "provider", id: stored.id },
               at,
             });
-            const account = buildProviderAccount(stored, []);
+            const account = buildProviderAccount(stored, [], []);
             if (alsoWrite !== undefined) yield* alsoWrite(account);
             return account;
           }),
@@ -620,7 +733,10 @@ const make = Effect.gen(function* () {
               // The new key may belong to someone else. See spec 06 section 11.
               yield* accounts.clearIdentity(id, at);
               // An answer to a probe sent with the old key must not be stored.
+              // It also clears the account's failure and expiry warning.
               yield* accounts.advanceCredentialGeneration(id, at);
+              // The new key may be someone else's, so its readings no longer apply.
+              yield* accountUsage.clear(id);
             }
             yield* accounts.update(
               id,
@@ -808,6 +924,8 @@ const make = Effect.gen(function* () {
               yield* accounts.setCredentialExpiry(id, computeTokenExpiry(at), at);
               // The new token may belong to someone else. See spec 06 section 11.
               yield* accounts.clearIdentity(id, at);
+              // The new token may be someone else's, so its readings no longer apply.
+              yield* accountUsage.clear(id);
             }
             // After every accepted sign-in, whatever it stores.
             yield* accounts.recordAcceptedSignIn(id, runnerId, harnessId, at);
@@ -822,6 +940,132 @@ const make = Effect.gen(function* () {
           // The name comes from the plugin catalog, which refuses names the
           // secrets store rejects.
         ).pipe(Effect.catchTag("SecretNameError", Effect.die));
+      }),
+
+    /**
+     * Raises one `core.account-expiring` notification for each account whose
+     * credential stops working within 14 days (spec 06 section 18.3) and that
+     * has not been warned about that credential. A credential that has expired
+     * already is warned about once too, so an account whose controller was off
+     * at the 14-day mark still hears of it. A new credential makes the account
+     * warnable again. Each account is marked and its notification raised in
+     * one transaction, so a crash cannot mark an account without warning, nor
+     * warn twice. The controller daemon calls it on a timer; it checks no
+     * grant.
+     */
+    notifyExpiring: (): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const nowMillis = yield* Clock.currentTimeMillis;
+          const at = new Date(nowMillis).toISOString();
+          const cutoff = new Date(nowMillis + EXPIRY_WARNING_DAYS * MILLIS_PER_DAY).toISOString();
+          const expiring = yield* accounts.claimExpiryWarnings(cutoff, at);
+          if (expiring.length === 0) return;
+          const providers = yield* host.providers();
+          for (const account of expiring) {
+            const name = describeProviderAccount(account, providers);
+            const renewal = describeRenewal(account, providers);
+            const daysLeft = Math.ceil(
+              (Date.parse(account.credentialExpiresAt) - nowMillis) / MILLIS_PER_DAY,
+            );
+            yield* notifier.createCoreNotification({
+              kind: "core.account-expiring",
+              ...(daysLeft <= 0
+                ? {
+                    title: `${name} has expired`,
+                    body: `Its sessions cannot start until you ${renewal}.`,
+                  }
+                : {
+                    title: `${name} expires in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}`,
+                    body: `Its sessions stop working then. ${renewal.charAt(0).toUpperCase()}${renewal.slice(1)} before that.`,
+                  }),
+              subject: [{ kind: "providerAccount", id: account.id }],
+            });
+            yield* announceAccountChanged(account.id);
+          }
+        }),
+      ),
+
+    /**
+     * Reads the account's usage from its provider's endpoint with the
+     * account's key, and stores the outcome (spec 06 section 18.2). It is for
+     * a kind whose `usage` is `readBy: "endpoint"`. The controller daemon calls
+     * it after `claimRead` and checks no grant. Nothing is returned, and the
+     * key is never logged.
+     *
+     * - The provider accepted the key: the readings are stored as read, and
+     *   the account's failure is cleared.
+     * - The provider refused the key (a 401, or an answer its plugin reads as
+     *   a refusal): the account is failed with the provider's words.
+     * - Anything else (no answer in time, 403, 429, 5xx, a redirect, an answer
+     *   the plugin cannot read, a stored key that cannot be decrypted or
+     *   cannot be sent in a header) is logged as a warning, and the account
+     *   keeps its status.
+     *
+     * The readings (or the refusal) are stored in one transaction, and only
+     * when the account still has the credential generation it had before the
+     * request. A key replaced while the read was in flight therefore gets
+     * neither the old key's readings nor its refusal. The transaction waits
+     * for the promotion gate, but the request does not hold it, and a sealed
+     * controller stores nothing.
+     *
+     * Does nothing for an account that does not exist, that has no stored
+     * key, or whose kind does not read usage from an endpoint.
+     */
+    readUsageWithKey: (
+      providerAccountId: string,
+    ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const found = yield* accounts.one(providerAccountId);
+        if (Option.isNone(found)) return;
+        const account = found.value;
+        const providers = yield* host.providers();
+        const provider = providers.find(({ id }) => id === account.providerId);
+        const kind = findAccountKind(providers, account);
+        const parse = provider?.parseUsageBody[account.kind];
+        const secretName = kind === undefined ? undefined : findCredentialSecretName(kind);
+        if (kind?.usage?.readBy !== "endpoint" || parse === undefined || secretName === undefined) {
+          return;
+        }
+        // The generation is read before the key. A key replaced in between
+        // makes this read's outcome stale, and a stale outcome is not stored.
+        const generation = account.credentialGeneration;
+        const key = yield* secrets.get(buildProviderAccountOwner(account.id), secretName).pipe(
+          // The name comes from the plugin catalog, which refuses names the
+          // secrets store rejects.
+          Effect.catchTag("SecretNameError", Effect.die),
+          Effect.catchTag("SecretDecryptError", (error) =>
+            Effect.logWarning(
+              `Could not read the usage of account ${account.id}: its stored key cannot be decrypted`,
+              error,
+            ).pipe(Effect.as(Option.none<Redacted.Redacted<string>>())),
+          ),
+        );
+        if (Option.isNone(key)) return;
+        const outcome = yield* keyRequests.readUsage(kind.usage, parse, key.value);
+        if (outcome._tag === "unavailable") {
+          yield* Effect.logWarning(
+            `Could not read the usage of account ${account.id} from ${provider?.displayName}: ${outcome.reason}`,
+          );
+          return;
+        }
+        const store = withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const current = yield* accounts.one(account.id);
+            if (Option.isNone(current) || current.value.credentialGeneration !== generation) {
+              return;
+            }
+            if (outcome._tag === "readings") {
+              yield* accountUsage.record(account.id, outcome.readings, { source: "read" });
+              yield* recordCredentialAccepted(account.id, generation);
+            } else {
+              yield* recordCredentialRefused(account.id, generation, outcome.message);
+            }
+          }),
+        );
+        yield* promotion.whenServingOr(store, () => Effect.void);
       }),
 
     /**
@@ -863,6 +1107,9 @@ export const ProviderAccountServiceLayer: Layer.Layer<
   | AuditLog
   | Secrets
   | Settings
-  | ProviderKeyCheck
+  | ProviderKeyRequests
+  | PromotionState
   | HarnessAccounts
+  | Notifier
+  | AccountUsage
 > = Layer.effect(ProviderAccountService)(make);

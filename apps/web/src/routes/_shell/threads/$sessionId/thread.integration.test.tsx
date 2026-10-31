@@ -98,6 +98,8 @@ const ACCOUNT_STARTED: ProviderAccount = {
   planLabel: "Claude Max",
   defaultHarnessId: "claude-code/claude-code",
   expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: [
     buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       {

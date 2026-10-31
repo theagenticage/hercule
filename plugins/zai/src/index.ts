@@ -5,6 +5,7 @@ import {
   type Plugin,
   type ProviderDefinition,
 } from "@hercule/plugin-host";
+import { parseQuotaBody } from "./quota";
 
 /**
  * A placeholder mark for Z.ai, path data only, on the 16x16 grid a plugin's
@@ -34,6 +35,16 @@ const definition: ProviderDefinition = {
         url: "https://api.z.ai/api/coding/paas/v4/models",
         headers: { authorization: "Bearer {apiKey}" },
       },
+      // The Coding Plan's quota. The endpoint reads the key the same way with or
+      // without `Bearer` (a bogus key gets the same refusal either way, checked
+      // on 2026-10-31), and Hercule sends it raw, as Z.ai's own usage plugin
+      // does. That a valid key answers with the limits is not yet verified with
+      // a real key (spec 16 open item).
+      usage: {
+        readBy: "endpoint",
+        url: "https://api.z.ai/api/monitor/usage/quota/limit",
+        headers: { authorization: "{apiKey}" },
+      },
       harnesses: ["pi/pi"],
     },
   ],
@@ -52,7 +63,8 @@ export const zai: Plugin = {
     configSchema: Schema.Struct({}),
     mark: { paths: [ZAI_MARK_PATH] },
   },
-  register: (host) => registerProvider(host, definition),
+  register: (host) =>
+    registerProvider(host, definition, { parseUsageBody: { "api-key": parseQuotaBody } }),
   // Nothing runs on the controller for a provider yet: the definition above is
   // everything the plugin contributes.
   activate: () => Effect.succeed(Effect.void),

@@ -313,7 +313,7 @@ const dial = (
           providerAccountId: request.harnessAccount.providerAccountId,
           // Newer than the floor of every shipped harness, because a runner
           // with an older harness is not placed on.
-          result: { harnessVersion: "99.0.0", auth: { status: "ok" }, models },
+          result: { harnessVersion: "99.0.0", auth: { status: "ok" }, models, usage: null },
         });
       }
     };
