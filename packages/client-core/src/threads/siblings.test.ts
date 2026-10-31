@@ -95,7 +95,7 @@ describe("listWorkspaceSessionTabs", () => {
   // The sessions of the workspace, as the sidebar's read holds them.
   const HELD = SESSIONS.map((session) => ({ ...session, ...IN_3F1 }));
   const INSTANCES = [
-    { id: "i-claude", harnessId: "claude-code", snapshots: [] },
+    { id: "i-claude", harnessId: "claude-code/claude-code", snapshots: [] },
   ] as unknown as readonly ProviderInstance[];
   const reads = (workspaces: readonly Workspace[] = [THREAD_3F1]) => ({
     workspaces,
@@ -114,7 +114,7 @@ describe("listWorkspaceSessionTabs", () => {
     expect(listIds(listWorkspaceSessionTabs(open, SESSIONS, reads([])))).toEqual(["s-flaky"]);
   });
 
-  it("describes each session: its pose, status, Done mark, provider and model", () => {
+  it("describes each session: its pose, status, Done mark, harness and model", () => {
     const open = buildSession({ id: "s-open", ...IN_3F1, title: "Open", status: "busy" });
     const finished = buildSession({
       id: "s-finished",
@@ -137,7 +137,7 @@ describe("listWorkspaceSessionTabs", () => {
         status: "working",
         activityAt: AT,
         done: false,
-        harnessId: "claude-code",
+        harnessId: "claude-code/claude-code",
         model: "claude-sonnet-5",
       },
       expect.objectContaining({ sessionId: "s-finished", done: true, status: "age" }),

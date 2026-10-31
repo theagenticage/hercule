@@ -69,12 +69,12 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
   return {
     /**
      * Returns a function that builds the API record from a stored agent, with
-     * `unenforced` computed from the provider's declaration. The provider
+     * `unenforced` computed from the harness's declaration. The harness
      * catalog is read once from memory, so one function serves a whole page
      * as well as a single agent.
      */
     buildAgentRecordComposer: Effect.map(
-      host.providers(),
+      host.harnesses(),
       (definitions) =>
         (stored: StoredAgent): Agent => ({
           ...Struct.omit(stored, ["harnessId", "kind"]),
@@ -85,7 +85,7 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
     /**
      * Returns the harness id of the instance an agent names. Fails with
      * `Validation` if the instance does not exist, or if this build does not
-     * include its provider. It does not check what the machines that host the
+     * include its harness. It does not check what the machines that host the
      * harness can do now: an agent is a stored configuration, not a
      * placement.
      */
@@ -100,15 +100,15 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
           );
         }
         const harnessId = instance.value.harnessId;
-        const definitions = yield* host.providers();
+        const definitions = yield* host.harnesses();
         if (!definitions.some((definition) => definition.id === harnessId)) {
           return yield* Effect.fail(
             createValidationError([
               {
                 path: ["instanceId"],
                 message:
-                  `this build carries no ${harnessId} provider; ` +
-                  "name an instance of a provider this build carries",
+                  `this build carries no ${harnessId} harness; ` +
+                  "name an instance of a harness this build carries",
               },
             ]),
           );

@@ -53,7 +53,7 @@ const NonBlankMessage = Schema.String.check(
   Schema.isMaxLength(MAX_MESSAGE_LENGTH),
 );
 
-/** What one text generation asks the model: the same for every provider. */
+/** What one text generation asks the model: the same for every harness. */
 export const TextGenerationSpec = Schema.Struct({
   /** The model, as the instance's model list names it. A text generation takes no model options. */
   model: Fact,

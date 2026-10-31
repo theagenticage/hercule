@@ -129,7 +129,7 @@ const dial = () => new Promise((done, fail) => {
   next.onopen = () => {
     socket = next;
     send({ _tag: "runnerHello", protocolVersion: PROTOCOL_VERSION, capabilities: [WORKSPACE_LIFECYCLE_CAPABILITY], binaryVersion: "fixture", nonce: randomBytes(16).toString("base64"),
-    facts: { os: options.os, arch: "arm64", totalMemoryBytes: 64 * 1024 ** 3, docker: false, toolchains: [], providers: [{ name: "claude", present: true, path: "/fixture/never-executed" }], adapters: ["claude-code"], identityPort: options.identityPort } });
+    facts: { os: options.os, arch: "arm64", totalMemoryBytes: 64 * 1024 ** 3, docker: false, toolchains: [], harnesses: [{ name: "claude", present: true, path: "/fixture/never-executed" }], adapters: ["claude-code/claude-code"], identityPort: options.identityPort } });
   };
   next.onmessage = ({ data }) => {
     const frame = JSON.parse(String(data));
@@ -370,7 +370,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     await expect
       .poll(async () =>
         (await client.provider.query())
-          .find((instance) => instance.harnessId === "claude-code")
+          .find((instance) => instance.harnessId === "claude-code/claude-code")
           ?.snapshots.some(
             (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",
           ),
@@ -524,7 +524,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
   expect(runGit(remoteSource, "rev-parse", "HEAD")).toBe(remoteCommit);
   expect(hashUserFiles(source)).toBe(sourceHash);
   const instanceId = (await client.provider.query()).find(
-    (instance) => instance.harnessId === "claude-code",
+    (instance) => instance.harnessId === "claude-code/claude-code",
   )!.id;
   const spawnThread = (startingRevision: StartingRevision, runnerId = local.runnerId) =>
     client.session.spawn({

@@ -250,7 +250,7 @@ describe("bootWith", () => {
 });
 
 /**
- * Builds a plugin with one provider that either starts or fails to start. That
+ * Builds a plugin with one harness that either starts or fails to start. That
  * is enough to test what a boot does with one of each; the catalog and the
  * plugin lifecycle are tested in their own modules.
  */
@@ -259,13 +259,13 @@ const buildBootPlugin = (id: string, failure?: string): Plugin => ({
     id,
     displayName: `Plugin ${id}`,
     hostApi: HOST_API,
-    capabilities: ["providers"],
+    capabilities: ["harnesses"],
     configSchema: Schema.Struct({}),
   },
   register: (host) =>
-    host.providers!.register({
-      id: `${id}-provider`,
-      displayName: `Provider ${id}`,
+    host.harnesses!.register({
+      id,
+      displayName: `Harness ${id}`,
       binaryName: "harness",
       supportsMultipleInstances: true,
       configSchema: Schema.Struct({}),
@@ -320,7 +320,7 @@ describe("a boot with a plugin that will not start", () => {
     });
     expect(details[1]?.status).toEqual({ _tag: "active" });
     // Registration ran before activation, so the failure did not undo it.
-    expect(details[0]?.contributions.map((c) => c.id)).toEqual(["broken-provider"]);
+    expect(details[0]?.contributions.map((c) => c.id)).toEqual(["broken/broken"]);
     // No user asked for this boot, so the entry's actor is the system rather
     // than whoever logged in last.
     expect(

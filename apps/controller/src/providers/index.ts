@@ -1,8 +1,8 @@
 /**
- * Provider instances: a registered provider plus the config it runs under.
+ * Provider instances: a registered harness plus the config it runs under.
  *
- * This is the one domain that still sends frames to runners itself - to log a
- * provider in, probe a runner, or install a harness - instead of leaving that
+ * This is the one domain that still sends frames to runners itself - to log an
+ * instance in, probe a runner, or install a harness - instead of leaving that
  * to the controller daemon. It creates no dependency cycle, so it was left as
  * it is; moving it under the same rule is issue #209.
  */

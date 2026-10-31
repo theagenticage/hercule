@@ -1,5 +1,5 @@
 /**
- * Shared helpers for the workflow tests: a set-up controller with a provider
+ * Shared helpers for the workflow tests: a set-up controller with a harness
  * for Agents and a local GitHub plugin for triggers, HTTP helpers that create,
  * update and list workflows and triggers, a reader for validation errors, and
  * sample workflow sources. The suites share them so that they all run against
@@ -42,7 +42,10 @@ export const ABSENT_ID = "0192f0a1-0000-7000-8000-00000000dead";
 export const ACCEPTED_GITHUB_TOKEN = "ghp_a-token";
 
 /** The harness an agent step's Agent runs on. */
-export const AGENT_HARNESS = buildHarnessDefinition("test-provider", { token: "t" });
+export const AGENT_HARNESS = buildHarnessDefinition("test", { token: "t" });
+
+/** The qualified id of `AGENT_HARNESS`: the plugin that registers it is `harnesses`. */
+const AGENT_HARNESS_ID = "harnesses/test";
 
 /**
  * A local stand-in for the GitHub plugin, with its Connection type and the one
@@ -126,7 +129,7 @@ export interface SetUpController {
 
 /**
  * Starts a controller, completes first-run setup, and runs `body` against it.
- * The controller has a provider for Agents and the local GitHub plugin for
+ * The controller has a harness for Agents and the local GitHub plugin for
  * triggers. `additionalPlugins` are installed too, for tests that need a
  * Connection type or a workflow action that GitHub does not declare.
  * `timings` shortens the intervals of the event router, the scheduler and the
@@ -149,7 +152,7 @@ export const withSetUpController = (
     {
       ...timings,
       plugins: [
-        createPluginFixture({ id: "providers", definitions: [AGENT_HARNESS] }).plugin,
+        createPluginFixture({ id: "harnesses", definitions: [AGENT_HARNESS] }).plugin,
         localGithubPlugin,
         ...additionalPlugins,
       ],
@@ -322,14 +325,14 @@ export const expectNothingStored = async (base: string, token: string): Promise<
   expect(await queryTriggers(base, token)).toEqual([]);
 };
 
-/** Creates an Agent on the test provider and returns its id, for use in an agent step. */
+/** Creates an Agent on the test harness and returns its id, for use in an agent step. */
 export const createAgent = async (base: string, token: string): Promise<string> => {
   const providers = await get(base, "/api/v1/providers", token);
   expect(providers.status, await providers.clone().text()).toBe(200);
   const instance = (
     (await providers.json()) as ReadonlyArray<{ id: string; harnessId: string }>
-  ).find((provider) => provider.harnessId === AGENT_HARNESS.id);
-  expect(instance, AGENT_HARNESS.id).toBeDefined();
+  ).find((provider) => provider.harnessId === AGENT_HARNESS_ID);
+  expect(instance, AGENT_HARNESS_ID).toBeDefined();
   const profiles = await get(base, "/api/v1/profiles", token);
   expect(profiles.status, await profiles.clone().text()).toBe(200);
   const profile = (

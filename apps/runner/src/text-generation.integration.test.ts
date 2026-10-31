@@ -38,7 +38,7 @@ const REQUEST: TextGenerationRequest = {
   _tag: "textGenerationRequest",
   requestId: "request-1",
   instanceId: "instance-1",
-  harnessId: "pi",
+  harnessId: "pi/pi",
   config: {},
   secrets: {},
   spec: {
@@ -240,7 +240,7 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
   });
-  const request: TextGenerationRequest = { ...REQUEST, harnessId: "claude-code" };
+  const request: TextGenerationRequest = { ...REQUEST, harnessId: "claude-code/claude-code" };
 
   const startedAt = Date.now();
   const outcomes: Array<TextGenerationOutcome> = await Promise.all(

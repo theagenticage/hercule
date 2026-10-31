@@ -340,7 +340,7 @@ const make = Effect.gen(function* () {
       const { instance, model } = target;
       const started = yield* Clock.currentTimeMillis;
       const decrypted = yield* Effect.result(
-        readInstanceSecrets(secrets, yield* host.providers(), instance.id, instance.harnessId),
+        readInstanceSecrets(secrets, yield* host.harnesses(), instance.id, instance.harnessId),
       );
       if (decrypted._tag === "Failure") {
         const error = decrypted.failure;

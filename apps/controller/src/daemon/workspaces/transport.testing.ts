@@ -165,8 +165,8 @@ export const connectProofRunner = async (
         nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
         facts: {
           ...FACTS,
-          providers: [{ name: "claude", present: true, path: "/fixture/claude" }],
-          adapters: ["claude-code"],
+          harnesses: [{ name: "claude", present: true, path: "/fixture/claude" }],
+          adapters: ["claude-code/claude-code"],
         },
       });
       opened();

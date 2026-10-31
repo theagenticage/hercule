@@ -43,13 +43,13 @@ const withSuggestion = (id: string, model: string): HarnessDefinition => ({
 });
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
+  // One plugin per harness, named like the shipped ones, so the qualified ids
+  // are the ones `automatic` lists.
+  createPluginFixture({ id: "codex", definitions: [withSuggestion("codex", "codex-mini")] }).plugin,
+  createPluginFixture({ id: "pi", definitions: [withSuggestion("pi", "pi-small")] }).plugin,
   createPluginFixture({
-    id: "titles",
-    definitions: [
-      withSuggestion("codex", "codex-mini"),
-      withSuggestion("pi", "pi-small"),
-      withSuggestion("claude-code", "haiku"),
-    ],
+    id: "claude-code",
+    definitions: [withSuggestion("claude-code", "haiku")],
   }).plugin,
 ];
 
@@ -59,8 +59,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["codex", "pi", "claude-code"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["codex/codex", "pi/pi", "claude-code/claude-code"],
   identityPort: 4939,
 };
 
@@ -195,8 +195,8 @@ describe("a text generation that succeeds", () => {
         1,
       );
       expect(request).toMatchObject({
-        instanceId: findInstanceId(arranged, "codex"),
-        harnessId: "codex",
+        instanceId: findInstanceId(arranged, "codex/codex"),
+        harnessId: "codex/codex",
         secrets: {},
         spec: {
           model: "codex-mini",
@@ -237,7 +237,7 @@ describe("a text generation that succeeds", () => {
       expect(entries[0]!.payload).toEqual({
         purpose: "sessions/thread.title",
         caller: "core:sessions",
-        instanceId: findInstanceId(arranged, "codex"),
+        instanceId: findInstanceId(arranged, "codex/codex"),
         model: "codex-mini",
         runnerId: arranged.runnerId,
         durationMs: expect.any(Number) as unknown,
@@ -279,7 +279,7 @@ describe("the last failure after the model setting changes", () => {
       await generate(arranged);
       expect((await readStatus(arranged)).lastFailure).toMatchObject({ reason: "failed" });
 
-      const pi = findInstanceId(arranged, "pi");
+      const pi = findInstanceId(arranged, "pi/pi");
       expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
 
       expect((await readStatus(arranged)).lastFailure).toBeNull();
@@ -288,8 +288,8 @@ describe("the last failure after the model setting changes", () => {
 
   it("is not shown when automatic starts resolving to another model", async () => {
     await withFleet(async (arranged) => {
-      const codex = findInstanceId(arranged, "codex");
-      const pi = findInstanceId(arranged, "pi");
+      const codex = findInstanceId(arranged, "codex/codex");
+      const pi = findInstanceId(arranged, "pi/pi");
       arranged.wire.setTextGenerationAnswer(() => ({
         outcome: "failed",
         message: "codex went wrong",
@@ -318,7 +318,7 @@ describe("the last failure after the model setting changes", () => {
         "textGenerationRequest",
         1,
       );
-      const pi = findInstanceId(arranged, "pi");
+      const pi = findInstanceId(arranged, "pi/pi");
       expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
 
       arranged.wire.send({
@@ -437,14 +437,14 @@ describe("the model automatic chooses", () => {
   it("prefers codex, then pi, then claude-code", async () => {
     await withFleet(async (arranged) => {
       expect((await readStatus(arranged)).model).toEqual({
-        instanceId: findInstanceId(arranged, "codex"),
+        instanceId: findInstanceId(arranged, "codex/codex"),
         model: "codex-mini",
       });
     });
     await withFleet(
       async (arranged) => {
         expect((await readStatus(arranged)).model).toEqual({
-          instanceId: findInstanceId(arranged, "pi"),
+          instanceId: findInstanceId(arranged, "pi/pi"),
           model: "pi-small",
         });
       },
@@ -453,7 +453,7 @@ describe("the model automatic chooses", () => {
     await withFleet(
       async (arranged) => {
         expect((await readStatus(arranged)).model).toEqual({
-          instanceId: findInstanceId(arranged, "claude-code"),
+          instanceId: findInstanceId(arranged, "claude-code/claude-code"),
           model: "haiku",
         });
       },
@@ -461,7 +461,7 @@ describe("the model automatic chooses", () => {
     );
   });
 
-  it("skips a provider that is logged out", async () => {
+  it("skips a harness that is logged out", async () => {
     await withFleet(async (arranged) => {
       // The logout is stored for every instance on the runner, so log back in
       // everything but codex by rewriting the one row.
@@ -469,7 +469,7 @@ describe("the model automatic chooses", () => {
         withTransaction(
           arranged.harness.sql,
           arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-               WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex"))}`,
+               WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex/codex"))}`,
         ).pipe(Effect.orDie),
       );
       answerOk(arranged);
@@ -478,7 +478,7 @@ describe("the model automatic chooses", () => {
 
       expect(result).toEqual({ ok: true, value: { title: TITLE } });
       expect(requestsOn(arranged)[0]).toMatchObject({
-        harnessId: "pi",
+        harnessId: "pi/pi",
         spec: { model: "pi-small" },
       });
     });
@@ -499,7 +499,7 @@ describe("the model automatic chooses", () => {
               Effect.gen(function* () {
                 const sql = arranged.harness.sql;
                 yield* sql`DELETE FROM capability_snapshots
-                WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex"))}
+                WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex/codex"))}
                   AND runner_id = ${uuidFromString(other.runnerId)}`;
                 if (kind === "offline") {
                   yield* sql`UPDATE runners SET connectivity = 'offline'
@@ -510,7 +510,7 @@ describe("the model automatic chooses", () => {
           );
 
           expect((await readStatus(arranged)).model).toEqual({
-            instanceId: findInstanceId(arranged, "pi"),
+            instanceId: findInstanceId(arranged, "pi/pi"),
             model: "pi-small",
           });
           const result = await generate(arranged);
@@ -520,7 +520,7 @@ describe("the model automatic chooses", () => {
           const [entry] = await arranged.harness.audit("textGeneration.completed");
           expect(entry!.payload).toMatchObject({
             runnerId: other.runnerId,
-            instanceId: findInstanceId(arranged, "pi"),
+            instanceId: findInstanceId(arranged, "pi/pi"),
           });
         },
         kind === "offline" ? {} : { capabilities: [] },
@@ -528,7 +528,7 @@ describe("the model automatic chooses", () => {
     });
   }
 
-  it("fails with unavailable, and records it, when no provider offers its suggested model", async () => {
+  it("fails with unavailable, and records it, when no harness offers its suggested model", async () => {
     await withFleet(
       async (arranged) => {
         answerOk(arranged);
@@ -559,14 +559,14 @@ describe("a model the user chose", () => {
   it("runs on that instance and model", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
-      const pi = findInstanceId(arranged, "pi");
+      const pi = findInstanceId(arranged, "pi/pi");
       expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
 
       await generate(arranged);
 
       expect(requestsOn(arranged)[0]).toMatchObject({
         instanceId: pi,
-        harnessId: "pi",
+        harnessId: "pi/pi",
         spec: { model: "haiku" },
       });
       expect(await readStatus(arranged)).toMatchObject({
@@ -575,10 +575,10 @@ describe("a model the user chose", () => {
     });
   });
 
-  it("never falls back to another provider when the chosen one cannot run", async () => {
+  it("never falls back to another harness when the chosen one cannot run", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
-      const pi = findInstanceId(arranged, "pi");
+      const pi = findInstanceId(arranged, "pi/pi");
       expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
       await Effect.runPromise(
         withTransaction(
@@ -653,7 +653,7 @@ describe("which runner makes the call", () => {
       async (arranged) => {
         const other = await arranged.enlist();
         other.wire.setTextGenerationAnswer(() => OK);
-        const pi = findInstanceId(arranged, "pi");
+        const pi = findInstanceId(arranged, "pi/pi");
         expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
         // The local runner no longer lists any model for pi.
         await Effect.runPromise(
@@ -679,7 +679,7 @@ describe("which runner makes the call", () => {
   it("fails with unavailable, and says why in the status, when no runner lists the chosen model", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
-      const pi = findInstanceId(arranged, "pi");
+      const pi = findInstanceId(arranged, "pi/pi");
       expect((await setModel(arranged, { instanceId: pi, model: "not-in-any-list" })).status).toBe(
         200,
       );
@@ -943,7 +943,7 @@ describe("an error nobody expected", () => {
   });
 });
 
-describe("a caller that gives a schema no provider accepts", () => {
+describe("a caller that gives a schema no harness accepts", () => {
   it("fails as failed, without sending the call", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);

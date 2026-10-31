@@ -82,14 +82,14 @@ const GPT = {
   options: [],
 };
 
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS, HAIKU] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [SONNET, OPUS, HAIKU] }),
   buildSnapshot({ runnerId: MOSS.id, models: [SONNET, OPUS, HAIKU] }),
 ]);
 
 /** Logged in on the remote runner only; on the local one it is installed but logged out. */
-const CODEX = buildInstance("codex", "Codex", [
+const CODEX = buildInstance("codex/codex", "Codex", [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
   buildSnapshot({
     runnerId: REMOTE.id,
@@ -335,7 +335,7 @@ describe("resolveThreadConfig: a draft's runner", () => {
   });
 
   it("leaves the draft with no runner when its account has no default one, and names a reference runner apart", () => {
-    const loggedOut = buildInstance("claude-code", "Claude Code", [
+    const loggedOut = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
     ]);
     const resolved = resolveDraft(

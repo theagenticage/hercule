@@ -28,7 +28,7 @@ const RUNNER_ID = "01a06d02-beff-7037-9f5b-042822015952";
 
 const CODEX: ProviderInstance = {
   id: "01a06d02-1000-7000-8000-000000000001",
-  harnessId: "codex",
+  harnessId: "codex/codex",
   name: "Codex",
   config: {},
   displayName: "Codex",
@@ -135,7 +135,7 @@ describe("Settings > System: the access-mode fallback policy", () => {
     // than a setting. Both are checked as whole sentences, so half a sentence
     // cannot pass.
     expect(text).toContain(
-      "A thread asking for a mode its provider does not support runs at the nearest less permissive mode that provider does support.",
+      "A thread asking for a mode its harness does not support runs at the nearest less permissive mode that harness does support.",
     );
     expect(text).toContain(
       "The substitution never goes the other way: a thread never runs more permissively than it asked for.",

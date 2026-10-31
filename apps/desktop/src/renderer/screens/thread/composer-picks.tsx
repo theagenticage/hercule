@@ -66,7 +66,7 @@ export function OptionsPick({
 }
 
 /**
- * Renders the model pick in a composer's row: the pill with the provider's
+ * Renders the model pick in a composer's row: the pill with the harness's
  * logo, the account and the model, as a trigger that opens the model menu,
  * see `ModelMenu`.
  *

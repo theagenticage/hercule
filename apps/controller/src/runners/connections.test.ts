@@ -216,8 +216,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [],
-  adapters: ["claude-code"],
+  harnesses: [],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 };
 

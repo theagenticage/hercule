@@ -145,7 +145,7 @@ const make = Effect.gen(function* () {
                 readGithubAccount: accounts.readGithubAccount,
                 readGitIdentity: accounts.readGitIdentity,
                 readSecrets: (instanceId, harnessId) =>
-                  Effect.flatMap(host.providers(), (registered) =>
+                  Effect.flatMap(host.harnesses(), (registered) =>
                     readInstanceSecrets(secrets, registered, instanceId, harnessId),
                   ),
                 buildCoordination: (sessionId) =>

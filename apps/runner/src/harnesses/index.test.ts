@@ -1,7 +1,7 @@
 /**
  * Tests which adapters this runner build includes, and which the session
  * supervisor receives. The registry is the only place a harness id becomes an
- * adapter, so a provider missing from it shows up everywhere in the product as
+ * adapter, so a harness missing from it shows up everywhere in the product as
  * "no adapter in this build".
  */
 import { join } from "node:path";
@@ -23,17 +23,17 @@ afterAll(cleanTemporaries);
 
 describe("the adapters in this runner build", () => {
   it("finds Codex by the harness id and binary name its plugin declares", () => {
-    const codex = findAdapter("codex");
+    const codex = findAdapter("codex/codex");
 
-    expect(codex?.harnessId).toBe("codex");
+    expect(codex?.harnessId).toBe("codex/codex");
     expect(codex?.binaryName).toBe("codex");
-    expect(ADAPTER_IDS).toContain("codex");
+    expect(ADAPTER_IDS).toContain("codex/codex");
     // The existing Claude Code adapter is still registered.
-    expect(ADAPTER_IDS).toContain("claude-code");
+    expect(ADAPTER_IDS).toContain("claude-code/claude-code");
   });
 
   it("includes the Codex adapter in the events the supervisor forwards", async () => {
-    const codex = findAdapter("codex");
+    const codex = findAdapter("codex/codex");
     // `makeSupervising` merges the events of every adapter it is given, and the
     // runner gives it this array. An adapter missing from the array would have
     // no subscriber.
@@ -96,19 +96,19 @@ describe("the adapters in this runner build", () => {
 
 describe("the pi adapter in this runner build", () => {
   it("finds pi by the harness id and binary name its plugin declares", () => {
-    const pi = findAdapter("pi");
+    const pi = findAdapter("pi/pi");
 
-    expect(pi?.harnessId).toBe("pi");
+    expect(pi?.harnessId).toBe("pi/pi");
     expect(pi?.binaryName).toBe("pi");
-    expect(ADAPTER_IDS).toContain("pi");
+    expect(ADAPTER_IDS).toContain("pi/pi");
     // The existing adapters are still registered.
-    expect(ADAPTER_IDS).toContain("claude-code");
-    expect(ADAPTER_IDS).toContain("codex");
+    expect(ADAPTER_IDS).toContain("claude-code/claude-code");
+    expect(ADAPTER_IDS).toContain("codex/codex");
     // An adapter missing from this array would have no subscriber for its events.
     expect(adapters).toContain(pi);
   });
 
   it("can install the harness on a machine that does not have it", () => {
-    expect(findAdapter("pi")?.install).toBeDefined();
+    expect(findAdapter("pi/pi")?.install).toBeDefined();
   });
 });

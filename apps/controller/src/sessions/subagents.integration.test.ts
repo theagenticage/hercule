@@ -680,7 +680,7 @@ describe("a subagent's spawn link", () => {
         turnId: "t1",
         itemId,
         kind: "subagent",
-        // A provider can list anything; only string ids name a subagent.
+        // A harness can list anything; only string ids name a subagent.
         detail: { subagentIds: ["a1", 7] },
       });
       reportEvents(arranged, 2, [
@@ -917,7 +917,7 @@ describe("Token Usage across a resume", () => {
           {
             sessionId: id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "full-provider"),
+            instanceId: findInstanceId(arranged, "harnesses/full"),
           },
         ],
       });
@@ -1052,7 +1052,7 @@ describe("incomplete token accounting across controller persistence and public p
           {
             sessionId: id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "full-provider"),
+            instanceId: findInstanceId(arranged, "harnesses/full"),
           },
         ],
       });

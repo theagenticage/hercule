@@ -32,8 +32,8 @@ const MOSS: Runner = {
     totalMemoryBytes: 64 * 1024 ** 3,
     docker: true,
     toolchains: [],
-    providers: [{ name: "claude", present: true, path: "/opt/homebrew/bin/claude" }],
-    adapters: ["claude-code"],
+    harnesses: [{ name: "claude", present: true, path: "/opt/homebrew/bin/claude" }],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
 };

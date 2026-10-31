@@ -16,7 +16,7 @@ const captureHarnessDefinition = (): HarnessDefinition => {
   Effect.runSync(
     Effect.orDie(
       pi.register({
-        providers: {
+        harnesses: {
           register: (definition) =>
             Effect.sync(() => {
               definitions.push(definition);

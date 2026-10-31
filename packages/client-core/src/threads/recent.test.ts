@@ -51,7 +51,7 @@ describe("buildRecentModel", () => {
 
   it("adds nothing for an account choice alone, whose default model is not a pick", () => {
     const runner = { ...BARE, id: "r-moss" };
-    const codex = buildInstance("codex", "Codex", [
+    const codex = buildInstance("codex/codex", "Codex", [
       buildSnapshot({
         runnerId: runner.id,
         models: [{ slug: "gpt-5", name: "GPT-5", imageInput: null, isDefault: true, options: [] }],

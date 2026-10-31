@@ -50,7 +50,7 @@ interface RunnerTraits {
   readonly capable?: boolean;
 }
 
-/** A fleet of one instance per automatic provider, arranged by `arrange`. */
+/** A fleet of one instance per automatic harness, arranged by `arrange`. */
 const run = <A>(
   arrange: (fleet: {
     readonly instances: Readonly<Record<string, string>>;
@@ -66,13 +66,16 @@ const run = <A>(
     Effect.gen(function* () {
       yield* Effect.flatMap(PluginHost, (host) =>
         host.boot([
+          // One plugin per harness, named like the shipped ones, so the
+          // qualified ids are the ones `AUTOMATIC_HARNESS_ORDER` lists.
           createPluginFixture({
-            id: "titles",
-            definitions: [
-              withSuggestion("codex", "codex-mini"),
-              withSuggestion("pi", "pi-small"),
-              withSuggestion("claude-code", "haiku"),
-            ],
+            id: "codex",
+            definitions: [withSuggestion("codex", "codex-mini")],
+          }).plugin,
+          createPluginFixture({ id: "pi", definitions: [withSuggestion("pi", "pi-small")] }).plugin,
+          createPluginFixture({
+            id: "claude-code",
+            definitions: [withSuggestion("claude-code", "haiku")],
           }).plugin,
         ]),
       );
@@ -85,7 +88,7 @@ const run = <A>(
         ids[harnessId] = (yield* withTransaction(
           sql,
           instances.insert({
-            harnessId,
+            harnessId: `${harnessId}/${harnessId}`,
             name: harnessId,
             config: { token: "t" },
             at,
@@ -124,7 +127,7 @@ const run = <A>(
 const resolve = Effect.flatMap(TextGenerationModels, (models) => models.resolve());
 
 describe("automatic", () => {
-  it("picks the first provider whose suggested model a logged-in runner offers", async () => {
+  it("picks the first harness whose suggested model a logged-in runner offers", async () => {
     const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const runner = yield* addRunner();
@@ -137,7 +140,7 @@ describe("automatic", () => {
 
     expect(target).toMatchObject({
       _tag: "resolved",
-      instance: { harnessId: "pi" },
+      instance: { harnessId: "pi/pi" },
       model: "pi-small",
       runnerIds: [expect.any(String) as unknown],
     });
@@ -157,7 +160,7 @@ describe("automatic", () => {
 
     expect(target).toMatchObject({
       _tag: "resolved",
-      instance: { harnessId: "claude-code" },
+      instance: { harnessId: "claude-code/claude-code" },
       model: "haiku",
     });
   });
@@ -173,7 +176,7 @@ describe("automatic", () => {
       }),
     );
 
-    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "pi" } });
+    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "pi/pi" } });
   });
 
   it("skips an instance that is logged in only on a runner without the text generation capability", async () => {
@@ -187,7 +190,7 @@ describe("automatic", () => {
       }),
     );
 
-    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "pi" } });
+    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "pi/pi" } });
   });
 
   it("lists every runner that could take the call", async () => {
@@ -259,7 +262,7 @@ describe("automatic", () => {
       }),
     );
 
-    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "codex" } });
+    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "codex/codex" } });
   });
 });
 
@@ -299,7 +302,7 @@ describe("a chosen instance and model", () => {
 
     expect(target).toMatchObject({
       _tag: "resolved",
-      instance: { harnessId: "pi" },
+      instance: { harnessId: "pi/pi" },
       model: "not-in-any-catalog",
       runnerIds: [],
     });

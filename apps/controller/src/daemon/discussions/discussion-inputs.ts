@@ -118,7 +118,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns how the session's provider steers a running turn, or `none`,
+   * Returns how the session's harness steers a running turn, or `none`,
    * logged, when this build cannot resolve the session's provider instance.
    * A stored configuration that no longer decodes is a bug, so it is a
    * defect.
@@ -133,7 +133,7 @@ const make = Effect.gen(function* () {
         (error) =>
           Effect.as(
             Effect.logWarning(
-              "A session was not told about Discussions: its provider is not available",
+              "A session was not told about Discussions: its harness is not available",
               { sessionId: session.id, reason: error.error.message },
             ),
             Option.none(),
@@ -146,9 +146,9 @@ const make = Effect.gen(function* () {
    * Tells the session what it has not been told about its Discussions, if
    * anything, by the session's status at this moment:
    *
-   * - a busy session is told only at an `entry`. A provider that steers
+   * - a busy session is told only at an `entry`. A harness that steers
    *   natively gets the Discussion Input steered into the running turn. Any
-   *   other provider has the turn interrupted, stamped `system`, and nothing
+   *   other harness has the turn interrupted, stamped `system`, and nothing
    *   is sent: the turn's end tells the session. An interrupt that cannot
    *   reach the runner is logged, and the session is told when its turn
    *   ends;

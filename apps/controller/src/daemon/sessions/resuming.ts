@@ -1,6 +1,6 @@
 /**
  * Checks whether a session's transcript can be resumed, and returns the
- * provider-native session to resume.
+ * harness-native session to resume.
  *
  * The check reads three places: the session's row, the workspace it ran in,
  * and the runner that holds its native state. Resuming a session in place and
@@ -21,11 +21,11 @@ const STILL_LIVE = "that session is still live; stop it first";
 
 /**
  * The error message for the one reason an exited session cannot be resumed
- * that is not about its runner: it never reported a provider-native session,
+ * that is not about its runner: it never reported a harness-native session,
  * so there is no transcript to resume.
  */
 const NO_TRANSCRIPT =
-  "that session left no provider-native session, so its transcript is gone and there is " +
+  "that session left no harness-native session, so its transcript is gone and there is " +
   "nothing to resume";
 
 /**
@@ -43,7 +43,7 @@ const describeWorkspaceGone = (status: string): string =>
 
 /**
  * Builds the check that every resume and fork goes through. The check returns
- * the session's provider-native session id. It fails with an invalid state
+ * the session's harness-native session id. It fails with an invalid state
  * error, whose message states the reason, when:
  *
  * - the session is still live;

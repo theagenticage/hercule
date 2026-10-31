@@ -1088,7 +1088,7 @@ describe("buildTurns: the skills of a message", () => {
 });
 
 describe("buildTurns runtime notes", () => {
-  const INSTALL_COMMAND = "hercule runner install-harness r1 --provider claude-code";
+  const INSTALL_COMMAND = "hercule runner install-harness r1 --harness claude-code/claude-code";
   const base = (position: number, at: string) => ({
     eventId: `n${position}`,
     sessionId: SESSION_ID,

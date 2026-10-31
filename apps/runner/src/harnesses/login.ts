@@ -334,7 +334,9 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     start: (requestId, instanceId, adapter, ctx) =>
       Effect.gen(function* () {
         if (adapter.login === undefined) {
-          return buildLoginFailed(`${adapter.harnessId} has no login in this runner build`);
+          return buildLoginFailed(
+            `The harness ${adapter.harnessId} has no login in this runner build`,
+          );
         }
         if (ctx.binary === undefined) {
           return buildLoginFailed(`no ${adapter.binaryName} on this machine`);

@@ -84,8 +84,8 @@ function System(): JSX.Element {
           {ACCESS_MODE_CHAIN.map(formatAccessMode).join(" < ")}
         </span>
         <p className="text-row text-muted">
-          A thread asking for a mode its provider does not support runs at the nearest less
-          permissive mode that provider does support. The substitution never goes the other way: a
+          A thread asking for a mode its harness does not support runs at the nearest less
+          permissive mode that harness does support. The substitution never goes the other way: a
           thread never runs more permissively than it asked for.
         </p>
       </FormCard>

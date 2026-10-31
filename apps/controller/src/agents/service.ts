@@ -18,7 +18,7 @@
  * A session is also refused a profile that holds a grant only the user gives,
  * because a workflow's agent step runs with its Agent's profile.
  *
- * `unenforced` is not stored. It is computed from the provider's declaration
+ * `unenforced` is not stored. It is computed from the harness's declaration
  * on every read, so it reflects this binary, not the older binary that may
  * have written the row.
  *
@@ -114,7 +114,7 @@ const ASSISTANT_CHANGE_REFUSED =
 
 /**
  * The errors every operation can fail with. `SchemaError` comes from the
- * provider catalog: reading what a provider declares decodes that provider's
+ * harness catalog: reading what a harness declares decodes that harness's
  * stored config, and every operation here reads it to report `unenforced`.
  */
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError | Schema.SchemaError;

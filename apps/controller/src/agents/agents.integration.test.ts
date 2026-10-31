@@ -33,22 +33,22 @@ import {
 } from "../sessions/testing";
 
 /** A harness that enforces a tool restriction natively, as Claude Code does. */
-const CLAUDE: HarnessDefinition = buildHarnessDefinition("claude-provider", { token: "t" });
+const CLAUDE: HarnessDefinition = buildHarnessDefinition("claude", { token: "t" });
 
 /** A harness that enforces a tool restriction natively, as pi does. */
-const PI: HarnessDefinition = buildHarnessDefinition("pi-provider", { token: "t" });
+const PI: HarnessDefinition = buildHarnessDefinition("pi", { token: "t" });
 
 /** A harness that stores a tool restriction but enforces none, as Codex does. */
 const CODEX: HarnessDefinition = {
-  ...buildHarnessDefinition("codex-provider", { token: "t" }),
+  ...buildHarnessDefinition("codex", { token: "t" }),
   declared: {
-    ...buildHarnessDefinition("codex-provider").declared,
+    ...buildHarnessDefinition("codex").declared,
     disallowedTools: "unsupported",
   },
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "providers", definitions: [CLAUDE, CODEX, PI] }).plugin,
+  createPluginFixture({ id: "harnesses", definitions: [CLAUDE, CODEX, PI] }).plugin,
 ];
 
 const FACTS: RunnerFacts = {
@@ -57,8 +57,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["claude-provider", "codex-provider", "pi-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/claude", "harnesses/codex", "harnesses/pi"],
   identityPort: 4939,
 };
 
@@ -211,7 +211,7 @@ const driveSessionToExited = async (
 describe("the agent over its five operations", () => {
   it("is created with the defaults for a background agent, reads and lists the same way, accepts an update, and is gone after a delete", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "claude-provider");
+      const instanceId = findInstanceId(arranged, "harnesses/claude");
       const profile = await readProfileNamed(arranged, "unrestricted");
 
       const created = await createAgentForInstance(arranged, instanceId);
@@ -292,7 +292,7 @@ describe("the agent over its five operations", () => {
       const response = await createAgent(arranged, {
         name: "assessor",
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "claude-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/claude"),
         permissionProfileId: profile.id,
         ...fields,
       });
@@ -328,7 +328,7 @@ describe("the agent over its five operations", () => {
     await withFleet(async (arranged) => {
       const agent = await createAgentForInstance(
         arranged,
-        findInstanceId(arranged, "claude-provider"),
+        findInstanceId(arranged, "harnesses/claude"),
       );
 
       const refused = await parseRefusal(await updateAgent(arranged, agent.id, fields));
@@ -339,7 +339,7 @@ describe("the agent over its five operations", () => {
 
   it("rejects every call by an actor whose profile lacks the grant, and names the grant", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "claude-provider");
+      const instanceId = findInstanceId(arranged, "harnesses/claude");
       const agent = await createAgentForInstance(arranged, instanceId);
       const profile = await readProfileNamed(arranged, "unrestricted");
       const { token } = await spawnThreadUnder(
@@ -388,37 +388,37 @@ describe("the agent over its five operations", () => {
   });
 });
 
-describe("what a provider declares it will not enforce", () => {
+describe("what a harness declares it will not enforce", () => {
   it.each([
     {
       what: "a Codex instance with a restriction",
-      provider: "codex-provider",
+      harness: "harnesses/codex",
       tools: ["edit"],
       unenforced: ["disallowedTools"],
     },
     {
       what: "a Codex instance with no restriction",
-      provider: "codex-provider",
+      harness: "harnesses/codex",
       tools: [],
       unenforced: [],
     },
     {
       what: "a Claude Code instance with a restriction",
-      provider: "claude-provider",
+      harness: "harnesses/claude",
       tools: ["edit"],
       unenforced: [],
     },
     {
       what: "a pi instance with a restriction",
-      provider: "pi-provider",
+      harness: "harnesses/pi",
       tools: ["edit"],
       unenforced: [],
     },
   ])(
     "reports unenforced for $what, at create and at read",
-    async ({ provider, tools, unenforced }) => {
+    async ({ harness, tools, unenforced }) => {
       await withFleet(async (arranged) => {
-        const created = await createAgentForInstance(arranged, findInstanceId(arranged, provider), {
+        const created = await createAgentForInstance(arranged, findInstanceId(arranged, harness), {
           disallowedTools: tools,
         });
 
@@ -436,7 +436,7 @@ describe("deleting an agent a session still points at", () => {
       await withFleet(async (arranged) => {
         const agent = await createAgentForInstance(
           arranged,
-          findInstanceId(arranged, "claude-provider"),
+          findInstanceId(arranged, "harnesses/claude"),
         );
         // The runner leaves a starting session's start unanswered, so the
         // session cannot move on to `busy`.
@@ -461,7 +461,7 @@ describe("deleting an agent a session still points at", () => {
     await withFleet(async (arranged) => {
       const agent = await createAgentForInstance(
         arranged,
-        findInstanceId(arranged, "claude-provider"),
+        findInstanceId(arranged, "harnesses/claude"),
       );
       const session = await spawnSessionFor(arranged, agent.id);
       await driveSessionToBusy(arranged, session);
@@ -488,7 +488,7 @@ describe("deleting an agent a session still points at", () => {
 describe("listing sessions by what spawned them", () => {
   it("returns one agent's sessions by its id, and only the threads for a thread listing", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "claude-provider");
+      const instanceId = findInstanceId(arranged, "harnesses/claude");
       const mine = await createAgentForInstance(arranged, instanceId);
       const other = await createAgentForInstance(arranged, instanceId);
       const ours = await spawnSessionFor(arranged, mine.id);
@@ -511,7 +511,7 @@ describe("listing sessions by what spawned them", () => {
     await withFleet(async (arranged) => {
       const agent = await createAgentForInstance(
         arranged,
-        findInstanceId(arranged, "claude-provider"),
+        findInstanceId(arranged, "harnesses/claude"),
       );
 
       const response = await get(
@@ -534,7 +534,7 @@ describe("the permission profile an agent spawns under", () => {
       const profile = await createProfile(arranged, "assessors", ["session.read"]);
       const agent = await createAgentForInstance(
         arranged,
-        findInstanceId(arranged, "claude-provider"),
+        findInstanceId(arranged, "harnesses/claude"),
         {
           name: "the-assessor",
           permissionProfileId: profile.id,
@@ -571,7 +571,7 @@ describe("the permission profile an agent spawns under", () => {
       const profile = await createProfile(arranged, "doomed", ["session.read"]);
       const agent = await createAgentForInstance(
         arranged,
-        findInstanceId(arranged, "claude-provider"),
+        findInstanceId(arranged, "harnesses/claude"),
         {
           permissionProfileId: profile.id,
         },
@@ -623,7 +623,7 @@ describe("an assistant seen through the agent operations", () => {
       await createAssistant(arranged);
       const plain = await createAgentForInstance(
         arranged,
-        findInstanceId(arranged, "claude-provider"),
+        findInstanceId(arranged, "harnesses/claude"),
       );
 
       expect((await listAgents(arranged)).map((agent) => agent.id)).toEqual([plain.id]);
@@ -721,7 +721,7 @@ describe("a profile that holds a grant only the user gives", () => {
 
   it("refuses a session that puts an Agent or an assistant on it, and changes nothing", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "claude-provider");
+      const instanceId = findInstanceId(arranged, "harnesses/claude");
       const assistantProfile = await readProfileNamed(arranged, "assistant");
       const worker = await readProfileNamed(arranged, "worker");
       const agent = await createAgentForInstance(arranged, instanceId);
@@ -795,7 +795,7 @@ describe("a profile that holds a grant only the user gives", () => {
 
   it("lets a session name a profile without them, and lets the user name any profile", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "claude-provider");
+      const instanceId = findInstanceId(arranged, "harnesses/claude");
       const assistantProfile = await readProfileNamed(arranged, "assistant");
       const worker = await readProfileNamed(arranged, "worker");
       const { token } = await spawnThreadUnder(

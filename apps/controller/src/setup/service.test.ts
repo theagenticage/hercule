@@ -240,15 +240,15 @@ describe("setup.complete", () => {
  * defaults come from the provider instances and permission profiles a booted
  * controller has.
  */
-const PROVIDERS = [
-  buildHarnessDefinition("claude-provider", { token: "t" }),
-  buildHarnessDefinition("codex-provider", { token: "t" }),
-  buildHarnessDefinition("pi-provider", { token: "t" }),
+const HARNESSES = [
+  buildHarnessDefinition("claude", { token: "t" }),
+  buildHarnessDefinition("codex", { token: "t" }),
+  buildHarnessDefinition("pi", { token: "t" }),
 ];
 
 const withProviders = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
   withServer(body, {
-    plugins: [createPluginFixture({ id: "providers", definitions: PROVIDERS }).plugin],
+    plugins: [createPluginFixture({ id: "harnesses", definitions: HARNESSES }).plugin],
   });
 
 /** Sends `setup.complete` with the setup token, as the onboarding screen does. */
@@ -362,7 +362,7 @@ describe("the default assistant", () => {
 
   it("fails setup with invalid_state when there is no provider instance, and writes nothing", async () => {
     await withProviders(async (harness) => {
-      // The boot opens one instance per provider, so the test deletes them
+      // The boot opens one instance per harness, so the test deletes them
       // all to stand for a build that opened none.
       await Effect.runPromise(
         Effect.orDie(withTransaction(harness.sql, harness.sql`DELETE FROM provider_instances`)),

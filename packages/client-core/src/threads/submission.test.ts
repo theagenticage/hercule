@@ -99,7 +99,7 @@ const SONNET = {
   ],
 };
 const OPUS = { ...SONNET, slug: "claude-opus-5", name: "Claude Opus 5", isDefault: false };
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [SONNET, OPUS] }),
 ]);
@@ -128,7 +128,7 @@ describe("buildSubmission: a draft thread", () => {
   it("sends the default runner and model of the account picked, not the draft's own", () => {
     // The draft runs Claude on the local runner. Codex is logged in on the
     // remote runner only, and the picks hold the account alone.
-    const codex = buildInstance("codex", "Codex", [
+    const codex = buildInstance("codex/codex", "Codex", [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
       buildSnapshot({
         runnerId: REMOTE.id,

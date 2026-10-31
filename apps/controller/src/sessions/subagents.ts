@@ -29,7 +29,7 @@ import {
  * A subagent record as stored. Absent fields are `undefined` rather than
  * missing, and `usageProcess` is the current process's last usage snapshot,
  * which `addUsageSnapshot` needs and the API never shows. `lastUsageReport`
- * keeps the provider's original report behind that snapshot for a resume;
+ * keeps the harness's original report behind that snapshot for a resume;
  * it is private and survives a process ending or starting.
  */
 export interface StoredSubagent {

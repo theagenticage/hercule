@@ -630,7 +630,7 @@ const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
 
 /**
- * Returns the provider-native session id from a `session.started` event, if
+ * Returns the harness-native session id from a `session.started` event, if
  * it has one. The key is the same as `SessionBinding`'s field, because it is
  * the same value. When the event has none, the id stays null until the next
  * sessions report.
@@ -1921,7 +1921,7 @@ const make = Effect.gen(function* () {
      * the adapter puts a subagent it continues back on the record the
      * controller already has. Each entry names the subagent that started
      * it, so the adapter knows the tree a stop cascades down. Each saved
-     * provider usage report goes back unchanged, so the adapter can restore
+     * harness usage report goes back unchanged, so the adapter can restore
      * native counters without reading the transcript. Checks no grant: the
      * controller daemon calls it while it builds a resume spec.
      */
@@ -3232,7 +3232,7 @@ const make = Effect.gen(function* () {
           yield* editObserver.filesEdited(id, event.editedFiles);
         }
         // Written together with the status change from the same event, so a
-        // session that reads `idle` already has its provider-native id.
+        // session that reads `idle` already has its harness-native id.
         const native = findNativeId(event);
         if (native !== undefined) {
           yield* sessions.bind(id, runnerId, session.instanceId, native);

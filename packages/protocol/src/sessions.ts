@@ -1,6 +1,6 @@
 /**
  * Sessions on the wire: what the controller sends, what the runner reports
- * back, and the normalized vocabulary every provider's traffic is converted to
+ * back, and the normalized vocabulary every harness's traffic is converted to
  * before it leaves the machine it ran on (spec 06 sections 4 and 6).
  *
  * The runner normalizes, so this file is the whole contract for anything that
@@ -144,7 +144,7 @@ export const SessionSpec = Schema.Struct({
   /** `null` for a session without a workspace: the runner gives it a scratch working directory. */
   workspaceId: Schema.NullOr(Fact),
   modelSelection: ModelSelection,
-  /** The mode after the access-mode fallback: always one the target provider declares native. */
+  /** The mode after the access-mode fallback: always one the target harness declares native. */
   accessMode: AccessMode,
   /**
    * Appended to the harness's own system prompt, never in place of it. A
@@ -178,9 +178,9 @@ export const SessionSpec = Schema.Struct({
    */
   autoCompaction: Schema.optionalKey(Schema.Literal(false)),
   /**
-   * The tool families to take away. A provider that declares it enforces none
+   * The tool families to take away. A harness that declares it enforces none
    * of them still receives the list, and the record the caller reads reports
-   * that the provider ignores the field.
+   * that the harness ignores the field.
    */
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
   /**
@@ -189,7 +189,7 @@ export const SessionSpec = Schema.Struct({
    */
   outputSchema: Schema.optionalKey(OutputSchema),
   /**
-   * The provider-native session this one continues from, on the same runner
+   * The harness-native session this one continues from, on the same runner
    * and the same instance (spec 06 section 4.1). A resume continues that
    * native session; a fork branches off it, leaving the original untouched.
    *
@@ -229,7 +229,7 @@ export const SessionSpec = Schema.Struct({
 export type SessionSpec = Schema.Schema.Type<typeof SessionSpec>;
 
 /**
- * The explicit join between a Hercule session and the provider-native object
+ * The explicit join between a Hercule session and the harness-native object
  * behind it. The two ids are separate concepts and nothing else joins them.
  */
 export const SessionBinding = Schema.Struct({
@@ -427,7 +427,7 @@ const ToolApproval = defineApprovalRequest("tool_approval", { toolName: Fact });
  *
  * The struct is closed, like every detail here: a vendor's extra field (the
  * Claude SDK's `preview`) would make what the user sees depend on which
- * harness asked (ADR 0007). Every provider maps its own shape into this one.
+ * harness asked (ADR 0007). Every harness maps its own shape into this one.
  */
 const Question = Schema.Struct({
   question: Message,
@@ -639,7 +639,7 @@ const SessionExited = defineEvent("session.exited", {
  * What a turn returned under the session's output schema (spec 06 section 7).
  * It has one shape for every harness. The runner validates whatever its
  * harness produced against the declared schema, so `ok` means the same thing
- * on every provider, and a failure gives its reason in the same words.
+ * on every harness, and a failure gives its reason in the same words.
  */
 export const StructuredResult = Schema.Union([
   Schema.Struct({ outcome: Schema.Literal("ok"), value: Schema.Json }),

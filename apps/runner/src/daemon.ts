@@ -172,7 +172,7 @@ export const runDaemon = (
       const probe = probeFacts(thisMachine, identityPort);
       const headroom = readMachineHeadroom(home);
       // Everything this machine stores for its controller lives in this
-      // directory. So when the machine joins again, every provider login,
+      // directory. So when the machine joins again, every harness login,
       // workspace and cache stays behind with the old runner identity.
       const storageDir = joinPath(locateRunnerDir(home), pin.storageDirectory);
       // No other user on the machine may read a session's workspace or the

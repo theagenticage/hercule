@@ -3,17 +3,17 @@ import type { HarnessDefinition } from "@hercule/plugin-host";
 import { buildHarnessDefinition } from "../plugins/testing";
 import { listUnenforcedFields } from "./enforcement";
 
-const ENFORCING: HarnessDefinition = buildHarnessDefinition("claude-provider");
+const ENFORCING: HarnessDefinition = buildHarnessDefinition("claude");
 
 const IGNORING: HarnessDefinition = {
-  ...buildHarnessDefinition("codex-provider"),
+  ...buildHarnessDefinition("codex"),
   declared: { ...ENFORCING.declared, disallowedTools: "unsupported" },
 };
 
 const CATALOG: ReadonlyArray<HarnessDefinition> = [ENFORCING, IGNORING];
 
 describe("listUnenforcedFields", () => {
-  it("returns disallowedTools when the provider stores the list but does not enforce it", () => {
+  it("returns disallowedTools when the harness stores the list but does not enforce it", () => {
     expect(listUnenforcedFields(CATALOG, IGNORING.id, ["edit", "shell"])).toEqual([
       "disallowedTools",
     ]);
@@ -23,11 +23,11 @@ describe("listUnenforcedFields", () => {
     expect(listUnenforcedFields(CATALOG, IGNORING.id, [])).toEqual([]);
   });
 
-  it("returns nothing when the provider enforces the restriction itself", () => {
+  it("returns nothing when the harness enforces the restriction itself", () => {
     expect(listUnenforcedFields(CATALOG, ENFORCING.id, ["edit"])).toEqual([]);
   });
 
-  it("returns nothing for a provider this build no longer has", () => {
-    expect(listUnenforcedFields(CATALOG, "gone-provider", ["edit"])).toEqual([]);
+  it("returns nothing for a harness this build no longer has", () => {
+    expect(listUnenforcedFields(CATALOG, "gone", ["edit"])).toEqual([]);
   });
 });

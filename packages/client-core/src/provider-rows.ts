@@ -92,7 +92,7 @@ export const buildProviderRows = (
     const adapter = (runner.facts?.adapters ?? []).includes(instance.harnessId);
     // The binary name the runner reports from its `PATH` is the instance's
     // `binaryName`, so no lookup table is needed.
-    const binary = (runner.facts?.providers ?? []).find(
+    const binary = (runner.facts?.harnesses ?? []).find(
       (each) => each.name === instance.binaryName && each.present,
     );
     const present = binary !== undefined;

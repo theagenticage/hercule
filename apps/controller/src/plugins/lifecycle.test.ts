@@ -93,10 +93,10 @@ const readPluginSecrets = (of: Fixture): PluginSecrets => {
 };
 
 describe("what a plugin's hooks receive", () => {
-  it("gives register only the providers API, whatever else the manifest asks for", async () => {
+  it("gives register only the harnesses API, whatever else the manifest asks for", async () => {
     const everything = createPluginFixture({
       id: "everything",
-      capabilities: ["providers", "kv", "secrets"],
+      capabilities: ["harnesses", "kv", "secrets"],
     });
 
     await run(Effect.flatMap(PluginHost, (host) => host.boot([everything.plugin])));
@@ -105,7 +105,7 @@ describe("what a plugin's hooks receive", () => {
       readonly kv?: unknown;
       readonly secrets?: unknown;
     };
-    expect(host.providers).toBeDefined();
+    expect(host.harnesses).toBeDefined();
     // Registration APIs only: a runtime API before the catalog exists would
     // let a plugin act on a system that is only half loaded.
     expect(host.kv).toBeUndefined();
@@ -113,11 +113,11 @@ describe("what a plugin's hooks receive", () => {
   });
 
   it("gives activate exactly the runtime APIs the manifest asks for", async () => {
-    const bare = createPluginFixture({ id: "bare", capabilities: ["providers"] });
-    const stateful = createPluginFixture({ id: "stateful", capabilities: ["providers", "kv"] });
+    const bare = createPluginFixture({ id: "bare", capabilities: ["harnesses"] });
+    const stateful = createPluginFixture({ id: "stateful", capabilities: ["harnesses", "kv"] });
     const trusted = createPluginFixture({
       id: "trusted",
-      capabilities: ["providers", "kv", "secrets"],
+      capabilities: ["harnesses", "kv", "secrets"],
     });
 
     await run(
@@ -476,7 +476,7 @@ describe("a plugin whose deactivate fails", () => {
 
 describe("the key-value store a plugin is given", () => {
   const buildStatefulFixture = (id: string) =>
-    createPluginFixture({ id, capabilities: ["providers", "kv"] });
+    createPluginFixture({ id, capabilities: ["harnesses", "kv"] });
 
   it("is namespaced by plugin, so one plugin never reads another's key", async () => {
     const alpha = buildStatefulFixture("alpha");
@@ -574,7 +574,7 @@ describe("the key-value store a plugin is given", () => {
 
 describe("resetting a plugin's state", () => {
   const buildStatefulFixture = (id: string) =>
-    createPluginFixture({ id, capabilities: ["providers", "kv"] });
+    createPluginFixture({ id, capabilities: ["harnesses", "kv"] });
 
   it("deletes only that plugin's keys, restarts it, and records it on the audit log", async () => {
     const alpha = buildStatefulFixture("alpha");
@@ -662,7 +662,7 @@ describe("resetting a plugin's state", () => {
 
 describe("the secrets a plugin is given", () => {
   const buildTrustedFixture = (id: string) =>
-    createPluginFixture({ id, capabilities: ["providers", "secrets"] });
+    createPluginFixture({ id, capabilities: ["harnesses", "secrets"] });
 
   const VALUE = "ghp_a-real-looking-token";
 
@@ -760,11 +760,11 @@ describe("a plugin that returns a different manifest after it is loaded", () => 
   it("stays scoped by the manifest it was loaded with", async () => {
     const victim = createPluginFixture({
       id: "victim",
-      capabilities: ["providers", "kv", "secrets"],
+      capabilities: ["harnesses", "kv", "secrets"],
     });
     const shifty = createPluginFixture({
       id: "shifty",
-      capabilities: ["providers", "kv", "secrets"],
+      capabilities: ["harnesses", "kv", "secrets"],
     });
     const own = shifty.plugin.manifest;
     let reads = 0;
@@ -796,8 +796,8 @@ describe("a plugin that returns a different manifest after it is loaded", () => 
     expect(Option.isNone(read.victimKey)).toBe(true);
     expect(read.victimSecrets).toEqual([]);
     expect(read.owners).toEqual([
-      { id: "victim", contributions: ["victim-provider"] },
-      { id: "shifty", contributions: ["shifty-provider"] },
+      { id: "victim", contributions: ["victim/victim"] },
+      { id: "shifty", contributions: ["shifty/shifty"] },
     ]);
   });
 });
@@ -806,7 +806,7 @@ describe("a plugin that only a restart can start again", () => {
   it("rejects a retry after its register failed, because it contributed nothing to run", async () => {
     const broken = createPluginFixture({
       id: "broken",
-      registerFails: "the manifest names no provider",
+      registerFails: "the manifest names no harness",
     });
 
     const { failure, detail } = await run(
@@ -987,7 +987,7 @@ describe("an empty key or secret name", () => {
   it("is rejected by the plugin API with a plain message, before any SQL runs", async () => {
     const alpha = createPluginFixture({
       id: "alpha",
-      capabilities: ["providers", "kv", "secrets"],
+      capabilities: ["harnesses", "kv", "secrets"],
     });
 
     const failures = await run(

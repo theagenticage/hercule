@@ -49,7 +49,7 @@ export const buildHarnessDefinition = (
   defaultConfig: Schema.Json = {},
 ): HarnessDefinition => ({
   id,
-  displayName: `Provider ${id}`,
+  displayName: `Harness ${id}`,
   binaryName: "harness",
   supportsMultipleInstances: true,
   configSchema: Schema.Struct({ token: Schema.String }),
@@ -158,7 +158,7 @@ export const createPluginFixture = (options: {
   const calls: Array<string> = [];
   const contexts: Array<ActivationContext> = [];
   const hosts: Array<RegistrationHost> = [];
-  const definitions = options.definitions ?? [buildHarnessDefinition(`${options.id}-provider`)];
+  const definitions = options.definitions ?? [buildHarnessDefinition(options.id)];
   let remainingFailures = options.activateFailures ?? 0;
   let up = false;
   const pause = options.slow === true ? Effect.yieldNow : Effect.void;
@@ -168,7 +168,7 @@ export const createPluginFixture = (options: {
       id: options.id,
       displayName: `Plugin ${options.id}`,
       hostApi: options.hostApi ?? HOST_API,
-      capabilities: options.capabilities ?? ["providers"],
+      capabilities: options.capabilities ?? ["harnesses"],
       configSchema: options.configSchema ?? Schema.Struct({}),
     },
     register:
@@ -177,7 +177,7 @@ export const createPluginFixture = (options: {
         Effect.gen(function* () {
           hosts.push(host);
           for (const definition of definitions) {
-            if (host.providers !== undefined) yield* host.providers.register(definition);
+            if (host.harnesses !== undefined) yield* host.harnesses.register(definition);
           }
           if (options.registerFails !== undefined) {
             return yield* Effect.fail(new PluginError({ message: options.registerFails }));

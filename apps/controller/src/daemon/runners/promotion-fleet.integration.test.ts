@@ -85,7 +85,7 @@ const buildHello = (overrides: Partial<RunnerHello> = {}): RunnerHello => ({
     totalMemoryBytes: 1,
     docker: false,
     toolchains: [],
-    providers: [],
+    harnesses: [],
     adapters: [],
     identityPort: 4939,
   },

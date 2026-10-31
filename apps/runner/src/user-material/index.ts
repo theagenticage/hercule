@@ -267,7 +267,7 @@ const findPiMaterial = (home: string): FoundMaterial => {
  * default locations under `env.HOME`, and returns the paths the adapter
  * passes to the harness. For Claude Code it writes links to that material
  * into `instanceHome` and returns no paths; for every other harness it
- * writes nothing. Returns no paths when `env` has no `HOME` or the provider
+ * writes nothing. Returns no paths when `env` has no `HOME` or the harness
  * has no material.
  *
  * Never fails. A missing source is skipped quietly, and a filesystem error is

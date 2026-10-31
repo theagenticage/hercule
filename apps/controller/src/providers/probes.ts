@@ -102,7 +102,7 @@ const make = Effect.gen(function* () {
           // check, which is only meaningful with the credential.
           secrets: yield* readInstanceSecrets(
             secrets,
-            yield* host.providers(),
+            yield* host.harnesses(),
             instance.id,
             instance.harnessId,
           ),

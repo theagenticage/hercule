@@ -67,12 +67,12 @@ const STUDIO: Runner = {
     totalMemoryBytes: 64 * 1024 * 1024 * 1024,
     docker: true,
     toolchains: [],
-    providers: [
+    harnesses: [
       { name: "claude", present: true, path: "/opt/homebrew/bin/claude" },
       { name: "codex", present: true, path: "/opt/homebrew/bin/codex" },
       { name: "pi", present: false },
     ],
-    adapters: ["claude-code", "codex", "pi"],
+    adapters: ["claude-code/claude-code", "codex/codex", "pi/pi"],
     identityPort: 4939,
   },
 };
@@ -82,7 +82,7 @@ const BARE_STUDIO: Runner = {
   ...STUDIO,
   facts: {
     ...STUDIO.facts!,
-    providers: [
+    harnesses: [
       { name: "claude", present: false },
       { name: "codex", present: false },
       { name: "pi", present: false },
@@ -140,9 +140,15 @@ const PI_ID = "01a06d02-1000-7000-8000-000000000003";
 
 /** Returns the three instances setup creates, with the ones in `loggedIn` logged in. */
 const buildInstances = (loggedIn: readonly string[] = []): ProviderInstance[] => [
-  buildInstance(CLAUDE_ID, "claude-code", "Claude Code", "claude", loggedIn.includes(CLAUDE_ID)),
-  buildInstance(CODEX_ID, "codex", "Codex", "codex", loggedIn.includes(CODEX_ID)),
-  buildInstance(PI_ID, "pi", "pi", "pi", loggedIn.includes(PI_ID)),
+  buildInstance(
+    CLAUDE_ID,
+    "claude-code/claude-code",
+    "Claude Code",
+    "claude",
+    loggedIn.includes(CLAUDE_ID),
+  ),
+  buildInstance(CODEX_ID, "codex/codex", "Codex", "codex", loggedIn.includes(CODEX_ID)),
+  buildInstance(PI_ID, "pi/pi", "pi", "pi", loggedIn.includes(PI_ID)),
 ];
 
 /** Hercule, the assistant setup creates. */

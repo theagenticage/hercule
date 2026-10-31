@@ -342,7 +342,7 @@ const buildHello = (): RunnerHello => ({
     totalMemoryBytes: 1,
     docker: false,
     toolchains: [],
-    providers: [],
+    harnesses: [],
     adapters: [],
     identityPort: 4939,
   },

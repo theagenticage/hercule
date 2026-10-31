@@ -657,7 +657,7 @@ describe("the first run's steps", () => {
                 totalMemoryBytes: 1024,
                 docker: false,
                 toolchains: [],
-                providers: [],
+                harnesses: [],
                 adapters: [],
                 identityPort: 4939,
               },

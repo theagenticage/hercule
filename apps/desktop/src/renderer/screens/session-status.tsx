@@ -55,7 +55,7 @@ export function StatusSlot({
 }
 
 /**
- * Renders the agent of a session: its provider's mark, then the name of its
+ * Renders the agent of a session: its harness's mark, then the name of its
  * model, which is left out whole, never cut short, when it has no room,
  * before the session's own name is. Both sit in the faint ink of a line's
  * second part. Used in the sidebar's rows, the hover card and the thread

@@ -8,7 +8,7 @@
  * - a draft that cannot start says why, and includes the login it needs;
  * - a draft cannot join a workspace that is not ready, or run on a retired
  *   runner;
- * - the model pill names the account only when the provider has more than
+ * - the model pill names the account only when the harness has more than
  *   one instance.
  */
 import { describe, expect, it } from "vitest";
@@ -64,11 +64,11 @@ const HAIKU = {
   options: [],
 };
 
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, HAIKU] }),
 ]);
 
-/** Returns another instance of the same provider, so the pill has an account to name. */
+/** Returns another instance of the same harness, so the pill has an account to name. */
 const buildNamedInstance = (id: string, name: string): ProviderInstance => ({
   ...CLAUDE,
   id,
@@ -79,9 +79,9 @@ const WORK = buildNamedInstance("instance-claude-work", "work");
 const PERSONAL = buildNamedInstance("instance-claude-personal", "personal");
 
 /** Probed on no runner: the instance exists, but it has no catalog. */
-const NOT_HERE = buildInstance("claude-code", "Claude Code", []);
+const NOT_HERE = buildInstance("claude-code/claude-code", "Claude Code", []);
 
-const LOGGED_OUT = buildInstance("claude-code", "Claude Code", [
+const LOGGED_OUT = buildInstance("claude-code/claude-code", "Claude Code", [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
 ]);
 
@@ -202,7 +202,7 @@ describe("buildComposerFields", () => {
   it("says whether the selected model takes images, and fails closed on a model it cannot find", () => {
     const TEXT_ONLY = { slug: "glm-5.3", name: "GLM 5.3", imageInput: null, options: [] };
     const catalogs = buildCatalogs([
-      buildInstance("claude-code", "Claude Code", [
+      buildInstance("claude-code/claude-code", "Claude Code", [
         buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, TEXT_ONLY] }),
       ]),
     ]);
@@ -219,22 +219,22 @@ describe("buildComposerFields", () => {
     });
   });
 
-  it("names no account in the pill when the provider has one instance", () => {
+  it("names no account in the pill when the harness has one instance", () => {
     expect(composeDraft(buildCatalogs([CLAUDE]), buildConfig()).model.pill).toEqual({
-      harnessId: "claude-code",
+      harnessId: "claude-code/claude-code",
       account: null,
       name: "Claude Sonnet 5",
     });
   });
 
-  it("names the instance in the pill when the provider has more than one", () => {
+  it("names the instance in the pill when the harness has more than one", () => {
     const fields = composeDraft(
       buildCatalogs([WORK, PERSONAL]),
       buildConfig({ instanceId: PERSONAL.id }),
     );
 
     expect(fields.model.pill).toEqual({
-      harnessId: "claude-code",
+      harnessId: "claude-code/claude-code",
       account: "personal",
       name: "Claude Sonnet 5",
     });
@@ -254,7 +254,7 @@ describe("buildComposerFields: the access mode", () => {
     ]);
   });
 
-  it("offers no modes while no instance is set up, because there is no provider to ask", () => {
+  it("offers no modes while no instance is set up, because there is no harness to ask", () => {
     const fields = composeDraft(buildCatalogs([]), buildConfig({ instanceId: null }));
 
     expect(fields.accessMode.rows).toEqual([]);
@@ -313,7 +313,7 @@ describe("buildComposerFields: a runner the user picked", () => {
     thisMacRunnerId: LOCAL.id,
   });
   const onCove: ThreadPicks = { runnerId: COVE.id };
-  const INSTALLED = buildInstance("claude-code", "Claude Code", [
+  const INSTALLED = buildInstance("claude-code/claude-code", "Claude Code", [
     buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
     buildSnapshot({ runnerId: COVE.id, models: [SONNET] }),
   ]);
@@ -331,7 +331,7 @@ describe("buildComposerFields: a runner the user picked", () => {
   });
 
   it("stays the runner when the account picked is installed there but logged out, and offers the login", () => {
-    const loggedOutOnCove = buildInstance("claude-code", "Claude Code", [
+    const loggedOutOnCove = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
       buildSnapshot({ runnerId: COVE.id, auth: { status: "unauthenticated" }, models: [] }),
     ]);
@@ -348,7 +348,7 @@ describe("buildComposerFields: a runner the user picked", () => {
   });
 
   it("gives way to the account's default runner when the account is not installed on the picked one", () => {
-    const onLocalOnly = buildInstance("claude-code", "Claude Code", [
+    const onLocalOnly = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
     ]);
     const fields = composeDraft(both(onLocalOnly), buildConfig(), onCove);

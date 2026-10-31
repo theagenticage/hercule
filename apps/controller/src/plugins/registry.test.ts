@@ -34,7 +34,7 @@ const SHIPPED = [
     id: "claude-code",
     displayName: "Claude Code",
     definition: {
-      id: "claude-code",
+      id: "claude-code/claude-code",
       displayName: "Claude Code",
       binaryName: "claude",
       supportsMultipleInstances: true,
@@ -61,7 +61,7 @@ const SHIPPED = [
     id: "codex",
     displayName: "Codex",
     definition: {
-      id: "codex",
+      id: "codex/codex",
       displayName: "Codex",
       binaryName: "codex",
       supportsMultipleInstances: true,
@@ -88,11 +88,11 @@ const SHIPPED = [
     id: "pi",
     displayName: "pi",
     definition: {
-      id: "pi",
+      id: "pi/pi",
       displayName: "pi",
       binaryName: "pi",
       supportsMultipleInstances: true,
-      // The only provider with a setting: the Z.ai key, which is entered in a
+      // The only harness with a setting: the Z.ai key, which is entered in a
       // masked field and stored outside the config it is declared in.
       configSchema: {
         type: "object",
@@ -141,7 +141,7 @@ describe("the shipped registry after a boot", () => {
     );
   });
 
-  it("holds the three provider plugins and the github, sentry and linear plugins, in registry order", () => {
+  it("holds the three harness plugins and the github, sentry and linear plugins, in registry order", () => {
     expect(details.map((detail) => detail.id)).toEqual([
       "claude-code",
       "codex",
@@ -153,17 +153,17 @@ describe("the shipped registry after a boot", () => {
   });
 
   it.each(SHIPPED)(
-    "$id is active, asks nothing of the user, and contributes its provider",
+    "$id is active, asks nothing of the user, and contributes its harness",
     ({ id, displayName, definition }) => {
       const detail = details.find((one) => one.id === id);
 
       expect(detail?.displayName).toBe(displayName);
       expect(detail?.status).toEqual({ _tag: "active" });
-      expect(detail?.capabilities).toEqual(["providers"]);
+      expect(detail?.capabilities).toEqual(["harnesses"]);
       expect(detail?.configSchema).toEqual(NO_SETTINGS);
 
       expect(detail?.contributions).toEqual([
-        { extensionPoint: "provider", id: definition.id, definition },
+        { extensionPoint: "harness", id: definition.id, definition },
       ]);
     },
   );

@@ -44,7 +44,7 @@ export const codex: Plugin = {
     id: "codex",
     displayName: "Codex",
     hostApi: HOST_API,
-    capabilities: ["providers"],
+    capabilities: ["harnesses"],
     configSchema: Schema.Struct({}),
   },
   register: (host) => registerHarness(host, definition),

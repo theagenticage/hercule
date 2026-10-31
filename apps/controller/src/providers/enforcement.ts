@@ -1,5 +1,5 @@
 /**
- * Which spec fields a provider stores but does not act on.
+ * Which spec fields a harness stores but does not act on.
  *
  * A spec field that a harness cannot honour is kept, not dropped: a Codex
  * instance still records which tool families an agent asked to take away. The

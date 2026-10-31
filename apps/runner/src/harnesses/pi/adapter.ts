@@ -117,7 +117,8 @@ import {
 } from "./rpc";
 import { buildPiPrompt } from "./skill-prompt";
 
-export const PI = "pi";
+/** The qualified id of the pi harness (see `CLAUDE_CODE`). */
+export const PI = "pi/pi";
 
 const PI_BINARY = "pi";
 

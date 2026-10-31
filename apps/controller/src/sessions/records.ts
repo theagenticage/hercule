@@ -6,7 +6,7 @@
  * holds `NULL` for them. Each open Request a subagent asked also gets that
  * subagent's name, from the names the row was read with. `resumeHeld` is the crash-loop guard's rule applied to the
  * row, so every reader of the record agrees with the controller about it. The list
- * of spec fields the session's provider ignores is read from the provider
+ * of spec fields the session's harness ignores is read from the harness
  * definition on every read. So when a new binary's adapter starts enforcing a
  * field, the field drops off the list.
  *
@@ -51,7 +51,7 @@ export const sessionRecordComposer: Effect.Effect<
 > = Effect.gen(function* () {
   const host = yield* PluginHost;
 
-  return Effect.map(host.providers(), (definitions) => (stored: StoredSession): Session => ({
+  return Effect.map(host.harnesses(), (definitions) => (stored: StoredSession): Session => ({
     ...Struct.omit(stored, [
       "harnessId",
       "disallowedTools",

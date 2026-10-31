@@ -1,6 +1,6 @@
 /**
  * Decides whether a turn's answer satisfies its session's output schema. This
- * module decides it for every provider (spec 06 section 7).
+ * module decides it for every harness (spec 06 section 7).
  *
  * Each harness produces a value, or fails to, in its own way: a re-prompt
  * limit, a tool that was never called, a final message that is not JSON. An

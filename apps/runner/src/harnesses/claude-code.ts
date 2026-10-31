@@ -121,7 +121,11 @@ import { buildQuestionRequest } from "./questions";
 import { endSentence, now } from "../report";
 import { listNativeClaudeSkills, runBoundedListing } from "../skills";
 
-export const CLAUDE_CODE = "claude-code";
+/**
+ * The qualified id of the Claude Code harness. The runner has no plugin host to mint it, so it
+ * carries the id the controller uses as a constant. Never split it or use it as a path or a name.
+ */
+export const CLAUDE_CODE = "claude-code/claude-code";
 
 /** The name the user knows this harness by, as it appears in the messages shown to them. */
 const CLAUDE_CODE_NAME = "Claude Code";
@@ -1738,7 +1742,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
-    // The config is empty for every shipped provider, so it is not read.
+    // The config is empty for every shipped harness, so it is not read.
     generateText: (ctx, _config, spec) =>
       // The harness is closed, and its exit awaited, before the runner
       // removes its working directory and frees the call's slot, so nothing is

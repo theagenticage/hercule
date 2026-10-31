@@ -41,7 +41,7 @@ export const claudeCode: Plugin = {
     id: "claude-code",
     displayName: "Claude Code",
     hostApi: HOST_API,
-    capabilities: ["providers"],
+    capabilities: ["harnesses"],
     configSchema: Schema.Struct({}),
   },
   register: (host) => registerHarness(host, definition),

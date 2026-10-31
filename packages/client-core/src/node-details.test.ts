@@ -129,7 +129,7 @@ const READS: NodeCardReads = {
   agents: [REVIEWER],
   actions: [],
   instances: [
-    buildInstance("claude-code", "Claude Code", [
+    buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({
         models: [{ slug: "claude-opus-5", name: "Claude Opus 5", imageInput: null, options: [] }],
       }),

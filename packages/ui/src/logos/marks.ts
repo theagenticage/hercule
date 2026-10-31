@@ -1,5 +1,5 @@
 /**
- * The SVG path of each provider mark, drawn on a 24x24 box. The paths live in
+ * The SVG path of each harness mark, drawn on a 24x24 box. The paths live in
  * TypeScript instead of `.svg` files imported as text, because two bundlers
  * build this package - Vite for the web app, Bun for the isolation check - and
  * only one of them supports raw imports. `LICENSE-lobehub.txt` lists the source

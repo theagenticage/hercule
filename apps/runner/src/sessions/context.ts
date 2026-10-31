@@ -1,7 +1,7 @@
 /**
  * Resolves what one session needs on this machine from its start frame. The
  * frame holds ids, and this file turns them into paths and an environment.
- * Only this file resolves the runner's provider homes and working directories.
+ * Only this file resolves the runner's harness homes and working directories.
  * Managed workspace paths stay on the runner; an attached checkout's path is
  * explicitly registered on the controller.
  */
@@ -33,7 +33,10 @@ import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
 
 /** The facts about this machine that a session's context is built from. */
 export interface Machine {
-  /** `<runner storage>/providers`: one isolated provider home per instance. */
+  /**
+   * `<runner storage>/providers`: one isolated harness home per instance. The folder keeps
+   * its old name, because renaming it would move the logins stored in it.
+   */
   readonly providersDir: string;
   /** Where a workspace-less session's empty cwd is made, one directory per session. */
   readonly scratchDir: string;
@@ -106,7 +109,7 @@ export interface Resolved {
 /**
  * Returns the string-valued variables in the `env` object of an instance's
  * config: the "extra environment for the spawned process" (spec 06 section
- * 2.1). No shipped provider declares a `configSchema` field for it yet, so the
+ * 2.1). No shipped harness declares a `configSchema` field for it yet, so the
  * config is read leniently: anything else is ignored rather than failing the
  * session start.
  *
@@ -318,7 +321,7 @@ const placeSession = (
 
 /**
  * Resolves the context an adapter needs to start a session: its cwd, the
- * instance's provider home, the harness binary, the environment and the
+ * instance's harness home, the harness binary, the environment and the
  * secrets. When the frame's `userMaterial` flag is set, the context also
  * carries the user's own material (spec 06 section 9.1). Fails with a message the user can read
  * when the session cannot be placed on this machine.

@@ -9,13 +9,13 @@ import type { VersionVerdict } from "@hercule/contract";
 import { CLAUDE_CODE_VERSION, CODEX_VERSION, PI_VERSION } from "@hercule/home/version";
 
 /**
- * The providers this build pins a version for. Other providers' versions are
- * recorded but not compared.
+ * The harnesses this build pins a version for, by qualified id. Other
+ * harnesses' versions are recorded but not compared.
  */
 const FLOORS: ReadonlyMap<string, string> = new Map([
-  ["claude-code", CLAUDE_CODE_VERSION],
-  ["codex", CODEX_VERSION],
-  ["pi", PI_VERSION],
+  ["claude-code/claude-code", CLAUDE_CODE_VERSION],
+  ["codex/codex", CODEX_VERSION],
+  ["pi/pi", PI_VERSION],
 ]);
 
 export const findVersionFloor = (harnessId: string): string | null => FLOORS.get(harnessId) ?? null;

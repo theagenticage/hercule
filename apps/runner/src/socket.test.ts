@@ -75,8 +75,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-  adapters: ["claude-code"],
+  harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 };
 
@@ -315,7 +315,7 @@ const IDLE_STEPS = makeWorkspaceSteps({
   baseEnv: {},
 });
 
-/** The provider logins of a runner that starts none. */
+/** The harness logins of a runner that starts none. */
 const IDLE_LOGINS = makeLogins(() => {
   throw new Error("no test in this file starts a login");
 });
@@ -747,7 +747,7 @@ describe("a runner with workspace steps in flight", () => {
 });
 
 describe("reporting the end of a device login", () => {
-  /** Returns the idle provider logins, counting how often a connection attaches to them. */
+  /** Returns the idle harness logins, counting how often a connection attaches to them. */
   const countAttaches = (): { readonly logins: Logins; readonly attaches: () => number } => {
     let attaches = 0;
     return {
@@ -947,12 +947,12 @@ describe("a controller requesting the machine's facts", () => {
   });
 });
 
-describe("a controller asking a runner to probe a provider it has no adapter for", () => {
+describe("a controller asking a runner to probe a harness it has no adapter for", () => {
   const REQUEST: ProbeRequest = {
     _tag: "probeRequest",
     requestId: "01999999-0000-7000-8000-0000000000c1",
     instanceId: "01999999-0000-7000-8000-0000000000c2",
-    harnessId: "a-provider-nobody-wrote-an-adapter-for",
+    harnessId: "a-harness-nobody-wrote-an-adapter-for",
     config: {},
     secrets: {},
   };
@@ -979,7 +979,7 @@ describe("a controller asking a runner to probe a provider it has no adapter for
     expect(report?.instanceId).toBe(REQUEST.instanceId);
     expect(report?.result.auth.status).toBe("error");
     expect(report?.result.auth.message).toContain(
-      'does not support the provider "a-provider-nobody-wrote-an-adapter-for"',
+      'does not support the harness "a-harness-nobody-wrote-an-adapter-for"',
     );
     expect(report?.result.harnessVersion).toBeNull();
     expect(report?.result.models).toEqual([]);
@@ -997,7 +997,7 @@ describe("a controller asking a runner to probe a provider it has no adapter for
  * while a start is held at a chosen point.
  */
 describe("session frames on one connection", () => {
-  const PROVIDER = "fake";
+  const HARNESS_ID = "fake";
   const SESSION_A = "0199e0e7-0000-7000-8000-0000000000a1";
   const SESSION_B = "0199e0e7-0000-7000-8000-0000000000b1";
 
@@ -1072,7 +1072,7 @@ describe("session frames on one connection", () => {
       stopGate: undefined,
       emit: (event) => PubSub.publishUnsafe(events, event),
       adapter: {
-        harnessId: PROVIDER,
+        harnessId: HARNESS_ID,
         binaryName: "fake-harness",
         events: Stream.fromPubSub(events),
         probe: () => Effect.die("not probed here"),
@@ -1151,7 +1151,7 @@ describe("session frames on one connection", () => {
     requestId,
     sessionId,
     input: { text: `start ${sessionId}` },
-    harnessId: PROVIDER,
+    harnessId: HARNESS_ID,
     config: {},
     secrets: {},
     spec: {

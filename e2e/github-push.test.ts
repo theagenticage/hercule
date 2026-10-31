@@ -265,7 +265,7 @@ const isClaudeLoggedIn = async (): Promise<boolean> => {
     }>
   ).some(
     (one) =>
-      one.harnessId === "claude-code" &&
+      one.harnessId === "claude-code/claude-code" &&
       one.snapshots.some((snapshot) => snapshot.auth.status === "ok"),
   );
 };

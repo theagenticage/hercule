@@ -113,9 +113,9 @@ const REMOTE_PREFIX = "https://hercule.test/acme/";
  * by harness id. A harness without an entry steers the skill normally.
  */
 const STEER_REFUSALS: Partial<Record<string, string>> = {
-  "claude-code":
+  "claude-code/claude-code":
     "Not steered: Claude Code can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
-  codex:
+  "codex/codex":
     "Not steered: Codex can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
 };
 
@@ -472,14 +472,14 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
         // pi runs the first one natively and gives the others as a pointer to
         // read.
         const guaranteed = {
-          "claude-code": [BRAVO_WORD],
-          codex: [ALPHA_WORD, BRAVO_WORD],
-          pi: [ALPHA_WORD],
+          "claude-code/claude-code": [BRAVO_WORD],
+          "codex/codex": [ALPHA_WORD, BRAVO_WORD],
+          "pi/pi": [ALPHA_WORD],
         }[harness.harnessId] ?? [ALPHA_WORD, BRAVO_WORD];
         for (const word of guaranteed) expect(reply, describeReply(rows)).toContain(word);
         // Whether a harness reads the image is a property of its model, not of
         // the translation; the cheap pi model may not take images.
-        if (harness.harnessId !== "pi") {
+        if (harness.harnessId !== "pi/pi") {
           expect(reply.toLowerCase(), describeReply(rows)).toContain("red");
         }
       },
@@ -502,7 +502,7 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
         expect(listUserMessages(first)[0]?.skills).toEqual(["release"]);
         // In pi both skills are called `release` in its own list, so which one
         // `/skill:release` runs is pi's choice. The reply is logged instead.
-        if (harness.harnessId !== "pi") {
+        if (harness.harnessId !== "pi/pi") {
           expect(libraryReply, describeReply(first)).toContain(LIBRARY_RELEASE_WORD);
           expect(libraryReply, describeReply(first)).not.toContain(REPOSITORY_RELEASE_WORD);
         }
@@ -512,7 +512,7 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
         expect(listUserMessages(second.rows)[1]?.skills).toEqual(["webshop:release"]);
         // In pi a repository skill is a pointer to its `SKILL.md`, which the
         // model has to read; the reply is logged instead.
-        if (harness.harnessId !== "pi") {
+        if (harness.harnessId !== "pi/pi") {
           expect(second.text, describeReply(second.rows)).toContain(REPOSITORY_RELEASE_WORD);
           expect(second.text, describeReply(second.rows)).not.toContain(LIBRARY_RELEASE_WORD);
         }

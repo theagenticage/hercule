@@ -95,8 +95,8 @@ const FACTS: Omit<RunnerFacts, "identityPort"> = {
   totalMemoryBytes: 64 * 1024 ** 3,
   docker: false,
   toolchains: [],
-  providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-  adapters: ["claude-code"],
+  harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code/claude-code"],
 };
 
 /**
@@ -1290,7 +1290,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 13 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 14 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
@@ -1516,7 +1516,7 @@ function buildOpenRequest(kind: RequestKind): OpenRequest {
 }
 
 /**
- * Returns the provider-native id a session reports when it starts, which
+ * Returns the harness-native id a session reports when it starts, which
  * makes the session resumable, as it is with a real harness.
  */
 function buildNativeSessionId(sessionId: string): string {

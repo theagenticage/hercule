@@ -7,7 +7,7 @@ import { buildInstance, buildSnapshot } from "../providers.testing";
 import { describeAgent, findModelName } from "./model-name";
 
 /** An instance with a catalog on two runners; only the second lists Opus. */
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
   buildSnapshot({
     runnerId: "atlas",
     models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],

@@ -20,13 +20,13 @@ const model = (slug: string, name: string, extra: { isLegacy?: boolean } = {}) =
   ...extra,
 });
 
-const CODEX = buildInstance("codex", "Codex", [
+const CODEX = buildInstance("codex/codex", "Codex", [
   buildSnapshot({ models: [model("gpt-6-luna", "GPT-6 Luna"), model("gpt-6", "GPT-6")] }),
 ]);
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
   buildSnapshot({ models: [model("claude-haiku-5", "Haiku 5")] }),
 ]);
-const LOGGED_OUT = buildInstance("pi", "pi", [
+const LOGGED_OUT = buildInstance("pi/pi", "pi", [
   buildSnapshot({
     auth: { status: "unauthenticated" },
     models: [model("glm-5.3-flash", "GLM 5.3 Flash")],
@@ -99,7 +99,7 @@ describe("buildTextGenerationField", () => {
   });
 
   it("lists a model once when several runners offer it", () => {
-    const twice = buildInstance("codex", "Codex", [
+    const twice = buildInstance("codex/codex", "Codex", [
       buildSnapshot({ models: [model("gpt-6", "GPT-6")] }),
       buildSnapshot({ runnerId: "other", models: [model("gpt-6", "GPT-6")] }),
     ]);
@@ -169,7 +169,7 @@ describe("describeTextGenerationFailure", () => {
 
 describe("buildTextGenerationField, with models several runners list", () => {
   it("offers each model once, and no model kept only for old sessions", () => {
-    const twoRunners = buildInstance("codex", "Codex", [
+    const twoRunners = buildInstance("codex/codex", "Codex", [
       buildSnapshot({ models: [model("gpt-6-luna", "GPT-6 Luna")] }),
       buildSnapshot({
         runnerId: "other",

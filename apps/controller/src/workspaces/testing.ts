@@ -8,7 +8,7 @@
  * tests and the controller to drift apart.
  *
  * What differs between callers is passed in: extra plugins besides the
- * provider fixture, and the sweep interval for a test that watches the sweep.
+ * harness fixture, and the sweep interval for a test that watches the sweep.
  */
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
@@ -42,8 +42,8 @@ export const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["test-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/test"],
   identityPort: 4939,
 };
 
@@ -53,7 +53,7 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 export interface WorkspaceFleetOptions {
-  /** Plugins to load in addition to the provider fixture that every one of these fleets needs. */
+  /** Plugins to load in addition to the harness fixture that every one of these fleets needs. */
   readonly plugins?: ReadonlyArray<Plugin>;
   /**
    * Overrides the shipped ten minutes, which is longer than a test that
@@ -64,7 +64,7 @@ export interface WorkspaceFleetOptions {
 
 /**
  * Runs `body` against a controller with one enrolled, connected, logged-in
- * runner and a provider on it.
+ * runner and a harness on it.
  */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
@@ -73,8 +73,8 @@ export const withFleet = (
   withRunnerFleet(body, {
     plugins: [
       createPluginFixture({
-        id: "providers",
-        definitions: [buildHarnessDefinition("test-provider")],
+        id: "harnesses",
+        definitions: [buildHarnessDefinition("test")],
       }).plugin,
       ...(options.plugins ?? []),
     ],
@@ -306,7 +306,7 @@ export const spawnThread = async (
 };
 
 /**
- * Has the runner report that the thread's provider transcript is known, which
+ * Has the runner report that the thread's harness transcript is known, which
  * a session needs before it can be resumed.
  */
 export const bindTranscript = async (arranged: Arranged, session: Session): Promise<void> => {

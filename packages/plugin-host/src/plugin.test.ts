@@ -33,7 +33,7 @@ describe("registerHarness", () => {
     await Effect.runPromise(
       registerHarness(
         {
-          providers: {
+          harnesses: {
             register: (one) =>
               Effect.sync(() => {
                 registered.push(one);
@@ -54,6 +54,6 @@ describe("registerHarness", () => {
     const failure = await Effect.runPromise(Effect.flip(registerHarness({}, definition)));
 
     expect(failure).toBeInstanceOf(PluginError);
-    expect(failure.message).toContain("providers");
+    expect(failure.message).toContain("harnesses");
   });
 });

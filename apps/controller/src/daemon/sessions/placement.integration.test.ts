@@ -54,22 +54,22 @@ import {
 } from "../../workspaces/testing";
 
 /** A harness that supports everything natively, and is not the thread default. */
-const ALPHA: HarnessDefinition = buildHarnessDefinition("alpha-provider", { token: "t" });
+const ALPHA: HarnessDefinition = buildHarnessDefinition("alpha", { token: "t" });
 
 /** The harness the tests set as the thread default. */
-const BETA: HarnessDefinition = buildHarnessDefinition("beta-provider", { token: "t" });
+const BETA: HarnessDefinition = buildHarnessDefinition("beta", { token: "t" });
 
 /** A harness that stores a tool restriction but does not enforce it, like Codex. */
 const GAMMA: HarnessDefinition = {
-  ...buildHarnessDefinition("gamma-provider", { token: "t" }),
+  ...buildHarnessDefinition("gamma", { token: "t" }),
   declared: {
-    ...buildHarnessDefinition("gamma-provider").declared,
+    ...buildHarnessDefinition("gamma").declared,
     disallowedTools: "unsupported",
   },
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "providers", definitions: [ALPHA, BETA, GAMMA] }).plugin,
+  createPluginFixture({ id: "harnesses", definitions: [ALPHA, BETA, GAMMA] }).plugin,
 ];
 
 const FACTS: RunnerFacts = {
@@ -78,8 +78,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["alpha-provider", "beta-provider", "gamma-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/alpha", "harnesses/beta", "harnesses/gamma"],
   identityPort: 4939,
 };
 
@@ -155,7 +155,7 @@ const buildEphemeralWorkspace = (resourceId: string) => ({
 describe("placeSession", () => {
   it("carries the user's thread defaults into the stored spec", async () => {
     await withFleet(async (arranged) => {
-      const beta = findInstanceId(arranged, "beta-provider");
+      const beta = findInstanceId(arranged, "harnesses/beta");
       const worker = await readProfileNamed(arranged, "worker");
       await setThreadDefaults(arranged, {
         "thread.instanceId": beta,
@@ -260,7 +260,7 @@ describe("placeSession from an Agent", () => {
     fields: Record<string, unknown> = {},
   ): Promise<{ readonly id: string; readonly profileId: string; readonly instanceId: string }> => {
     const profile = await readProfileNamed(arranged, "worker");
-    const instanceId = findInstanceId(arranged, "alpha-provider");
+    const instanceId = findInstanceId(arranged, "harnesses/alpha");
     const agent = await createAgent(arranged, {
       name: `assessor-${crypto.randomUUID()}`,
       systemPrompt: "You assess tasks.",
@@ -326,7 +326,7 @@ describe("placeSession from an Agent", () => {
       const bare = await createAgent(arranged, {
         name: `bare-${crypto.randomUUID()}`,
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "alpha-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/alpha"),
         permissionProfileId: (await readProfileNamed(arranged, "worker")).id,
       });
 
@@ -494,7 +494,7 @@ describe("placeSession from an Agent", () => {
         body: {
           name: "somebody-else",
           systemPrompt: "You do something else entirely.",
-          instanceId: findInstanceId(arranged, "beta-provider"),
+          instanceId: findInstanceId(arranged, "harnesses/beta"),
           permissionProfileId: (await readProfileNamed(arranged, "unrestricted")).id,
           accessMode: "approval-required",
           model: "clever",
@@ -510,10 +510,10 @@ describe("placeSession from an Agent", () => {
     });
   });
 
-  it("lists on the session the spec fields the provider does not enforce", async () => {
+  it("lists on the session the spec fields the harness does not enforce", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAssessor(arranged, {
-        instanceId: findInstanceId(arranged, "gamma-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/gamma"),
         disallowedTools: ["edit"],
       });
 
@@ -624,7 +624,7 @@ describe("placeSession for a session that starts a Thread", () => {
       arranged,
       await createProfile(arranged, "thread-starter", ["session.spawn", "thread.start"]),
       {
-        instanceId: findInstanceId(arranged, "alpha-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/alpha"),
         model: "fast",
         options: { effort: "high" },
         accessMode: "auto-accept-edits",
@@ -635,7 +635,7 @@ describe("placeSession for a session that starts a Thread", () => {
   it("copies the caller's model and options when the Thread runs on the caller's instance", async () => {
     await withFleet(async (arranged) => {
       const caller = await startCaller(arranged);
-      const alpha = findInstanceId(arranged, "alpha-provider");
+      const alpha = findInstanceId(arranged, "harnesses/alpha");
 
       const implicit = await spawnThreadAs(arranged, caller.token);
       const explicit = await spawnThreadAs(arranged, caller.token, { instanceId: alpha });
@@ -650,7 +650,7 @@ describe("placeSession for a session that starts a Thread", () => {
   it("takes the other instance's default model when the Thread runs on another instance", async () => {
     await withFleet(async (arranged) => {
       const caller = await startCaller(arranged);
-      const beta = findInstanceId(arranged, "beta-provider");
+      const beta = findInstanceId(arranged, "harnesses/beta");
 
       const thread = await spawnThreadAs(arranged, caller.token, { instanceId: beta });
 
@@ -681,7 +681,7 @@ describe("placeSession for a session that starts a Thread", () => {
     await withFleet(async (arranged) => {
       const caller = await startCaller(arranged);
       await setThreadDefaults(arranged, {
-        "thread.instanceId": findInstanceId(arranged, "beta-provider"),
+        "thread.instanceId": findInstanceId(arranged, "harnesses/beta"),
         "thread.model": "swift",
         "thread.accessMode": "full-access",
         "thread.profileId": (await readProfileNamed(arranged, "worker")).id,
@@ -747,7 +747,7 @@ describe("placeSession for a session that starts a Thread", () => {
       const agent = await createAgent(arranged, {
         name: `starter-${crypto.randomUUID()}`,
         systemPrompt: "You start Threads.",
-        instanceId: findInstanceId(arranged, "alpha-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/alpha"),
         permissionProfileId: (
           await createProfile(arranged, "agent-thread-starter", ["session.spawn", "thread.start"])
         ).id,
@@ -814,7 +814,7 @@ describe("placeSession for a session's spawn: where it runs", () => {
       await createAgent(arranged, {
         name: `reviewer-${crypto.randomUUID()}`,
         systemPrompt: "You review changes.",
-        instanceId: findInstanceId(arranged, "alpha-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/alpha"),
         permissionProfileId: (await createProfile(arranged, `reviewer-${crypto.randomUUID()}`, []))
           .id,
       })
@@ -1004,13 +1004,13 @@ describe("placeSession generates a Thread title", () => {
     sharedWithFleet(
       async (arranged) => {
         arranged.wire.setTextGenerationAnswer(() => answer);
-        // None of the fixture providers is one `automatic` tries, so the
+        // None of the fixture harnesses is one `automatic` tries, so the
         // Thread title runs on the instance the test chooses.
         const chosen = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
           body: {
             controller: {
               "textGeneration.model": {
-                instanceId: findInstanceId(arranged, "alpha-provider"),
+                instanceId: findInstanceId(arranged, "harnesses/alpha"),
                 model: "clever",
               },
             },
@@ -1103,7 +1103,7 @@ describe("placeSession generates a Thread title", () => {
       const agent = await createAgent(arranged, {
         name: "titleless",
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "alpha-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/alpha"),
         permissionProfileId: profile.id,
         accessMode: "auto-accept-edits",
         model: "fast",
@@ -1177,7 +1177,7 @@ describe("placeSession generates a Thread title", () => {
       const agent = await createAgent(arranged, {
         name: "forked",
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "alpha-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/alpha"),
         permissionProfileId: profile.id,
         accessMode: "auto-accept-edits",
         model: "fast",
@@ -1303,7 +1303,7 @@ describe("placeSession and continueSession with a dedupKey", () => {
       const agent = await createAgent(arranged, {
         name: "short-lived",
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "alpha-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/alpha"),
         permissionProfileId: profile.id,
       });
       const first = await spawnAndEnd(arranged, {

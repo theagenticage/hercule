@@ -26,8 +26,8 @@ const buildFacts = (identityPort: number): RunnerFacts => ({
   totalMemoryBytes: 64 * 1024 * 1024 * 1024,
   docker: true,
   toolchains: [],
-  providers: [],
-  adapters: ["claude-code"],
+  harnesses: [],
+  adapters: ["claude-code/claude-code"],
   identityPort,
 });
 

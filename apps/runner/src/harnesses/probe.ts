@@ -1,7 +1,7 @@
 /**
  * The probe result every adapter returns when a probe has nothing to report
  * except an error. It lives in one module because a probe result the
- * controller cannot read leaves the provider row with no information at all.
+ * controller cannot read leaves the harness row with no information at all.
  */
 import * as Duration from "effect/Duration";
 import type { ProbeResult } from "@hercule/protocol";

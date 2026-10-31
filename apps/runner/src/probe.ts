@@ -88,7 +88,7 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
       const found = yield* findToolchain(machine, name);
       if (found !== undefined) toolchains.push(found);
     }
-    const providers: Array<HarnessBinary> = HARNESS_BINARIES.map((name) => {
+    const harnesses: Array<HarnessBinary> = HARNESS_BINARIES.map((name) => {
       const path = machine.locate(name);
       return path === undefined
         ? { name, present: false }
@@ -100,9 +100,9 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
       totalMemoryBytes: totalmem(),
       docker: machine.locate(DOCKER) !== undefined,
       toolchains,
-      providers,
-      // A fact about this build, not about the machine: which provider
-      // binaries this runner can drive when they are installed.
+      harnesses,
+      // A fact about this build, not about the machine: which harnesses
+      // this runner can drive when their binaries are installed.
       adapters: ADAPTER_IDS,
       identityPort,
     };

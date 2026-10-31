@@ -52,7 +52,7 @@ import { WorkRowList } from "./work-rows";
  *
  * - `look` is the face's look, from `buildLook`.
  * - `agent` is the first part of the meta line, before the time: the
- *   provider and the model.
+ *   harness and the model.
  * - `pose` is the face's pose: the session's pose while this message holds
  *   the working face, else `idle`.
  * - `text` is the text the transcript's rows hold. While the message is
@@ -296,7 +296,7 @@ const RUNTIME_NOTE_CLASS: Record<RuntimeNoteKind, string> = {
 };
 
 /**
- * Renders a note the runner, the harness or the provider reported about the
+ * Renders a note the runner or the harness reported about the
  * agent's work: a marker in the first column, the `message` as the runner wrote
  * it, and its time. The three `kind`s share the layout and differ in colour and
  * marker, so a note of any kind starts its words at the same edge:
@@ -305,7 +305,7 @@ const RUNTIME_NOTE_CLASS: Record<RuntimeNoteKind, string> = {
  *   whole. It is quiet, because the work went on: the dot and the message are in
  *   the muted ink, not in tomato, which means something failed. The dot is named
  *   "Warning".
- * - `runtime-notice` is something the provider reported that is neither a warning
+ * - `runtime-notice` is something the harness reported that is neither a warning
  *   nor an error, such as "Conversation was cleared" or "Recalled 3 memories".
  *   It is the warning's neutral sibling, with the 14px info icon in the dot's
  *   column. The icon is named "Notice".

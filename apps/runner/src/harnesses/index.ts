@@ -416,4 +416,4 @@ export { CLAUDE_CODE, CODEX, PI };
  * which happens when the controller knows a harness that this runner build does not.
  */
 export const describeMissingAdapter = (harnessId: string): string =>
-  `This runner does not support the provider "${harnessId}". Update the runner, or run the session on another runner.`;
+  `This runner does not support the harness "${harnessId}". Update the runner, or run the session on another runner.`;

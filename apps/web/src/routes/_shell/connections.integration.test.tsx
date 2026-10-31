@@ -146,11 +146,11 @@ const BYSTANDER: Plugin = {
   id: "quiet-sink",
   displayName: "Quiet Sink",
   hostApi: 1,
-  capabilities: ["providers"],
+  capabilities: ["harnesses"],
   enabled: true,
   status: { _tag: "active" },
   config: {},
-  contributions: [{ extensionPoint: "provider", id: "acme", definition: {} }],
+  contributions: [{ extensionPoint: "harness", id: "acme", definition: {} }],
   intake: NO_INTAKE,
 };
 

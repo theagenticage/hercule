@@ -138,7 +138,8 @@ import type {
   UserInput,
 } from "./types";
 
-export const CODEX = "codex";
+/** The qualified id of the Codex harness (see `CLAUDE_CODE`). */
+export const CODEX = "codex/codex";
 
 const CODEX_BINARY = "codex";
 

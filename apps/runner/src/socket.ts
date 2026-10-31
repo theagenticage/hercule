@@ -156,7 +156,8 @@ export interface ConnectOptions {
   readonly headroom: Effect.Effect<RunnerWatermark, Cause.UnknownError>;
   /**
    * The directory that holds one config directory per provider instance on
-   * this machine. Each instance has its own, so two accounts of one harness
+   * this machine. It keeps the name `providers`, because renaming it would
+   * move the logins stored in it. Each instance has its own, so two accounts of one harness
    * never read each other's credentials, or the user's own.
    */
   readonly providersDir: string;
@@ -417,7 +418,7 @@ export const connect = (
     );
 
     const findBinaryPath = (binaryName: string): string | undefined =>
-      facts.providers.find((provider) => provider.name === binaryName && provider.present)?.path;
+      facts.harnesses.find((harness) => harness.name === binaryName && harness.present)?.path;
 
     /**
      * Builds the context for a probe, login or install of one provider

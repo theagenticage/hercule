@@ -111,7 +111,7 @@ describe("the outcome of a text generation", () => {
     expect(interrupted).toBe(true);
   });
 
-  it("fails when this build has no adapter for the provider", async () => {
+  it("fails when this build has no adapter for the harness", async () => {
     const generate = buildGenerator(undefined);
 
     const message = readFailedMessage(await Effect.runPromise(generate(REQUEST)));

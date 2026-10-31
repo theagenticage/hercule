@@ -1,6 +1,6 @@
 /**
- * Provider instances. Everything routes on the instance id, not the provider
- * id: one provider can have several accounts, kept apart by their config
+ * Provider instances. Everything routes on the instance id, not the harness
+ * id: one harness can have several accounts, kept apart by their config
  * directories.
  * `displayName`, `binaryName` and `declared` come from the registering plugin
  * at read time, not from the stored row.
@@ -25,7 +25,7 @@ import { bounded } from "../strings";
 /**
  * The longest name a provider instance may carry. It is the same limit as a
  * contribution's name, because the controller names the default instance
- * after its provider.
+ * after its harness.
  */
 export const MAX_PROVIDER_INSTANCE_NAME_LENGTH = MAX_CONTRIBUTION_NAME_LENGTH;
 
@@ -40,7 +40,7 @@ export { ModelDescriptor, ModelOption, SnapshotAuth } from "@hercule/protocol";
 /**
  * How the harness version a runner reported compares with the versions this
  * build was tested with. `unknown` means the machine reported no version, or
- * the provider has no minimum version set.
+ * the harness has no minimum version set.
  */
 export const VersionVerdict = Schema.Literals(["unknown", "below-floor", "ok", "above-tested-max"]);
 
@@ -58,7 +58,7 @@ export const CapabilitySnapshot = Schema.Struct({
 export type CapabilitySnapshot = Schema.Schema.Type<typeof CapabilitySnapshot>;
 
 /**
- * One secret config field of a provider, described in the plugin's own words,
+ * One secret config field of a harness, described in the plugin's own words,
  * and whether this instance has a value stored for it. The value is written
  * through `secret.set` and never read back: an instance shows that a
  * credential is there, never what it is.
@@ -81,7 +81,7 @@ export const ProviderInstance = Schema.Struct({
   /** The harness's executable name on a machine's `PATH`, which is how Runner Facts refer to it. */
   binaryName: Schema.String,
   declared: DeclaredCapabilities,
-  /** Empty where the provider's plugin marked no field secret. */
+  /** Empty where the harness's plugin marked no field secret. */
   secretFields: Schema.Array(ProviderSecretField),
   snapshots: Schema.Array(CapabilitySnapshot),
   createdAt: Timestamp,

@@ -131,8 +131,14 @@ export {
  * - Version 13 added the `wait` and `image_generation` item kinds. A controller
  *   on 12 could not decode an item of either kind and would close the socket
  *   on it, again after every reconnect, so the two refuse each other at hello.
+ * - Version 14 renamed the frame fields that name a harness: `harnessId` on
+ *   the probe, install, login and session start requests and on the text
+ *   generation request, `harnessRefs` on events, and `harnesses` in the runner
+ *   facts. The harness ids are now qualified (`claude-code/claude-code`). An
+ *   older peer cannot decode the renamed fields, so the two refuse each other
+ *   at hello.
  */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -216,11 +222,12 @@ export const RunnerFacts = Schema.Struct({
   totalMemoryBytes: Bytes,
   docker: Schema.Boolean,
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
-  providers: Schema.Array(HarnessBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  harnesses: Schema.Array(HarnessBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /**
-   * The harness ids this runner build has an adapter for. A fact about the
-   * binary rather than the machine, so the fleet view can show "no adapter in
-   * this runner build" instead of finding out by trying and failing.
+   * The qualified harness ids (such as `claude-code/claude-code`) this runner
+   * build has an adapter for. A fact about the binary rather than the machine,
+   * so the fleet view can show "no adapter in this runner build" instead of
+   * finding out by trying and failing.
    */
   adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /** The port that serves `GET /identity`, which is used to resolve the "local" alias. */

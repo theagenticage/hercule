@@ -233,8 +233,12 @@ export const THREAD_HEADER_RECORDS: SidebarRecords = {
   workspaces: [RESULT_WORKSPACE],
   resources: [PAYMENTS_REPO],
   instances: [
-    buildInstance("i-claude", "claude-code", "Claude Code", [SONNET, CLAUDE_OPUS, HAIKU]),
-    buildInstance("i-codex", "codex", "Codex", [GPT_54, GPT_MINI]),
+    buildInstance("i-claude", "claude-code/claude-code", "Claude Code", [
+      SONNET,
+      CLAUDE_OPUS,
+      HAIKU,
+    ]),
+    buildInstance("i-codex", "codex/codex", "Codex", [GPT_54, GPT_MINI]),
   ],
 };
 

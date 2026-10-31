@@ -10,7 +10,7 @@ const LINES: ReadonlyArray<readonly [string, keyof RunnerFactsReading]> = [
   ["Toolchains", "toolchains"],
   // Not "Providers": the card below uses that word for provider instances,
   // and this line lists the binaries the machine found on its PATH.
-  ["Harnesses", "providers"],
+  ["Harnesses", "harnesses"],
   ["Docker", "docker"],
   ["Binary", "binary"],
 ];

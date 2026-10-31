@@ -104,8 +104,8 @@ const STEP_INPUT_FIXED =
 
 /**
  * Runs `body` against a controller with one runner that hosts the test
- * provider, so an Agent on it can run. `plugins` are loaded beside the
- * provider, and the other options go to the controller unchanged.
+ * harness, so an Agent on it can run. `plugins` are loaded beside the
+ * harness, and the other options go to the controller unchanged.
  */
 const withAgentStepFleet = (
   body: (arranged: Arranged) => Promise<void>,
@@ -118,8 +118,8 @@ const withAgentStepFleet = (
   withFleet(body, {
     plugins: [
       createPluginFixture({
-        id: "providers",
-        definitions: [buildHarnessDefinition("test-provider")],
+        id: "harnesses",
+        definitions: [buildHarnessDefinition("test")],
       }).plugin,
       ...plugins,
     ],
@@ -1088,7 +1088,7 @@ describe("agent steps over the runner socket", () => {
             {
               sessionId: takenSession,
               nativeSessionId: `native-${takenSession}`,
-              instanceId: findInstanceId(arranged, "test-provider"),
+              instanceId: findInstanceId(arranged, "harnesses/test"),
             },
           ],
         });
@@ -1333,7 +1333,7 @@ describe("agent steps over the runner socket", () => {
               {
                 sessionId,
                 nativeSessionId: `native-${sessionId}`,
-                instanceId: findInstanceId(arranged, "test-provider"),
+                instanceId: findInstanceId(arranged, "harnesses/test"),
               },
             ],
           });

@@ -158,8 +158,8 @@ describe("the new-thread screen", () => {
         totalMemoryBytes: 1024,
         docker: false,
         toolchains: [],
-        providers: [],
-        adapters: ["claude-code"],
+        harnesses: [],
+        adapters: ["claude-code/claude-code"],
         identityPort,
       },
     });

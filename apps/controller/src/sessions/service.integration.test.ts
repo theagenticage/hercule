@@ -71,7 +71,7 @@ let homes: Array<string> = [];
 
 /**
  * Builds a real plugin host with no plugins. It is needed because a session
- * record lists what its provider does not enforce, and that list is read from
+ * record lists what its harness does not enforce, and that list is read from
  * the harness definitions the host holds.
  */
 const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClient>) =>

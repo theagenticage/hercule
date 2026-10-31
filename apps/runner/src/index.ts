@@ -103,7 +103,7 @@ const runUntilStopped = async (
           Effect.raceFirst(work, Effect.andThen(stopped, sessions.shutdown("runner_restart"))),
         ),
       ).pipe(
-        // Stop any provider login in progress. A login process blocked on
+        // Stop any harness login in progress. A login process blocked on
         // stdin would otherwise outlive this process, still waiting for a
         // credential.
         Effect.ensuring(harnessLogins.stopAll),

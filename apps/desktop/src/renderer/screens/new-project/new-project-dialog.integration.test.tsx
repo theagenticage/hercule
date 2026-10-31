@@ -75,7 +75,7 @@ const pickFolder = async ({
           totalMemoryBytes: 1024,
           docker: false,
           toolchains: [],
-          providers: [],
+          harnesses: [],
           adapters: [],
           identityPort: 4939,
         },

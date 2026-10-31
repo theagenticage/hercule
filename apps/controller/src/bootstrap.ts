@@ -8,7 +8,7 @@
  * - the database and its migrations;
  * - the shipped defaults and the master key;
  * - the controller identity;
- * - one provider instance per shipped provider plugin;
+ * - one provider instance per shipped harness plugin;
  * - the one-time setup URL.
  *
  * Every later boot runs the same sequence. Every step is idempotent, so a
@@ -339,7 +339,7 @@ export const bootWith = <A, E>(
     /**
      * The plugin host on top of those repositories: it reads secrets and
      * appends to the audit log, so it is built on them rather than merged
-     * beside them. It is also the catalog every layer above reads a provider's
+     * beside them. It is also the catalog every layer above reads a harness's
      * definition from, which is why the fleet is built on it. Each
      * Connection's ingest runs on a fiber of the controller daemon's Ingest
      * Executor, which is built below the host so that it is released after
@@ -453,7 +453,7 @@ export const bootWith = <A, E>(
 
         // After the migrations and the identity, because a plugin that
         // activates may read its own state and secrets. Before the runner,
-        // because a session's provider is looked up in the catalog.
+        // because a session's harness is looked up in the catalog.
         yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
         // After the plugins start, because a stored workflow is judged
         // against the actions, event kinds and Connection types of the active
@@ -461,7 +461,7 @@ export const bootWith = <A, E>(
         // A failure is logged and the boot goes on.
         yield* revalidateStoredWorkflowsOrLog;
         // After the catalog, because a provider instance is created only for
-        // a provider this build registered.
+        // a harness this build registered.
         yield* ensureProviderInstances;
       }
 

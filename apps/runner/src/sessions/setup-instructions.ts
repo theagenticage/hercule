@@ -23,7 +23,7 @@ export const appendSetupInstructions = (error: AdapterError, target: SetupTarget
   switch (error._tag) {
     case "HarnessNotInstalled":
       return new HarnessNotInstalled({
-        message: `${endSentence(error.message)} Install it with: \`hercule runner install-harness ${target.runnerId} --provider ${target.harnessId}\``,
+        message: `${endSentence(error.message)} Install it with: \`hercule runner install-harness ${target.runnerId} --harness ${target.harnessId}\``,
       });
     case "HarnessLoginMissing":
       return new HarnessLoginMissing({

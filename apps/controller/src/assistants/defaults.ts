@@ -4,7 +4,7 @@
  * Setup, the web app's onboarding and the CLI all create an assistant from a
  * name alone, so the defaults live in this one place and cannot drift apart.
  * Two defaults are not constants and are read when an assistant is created:
- * the provider instance (the oldest one whose provider this build carries)
+ * the provider instance (the oldest one whose harness this build carries)
  * and the permission profile (the shipped `assistant` profile).
  */
 import type { AccessMode, DisallowedTool } from "@hercule/protocol";

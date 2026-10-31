@@ -1,5 +1,5 @@
 /**
- * Groups a transcript into turns. A transcript is a flat log of provider
+ * Groups a transcript into turns. A transcript is a flat log of harness
  * events, and a turn is what the thread screen renders. Grouping here means
  * the transcript column only renders turns, and no harness event names leak
  * into it.

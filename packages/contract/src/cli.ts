@@ -2279,7 +2279,7 @@ export const CLI = {
   },
   "runner.refreshFacts": {
     command: "runner refresh-facts",
-    help: "Re-probes a runner's facts now instead of waiting for the hourly refresh. The facts are its OS, architecture, RAM, toolchains and which provider CLIs are on its PATH. Returns the runner with the facts it just reported.",
+    help: "Re-probes a runner's facts now instead of waiting for the hourly refresh. The facts are its OS, architecture, RAM, toolchains and which harness CLIs are on its PATH. Returns the runner with the facts it just reported.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2291,8 +2291,8 @@ export const CLI = {
   },
   "runner.installHarness": {
     command: "runner install-harness",
-    help: "Installs a provider's harness binary on a runner. Use it when `hercule runner read` shows the provider missing from the machine's facts; the returned facts are refreshed.",
-    examples: [{ args: ["1f3a9c2e", "--provider", "claude-code"] }],
+    help: "Installs a harness binary on a runner. Use it when `hercule runner read` shows the harness missing from the machine's facts; the returned facts are refreshed.",
+    examples: [{ args: ["1f3a9c2e", "--harness", "claude-code/claude-code"] }],
     fields: {
       id: {
         positional: true,
@@ -2300,8 +2300,8 @@ export const CLI = {
         resolves: "runner.query",
       },
       harnessId: {
-        flag: "provider",
-        help: "Which harness to install, by harness id such as claude-code or codex; not an instance id.",
+        flag: "harness",
+        help: "Which harness to install, by its qualified harness id such as claude-code/claude-code or codex/codex; not an instance id.",
       },
     },
   },
@@ -2447,12 +2447,12 @@ export const CLI = {
   },
   "provider.create": {
     command: "provider create",
-    help: "Opens a Provider Instance: one account of one provider, with its own provider home on every runner. The config is a JSON object validated against the provider's own schema. Log the new instance in on a machine with `hercule provider login`.",
-    examples: [{ args: ["--provider", "claude-code", "--name", "work"], stdin: "{}" }],
+    help: "Opens a Provider Instance: one account of one harness, with its own provider home on every runner. The config is a JSON object validated against the harness's own schema. Log the new instance in on a machine with `hercule provider login`.",
+    examples: [{ args: ["--harness", "claude-code/claude-code", "--name", "work"], stdin: "{}" }],
     fields: {
       harnessId: {
-        flag: "provider",
-        help: "Which harness to open an account of, by harness id such as claude-code or codex.",
+        flag: "harness",
+        help: "Which harness to open an account of, by its qualified harness id such as claude-code/claude-code or codex/codex.",
       },
       name: {
         flag: "name",
@@ -2478,13 +2478,13 @@ export const CLI = {
       name: { flag: "name", help: "A new name for the instance." },
       config: {
         flag: "config",
-        help: "A replacement config as inline JSON, validated against the provider's own schema.",
+        help: "A replacement config as inline JSON, validated against the harness's own schema.",
       },
     },
   },
   "provider.delete": {
     command: "provider delete",
-    help: "Deletes a Provider Instance. Nothing can be spawned on it afterwards, so open its replacement with `hercule provider create` before deleting the last account of a provider.",
+    help: "Deletes a Provider Instance. Nothing can be spawned on it afterwards, so open its replacement with `hercule provider create` before deleting the last account of a harness.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2774,7 +2774,7 @@ export const CLI = {
   },
   "agent.read": {
     command: "agent read",
-    help: "Reads one Agent in full: its prompt, where it runs and what it may do. It also shows which of those fields its provider does not enforce.",
+    help: "Reads one Agent in full: its prompt, where it runs and what it may do. It also shows which of those fields its harness does not enforce.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2845,7 +2845,7 @@ export const CLI = {
       },
       disallowedTools: {
         flag: "disallowed-tool",
-        help: "A tool family to take away: edit, write, shell, web-search or web-fetch. If the provider enforces none of them, the reply shows that.",
+        help: "A tool family to take away: edit, write, shell, web-search or web-fetch. If the harness enforces none of them, the reply shows that.",
       },
     },
     errors: { forbidden: AGENT_PROFILE_FORBIDDEN },
@@ -2968,7 +2968,7 @@ export const CLI = {
       },
       instanceId: {
         flag: "instance",
-        help: "The Provider Instance its sessions run on, by its id or a tail of eight or more characters; leave it off for the oldest instance of a provider this build carries.",
+        help: "The Provider Instance its sessions run on, by its id or a tail of eight or more characters; leave it off for the oldest instance of a harness this build carries.",
         resolves: "provider.query",
       },
       permissionProfileId: {
@@ -3484,7 +3484,7 @@ export const CLI = {
 
   "session.query": {
     command: "session list",
-    help: "Lists sessions, newest first: each is a provider-backed agent at work, or one that has ended. Use it to find the id every other `hercule session` command takes.",
+    help: "Lists sessions, newest first: each is a harness-backed agent at work, or one that has ended. Use it to find the id every other `hercule session` command takes.",
     examples: [
       { args: [] },
       { args: ["--status", "busy", "--status", "idle"] },
@@ -3709,7 +3709,7 @@ export const CLI = {
       },
       accessMode: {
         flag: "access-mode",
-        help: "What the harness adapter enforces for this session. Without it, a Thread takes the user's thread setting, or the calling session's own access mode. A mode the provider does not support falls back to a less permissive one, never a more permissive one, and the reply shows which mode the session actually got.",
+        help: "What the harness adapter enforces for this session. Without it, a Thread takes the user's thread setting, or the calling session's own access mode. A mode the harness does not support falls back to a less permissive one, never a more permissive one, and the reply shows which mode the session actually got.",
       },
       runnerId: {
         flag: "runner",
@@ -3799,7 +3799,7 @@ export const CLI = {
       },
       steer: {
         flag: "steer",
-        help: "With true, a busy session gets the input in the turn it is running now, as `hercule input steer` does. With false, the input waits for that turn to end. Left out, an agent's message to another session is steered, and a message to your own session, or from the user, waits. Use false when the other agent should finish what it is doing first. A provider that cannot steer has its running turn interrupted, and the input is sent as the next turn, reported as `queued`. A session that is not busy takes the input as without the flag: an idle one starts a turn with it. If the steer cannot be delivered, because the runner refused it, is not connected, or did not answer in time, the input is still stored and waits for the turn to end, and the answer is `queued`. `hercule input list` shows the reason.",
+        help: "With true, a busy session gets the input in the turn it is running now, as `hercule input steer` does. With false, the input waits for that turn to end. Left out, an agent's message to another session is steered, and a message to your own session, or from the user, waits. Use false when the other agent should finish what it is doing first. A harness that cannot steer has its running turn interrupted, and the input is sent as the next turn, reported as `queued`. A session that is not busy takes the input as without the flag: an idle one starts a turn with it. If the steer cannot be delivered, because the runner refused it, is not connected, or did not answer in time, the input is still stored and waits for the turn to end, and the answer is `queued`. `hercule input list` shows the reason.",
       },
       dedupKey: {
         flag: "dedup-key",
@@ -3808,7 +3808,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the session cannot take it: it left no provider-native session to resume, or its runner is retired, draining or no longer connected, or an earlier input with this --dedup-key was cancelled",
+        "the session cannot take it: it left no harness-native session to resume, or its runner is retired, draining or no longer connected, or an earlier input with this --dedup-key was cancelled",
     },
   },
   "session.interrupt": {
@@ -3905,7 +3905,7 @@ export const CLI = {
   },
   "session.continue": {
     command: "session continue",
-    help: "Forks a session: opens a second provider-native session off the one the parent left behind. The parent's own transcript is untouched. It runs on the parent's runner and Provider Instance, because that is where the native state is, and returns a new session with its own id. To continue the parent itself instead, send it `hercule session input`. A session that forks a Thread needs `thread.start` as well as `session.spawn`.",
+    help: "Forks a session: opens a second harness-native session off the one the parent left behind. The parent's own transcript is untouched. It runs on the parent's runner and Provider Instance, because that is where the native state is, and returns a new session with its own id. To continue the parent itself instead, send it `hercule session input`. A session that forks a Thread needs `thread.start` as well as `session.spawn`.",
     examples: [
       {
         args: ["1f3a9c2e", "--mode", "fork"],
@@ -3942,7 +3942,7 @@ export const CLI = {
       forbidden:
         "you lack session.spawn, which a Permission Request can get you. Or you are a session forking a Thread without thread.start, which a Permission Request can also get you. Or a session token asked to fork a session on another Permission Profile, which no grant allows: a fork keeps its parent's profile, and a session may fork only a session on its own profile, so ask the user to fork this one",
       invalid_state:
-        "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
+        "the parent is still live, or it left no harness-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
     },
   },
   "session.markDone": {
@@ -4048,7 +4048,7 @@ export const CLI = {
   },
   "input.steer": {
     command: "input steer",
-    help: "Gets a Queued Input into the session's running turn now, instead of waiting for the turn to end. Only a busy session can be steered, and every provider can be: one that steers natively folds the input into the running turn, and for any other the running turn is interrupted and the input is sent as the next turn, which is reported as `queued`.",
+    help: "Gets a Queued Input into the session's running turn now, instead of waiting for the turn to end. Only a busy session can be steered, and every harness can be: one that steers natively folds the input into the running turn, and for any other the running turn is interrupted and the input is sent as the next turn, which is reported as `queued`.",
     examples: [{ args: ["1f3a9c2e", "0193f3a9-2e5c-7b41-9a6d-1f3a9c2e77b0"] }],
     fields: {
       id: {
@@ -4296,7 +4296,7 @@ export const NOUNS = {
     summary: "Conversations: an assistant's exchange in one channel.",
   },
   session: {
-    summary: "Sessions: provider-backed agents at work, resumable and forkable.",
+    summary: "Sessions: harness-backed agents at work, resumable and forkable.",
     flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond-to-approval-request and hercule session respond-to-question answer what it is parked on, hercule session subagent list shows the subagents it delegated to, hercule session skill list shows the skills it has (hercule session skill preview does the same for a thread not yet started), hercule session stop ends it.",
   },
   input: {

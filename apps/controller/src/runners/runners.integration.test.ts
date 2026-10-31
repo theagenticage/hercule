@@ -1246,8 +1246,8 @@ const FLEET_FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/full"],
   identityPort: 4939,
 };
 
@@ -1262,8 +1262,8 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
   sharedWithFleet(body, {
     plugins: [
       createPluginFixture({
-        id: "providers",
-        definitions: [buildHarnessDefinition("full-provider", { token: "t" })],
+        id: "harnesses",
+        definitions: [buildHarnessDefinition("full", { token: "t" })],
       }).plugin,
     ],
     facts: FLEET_FACTS,

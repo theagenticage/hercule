@@ -98,13 +98,13 @@ import {
 } from "../conversations/testing";
 
 /** A harness that supports everything natively: the instance a plain spawn uses. */
-const FULL = buildHarnessDefinition("full-provider", { token: "t" });
+const FULL = buildHarnessDefinition("full", { token: "t" });
 
 /** The harness for the access-mode fallback tests: it supports up to `auto-accept-edits`. */
 const LIMITED: HarnessDefinition = {
-  ...buildHarnessDefinition("limited-provider", { token: "t" }),
+  ...buildHarnessDefinition("limited", { token: "t" }),
   declared: {
-    ...buildHarnessDefinition("limited-provider").declared,
+    ...buildHarnessDefinition("limited").declared,
     steering: "unsupported",
     accessModes: {
       "approval-required": "native",
@@ -120,9 +120,9 @@ const LIMITED: HarnessDefinition = {
  * unsupported, so the fallback has no lower mode to substitute.
  */
 const BARE: HarnessDefinition = {
-  ...buildHarnessDefinition("bare-provider", { token: "t" }),
+  ...buildHarnessDefinition("bare", { token: "t" }),
   declared: {
-    ...buildHarnessDefinition("bare-provider").declared,
+    ...buildHarnessDefinition("bare").declared,
     accessModes: {
       "approval-required": "unsupported",
       "auto-accept-edits": "unsupported",
@@ -133,7 +133,7 @@ const BARE: HarnessDefinition = {
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "providers", definitions: [FULL, LIMITED, BARE] }).plugin,
+  createPluginFixture({ id: "harnesses", definitions: [FULL, LIMITED, BARE] }).plugin,
 ];
 
 const FACTS: RunnerFacts = {
@@ -142,8 +142,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider", "limited-provider", "bare-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/full", "harnesses/limited", "harnesses/bare"],
   identityPort: 4939,
 };
 
@@ -228,7 +228,7 @@ const EXPIRING_INPUT_DEADLINE = Duration.millis(300);
  */
 const NO_TICK = Duration.hours(1);
 
-/** Runs `body` against a controller with one joined, connected, logged-in runner, using this suite's providers and models. */
+/** Runs `body` against a controller with one joined, connected, logged-in runner, using this suite's harnesses and models. */
 const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
   options: {
@@ -530,7 +530,7 @@ const endSession = async (arranged: Arranged, session: Session, seq: number): Pr
       {
         sessionId: session.id,
         nativeSessionId: "native-1",
-        instanceId: findInstanceId(arranged, "full-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/full"),
       },
     ],
   });
@@ -563,7 +563,7 @@ describe("session.spawn", () => {
 
       expect(session.status).toBe("starting");
       expect(session.runnerId).toBe(arranged.runnerId);
-      expect(session.instanceId).toBe(findInstanceId(arranged, "full-provider"));
+      expect(session.instanceId).toBe(findInstanceId(arranged, "harnesses/full"));
       expect(session.requestedAccessMode).toBe("approval-required");
       expect(session.accessMode).toBe("approval-required");
       expect(session.nativeSessionId).toBeNull();
@@ -571,7 +571,7 @@ describe("session.spawn", () => {
 
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(session.id);
-      expect(start.harnessId).toBe("full-provider");
+      expect(start.harnessId).toBe("harnesses/full");
       expect(start.spec).toEqual({
         instanceId: session.instanceId,
         workspaceId: null,
@@ -605,7 +605,7 @@ describe("session.spawn", () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "limited-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/limited"),
         accessMode: "auto",
       });
 
@@ -617,21 +617,21 @@ describe("session.spawn", () => {
     });
   });
 
-  it("rejects the spawn when the provider supports no mode at or below the requested one", async () => {
+  it("rejects the spawn when the harness supports no mode at or below the requested one", async () => {
     await withFleet(async (arranged) => {
       const response = await spawnSession(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "bare-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/bare"),
         accessMode: "auto",
       });
 
       const said = await response.clone().text();
       expect(response.status, said).toBe(409);
       expect((await parseRefusal(response)).code).toBe("invalid_state");
-      // The error names the requested mode and the provider that cannot run
+      // The error names the requested mode and the harness that cannot run
       // it, so the user knows which of the two to change.
       expect(said).toContain("auto");
-      expect(said).toContain("Provider bare-provider");
+      expect(said).toContain("Harness bare");
       // Nothing was substituted and nothing was started.
       expect(await listSessions(arranged)).toEqual([]);
       await delay(250);
@@ -811,7 +811,7 @@ describe("session.spawn with an explicit runner or profile", () => {
 
       const response = await spawnSession(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "full-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/full"),
         runnerId: arranged.runnerId,
       });
 
@@ -904,7 +904,7 @@ describe("the `userMaterial` flag on a start frame", () => {
           {
             name: "assessor",
             systemPrompt: "You assess tasks.",
-            instanceId: findInstanceId(arranged, "full-provider"),
+            instanceId: findInstanceId(arranged, "harnesses/full"),
             permissionProfileId: worker.id,
           },
           arranged.token,
@@ -987,7 +987,7 @@ const spawnAgentSession = async (arranged: Arranged): Promise<Session> => {
     {
       name: "assessor",
       systemPrompt: "You assess tasks.",
-      instanceId: findInstanceId(arranged, "full-provider"),
+      instanceId: findInstanceId(arranged, "harnesses/full"),
       permissionProfileId: worker.id,
     },
     arranged.token,
@@ -1336,7 +1336,7 @@ describe("what a runner reports", () => {
   it("stores the native id from a sessions report, for a session already running", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
-      const instanceId = findInstanceId(arranged, "full-provider");
+      const instanceId = findInstanceId(arranged, "harnesses/full");
 
       arranged.wire.send({
         _tag: "sessionsReport",
@@ -1361,7 +1361,7 @@ describe("what a runner reports", () => {
           {
             sessionId: session.id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "full-provider"),
+            instanceId: findInstanceId(arranged, "harnesses/full"),
           },
         ],
       });
@@ -1724,11 +1724,11 @@ describe("input.steer", () => {
     });
   });
 
-  it("interrupts the running turn and sends the input as the next turn, on a provider that does not steer natively", async () => {
+  it("interrupts the running turn and sends the input as the next turn, on a harness that does not steer natively", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "limited-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/limited"),
       });
       const events = buildTranscript(session.id);
       await waitForStartFrames(arranged, session.id, 1);
@@ -1978,12 +1978,12 @@ describe("session.input from a session", () => {
     });
   });
 
-  it("interrupts the running turn of a provider that does not steer natively", async () => {
+  it("interrupts the running turn of a harness that does not steer natively", async () => {
     await withFleet(async (arranged) => {
       const sender = await spawnThreadWithGrants(arranged, "messenger", ["session.steer"]);
       const target = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "limited-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/limited"),
       });
       const events = buildTranscript(target.id);
       await waitForStartFrames(arranged, target.id, 1);
@@ -2033,7 +2033,7 @@ describe("the sender an input frame names", () => {
         {
           name: "helper",
           systemPrompt: "You help.",
-          instanceId: findInstanceId(arranged, "full-provider"),
+          instanceId: findInstanceId(arranged, "harnesses/full"),
           permissionProfileId: (await createProfile(arranged, "narrow", ["session.read"])).id,
         },
         arranged.token,
@@ -2136,14 +2136,14 @@ describe("a session's inputs", () => {
   const withInputs = async (arranged: Arranged): Promise<Session> => {
     const session = await spawnSessionOrFail(arranged, {
       prompt: "hello",
-      instanceId: findInstanceId(arranged, "limited-provider"),
+      instanceId: findInstanceId(arranged, "harnesses/limited"),
     });
     const events = buildTranscript(session.id);
     await waitForStartFrames(arranged, session.id, 1);
     reportEvent(arranged.wire, ...events[0]!);
     reportEvent(arranged.wire, ...events[1]!);
     await waitForSession(arranged, session.id, (one) => one.status === "busy");
-    // The provider does not support steering, so both inputs are queued.
+    // The harness does not support steering, so both inputs are queued.
     for (const text of ["second", "third"]) {
       const queued = await sendInput(arranged, session.id, { text });
       expect(queued.status, await queued.clone().text()).toBe(200);
@@ -3088,7 +3088,7 @@ describe("session.continue", () => {
         {
           name: "assessor",
           systemPrompt: "You assess tasks.",
-          instanceId: findInstanceId(arranged, "full-provider"),
+          instanceId: findInstanceId(arranged, "harnesses/full"),
           permissionProfileId: worker!.id,
           disallowedTools: ["edit", "shell"],
         },
@@ -3831,7 +3831,7 @@ const reportFailedStart = async (
  */
 describe("an input the runner refused with a typed failure", () => {
   const INSTALL_MESSAGE =
-    "Claude Code is not installed on this runner. Install it with: `hercule runner install-harness r1 --provider claude-code`";
+    "Claude Code is not installed on this runner. Install it with: `hercule runner install-harness r1 --harness claude-code/claude-code`";
 
   it("fails a Thread's start input with the install command when the harness is not installed, and the crash exit follows", async () => {
     await withFleet(async (arranged) => {
@@ -4420,7 +4420,7 @@ const reportHeldSessions = (
     sessions: sessionIds.map((sessionId) => ({
       sessionId,
       nativeSessionId: `native-${sessionId}`,
-      instanceId: findInstanceId(arranged, "full-provider"),
+      instanceId: findInstanceId(arranged, "harnesses/full"),
     })),
   });
 
@@ -6726,7 +6726,7 @@ describe("session.markDone and session.reopen", () => {
       {
         name: "assessor",
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "full-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/full"),
         permissionProfileId: worker.id,
       },
       arranged.token,

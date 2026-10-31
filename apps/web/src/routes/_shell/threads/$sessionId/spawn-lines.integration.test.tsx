@@ -25,7 +25,7 @@ const NOW = new Date("2026-09-08T10:17:00.000Z");
 
 const INSTANCE: ProviderInstance = {
   id: "01a06d02-1000-7000-8000-000000000001",
-  harnessId: "claude-code",
+  harnessId: "claude-code/claude-code",
   secretFields: [],
   name: "personal",
   config: {},

@@ -21,12 +21,12 @@ export const BARE: Runner = {
     totalMemoryBytes: 64 * GIB,
     docker: true,
     toolchains: [],
-    providers: [
+    harnesses: [
       { name: "claude", present: false },
       { name: "codex", present: false },
       { name: "pi", present: false },
     ],
-    adapters: ["claude-code"],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
   watermark: null,
@@ -39,7 +39,7 @@ export const WITH_CLAUDE: Runner = {
   ...BARE,
   facts: {
     ...BARE.facts!,
-    providers: [
+    harnesses: [
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: false },
@@ -66,19 +66,23 @@ export const buildInstance = (
   harnessId: string,
   displayName: string,
   snapshots: ProviderInstance["snapshots"] = [],
-): ProviderInstance => ({
-  id: `instance-${harnessId}`,
-  harnessId,
-  name: displayName,
-  config: {},
-  displayName,
-  binaryName: harnessId === "claude-code" ? "claude" : harnessId,
-  declared: DECLARED,
-  secretFields: [],
-  snapshots,
-  createdAt: "2026-09-05T09:00:00.000Z",
-  updatedAt: "2026-09-05T09:00:00.000Z",
-});
+): ProviderInstance => {
+  // A qualified harness id is `<plugin>/<harness>`; the harness's own name is the binary's.
+  const harnessName = harnessId.slice(harnessId.indexOf("/") + 1);
+  return {
+    id: `instance-${harnessName}`,
+    harnessId,
+    name: displayName,
+    config: {},
+    displayName,
+    binaryName: harnessName === "claude-code" ? "claude" : harnessName,
+    declared: DECLARED,
+    secretFields: [],
+    snapshots,
+    createdAt: "2026-09-05T09:00:00.000Z",
+    updatedAt: "2026-09-05T09:00:00.000Z",
+  };
+};
 
 /** Returns an instance's capability snapshot on `BARE`, logged in unless `fields` overrides it. */
 export const buildSnapshot = (

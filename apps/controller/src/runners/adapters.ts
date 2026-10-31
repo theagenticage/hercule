@@ -1,7 +1,7 @@
 /**
- * Checks whether a runner can be asked to do anything for a provider. Install
+ * Checks whether a runner can be asked to do anything for a harness. Install
  * and login both fail here, before a frame is sent, because the runner's hello
- * already listed the providers its build has an adapter for.
+ * already listed the harnesses its build has an adapter for.
  */
 import * as Effect from "effect/Effect";
 import {
@@ -23,7 +23,7 @@ export const describeNoAdapter = (harnessId: string): string =>
 
 /**
  * Checks that the runner is connected and its build has an adapter for this
- * provider. Fails with `InvalidState` when the runner is not connected, and
+ * harness. Fails with `InvalidState` when the runner is not connected, and
  * with a `Validation` error on `field` when it has no adapter.
  */
 export const requireAdapter = (

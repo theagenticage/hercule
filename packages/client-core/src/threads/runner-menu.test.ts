@@ -15,7 +15,7 @@ const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
 
 describe("buildRunnerMenu", () => {
   it("dims an offline or unreachable runner for that reason first, even when it is also draining and not logged in", () => {
-    const claude = buildInstance("claude-code", "Claude Code", []); // logged in nowhere
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", []); // logged in nowhere
 
     const offlineDraining = buildRunner({
       id: "r-offline",
@@ -39,7 +39,7 @@ describe("buildRunnerMenu", () => {
   });
 
   it("derives the state: draining when the runner is draining, else the connectivity", () => {
-    const claude = buildInstance("claude-code", "Claude Code", []);
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", []);
 
     expect(
       buildRunnerMenu(
@@ -60,7 +60,7 @@ describe("buildRunnerMenu", () => {
 
   it("leaves retired runners out, so none can be the default", () => {
     const retired = buildRunner({ id: "r-gone", name: "gone", lifecycle: "retired" });
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({ runnerId: "r-gone" }),
     ]);
 
@@ -77,7 +77,7 @@ describe("buildRunnerMenu", () => {
       connectivity: "online",
       lifecycle: "draining",
     });
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({
         runnerId: "r-drain",
         auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
@@ -100,7 +100,7 @@ describe("buildRunnerMenu", () => {
       connectivity: "online",
       lifecycle: "active",
     });
-    const claude = buildInstance("claude-code", "Claude Code", []); // no snapshot for r-active
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", []); // no snapshot for r-active
 
     const menu = buildRunnerMenu([active], null, claude);
 
@@ -110,7 +110,7 @@ describe("buildRunnerMenu", () => {
   it("marks isLocal true only for the runner whose id equals localId", () => {
     const a = buildRunner({ id: "r-a", name: "a" });
     const b = buildRunner({ id: "r-b", name: "b" });
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({ runnerId: "r-a" }),
       buildSnapshot({ runnerId: "r-b" }),
     ]);
@@ -126,7 +126,7 @@ describe("buildRunnerMenu", () => {
   it("defaults to the local runner when it is present among the runners", () => {
     const a = buildRunner({ id: "r-a", name: "a" });
     const b = buildRunner({ id: "r-b", name: "b" });
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({ runnerId: "r-a" }),
       buildSnapshot({ runnerId: "r-b" }),
     ]);
@@ -137,7 +137,7 @@ describe("buildRunnerMenu", () => {
   it("defaults to the first not-dimmed row when localId is absent or matches no runner", () => {
     const dimmed = buildRunner({ id: "r-a", name: "a", connectivity: "offline" });
     const ok = buildRunner({ id: "r-b", name: "b", connectivity: "online", lifecycle: "active" });
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({ runnerId: "r-b" }),
     ]);
 
@@ -148,7 +148,7 @@ describe("buildRunnerMenu", () => {
   it("falls through to the first not-dimmed row when the local runner is itself dimmed", () => {
     const localDimmed = buildRunner({ id: "r-local", name: "local", connectivity: "offline" });
     const ok = buildRunner({ id: "r-b", name: "b", connectivity: "online", lifecycle: "active" });
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", [
       buildSnapshot({ runnerId: "r-b" }),
     ]);
 
@@ -163,7 +163,7 @@ describe("buildRunnerMenu", () => {
       connectivity: "online",
       lifecycle: "draining",
     });
-    const claude = buildInstance("claude-code", "Claude Code", []);
+    const claude = buildInstance("claude-code/claude-code", "Claude Code", []);
 
     expect(buildRunnerMenu([offline, draining], null, claude).defaultRunnerId).toBeNull();
   });

@@ -19,7 +19,7 @@
   font-weight: var(--w-bold);
 }
 
-/* The agent of a session: its provider's mark and its model, in the faint
+/* The agent of a session: its harness's mark and its model, in the faint
    ink of a row's second line. When the line is too narrow, the model's name
    goes first, whole, leaving the mark; only then does the session name
    shrink. A flex container shares the missing width by shrink factor times
@@ -35,7 +35,7 @@
   align-items: center;
   gap: 4px;
   flex: 0 100000 auto;
-  /* The provider's mark (11px) and the gap after it always show. */
+  /* The harness's mark (11px) and the gap after it always show. */
   min-width: 15px;
   height: 1lh;
   overflow: hidden;

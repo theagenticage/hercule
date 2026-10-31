@@ -234,7 +234,7 @@ export const buildInstance = (
   name: displayName,
   config: {},
   displayName,
-  binaryName: harnessId,
+  binaryName: harnessId.slice(harnessId.indexOf("/") + 1),
   declared: {
     steering: "native",
     fork: "native",
@@ -271,11 +271,11 @@ export const buildInstance = (
 
 /** The two provider instances, whose catalogs give the threads' models their names. */
 export const SPECIMEN_INSTANCES: ReadonlyArray<ProviderInstance> = [
-  buildInstance(CLAUDE_SONNET.instanceId, "claude-code", "Claude Code", [
+  buildInstance(CLAUDE_SONNET.instanceId, "claude-code/claude-code", "Claude Code", [
     CLAUDE_SONNET,
     CLAUDE_OPUS,
   ]),
-  buildInstance(GPT.instanceId, "codex", "Codex", [GPT]),
+  buildInstance(GPT.instanceId, "codex/codex", "Codex", [GPT]),
 ];
 
 /**

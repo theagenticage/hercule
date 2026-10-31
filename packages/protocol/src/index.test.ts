@@ -59,11 +59,11 @@ const facts = {
     { name: "git", version: "2.50.1", path: "/usr/bin/git" },
     { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
   ],
-  providers: [
+  harnesses: [
     { name: "claude", present: true, path: "/usr/local/bin/claude" },
     { name: "codex", present: false },
   ],
-  adapters: ["claude-code"],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 } as const;
 
@@ -407,8 +407,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 13, the version that added the wait and image generation item kinds", () => {
-    expect(PROTOCOL_VERSION).toBe(13);
+  it("is 14, the version that renamed the harness fields and qualified the harness ids", () => {
+    expect(PROTOCOL_VERSION).toBe(14);
   });
 });
 

@@ -1515,7 +1515,7 @@ describe("a session that cannot run here", () => {
     expect(events[0]).toMatchObject({
       class: "HarnessNotInstalled",
       message: expect.stringContaining(
-        `hercule runner install-harness ${RUNNER_ID} --provider fake`,
+        `hercule runner install-harness ${RUNNER_ID} --harness fake`,
       ) as string,
     });
     // Not `stopped`: nobody asked for this, and there is nothing to resume.
@@ -1526,7 +1526,7 @@ describe("a session that cannot run here", () => {
     expect(fake.inputs).toEqual([]);
     expectStartInputRefused(
       sent,
-      `hercule runner install-harness ${RUNNER_ID} --provider fake`,
+      `hercule runner install-harness ${RUNNER_ID} --harness fake`,
       "HarnessNotInstalled",
     );
     // The answer comes before the exit, so the controller has it before the
@@ -1584,18 +1584,18 @@ describe("a session that cannot run here", () => {
     expectStartInputRefused(sent, "minProperties");
   });
 
-  it("ends a start for a provider this build has no adapter for", async () => {
+  it("ends a start for a harness this build has no adapter for", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runConnected(fake, supervisor, supervisor.start({ ...START, harnessId: "codex" }));
+    await runConnected(fake, supervisor, supervisor.start({ ...START, harnessId: "codex/codex" }));
 
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events[0]).toMatchObject({
-      message: expect.stringContaining("does not support the provider") as unknown,
+      message: expect.stringContaining("does not support the harness") as unknown,
     });
     expect(events[1]).toMatchObject({ _tag: "session.exited", reason: "crash" });
-    expectStartInputRefused(sent, "does not support the provider");
+    expectStartInputRefused(sent, "does not support the harness");
   });
 
   it("reports a defect on the session instead of letting it end the connection", async () => {

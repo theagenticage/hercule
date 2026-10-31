@@ -37,11 +37,15 @@ import { runnerRepository, type PlacementCandidate } from "../runners";
 import { Settings } from "../settings";
 
 /**
- * The providers `automatic` tries, best first. The order is a decision of the
+ * The harnesses `automatic` tries, best first, by qualified id. The order is a decision of the
  * controller, not of a harness, so a plugin cannot move itself to the front.
  * Each harness names its own suggested model on its definition.
  */
-const AUTOMATIC_HARNESS_ORDER: ReadonlyArray<string> = ["codex", "pi", "claude-code"];
+const AUTOMATIC_HARNESS_ORDER: ReadonlyArray<string> = [
+  "codex/codex",
+  "pi/pi",
+  "claude-code/claude-code",
+];
 
 /**
  * What the setting resolves to now:
@@ -155,12 +159,12 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Finds the first instance, in provider order, that a runner able to make
-   * the call has logged in with its provider's suggested model.
+   * Finds the first instance, in harness order, that a runner able to make
+   * the call has logged in with its harness's suggested model.
    */
   const resolveAutomatic: Effect.Effect<TextGenerationChoice, SqlError> = Effect.gen(function* () {
     const capable = yield* readCapableRunnerIds;
-    const definitions = yield* host.providers();
+    const definitions = yield* host.harnesses();
     const all = yield* instances.list();
     const snapshots = yield* instances.snapshots();
     for (const harnessId of AUTOMATIC_HARNESS_ORDER) {

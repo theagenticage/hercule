@@ -293,7 +293,9 @@ export async function readClaudeInstance(options: {
   readonly url: string;
   readonly apiKey: string;
 }): Promise<Instance> {
-  const found = (await listInstances(options)).find((one) => one.harnessId === "claude-code");
+  const found = (await listInstances(options)).find(
+    (one) => one.harnessId === "claude-code/claude-code",
+  );
   if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
   return found;
 }
@@ -663,7 +665,7 @@ function findMissingBinary(name: string): string | undefined {
  */
 export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
   {
-    harnessId: "claude-code",
+    harnessId: "claude-code/claude-code",
     label: "Claude Code",
     invokeSkill: (name) => `/${name}`,
     invokeRepositorySkill: (checkout, name) => `/repo-${checkout}:${name}`,
@@ -681,7 +683,7 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
     },
   },
   {
-    harnessId: "codex",
+    harnessId: "codex/codex",
     label: "Codex",
     invokeSkill: (name) => `$${name}`,
     invokeRepositorySkill: (_checkout, name) => `$${name}`,
@@ -703,7 +705,7 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
     },
   },
   {
-    harnessId: "pi",
+    harnessId: "pi/pi",
     label: "pi",
     invokeSkill: (name) => `/skill:${name}`,
     invokeRepositorySkill: (_checkout, name) => `/skill:${name}`,

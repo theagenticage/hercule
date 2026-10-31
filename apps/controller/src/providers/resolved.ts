@@ -38,7 +38,7 @@ export const isLoggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.s
 /**
  * Builds a function that resolves an instance id to its harness definition
  * and snapshots. The function fails with a validation error if the instance
- * does not exist, or if this build has no such provider. Each service builds
+ * does not exist, or if this build has no such harness. Each service builds
  * it once, as it does a repository, so the plugin catalog and the rows are
  * read through the caller's own context.
  */
@@ -58,14 +58,14 @@ export const resolvedInstance: Effect.Effect<
           createValidationError([{ path: ["instanceId"], message: "no such provider instance" }]),
         );
       }
-      const registered = yield* host.providers();
+      const registered = yield* host.harnesses();
       const definition = registered.find((one) => one.id === found.value.harnessId);
       if (definition === undefined) {
         return yield* Effect.fail(
           createValidationError([
             {
               path: ["instanceId"],
-              message: `this build carries no ${found.value.harnessId} provider`,
+              message: `this build carries no ${found.value.harnessId} harness`,
             },
           ]),
         );

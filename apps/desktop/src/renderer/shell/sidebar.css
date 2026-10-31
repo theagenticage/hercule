@@ -241,7 +241,7 @@
 .side-thread:focus-within .side-name {
   color: var(--ink);
 }
-/* A row's second line: the provider's mark, then where the thread works.
+/* A row's second line: the harness's mark, then where the thread works.
    The first part ellipsizes; the part kept after it, the end of a branch
    or a machine's name, never does. */
 .side-detail {
@@ -254,7 +254,7 @@
   line-height: var(--line-16);
   white-space: nowrap;
 }
-/* The glyph's slot keeps its width when the provider is unknown, so every
+/* The glyph's slot keeps its width when the harness is unknown, so every
    second line starts at the same place. */
 .side-glyph {
   display: inline-grid;

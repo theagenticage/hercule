@@ -58,7 +58,7 @@ export const pi: Plugin = {
     id: "pi",
     displayName: "pi",
     hostApi: HOST_API,
-    capabilities: ["providers"],
+    capabilities: ["harnesses"],
     configSchema: Schema.Struct({}),
   },
   register: (host) => registerHarness(host, definition),

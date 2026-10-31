@@ -33,7 +33,7 @@ const GITHUB: Connection = {
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
-const LOGGED_IN = buildInstance("claude-code", "Claude", [buildSnapshot()]);
+const LOGGED_IN = buildInstance("claude-code/claude-code", "Claude", [buildSnapshot()]);
 
 /** Reads with nothing done yet. */
 const NOTHING: FirstRunReads = {
@@ -75,7 +75,7 @@ describe("findDoneSteps", () => {
   });
 
   it("counts only a login on the controller's local runner", () => {
-    const elsewhere = buildInstance("claude-code", "Claude", [
+    const elsewhere = buildInstance("claude-code/claude-code", "Claude", [
       buildSnapshot({ runnerId: "01a06d02-beff-7037-9f5b-000000000000" }),
     ]);
 
@@ -84,7 +84,7 @@ describe("findDoneSteps", () => {
   });
 
   it("does not count a login that failed", () => {
-    const loggedOut = buildInstance("claude-code", "Claude", [
+    const loggedOut = buildInstance("claude-code/claude-code", "Claude", [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
 
@@ -312,9 +312,9 @@ describe("buildFirstRunHost", () => {
 
 describe("buildProvidersStepText", () => {
   const INSTANCES = [
-    buildInstance("claude-code", "Claude Code"),
-    buildInstance("codex", "Codex"),
-    buildInstance("pi", "pi"),
+    buildInstance("claude-code/claude-code", "Claude Code"),
+    buildInstance("codex/codex", "Codex"),
+    buildInstance("pi/pi", "pi"),
   ];
   const THIS_MAC = { name: "this Mac", isThisMac: true };
 
@@ -341,7 +341,7 @@ describe("buildProvidersStepText", () => {
       ...WITH_CLAUDE,
       facts: {
         ...WITH_CLAUDE.facts!,
-        providers: [
+        harnesses: [
           { name: "claude", present: true, path: "/usr/local/bin/claude" },
           { name: "codex", present: true },
           { name: "pi", present: false },
@@ -411,7 +411,7 @@ describe("buildAllSetRecap", () => {
 
     expect(recap).toEqual({
       providerNames: "Claude",
-      harnessId: "claude-code",
+      harnessId: "claude-code/claude-code",
       gitHubAccount: "rogier",
       project: { id: PROJECT_ID, name: "webshop", repository: "rogier/webshop" },
     });
@@ -431,14 +431,14 @@ describe("buildAllSetRecap", () => {
   it("leaves everything empty when nothing is logged in and the project has no repository", () => {
     const recap = buildAllSetRecap({
       ...EVERYTHING,
-      instances: [buildInstance("claude-code", "Claude Code")],
+      instances: [buildInstance("claude-code/claude-code", "Claude Code")],
       connections: [],
       resources: [],
     });
 
     expect(recap.providerNames).toBeNull();
     // The row still draws a mark: the first harness listed.
-    expect(recap.harnessId).toBe("claude-code");
+    expect(recap.harnessId).toBe("claude-code/claude-code");
     expect(recap.gitHubAccount).toBeNull();
     expect(recap.project?.repository).toBeNull();
   });

@@ -42,7 +42,7 @@ export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
 
 /**
  * A provider instance's id. Stricter than a fact, because the runner uses it as
- * a directory name: the credential a login writes, and the provider home a
+ * a directory name: the credential a login writes, and the harness home a
  * session runs against, must stay under the instance's own home, with no way
  * for the path to escape it.
  */

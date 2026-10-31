@@ -1,10 +1,10 @@
 /**
  * Tests `formatAccessMode(mode)`, which returns a mode's name as the user
- * reads it, and `buildAccessModeMenu(declared, providerName)`, which lists the
- * four access modes with their fixed meaning. A mode the provider does not
+ * reads it, and `buildAccessModeMenu(declared, harnessName)`, which lists the
+ * four access modes with their fixed meaning. A mode the harness does not
  * support falls back downward, to the nearest less permissive mode it does
  * support (spec 06 §8.4). A dimmed mode's note names the mode it runs as and
- * the provider that falls back, as in "runs as Auto-accept edits on pi".
+ * the harness that falls back, as in "runs as Auto-accept edits on pi".
  *
  * `AccessMode` is defined in `@hercule/protocol`
  * (packages/protocol/src/sessions.ts) and re-exported unchanged by
@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { ACCESS_MODE_CHAIN, type AccessMode } from "@hercule/contract";
 import { buildAccessModeMenu, formatAccessMode } from "./access-modes";
 
-/** The provider's display name, as used in a dimmed row's note. */
+/** The harness's display name, as used in a dimmed row's note. */
 const PROVIDER = "Claude Code";
 
 const ALL_NATIVE: Record<AccessMode, "native" | "unsupported"> = {
@@ -80,7 +80,7 @@ describe("buildAccessModeMenu", () => {
     });
   });
 
-  it("names the given provider, not a fixed placeholder", () => {
+  it("names the given harness, not a fixed placeholder", () => {
     const items = buildAccessModeMenu({ ...ALL_NATIVE, auto: "unsupported" }, "pi");
 
     expect(items.find((item) => item.mode === "auto")).toMatchObject({

@@ -404,20 +404,20 @@ export const ProjectHeader = memo(function ProjectHeader({
 /** The size of the pencil before an unsent row's title, in CSS pixels. */
 const UNSENT_ICON_SIZE = 12;
 
-/** The size of the provider's mark that leads a row's second line, and of a row's action icon, in CSS pixels. */
+/** The size of the harness's mark that leads a row's second line, and of a row's action icon, in CSS pixels. */
 const ROW_GLYPH_SIZE = 12;
 
 /** How many characters at the end of a row's kept part always show. */
 const KEEP_TAIL_LENGTH = 8;
 
 /**
- * Renders a row's second line after the provider's mark: `clip`, which may be
+ * Renders a row's second line after the harness's mark: `clip`, which may be
  * cut short with an ellipsis, then `keep`, which never is. A branch name
  * keeps its end, a main workspace its machine. `keep` is "" when there is
  * nothing to keep.
  *
  * - `asking` draws `clip` in the colour of a question to the user.
- * - `done` draws a green check where the provider's mark goes, for a
+ * - `done` draws a green check where the harness's mark goes, for a
  *   finished group.
  *
  * A `keep` wider than the whole line, such as a long machine name in a
@@ -734,7 +734,7 @@ function GroupRowFrame({
 /**
  * Renders a group in its project, in two lines: a thread, or a lead with its
  * partners. The first line holds its title and its status slot
- * (`StatusSlot`); the second, the mark of its provider and, while a session
+ * (`StatusSlot`); the second, the mark of its harness and, while a session
  * of the group asks something (`item.row.ask`, see `AskText`), the question,
  * else where the lead works (`item.row.placeLabel`, see `DetailLine`).
  *
@@ -1011,7 +1011,7 @@ export const DoneHeader = memo(function DoneHeader({
  * it calls `onReopen` with `item.row.threadIds`, every Thread of the group.
  *
  * - A group of one Thread is a Done thread's row: the second line starts with
- *   the mark of its provider and reads "Done 2 hours ago".
+ *   the mark of its harness and reads "Done 2 hours ago".
  * - A group of several starts it with a green check and reads "3 threads ·
  *   done 2 hours ago".
  * - A group of several sessions has a dots button, as a group's row in a

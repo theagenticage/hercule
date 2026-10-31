@@ -10,7 +10,7 @@ describe("buildProviderRows", () => {
   it("shows a logged-in harness's account and what it offers", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code", "Claude Code", [buildSnapshot()]),
+      buildInstance("claude-code/claude-code", "Claude Code", [buildSnapshot()]),
     );
 
     expect(row).toMatchObject({
@@ -31,7 +31,9 @@ describe("buildProviderRows", () => {
     // works, but there is no account name, and an empty line looks like a fault.
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code", "Claude Code", [buildSnapshot({ auth: { status: "ok" } })]),
+      buildInstance("claude-code/claude-code", "Claude Code", [
+        buildSnapshot({ auth: { status: "ok" } }),
+      ]),
     );
 
     expect(row.account).toBe("signed in");
@@ -40,7 +42,7 @@ describe("buildProviderRows", () => {
   it("shows the token source when the harness reports one", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code", "Claude Code", [
+      buildInstance("claude-code/claude-code", "Claude Code", [
         buildSnapshot({ auth: { status: "ok", backend: "ANTHROPIC_API_KEY" } }),
       ]),
     );
@@ -51,7 +53,7 @@ describe("buildProviderRows", () => {
   it("flags a version this build was not tested with", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code", "Claude Code", [
+      buildInstance("claude-code/claude-code", "Claude Code", [
         buildSnapshot({ harnessVersion: "2.0.9", versionVerdict: "below-floor" }),
       ]),
     );
@@ -60,7 +62,7 @@ describe("buildProviderRows", () => {
   });
 
   it("offers the install, and no login, for a harness that is not installed on the runner", () => {
-    const row = buildProviderRow(WITH_CLAUDE, buildInstance("codex", "Codex", []));
+    const row = buildProviderRow(WITH_CLAUDE, buildInstance("codex/codex", "Codex", []));
 
     expect(row).toMatchObject({ install: "blocked", logIn: false, version: "not reported" });
     expect(row.account).toBe("no adapter in this runner build");
@@ -69,7 +71,7 @@ describe("buildProviderRows", () => {
   it("offers no action on an offline runner", () => {
     const row = buildProviderRow(
       { ...WITH_CLAUDE, connectivity: "offline" },
-      buildInstance("claude-code", "Claude Code", [buildSnapshot()]),
+      buildInstance("claude-code/claude-code", "Claude Code", [buildSnapshot()]),
     );
 
     expect(row).toMatchObject({ install: "none", logIn: false, probe: false });
@@ -89,7 +91,7 @@ describe("buildProviderRows for a provider with a secret field", () => {
   };
 
   const buildKeyedInstance = (set: boolean): ProviderInstance => ({
-    ...buildInstance("pi", "pi", [buildSnapshot({ auth: { status: "unauthenticated" } })]),
+    ...buildInstance("pi/pi", "pi", [buildSnapshot({ auth: { status: "unauthenticated" } })]),
     binaryName: "pi",
     secretFields: [{ ...FIELD, set }],
   });
@@ -98,8 +100,8 @@ describe("buildProviderRows for a provider with a secret field", () => {
     ...WITH_CLAUDE,
     facts: {
       ...WITH_CLAUDE.facts!,
-      providers: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
-      adapters: ["pi"],
+      harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+      adapters: ["pi/pi"],
     },
   };
 
@@ -127,7 +129,7 @@ describe("buildProviderRows for a provider with a secret field", () => {
     });
     const withPiAdapter: Runner = {
       ...WITH_CLAUDE,
-      facts: { ...WITH_CLAUDE.facts!, adapters: ["claude-code", "pi"] },
+      facts: { ...WITH_CLAUDE.facts!, adapters: ["claude-code/claude-code", "pi/pi"] },
     };
     expect(buildProviderRow(withPiAdapter, buildKeyedInstance(false)).location).toBe(
       "not installed",
@@ -137,7 +139,7 @@ describe("buildProviderRows for a provider with a secret field", () => {
   it("says installed when the runner found the harness but did not say where", () => {
     const pathless: Runner = {
       ...WITH_PI,
-      facts: { ...WITH_PI.facts!, providers: [{ name: "pi", present: true }] },
+      facts: { ...WITH_PI.facts!, harnesses: [{ name: "pi", present: true }] },
     };
     expect(buildProviderRow(pathless, buildKeyedInstance(false))).toMatchObject({
       path: null,

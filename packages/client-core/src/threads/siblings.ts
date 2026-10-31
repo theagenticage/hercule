@@ -98,7 +98,7 @@ export interface SessionTab {
   readonly activityAt: string;
   /** Whether the session is a Thread marked Done. */
   readonly done: boolean;
-  /** The harness of the session's instance, such as `claude-code`, or `null` when the instance is unknown. */
+  /** The harness of the session's instance, such as `claude-code/claude-code`, or `null` when the instance is unknown. */
   readonly harnessId: string | null;
   /** The display name of the model the session runs on. */
   readonly model: string;

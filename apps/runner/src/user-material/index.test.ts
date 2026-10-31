@@ -1,7 +1,7 @@
 /**
  * Tests what a Thread sees of the user's own material. Every test builds a
  * fake user home in a temporary directory; none reads the real one. Besides
- * what each provider gets, the tests guard two things the spec names:
+ * what each harness gets, the tests guard two things the spec names:
  *
  * - Codex and pi never get anything written into their instance home, which
  *   every session of the instance shares;
@@ -390,7 +390,7 @@ describe("pi's material", () => {
   });
 });
 
-describe("any other provider", () => {
+describe("any other harness", () => {
   it("gets no material, and nothing is written", () => {
     const { home, instanceHome } = createHomes();
     writeFile(join(home, ".claude", "CLAUDE.md"));

@@ -136,7 +136,7 @@ describe("join", () => {
       pathJoin(home, "runner", String(written["storageDirectory"])),
     );
     expect(statSync(result.storageDirectory).isDirectory()).toBe(true);
-    // Workspaces and provider homes live in this directory, so only the
+    // Workspaces and harness homes live in this directory, so only the
     // runner's user may open it, for the same reason as the file.
     expect(statSync(result.storageDirectory).mode & 0o777).toBe(0o700);
   });

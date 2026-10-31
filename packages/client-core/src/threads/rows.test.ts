@@ -9,7 +9,7 @@ import { buildThreadRows } from "./rows";
 import { buildRunner } from "./workspaces.testing";
 
 /** The instance whose catalog gives rows their model names. It offers two models. */
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
   buildSnapshot({
     models: [
       {

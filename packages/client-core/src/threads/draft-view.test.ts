@@ -35,7 +35,7 @@ const UNRESTRICTED: Profile = {
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
   buildSnapshot({
     runnerId: MOSS.id,
     models: [

@@ -590,7 +590,7 @@ export const spawnSessionOrFail = async (arranged: Arranged, body: unknown): Pro
  * runner, the profile lookup and the start frame are set up in one place.
  */
 
-const AGENT_HARNESS = buildHarnessDefinition("full-provider", { token: "t" });
+const AGENT_HARNESS = buildHarnessDefinition("full", { token: "t" });
 
 const AGENT_FACTS = {
   os: "darwin",
@@ -598,8 +598,8 @@ const AGENT_FACTS = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/full"],
   identityPort: 4939,
 } as const;
 
@@ -609,9 +609,9 @@ const AGENT_MODELS = [
 
 /**
  * Runs `body` against a fleet whose one runner can run a session on any
- * built-in profile. The controller loads the agent provider's plugin, and
- * `plugins` beside it. `steering` replaces how the agent provider declares it
- * steers a running turn, for a test about a provider that cannot.
+ * built-in profile. The controller loads the agent harness's plugin, and
+ * `plugins` beside it. `steering` replaces how the agent harness declares it
+ * steers a running turn, for a test about a harness that cannot.
  */
 export const withAgentFleet = (
   body: (arranged: Arranged) => Promise<void>,
@@ -627,7 +627,7 @@ export const withAgentFleet = (
   withFleet(body, {
     plugins: [
       createPluginFixture({
-        id: "providers",
+        id: "harnesses",
         definitions: [{ ...AGENT_HARNESS, declared: { ...AGENT_HARNESS.declared, steering } }],
       }).plugin,
       ...plugins,

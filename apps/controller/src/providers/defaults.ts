@@ -1,8 +1,8 @@
 /**
- * Creates one instance for each registered provider that has none, so a fresh
+ * Creates one instance for each registered harness that has none, so a fresh
  * install can offer "Log in to Claude Code" before the user knows about
- * instances. The check is per provider, not "is the table empty", so a
- * provider added in a later release still gets its default instance.
+ * instances. The check is per harness, not "is the table empty", so a
+ * harness added in a later release still gets its default instance.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -22,7 +22,7 @@ export const ensureProviderInstances: Effect.Effect<
   const instances = yield* providerRepository;
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
-  const registered = yield* host.providers();
+  const registered = yield* host.harnesses();
   // A map, so two plugins that register the same harness still get one instance.
   const missing = new Map(registered.map((definition) => [definition.id, definition]));
   for (const harnessId of yield* instances.harnessesWithInstance()) missing.delete(harnessId);

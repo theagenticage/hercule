@@ -70,7 +70,7 @@ const refuseSessionPlacement = async (
     requestId: createId(),
     sessionId: createId(),
     input: { text: "hello" },
-    harnessId: "claude-code",
+    harnessId: "claude-code/claude-code",
     config: {},
     secrets: {},
     token: "fixture-token",
@@ -86,7 +86,7 @@ const refuseSessionPlacement = async (
     frame.spec,
     {
       ...frame.spec,
-      continue: { nativeSessionId: "saved-provider-transcript", mode: "resume" as const },
+      continue: { nativeSessionId: "saved-harness-transcript", mode: "resume" as const },
     },
   ]) {
     const outcome = await Effect.runPromise(

@@ -1167,8 +1167,8 @@ describe("what a runner subscription receives", () => {
     totalMemoryBytes: 68719476736,
     docker: false,
     toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-    providers: [],
-    adapters: ["claude-code"],
+    harnesses: [],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   };
 
@@ -1351,7 +1351,7 @@ describe("what a runner subscription receives", () => {
 
 /**
  * The smallest fleet that can spawn one session and write its transcript: one
- * provider, and one runner that answers hello and probes and sends nothing
+ * harness, and one runner that answers hello and probes and sends nothing
  * else on its own. Placement, access modes and input are tested in
  * `sessions.integration.test.ts`. This suite only needs a session that exists
  * and a wire to report its events on, so its two live topics have something
@@ -1364,8 +1364,8 @@ const SESSION_TOPIC_FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["session-topic-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["session-topics/session-topic"],
   identityPort: 4939,
 };
 
@@ -1376,7 +1376,7 @@ const SESSION_TOPIC_MODELS = [
 const buildSessionTopicPlugins = (): ReadonlyArray<Plugin> => [
   createPluginFixture({
     id: "session-topics",
-    definitions: [buildHarnessDefinition("session-topic-provider", { token: "t" })],
+    definitions: [buildHarnessDefinition("session-topic", { token: "t" })],
   }).plugin,
 ];
 

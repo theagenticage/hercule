@@ -8,7 +8,7 @@ import type { KeyValueStore, PluginError } from "./plugin";
 const Support = Schema.Literals(["native", "unsupported"]);
 
 /**
- * Static facts about the pinned harness version behind a provider. Every value
+ * Static facts about the pinned harness version behind a harness definition. Every value
  * is a fact, never a fallback: the controller decides what an unsupported mode
  * falls back to, so nothing here records it.
  */
@@ -37,7 +37,7 @@ export type DeclaredCapabilities = Schema.Schema.Type<typeof DeclaredCapabilitie
 export const MAX_CONTRIBUTION_NAME_LENGTH = 128;
 
 /**
- * The name of one contribution: a provider, an event source, or whatever a
+ * The name of one contribution: a harness, an event source, or whatever a
  * later extension point contributes. One limit for all of them, because they
  * are all stored in the same columns.
  */
@@ -47,8 +47,8 @@ const ContributionName = Schema.String.check(
 );
 
 /**
- * The unqualified id a plugin gives an event source, a workflow action or a
- * Connection type. The host prefixes it with the plugin id and a `/` to build
+ * The unqualified id a plugin gives a harness, an event source, a workflow
+ * action or a Connection type. The host prefixes it with the plugin id and a `/` to build
  * the qualified id (`github/pr.merge`). A `/` in the word would make the
  * qualified id ambiguous, so it is rejected.
  */
@@ -60,12 +60,13 @@ export const ContributionWord = ContributionName.check(
 );
 
 /**
- * A provider's static self-description, which is all a provider plugin
- * contributes. `defaultConfig` is a value rather than a function, because a
- * function cannot be stored in the catalog.
+ * A harness's static self-description, which is all a harness plugin
+ * contributes. `id` is the unqualified word; the host builds the qualified id
+ * (`claude-code/claude-code`) at registration. `defaultConfig` is a value
+ * rather than a function, because a function cannot be stored in the catalog.
  */
 export const HarnessDefinition = Schema.Struct({
-  id: ContributionName,
+  id: ContributionWord,
   displayName: ContributionName,
   /** The harness's executable name on `PATH`, which links a runner's facts to an instance. */
   binaryName: ContributionName,
@@ -76,11 +77,11 @@ export const HarnessDefinition = Schema.Struct({
   defaultConfig: Schema.Json,
   declared: DeclaredCapabilities,
   /**
-   * The model slug this provider suggests for text generation: a small, cheap
+   * The model slug this harness suggests for text generation: a small, cheap
    * model from its catalog. The controller's `Automatic` text generation
-   * model picks the first provider, in its own order, whose suggested model
+   * model picks the first harness, in its own order, whose suggested model
    * a logged-in instance offers (spec 06 section 14). Absent when the
-   * provider suggests none.
+   * harness suggests none.
    */
   suggestedTextGenerationModel: Schema.optionalKey(Schema.NonEmptyString),
 });

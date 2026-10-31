@@ -685,7 +685,7 @@ describe("what the controller sends for a session", () => {
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionSpec)(forked))).toEqual(forked);
   });
 
-  it("returns a saved provider usage report unchanged on a resume", () => {
+  it("returns a saved harness usage report unchanged on a resume", () => {
     const lastUsageReport = {
       source: "codex.app-server.notification",
       payload: {

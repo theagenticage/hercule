@@ -186,7 +186,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
-    // The three harnesses are providers. github is the connection type, the
+    // The three harness plugins have no capabilities asserted here. github is the connection type, the
     // event source with the GitHub event kinds it emits, the reader of the
     // linked repo Resources it watches, and the GitHub workflow actions.
     // sentry is the same without Resources, and linear is sentry without

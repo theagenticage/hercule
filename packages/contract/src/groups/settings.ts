@@ -32,7 +32,7 @@ import { SpawnBound } from "./workflow-definition";
 
 /**
  * The session-level access mode a harness adapter enforces. Re-exported so
- * that the wire shape and the modes a provider plugin declares support for
+ * that the wire shape and the modes a harness declares support for
  * cannot drift apart.
  */
 export { AccessMode };

@@ -17,7 +17,7 @@ const SONNET: ModelMenuRow = {
 
 const ACCOUNT: ModelMenuInstanceRow = {
   instanceId: "work",
-  harnessId: "claude-code",
+  harnessId: "claude-code/claude-code",
   name: "work",
   identity: "work@example.com",
   planLabel: "Claude Pro",

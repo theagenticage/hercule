@@ -128,7 +128,7 @@ const withEvents = (
  * credential without `event.emit`. The github plugin is loaded too, because the
  * rejected call must be one that would otherwise have worked.
  */
-const PROVIDER = buildHarnessDefinition("full-provider", { token: "t" });
+const HARNESS = buildHarnessDefinition("full", { token: "t" });
 
 const FACTS: RunnerFacts = {
   os: "darwin",
@@ -136,8 +136,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/full"],
   identityPort: 4939,
 };
 
@@ -146,7 +146,7 @@ const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "providers", definitions: [PROVIDER] }).plugin,
+  createPluginFixture({ id: "harnesses", definitions: [HARNESS] }).plugin,
   github,
 ];
 

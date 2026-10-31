@@ -14,7 +14,7 @@ export const HOST_API = 2;
  * they are implemented.
  */
 export const PLUGIN_CAPABILITIES = [
-  "providers",
+  "harnesses",
   "channels",
   "event-sources",
   "workflow-actions",

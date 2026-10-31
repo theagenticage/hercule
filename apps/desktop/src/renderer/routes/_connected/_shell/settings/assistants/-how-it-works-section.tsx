@@ -88,7 +88,7 @@ export function HowItWorksSection({ assistant }: { readonly assistant: Assistant
       />
       <SettingTextRow
         label="Persona"
-        hint={`Instructions added to every session ${assistant.name} starts, on top of the provider’s own.`}
+        hint={`Instructions added to every session ${assistant.name} starts, on top of the harness’s own.`}
         value={persona.value}
         error={persona.error}
         onCommit={persona.save}

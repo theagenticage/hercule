@@ -111,7 +111,7 @@ const buildProviderInstance = (
   snapshots: ProviderInstance["snapshots"],
 ): ProviderInstance => ({
   id,
-  harnessId: "claude-code",
+  harnessId: "claude-code/claude-code",
   secretFields: [],
   name,
   config: {},
@@ -936,7 +936,7 @@ const CODEX: ProviderInstance = {
       buildModel("gpt-5-codex", "GPT-5 Codex", { isDefault: true }),
     ]),
   ]),
-  harnessId: "codex",
+  harnessId: "codex/codex",
   binaryName: "codex",
 };
 
@@ -945,7 +945,7 @@ const OTHER_LOGGED_OUT: ProviderInstance = {
   ...buildProviderInstance("01a06d02-1000-7000-8000-000000000015", "openai", "Codex", [
     buildUnauthenticatedSnapshot(RUNNER.id),
   ]),
-  harnessId: "codex",
+  harnessId: "codex/codex",
   binaryName: "codex",
 };
 
@@ -2302,7 +2302,7 @@ describe("The New project dialog", () => {
 /** A model that takes no images, as pi reports a text-only model. */
 const INSTANCE_TEXT_ONLY = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000004",
-  "pi",
+  "pi/pi",
   "pi",
   [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Pi", [

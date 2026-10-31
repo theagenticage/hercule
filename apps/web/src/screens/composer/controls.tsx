@@ -172,7 +172,7 @@ export function PreviousButton({
 
 /**
  * Renders the model pill's content: the harness logo, the account when a
- * provider has two, and the model name.
+ * harness has two, and the model name.
  *
  * The parts are laid out as a flex row rather than inline text, because the
  * logo is an `svg` block and a block inside inline text breaks the line. Only

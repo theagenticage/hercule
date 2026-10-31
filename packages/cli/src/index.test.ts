@@ -840,7 +840,7 @@ describe("id tails", () => {
     // because there is one instance per harness and only a few harnesses.
     const instance = {
       id: buildId("cccccccc"),
-      harnessId: "claude-code",
+      harnessId: "claude-code/claude-code",
       name: "Claude Code",
       config: {},
       displayName: "Claude Code",

@@ -20,7 +20,7 @@
  * The controller has these plugins:
  * - A local GitHub plugin, for its event kind and its Connection type.
  * - A mail plugin, for a Connection of the wrong type.
- * - A provider, for an Agent.
+ * - A harness, for an Agent.
  * - A notes plugin that declares one workflow action.
  * - A forge plugin with a Connection type and one action that acts through
  *   it.

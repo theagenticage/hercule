@@ -1,10 +1,10 @@
 /**
- * The provider instance operations. An instance is a row plus its provider
+ * The provider instance operations. An instance is a row plus its harness
  * definition: `displayName` and `declared` are added when the row is read,
  * never copied into the row, so they cannot go stale.
  *
- * A row whose provider this build does not have is not listed and cannot be
- * read, but the row is kept, so a later build that has the provider again
+ * A row whose harness this build does not have is not listed and cannot be
+ * read, but the row is kept, so a later build that has the harness again
  * finds it.
  *
  * A method that takes only an id does not decode it again: the transport has
@@ -160,7 +160,7 @@ const describeLoginFailure = (answer: LoginAnswer): string =>
   answer._tag === "loginFailed" ? answer.message : "the login did not return a URL";
 
 /**
- * Validates a config against the provider's schema, and fails with every
+ * Validates a config against the harness's schema, and fails with every
  * error at once, so a form can show each message under its own field. The
  * schema excludes the secret fields: those are stored in the secrets table,
  * so a secret written into the config is an unknown key and is rejected by
@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
 
   const definitions = Effect.map(
-    host.providers(),
+    host.harnesses(),
     (registered) => new Map(registered.map((definition) => [definition.id, definition])),
   );
 
@@ -256,7 +256,7 @@ const make = Effect.gen(function* () {
   /**
    * Reads one instance without a grant check, because the calling operation
    * has already checked its grant. Fails with `NotFound` if there is no such
-   * instance, or if this build does not have its provider.
+   * instance, or if this build does not have its harness.
    */
   const readInstanceOrFail = (
     id: string,
@@ -285,7 +285,7 @@ const make = Effect.gen(function* () {
       return definition === undefined
         ? Effect.fail(
             createValidationError([
-              { path: ["harnessId"], message: `no plugin registered the provider ${id}` },
+              { path: ["harnessId"], message: `no plugin registered the harness ${id}` },
             ]),
           )
         : Effect.succeed(definition);
@@ -491,7 +491,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Installs a provider's harness on a runner, and returns the runner. The
+     * Installs a harness on a runner, and returns the runner. The
      * runner reports its facts before it reports that the install finished,
      * so the returned runner is up to date. Every instance is then probed on
      * that runner, because a newly installed harness has never been probed.
@@ -525,8 +525,8 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Creates a second account on a provider, or the first account on a
-     * provider the boot did not seed. Returns the new instance.
+     * Creates a second instance of a harness, or the first instance of a
+     * harness the boot did not seed. Returns the new instance.
      */
     create: (input: ProviderInstanceCreateInput): Effect.Effect<ProviderInstance, CreateError> =>
       Effect.gen(function* () {
@@ -538,7 +538,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             // Inside the transaction, so two concurrent calls cannot give a
-            // single-account provider two instances.
+            // single-account harness two instances.
             if (!definition.supportsMultipleInstances) {
               const existing = yield* instances.list();
               if (existing.some((row) => row.harnessId === definition.id)) {
@@ -616,8 +616,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Deletes an instance and its stored credentials. It reads the row, not
-     * the full instance, so an instance whose provider this build no longer
-     * has can still be deleted. If this was the provider's only instance, the
+     * the full instance, so an instance whose harness this build no longer
+     * has can still be deleted. If this was the harness's only instance, the
      * next boot creates a new default one.
      */
     delete: (id: Id): Effect.Effect<Record<string, never>, Exclude<WriteError, Validation>> =>

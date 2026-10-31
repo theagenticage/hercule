@@ -29,7 +29,7 @@ const FAMILY_ICONS: { readonly [Family in DisallowedTool]: (props: IconProps) =>
  *
  * Every change calls `onChange` with the family and whether it is now
  * disallowed. When `unenforced`
- * is true, the assistant's provider ignores the list, and the hint says so.
+ * is true, the assistant's harness ignores the list, and the hint says so.
  */
 export function DisallowedToolsRow({
   assistantName,
@@ -47,7 +47,7 @@ export function DisallowedToolsRow({
   const missing = TOOL_FAMILIES.filter((family) => !tools.includes(family));
   const hint =
     `Tools ${assistantName}’s sessions may never use.` +
-    (unenforced ? " Its provider does not enforce this list, so they stay available." : "");
+    (unenforced ? " Its harness does not enforce this list, so they stay available." : "");
   return (
     <SettingRow
       label="Disallowed tools"

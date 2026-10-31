@@ -8,7 +8,7 @@ import {
 } from "@hercule/protocol";
 import { appendSetupInstructions } from "./setup-instructions";
 
-const target = { runnerId: "runner-7", harnessId: "codex", instanceId: "instance-3" };
+const target = { runnerId: "runner-7", harnessId: "codex/codex", instanceId: "instance-3" };
 
 describe("appendSetupInstructions", () => {
   it("adds the install command to a missing harness", () => {
@@ -18,7 +18,7 @@ describe("appendSetupInstructions", () => {
     );
     expect(fixed._tag).toBe("HarnessNotInstalled");
     expect(fixed.message).toBe(
-      "Codex is not installed on this runner. Install it with: `hercule runner install-harness runner-7 --provider codex`",
+      "Codex is not installed on this runner. Install it with: `hercule runner install-harness runner-7 --harness codex/codex`",
     );
   });
 

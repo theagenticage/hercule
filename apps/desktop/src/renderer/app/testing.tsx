@@ -1057,7 +1057,7 @@ export const EFFORT_OPTION: ModelOption = {
  */
 export const FIXTURE_INSTANCE: ProviderInstance = {
   id: INSTANCE_ID,
-  harnessId: "claude-code",
+  harnessId: "claude-code/claude-code",
   name: "personal",
   config: {},
   displayName: "Claude Code",
@@ -1528,7 +1528,7 @@ export const THREAD_FIXTURES = {
           _tag: "turn.completed",
           turnId: "turn-1",
           state: "failed",
-          error: "The provider stopped answering: rate limit reached.",
+          error: "The harness stopped answering: rate limit reached.",
         },
       ],
     ]),

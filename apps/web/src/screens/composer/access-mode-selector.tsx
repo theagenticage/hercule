@@ -8,8 +8,8 @@ import { SelectorShell } from "./selector-shell";
  * The selector for the four access modes. The menu has no header, because the
  * mode names are clear on their own.
  *
- * A mode the provider does not support natively keeps its row and can still be
- * picked. The controller runs it at the nearest mode the provider does
+ * A mode the harness does not support natively keeps its row and can still be
+ * picked. The controller runs it at the nearest mode the harness does
  * support, and the row explains this in the attention hue below the mode's
  * description. The menu neither blocks the choice nor hides the mode.
  */

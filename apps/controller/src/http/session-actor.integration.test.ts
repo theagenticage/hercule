@@ -89,7 +89,7 @@ const spawnFromAgent = async (
     {
       name,
       systemPrompt: "You carry work on.",
-      instanceId: findInstanceId(arranged, "full-provider"),
+      instanceId: findInstanceId(arranged, "harnesses/full"),
       permissionProfileId: profile.id,
     },
     arranged.token,

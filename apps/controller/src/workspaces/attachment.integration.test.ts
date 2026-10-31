@@ -284,8 +284,8 @@ describe("workspace.attach", () => {
           models: MODELS,
           plugins: [
             createPluginFixture({
-              id: "providers",
-              definitions: [buildHarnessDefinition("test-provider")],
+              id: "harnesses",
+              definitions: [buildHarnessDefinition("test")],
             }).plugin,
           ],
         },
