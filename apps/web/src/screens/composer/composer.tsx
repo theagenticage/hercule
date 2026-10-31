@@ -9,6 +9,7 @@ import {
   buildPendingModelNote,
   listProjectRepos,
   queryKeys,
+  resolveDisplayTimezone,
   setWorkspaceStartingRevision,
   buildWorkspaceMenu,
   findProviderPluginId,
@@ -27,6 +28,7 @@ import {
   resourcesQuery,
   runnersQuery,
   sessionsQuery,
+  settingsQuery,
   workspacesQuery,
 } from "../../app/queries";
 import { AccessModeSelector } from "./access-mode-selector";
@@ -43,6 +45,7 @@ import { ModelSelector } from "./model-selector";
 import { MessageBox } from "./message-box";
 import { useComposerAnswer } from "./use-composer-answer";
 import { useComposerModel } from "./use-composer-model";
+import { useNewModelSave } from "./use-new-model-save";
 import { useTypingGuard } from "./use-typing-guard";
 
 type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
@@ -80,6 +83,10 @@ export function Composer({
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
+  // The zone in which a New row says when its model arrived.
+  const timezone = resolveDisplayTimezone(
+    useSuspenseQuery(settingsQuery(client)).data.user.timezone,
+  );
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   // The catalogs the workspace menu reads. If the controller cannot return
@@ -110,6 +117,7 @@ export function Composer({
   const [dragging, setDragging] = useState(false);
   // The position of the shelf image shown large, or null when none is.
   const [preview, setPreview] = useState<number | null>(null);
+  const newModelSave = useNewModelSave(client);
   const model = useComposerModel(thread, catalogs, client, uploads, onSend);
   const guard = useTypingGuard();
   const answer = useComposerAnswer(
@@ -130,6 +138,7 @@ export function Composer({
     if (key === "model" && !next) {
       setFilter("");
       setOpenedProfileId(null);
+      newModelSave.reset();
     }
   };
   // The model menu is built only while it is open.
@@ -142,6 +151,8 @@ export function Composer({
           runnerId: model.menuRunnerId,
           openedProfileId,
           lastOpenProfileId: model.lastOpenProfileId,
+          now: new Date(),
+          timezone,
         })
       : null;
   const projectId = config.projectId ?? null;
@@ -346,6 +357,10 @@ export function Composer({
                       setOpenedProfileId(profileId);
                       model.rememberOpenProfile(profileId);
                     }}
+                    onAddNewModel={newModelSave.add}
+                    onDismissNewModel={newModelSave.dismiss}
+                    savingNewModel={newModelSave.saving}
+                    newModelRefusal={newModelSave.refusal}
                     pill={fields.model.pill}
                     disabled={model.readOnly !== null}
                     open={open === "model"}

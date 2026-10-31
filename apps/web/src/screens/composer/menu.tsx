@@ -48,8 +48,9 @@ export function MenuRow({
   readonly clipNote?: boolean;
   /**
    * Whether the row cannot be picked, for a row that shows its reason
-   * somewhere other than the right-hand note, such as on its sub-line. A row
-   * with a `dimmed` reason is already inert without this flag.
+   * somewhere other than the right-hand note, such as on its sub-line, or
+   * that has controls of its own at the right. A row with a `dimmed` reason is
+   * already inert without this flag. Only a `dimmed` row is drawn faded.
    */
   readonly inert?: boolean;
   readonly trailing?: ReactNode;
@@ -116,7 +117,7 @@ export function MenuRow({
   );
 
   if (inert ?? dimmed !== null) {
-    return <div className={cn(layout, "opacity-50")}>{body}</div>;
+    return <div className={cn(layout, dimmed !== null && "opacity-50")}>{body}</div>;
   }
 
   return (

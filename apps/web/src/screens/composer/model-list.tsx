@@ -3,15 +3,23 @@ import {
   describeModelRow,
   type ModelMenu,
   type ModelMenuRow,
+  type NewModelRow,
   type SignInTarget,
   type ThreadChoice,
 } from "@hercule/client-core";
-import { HarnessLogo } from "@hercule/ui";
+import { Button, HarnessLogo } from "@hercule/ui";
 import { Lane, MenuFoot, MenuRow, ProfileHead, renderMarker } from "./menu";
 
 /** Classes that make the Sign in on a dimmed row look like the row's note, not a button. */
 const ROW_SIGN_IN =
   "p-0 text-[11px] leading-normal font-normal text-muted enabled:hover:bg-transparent";
+
+/** Why a save of a New row failed, and the lane it is shown under. */
+export interface NewModelRefusal {
+  readonly profileId: string;
+  readonly providerAccountId: string;
+  readonly message: string;
+}
 
 /**
  * The list in the model menu, below the filter. `buildModelMenu` decides what
@@ -23,12 +31,21 @@ const ROW_SIGN_IN =
  * that tells the user other models start a new thread. An entry that cannot
  * run stays in the list, dimmed, with its reason at the right and, when
  * signing in would fix it, a Sign in on the row.
+ *
+ * A lane begins with a row for each model announced as new, with Add and Not
+ * now. Neither picks the model or closes the menu. While `savingNewModel`
+ * holds, every such button is disabled, because saves run one after another.
+ * `newModelRefusal` shows under the lane of the row whose save was refused.
  */
 export function ModelList({
   menu,
   renderProviderMark,
   onChoose,
   onOpenProfile,
+  onAddNewModel,
+  onDismissNewModel,
+  savingNewModel,
+  newModelRefusal,
   signInSlot,
 }: {
   readonly menu: ModelMenu;
@@ -36,6 +53,14 @@ export function ModelList({
   readonly renderProviderMark: (providerId: string) => ReactNode;
   readonly onChoose: (choice: ThreadChoice) => void;
   readonly onOpenProfile: (profileId: string) => void;
+  /** Adds the model of a New row to the profile whose lane holds the row. */
+  readonly onAddNewModel: (profileId: string, row: NewModelRow) => void;
+  /** Hides the model of a New row for good in the profile whose lane holds the row. */
+  readonly onDismissNewModel: (profileId: string, row: NewModelRow) => void;
+  /** Whether a save of a New row is running. */
+  readonly savingNewModel: boolean;
+  /** The refusal of the last save of a New row, or `null`. */
+  readonly newModelRefusal: NewModelRefusal | null;
   readonly signInSlot: (target: SignInTarget, className: string) => ReactNode;
 }): JSX.Element {
   const renderRow = (
@@ -67,6 +92,47 @@ export function ModelList({
       />
     );
   };
+  const renderNewModelRow = (profileId: string, row: NewModelRow): JSX.Element => (
+    <MenuRow
+      key={`new:${row.providerAccountId}:${row.model}`}
+      marker={renderMarker(null)}
+      name={
+        <>
+          <span className="mr-1.5 text-label font-emph tracking-[0.1em] text-faint uppercase">
+            New
+          </span>
+          {row.name}
+        </>
+      }
+      detail={row.arrivalText}
+      inert
+      note={
+        <>
+          <Button
+            disabled={savingNewModel}
+            aria-label={`Add ${row.name}`}
+            className="px-1.5 py-0.5 text-[11px] font-normal"
+            onClick={() => {
+              onAddNewModel(profileId, row);
+            }}
+          >
+            Add
+          </Button>
+          <Button
+            disabled={savingNewModel}
+            title="Not now"
+            aria-label={`Not now for ${row.name}`}
+            className="px-1.5 py-0.5 text-[13px] font-normal"
+            onClick={() => {
+              onDismissNewModel(profileId, row);
+            }}
+          >
+            ×
+          </Button>
+        </>
+      }
+    />
+  );
   const buildRowKey = (row: ModelMenuRow): string =>
     `${row.providerAccountId}:${row.harnessId}:${row.model}`;
 
@@ -112,7 +178,14 @@ export function ModelList({
               {lane.note === null ? null : (
                 <p className="py-1.5 pr-2 pl-8 text-meta text-faint">{lane.note}</p>
               )}
+              {lane.newModels.map((row) => renderNewModelRow(profile.profileId, row))}
               {lane.rows.map((row) => renderRow(row, buildRowKey(row), { showCheck: true }))}
+              {newModelRefusal?.profileId === profile.profileId &&
+              newModelRefusal.providerAccountId === lane.providerAccountId ? (
+                <p className="py-1.5 pr-2 pl-8 text-fine text-fail" role="alert">
+                  {newModelRefusal.message}
+                </p>
+              ) : null}
             </Fragment>
           ))}
         </Fragment>

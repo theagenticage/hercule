@@ -1790,6 +1790,8 @@ The controller stores each account's catalog: its models, `readAt`, and the erro
 
 OpenRouter gives all of these details, and a harness probe gives what its list carries. The details are for showing and filtering only; nothing decides on them.
 
+*(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* The catalog also stores the time of its first successful read (`first_read_at`; it is internal and no client reads it). Section 17.5 compares `firstSeenAt` with it. A first read that lists no model leaves no `firstSeenAt` to compare against, so the time cannot be taken from the models. Migration `0102` fills it for the catalogs that exist: the earliest `firstSeenAt` in the catalog, else the time of its last read.
+
 - **The latest successful read wins,** from whichever runner made it.
 - **A failed read keeps the last good list,** with its time and the error. It never removes models.
 - **`modelCount`** on the account is the stored catalog's size, so a client can say "Browse 466 models" without reading the list.
@@ -1872,11 +1874,18 @@ When an account has no catalog yet, its selection is applied when its first read
 A model is **new** to a profile when all of these hold:
 
 - it is in its account's default selection;
-- its `firstSeenAt` is later than the account's first catalog read;
-- the profile holds the account but not the model;
+- its `firstSeenAt` is later than the account's ~~first catalog read~~ *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* first successful catalog read;
+- the profile holds the account ~~but not the model~~ *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)*, the section is not waiting for its first catalog read (section 17.3), and the section holds no entry of the model, in any harness;
 - the profile has not dismissed it.
 
-The check runs whenever a catalog read stores a change, so at most every 4 hours. The composer and the Providers page show a new model at the top of its account's section: "New · Opus 5.6 · released 26 Oct [Add] [Not now]". Add puts it in the profile. Not now adds it to `dismissedNewModels`. Taking a model out of a profile also dismisses it, so it is not announced again. A provider whose default selection is `none`, such as OpenRouter, never announces a model.
+~~The check runs whenever a catalog read stores a change, so at most every 4 hours.~~ *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* Nothing is stored for a new model. It is worked out on every `modelProfile.query` and `modelProfile.read`, so the answer changes when a catalog read stores a change or when the profile changes. Both are announced on the live topic `provider` (section 17.6).
+
+Two consequences:
+
+- A model first seen after the first read but marked legacy is not announced, because it is not in the default selection. It is announced if it later stops being legacy.
+- A model of the first read is never announced.
+
+The composer and the Providers page show a new model at the top of its account's section: "New · Opus 5.6 · ~~released 26 Oct~~ arrived 26 Oct [Add] [Not now]". *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* No catalog source that announces (the Claude Code, Codex and pi probes) reports a release date, so the row shows when the model arrived, from `firstSeenAt`: "arrived 26 Oct", and "arrived 26 Oct 2025" when that is not this year. Add puts it in the profile. Not now adds it to `dismissedNewModels`. ~~Taking a model out of a profile also dismisses it, so it is not announced again.~~ *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* Taking a model out of a profile in the desktop app also dismisses it, so it is not announced again: the client sends the dismissal in the same write, because `modelProfile.update` replaces the whole profile and adds none by itself. A caller of the API or the CLI sends `dismissedNewModels` as it wants them. A provider whose default selection is `none`, such as OpenRouter, never announces a model.
 
 ### 17.6 What clients read
 

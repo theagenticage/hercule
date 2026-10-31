@@ -1273,6 +1273,184 @@ describe("Composer: model menu shapes", () => {
   });
 });
 
+const NEW_MODEL_SLUG = "claude-opus-5-6";
+const NEW_MODEL_PATH = `/api/v1/model-profiles/${buildMainProfile([ACCOUNT_A]).id}`;
+
+/** Adds `newModels` to the first account's section of a profile. */
+const withNewModels = (profile: ModelProfile): ModelProfile => ({
+  ...profile,
+  accounts: profile.accounts.map((section, index) =>
+    index === 0
+      ? {
+          ...section,
+          newModels: [
+            {
+              model: NEW_MODEL_SLUG,
+              name: "Claude Opus 5.6",
+              // The current year, so the row reads "arrived 26 Oct" whenever the test runs.
+              firstSeenAt: `${String(new Date().getFullYear())}-10-26T10:00:00.000Z`,
+            },
+          ],
+        }
+      : section,
+  ),
+});
+
+/** Returns the profile as the controller answers an Add: the model is an entry and no longer new. */
+const withNewModelAdded = (profile: ModelProfile): ModelProfile => {
+  const section = profile.accounts[0]!;
+  const opus = section.entries.find((entry) => entry.model === "claude-opus-5")!;
+  return {
+    ...profile,
+    revision: profile.revision + 1,
+    accounts: [
+      {
+        ...section,
+        newModels: [],
+        entries: [...section.entries, { ...opus, model: NEW_MODEL_SLUG, name: "Claude Opus 5.6" }],
+      },
+      ...profile.accounts.slice(1),
+    ],
+  };
+};
+
+describe("Composer: New rows in the model menu", () => {
+  const profile = withNewModels(buildMainProfile([ACCOUNT_A]));
+
+  const openWithNewModel = async (extra: Readonly<Record<string, Handler>>) => {
+    const user = userEvent.setup();
+    const { api } = await openApp(
+      [ACCOUNT_A],
+      {},
+      { "GET /api/v1/model-profiles": { body: [profile] }, ...extra },
+    );
+    const menu = await openModelMenu(user, /claude sonnet 5/i);
+    return { user, api, menu };
+  };
+
+  const readUpdates = (api: {
+    readonly calls: readonly { method: string; path: string; body: unknown }[];
+  }) => api.calls.filter((call) => call.method === "PATCH" && call.path === NEW_MODEL_PATH);
+
+  it("draws the row at the top of the account's lane with its arrival date, and does not make it a pick", async () => {
+    const { user, menu } = await openWithNewModel({});
+
+    const row = within(menu).getByText("Claude Opus 5.6").closest("div")!;
+    expect(readPageText(row)).toContain("New");
+    expect(readPageText(row)).toContain("arrived 26 Oct");
+    // Above the lane's first model.
+    const first = within(menu).getByRole("button", { name: /claude sonnet 5/i });
+    expect(row.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // The body of the row is not a button, so clicking it picks nothing.
+    await user.click(within(menu).getByText("Claude Opus 5.6"));
+    expect(screen.getByRole("dialog")).toBeDefined();
+    // Still the current model: the pill and the menu's check mark did not move.
+    expect(screen.getAllByRole("button", { name: /claude sonnet 5/i }).length).toBe(2);
+    expect(screen.queryByRole("button", { name: /^claude opus 5\.6/i })).toBeNull();
+  });
+
+  it("adds the model to the profile with one update, keeps the menu open, and redraws without the row", async () => {
+    const { user, api, menu } = await openWithNewModel({
+      [`PATCH ${NEW_MODEL_PATH}`]: { body: withNewModelAdded(profile) },
+    });
+
+    await user.click(within(menu).getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Add Claude Opus 5.6" })).toBeNull();
+    });
+    const updates = readUpdates(api);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.body).toMatchObject({
+      expectedRevision: profile.revision,
+      accounts: [
+        {
+          providerAccountId: ACCOUNT_A.id,
+          entries: [
+            { model: "claude-sonnet-5" },
+            { model: "claude-opus-5" },
+            { model: NEW_MODEL_SLUG, harnessId: null },
+          ],
+        },
+      ],
+    });
+    // The menu is open, the model is now a pickable entry, and nothing was picked.
+    const open = screen.getByRole("dialog");
+    expect(within(open).getByRole("button", { name: /claude opus 5\.6/i })).toBeDefined();
+    expect(screen.getAllByRole("button", { name: /claude sonnet 5/i }).length).toBeGreaterThan(0);
+  });
+
+  it("hides the model with one update when Not now is pressed, and keeps the menu open", async () => {
+    const { user, api, menu } = await openWithNewModel({
+      [`PATCH ${NEW_MODEL_PATH}`]: {
+        body: {
+          ...profile,
+          revision: profile.revision + 1,
+          accounts: profile.accounts.map((section) => ({ ...section, newModels: [] })),
+          dismissedNewModels: [{ providerAccountId: ACCOUNT_A.id, model: NEW_MODEL_SLUG }],
+        },
+      },
+    });
+
+    const dismiss = within(menu).getByRole("button", { name: /not now/i });
+    expect(dismiss.getAttribute("title")).toBe("Not now");
+    await user.click(dismiss);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Claude Opus 5.6")).toBeNull();
+    });
+    const updates = readUpdates(api);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.body).toMatchObject({
+      dismissedNewModels: [{ providerAccountId: ACCOUNT_A.id, model: NEW_MODEL_SLUG }],
+    });
+    expect(screen.getByRole("dialog")).toBeDefined();
+  });
+
+  it("disables the buttons of the New rows while a save runs", async () => {
+    let finish: () => void = () => undefined;
+    const { user, menu } = await openWithNewModel({
+      [`PATCH ${NEW_MODEL_PATH}`]: () =>
+        new Promise((resolve) => {
+          finish = () => {
+            resolve({ body: withNewModelAdded(profile) });
+          };
+        }),
+    });
+
+    await user.click(within(menu).getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    await waitFor(() => {
+      const buttons = [
+        within(menu).getByRole("button", { name: "Add Claude Opus 5.6" }),
+        within(menu).getByRole("button", { name: /not now/i }),
+      ];
+      expect(buttons.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    });
+    finish();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Add Claude Opus 5.6" })).toBeNull();
+    });
+  });
+
+  it("shows the controller's refusal under the lane, keeps the row, and lets the user try again", async () => {
+    const { user, menu } = await openWithNewModel({
+      [`PATCH ${NEW_MODEL_PATH}`]: {
+        status: 400,
+        body: buildErrorBody("validation", "The profile cannot hold more models."),
+      },
+    });
+
+    await user.click(within(menu).getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    const alert = await within(menu).findByRole("alert");
+    expect(alert.textContent).toBe("The profile cannot hold more models.");
+    const add = within(menu).getByRole("button", { name: "Add Claude Opus 5.6" });
+    expect((add as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
 describe("Composer: the Recent lane is written only after a successful spawn", () => {
   const pickOpusAndSend = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
     await user.click(await screen.findByRole("button", { name: /claude sonnet 5/i }));
