@@ -196,7 +196,36 @@ describe("Settings > Threads defaults", () => {
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
-    expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.model": "claude-opus-5" } });
+    // The prefilled account is saved with the model, so the default is explicit.
+    expect(listWrites(api)[0]?.body).toEqual({
+      user: { "thread.providerAccountId": ACCOUNT_LOCAL.id, "thread.model": "claude-opus-5" },
+    });
+  });
+
+  it("writes the prefilled account with the model when no account was ever saved", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp({ "thread.providerAccountId": undefined });
+
+    await user.selectOptions(await screen.findByLabelText<HTMLSelectElement>("Model"), "Opus 5");
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(listWrites(api)[0]?.body).toEqual({
+      user: { "thread.providerAccountId": ACCOUNT_LOCAL.id, "thread.model": "claude-opus-5" },
+    });
+  });
+
+  it("writes the fallback account with the model when the saved account was deleted", async () => {
+    const user = userEvent.setup();
+    const { api } = await openApp({
+      "thread.providerAccountId": "01a06d02-1000-7000-8000-00000000dead",
+    });
+
+    await user.selectOptions(await screen.findByLabelText<HTMLSelectElement>("Model"), "Opus 5");
+
+    expect(await screen.findByRole("status")).toBeDefined();
+    expect(listWrites(api)[0]?.body).toEqual({
+      user: { "thread.providerAccountId": ACCOUNT_LOCAL.id, "thread.model": "claude-opus-5" },
+    });
   });
 
   it("falls back to the account's first snapshot when none is the local runner's", async () => {

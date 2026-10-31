@@ -672,11 +672,17 @@ const make = Effect.gen(function* () {
    * `github.defaultConnectionId`. There is no setting for options or a
    * project, so those are undefined.
    *
-   * A `thread.providerAccountId` that names no existing account is treated as
-   * unset, together with the harness and the model chosen for it, so the
-   * Thread falls through to the next rule instead of failing. The setting can
-   * dangle because it is a plain string, and a model and a harness mean
-   * nothing without their account.
+   * The account setting is in one of three states:
+   *
+   * - Unset: the user never saved an account. `providerAccountId` is
+   *   undefined and the saved model applies to whichever account the Thread
+   *   ends up on, because the user chose a model without choosing an account.
+   * - Set to an existing account: the model and harness belong to that account
+   *   and apply only to a Thread on it (see `threadDefaultsFit`).
+   * - Dangling: set to an account that was deleted. The account, its harness
+   *   and its model are all dropped, so the Thread falls through to the next
+   *   rule instead of failing. A model and a harness mean nothing without
+   *   their account. The setting can dangle because it is a plain string.
    */
   const readUserThreadDefaults = (
     userId: string,
@@ -684,13 +690,13 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const values = yield* settings.allForUser(userId);
       const savedProviderAccountId = values["thread.providerAccountId"];
-      const providerAccountExists =
+      const isDangling =
         savedProviderAccountId !== undefined &&
-        Option.isSome(yield* providerAccounts.one(savedProviderAccountId));
+        Option.isNone(yield* providerAccounts.one(savedProviderAccountId));
       return {
-        providerAccountId: providerAccountExists ? savedProviderAccountId : undefined,
-        harnessId: providerAccountExists ? (values["thread.harnessId"] ?? undefined) : undefined,
-        model: providerAccountExists ? values["thread.model"] : undefined,
+        providerAccountId: isDangling ? undefined : savedProviderAccountId,
+        harnessId: isDangling ? undefined : (values["thread.harnessId"] ?? undefined),
+        model: isDangling ? undefined : values["thread.model"],
         options: undefined,
         accessMode: values["thread.accessMode"],
         permissionProfileId: values["thread.profileId"],
@@ -1373,14 +1379,18 @@ const make = Effect.gen(function* () {
           // exist there. So they apply only when the session runs on that same
           // account and harness. Otherwise the model is the runner's default
           // for the chosen account and harness, as for an Agent with no model.
+          // A default with no account (never saved, or dropped as dangling by
+          // `readUserThreadDefaults`) is tied to no pair: its model, if any,
+          // applies to the account the Thread ends up on.
           const threadDefaultsFit =
             threadDefaults !== undefined &&
-            providerAccountId === threadDefaults.providerAccountId &&
-            (yield* isSameHarnessOnProviderAccount(
-              providerAccountId,
-              requestedHarnessId,
-              threadDefaults.harnessId,
-            ));
+            (threadDefaults.providerAccountId === undefined ||
+              (providerAccountId === threadDefaults.providerAccountId &&
+                (yield* isSameHarnessOnProviderAccount(
+                  providerAccountId,
+                  requestedHarnessId,
+                  threadDefaults.harnessId,
+                ))));
           const defaultModel = threadDefaultsFit ? threadDefaults?.model : undefined;
           // A model and its options are one selection: options belong to the
           // model that offers them. So the Agent's or the Thread default's

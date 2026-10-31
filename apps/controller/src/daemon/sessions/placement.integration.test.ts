@@ -872,6 +872,18 @@ describe("the harness a session is placed in", () => {
     });
   });
 
+  it("applies a saved thread.model when thread.providerAccountId was never saved", async () => {
+    await withMulti(async (arranged) => {
+      // Settings > Threads saves only the model when the user leaves the
+      // prefilled account unchanged.
+      await setThreadDefaults(arranged, { "thread.model": "fast" });
+
+      const thread = await spawnThread(arranged, {});
+
+      expect(thread.modelSelection.model).toBe("fast");
+    });
+  });
+
   it("ignores a thread default whose account no longer exists, and places the Thread by the next rule", async () => {
     await withMulti(async (arranged, { second }) => {
       await setThreadDefaults(arranged, {

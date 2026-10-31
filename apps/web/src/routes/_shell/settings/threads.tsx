@@ -84,7 +84,7 @@ function Threads(): JSX.Element {
           account,
           resolveThreadHarnessId(account, defaults.harnessId),
           defaults.runnerId,
-          settings.user["thread.model"],
+          defaults.model ?? undefined,
         );
 
   return (
@@ -141,7 +141,18 @@ function Threads(): JSX.Element {
                   id="thread-model"
                   value={defaults.model ?? ""}
                   onChange={(event) => {
-                    save({ user: { "thread.model": event.target.value } });
+                    // The account shown may be a prefilled one: nothing was
+                    // saved, or the saved account was deleted. A saved model
+                    // belongs to its account, so the account is saved with it
+                    // and the default cannot drift to another account later.
+                    save({
+                      user: {
+                        ...(account === undefined
+                          ? {}
+                          : { "thread.providerAccountId": account.id }),
+                        "thread.model": event.target.value,
+                      },
+                    });
                   }}
                 >
                   {modelField.options.map((option) => (

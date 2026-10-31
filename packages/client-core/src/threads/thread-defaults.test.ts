@@ -208,6 +208,17 @@ describe("computeThreadDefaults", () => {
     );
   });
 
+  it("drops the stored model when the stored account is gone, and uses the fallback account's default model", () => {
+    const stale: SettingsState["user"] = {
+      "thread.providerAccountId": "account-that-went-away",
+      "thread.model": "model-of-the-deleted-account",
+    };
+
+    expect(computeThreadDefaults(stale, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id)).toMatchObject(
+      { providerAccountId: claude.id, model: "claude-sonnet-5" },
+    );
+  });
+
   it("reads the model in the stored harness", () => {
     const withPi = {
       ...claude,

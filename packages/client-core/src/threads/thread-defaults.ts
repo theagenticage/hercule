@@ -103,18 +103,17 @@ export const computeThreadDefaults = (
   profiles: readonly Profile[],
   thisMacRunnerId: string | null,
 ): ThreadDefaults => {
-  // A stored account id that no longer exists falls back the same way an
-  // unset one does. So there is always an account to read a catalog from,
-  // rather than an empty field with no explanation.
+  // A stored account id that no longer exists (dangling) falls back the same
+  // way an unset one does. So there is always an account to read a catalog
+  // from, rather than an empty field with no explanation.
+  const storedProviderAccountId = settingsUser["thread.providerAccountId"];
+  const storedAccount = accounts.find((each) => each.id === storedProviderAccountId);
+  const isDangling = storedProviderAccountId !== undefined && storedAccount === undefined;
   const account =
-    accounts.find((each) => each.id === settingsUser["thread.providerAccountId"]) ??
-    accounts.find((each) => each.id === findDefaultProviderAccountId(accounts));
+    storedAccount ?? accounts.find((each) => each.id === findDefaultProviderAccountId(accounts));
   // A stored harness belongs to the stored account. When the stored account
   // is gone, the fallback account runs in its own default harness.
-  const harnessId =
-    account !== undefined && account.id === settingsUser["thread.providerAccountId"]
-      ? (settingsUser["thread.harnessId"] ?? null)
-      : null;
+  const harnessId = storedAccount === undefined ? null : (settingsUser["thread.harnessId"] ?? null);
   const forProviderAccount =
     account === undefined
       ? { runnerId: null, model: null }
@@ -131,7 +130,12 @@ export const computeThreadDefaults = (
     // A stored model that the resolved runner does not offer is still the
     // user's choice. It stays picked and the model menu shows that it is not
     // offered there, rather than silently replacing it with another model.
-    model: settingsUser["thread.model"] ?? forProviderAccount.model,
+    // The exception is a dangling account: its model belonged to the deleted
+    // account, so the fallback account's default model is used instead, as
+    // the controller does.
+    model: isDangling
+      ? forProviderAccount.model
+      : (settingsUser["thread.model"] ?? forProviderAccount.model),
     accessMode: settingsUser["thread.accessMode"] ?? DEFAULT_ACCESS_MODE,
     runnerId: forProviderAccount.runnerId,
     profileId:
