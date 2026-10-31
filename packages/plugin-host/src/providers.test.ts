@@ -109,6 +109,30 @@ describe("what a harness declares it runs", () => {
   });
 });
 
+describe("a credential variable a harness declares", () => {
+  it.each([
+    "PATH",
+    "GH_TOKEN",
+    "NODE_OPTIONS",
+    "LD_PRELOAD",
+    "DYLD_INSERT_LIBRARIES",
+    "HERCULE_HOME",
+    "GIT_ASKPASS",
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "PI_CODING_AGENT_DIR",
+  ])("refuses the reserved variable %s", (variable) => {
+    const support = {
+      providerId: "zai/zai",
+      kinds: [{ kind: "api-key", credentialVariable: variable }],
+      modelArgument: "zai/{model}",
+      models: "own-list",
+    };
+
+    expect(accepts(HarnessProviderSupport, support)).toBe(false);
+  });
+});
+
 describe("a harness id", () => {
   it.each(["claude-code", "pi", "Codex_2.v1", "a".repeat(64)])("accepts %s", (word) => {
     expect(accepts(HarnessWord, word)).toBe(true);

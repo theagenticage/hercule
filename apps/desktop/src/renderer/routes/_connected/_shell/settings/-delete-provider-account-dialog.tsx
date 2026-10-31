@@ -2,13 +2,12 @@ import { useRef, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { isInvalidState, isNotFound, readErrorMessage } from "@hercule/client-core";
-import type { ProviderAccount } from "@hercule/contract";
 import { providerAccountsQuery } from "../../../../app/queries";
 import { ConfirmDialog } from "../../../../screens/confirm-dialog";
 
 /**
- * Renders the dialog that asks before the Provider Account `account`,
- * called `name`, is deleted (spec 17 §Settings, Providers).
+ * Renders the dialog that asks before the Provider Account
+ * `providerAccountId`, called `name`, is deleted (spec 17 §Settings, Providers).
  *
  * Delete calls `providerAccount.delete`. A `not_found` reply counts as
  * success, because the account is gone either way. On success `onDeleted` is
@@ -25,12 +24,12 @@ import { ConfirmDialog } from "../../../../screens/confirm-dialog";
  * `onClose` is called whenever the dialog closes, also after a delete.
  */
 export function DeleteProviderAccountDialog({
-  account,
+  providerAccountId,
   name,
   onDeleted,
   onClose,
 }: {
-  readonly account: ProviderAccount;
+  readonly providerAccountId: string;
   /** The account's name, such as "Anthropic · work". */
   readonly name: string;
   readonly onDeleted: () => void;
@@ -42,7 +41,7 @@ export function DeleteProviderAccountDialog({
   const remove = useMutation({
     mutationFn: async () => {
       try {
-        await client.providerAccount.delete({ params: { id: account.id } });
+        await client.providerAccount.delete({ params: { id: providerAccountId } });
       } catch (error) {
         if (!isNotFound(error)) throw error;
       }
@@ -53,7 +52,9 @@ export function DeleteProviderAccountDialog({
       // removes the account from the list.
       onDeleted();
       const { queryKey } = providerAccountsQuery(client);
-      queryClient.setQueryData(queryKey, (list) => list?.filter(({ id }) => id !== account.id));
+      queryClient.setQueryData(queryKey, (list) =>
+        list?.filter(({ id }) => id !== providerAccountId),
+      );
       // Read again, so a read that started before the delete cannot bring
       // the account back.
       await queryClient.invalidateQueries({ queryKey });

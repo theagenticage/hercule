@@ -4,7 +4,7 @@
  * audit entries and the status `controller.read` shows are what they check.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect } from "effect";
+import { Duration, Effect, Redacted } from "effect";
 import type { ControllerInfo } from "@hercule/contract";
 import type {
   ModelDescriptor,
@@ -16,6 +16,7 @@ import type { Plugin } from "@hercule/plugin-host";
 import { SYSTEM_ACTOR } from "../../actor";
 import { uuidFromString, withTransaction } from "../../db";
 import { get, send } from "../../http/testing";
+import { buildProviderAccountOwner } from "../../secrets";
 import {
   findProviderAccountId,
   waitForFrames,
@@ -489,7 +490,7 @@ describe("the model automatic chooses", () => {
         async (arranged) => {
           const other = await arranged.enlist();
           other.wire.setTextGenerationAnswer(() => OK);
-          // Codex is logged in on the first runner only. That runner cannot
+          // Codex is signed in on the first runner only. That runner cannot
           // take the call, so `automatic` must go on to pi, which the other
           // runner has.
           await Effect.runPromise(
@@ -547,7 +548,9 @@ describe("the model automatic chooses", () => {
         });
         expect(await readStatus(arranged)).toMatchObject({
           model: null,
-          unavailableReason: expect.stringContaining("suggested text generation model") as unknown,
+          unavailableReason: expect.stringContaining(
+            "pick a model in Settings › System",
+          ) as unknown,
           lastFailure: { reason: "unavailable" },
         });
       },
@@ -767,7 +770,7 @@ describe("which runner makes the call", () => {
     });
   });
 
-  it("fails with unavailable when every logged-in runner lacks the capability", async () => {
+  it("fails with unavailable when every signed-in runner lacks the capability", async () => {
     await withFleet(
       async (arranged) => {
         const result = await generate(arranged);
@@ -776,7 +779,7 @@ describe("which runner makes the call", () => {
           ok: false,
           error: {
             reason: "unavailable",
-            message: expect.stringContaining("no up-to-date runner") as unknown,
+            message: expect.stringContaining("pick a model in Settings › System") as unknown,
           },
         });
       },
@@ -784,7 +787,7 @@ describe("which runner makes the call", () => {
     );
   });
 
-  it("fails with unavailable when no runner is logged in", async () => {
+  it("fails with unavailable when no runner is signed in", async () => {
     await withFleet(async (arranged) => {
       await logOut(arranged, arranged.runnerId);
 
@@ -881,6 +884,67 @@ describe("the limit per runner", () => {
         }
       },
       { textGenerationDeadline: Duration.millis(deadlineMs) },
+    );
+  });
+});
+
+describe("the key a call sends", () => {
+  /** Stores the key of an account the way the account update does, in its own transaction. */
+  const storeKey = (arranged: Arranged, providerAccountId: string, value: string): Promise<void> =>
+    Effect.runPromise(
+      Effect.asVoid(
+        Effect.orDie(
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.secrets.set(
+              buildProviderAccountOwner(providerAccountId),
+              "apiKey",
+              Redacted.make(value),
+            ),
+          ),
+        ),
+      ),
+    );
+
+  it("is the key stored when the call gets its slot, not the one stored when it queued", async () => {
+    await withFleet(
+      async (arranged) => {
+        const pi = findProviderAccountId(arranged, "pi/pi");
+        expect(
+          (await setModel(arranged, { providerAccountId: pi, model: "pi-small" })).status,
+        ).toBe(200);
+        await storeKey(arranged, pi, "the-old-key");
+        // No runner answers, so the first ten calls hold every slot.
+        const calls = Array.from({ length: 11 }, () => generate(arranged));
+        const first = await waitForFrames<TextGenerationRequest>(
+          arranged.wire,
+          "textGenerationRequest",
+          10,
+        );
+        await storeKey(arranged, pi, "the-new-key");
+
+        arranged.wire.send({
+          _tag: "textGenerationReport",
+          requestId: first[0]!.requestId,
+          outcome: OK,
+        });
+        const all = await waitForFrames<TextGenerationRequest>(
+          arranged.wire,
+          "textGenerationRequest",
+          11,
+        );
+
+        expect(all[10]!.harnessAccount.credential?.value).toBe("the-new-key");
+        for (const frame of all.slice(1)) {
+          arranged.wire.send({
+            _tag: "textGenerationReport",
+            requestId: frame.requestId,
+            outcome: OK,
+          });
+        }
+        await Promise.all(calls);
+      },
+      { textGenerationDeadline: Duration.seconds(20) },
     );
   });
 });

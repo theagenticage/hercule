@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decideSessionsEmptyState,
-  hasLoggedInRunner,
+  hasSignedInRunner,
   type SessionsEmptyState,
 } from "./sessions-empty-state";
 import {
@@ -20,7 +20,7 @@ const waiting = buildProviderAccount(ANTHROPIC_IDENTITY, [
   buildSnapshot({ auth: { status: "unauthenticated" } }),
 ]);
 
-const loggedIn = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot()]);
+const signedIn = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot()]);
 
 const undrivable = buildProviderAccount(OPENAI_IDENTITY, [
   buildSnapshot({
@@ -69,7 +69,7 @@ describe("decideSessionsEmptyState", () => {
     });
   });
 
-  it("offers a login for every installed harness that is not logged in", () => {
+  it("offers a login for every installed harness that is not signed in", () => {
     const state = decideSessionsEmptyState(
       WITH_CLAUDE,
       [waiting, undrivable],
@@ -121,7 +121,7 @@ describe("decideSessionsEmptyState", () => {
   });
 
   it("is ready once one account on the local runner is signed in", () => {
-    expect(decideSessionsEmptyState(WITH_CLAUDE, [loggedIn], PROVIDERS, HARNESSES)).toEqual({
+    expect(decideSessionsEmptyState(WITH_CLAUDE, [signedIn], PROVIDERS, HARNESSES)).toEqual({
       kind: "ready",
       name: "Anthropic",
     });
@@ -133,7 +133,7 @@ describe("decideSessionsEmptyState", () => {
     const second = buildProviderAccount(OPENAI_IDENTITY, [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
-    expect(decideSessionsEmptyState(WITH_CLAUDE, [second, loggedIn], PROVIDERS, HARNESSES)).toEqual(
+    expect(decideSessionsEmptyState(WITH_CLAUDE, [second, signedIn], PROVIDERS, HARNESSES)).toEqual(
       {
         kind: "ready",
         name: "Anthropic",
@@ -241,22 +241,22 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
   });
 });
 
-describe("hasLoggedInRunner", () => {
-  it("is true when an online runner has a logged-in harness", () => {
-    expect(hasLoggedInRunner([BARE], [loggedIn], PROVIDERS, HARNESSES)).toBe(true);
+describe("hasSignedInRunner", () => {
+  it("is true when an online runner has a signed-in harness", () => {
+    expect(hasSignedInRunner([BARE], [signedIn], PROVIDERS, HARNESSES)).toBe(true);
   });
 
-  it("is false when no harness is logged in", () => {
-    expect(hasLoggedInRunner([BARE], [waiting], PROVIDERS, HARNESSES)).toBe(false);
+  it("is false when no harness is signed in", () => {
+    expect(hasSignedInRunner([BARE], [waiting], PROVIDERS, HARNESSES)).toBe(false);
   });
 
   it("is false when the runner with the login is offline", () => {
     expect(
-      hasLoggedInRunner([{ ...BARE, connectivity: "offline" }], [loggedIn], PROVIDERS, HARNESSES),
+      hasSignedInRunner([{ ...BARE, connectivity: "offline" }], [signedIn], PROVIDERS, HARNESSES),
     ).toBe(false);
   });
 
   it("is false with no runners", () => {
-    expect(hasLoggedInRunner([], [loggedIn], PROVIDERS, HARNESSES)).toBe(false);
+    expect(hasSignedInRunner([], [signedIn], PROVIDERS, HARNESSES)).toBe(false);
   });
 });

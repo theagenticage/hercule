@@ -1,5 +1,5 @@
 /**
- * Test helpers for a fleet of one joined, connected, logged-in runner, for a
+ * Test helpers for a fleet of one joined, connected, signed-in runner, for a
  * test that spawns a session and drives its transcript over the real runner
  * socket. This domain's integration suite and the live socket's suite share
  * these helpers because both need the same socket and the same session. A
@@ -64,6 +64,7 @@ import {
   get,
   post,
   send,
+  TEST_HARNESS_ID,
   withServer,
   type ServerHarness,
   type ServerOptions,
@@ -213,7 +214,7 @@ const decodeFrame = (raw: unknown): ControllerMessage =>
 
 /**
  * Opens the socket with a runner credential, sends the hello with
- * `capabilities`, and answers every probe with a logged-in report, so the
+ * `capabilities`, and answers every probe with a signed-in report, so the
  * controller can place sessions on this runner.
  */
 const dial = (
@@ -687,7 +688,9 @@ const AGENT_FACTS = {
   docker: false,
   toolchains: [],
   harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["harnesses/full"],
+  // The test controller also registers the `test` harness and an account that
+  // runs in it, and an account is probed only on a runner with its harness.
+  adapters: ["harnesses/full", TEST_HARNESS_ID],
   identityPort: 4939,
 } as const;
 

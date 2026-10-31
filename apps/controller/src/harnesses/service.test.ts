@@ -91,7 +91,7 @@ describe("harness.query", () => {
   it("reports a runner that has not said hello as not having the harness", async () => {
     const harnesses = await run(
       Effect.gen(function* () {
-        yield* addRunner("new");
+        yield* addRunner("new", { saidHello: false });
         return yield* Effect.flatMap(HarnessService, (service) => service.query());
       }),
     );

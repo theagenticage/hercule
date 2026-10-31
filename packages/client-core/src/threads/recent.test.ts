@@ -169,6 +169,17 @@ describe("parseRecentModels", () => {
     ]);
   });
 
+  it("reads the key instanceId of a list stored before Provider Accounts as providerAccountId", () => {
+    const stored = JSON.stringify([
+      { instanceId: WORK, model: OPUS },
+      { providerAccountId: PERSONAL, model: SONNET },
+    ]);
+    expect(parseRecentModels(stored)).toEqual([
+      { providerAccountId: WORK, model: OPUS },
+      { providerAccountId: PERSONAL, model: SONNET },
+    ]);
+  });
+
   it("reads nothing stored as an empty list", () => {
     expect(parseRecentModels(null)).toEqual([]);
   });
@@ -180,6 +191,7 @@ describe("parseRecentModels", () => {
   it("reads JSON that is not a list of pairs as an empty list", () => {
     expect(parseRecentModels(JSON.stringify({ providerAccountId: WORK, model: OPUS }))).toEqual([]);
     expect(parseRecentModels(JSON.stringify([{ providerAccountId: WORK }]))).toEqual([]);
+    expect(parseRecentModels(JSON.stringify([{ model: OPUS }]))).toEqual([]);
     expect(parseRecentModels(JSON.stringify([{ providerAccountId: WORK, model: 3 }]))).toEqual([]);
   });
 

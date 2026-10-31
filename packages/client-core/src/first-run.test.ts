@@ -43,7 +43,7 @@ const GITHUB: Connection = {
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
-const LOGGED_IN = buildProviderAccount({ ...ANTHROPIC_IDENTITY, label: "Claude" }, [
+const SIGNED_IN = buildProviderAccount({ ...ANTHROPIC_IDENTITY, label: "Claude" }, [
   buildSnapshot(),
 ]);
 
@@ -62,7 +62,7 @@ const NOTHING: FirstRunReads = {
 const EVERYTHING: FirstRunReads = {
   setupComplete: true,
   localRunner: { ...BARE, maxConcurrentSessions: 6 },
-  accounts: [LOGGED_IN],
+  accounts: [SIGNED_IN],
   providers: PROVIDERS,
   harnesses: HARNESSES,
   connections: [GITHUB],
@@ -100,11 +100,11 @@ describe("findDoneSteps", () => {
   });
 
   it("does not count a login that failed", () => {
-    const loggedOut = buildProviderAccount({ ...ANTHROPIC_IDENTITY, label: "Claude" }, [
+    const signedOut = buildProviderAccount({ ...ANTHROPIC_IDENTITY, label: "Claude" }, [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
 
-    expect(findDoneSteps({ ...EVERYTHING, accounts: [loggedOut] }).providers).toBe(false);
+    expect(findDoneSteps({ ...EVERYTHING, accounts: [signedOut] }).providers).toBe(false);
   });
 
   it("counts only a GitHub Connection", () => {
@@ -290,7 +290,7 @@ describe("buildRoomContents", () => {
     expect(room.assistant).toEqual({ id: HERCULE.id, name: "Hercule" });
   });
 
-  it("draws the first thread only when a provider is logged in, in the oldest project", () => {
+  it("draws the first thread only when a provider is signed in, in the oldest project", () => {
     const older = {
       ...buildProject("01a06d02-7000-7000-8000-000000000002", "ops"),
       createdAt: "2026-09-01T09:00:00.000Z",

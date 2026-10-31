@@ -19,5 +19,5 @@ export {
   PROVIDERS,
   ZAI_IDENTITY,
   buildProviderAccount,
-  type AccountIdentity,
+  type ProviderAccountIdentity,
 } from "./providers.testing";

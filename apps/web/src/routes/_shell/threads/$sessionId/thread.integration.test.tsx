@@ -73,7 +73,7 @@ import {
  *   they never show up in a started thread's read-only fields or its
  *   other-account groups.
  */
-const buildAccountSnapshot = (
+const buildProviderAccountSnapshot = (
   runnerId: string,
   identity: string,
   planLabel: string,
@@ -97,7 +97,7 @@ const ACCOUNT_STARTED: ProviderAccount = {
   planLabel: "Claude Max",
   defaultHarnessId: "claude-code/claude-code",
   snapshots: [
-    buildAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
@@ -134,7 +134,7 @@ const EFFORT: ModelOption = {
 const ACCOUNT_OPTIONS: ProviderAccount = {
   ...ACCOUNT_STARTED,
   snapshots: [
-    buildAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
@@ -159,7 +159,7 @@ const ACCOUNT_OTHER: ProviderAccount = {
   identity: "work@example.com",
   planLabel: "Claude Pro",
   snapshots: [
-    buildAccountSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
+    buildProviderAccountSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
       {
         slug: "claude-haiku-5",
         name: "Claude Haiku 5",

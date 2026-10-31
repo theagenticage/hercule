@@ -77,7 +77,7 @@ export function ModelSelector({
             onPickModel={(providerAccountId, model) => {
               forwardThreadChoice({ kind: "model", providerAccountId, model });
             }}
-            onPickAccount={(providerAccountId) => {
+            onPickProviderAccount={(providerAccountId) => {
               forwardThreadChoice({ kind: "account", providerAccountId });
             }}
             signInSlot={signInSlot}

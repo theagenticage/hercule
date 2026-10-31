@@ -56,6 +56,20 @@ export interface CompleteInput {
   readonly timezone: string;
 }
 
+/**
+ * Returns whether first run is done. A database that has not been booted yet
+ * has no `setup_state` row, which also means not done.
+ */
+export const readSetupComplete: Effect.Effect<boolean, SqlError, SqlClient.SqlClient> = Effect.gen(
+  function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{
+      readonly completed_at: string | null;
+    }>`SELECT completed_at FROM setup_state WHERE singleton = 1`;
+    return rows[0]?.completed_at != null;
+  },
+);
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const users = yield* Users;

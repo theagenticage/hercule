@@ -264,7 +264,7 @@ describe("the harness account a frame carries to a runner", () => {
     });
   });
 
-  it("leaves a session whose key cannot be decrypted queued, and starts the others", async () => {
+  it("ends a session whose key cannot be decrypted, with the reason, and starts the others", async () => {
     await withFleet(async (arranged) => {
       const keyed = findProviderAccountId(arranged, "harnesses/keyed");
       await setKey(arranged, keyed, KEY_VALUE);
@@ -284,12 +284,20 @@ describe("the harness account a frame carries to a runner", () => {
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(running.id);
       expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
-      // Still queued, not starting: the runner was never told to run it, so
-      // nothing waits for a report about it.
+      // Ended, not starting and not waiting: the runner was never told to run
+      // it, and retrying could never mend a key that does not decrypt. The
+      // user reads why in the thread's exit.
       const read = await send("GET", arranged.harness.base, `/api/v1/sessions/${stuck.id}`, {
         token: arranged.token,
       });
-      expect(((await read.json()) as { readonly status: string }).status).toBe("queued");
+      expect(((await read.json()) as { readonly status: string }).status).toBe("exited");
+      const transcript = await send(
+        "GET",
+        arranged.harness.base,
+        `/api/v1/sessions/${stuck.id}/transcript`,
+        { token: arranged.token },
+      );
+      expect(await transcript.text()).toContain("could not be decrypted");
     });
   });
 });

@@ -1,11 +1,11 @@
 import type { JSX, ReactNode } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Button, EmptyState } from "@hercule/ui";
-import { queryKeys, decideSessionsEmptyState, readErrorMessage } from "@hercule/client-core";
+import { queryKeys, decideSessionsEmptyState } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../app/live-invalidation";
 import {
-  ensureAccountReads,
+  ensureProviderAccountReads,
   harnessesQuery,
   localRunnerQuery,
   providerAccountsQuery,
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/_shell/")({
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      ensureAccountReads(context.queryClient, context.client),
+      ensureProviderAccountReads(context.queryClient, context.client),
     ]);
     await context.queryClient.ensureQueryData(
       localRunnerQuery(context.detectLocalRunner, runners.items),
@@ -50,21 +50,11 @@ function Sessions(): JSX.Element {
   const local = runners.find((runner) => runner.id === localId) ?? null;
 
   const state = decideSessionsEmptyState(local, accounts, providers, harnesses);
+  // The controller probes the account when a sign-in ends and pushes the new
+  // snapshot on the `provider` topic. This read only shows it sooner.
   const reread = (): void => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
   };
-  // A sign-in writes a credential that the stored account snapshot does not
-  // know about, so ask the machine to probe the account again before this
-  // screen treats it as signed in.
-  const probe = useMutation({
-    mutationFn: (asked: { readonly runnerId: string; readonly providerAccountId: string }) =>
-      client.runner.probe({
-        params: { id: asked.runnerId },
-        payload: { providerAccountId: asked.providerAccountId },
-      }),
-    onSuccess: reread,
-  });
-
   // The state alone already covers `local === null`; the check is here so
   // TypeScript narrows `local` for the code below.
   if (local === null || state.kind === "no-runner") {
@@ -114,12 +104,8 @@ function Sessions(): JSX.Element {
             .
           </>
         }
-        failure={probe.error === null ? null : readErrorMessage(probe.error)}
       >
         {state.offers.flatMap((row) => {
-          const probeOfferedAccount = () => {
-            probe.mutate({ runnerId: local.id, providerAccountId: row.id });
-          };
           // An account that authenticates with a value the user supplies, such
           // as an API key, has no vendor login page, so ask for the value here.
           return row.credentialFields.length === 0
@@ -133,7 +119,7 @@ function Sessions(): JSX.Element {
                   subject={`${row.name} on this machine`}
                   label={`Sign in to ${row.name}`}
                   variant="primary"
-                  onSignedIn={probeOfferedAccount}
+                  onSignedIn={reread}
                 />,
               ]
             : row.credentialFields.map((field) => (
@@ -164,7 +150,6 @@ function Screen({
   lead,
   fine,
   ready = false,
-  failure = null,
   children,
 }: {
   readonly headline: string;
@@ -172,8 +157,6 @@ function Screen({
   readonly fine?: ReactNode;
   /** Whether a thread can actually be started from here yet. */
   readonly ready?: boolean;
-  /** The error message of the last action on this screen, if it failed. */
-  readonly failure?: string | null;
   readonly children?: ReactNode;
 }): JSX.Element {
   return (
@@ -188,11 +171,6 @@ function Screen({
           </Button>
         )}
       </div>
-      {failure === null ? null : (
-        <p className="text-fine text-fail" role="alert">
-          {failure}
-        </p>
-      )}
     </EmptyState>
   );
 }

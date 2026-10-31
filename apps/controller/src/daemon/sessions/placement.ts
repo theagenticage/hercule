@@ -57,10 +57,10 @@ import { PermissionProfiles, type GrantsError, type PermissionProfile } from "..
 import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
 import {
-  isLoggedIn,
+  isSignedIn,
   NO_PLACEMENT,
   providerAccountRepository,
-  resolveAccountHarness,
+  resolveProviderAccountHarness,
   type StoredSnapshot,
 } from "../../provider-accounts";
 import { resourceRepository } from "../../resources";
@@ -382,9 +382,9 @@ const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration;
   const forkAfterCommit = yield* makeForkAfterCommit;
 
-  /** Resolves an account and a harness (`resolveAccountHarness`) in this layer's context. */
-  const resolveAccountHarnessHere = (providerAccountId: string, harnessId: string | undefined) =>
-    resolveAccountHarness(providerAccountId, harnessId).pipe(
+  /** Resolves an account and a harness (`resolveProviderAccountHarness`) in this layer's context. */
+  const resolveHarnessChoice = (providerAccountId: string, harnessId: string | undefined) =>
+    resolveProviderAccountHarness(providerAccountId, harnessId).pipe(
       Effect.provideService(SqlClient.SqlClient, sql),
       Effect.provideService(PluginHost, host),
     );
@@ -435,7 +435,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const placeable = yield* runners.placeable();
       const found = snapshots.find(
-        (snapshot) => isLoggedIn(snapshot) && placeable.has(snapshot.runnerId),
+        (snapshot) => isSignedIn(snapshot) && placeable.has(snapshot.runnerId),
       );
       if (found === undefined) return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       return found;
@@ -469,7 +469,7 @@ const make = Effect.gen(function* () {
           createInvalidStateError(runner.lifecycle === "retired" ? RETIRED : DRAINING),
         );
       }
-      const snapshot = snapshots.find((one) => one.runnerId === runnerId && isLoggedIn(one));
+      const snapshot = snapshots.find((one) => one.runnerId === runnerId && isSignedIn(one));
       if (snapshot === undefined) return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       return snapshot;
     });
@@ -513,7 +513,7 @@ const make = Effect.gen(function* () {
     InvalidState | Validation | SqlError | Schema.SchemaError
   > =>
     Effect.gen(function* () {
-      const { harnessId, definition, snapshots } = yield* resolveAccountHarnessHere(
+      const { harnessId, definition, snapshots } = yield* resolveHarnessChoice(
         request.providerAccountId,
         request.harnessId,
       );
@@ -671,16 +671,26 @@ const make = Effect.gen(function* () {
    * leaves out: the user's `thread.*` settings and
    * `github.defaultConnectionId`. There is no setting for options or a
    * project, so those are undefined.
+   *
+   * A `thread.providerAccountId` that names no existing account is treated as
+   * unset, together with the harness and the model chosen for it, so the
+   * Thread falls through to the next rule instead of failing. The setting can
+   * dangle because it is a plain string, and a model and a harness mean
+   * nothing without their account.
    */
   const readUserThreadDefaults = (
     userId: string,
   ): Effect.Effect<ThreadDefaults, SettingError | SqlError> =>
     Effect.gen(function* () {
       const values = yield* settings.allForUser(userId);
+      const savedProviderAccountId = values["thread.providerAccountId"];
+      const providerAccountExists =
+        savedProviderAccountId !== undefined &&
+        Option.isSome(yield* providerAccounts.one(savedProviderAccountId));
       return {
-        providerAccountId: values["thread.providerAccountId"],
-        harnessId: values["thread.harnessId"] ?? undefined,
-        model: values["thread.model"],
+        providerAccountId: providerAccountExists ? savedProviderAccountId : undefined,
+        harnessId: providerAccountExists ? (values["thread.harnessId"] ?? undefined) : undefined,
+        model: providerAccountExists ? values["thread.model"] : undefined,
         options: undefined,
         accessMode: values["thread.accessMode"],
         permissionProfileId: values["thread.profileId"],
@@ -736,24 +746,44 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Checks whether two requested harnesses are the same harness on one
+   * account. `undefined` means the account's default harness, so it equals a
+   * harness id that names that default. Returns `false` when the account does
+   * not exist, because nothing then runs on it.
+   */
+  const isSameHarnessOnProviderAccount = (
+    providerAccountId: string,
+    first: string | undefined,
+    second: string | undefined,
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      if (first !== undefined && second !== undefined) return first === second;
+      const account = yield* providerAccounts.one(providerAccountId);
+      return (
+        Option.isSome(account) &&
+        (first ?? account.value.defaultHarnessId) === (second ?? account.value.defaultHarnessId)
+      );
+    });
+
+  /**
    * Returns the id of the oldest Provider Account that is signed in on some
    * runner, in its default harness. A Thread uses it when the user has not
    * set `thread.providerAccountId`. Fails with an invalid state error when no
    * account is signed in anywhere.
    */
-  const pickSignedInAccount = (): Effect.Effect<
+  const pickSignedInProviderAccount = (): Effect.Effect<
     string,
     InvalidState | SqlError | Schema.SchemaError
   > =>
     Effect.gen(function* () {
-      const snapshots = yield* providerAccounts.snapshots();
+      const snapshots = yield* providerAccounts.listAllSnapshots();
       for (const account of yield* providerAccounts.list()) {
         if (
           snapshots.some(
             (snapshot) =>
               snapshot.providerAccountId === account.id &&
               snapshot.harnessId === account.defaultHarnessId &&
-              isLoggedIn(snapshot),
+              isSignedIn(snapshot),
           )
         ) {
           return account.id;
@@ -1323,7 +1353,7 @@ const make = Effect.gen(function* () {
             decoded.providerAccountId ??
             agent?.providerAccountId ??
             threadDefaults?.providerAccountId ??
-            (yield* pickSignedInAccount());
+            (yield* pickSignedInProviderAccount());
           // A harness default belongs to its account, so it applies only when
           // the session runs on that account. `undefined` means the account's
           // default harness.
@@ -1338,6 +1368,20 @@ const make = Effect.gen(function* () {
             agent?.accessMode ??
             threadDefaults?.accessMode ??
             DEFAULT_ACCESS_MODE;
+          // The Thread default's model and options were chosen for one account
+          // and harness. On any other pair they mean nothing: the model may not
+          // exist there. So they apply only when the session runs on that same
+          // account and harness. Otherwise the model is the runner's default
+          // for the chosen account and harness, as for an Agent with no model.
+          const threadDefaultsFit =
+            threadDefaults !== undefined &&
+            providerAccountId === threadDefaults.providerAccountId &&
+            (yield* isSameHarnessOnProviderAccount(
+              providerAccountId,
+              requestedHarnessId,
+              threadDefaults.harnessId,
+            ));
+          const defaultModel = threadDefaultsFit ? threadDefaults?.model : undefined;
           // A model and its options are one selection: options belong to the
           // model that offers them. So the Agent's or the Thread default's
           // options apply only when the call names no model of its own. A call
@@ -1345,14 +1389,14 @@ const make = Effect.gen(function* () {
           // or none at all.
           const defaultOptions =
             decoded.model === undefined
-              ? (agent?.model?.options ?? threadDefaults?.options)
+              ? (agent?.model?.options ?? (threadDefaultsFit ? threadDefaults?.options : undefined))
               : undefined;
           const { harnessId, runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
             providerAccountId,
             harnessId: requestedHarnessId,
             runnerId: pinnedTo ?? decoded.runnerId ?? caller?.runnerId,
             requestedAccessMode,
-            model: decoded.model ?? agent?.model?.model ?? threadDefaults?.model,
+            model: decoded.model ?? agent?.model?.model ?? defaultModel,
             options: decoded.options ?? defaultOptions ?? {},
           }).pipe(
             Effect.mapError((error) =>
@@ -1477,7 +1521,7 @@ const make = Effect.gen(function* () {
           // longer run in the harness, or this build no longer carries it. It
           // comes after the resume check, which refuses a deleted account
           // with its own message.
-          yield* resolveAccountHarnessHere(parent.providerAccountId, parent.harnessId);
+          yield* resolveHarnessChoice(parent.providerAccountId, parent.harnessId);
 
           return {
             permissionProfileId: parent.permissionProfileId,

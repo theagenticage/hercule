@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { isLoggedIn, resolveAccountHarness } from "./account-harness";
+import { isSignedIn, resolveProviderAccountHarness } from "./harness-choice";
 import type { StoredSnapshot } from "./repository";
 import {
   addAccount,
@@ -16,7 +16,7 @@ import {
 
 const MISSING = "0199e0e7-9999-7000-8000-000000000000";
 
-describe("resolveAccountHarness", () => {
+describe("resolveProviderAccountHarness", () => {
   it("returns the account, the default harness and only the snapshots of that harness", async () => {
     const resolved = await runWithAccounts(
       Effect.gen(function* () {
@@ -25,7 +25,7 @@ describe("resolveAccountHarness", () => {
         yield* addSnapshot(account.id, ALPHA_HARNESS_ID, laptop);
         // A snapshot in another harness is not this pair's.
         yield* addSnapshot(account.id, BETA_HARNESS_ID, laptop);
-        return { account, laptop, resolved: yield* resolveAccountHarness(account.id) };
+        return { account, laptop, resolved: yield* resolveProviderAccountHarness(account.id) };
       }),
     );
 
@@ -44,7 +44,7 @@ describe("resolveAccountHarness", () => {
     const resolved = await runWithAccounts(
       Effect.gen(function* () {
         const account = yield* addAccount({ kind: KEY_KIND });
-        return yield* resolveAccountHarness(account.id, null);
+        return yield* resolveProviderAccountHarness(account.id, null);
       }),
     );
 
@@ -52,7 +52,7 @@ describe("resolveAccountHarness", () => {
   });
 
   it("fails Validation on providerAccountId for an account that does not exist", async () => {
-    const failure = await runWithAccounts(Effect.flip(resolveAccountHarness(MISSING)));
+    const failure = await runWithAccounts(Effect.flip(resolveProviderAccountHarness(MISSING)));
 
     expect(failure).toMatchObject({
       error: { code: "validation", details: { issues: [{ path: ["providerAccountId"] }] } },
@@ -63,7 +63,7 @@ describe("resolveAccountHarness", () => {
     const failure = await runWithAccounts(
       Effect.gen(function* () {
         const account = yield* addAccount({ kind: KEY_KIND });
-        return yield* Effect.flip(resolveAccountHarness(account.id, "gamma/gamma"));
+        return yield* Effect.flip(resolveProviderAccountHarness(account.id, "gamma/gamma"));
       }),
     );
 
@@ -76,7 +76,7 @@ describe("resolveAccountHarness", () => {
     const failure = await runWithAccounts(
       Effect.gen(function* () {
         const account = yield* addAccount({ defaultHarnessId: "gamma/gamma" });
-        return yield* Effect.flip(resolveAccountHarness(account.id));
+        return yield* Effect.flip(resolveProviderAccountHarness(account.id));
       }),
     );
 
@@ -89,7 +89,7 @@ describe("resolveAccountHarness", () => {
     const failure = await runWithAccounts(
       Effect.gen(function* () {
         const account = yield* addAccount({ kind: MACHINE_KIND });
-        return yield* Effect.flip(resolveAccountHarness(account.id, BETA_HARNESS_ID));
+        return yield* Effect.flip(resolveProviderAccountHarness(account.id, BETA_HARNESS_ID));
       }),
     );
 
@@ -100,7 +100,7 @@ describe("resolveAccountHarness", () => {
   });
 });
 
-describe("isLoggedIn", () => {
+describe("isSignedIn", () => {
   const snapshot = (status: "ok" | "unauthenticated" | "error"): StoredSnapshot => ({
     providerAccountId: "a",
     harnessId: ALPHA_HARNESS_ID,
@@ -112,8 +112,8 @@ describe("isLoggedIn", () => {
   });
 
   it("is true only for a snapshot whose auth is ok", () => {
-    expect(isLoggedIn(snapshot("ok"))).toBe(true);
-    expect(isLoggedIn(snapshot("unauthenticated"))).toBe(false);
-    expect(isLoggedIn(snapshot("error"))).toBe(false);
+    expect(isSignedIn(snapshot("ok"))).toBe(true);
+    expect(isSignedIn(snapshot("unauthenticated"))).toBe(false);
+    expect(isSignedIn(snapshot("error"))).toBe(false);
   });
 });

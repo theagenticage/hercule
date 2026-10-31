@@ -518,3 +518,37 @@ describe("providerAccount.signIn", () => {
     expect(failure).toMatchObject({ error: { code: "not_found" } });
   });
 });
+
+describe("providerAccount.submitSignInCode", () => {
+  it("is refused with InvalidState for a key account, before the runner is asked", async () => {
+    const failure = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addAccount({ kind: KEY_KIND });
+        const runner = yield* addRunner("laptop");
+        return yield* withService((service) =>
+          Effect.flip(service.submitSignInCode({ id: added.id, runnerId: runner, code: "abc" })),
+        );
+      }),
+    );
+
+    expect(failure).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: expect.stringContaining("no sign-in step") as unknown,
+      },
+    });
+  });
+
+  it("fails NotFound for an account that does not exist", async () => {
+    const failure = await runWithAccounts(
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        return yield* withService((service) =>
+          Effect.flip(service.submitSignInCode({ id: MISSING, runnerId: runner, code: "abc" })),
+        );
+      }),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "not_found" } });
+  });
+});

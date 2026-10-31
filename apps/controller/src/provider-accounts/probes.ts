@@ -22,17 +22,17 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   createNotFoundError,
+  NotFound,
   type CapabilitySnapshot,
   type InvalidState,
-  type NotFound,
 } from "@hercule/contract";
+import type { RunnerFacts } from "@hercule/protocol";
 import { afterCommit, announce, nowIso, withTransaction } from "../db";
 import { computeVersionVerdict, findVersionFloor } from "../harnesses";
-import { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
 import { RunnerConnections, runnerRepository } from "../runners";
-import { Secrets } from "../secrets";
-import { prepareHarnessAccount } from "./harness-account";
+import { PluginHost, type RegisteredHarness } from "../plugins";
+import { HarnessAccounts } from "./harness-account";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 
 /**
@@ -60,6 +60,38 @@ export const ProviderAccountProbeInterval = Context.Reference<Duration.Duration>
 
 type StoreError = SqlError | Schema.SchemaError | InvalidState;
 
+const NO_SUCH_PROVIDER_ACCOUNT = "no such provider account";
+
+/**
+ * Checks from a runner's facts that it could run the harness: its build has
+ * an adapter for it and its binary is on the machine. A probe on a runner
+ * without either could only report that the harness is missing, and would
+ * send the account's key there for nothing.
+ */
+const canRunHarness = (facts: RunnerFacts | null, harness: RegisteredHarness): boolean =>
+  facts !== null &&
+  facts.adapters.includes(harness.id) &&
+  facts.harnesses.some((binary) => binary.name === harness.binaryName && binary.present);
+
+/**
+ * Logs a probe that failed because its account was deleted meanwhile at info,
+ * since that is a race with the user and nothing is wrong, and any other
+ * failure at error. Nothing is waiting on the probe, so the log is the only
+ * place the failure can go.
+ */
+const logProbeFailure = (
+  probed: Effect.Effect<unknown, StoreError | NotFound>,
+  message: string,
+): Effect.Effect<void> =>
+  probed.pipe(
+    Effect.asVoid,
+    Effect.catchIf(
+      (error): error is NotFound => error instanceof NotFound,
+      () => Effect.logInfo(`${message}, because the provider account was deleted meanwhile`),
+    ),
+    Effect.catchCause((cause) => Effect.logError(message, cause)),
+  );
+
 /** A login whose end the controller waits for the runner to report. */
 interface AwaitedLogin {
   readonly runnerId: string;
@@ -76,11 +108,8 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
   const promotion = yield* PromotionState;
-  // What `prepareHarnessAccount` reads, captured here so the probes this
-  // service offers need nothing from their caller.
-  const frameServices = yield* Effect.context<SqlClient.SqlClient | PluginHost | Secrets>();
-  const prepareFrameAccount = (providerAccountId: string, harnessId: string) =>
-    Effect.provideContext(prepareHarnessAccount(providerAccountId, harnessId), frameServices);
+  const harnessAccounts = yield* HarnessAccounts;
+  const host = yield* PluginHost;
   // A wake needs no payload, and one unread change already says that a
   // snapshot was stored, so the PubSub keeps only the latest.
   const snapshotWrites = yield* PubSub.sliding<void>(1);
@@ -115,7 +144,7 @@ const make = Effect.gen(function* () {
           harnessId,
           // Decrypted here, at send time: the probe runs the harness's own auth
           // check, which is only meaningful with the credential.
-          harnessAccount: yield* prepareFrameAccount(providerAccountId, harnessId),
+          harnessAccount: yield* harnessAccounts.prepare(providerAccountId, harnessId),
         },
         yield* ProviderAccountProbeDeadline,
       );
@@ -125,6 +154,11 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
+          // The account may have been deleted while the runner was answering,
+          // and a snapshot cannot be stored for an account that is gone.
+          if (Option.isNone(yield* accounts.one(providerAccountId))) {
+            return yield* Effect.fail(createNotFoundError(NO_SUCH_PROVIDER_ACCOUNT));
+          }
           yield* accounts.recordSnapshot(providerAccountId, harnessId, runnerId, result, at);
           yield* afterCommit(() => {
             PubSub.publishUnsafe(snapshotWrites, undefined);
@@ -155,23 +189,43 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Probes every account, in its default harness, on every given runner,
-   * concurrently. Each probe logs its own failure, so one account deleted
-   * mid-sweep, or one that cannot run in its default harness, does not discard
-   * the rest of the fleet's snapshots.
+   * Probes every account, in its default harness, on every given runner that
+   * could run that harness (`canRunHarness`), concurrently. Each probe logs
+   * its own failure, so one account deleted mid-sweep, or one that cannot run
+   * in its default harness, does not discard the rest of the fleet's
+   * snapshots. Fails only when the runners cannot be read.
    */
   const sweep = (
     runnerIds: ReadonlyArray<string>,
     over: ReadonlyArray<StoredProviderAccount>,
-  ): Effect.Effect<void> =>
-    Effect.forEach(
-      runnerIds.flatMap((runnerId) => over.map((account) => ({ runnerId, account }))),
-      ({ runnerId, account }) =>
-        Effect.catchCause(probeOne(runnerId, account.id, account.defaultHarnessId), (cause) =>
-          Effect.logError("A provider account probe could not be recorded", cause),
-        ),
-      { concurrency: "unbounded", discard: true },
-    );
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const harnesses = yield* host.harnesses();
+      const factsByRunner = new Map(
+        (yield* runners.listFacts()).map((runner) => [runner.id, runner.facts]),
+      );
+      const probes = runnerIds.flatMap((runnerId) =>
+        over
+          .filter((account) => {
+            const harness = harnesses.find((one) => one.id === account.defaultHarnessId);
+            // A harness this build does not carry is probed anyway, so the
+            // probe fails with a message that says so.
+            return (
+              harness === undefined || canRunHarness(factsByRunner.get(runnerId) ?? null, harness)
+            );
+          })
+          .map((account) => ({ runnerId, account })),
+      );
+      yield* Effect.forEach(
+        probes,
+        ({ runnerId, account }) =>
+          logProbeFailure(
+            probeOne(runnerId, account.id, account.defaultHarnessId),
+            "A provider account probe could not be recorded",
+          ),
+        { concurrency: "unbounded", discard: true },
+      );
+    });
 
   /**
    * Logs the error of a sweep that fails to start, for example because the
@@ -190,7 +244,7 @@ const make = Effect.gen(function* () {
    * Probes the account in the harness on the runner, stores the snapshot, and
    * returns it. Fails with `NotFound` if no such account exists.
    */
-  const probeAccount = (
+  const probeProviderAccount = (
     runnerId: string,
     providerAccountId: string,
     harnessId: string,
@@ -199,7 +253,7 @@ const make = Effect.gen(function* () {
       accounts.one(providerAccountId),
       (found): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
         Option.isNone(found)
-          ? Effect.fail(createNotFoundError("no such provider account"))
+          ? Effect.fail(createNotFoundError(NO_SUCH_PROVIDER_ACCOUNT))
           : probeOne(runnerId, providerAccountId, harnessId),
     );
 
@@ -225,7 +279,7 @@ const make = Effect.gen(function* () {
   // so at most one runs per account in a harness on a runner.
   const probingAfterLoginEnd = new Set<string>();
   const probeAgainAfterLoginEnd = new Set<string>();
-  const buildAccountKey = (
+  const buildProviderAccountKey = (
     runnerId: string,
     providerAccountId: string,
     harnessId: string,
@@ -245,7 +299,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       do {
         probeAgainAfterLoginEnd.delete(key);
-        yield* probeAccount(runnerId, providerAccountId, harnessId);
+        yield* probeProviderAccount(runnerId, providerAccountId, harnessId);
       } while (probeAgainAfterLoginEnd.has(key));
     }).pipe(
       Effect.ensuring(
@@ -257,7 +311,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    probe: probeAccount,
+    probe: probeProviderAccount,
 
     /**
      * Emits once each time a stored snapshot commits, so a run whose
@@ -353,10 +407,7 @@ const make = Effect.gen(function* () {
      * ended while that probe runs causes exactly one more probe after it,
      * because the running probe may have read the state from before the login.
      */
-    probeAfterLoginEnd: (
-      runnerId: string,
-      requestId: string,
-    ): Effect.Effect<void, StoreError | NotFound> =>
+    probeAfterLoginEnd: (runnerId: string, requestId: string): Effect.Effect<void, StoreError> =>
       Effect.suspend(() => {
         const loginKey = buildLoginKey(runnerId, requestId);
         const login = awaitedLoginEnds.get(loginKey);
@@ -367,13 +418,23 @@ const make = Effect.gen(function* () {
         }
         awaitedLoginEnds.delete(loginKey);
         const { providerAccountId, harnessId } = login;
-        const key = buildAccountKey(runnerId, providerAccountId, harnessId);
+        const key = buildProviderAccountKey(runnerId, providerAccountId, harnessId);
         if (probingAfterLoginEnd.has(key)) {
           probeAgainAfterLoginEnd.add(key);
           return Effect.void;
         }
         probingAfterLoginEnd.add(key);
-        return probeUntilSettled(runnerId, providerAccountId, harnessId, key);
+        return probeUntilSettled(runnerId, providerAccountId, harnessId, key).pipe(
+          // The user may have deleted the account while the login ran. That is
+          // a race, not a failure of the controller.
+          Effect.catchIf(
+            (error): error is NotFound => error instanceof NotFound,
+            () =>
+              Effect.logInfo(
+                "Did not probe after a login ended, because the provider account was deleted meanwhile",
+              ).pipe(Effect.annotateLogs({ runnerId, requestId })),
+          ),
+        );
       }),
 
     sweepRunner,
@@ -383,7 +444,7 @@ const make = Effect.gen(function* () {
      * A probe runs with the account's credential, so a new credential makes
      * every runner's snapshot stale at once.
      */
-    sweepAccount: (providerAccountId: string): Effect.Effect<void> =>
+    sweepProviderAccount: (providerAccountId: string): Effect.Effect<void> =>
       logSweepFailure(
         Effect.gen(function* () {
           const found = yield* accounts.one(providerAccountId);
@@ -427,5 +488,5 @@ export class ProviderAccountProbes extends Context.Service<
 export const ProviderAccountProbesLayer: Layer.Layer<
   ProviderAccountProbes,
   never,
-  SqlClient.SqlClient | RunnerConnections | Secrets | PluginHost | PromotionState
+  SqlClient.SqlClient | RunnerConnections | HarnessAccounts | PluginHost | PromotionState
 > = Layer.effect(ProviderAccountProbes)(make);

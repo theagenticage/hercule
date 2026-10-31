@@ -23,6 +23,8 @@ import {
   createPluginFixture,
 } from "../plugins/testing";
 import { RunnerConnections, RunnerConnectionsLayer, runnerRepository } from "../runners";
+import { SettingsLayer } from "../settings";
+import { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
 import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 import { ProviderAccountService, ProviderAccountServiceLayer } from "./service";
@@ -85,6 +87,8 @@ export const buildAccountPlugins = (): ReadonlyArray<Plugin> => [
 const buildStack = () =>
   ProviderAccountServiceLayer.pipe(
     Layer.provideMerge(ProviderAccountProbesLayer),
+    Layer.provideMerge(HarnessAccountsLayer),
+    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(RunnerConnectionsLayer),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(buildPluginStack()),
@@ -93,6 +97,7 @@ const buildStack = () =>
 export type AccountServices =
   | ProviderAccountService
   | ProviderAccountProbes
+  | HarnessAccounts
   | RunnerConnections
   | PluginHost
   | SqlClient.SqlClient
@@ -151,24 +156,61 @@ export const giveLegacyHome = (
     ),
   );
 
-/** Inserts a runner and returns its id. */
-export const addRunner = (name: string): Effect.Effect<string, unknown, SqlClient.SqlClient> =>
+/** The binary name every fixture harness declares (`buildHarnessDefinition`). */
+const FIXTURE_BINARY_NAME = "harness";
+
+/**
+ * Inserts an online runner with facts and returns its id. By default the
+ * facts show an adapter for both fixture harnesses and their binary on the
+ * machine; `adapters`, `binaryPresent` and `saidHello` change that.
+ */
+export const addRunner = (
+  name: string,
+  {
+    adapters = [ALPHA_HARNESS_ID, BETA_HARNESS_ID],
+    binaryPresent = true,
+    saidHello = true,
+  }: {
+    readonly adapters?: ReadonlyArray<string>;
+    readonly binaryPresent?: boolean;
+    /** False leaves the runner without facts, like one that has not said hello yet. */
+    readonly saidHello?: boolean;
+  } = {},
+): Effect.Effect<string, unknown, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const runners = yield* runnerRepository;
-    const runner = yield* withTransaction(
+    const at = yield* nowIso;
+    return yield* withTransaction(
       sql,
-      runners.insert({
-        name,
-        connectivity: "online",
-        lifecycle: "active",
-        reserved: false,
-        labels: [],
-        credentialHash: `hash-${name}`,
-        at: yield* nowIso,
+      Effect.gen(function* () {
+        const runner = yield* runners.insert({
+          name,
+          connectivity: "online",
+          lifecycle: "active",
+          reserved: false,
+          labels: [],
+          credentialHash: `hash-${name}`,
+          at,
+        });
+        if (!saidHello) return runner.id;
+        yield* runners.recordFacts(
+          runner.id,
+          {
+            os: "linux",
+            arch: "x64",
+            totalMemoryBytes: 8 * 1024 ** 3,
+            docker: false,
+            toolchains: [],
+            harnesses: [{ name: FIXTURE_BINARY_NAME, present: binaryPresent }],
+            adapters,
+            identityPort: 4937,
+          },
+          at,
+        );
+        return runner.id;
       }),
     );
-    return runner.id;
   });
 
 /** A probe result that shows a runner signed in, with one model. */

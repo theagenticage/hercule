@@ -109,6 +109,7 @@ export function ProviderLogin({
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.runners() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.harnesses() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() }),
       ]),
   });
@@ -335,7 +336,7 @@ function SignInPageButton({
  * the code has left, or, once the code has expired, that line and Start
  * again. Calls `onDone` once when a fresh snapshot shows the account
  * signed in, which never happens for an account that was signed in when the
- * sign-in started (`DeviceLogin.loggedInAtStart`); the user presses Cancel.
+ * sign-in started (`DeviceLogin.signedInAtStart`); the user presses Cancel.
  *
  * It reads the accounts from the cache, which the `provider` live topic
  * keeps current. The minutes move on with the age clock.

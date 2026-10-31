@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { AccountIdentityLine } from "@hercule/client-core";
+import type { ProviderAccountIdentityLine } from "@hercule/client-core";
 import "./providers.css";
 
 /**
@@ -12,7 +12,7 @@ export function IdentityLine({
   line,
   className,
 }: {
-  readonly line: AccountIdentityLine;
+  readonly line: ProviderAccountIdentityLine;
   readonly className: string;
 }): JSX.Element {
   const { text, plan } = line;

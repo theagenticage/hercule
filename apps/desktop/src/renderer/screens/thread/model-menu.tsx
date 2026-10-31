@@ -1,7 +1,7 @@
 import { Fragment, useState, type JSX } from "react";
 import {
   buildModelMenu,
-  describeAccountRow,
+  describeProviderAccountRow,
   describeModelRow,
   type ModelMenu as ModelMenuModel,
   type RecentModel,
@@ -148,7 +148,7 @@ export function ModelMenu({
                 key={account.providerAccountId}
                 glyph={<HarnessLogo harnessId={account.harnessId} size={13} />}
                 name={account.name}
-                detail={describeAccountRow(account)}
+                detail={describeProviderAccountRow(account)}
                 note={account.dimmed ?? account.models}
                 current={false}
                 chevron={account.dimmed === null}

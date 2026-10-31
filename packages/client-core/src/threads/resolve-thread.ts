@@ -16,6 +16,7 @@ import type {
   Runner,
   Workspace,
 } from "@hercule/contract";
+import { resolveThreadHarnessId } from "../provider-accounts";
 import { findSnapshotOn } from "./catalog";
 import {
   readThreadConfig,
@@ -137,7 +138,7 @@ const resolveDraft = (
   // The harness named for the draft's own account stays. Another account runs
   // in its default harness, because the named one belonged to the first.
   const namedHarnessId = account?.id === base.providerAccountId ? base.harnessId : null;
-  const harnessId = account === undefined ? null : (namedHarnessId ?? account.defaultHarnessId);
+  const harnessId = account === undefined ? null : resolveThreadHarnessId(account, namedHarnessId);
   const workspace =
     picks.workspace ??
     base.workspace ??

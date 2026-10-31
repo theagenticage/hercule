@@ -25,7 +25,7 @@ const NOW = new Date("2026-09-08T12:00:00.000Z");
 
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
-const buildClaudeCodeAccount = () => ({
+const buildClaudeCodeProviderAccount = () => ({
   id: CLAUDE_ID,
   providerId: "anthropic/anthropic",
   kind: "subscription-per-machine",
@@ -228,7 +228,7 @@ const buildController = (
     },
   },
   "GET /api/v1/sessions": { body: { items: sessions } },
-  "GET /api/v1/provider-accounts": { body: [buildClaudeCodeAccount()] },
+  "GET /api/v1/provider-accounts": { body: [buildClaudeCodeProviderAccount()] },
   "GET /api/v1/runners": { body: { items: [MOSS] } },
   // The sidebar's Assistants group reads this; no test here has an assistant.
   "GET /api/v1/assistants": { body: { items: [] } },

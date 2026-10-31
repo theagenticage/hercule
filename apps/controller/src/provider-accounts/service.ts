@@ -6,6 +6,11 @@
  * is built from the row's public fields one by one, never by spreading the
  * row, so a field that is stored but not public cannot leak into a response.
  *
+ * This domain sends the sign-in, probe and harness-install frames to runners
+ * itself, which no other domain does: they belong in the controller daemon
+ * (ADR 0033). It is kept here as an exception, because it creates no
+ * dependency cycle. Issue #209 moves it, and ticket #934 absorbs #209.
+ *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
  * the controller passes an id it read from a stored row.
@@ -56,7 +61,8 @@ import {
   type Answer,
 } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
-import { prepareHarnessAccount } from "./harness-account";
+import type { Settings } from "../settings";
+import { HarnessAccounts } from "./harness-account";
 import { ProviderAccountProbeDeadline, ProviderAccountProbes } from "./probes";
 import {
   providerAccountRepository,
@@ -95,15 +101,15 @@ const HARNESS_INSTALL_DEADLINE: Duration.Duration = Duration.minutes(6);
 /** The account and the runner a sign-in runs on. The credential is stored on that runner only. */
 const SignInInput = Schema.Struct({ id: Id, ...ProviderAccountSignInInput.fields });
 
-export type SignInInput = Schema.Schema.Type<typeof SignInInput>;
+type SignInInput = Schema.Schema.Type<typeof SignInInput>;
 
 const SignInCodeInput = Schema.Struct({ id: Id, ...ProviderAccountSignInCodeInput.fields });
 
-export type SignInCodeInput = Schema.Schema.Type<typeof SignInCodeInput>;
+type SignInCodeInput = Schema.Schema.Type<typeof SignInCodeInput>;
 
 const UpdateInput = Schema.Struct({ id: Id, ...ProviderAccountUpdateInput.fields });
 
-export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
+type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
 const ProbeInput = Schema.Struct({
   runnerId: Id,
@@ -111,11 +117,11 @@ const ProbeInput = Schema.Struct({
   harnessId: Schema.optionalKey(Schema.String),
 });
 
-export type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
+type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
 
 const InstallInput = Schema.Struct({ runnerId: Id, harnessId: Schema.String });
 
-export type InstallInput = Schema.Schema.Type<typeof InstallInput>;
+type InstallInput = Schema.Schema.Type<typeof InstallInput>;
 
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeSignIn = Schema.decodeUnknownEffect(SignInInput);
@@ -141,7 +147,7 @@ const describeSignInFailure = (answer: LoginAnswer): string =>
  * Names an account the way a user reads it: its provider, then its label if it
  * has one ("Anthropic · work").
  */
-export const describeAccount = (
+export const describeProviderAccount = (
   account: StoredProviderAccount,
   providers: ReadonlyArray<RegisteredProvider>,
 ): string => {
@@ -195,11 +201,7 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const runners = yield* runnerRepository;
   const secrets = yield* Secrets;
-  // What `prepareHarnessAccount` reads, captured here so the methods below
-  // need nothing from their caller.
-  const frameServices = yield* Effect.context<SqlClient.SqlClient | PluginHost | Secrets>();
-  const prepareFrameAccount = (providerAccountId: string, harnessId: string) =>
-    Effect.provideContext(prepareHarnessAccount(providerAccountId, harnessId), frameServices);
+  const harnessAccounts = yield* HarnessAccounts;
 
   const buildProviderAccount = (
     stored: StoredProviderAccount,
@@ -242,7 +244,7 @@ const make = Effect.gen(function* () {
     );
 
   /** Reads one account with its snapshots, or fails with `NotFound`. Checks no grant. */
-  const readAccountOrFail = (
+  const readProviderAccountOrFail = (
     id: string,
   ): Effect.Effect<ProviderAccount, NotFound | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
@@ -402,14 +404,14 @@ const make = Effect.gen(function* () {
         yield* requireGrant("providerAccount.query");
         const stored = yield* accounts.list();
         // One query for the whole list rather than one per account.
-        const snapshots = yield* accounts.snapshots();
+        const snapshots = yield* accounts.listAllSnapshots();
         return stored.map((account) => buildProviderAccount(account, snapshots));
       }),
 
     read: (id: Id): Effect.Effect<ProviderAccount, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("providerAccount.read");
-        return yield* readAccountOrFail(id);
+        return yield* readProviderAccountOrFail(id);
       }),
 
     /**
@@ -484,13 +486,14 @@ const make = Effect.gen(function* () {
             });
             // Read back rather than merged in memory, so the caller gets the
             // row as it was written, whatever the update changed.
-            return yield* readAccountOrFail(id);
+            return yield* readProviderAccountOrFail(id);
           }),
           // Field names come from the kind's declaration, which the plugin host
           // rejects at registration if one contains `|`, so this cannot fail.
         ).pipe(Effect.catchTag("SecretNameError", Effect.die));
         // After the commit, without waiting: the response only needs the update.
-        if (patch.credentials !== undefined) yield* Effect.forkDetach(probes.sweepAccount(id));
+        if (patch.credentials !== undefined)
+          yield* Effect.forkDetach(probes.sweepProviderAccount(id));
         return updated;
       }),
 
@@ -518,7 +521,7 @@ const make = Effect.gen(function* () {
             if (blockers.length > 0) {
               return yield* Effect.fail(
                 createInvalidStateError(
-                  `${describeAccount(stored, providers)} is still in use, so it was not deleted. Change these first: ${blockers.join("; ")}.`,
+                  `${describeProviderAccount(stored, providers)} is still in use, so it was not deleted. Change these first: ${blockers.join("; ")}.`,
                 ),
               );
             }
@@ -573,7 +576,7 @@ const make = Effect.gen(function* () {
         yield* requireSignInStep(account);
         const harnessId = account.defaultHarnessId;
         yield* validateRunnerCanDrive(runnerId, harnessId, "runnerId");
-        const harnessAccount = yield* prepareFrameAccount(id, harnessId);
+        const harnessAccount = yield* harnessAccounts.prepare(id, harnessId);
         const requestId = crypto.randomUUID();
         // Expected before the runner is asked, because a device login that
         // fails at once can report its end before this fiber reads the answer.
@@ -618,9 +621,7 @@ const make = Effect.gen(function* () {
      * with a fresh snapshot from a new probe, because the harness has not yet
      * been asked whose credential it holds.
      */
-    submitSignInCode: (
-      input: SignInCodeInput,
-    ): Effect.Effect<ProviderAccount, AskError | Conflict> =>
+    submitSignInCode: (input: SignInCodeInput): Effect.Effect<ProviderAccount, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("providerAccount.submitSignInCode");
         const { id, runnerId, code } = yield* Effect.mapError(
@@ -628,6 +629,7 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const account = yield* readStoredOrFail(id);
+        yield* requireSignInStep(account);
         const harnessId = account.defaultHarnessId;
         yield* validateRunnerCanDrive(runnerId, harnessId, "runnerId");
         const answer = yield* askRunner(
@@ -668,7 +670,7 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        return yield* readAccountOrFail(id);
+        return yield* readProviderAccountOrFail(id);
       }),
 
     /**
@@ -709,6 +711,9 @@ const make = Effect.gen(function* () {
      * reports its facts before it reports that the install finished, so the
      * returned runner is up to date. Every account is then probed on that
      * runner, because a newly installed harness has never been probed.
+     *
+     * It sends the install frame from this domain, which is the exception
+     * named at the top of this file (issue #209, absorbed by ticket #934).
      */
     installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, AskError> =>
       Effect.gen(function* () {
@@ -751,5 +756,12 @@ export class ProviderAccountService extends Context.Service<
 export const ProviderAccountServiceLayer: Layer.Layer<
   ProviderAccountService,
   never,
-  SqlClient.SqlClient | PluginHost | AuditLog | ProviderAccountProbes | RunnerConnections | Secrets
+  | SqlClient.SqlClient
+  | PluginHost
+  | AuditLog
+  | ProviderAccountProbes
+  | RunnerConnections
+  | Secrets
+  | Settings
+  | HarnessAccounts
 > = Layer.effect(ProviderAccountService)(make);

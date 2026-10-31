@@ -1,5 +1,5 @@
 import type { JSX, ReactNode, RefObject } from "react";
-import type { AccountIdentityLine } from "@hercule/client-core";
+import type { ProviderAccountIdentityLine } from "@hercule/client-core";
 import { CloseIcon } from "../../../icons/close";
 import { GlassDialog } from "../../glass-dialog";
 import { IdentityLine } from "./identity-line";
@@ -9,11 +9,11 @@ import "./providers.css";
  * Renders the account sheet: a glass dialog over the Providers page,
  * titled with the account's `name`, with its provider's `mark` and the
  * `identity` line beside the title. `children` are the sheet's sections
- * (`AccountSheetSection`). The close button, Done, Esc and a click on the
+ * (`ProviderAccountSheetSection`). The close button, Done, Esc and a click on the
  * scrim close it; `onClose` is called whenever it closes, and the caller then
  * unmounts it.
  */
-export function AccountSheet({
+export function ProviderAccountSheet({
   dialogRef,
   mark,
   name,
@@ -24,7 +24,7 @@ export function AccountSheet({
   readonly dialogRef: RefObject<HTMLDialogElement | null>;
   readonly mark: ReactNode;
   readonly name: string;
-  readonly identity: AccountIdentityLine;
+  readonly identity: ProviderAccountIdentityLine;
   readonly onClose: () => void;
   readonly children: ReactNode;
 }): JSX.Element {
@@ -52,7 +52,7 @@ export function AccountSheet({
 }
 
 /** Renders one section of the account sheet: its heading, then `children`. */
-export function AccountSheetSection({
+export function ProviderAccountSheetSection({
   heading,
   children,
 }: {

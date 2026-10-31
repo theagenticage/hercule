@@ -128,7 +128,7 @@ describe("buildProviderRows", () => {
 describe("buildProviderRows for an account with a credentials step", () => {
   const FIELD = { name: "apiKey", title: "API key", description: "" };
 
-  const buildKeyedAccount = (signedIn: boolean): ProviderAccount =>
+  const buildKeyedProviderAccount = (signedIn: boolean): ProviderAccount =>
     buildProviderAccount(ZAI_IDENTITY, [
       buildSnapshot(signedIn ? {} : { auth: { status: "unauthenticated" } }),
     ]);
@@ -143,24 +143,24 @@ describe("buildProviderRows for an account with a credentials step", () => {
   };
 
   it("labels the key with the kind's field label, and offers to replace a key that works", () => {
-    expect(buildProviderRow(WITH_PI, buildKeyedAccount(false)).credentialFields).toEqual([
+    expect(buildProviderRow(WITH_PI, buildKeyedProviderAccount(false)).credentialFields).toEqual([
       { ...FIELD, set: false, label: "Enter API key" },
     ]);
-    expect(buildProviderRow(WITH_PI, buildKeyedAccount(true)).credentialFields).toEqual([
+    expect(buildProviderRow(WITH_PI, buildKeyedProviderAccount(true)).credentialFields).toEqual([
       { ...FIELD, set: true, label: "Replace API key" },
     ]);
   });
 
   it("offers the key instead of a sign-in, because there is no vendor sign-in page", () => {
-    expect(buildProviderRow(WITH_PI, buildKeyedAccount(false)).signIn).toBe(false);
+    expect(buildProviderRow(WITH_PI, buildKeyedProviderAccount(false)).signIn).toBe(false);
   });
 
   it("gives where the runner found the harness, and no path where it is not installed", () => {
-    expect(buildProviderRow(WITH_PI, buildKeyedAccount(false))).toMatchObject({
+    expect(buildProviderRow(WITH_PI, buildKeyedProviderAccount(false))).toMatchObject({
       path: "/usr/local/bin/pi",
       location: "/usr/local/bin/pi",
     });
-    expect(buildProviderRow(WITH_CLAUDE, buildKeyedAccount(false))).toMatchObject({
+    expect(buildProviderRow(WITH_CLAUDE, buildKeyedProviderAccount(false))).toMatchObject({
       path: null,
       location: "no adapter in this runner build",
     });
@@ -168,7 +168,7 @@ describe("buildProviderRows for an account with a credentials step", () => {
       ...WITH_CLAUDE,
       facts: { ...WITH_CLAUDE.facts!, adapters: ["claude-code/claude-code", "pi/pi"] },
     };
-    expect(buildProviderRow(withPiAdapter, buildKeyedAccount(false)).location).toBe(
+    expect(buildProviderRow(withPiAdapter, buildKeyedProviderAccount(false)).location).toBe(
       "not installed",
     );
   });
@@ -178,14 +178,14 @@ describe("buildProviderRows for an account with a credentials step", () => {
       ...WITH_PI,
       facts: { ...WITH_PI.facts!, harnesses: [{ name: "pi", present: true }] },
     };
-    expect(buildProviderRow(pathless, buildKeyedAccount(false))).toMatchObject({
+    expect(buildProviderRow(pathless, buildKeyedProviderAccount(false))).toMatchObject({
       path: null,
       location: "installed",
     });
   });
 
   it("offers neither on a runner where the harness is not installed", () => {
-    expect(buildProviderRow(WITH_CLAUDE, buildKeyedAccount(false))).toMatchObject({
+    expect(buildProviderRow(WITH_CLAUDE, buildKeyedProviderAccount(false))).toMatchObject({
       credentialFields: [],
       signIn: false,
     });

@@ -223,7 +223,7 @@ describe("the first run and everything after it", () => {
       textGeneration: {
         model: null,
         unavailableReason: expect.stringMatching(
-          /^no up-to-date runner has an account signed in that offers a suggested text generation model/,
+          /^no model is available for text generation; sign in to an account that offers OpenAI's, Z\.ai's or Anthropic's small model/,
         ) as string,
         lastFailure: null,
       },

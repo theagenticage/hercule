@@ -18,7 +18,7 @@ const LOGIN: DeviceLogin = {
   runnerId: BARE.id,
   userCode: "ABCD-1234",
   probedAtStart: STARTED_AT,
-  loggedInAtStart: false,
+  signedInAtStart: false,
   expiresAt: EXPIRES_AT,
 };
 
@@ -64,7 +64,7 @@ describe("startProviderLogin", () => {
       [QUERY_PATH]: { body: [buildCodex([buildSnapshot()])] },
     });
     const started = await startProviderLogin(client, ACCOUNT_ID, BARE.id);
-    expect(started.deviceLogin).toMatchObject({ probedAtStart: STARTED_AT, loggedInAtStart: true });
+    expect(started.deviceLogin).toMatchObject({ probedAtStart: STARTED_AT, signedInAtStart: true });
   });
 
   it("notes an account that was never probed on the runner", async () => {
@@ -75,7 +75,7 @@ describe("startProviderLogin", () => {
     const started = await startProviderLogin(client, ACCOUNT_ID, BARE.id);
     expect(started.deviceLogin).toMatchObject({
       probedAtStart: null,
-      loggedInAtStart: false,
+      signedInAtStart: false,
       expiresAt: undefined,
     });
   });
@@ -114,7 +114,7 @@ describe("decideDeviceLoginStep", () => {
     // credential still checks as signed in, so a fresh signed-in snapshot
     // does not prove that this login ended.
     const accounts = [buildProviderAccount(OPENAI_IDENTITY, [buildSnapshot({ probedAt: LATER })])];
-    const login = { ...LOGIN, loggedInAtStart: true };
+    const login = { ...LOGIN, signedInAtStart: true };
     expect(decideDeviceLoginStep(login, accounts, 5)).toEqual({
       kind: "waiting",
       minutesLeft: 5,

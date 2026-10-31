@@ -232,7 +232,7 @@ const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
  * whose one capability snapshot lists `models` in the account's default
  * harness `harnessId`.
  */
-export const buildSpecimenAccount = (
+export const buildSpecimenProviderAccount = (
   id: string,
   providerId: string,
   harnessId: string,
@@ -267,13 +267,13 @@ export const buildSpecimenAccount = (
 
 /** The two Provider Accounts, whose catalogs give the threads' models their names. */
 export const SPECIMEN_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
-  buildSpecimenAccount(
+  buildSpecimenProviderAccount(
     CLAUDE_SONNET.providerAccountId,
     "anthropic/anthropic",
     CLAUDE_SONNET.harnessId,
     [CLAUDE_SONNET, CLAUDE_OPUS],
   ),
-  buildSpecimenAccount(GPT.providerAccountId, "openai/openai", GPT.harnessId, [GPT]),
+  buildSpecimenProviderAccount(GPT.providerAccountId, "openai/openai", GPT.harnessId, [GPT]),
 ];
 
 /**

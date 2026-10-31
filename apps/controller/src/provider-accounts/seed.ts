@@ -38,62 +38,60 @@ const FRESH_INSTALL_ACCOUNTS = [
 
 /**
  * Creates the three default accounts when the controller has no Provider
- * Account at all and first-run setup is not complete. It does nothing
- * otherwise, so an account the user deleted after setup stays deleted, and an
- * install that was upgraded from the previous version keeps exactly the
- * accounts the upgrade made.
+ * Account at all and first-run setup is not complete (`setupComplete` is
+ * false; the boot reads it). It does nothing otherwise, so an account the user
+ * deleted after setup stays deleted, and an install that was upgraded from
+ * the previous version keeps exactly the accounts the upgrade made.
+ *
+ * Before setup completes there is no way to tell a fresh install from one
+ * whose user deleted every account, so a default the user deleted comes back
+ * on the next restart. Ticket #934 removes this seed together with that
+ * wrinkle.
  *
  * A default is skipped when this build does not register its provider and
  * account kind, since an account of a provider nobody can run is of no use.
  * Each account is audited as `providerAccount.created`, by the system.
  */
-export const seedProviderAccounts: Effect.Effect<
-  void,
-  SqlError,
-  SqlClient.SqlClient | PluginHost | AuditLog
-> = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const accounts = yield* providerAccountRepository;
-  const host = yield* PluginHost;
-  const audit = yield* AuditLog;
-  // Read from the setup table directly: the setup domain depends on this one
-  // (through the assistants it creates), so this one cannot import it. A
-  // fresh database has no row yet, which also means setup is not complete.
-  const setup = yield* sql<{ readonly completed_at: string | null }>`
-    SELECT completed_at FROM setup_state WHERE singleton = 1
-  `;
-  if (setup[0]?.completed_at != null) return;
-  if (yield* accounts.hasAny()) return;
-  const providers = yield* host.providers();
-  const registered = FRESH_INSTALL_ACCOUNTS.filter((account) =>
-    providers.some(
-      (provider) =>
-        provider.id === account.providerId &&
-        provider.kinds.some((kind) => kind.id === account.kind),
-    ),
-  );
-  if (registered.length === 0) return;
-  const at = yield* nowIso;
-  yield* withTransaction(
-    sql,
-    Effect.forEach(
-      registered,
-      (account) =>
-        Effect.gen(function* () {
-          const stored = yield* accounts.insert({ ...account, label: null, at });
-          yield* audit.append({
-            kind: "providerAccount.created",
-            actor: SYSTEM_ACTOR,
-            payload: {
-              providerAccountId: stored.id,
-              providerId: stored.providerId,
-              kind: stored.kind,
-            },
-            record: { topic: "provider", id: stored.id },
-            at,
-          });
-        }),
-      { discard: true },
-    ),
-  );
-});
+export const seedProviderAccounts = (
+  setupComplete: boolean,
+): Effect.Effect<void, SqlError, SqlClient.SqlClient | PluginHost | AuditLog> =>
+  Effect.gen(function* () {
+    if (setupComplete) return;
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    const host = yield* PluginHost;
+    const audit = yield* AuditLog;
+    if (yield* accounts.hasAny()) return;
+    const providers = yield* host.providers();
+    const registered = FRESH_INSTALL_ACCOUNTS.filter((account) =>
+      providers.some(
+        (provider) =>
+          provider.id === account.providerId &&
+          provider.kinds.some((kind) => kind.id === account.kind),
+      ),
+    );
+    if (registered.length === 0) return;
+    const at = yield* nowIso;
+    yield* withTransaction(
+      sql,
+      Effect.forEach(
+        registered,
+        (account) =>
+          Effect.gen(function* () {
+            const stored = yield* accounts.insert({ ...account, label: null, at });
+            yield* audit.append({
+              kind: "providerAccount.created",
+              actor: SYSTEM_ACTOR,
+              payload: {
+                providerAccountId: stored.id,
+                providerId: stored.providerId,
+                kind: stored.kind,
+              },
+              record: { topic: "provider", id: stored.id },
+              at,
+            });
+          }),
+        { discard: true },
+      ),
+    );
+  });

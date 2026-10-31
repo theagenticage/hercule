@@ -174,7 +174,7 @@ const listWrites = (api: { readonly calls: readonly Call[] }) =>
 const findModelField = () => screen.findByLabelText<HTMLSelectElement>("Model");
 
 describe("Settings > System: text generation", () => {
-  it("offers Automatic with the model it resolves to, every logged-in model, and Off", async () => {
+  it("offers Automatic with the model it resolves to, every signed-in model, and Off", async () => {
     await openApp();
 
     const field = await findModelField();

@@ -6,12 +6,11 @@
  * This is the one domain that still sends frames to runners itself - to sign
  * an account in, probe a runner, or install a harness - instead of leaving
  * that to the controller daemon. It creates no dependency cycle, so it was
- * left as it is; moving it under the same rule is issue #209.
+ * left as it is; moving it under the same rule is issue #209, which ticket
+ * #934 absorbs.
  */
-export { isLoggedIn, NO_PLACEMENT, resolveAccountHarness } from "./account-harness";
-export type { ResolvedAccountHarness } from "./account-harness";
-export { prepareHarnessAccount } from "./harness-account";
-export { resolveHarnessHome } from "./harness-home";
+export { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
+export { isSignedIn, NO_PLACEMENT, resolveProviderAccountHarness } from "./harness-choice";
 export {
   ProviderAccountProbeDeadline,
   ProviderAccountProbeInterval,
@@ -25,13 +24,8 @@ export {
 } from "./repository";
 export { seedProviderAccounts } from "./seed";
 export {
-  describeAccount,
+  describeProviderAccount,
   ProviderAccountService,
   ProviderAccountServiceLayer,
   ProviderAccountSignInDeadline,
-  type InstallInput,
-  type ProbeInput,
-  type SignInCodeInput,
-  type SignInInput,
-  type UpdateInput,
 } from "./service";

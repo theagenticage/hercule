@@ -12,9 +12,9 @@ import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createInvalidStateError, type InvalidState } from "@hercule/contract";
-import { isLoggedIn, NO_PLACEMENT, providerAccountRepository } from "../../provider-accounts";
+import { isSignedIn, NO_PLACEMENT, providerAccountRepository } from "../../provider-accounts";
 import { DRAINING, RETIRED, runnerRepository } from "../../runners";
-import type { StoredSession } from "../../sessions";
+import { ACCOUNT_DELETED, type StoredSession } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 
 const STILL_LIVE = "that session is still live; stop it first";
@@ -36,12 +36,6 @@ const NO_TRANSCRIPT =
 const CONVERSATION_DELETED =
   "that session answered an assistant's conversation that was deleted, so it is kept as " +
   "history and is never resumed";
-
-/**
- * The error message for a session whose Provider Account was deleted. The
- * session is kept as history, but nothing can run it any more.
- */
-const ACCOUNT_DELETED = "The account this thread ran on was deleted.";
 
 /** Returns the error message for a session whose workspace is gone. */
 const describeWorkspaceGone = (status: string): string =>
@@ -113,7 +107,7 @@ export const resumable: Effect.Effect<
         session.harnessId,
         session.runnerId,
       );
-      if (Option.isNone(snapshot) || !isLoggedIn(snapshot.value)) {
+      if (Option.isNone(snapshot) || !isSignedIn(snapshot.value)) {
         return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
       }
       return session.nativeSessionId;

@@ -19,7 +19,7 @@ import {
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
-import { nowIso, withTransaction } from "../../db";
+import { nowIso, uuidFromString, withTransaction } from "../../db";
 import { del, get, post, send } from "../../http/testing";
 import { buildHarnessDefinition, createPluginFixture } from "../../plugins/testing";
 import { providerAccountRepository } from "../../provider-accounts";
@@ -653,7 +653,7 @@ describe("the harness a session is placed in", () => {
   const EPSILON_ID = "multi/epsilon";
 
   /** Asks the controller to probe an account in a harness on the fleet's runner, which the fake runner answers as signed in. */
-  const probeAccount = async (
+  const probeProviderAccount = async (
     arranged: Arranged,
     providerAccountId: string,
     harnessId?: string,
@@ -700,8 +700,8 @@ describe("the harness a session is placed in", () => {
       );
       if (inserted._tag !== "Success") throw new Error("the second account was not inserted");
       const second = inserted.value.id;
-      await probeAccount(arranged, second);
-      await probeAccount(arranged, first, EPSILON_ID);
+      await probeProviderAccount(arranged, second);
+      await probeProviderAccount(arranged, first, EPSILON_ID);
       await body(arranged, { first, epsilonAccount, second });
     });
 
@@ -849,6 +849,50 @@ describe("the harness a session is placed in", () => {
 
       expect(response.status, await response.clone().text()).toBe(400);
       expect((await parseRefusal(response)).code).toBe("validation");
+    });
+  });
+
+  it("applies the thread default's model only on its own account and harness, and takes the runner's default model on any other", async () => {
+    await withMulti(async (arranged, { first, second }) => {
+      await setThreadDefaults(arranged, {
+        "thread.providerAccountId": first,
+        "thread.model": "fast",
+      });
+
+      const onDefaults = await spawnThread(arranged, {});
+      // The default harness named outright is still the default's harness.
+      const onDefaultHarness = await spawnThread(arranged, { harnessId: DELTA_ID });
+      const onOtherAccount = await spawnThread(arranged, { providerAccountId: second });
+      const onOtherHarness = await spawnThread(arranged, { harnessId: EPSILON_ID });
+
+      expect(onDefaults.modelSelection.model).toBe("fast");
+      expect(onDefaultHarness.modelSelection.model).toBe("fast");
+      expect(onOtherAccount.modelSelection.model).toBe("clever");
+      expect(onOtherHarness.modelSelection.model).toBe("clever");
+    });
+  });
+
+  it("ignores a thread default whose account no longer exists, and places the Thread by the next rule", async () => {
+    await withMulti(async (arranged, { second }) => {
+      await setThreadDefaults(arranged, {
+        "thread.providerAccountId": second,
+        "thread.harnessId": DELTA_ID,
+        "thread.model": "fast",
+      });
+      await Effect.runPromise(
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`DELETE FROM provider_accounts WHERE id = ${uuidFromString(second)}`,
+        ).pipe(Effect.orDie),
+      );
+
+      const response = await spawnSession(arranged, { prompt: "hello" });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const thread = (await response.json()) as Session;
+      expect(thread.providerAccountId).not.toBe(second);
+      // The model chosen for the deleted account does not follow the Thread.
+      expect(thread.modelSelection.model).toBe("clever");
     });
   });
 });

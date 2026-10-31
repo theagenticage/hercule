@@ -4,8 +4,8 @@
  * signed in to an account and on what plan.
  */
 import { describe, expect, it } from "vitest";
-import type { ModelMenuAccountRow, ModelMenuRow } from "./model-menu";
-import { describeAccountRow, describeModelRow } from "./model-menu-details";
+import type { ModelMenuProviderAccountRow, ModelMenuRow } from "./model-menu";
+import { describeProviderAccountRow, describeModelRow } from "./model-menu-details";
 
 const SONNET: ModelMenuRow = {
   providerAccountId: "claude",
@@ -15,7 +15,7 @@ const SONNET: ModelMenuRow = {
   current: false,
 };
 
-const ACCOUNT: ModelMenuAccountRow = {
+const ACCOUNT: ModelMenuProviderAccountRow = {
   providerAccountId: "work",
   harnessId: "claude-code/claude-code",
   name: "Anthropic · work",
@@ -38,14 +38,14 @@ describe("describeModelRow", () => {
   });
 });
 
-describe("describeAccountRow", () => {
+describe("describeProviderAccountRow", () => {
   it("names who is signed in and on what plan", () => {
-    expect(describeAccountRow(ACCOUNT)).toBe("work@example.com · Claude Pro");
+    expect(describeProviderAccountRow(ACCOUNT)).toBe("work@example.com · Claude Pro");
   });
 
   it("names only what the account knows", () => {
-    expect(describeAccountRow({ ...ACCOUNT, identity: null })).toBe("Claude Pro");
-    expect(describeAccountRow({ ...ACCOUNT, planLabel: null })).toBe("work@example.com");
-    expect(describeAccountRow({ ...ACCOUNT, identity: null, planLabel: null })).toBeNull();
+    expect(describeProviderAccountRow({ ...ACCOUNT, identity: null })).toBe("Claude Pro");
+    expect(describeProviderAccountRow({ ...ACCOUNT, planLabel: null })).toBe("work@example.com");
+    expect(describeProviderAccountRow({ ...ACCOUNT, identity: null, planLabel: null })).toBeNull();
   });
 });

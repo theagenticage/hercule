@@ -4,15 +4,16 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildIdOptions,
   buildProviderAccountName,
-  computeAccountDefaults,
+  computeProviderAccountDefaults,
   computeThreadDefaults,
   buildThreadModelField,
+  resolveThreadHarnessId,
   resolveThreadRowsMode,
 } from "@hercule/client-core";
 import type { ThreadRows, ThreadWorkspace } from "@hercule/contract";
 import { FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hercule/ui";
 import {
-  ensureAccountReads,
+  ensureProviderAccountReads,
   localRunnerQuery,
   profilesQuery,
   providerAccountsQuery,
@@ -40,7 +41,7 @@ export const Route = createFileRoute("/_shell/settings/threads")({
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      ensureAccountReads(context.queryClient, context.client),
+      ensureProviderAccountReads(context.queryClient, context.client),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
     ]);
     await context.queryClient.ensureQueryData(
@@ -81,7 +82,7 @@ function Threads(): JSX.Element {
       ? { dimmed: null, options: [] }
       : buildThreadModelField(
           account,
-          defaults.harnessId ?? account.defaultHarnessId,
+          resolveThreadHarnessId(account, defaults.harnessId),
           defaults.runnerId,
           settings.user["thread.model"],
         );
@@ -104,13 +105,18 @@ function Threads(): JSX.Element {
                   const next = accounts.find((each) => each.id === event.target.value);
                   // The model follows the account, and is read from the runner
                   // that account would be placed on, using the same rule
-                  // (`computeAccountDefaults`) as the composer. A harness
+                  // (`computeProviderAccountDefaults`) as the composer. A harness
                   // stored for the previous account does not carry over: the
                   // new account runs in its default harness.
                   const nextModel =
                     next === undefined
                       ? null
-                      : computeAccountDefaults(next, next.defaultHarnessId, runners, localId).model;
+                      : computeProviderAccountDefaults(
+                          next,
+                          next.defaultHarnessId,
+                          runners,
+                          localId,
+                        ).model;
                   save({
                     user: {
                       "thread.providerAccountId": event.target.value,

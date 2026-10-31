@@ -21,6 +21,7 @@ import {
   post,
   readErrorBody,
   send,
+  TEST_HARNESS_ID,
   USERNAME,
   withServer,
   type ServerHarness,
@@ -137,7 +138,9 @@ const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [],
   harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["harnesses/full"],
+  // The test controller also registers the `test` harness and an account that
+  // runs in it, and an account is probed only on a runner with its harness.
+  adapters: ["harnesses/full", TEST_HARNESS_ID],
   identityPort: 4939,
 };
 

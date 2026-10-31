@@ -1008,11 +1008,12 @@ describe("buildQueryKeys", () => {
     ]);
   });
 
-  it("maps a runner push to the runner list, the page of each runner in it, and the controller", () => {
+  it("maps a runner push to the runner list, the page of each runner in it, the harnesses and the controller", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", ["r1", "r2"]), [
       ["runners"],
       ["runner", "r1"],
       ["runner", "r2"],
+      ["harnesses"],
       ["controller"],
     ]);
 
@@ -1020,11 +1021,17 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", ["r1"]), [
       queryKeys.runners(),
       queryKeys.runner("r1"),
+      queryKeys.harnesses(),
       queryKeys.controller(),
     ]);
 
     // A push with no ids means any runner may have changed.
-    assert.deepStrictEqual(buildQueryKeys("runner", []), [["runners"], ["runner"], ["controller"]]);
+    assert.deepStrictEqual(buildQueryKeys("runner", []), [
+      ["runners"],
+      ["runner"],
+      ["harnesses"],
+      ["controller"],
+    ]);
   });
 
   it("maps a provider push to the account list and the controller, whose text generation status follows sign-ins", () => {

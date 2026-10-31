@@ -17,6 +17,8 @@ export { AccountKind, AccountSetupStep } from "@hercule/plugin-host";
 export const Provider = Schema.Struct({
   /** The qualified id, such as `zai/zai`. */
   id: Schema.String,
+  /** The id of the plugin that registered the Provider, such as `zai`. Clients read it here and never split it off `id` (ADR 0034). */
+  pluginId: Schema.String,
   displayName: Schema.String,
   kinds: Schema.Array(AccountKind),
 });

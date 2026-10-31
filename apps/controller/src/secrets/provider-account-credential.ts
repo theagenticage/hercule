@@ -27,7 +27,7 @@ export const API_KEY_SECRET_NAME = "apiKey";
  *
  * Fails when the stored value cannot be read or decrypted, and the caller
  * fails with it. A probe or a session that went ahead without the key would
- * report that it is not logged in, which would look as if the user never
+ * report that it is not signed in, which would look as if the user never
  * entered one.
  */
 export const readProviderAccountCredential = (

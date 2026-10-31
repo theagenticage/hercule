@@ -1678,11 +1678,23 @@ describe("probing a runner's provider accounts", () => {
       return asked.length >= count ? asked : undefined;
     });
 
-  const buildNoAdapterResult = (harnessId: string): ProbeResult => ({
-    harnessVersion: null,
-    auth: { status: "error", message: `no adapter for ${harnessId} in this runner build` },
-    models: [],
-  });
+  /**
+   * The facts of a runner that could run all three harnesses: an adapter for
+   * each, and each binary on the machine. A runner that lacks either is not
+   * probed for that harness.
+   */
+  const EVERY_HARNESS: RunnerFacts = {
+    ...FACTS,
+    harnesses: [
+      { name: "claude", present: true, path: "/usr/local/bin/claude" },
+      { name: "codex", present: true, path: "/usr/local/bin/codex" },
+      { name: "pi", present: true, path: "/usr/local/bin/pi" },
+    ],
+    adapters: ["claude-code/claude-code", "codex/codex", "pi/pi"],
+  };
+
+  const greetEveryHarness = (base: string, credential: string) =>
+    greet(base, credential, { facts: EVERY_HARNESS });
 
   const probeNow = (base: string, token: string, id: string, providerAccountId: string) =>
     send("POST", base, `/api/v1/runners/${id}/probe`, { body: { providerAccountId }, token });
@@ -1693,7 +1705,7 @@ describe("probing a runner's provider accounts", () => {
   /** A probe deadline short enough for a test to wait for. */
   const PROBE_DEADLINE = Duration.millis(200);
 
-  it("probes every account as soon as the runner sends its hello, and stores the answers", async () => {
+  it("probes the accounts of the harnesses a runner can run as soon as it sends its hello, and stores the answers", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
@@ -1705,7 +1717,7 @@ describe("probing a runner's provider accounts", () => {
         "pi/pi",
       ]);
 
-      const { wire } = await greet(harness.base, joined.credential);
+      const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, all.length);
         // One request per account, keyed by account id, never harness id:
@@ -1719,15 +1731,11 @@ describe("probing a runner's provider accounts", () => {
         }
 
         for (const request of asked) {
-          const account = all.find((one) => one.id === request.harnessAccount.providerAccountId)!;
           wire.send({
             _tag: "probeReport",
             requestId: request.requestId,
             providerAccountId: request.harnessAccount.providerAccountId,
-            result:
-              account.defaultHarnessId === "claude-code/claude-code"
-                ? buildProbeResult("2.1.263")
-                : buildNoAdapterResult(account.defaultHarnessId),
+            result: buildProbeResult("2.1.263"),
           });
         }
 
@@ -1736,13 +1744,41 @@ describe("probing a runner's provider accounts", () => {
         expect(snapshot.harnessVersion).toBe("2.1.263");
         expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
         expect(snapshot.models.map((model) => model.slug)).toEqual(["default"]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
 
-        // A harness this runner build has no adapter for still gets a
-        // snapshot, which shows why, instead of staying blank forever.
-        const codex = await findAccountFor(harness.base, token, "codex/codex");
-        const refused = await readSnapshot(harness.base, token, codex.id, joined.runnerId);
-        expect(refused.auth.status).toBe("error");
-        expect(refused.auth.message).toBe("no adapter for codex/codex in this runner build");
+  it("sends no probe, and so no key, to a runner without the adapter or the binary of a harness", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const all = await listAccounts(harness.base, token);
+      // The runner has an adapter for Claude Code and pi, but only Claude
+      // Code's binary is on the machine. It has no adapter for Codex at all.
+      const facts: RunnerFacts = {
+        ...EVERY_HARNESS,
+        harnesses: [
+          { name: "claude", present: true, path: "/usr/local/bin/claude" },
+          { name: "codex", present: true, path: "/usr/local/bin/codex" },
+          { name: "pi", present: false },
+        ],
+        adapters: ["claude-code/claude-code", "pi/pi"],
+      };
+
+      const { wire } = await greet(harness.base, joined.credential, { facts });
+      try {
+        const asked = await waitForProbeRequests(wire, 1);
+        const claude = all.find((one) => one.defaultHarnessId === "claude-code/claude-code")!;
+        expect(asked.map((request) => request.harnessAccount.providerAccountId)).toEqual([
+          claude.id,
+        ]);
+
+        // The sweep probes its accounts together, so a second request would
+        // have arrived with the first.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(listProbeRequests(wire)).toHaveLength(1);
       } finally {
         wire.close();
       }
@@ -1757,8 +1793,8 @@ describe("probing a runner's provider accounts", () => {
       const all = await listAccounts(harness.base, token);
       const zai = all.find((one) => one.defaultHarnessId === "pi/pi")!;
 
-      const one = await greet(harness.base, first.credential);
-      const two = await greet(harness.base, second.credential);
+      const one = await greetEveryHarness(harness.base, first.credential);
+      const two = await greetEveryHarness(harness.base, second.credential);
       try {
         await waitForProbeRequests(one.wire, all.length);
         await waitForProbeRequests(two.wire, all.length);
@@ -1793,7 +1829,7 @@ describe("probing a runner's provider accounts", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
-      const { wire } = await greet(harness.base, joined.credential);
+      const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
         const opening = await waitForProbeRequests(wire, 3);
         const already = opening.length;
@@ -1844,7 +1880,7 @@ describe("probing a runner's provider accounts", () => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
         const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
-        const { wire } = await greet(harness.base, joined.credential);
+        const { wire } = await greetEveryHarness(harness.base, joined.credential);
         try {
           const already = (await waitForProbeRequests(wire, 3)).length;
 
@@ -1868,7 +1904,7 @@ describe("probing a runner's provider accounts", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
-      const { wire } = await greet(harness.base, joined.credential);
+      const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, 3);
         const mine = asked.find(
@@ -1905,13 +1941,13 @@ describe("probing a runner's provider accounts", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
-      const first = await greet(harness.base, joined.credential);
+      const first = await greetEveryHarness(harness.base, joined.credential);
       const asked = await waitForProbeRequests(first.wire, 3);
       const stale = asked.find(
         (request) => request.harnessAccount.providerAccountId === claude.id,
       )!;
 
-      const second = await greet(harness.base, joined.credential);
+      const second = await greetEveryHarness(harness.base, joined.credential);
       try {
         first.wire.send({
           _tag: "probeReport",
@@ -1945,7 +1981,7 @@ describe("probing a runner's provider accounts", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
-      const { wire } = await greet(harness.base, joined.credential);
+      const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, 3);
         const request = asked.find((one) => one.harnessAccount.providerAccountId === claude.id)!;
@@ -1983,7 +2019,7 @@ describe("probing a runner's provider accounts", () => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
         const all = await listAccounts(harness.base, token);
-        const { wire } = await greet(harness.base, joined.credential);
+        const { wire } = await greetEveryHarness(harness.base, joined.credential);
         try {
           // The probes after the hello, then the tick's: every account again,
           // not just the one somebody last looked at.
@@ -2457,7 +2493,7 @@ describe("signing a runner in to a provider account", () => {
         answerProbe(wire, await waitForProbe(wire, claude.id, before));
         // The probe stores the snapshot, which announces it on the provider
         // topic; a screen waiting on the login reads it from there.
-        await waitUntil("recorded the logged-in snapshot", async () => {
+        await waitUntil("recorded the signed-in snapshot", async () => {
           const response = await get(harness.base, `/api/v1/provider-accounts/${claude.id}`, token);
           const one = (await response.json()) as Account;
           return one.snapshots.find(
@@ -2955,7 +2991,7 @@ describe("signing a runner in to a provider account", () => {
         expect(sent.code).toBe("the-pasted-code");
         wire.send({ _tag: "loginResult", requestId: sent.requestId, ok: true });
 
-        // A harness that was just logged in has not been probed for its
+        // A harness that was just signed in has not been probed for its
         // account yet, so the response is a new snapshot, not the old one.
         const probe = await waitForProbe(wire, claude.id, before);
         wire.send({

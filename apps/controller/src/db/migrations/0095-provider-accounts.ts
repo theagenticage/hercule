@@ -44,11 +44,13 @@
  *   tables that reference it, so the default stays. The repository always
  *   writes the column.
  * - Each user's setting `thread.instanceId` (a row of `user_settings`) becomes
- *   `thread.providerAccountId` beside a new `thread.harnessId`, and the controller setting
+ *   `thread.providerAccountId`, and the controller setting
  *   `textGeneration.model` renames `instanceId` to `providerAccountId` and
- *   gains `harnessId`. Agents get their instance's harness in `harness_id` as
- *   well, so every reference keeps meaning the harness it ran in even if the
- *   account's default harness is edited later.
+ *   keeps its other fields. None of these gets a harness: a
+ *   missing harness means the account's default, which for a migrated account
+ *   is its instance's harness. Agents' `harness_id` stays NULL for the same
+ *   reason, so an agent can move to an account whose provider that harness
+ *   cannot run.
  * - `secrets`: pi's `zaiApiKey` (owner kind `provider-instance`) becomes the
  *   Z.ai account's `apiKey` (owner kind `provider-account`). The owner and
  *   name are the value's associated data, so each value is decrypted and
@@ -312,12 +314,11 @@ export default Effect.gen(function* () {
     ALTER TABLE agents ADD COLUMN harness_id TEXT
       CHECK (harness_id IS NULL OR length(harness_id) BETWEEN 1 AND 128)
   `;
-  yield* sql`
-    UPDATE agents
-    SET harness_id = (SELECT default_harness_id FROM provider_accounts
-                      WHERE provider_accounts.id = agents.provider_account_id)
-    WHERE provider_account_id IN (SELECT id FROM provider_accounts)
-  `;
+  // `harness_id` stays NULL on every migrated agent: NULL means "the account's
+  // default harness", which for a migrated account is the harness of its
+  // instance. A concrete value would pin the agent to that harness, and then an
+  // agent could not move to another account whose provider the harness does not
+  // run.
 
   // Every user's default account for a new Thread. A value that is not a JSON
   // string was already ignored by the settings reader, so it is only removed.
@@ -327,14 +328,13 @@ export default Effect.gen(function* () {
     readonly updated_at: string;
   }>`SELECT user_id, value, updated_at FROM user_settings WHERE key = 'thread.instanceId'`;
   yield* sql`DELETE FROM user_settings WHERE key = 'thread.instanceId'`;
+  // No `thread.harnessId` is written: unset means the account's default
+  // harness, the same reasoning as for agents above.
   for (const row of threadDefaults) {
-    const accountId = parseJson(row.value);
-    if (typeof accountId !== "string") continue;
+    if (typeof parseJson(row.value) !== "string") continue;
     yield* sql`
       INSERT INTO user_settings (user_id, key, value, updated_at)
-      VALUES (${row.user_id}, 'thread.providerAccountId', ${row.value}, ${row.updated_at}),
-             (${row.user_id}, 'thread.harnessId',
-              ${JSON.stringify(harnessByAccount.get(accountId) ?? null)}, ${row.updated_at})`;
+      VALUES (${row.user_id}, 'thread.providerAccountId', ${row.value}, ${row.updated_at})`;
   }
 
   const textGeneration = yield* sql<{ readonly value: string }>`
@@ -343,14 +343,10 @@ export default Effect.gen(function* () {
     const chosen = parseJson(row.value);
     if (typeof chosen !== "object" || chosen === null || !("instanceId" in chosen)) continue;
     const { instanceId, ...rest } = chosen as { instanceId: string };
-    const harnessId = harnessByAccount.get(instanceId);
+    // No `harnessId`: absent means the account's default harness.
     yield* sql`
       UPDATE settings
-      SET value = ${JSON.stringify({
-        providerAccountId: instanceId,
-        ...(harnessId === undefined ? {} : { harnessId }),
-        ...rest,
-      })}
+      SET value = ${JSON.stringify({ providerAccountId: instanceId, ...rest })}
       WHERE scope = 'controller' AND key = 'textGeneration.model'`;
   }
 

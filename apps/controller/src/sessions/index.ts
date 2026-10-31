@@ -39,6 +39,7 @@ export {
   type StoredSession,
 } from "./repository";
 export {
+  ACCOUNT_DELETED,
   endStrandedInputs,
   SessionService,
   SessionServiceLayer,

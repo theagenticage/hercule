@@ -3,9 +3,9 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   buildProviderAccountName,
-  describeAccountIdentity,
-  listAccountMachines,
-  requiresSignInPerMachine,
+  describeProviderAccountIdentity,
+  findProviderPluginId,
+  listProviderAccountMachines,
 } from "@hercule/client-core";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import {
@@ -15,8 +15,8 @@ import {
   providersQuery,
   runnersQuery,
 } from "../../../../app/queries";
-import { AccountCard, ProviderMark } from "../../../../screens/settings/providers";
-import { ProviderAccountSheet } from "./-provider-account-sheet";
+import { ProviderAccountCard, ProviderMark } from "../../../../screens/settings/providers";
+import { OpenedProviderAccountSheet } from "./-provider-account-sheet";
 
 /**
  * The account whose sheet is open. It holds the account's id, not the
@@ -25,7 +25,7 @@ import { ProviderAccountSheet } from "./-provider-account-sheet";
  * which account went if it is deleted elsewhere while the sheet is open.
  */
 interface OpenSheet {
-  readonly accountId: string;
+  readonly providerAccountId: string;
   readonly name: string;
 }
 
@@ -73,7 +73,7 @@ function Providers(): JSX.Element {
   const closeSheet = (closing: OpenSheet): void => {
     setSheet((current) => (current === closing ? null : current));
   };
-  const sheetAccount = accounts.find(({ id }) => id === sheet?.accountId);
+  const sheetProviderAccount = accounts.find(({ id }) => id === sheet?.providerAccountId);
 
   if (accounts.length === 0) {
     return <p className="pa-empty">No accounts yet.</p>;
@@ -83,7 +83,7 @@ function Providers(): JSX.Element {
       <section className="set-sec provider-accounts">
         <h2>Accounts</h2>
         <p className="pa-lead">Who pays for the models in your menu.</p>
-        {sheet !== null && sheetAccount === undefined && (
+        {sheet !== null && sheetProviderAccount === undefined && (
           <p className="set-note" role="status">
             {`${sheet.name} was deleted elsewhere, so its sheet closed.`}
           </p>
@@ -92,27 +92,29 @@ function Providers(): JSX.Element {
           {accounts.map((account) => {
             const name = buildProviderAccountName(providers, account);
             return (
-              <AccountCard
+              <ProviderAccountCard
                 key={account.id}
-                mark={<ProviderMark providerId={account.providerId} plugins={plugins} size={15} />}
-                name={name}
-                identity={describeAccountIdentity(providers, account)}
-                machines={
-                  requiresSignInPerMachine(providers, account)
-                    ? listAccountMachines(account, runners, providers, harnesses)
-                    : null
+                mark={
+                  <ProviderMark
+                    pluginId={findProviderPluginId(providers, account)}
+                    plugins={plugins}
+                    size={15}
+                  />
                 }
+                name={name}
+                identity={describeProviderAccountIdentity(providers, account)}
+                machines={listProviderAccountMachines(account, runners, providers, harnesses)}
                 onOpen={() => {
-                  setSheet({ accountId: account.id, name });
+                  setSheet({ providerAccountId: account.id, name });
                 }}
               />
             );
           })}
         </div>
       </section>
-      {sheet !== null && sheetAccount !== undefined && (
-        <ProviderAccountSheet
-          account={sheetAccount}
+      {sheet !== null && sheetProviderAccount !== undefined && (
+        <OpenedProviderAccountSheet
+          account={sheetProviderAccount}
           onClose={() => {
             closeSheet(sheet);
           }}

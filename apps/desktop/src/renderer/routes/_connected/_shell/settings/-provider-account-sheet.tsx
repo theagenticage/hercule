@@ -3,12 +3,12 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildProviderAccountName,
-  describeAccountIdentity,
-  listAccountMachines,
+  describeProviderAccountIdentity,
+  findProviderPluginId,
+  listProviderAccountMachines,
   queryKeys,
   readErrorMessage,
-  requiresSignInPerMachine,
-  type AccountMachine,
+  type ProviderAccountMachine,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { ProviderAccount, ProviderAccountUpdateInput } from "@hercule/contract";
@@ -23,9 +23,9 @@ import {
 import { useSavedRecordField } from "../../../../app/saved-record-field";
 import { ProviderLoginDialog } from "../../../../screens/provider-login";
 import {
-  AccountNameField,
-  AccountSheet,
-  AccountSheetSection,
+  ProviderAccountNameField,
+  ProviderAccountSheet,
+  ProviderAccountSheetSection,
   MachineRow,
   ProviderMark,
   type MachineAction,
@@ -40,7 +40,7 @@ import { DeleteProviderAccountDialog } from "./-delete-provider-account-dialog";
  * make, such as removing the label of the second account at one provider,
  * and its message becomes `error`.
  */
-function useSavedAccountLabel(client: HerculeClient, account: ProviderAccount) {
+function useSavedProviderAccountLabel(client: HerculeClient, account: ProviderAccount) {
   return useSavedRecordField<ProviderAccount, string, string, ProviderAccountUpdateInput>({
     listKey: providerAccountsQuery(client).queryKey,
     id: account.id,
@@ -68,7 +68,7 @@ function useSavedAccountLabel(client: HerculeClient, account: ProviderAccount) {
  * live topic keeps current, so a sign-in that ends shows in the machine's
  * row at once. `onClose` is called whenever the sheet closes.
  */
-export function ProviderAccountSheet({
+export function OpenedProviderAccountSheet({
   account,
   onClose,
 }: {
@@ -86,10 +86,10 @@ export function ProviderAccountSheet({
   const thisMacRunnerId = useQuery(localRunnerQuery(bridge, runners)).data ?? null;
   const [loginRunnerId, setLoginRunnerId] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const label = useSavedAccountLabel(client, account);
+  const label = useSavedProviderAccountLabel(client, account);
   const draft = useTextDraft(label.value, label.save);
   const install = useMutation({
-    mutationFn: (machine: AccountMachine) =>
+    mutationFn: (machine: ProviderAccountMachine) =>
       client.runner.installHarness({
         params: { id: machine.runnerId },
         payload: { harnessId: account.defaultHarnessId },
@@ -97,72 +97,59 @@ export function ProviderAccountSheet({
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.runners() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.harnesses() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() }),
       ]),
   });
 
   const name = buildProviderAccountName(providers, account);
-  const harnessName =
-    harnesses.find(({ id }) => id === account.defaultHarnessId)?.displayName ??
-    account.defaultHarnessId;
-  const machines = requiresSignInPerMachine(providers, account)
-    ? listAccountMachines(account, runners, providers, harnesses)
-    : null;
-  const pressInstall = (machine: AccountMachine): void => {
-    install.mutate(machine);
-  };
-  const buildAction = (machine: AccountMachine): MachineAction | null => {
-    if (machine.signedIn) return null;
-    if (machine.canSignIn) {
-      return {
-        label: "Sign in",
-        onPress: () => setLoginRunnerId(machine.runnerId),
-      };
-    }
-    if (machine.install === "offered") {
+  const machines = listProviderAccountMachines(account, runners, providers, harnesses);
+  // `client-core` decides which action a machine offers; this only draws it
+  // and says what pressing it does.
+  const buildMachineButton = (machine: ProviderAccountMachine): MachineAction | null => {
+    const { action } = machine;
+    if (action === null) return null;
+    if (action.kind === "install") {
       const installing = install.isPending && install.variables.runnerId === machine.runnerId;
       return {
         label: installing ? "Installing…" : "Install",
-        onPress: () => pressInstall(machine),
+        onPress: () => {
+          install.mutate(machine);
+        },
         pending: install.isPending,
       };
     }
-    if (machine.install === "blocked") {
-      return {
-        label: "Install",
-        onPress: () => undefined,
-        unavailable: `${machine.runnerName} runs a Hercule build that cannot run ${harnessName}.`,
-      };
+    if (action.kind === "sign-in") {
+      return { label: "Sign in", onPress: () => setLoginRunnerId(machine.runnerId) };
     }
-    if (!machine.online) {
-      return {
-        label: "Sign in",
-        onPress: () => undefined,
-        unavailable: `${machine.runnerName} is offline.`,
-      };
-    }
-    return null;
+    return { label: "Sign in", onPress: () => undefined, unavailable: action.reason };
   };
 
   return (
     <>
-      <AccountSheet
+      <ProviderAccountSheet
         dialogRef={dialogRef}
-        mark={<ProviderMark providerId={account.providerId} plugins={plugins} size={16} />}
+        mark={
+          <ProviderMark
+            pluginId={findProviderPluginId(providers, account)}
+            plugins={plugins}
+            size={16}
+          />
+        }
         name={name}
-        identity={describeAccountIdentity(providers, account)}
+        identity={describeProviderAccountIdentity(providers, account)}
         onClose={onClose}
       >
-        <AccountSheetSection heading="Name">
-          <AccountNameField
+        <ProviderAccountSheetSection heading="Name">
+          <ProviderAccountNameField
             draft={draft}
             placeholder="Work, Personal, Team…"
             hint={`Shown after the provider, as in ${buildProviderAccountName(providers, { providerId: account.providerId, label: "Work" })}. It tells your accounts apart in menus.`}
             error={label.error}
           />
-        </AccountSheetSection>
+        </ProviderAccountSheetSection>
         {machines !== null && (
-          <AccountSheetSection heading="Machines">
+          <ProviderAccountSheetSection heading="Machines">
             {machines.map((machine) => (
               <MachineRow
                 key={machine.runnerId}
@@ -170,7 +157,7 @@ export function ProviderAccountSheet({
                 isThisMac={machine.runnerId === thisMacRunnerId}
                 signedIn={machine.signedIn}
                 identity={machine.identity}
-                action={buildAction(machine)}
+                action={buildMachineButton(machine)}
                 error={
                   install.isError && install.variables.runnerId === machine.runnerId
                     ? readErrorMessage(install.error)
@@ -178,9 +165,9 @@ export function ProviderAccountSheet({
                 }
               />
             ))}
-          </AccountSheetSection>
+          </ProviderAccountSheetSection>
         )}
-        <AccountSheetSection heading={`Delete ${name}`}>
+        <ProviderAccountSheetSection heading={`Delete ${name}`}>
           <button
             type="button"
             className="btn btn--danger"
@@ -188,8 +175,8 @@ export function ProviderAccountSheet({
           >
             Delete…
           </button>
-        </AccountSheetSection>
-      </AccountSheet>
+        </ProviderAccountSheetSection>
+      </ProviderAccountSheet>
       {loginRunnerId !== null && (
         <ProviderLoginDialog
           providerAccountId={account.id}
@@ -199,7 +186,7 @@ export function ProviderAccountSheet({
       )}
       {confirmingDelete && (
         <DeleteProviderAccountDialog
-          account={account}
+          providerAccountId={account.id}
           name={name}
           onDeleted={onClose}
           onClose={() => setConfirmingDelete(false)}

@@ -73,6 +73,7 @@ const DECLARED: Harness["declared"] = {
 export const PROVIDERS: readonly Provider[] = [
   {
     id: "anthropic/anthropic",
+    pluginId: "anthropic",
     displayName: "Anthropic",
     kinds: [
       {
@@ -86,6 +87,7 @@ export const PROVIDERS: readonly Provider[] = [
   },
   {
     id: "openai/openai",
+    pluginId: "openai",
     displayName: "OpenAI",
     kinds: [
       {
@@ -99,6 +101,7 @@ export const PROVIDERS: readonly Provider[] = [
   },
   {
     id: "zai/zai",
+    pluginId: "zai",
     displayName: "Z.ai",
     kinds: [
       {
@@ -128,7 +131,7 @@ export const HARNESSES: readonly Harness[] = [
 ];
 
 /** What makes a Provider Account this one: its own id, its provider and kind, its default harness and its label. */
-export interface AccountIdentity {
+export interface ProviderAccountIdentity {
   readonly id: string;
   readonly providerId: string;
   readonly kind: string;
@@ -136,7 +139,7 @@ export interface AccountIdentity {
   readonly label: string | null;
 }
 
-export const ANTHROPIC_IDENTITY: AccountIdentity = {
+export const ANTHROPIC_IDENTITY: ProviderAccountIdentity = {
   id: "account-anthropic",
   providerId: "anthropic/anthropic",
   kind: "subscription-per-machine",
@@ -144,7 +147,7 @@ export const ANTHROPIC_IDENTITY: AccountIdentity = {
   label: null,
 };
 
-export const OPENAI_IDENTITY: AccountIdentity = {
+export const OPENAI_IDENTITY: ProviderAccountIdentity = {
   id: "account-openai",
   providerId: "openai/openai",
   kind: "subscription-per-machine",
@@ -152,7 +155,7 @@ export const OPENAI_IDENTITY: AccountIdentity = {
   label: null,
 };
 
-export const ZAI_IDENTITY: AccountIdentity = {
+export const ZAI_IDENTITY: ProviderAccountIdentity = {
   id: "account-zai",
   providerId: "zai/zai",
   kind: "api-key",
@@ -167,7 +170,7 @@ export const ZAI_IDENTITY: AccountIdentity = {
  * with snapshots in another harness.
  */
 export const buildProviderAccount = (
-  identity: AccountIdentity,
+  identity: ProviderAccountIdentity,
   snapshots: ReadonlyArray<CapabilitySnapshot> = [],
 ): ProviderAccount => ({
   id: identity.id,

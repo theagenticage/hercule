@@ -33,11 +33,9 @@ import { findJsonSchemaViolation } from "@hercule/protocol/json-schema";
 import { SYSTEM_ACTOR } from "../../actor";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
-import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
-import { prepareHarnessAccount } from "../../provider-accounts";
-import { Secrets } from "../../secrets";
+import { HarnessAccounts } from "../../provider-accounts";
 import {
   explainTextGenerationUnavailable,
   LastTextGenerationFailure,
@@ -101,6 +99,19 @@ type ResolvedTarget = Extract<TextGenerationTarget, { readonly _tag: "resolved" 
  * sent, and `generate` looks again with the setting as it is now.
  */
 const TARGET_CHANGED = { _tag: "targetChanged" } as const;
+
+/**
+ * What a call ends with when its slot holder could not build the account's
+ * frame content: the account was deleted, the pair cannot run, or the key
+ * does not decrypt. Nothing is sent. The message says which and what to do.
+ */
+interface NotPrepared {
+  readonly _tag: "notPrepared";
+  readonly message: string;
+}
+
+/** What the holder of a runner's slot ends with, before the caller turns it into an attempt. */
+type HolderOutcome = SendOutcome<Answer> | typeof TARGET_CHANGED | NotPrepared;
 
 /**
  * Makes an effect interruptible again inside `generate`, which runs
@@ -210,9 +221,7 @@ const make = Effect.gen(function* () {
   const models = yield* TextGenerationModels;
   const lastFailure = yield* LastTextGenerationFailure;
   const connections = yield* RunnerConnections;
-  // What `prepareHarnessAccount` reads, captured here so the call needs
-  // nothing from its caller.
-  const frameServices = yield* Effect.context<SqlClient.SqlClient | PluginHost | Secrets>();
+  const harnessAccounts = yield* HarnessAccounts;
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
   const localRunnerId = yield* LocalRunnerId;
@@ -328,6 +337,10 @@ const make = Effect.gen(function* () {
    * - A call whose target changed while it queued is not sent, and returns
    *   `TARGET_CHANGED`. A call can queue for a while, and must not run on a
    *   model the user has since turned off or replaced.
+   * - The account's frame content, with its decrypted key, is built by the
+   *   holder once it has the slot, so a key replaced while the call queued
+   *   is the key the runner gets. If it cannot be built, the call fails
+   *   without being sent.
    * - A caller interrupted after the request was sent leaves the record to
    *   whichever of it and the holder ends second (see `RecordHandoff`), so
    *   the record still holds the usage and cost of a call its caller gave
@@ -342,21 +355,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const { providerAccountId, harnessId, model } = target;
       const started = yield* Clock.currentTimeMillis;
-      const prepared = yield* Effect.result(
-        Effect.provideContext(prepareHarnessAccount(providerAccountId, harnessId), frameServices),
-      );
-      if (prepared._tag === "Failure") {
-        const error = prepared.failure;
-        // The account was deleted since it was resolved, the pair cannot run,
-        // or its key could not be decrypted. The error's message says which
-        // and what to do.
-        return error instanceof NotFound || error instanceof InvalidState
-          ? buildFailedAttempt("failed", error.error.message, runnerId)
-          : yield* Effect.die(error);
-      }
       // Completed with the holder's whole exit, not only its answer, so a
       // defect in the holder reaches the caller at once, as its own defect.
-      const answered = yield* Deferred.make<SendOutcome<Answer> | typeof TARGET_CHANGED>();
+      const answered = yield* Deferred.make<HolderOutcome>();
       // Completed once the holder has the slot, or once it ends, whichever
       // comes first, so a holder that ends early never leaves the caller waiting.
       const slotHeld = yield* Deferred.make<void>();
@@ -369,9 +370,7 @@ const make = Effect.gen(function* () {
        * Writes the record of a call whose caller was interrupted, from the
        * holder's exit. A call the holder never sent leaves no record.
        */
-      const recordAbandonedCall = (
-        exit: Exit.Exit<SendOutcome<Answer> | typeof TARGET_CHANGED>,
-      ): Effect.Effect<void> =>
+      const recordAbandonedCall = (exit: Exit.Exit<HolderOutcome>): Effect.Effect<void> =>
         Effect.gen(function* () {
           if (!(yield* Ref.get(requestSent))) return;
           let attempt: Attempt;
@@ -399,6 +398,22 @@ const make = Effect.gen(function* () {
                         current.model !== model
                       ) {
                         return TARGET_CHANGED;
+                      }
+                      // Built here, after the wait for the slot and just before
+                      // the frame is sent, so the key in it is the one stored
+                      // now. A key replaced while the call queued must be the
+                      // one the runner receives.
+                      const prepared = yield* Effect.result(
+                        harnessAccounts.prepare(providerAccountId, harnessId),
+                      );
+                      if (prepared._tag === "Failure") {
+                        const error = prepared.failure;
+                        // The account was deleted since it was resolved, the
+                        // pair cannot run, or its key could not be decrypted.
+                        // The error's message says which and what to do.
+                        return error instanceof NotFound || error instanceof InvalidState
+                          ? ({ _tag: "notPrepared", message: error.error.message } as const)
+                          : yield* Effect.die(error);
                       }
                       yield* Ref.set(requestSent, true);
                       return yield* connections.sendRequest(
@@ -457,8 +472,9 @@ const make = Effect.gen(function* () {
         ),
       );
       if (Option.isNone(sent)) return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
-      return sent.value._tag === "targetChanged"
-        ? TARGET_CHANGED
+      if (sent.value._tag === "targetChanged") return TARGET_CHANGED;
+      return sent.value._tag === "notPrepared"
+        ? buildFailedAttempt("failed", sent.value.message, runnerId)
         : decideAttempt(runnerId, call, sent.value);
     });
 
@@ -602,8 +618,7 @@ export const TextGenerationLayer: Layer.Layer<
   | TextGenerationModels
   | LastTextGenerationFailure
   | RunnerConnections
-  | Secrets
-  | PluginHost
+  | HarnessAccounts
   | AuditLog
   | PromotionState
   | LocalRunnerId

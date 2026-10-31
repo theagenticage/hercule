@@ -31,7 +31,7 @@ export interface ProviderAccountFixture {
  * Returns a new UUID version 7 as the 16 bytes a row's id holds: the
  * controller accepts no other version for an account's id.
  */
-function buildAccountId(at: number): Buffer {
+function buildProviderAccountId(at: number): Buffer {
   const id = randomBytes(16);
   id.writeUIntBE(at, 0, 6);
   id[6] = (id[6]! & 0x0f) | 0x70;
@@ -74,7 +74,7 @@ export function writeProviderAccounts(
       if (changes > 0) continue;
       const at = new Date(now + index).toISOString();
       insert.run(
-        buildAccountId(now + index),
+        buildProviderAccountId(now + index),
         providerId,
         kind,
         label,

@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import { inTransaction } from "../db/testing";
 import { PluginHost } from "../plugins";
 import { buildPluginStack } from "../plugins/testing";
@@ -79,7 +80,7 @@ describe("automatic", () => {
 
     expect(target).toMatchObject({
       _tag: "resolved",
-      accountName: "Z.ai",
+      providerAccountName: "Z.ai",
       harnessId: "pi/pi",
       model: "pi-small",
       runnerIds: [expect.any(String) as unknown],
@@ -113,11 +114,11 @@ describe("automatic", () => {
     expect(target.target).toMatchObject({
       _tag: "resolved",
       providerAccountId: target.olderId,
-      accountName: "OpenAI · older",
+      providerAccountName: "OpenAI · older",
     });
   });
 
-  it("skips a login that expired and a snapshot on a reserved runner", async () => {
+  it("skips a sign-in that expired and a snapshot on a reserved runner", async () => {
     const target = await run(({ openai, zai, anthropic, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const open = yield* addRunner();
@@ -218,8 +219,47 @@ describe("automatic", () => {
 
     expect(target).toMatchObject({
       _tag: "unresolved",
-      message: expect.stringContaining("signed in that offers a suggested") as unknown,
+      message: expect.stringContaining("sign in to an account that offers") as unknown,
     });
+  });
+
+  it("reads the accounts, the snapshots and the runners once, however many accounts there are", async () => {
+    const statements: Array<string> = [];
+    const countStatements: Statement.Transformer = (statement) =>
+      Effect.sync(() => {
+        statements.push(statement.compile()[0]);
+        return statement;
+      });
+
+    const target = await run(({ openai, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner();
+        // Six accounts of the first provider, none with the suggested model,
+        // so every one is looked at before the last one is taken.
+        for (const label of ["a", "b", "c", "d", "e"]) {
+          const other = yield* Effect.orDie(
+            addFixtureAccount("openai", label, "2026-10-02T00:00:00.000Z"),
+          );
+          yield* snapshot(other, runner, probed("ok", "other"));
+        }
+        yield* snapshot(openai, runner, probed("ok", "codex-mini"));
+        return yield* Effect.provideService(
+          resolve.pipe(Effect.orDie),
+          Statement.CurrentTransformer,
+          countStatements,
+        );
+      }),
+    );
+
+    expect(target).toMatchObject({
+      _tag: "resolved",
+      providerAccountId: expect.any(String) as unknown,
+    });
+    const reading = (table: string): number =>
+      statements.filter((text) => new RegExp(`FROM ${table}\\b`).test(text)).length;
+    expect(reading("provider_accounts")).toBe(1);
+    expect(reading("capability_snapshots")).toBe(1);
+    expect(reading("runners")).toBe(1);
   });
 
   it("is what an unset setting means", async () => {
@@ -273,7 +313,7 @@ describe("a chosen account and model", () => {
 
     expect(target).toMatchObject({
       _tag: "resolved",
-      accountName: "Z.ai",
+      providerAccountName: "Z.ai",
       harnessId: "pi/pi",
       model: "not-in-any-catalog",
       runnerIds: [],

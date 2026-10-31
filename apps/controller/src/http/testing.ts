@@ -95,6 +95,7 @@ import {
   providerAccountRepository,
   ProviderAccountProbeDeadline,
   ProviderAccountProbeInterval,
+  HarnessAccountsLayer,
   ProviderAccountProbesLayer,
   ProviderAccountServiceLayer,
   ProviderAccountSignInDeadline,
@@ -123,6 +124,7 @@ import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../pr
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
+import { readSetupComplete } from "../setup";
 import { operationLayers } from "./routes";
 import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
@@ -184,6 +186,7 @@ const buildServices = (
     // to the probe driver, which reads harness definitions from it.
     Layer.provideMerge(
       ProviderAccountProbesLayer.pipe(
+        Layer.provideMerge(HarnessAccountsLayer),
         Layer.provideMerge(RunnerConnectionsLayer),
         Layer.provideMerge(
           PluginHostLayer.pipe(
@@ -566,7 +569,7 @@ export const withServer = (
             host.boot(buildPluginRegistry(options.plugins ?? [])),
           );
           yield* revalidateStoredWorkflowsOrLog;
-          yield* seedProviderAccounts;
+          yield* seedProviderAccounts(yield* readSetupComplete);
           yield* seedTestProviderAccount;
         });
         yield* bootSteps;

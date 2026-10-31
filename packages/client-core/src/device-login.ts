@@ -5,10 +5,11 @@
  * login ends, the controller probes the account again and announces the new
  * snapshot, so the login is finished once a fresh snapshot for the login's
  * runner shows the account signed in. That holds only for an account that was
- * signed out as the login started: see `DeviceLogin.loggedInAtStart`.
+ * signed out as the login started: see `DeviceLogin.signedInAtStart`.
  */
 import type { CapabilitySnapshot, ProviderAccount } from "@hercule/contract";
 import type { HerculeClient } from "./client";
+import { findDefaultHarnessSnapshot } from "./provider-accounts";
 import { describeCodeExpiry } from "./minutes-left";
 
 /** Where a device login stands. */
@@ -50,7 +51,7 @@ export interface DeviceLogin {
    * connecting, so a fresh signed-in snapshot does not prove that this login
    * ended. Such a login never counts as done.
    */
-  readonly loggedInAtStart: boolean;
+  readonly signedInAtStart: boolean;
   /** When the code expires, or undefined when the runner's build did not say. */
   readonly expiresAt: string | undefined;
 }
@@ -74,9 +75,7 @@ const findSnapshot = (
   runnerId: string,
 ): CapabilitySnapshot | undefined => {
   const account = accounts.find((each) => each.id === providerAccountId);
-  return account?.snapshots.find(
-    (snapshot) => snapshot.harnessId === account.defaultHarnessId && snapshot.runnerId === runnerId,
-  );
+  return account === undefined ? undefined : findDefaultHarnessSnapshot(account, runnerId);
 };
 
 /**
@@ -109,7 +108,7 @@ export const startProviderLogin = async (
       runnerId,
       userCode: started.userCode,
       probedAtStart: snapshot?.probedAt ?? null,
-      loggedInAtStart: snapshot?.auth.status === "ok",
+      signedInAtStart: snapshot?.auth.status === "ok",
       expiresAt: started.expiresAt,
     },
   };
@@ -132,9 +131,9 @@ export const decideDeviceLoginStep = (
     snapshot !== undefined &&
     (login.probedAtStart === null ||
       Date.parse(snapshot.probedAt) > Date.parse(login.probedAtStart));
-  if (!login.loggedInAtStart && fresh && snapshot.auth.status === "ok") return { kind: "done" };
+  if (!login.signedInAtStart && fresh && snapshot.auth.status === "ok") return { kind: "done" };
   if (minutesLeft === 0) return { kind: "expired" };
-  return { kind: "waiting", minutesLeft, endsByItself: !login.loggedInAtStart };
+  return { kind: "waiting", minutesLeft, endsByItself: !login.signedInAtStart };
 };
 
 /**

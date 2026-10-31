@@ -19,7 +19,7 @@ import {
   PROVIDERS,
   ZAI_IDENTITY,
   buildProviderAccount,
-  type AccountIdentity,
+  type ProviderAccountIdentity,
   type Answer,
   type Handler,
 } from "@hercule/client-core/testing";
@@ -120,11 +120,11 @@ const CODEX_ID = "01a06d02-1000-7000-8000-000000000002";
 const PI_ID = "01a06d02-1000-7000-8000-000000000003";
 
 /** Returns an account of `identity` with one snapshot on studio-mac, signed in or not. */
-const buildAccount = (identity: AccountIdentity, signedIn: boolean): ProviderAccount =>
+const buildAccount = (identity: ProviderAccountIdentity, signedIn: boolean): ProviderAccount =>
   buildProviderAccount(identity, [buildSnapshot(identity.harnessId, signedIn)]);
 
 /** Returns the three accounts setup creates, with the ones in `signedIn` signed in. */
-const buildAccounts = (signedIn: readonly string[] = []): ProviderAccount[] => [
+const buildProviderAccounts = (signedIn: readonly string[] = []): ProviderAccount[] => [
   buildAccount({ ...ANTHROPIC_IDENTITY, id: CLAUDE_ID }, signedIn.includes(CLAUDE_ID)),
   buildAccount({ ...OPENAI_IDENTITY, id: CODEX_ID }, signedIn.includes(CODEX_ID)),
   buildAccount({ ...ZAI_IDENTITY, id: PI_ID }, signedIn.includes(PI_ID)),
@@ -186,7 +186,7 @@ interface ControllerRecords {
 /** Returns the records of a controller just set up on studio-mac: no sign-in, no GitHub, no project. */
 const buildRecords = (records: Partial<ControllerRecords> = {}): ControllerRecords => ({
   localRunner: STUDIO,
-  accounts: buildAccounts(),
+  accounts: buildProviderAccounts(),
   connections: [],
   projects: [],
   resources: [],
@@ -467,7 +467,7 @@ const buildGitHubEndingScene = (ending: {
 }): FirstRunScene =>
   buildSignedInScene(
     {
-      records: buildRecords({ accounts: buildAccounts([CLAUDE_ID, CODEX_ID]) }),
+      records: buildRecords({ accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]) }),
       handlers: {
         "POST /api/v1/oauth/device/start": () => buildGitHubDeviceStart(1),
         "POST /api/v1/oauth/device/poll": { body: ending },
@@ -482,11 +482,11 @@ const buildGitHubEndingScene = (ending: {
 
 /** Returns the records of the GitHub step: both accounts signed in, nothing else yet. */
 const buildGitHubRecords = (): ControllerRecords =>
-  buildRecords({ accounts: buildAccounts([CLAUDE_ID, CODEX_ID]) });
+  buildRecords({ accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]) });
 
 /** Returns the records of the project step: signed in and GitHub connected. */
 const buildProjectRecords = (): ControllerRecords =>
-  buildRecords({ accounts: buildAccounts([CLAUDE_ID, CODEX_ID]), connections: [GITHUB] });
+  buildRecords({ accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]), connections: [GITHUB] });
 
 /** Returns a project step scene where the folder dialog answers `outcome`, after a click on Choose a folder. */
 const buildPickedScene = (
@@ -497,7 +497,7 @@ const buildPickedScene = (
     {
       records: gitHub
         ? buildProjectRecords()
-        : buildRecords({ accounts: buildAccounts([CLAUDE_ID, CODEX_ID]) }),
+        : buildRecords({ accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]) }),
       firstRun: gitHub ? putOff() : putOff("github"),
       pickFolder: () => Promise.resolve(outcome),
     },
@@ -735,7 +735,7 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
   "done-default": () =>
     buildSignedInScene({
       records: buildRecords({
-        accounts: buildAccounts([CLAUDE_ID, CODEX_ID]),
+        accounts: buildProviderAccounts([CLAUDE_ID, CODEX_ID]),
         connections: [GITHUB],
         projects: [WEBSHOP],
         resources: [WEBSHOP_REPO],

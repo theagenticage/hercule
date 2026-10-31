@@ -1,6 +1,6 @@
 import { Fragment, type JSX, type ReactNode } from "react";
 import {
-  describeAccountRow,
+  describeProviderAccountRow,
   describeModelRow,
   type SignInTarget,
   type ModelMenu,
@@ -27,14 +27,14 @@ export function ModelList({
   older,
   onOlder,
   onPickModel,
-  onPickAccount,
+  onPickProviderAccount,
   signInSlot,
 }: {
   readonly menu: ModelMenu;
   readonly older: boolean;
   readonly onOlder: () => void;
   readonly onPickModel: (providerAccountId: string, model: string) => void;
-  readonly onPickAccount: (providerAccountId: string) => void;
+  readonly onPickProviderAccount: (providerAccountId: string) => void;
   readonly signInSlot: (target: SignInTarget, className: string) => ReactNode;
 }): JSX.Element {
   const renderModelRow = (harnessId: string | null, row: Row): JSX.Element => (
@@ -84,12 +84,12 @@ export function ModelList({
             className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
             marker={renderMarker(<HarnessLogo harnessId={account.harnessId} />)}
             name={account.name}
-            detail={describeAccountRow(account)}
+            detail={describeProviderAccountRow(account)}
             note={account.dimmed === null ? `${account.models} ›` : undefined}
             dimmed={account.dimmed}
             trailing={account.signIn === null ? null : signInSlot(account.signIn, ROW_SIGN_IN)}
             onPick={() => {
-              onPickAccount(account.providerAccountId);
+              onPickProviderAccount(account.providerAccountId);
             }}
           />
         ) : (

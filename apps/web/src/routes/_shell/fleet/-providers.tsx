@@ -46,6 +46,8 @@ export function Providers({
       client.runner.installHarness({ params: { id: runner.id }, payload: { harnessId } }),
     onSuccess: (updated) => {
       queryClient.setQueryData(queryKeys.runner(runner.id), updated);
+      // A new install changes which runners have the harness.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.harnesses() });
       reread();
     },
   });

@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import type { AccountIdentityLine } from "@hercule/client-core";
+import type { ProviderAccountIdentityLine } from "@hercule/client-core";
 import { FleetIcon } from "../../../icons/fleet";
 import { IdentityLine } from "./identity-line";
 import "./providers.css";
@@ -47,7 +47,7 @@ function MachinePips({
  * credential every machine uses, which the card says in words under the
  * identity line.
  */
-export function AccountCard({
+export function ProviderAccountCard({
   mark,
   name,
   identity,
@@ -56,7 +56,7 @@ export function AccountCard({
 }: {
   readonly mark: ReactNode;
   readonly name: string;
-  readonly identity: AccountIdentityLine;
+  readonly identity: ProviderAccountIdentityLine;
   readonly machines: ReadonlyArray<MachinePip> | null;
   readonly onOpen: () => void;
 }): JSX.Element {

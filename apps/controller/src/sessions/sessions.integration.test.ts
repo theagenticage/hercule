@@ -230,7 +230,7 @@ const EXPIRING_INPUT_DEADLINE = Duration.millis(300);
  */
 const NO_TICK = Duration.hours(1);
 
-/** Runs `body` against a controller with one joined, connected, logged-in runner, using this suite's harnesses and models. */
+/** Runs `body` against a controller with one joined, connected, signed-in runner, using this suite's harnesses and models. */
 const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
   options: {

@@ -1,6 +1,6 @@
 /**
  * Tests `computeThreadDefaults`, the rule the composer and Settings > Threads
- * both use to prefill a new thread, `computeAccountDefaults`, which resolves
+ * both use to prefill a new thread, `computeProviderAccountDefaults`, which resolves
  * the runner first and then the model, and `buildDraftConfig`, which places
  * those defaults in a Draft Thread's project. The tests check that:
  *
@@ -20,7 +20,7 @@ import {
 } from "../providers.testing";
 import {
   buildDraftConfig,
-  computeAccountDefaults,
+  computeProviderAccountDefaults,
   computeThreadDefaults,
   findDefaultModel,
 } from "./thread-defaults";
@@ -76,9 +76,9 @@ describe("findDefaultModel", () => {
   });
 });
 
-describe("computeAccountDefaults", () => {
+describe("computeProviderAccountDefaults", () => {
   it("resolves the runner first and reads the model from that runner's catalog", () => {
-    // The local runner is not logged in, so the thread is placed on the remote
+    // The local runner is not signed in, so the thread is placed on the remote
     // runner, and the model must come from that runner's catalog, not from
     // whichever snapshot happens to be first.
     const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [
@@ -87,7 +87,12 @@ describe("computeAccountDefaults", () => {
     ]);
 
     expect(
-      computeAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL, REMOTE], LOCAL.id),
+      computeProviderAccountDefaults(
+        claude,
+        ANTHROPIC_IDENTITY.harnessId,
+        [LOCAL, REMOTE],
+        LOCAL.id,
+      ),
     ).toEqual({
       runnerId: REMOTE.id,
       model: "claude-haiku-5",
@@ -101,7 +106,12 @@ describe("computeAccountDefaults", () => {
     ]);
 
     expect(
-      computeAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL, REMOTE], LOCAL.id),
+      computeProviderAccountDefaults(
+        claude,
+        ANTHROPIC_IDENTITY.harnessId,
+        [LOCAL, REMOTE],
+        LOCAL.id,
+      ),
     ).toEqual({
       runnerId: LOCAL.id,
       model: "claude-sonnet-5",
@@ -114,7 +124,7 @@ describe("computeAccountDefaults", () => {
     ]);
 
     expect(
-      computeAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL], LOCAL.id).model,
+      computeProviderAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL], LOCAL.id).model,
     ).toBe("claude-opus-5");
   });
 
@@ -123,12 +133,12 @@ describe("computeAccountDefaults", () => {
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [SONNET] }),
     ]);
 
-    expect(computeAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL], LOCAL.id)).toEqual(
-      {
-        runnerId: null,
-        model: null,
-      },
-    );
+    expect(
+      computeProviderAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL], LOCAL.id),
+    ).toEqual({
+      runnerId: null,
+      model: null,
+    });
   });
 });
 

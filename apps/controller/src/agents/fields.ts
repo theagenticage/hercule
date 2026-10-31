@@ -24,7 +24,7 @@ import type { Actor } from "../actor";
 import { PermissionProfiles, requireMayAssignAgentProfile, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { listUnenforcedFields } from "../harnesses";
-import { resolveAccountHarness } from "../provider-accounts";
+import { resolveProviderAccountHarness } from "../provider-accounts";
 import type { StoredAgent } from "./repository";
 
 const NO_SUCH_PROFILE = "no such permission profile";
@@ -64,7 +64,7 @@ export const buildModelSelection = (
 export const buildAgentFieldChecks = Effect.gen(function* () {
   const host = yield* PluginHost;
   const profiles = yield* PermissionProfiles;
-  // What `resolveAccountHarness` reads, captured here so the checks below
+  // What `resolveProviderAccountHarness` reads, captured here so the checks below
   // need nothing from their caller.
   const accountServices = yield* Effect.context<SqlClient.SqlClient | PluginHost>();
 
@@ -96,12 +96,15 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
      * it. It does not check what the machines that host the harness can do
      * now: an agent is a stored configuration, not a placement.
      */
-    validateAgentAccountHarness: (
+    validateAgentProviderAccountHarness: (
       providerAccountId: string,
       harnessId: string | null | undefined,
     ): Effect.Effect<void, Validation | SqlError | Schema.SchemaError> =>
       Effect.asVoid(
-        Effect.provideContext(resolveAccountHarness(providerAccountId, harnessId), accountServices),
+        Effect.provideContext(
+          resolveProviderAccountHarness(providerAccountId, harnessId),
+          accountServices,
+        ),
       ),
 
     /**

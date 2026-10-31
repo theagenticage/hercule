@@ -53,6 +53,13 @@ describe("a Harness Home", () => {
     expect(isAccepted(HarnessHome, `providers/homes/${fits}/${fits}/${fits}`)).toBe(true);
   });
 
+  it("refuses the folder name homes in any letter case as an account's legacy folder", () => {
+    for (const name of ["homes", "Homes", "HOMES", "hOmEs"]) {
+      expect(isAccepted(HarnessHome, `providers/${name}`), name).toBe(false);
+    }
+    expect(isAccepted(HarnessHome, "providers/homes2")).toBe(true);
+  });
+
   it("refuses a path that climbs out of the storage directory", () => {
     for (const home of [
       "providers/..",
@@ -128,6 +135,19 @@ describe("a Harness Account", () => {
     ).toBe(true);
   });
 
+  it("refuses a home that belongs to another account, in both shapes", () => {
+    const other = "0199c3f4-1f2a-7c31-9f0e-aaaaaaaaaaaa";
+    expect(isAccepted(HarnessAccount, { ...account, harnessHome: `providers/${other}` })).toBe(
+      false,
+    );
+    expect(
+      isAccepted(HarnessAccount, { ...account, harnessHome: `providers/homes/${other}/pi/pi` }),
+    ).toBe(false);
+    expect(isAccepted(HarnessAccount, { ...account, harnessHome: `providers/${ACCOUNT_ID}` })).toBe(
+      true,
+    );
+  });
+
   it("needs the id, the home and the model argument", () => {
     expect(isAccepted(HarnessAccount, omitField(account, "providerAccountId"))).toBe(false);
     expect(isAccepted(HarnessAccount, omitField(account, "harnessHome"))).toBe(false);
@@ -156,6 +176,34 @@ describe("a Harness Account", () => {
       expect(isAccepted(HarnessAccount, withVariable(variable)), variable).toBe(false);
     }
     expect(isAccepted(HarnessAccount, withVariable("ANTHROPIC_API_KEY"))).toBe(true);
+  });
+
+  it("refuses a credential variable the harness process depends on", () => {
+    const withVariable = (variable: string) => ({
+      ...account,
+      credential: { variable, value: "sk-test" },
+    });
+    for (const variable of [
+      "PATH",
+      "HOME",
+      "SHELL",
+      "USER",
+      "TMPDIR",
+      "NODE_OPTIONS",
+      "GH_TOKEN",
+      "LD_PRELOAD",
+      "DYLD_INSERT_LIBRARIES",
+      "HERCULE_HOME",
+      "GIT_SSH_COMMAND",
+      "CLAUDE_CONFIG_DIR",
+      "CODEX_HOME",
+      "PI_CODING_AGENT_DIR",
+    ]) {
+      expect(isAccepted(HarnessAccount, withVariable(variable)), variable).toBe(false);
+      expect(isAccepted(CredentialVariable, variable), variable).toBe(false);
+    }
+    expect(isAccepted(HarnessAccount, withVariable("PATHS"))).toBe(true);
+    expect(isAccepted(HarnessAccount, withVariable("USERNAME_KEY"))).toBe(true);
   });
 
   it("accepts a credential variable without a value, for an account with no key stored", () => {

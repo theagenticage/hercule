@@ -8,7 +8,7 @@ import "./providers.css";
  * field's value and handlers (`useTextDraft`), so typing saves when the user
  * leaves the field or presses Enter.
  */
-export function AccountNameField({
+export function ProviderAccountNameField({
   draft,
   placeholder,
   hint,

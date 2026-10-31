@@ -127,7 +127,9 @@ const buildExpiresAt = (minutesFromNow: number): string =>
  * given, until `signedIn` is called, and with the fresh signed-in one after
  * that.
  */
-const stubAccounts = (before: object = SIGNED_OUT): { handler: Handler; signedIn: () => void } => {
+const stubProviderAccounts = (
+  before: object = SIGNED_OUT,
+): { handler: Handler; signedIn: () => void } => {
   let snapshot: object = before;
   return {
     handler: () => ({ body: [buildCodex(snapshot)] }),
@@ -139,7 +141,7 @@ const stubAccounts = (before: object = SIGNED_OUT): { handler: Handler; signedIn
 
 describe("a login with a one-time code from the vendor", () => {
   it("shows the code, asks for no input, and closes once a fresh snapshot is signed in", async () => {
-    const accounts = stubAccounts();
+    const accounts = stubProviderAccounts();
     const { api, onSignedIn, announce } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(15) } },
       [LOGIN_CODE]: { body: SNAPSHOT },
@@ -203,7 +205,7 @@ describe("a login with a one-time code from the vendor", () => {
     try {
       await openLoginPanel({
         [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(2) } },
-        [ACCOUNTS]: stubAccounts().handler,
+        [ACCOUNTS]: stubProviderAccounts().handler,
       });
       await waitFor(() => {
         expect(screen.getByRole("status").textContent).toContain("The code expires in 2 minutes.");
@@ -226,7 +228,7 @@ describe("a login with a one-time code from the vendor", () => {
   it("stays open when the user signs in again, since no snapshot can tell the login ended", async () => {
     // Signed in before the login started: the old credential still checks as
     // signed in, so a fresh snapshot that says so proves nothing.
-    const accounts = stubAccounts(SNAPSHOT);
+    const accounts = stubProviderAccounts(SNAPSHOT);
     const { onSignedIn, announce } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(15) } },
       [ACCOUNTS]: accounts.handler,
@@ -249,7 +251,7 @@ describe("a login with a one-time code from the vendor", () => {
   });
 
   it("says the code expired and offers to start again", async () => {
-    const accounts = stubAccounts();
+    const accounts = stubProviderAccounts();
     const { user, api } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(-1) } },
       [ACCOUNTS]: accounts.handler,

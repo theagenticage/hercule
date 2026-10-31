@@ -28,7 +28,7 @@ import { buildRunActor, CurrentActor } from "../actor";
 import { agentRepository } from "../agents";
 import { afterCommit, nowIso, withTransaction } from "../db";
 import { renderInputTemplate } from "../expressions";
-import { isLoggedIn, providerAccountRepository } from "../provider-accounts";
+import { isSignedIn, providerAccountRepository } from "../provider-accounts";
 import type { PlacementCandidate } from "../runners";
 import type { StoredSession } from "../sessions";
 import { RunExecutor } from "./executor";
@@ -191,7 +191,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
           agentName: agent.value.name,
           runnerIds: new Set(
             snapshots
-              .filter((snapshot) => snapshot.harnessId === harnessId && isLoggedIn(snapshot))
+              .filter((snapshot) => snapshot.harnessId === harnessId && isSignedIn(snapshot))
               .map((snapshot) => snapshot.runnerId),
           ),
         };

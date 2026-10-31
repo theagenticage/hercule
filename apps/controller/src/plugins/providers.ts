@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect";
 import { PluginError, ProviderDefinition, type PluginManifest } from "@hercule/plugin-host";
+import { API_KEY_SECRET_NAME } from "../secrets";
 import { toPluginError } from "./errors";
 import { mintQualifiedId } from "./qualified-id";
 import type { NewContribution } from "./repository";
@@ -11,7 +12,11 @@ import type { NewContribution } from "./repository";
  * entry uses that id. An account kind's own id stays the provider's bare
  * word, because a kind belongs to one provider.
  */
-export type RegisteredProvider = Omit<ProviderDefinition, "id"> & { readonly id: string };
+export type RegisteredProvider = Omit<ProviderDefinition, "id"> & {
+  readonly id: string;
+  /** The id of the plugin that registered the provider. Read it here; never split it off `id`. */
+  readonly pluginId: string;
+};
 
 /** The name of the provider extension point in the catalog. */
 const PROVIDER = "provider";
@@ -27,7 +32,8 @@ const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
  * Validates a provider definition and adds it to this registration pass: a
  * catalog row in `declared` and the in-memory entry in `live`. Fails with a
  * `PluginError` for a definition that does not decode, whose qualified id is
- * too long, that declares an account kind twice, or that the plugin
+ * too long, that declares an account kind twice, that has an account kind whose
+ * credentials step is not exactly one field named `apiKey`, or that the plugin
  * registered twice.
  *
  * The harnesses an account kind lists are qualified ids and are not checked
@@ -53,6 +59,23 @@ export const registerProviderContribution = (
         );
       }
       kindIds.add(kind.id);
+      // A key account stores one Secret, named `apiKey`, and the controller
+      // reads only that one when it sends a harness the key (spec 06 section
+      // 15.2). A kind with other fields would accept values that are never
+      // used.
+      for (const step of kind.setup) {
+        if (step.kind !== "credentials") continue;
+        if (step.fields.length !== 1 || step.fields[0]?.name !== API_KEY_SECRET_NAME) {
+          return yield* Effect.fail(
+            new PluginError({
+              message:
+                `the account kind ${kind.id} of the provider ${id} has a credentials step with ` +
+                `the fields ${step.fields.map((field) => field.name).join(", ") || "(none)"}; ` +
+                `a credentials step must have exactly one field, named ${API_KEY_SECRET_NAME}`,
+            }),
+          );
+        }
+      }
     }
     if (declared.some((row) => row.extensionPoint === PROVIDER && row.id === id)) {
       return yield* Effect.fail(
@@ -65,5 +88,5 @@ export const registerProviderContribution = (
       id,
       definition: { ...decoded, id },
     });
-    live.push({ ...decoded, id });
+    live.push({ ...decoded, id, pluginId: manifest.id });
   });

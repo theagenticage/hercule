@@ -105,7 +105,11 @@ const buildConfig = (providerAccountId: string, model: string): ThreadConfig => 
 const DRAFT = { kind: "draft" as const, filter: "", recent: [] };
 
 /** Returns one account with `count` models, to test the filter threshold. */
-const buildCountedAccount = (id: string, label: string | null, count: number): ProviderAccount =>
+const buildCountedProviderAccount = (
+  id: string,
+  label: string | null,
+  count: number,
+): ProviderAccount =>
   withModels(
     CLAUDE,
     id,
@@ -122,8 +126,8 @@ describe("buildModelMenu: filterable", () => {
   it("offers no filter at eight models across all accounts", () => {
     const menu = buildModelMenu(
       buildCatalogs([
-        buildCountedAccount("account-a", "a", 5),
-        buildCountedAccount("account-b", "b", 3),
+        buildCountedProviderAccount("account-a", "a", 5),
+        buildCountedProviderAccount("account-b", "b", 3),
       ]),
       buildConfig("account-a", "model-account-a-0"),
       DRAFT,
@@ -135,8 +139,8 @@ describe("buildModelMenu: filterable", () => {
   it("offers a filter at nine models across all accounts", () => {
     const menu = buildModelMenu(
       buildCatalogs([
-        buildCountedAccount("account-a", "a", 5),
-        buildCountedAccount("account-b", "b", 4),
+        buildCountedProviderAccount("account-a", "a", 5),
+        buildCountedProviderAccount("account-b", "b", 4),
       ]),
       buildConfig("account-a", "model-account-a-0"),
       DRAFT,
@@ -205,7 +209,7 @@ describe("buildModelMenu: recent", () => {
 
   it("holds at most three rows", () => {
     const menu = buildModelMenu(
-      buildCatalogs([buildCountedAccount("account-a", "a", 5)]),
+      buildCatalogs([buildCountedProviderAccount("account-a", "a", 5)]),
       buildConfig("account-a", "model-account-a-0"),
       {
         ...DRAFT,
@@ -352,14 +356,14 @@ describe("buildModelMenu: the other accounts", () => {
   });
 
   it("reads the current account in the thread's harness and every other account in its default harness", () => {
-    const account = buildCountedAccount("account-a", null, 1);
+    const account = buildCountedProviderAccount("account-a", null, 1);
     const inPi = buildSnapshot({
       runnerId: LOCAL.id,
       harnessId: "pi/pi",
       models: [{ slug: "glm-5.3", name: "GLM 5.3", imageInput: null, options: [] }],
     });
     const current = { ...account, snapshots: [...account.snapshots, inPi] };
-    const other = { ...buildCountedAccount("account-b", null, 1), snapshots: [inPi] };
+    const other = { ...buildCountedProviderAccount("account-b", null, 1), snapshots: [inPi] };
 
     const menu = buildModelMenu(
       buildCatalogs([current, other]),
@@ -381,7 +385,7 @@ describe("buildModelMenu: the other accounts", () => {
 
   it("lists every other account, however many there are; only the recent models are capped", () => {
     const others = [1, 2, 3, 4].map((n) =>
-      buildCountedAccount(`account-${String(n)}`, `account ${String(n)}`, 1),
+      buildCountedProviderAccount(`account-${String(n)}`, `account ${String(n)}`, 1),
     );
     const menu = buildModelMenu(
       buildCatalogs([CLAUDE, ...others]),

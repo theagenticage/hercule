@@ -2,15 +2,16 @@
  * Tests the probes with a stand-in for the connection to the runners, so the
  * frames the controller sends can be read and answered one by one.
  */
-import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option, Redacted, Stream } from "effect";
+import { afterEach, describe, expect, it } from "vitest";
+import { Effect, Layer, Logger, Option, Redacted, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { ControllerToRunner, RunnerToController } from "@hercule/protocol";
-import { withTransaction } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import { asUser, buildPluginStack } from "../plugins/testing";
 import { RunnerConnections } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
+import { HarnessAccountsLayer } from "./harness-account";
 import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
 import { providerAccountRepository } from "./repository";
 import {
@@ -28,6 +29,9 @@ interface Sent {
   readonly request: ControllerToRunner;
 }
 
+/** Runs before a probe is answered, so a test can change the world while a runner is "thinking". */
+const beforeAnswer: { current: Effect.Effect<void> } = { current: Effect.void };
+
 /** A connection that records every frame and answers each probe with `SIGNED_IN`. */
 const buildFakeConnections = (sent: Array<Sent>): RunnerConnections["Service"] =>
   ({
@@ -41,13 +45,20 @@ const buildFakeConnections = (sent: Array<Sent>): RunnerConnections["Service"] =
         providerAccountId: request.harnessAccount.providerAccountId,
         result: SIGNED_IN,
       };
-      return Effect.succeed(Option.some(answer));
+      return Effect.as(beforeAnswer.current, Option.some(answer));
     },
   }) as unknown as RunnerConnections["Service"];
+
+/** A log line the controller wrote while a test ran. */
+interface Logged {
+  readonly level: string;
+  readonly message: string;
+}
 
 const run = <A, E>(
   sent: Array<Sent>,
   body: Effect.Effect<A, E, ProviderAccountProbes | SqlClient.SqlClient | Secrets>,
+  logged: Array<Logged> = [],
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -56,9 +67,17 @@ const run = <A, E>(
     }).pipe(
       Effect.provide(
         ProviderAccountProbesLayer.pipe(
+          Layer.provideMerge(HarnessAccountsLayer),
           Layer.provideMerge(Layer.succeed(RunnerConnections)(buildFakeConnections(sent))),
           Layer.provideMerge(buildPluginStack()),
         ),
+      ),
+      Effect.provide(
+        Logger.layer([
+          Logger.make<unknown, void>(({ logLevel, message }) => {
+            logged.push({ level: logLevel, message: String(message) });
+          }),
+        ]),
       ),
       asUser,
     ) as Effect.Effect<A, E, never>,
@@ -174,6 +193,25 @@ describe("a sweep", () => {
     ).toBe(true);
   });
 
+  it("sends nothing to a runner whose facts show no adapter for the harness, or no binary", async () => {
+    const sent: Array<Sent> = [];
+
+    const ready = await run(
+      sent,
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        yield* addAccount({ kind: KEY_KIND });
+        const ready = yield* addRunner("ready");
+        const noAdapter = yield* addRunner("no-adapter", { adapters: [] });
+        const noBinary = yield* addRunner("no-binary", { binaryPresent: false });
+        yield* Effect.forEach([ready, noAdapter, noBinary], probes.sweepRunner, { discard: true });
+        return ready;
+      }),
+    );
+
+    expect(sent.map((one) => one.runnerId)).toEqual([ready]);
+  });
+
   it("probes one account on every connected runner after its credential changed", async () => {
     const sent: Array<Sent> = [];
 
@@ -185,12 +223,75 @@ describe("a sweep", () => {
         yield* addAccount({ kind: KEY_KIND, label: "other" });
         yield* addRunner("laptop");
         yield* addRunner("desktop");
-        yield* probes.sweepAccount(account.id);
+        yield* probes.sweepProviderAccount(account.id);
         return account;
       }),
     );
 
     expect(sent).toHaveLength(2);
+  });
+});
+
+describe("an account deleted while a probe was in flight", () => {
+  /** Deletes the account the moment the runner is about to answer, like a user racing the probe. */
+  const deleteWhenAnswering = (accountId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      beforeAnswer.current = withTransaction(
+        sql,
+        sql`DELETE FROM provider_accounts WHERE id = ${uuidFromString(accountId)}`,
+      ).pipe(Effect.orDie);
+    });
+
+  afterEach(() => {
+    beforeAnswer.current = Effect.void;
+  });
+
+  it("is logged at info, not error, when a sweep's probe finds it gone", async () => {
+    const logged: Array<Logged> = [];
+
+    const stored = await run(
+      [],
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: KEY_KIND });
+        const runner = yield* addRunner("laptop");
+        yield* deleteWhenAnswering(account.id);
+        yield* probes.sweepRunner(runner);
+        return yield* snapshotsOf(account.id);
+      }),
+      logged,
+    );
+
+    expect(stored).toEqual([]);
+    expect(logged.filter((line) => line.level === "Error")).toEqual([]);
+    expect(logged.filter((line) => line.level === "Info").map((line) => line.message)).toEqual([
+      expect.stringContaining("deleted meanwhile") as unknown,
+    ]);
+  });
+
+  it("is logged at info, not error, when the probe after a sign-in ended finds it gone", async () => {
+    const logged: Array<Logged> = [];
+
+    await run(
+      [],
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        yield* probes.expectLoginEnd(runner, account.id, ALPHA_HARNESS_ID, "login-1");
+        yield* probes.recordPrintedLogin(runner, account.id, ALPHA_HARNESS_ID, "login-1", {
+          reportsEnd: true,
+        });
+        yield* deleteWhenAnswering(account.id);
+        // Fails with nothing: the end of a login is reported by a runner, and nobody awaits this call.
+        yield* probes.probeAfterLoginEnd(runner, "login-1");
+      }),
+      logged,
+    );
+
+    expect(logged.filter((line) => line.level === "Error")).toEqual([]);
+    expect(logged.map((line) => line.message).join("\n")).toContain("deleted meanwhile");
   });
 });
 

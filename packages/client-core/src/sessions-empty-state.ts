@@ -83,7 +83,7 @@ export const decideSessionsEmptyState = (
  * looks at every runner, because a thread can run on any machine in the fleet,
  * not only on this one.
  */
-export const hasLoggedInRunner = (
+export const hasSignedInRunner = (
   runners: ReadonlyArray<Runner>,
   accounts: ReadonlyArray<ProviderAccount>,
   providers: ReadonlyArray<Provider>,

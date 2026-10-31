@@ -25,11 +25,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { ConnectionTypes } from "../../connections";
 import { withTransaction } from "../../db";
-import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
-import { prepareHarnessAccount } from "../../provider-accounts";
-import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
+import { HarnessAccounts } from "../../provider-accounts";
 import { Secrets } from "../../secrets";
+import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
 import { SessionService, type StartRequest } from "../../sessions";
 import { githubAccounts } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
@@ -41,8 +40,7 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
   const accounts = yield* githubAccounts;
-  const secrets = yield* Secrets;
-  const host = yield* PluginHost;
+  const harnessAccounts = yield* HarnessAccounts;
   const localRunnerId = yield* LocalRunnerId;
   const promotion = yield* PromotionState;
   // Each start waits for the runner's answer on a fiber of its own, owned by
@@ -145,12 +143,7 @@ const make = Effect.gen(function* () {
               return yield* sessions.claimStarts(runnerId, room, {
                 readGithubAccount: accounts.readGithubAccount,
                 readGitIdentity: accounts.readGitIdentity,
-                prepareHarnessAccount: (providerAccountId, harnessId) =>
-                  prepareHarnessAccount(providerAccountId, harnessId).pipe(
-                    Effect.provideService(SqlClient.SqlClient, sql),
-                    Effect.provideService(PluginHost, host),
-                    Effect.provideService(Secrets, secrets),
-                  ),
+                prepareHarnessAccount: harnessAccounts.prepare,
                 buildCoordination: (sessionId) =>
                   Effect.provideService(
                     buildSessionCoordination(sessionId),
@@ -189,7 +182,7 @@ export const DispatchLayer: Layer.Layer<
   | ConnectionTypes
   | RunnerConnections
   | Secrets
-  | PluginHost
+  | HarnessAccounts
   | LocalRunnerId
   | PromotionState
 > = Layer.effect(Dispatch)(make);

@@ -27,7 +27,7 @@ import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
 import { withTransaction } from "../db";
 import { appendIngestedEvent } from "../events";
-import { get, post, type ServerHarness } from "../http/testing";
+import { get, post, TEST_HARNESS_ID, type ServerHarness } from "../http/testing";
 import { buildHarnessDefinition } from "../plugins/testing";
 import {
   spawnThreadWithGrants,
@@ -97,7 +97,9 @@ export const FACTS: RunnerFacts = {
   docker: false,
   toolchains: [],
   harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["harnesses/full"],
+  // The test controller also registers the `test` harness and an account that
+  // runs in it, and an account is probed only on a runner with its harness.
+  adapters: ["harnesses/full", TEST_HARNESS_ID],
   identityPort: 4939,
 };
 

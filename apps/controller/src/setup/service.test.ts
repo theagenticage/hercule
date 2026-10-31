@@ -363,7 +363,7 @@ describe("the default assistant", () => {
       expect(refused.status).toBe(409);
       const error = await readErrorBody(refused);
       expect(error.code).toBe("invalid_state");
-      expect(error.message).toContain("add a provider account first");
+      expect(error.message).toContain("this version cannot add one yet");
 
       const state = await get(harness.base, "/api/v1/setup");
       expect(await state.json()).toEqual({ complete: false });

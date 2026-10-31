@@ -29,7 +29,7 @@ import {
   type SessionInputResult,
   type SessionStart,
 } from "@hercule/protocol";
-import { createInvalidStateError, type Passage } from "@hercule/contract";
+import { createInvalidStateError, createNotFoundError, type Passage } from "@hercule/contract";
 import { buildSessionStamp, CurrentActor, type Actor, type SessionActor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
@@ -57,6 +57,7 @@ import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
+import { providerAccountRepository } from "../provider-accounts";
 import { sessionRepository } from "./repository";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver } from "./observer";
@@ -469,38 +470,69 @@ describe("SessionService.claimStarts", () => {
     );
   });
 
-  it("leaves a session queued, and logs it, when its account cannot be prepared", async () => {
-    const logged: Array<string> = [];
-    const result = await run(
-      Effect.gen(function* () {
-        const runnerId = mintId();
-        const providerAccountId = mintId();
-        const sessionId = yield* insertQueuedSession(runnerId, {
-          providerAccountId,
-          spec: buildSpec(providerAccountId, "clever"),
-        });
-        const sql = yield* SqlClient.SqlClient;
-        const sessions = yield* SessionService;
-        const claimed = yield* withTransaction(
-          sql,
-          sessions.claimStarts(runnerId, 1, {
-            readGithubAccount: () => Effect.succeed(undefined),
-            readGitIdentity: () => Effect.succeed(undefined),
-            prepareHarnessAccount: () =>
-              Effect.fail(createInvalidStateError("the key could not be decrypted")),
-            buildCoordination: () => Effect.succeed(undefined),
-            runner: { name: "a runner", negotiatedCapabilities: [] },
-            localRunnerId: undefined,
-          }),
-        ).pipe(Effect.provide(captureLogs(logged)));
-        return { claimed, status: yield* readStatus(sessionId), sessionId };
-      }),
-    );
+  it("ends a queued session, with the reason, when its account cannot be prepared", async () => {
+    // A refusal never passes by itself: retrying it on every pass would only
+    // log it again and keep the account from being deleted.
+    const refusals = [
+      createInvalidStateError("the key could not be decrypted"),
+      createNotFoundError("no such provider account"),
+    ];
+    for (const refusal of refusals) {
+      const result = await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const sessions = yield* SessionService;
+          const runnerId = mintId();
+          const refusedAccountId = mintId();
+          const fineAccountId = mintId();
+          const refused = yield* insertQueuedSession(runnerId, {
+            providerAccountId: refusedAccountId,
+            spec: buildSpec(refusedAccountId, "clever"),
+          });
+          // Claimed in the same pass: a refusal ends one session, not the batch.
+          const fine = yield* insertQueuedSession(runnerId, {
+            providerAccountId: fineAccountId,
+            spec: buildSpec(fineAccountId, "clever"),
+          });
+          const claimed = yield* withTransaction(
+            sql,
+            sessions.claimStarts(runnerId, 2, {
+              readGithubAccount: () => Effect.succeed(undefined),
+              readGitIdentity: () => Effect.succeed(undefined),
+              prepareHarnessAccount: (id) =>
+                id === refusedAccountId ? Effect.fail(refusal) : prepareAccount(id),
+              buildCoordination: () => Effect.succeed(undefined),
+              runner: { name: "a runner", negotiatedCapabilities: [] },
+              localRunnerId: undefined,
+            }),
+          );
+          const again = yield* claimStarting(runnerId, 2);
+          const exitRows = yield* sql<{ readonly event: string }>`
+            SELECT event FROM session_stream WHERE session_id = ${uuidFromString(refused)}
+          `;
+          const inputRows = yield* sql<{ readonly status: string; readonly reason: string | null }>`
+            SELECT status, reason FROM session_inputs WHERE session_id = ${uuidFromString(refused)}
+          `;
+          return {
+            claimed: claimed.map((claim) => claim.sessionId),
+            again,
+            refused,
+            fine,
+            refusedStatus: yield* readStatus(refused),
+            fineStatus: yield* readStatus(fine),
+            exitRows,
+            inputRows,
+          };
+        }),
+      );
 
-    expect(result.claimed).toEqual([]);
-    expect(result.status).toBe("queued");
-    expect(logged.join("\n")).toContain("could not be prepared");
-    expect(logged.join("\n")).toContain(result.sessionId);
+      expect(result.claimed).toEqual([result.fine]);
+      expect(result.fineStatus).toBe("starting");
+      expect(result.refusedStatus).toBe("exited");
+      expect(result.again).toEqual([]);
+      expect(JSON.stringify(result.exitRows)).toContain(refusal.error.message);
+      expect(result.inputRows).toEqual([{ status: "cancelled", reason: refusal.error.message }]);
+    }
   });
 
   it("adds the coordination paragraph to the spec the frame carries", async () => {
@@ -1130,6 +1162,95 @@ const openedAnswer = (requestId: string): SessionInputResult => ({
  * twice: the send waiting for it records it (`recordInputAnswer`), and the session's
  * ordered traffic applies it (`applyInputResult`). Either can run first.
  */
+describe("SessionService.resume", () => {
+  /**
+   * Exits a session that has a waiting input on a runner that is not retired,
+   * and returns its ids. Whether its account exists is up to the caller.
+   */
+  const arrangeExitedSession = (providerAccountId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sessionRepository;
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const runnerId = mintId();
+          yield* sql`
+            INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                                 credential_hash, created_at, updated_at)
+            VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                    'a hash', ${at}, ${at})
+          `;
+          const sessionId = yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
+          });
+          yield* rows.bind(sessionId, runnerId, providerAccountId, "native-1");
+          yield* rows.moved(sessionId, "exited", at);
+          return sessionId;
+        }),
+      );
+    });
+
+  const resumeNow = (sessionId: string, providerAccountId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      return yield* withTransaction(
+        sql,
+        sessions.resume(
+          sessionId,
+          () => Effect.succeed(JSON.stringify(encodeSpec(buildSpec(providerAccountId, "clever")))),
+          at,
+          false,
+        ),
+      ).pipe(Effect.exit);
+    });
+
+  it("refuses to queue a session whose account was deleted, and leaves it exited", async () => {
+    // The caller checked the account before the transaction. An account
+    // deleted since then must not leave a queued session that dispatch can
+    // never prepare.
+    const result = await run(
+      Effect.gen(function* () {
+        const providerAccountId = mintId();
+        const sessionId = yield* arrangeExitedSession(providerAccountId);
+        const exit = yield* resumeNow(sessionId, providerAccountId);
+        return { exit, status: yield* readStatus(sessionId) };
+      }),
+    );
+
+    expect(Exit.isFailure(result.exit)).toBe(true);
+    expect(JSON.stringify(result.exit)).toContain("The account this thread ran on was deleted.");
+    expect(result.status).toBe("exited");
+  });
+
+  it("queues a session whose account exists", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const account = yield* withTransaction(
+          sql,
+          accounts.insert({
+            providerId: "a-provider",
+            kind: "a-kind",
+            label: null,
+            defaultHarnessId: HARNESS_ID,
+            at,
+          }),
+        );
+        const sessionId = yield* arrangeExitedSession(account.id);
+        const exit = yield* resumeNow(sessionId, account.id);
+        return { exit, status: yield* readStatus(sessionId) };
+      }),
+    );
+
+    expect(Exit.isSuccess(result.exit) && result.exit.value).toBe(true);
+    expect(result.status).toBe("queued");
+  });
+});
+
 describe("SessionService.claimInput", () => {
   it("claims a waiting input in a transaction of its own, and refuses a second claim", async () => {
     const result = await run(

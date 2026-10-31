@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { buildDraftConfig, buildSiblingTabs } from "@hercule/client-core";
 import {
-  ensureAccountReads,
+  ensureProviderAccountReads,
   localRunnerQuery,
   profilesQuery,
   projectsQuery,
@@ -49,7 +49,7 @@ export const Route = createFileRoute("/_shell/threads/new")({
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      ensureAccountReads(context.queryClient, context.client),
+      ensureProviderAccountReads(context.queryClient, context.client),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
       context.queryClient.ensureQueryData(settingsQuery(context.client)),
       // The lists the workspace menu reads. They are prefetched rather than

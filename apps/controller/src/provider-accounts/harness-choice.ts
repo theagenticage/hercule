@@ -1,7 +1,7 @@
 /**
  * Resolves a Provider Account and a harness to the account's row and the
  * harness definition behind it, and checks from a runner's stored snapshot
- * whether the runner can run the pair.
+ * whether the runner is signed in to the account.
  *
  * Opening, forking and steering a session all need both, so they are defined
  * once here rather than in each caller.
@@ -12,7 +12,7 @@ import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createValidationError, type Validation } from "@hercule/contract";
-import { checkHarnessSupport, PluginHost, type RegisteredHarness } from "../plugins";
+import { decideProviderAccountHarness, PluginHost, type RegisteredHarness } from "../plugins";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
@@ -27,7 +27,7 @@ export const NO_PLACEMENT =
   "no connected runner is signed in to that provider account; sign in on a machine first";
 
 /** A Provider Account in one harness: the row, the harness definition, and the snapshots of that pair, one per runner. */
-export interface ResolvedAccountHarness {
+interface ResolvedProviderAccountHarness {
   readonly account: StoredProviderAccount;
   /** The qualified id of the harness: the one asked for, or else the account's default. */
   readonly harnessId: string;
@@ -40,7 +40,7 @@ export interface ResolvedAccountHarness {
  * to the account, which means it can run the account. Reads the stored
  * snapshot and never probes the runner.
  */
-export const isLoggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status === "ok";
+export const isSignedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status === "ok";
 
 /**
  * Resolves an account id, and a harness id (left out or `null`: the account's
@@ -50,18 +50,17 @@ export const isLoggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.s
  * Fails with a `Validation` error when:
  *
  * - there is no such account (path `providerAccountId`);
- * - this build carries no such harness (path `harnessId` when the caller named
- *   it, else `providerAccountId`, since the account's own default is the
- *   problem);
- * - the account cannot run in the harness (path `harnessId`), because its
- *   provider does not allow it or the harness does not support it. The
- *   message says which.
+ * - the account cannot run in the harness, because this build carries no such
+ *   harness, the account's provider does not allow it, or the harness does
+ *   not support it. `decideProviderAccountHarness` gives the message and the path:
+ *   `harnessId` when the caller named the harness, else `providerAccountId`,
+ *   since the account's own default is then the problem.
  */
-export const resolveAccountHarness = (
+export const resolveProviderAccountHarness = (
   providerAccountId: string,
   harnessId?: string | null,
 ): Effect.Effect<
-  ResolvedAccountHarness,
+  ResolvedProviderAccountHarness,
   Validation | SqlError | Schema.SchemaError,
   SqlClient.SqlClient | PluginHost
 > =>
@@ -77,33 +76,22 @@ export const resolveAccountHarness = (
       );
     }
     const account = found.value;
-    const resolvedHarnessId = harnessId ?? account.defaultHarnessId;
-    const definition = (yield* host.harnesses()).find(
-      (candidate) => candidate.id === resolvedHarnessId,
+    const choice = decideProviderAccountHarness(
+      yield* host.providers(),
+      yield* host.harnesses(),
+      account,
+      harnessId,
     );
-    if (definition === undefined) {
+    if (choice._tag === "refused") {
       return yield* Effect.fail(
-        createValidationError([
-          {
-            path: [
-              harnessId === undefined || harnessId === null ? "providerAccountId" : "harnessId",
-            ],
-            message: `this build carries no ${resolvedHarnessId} harness`,
-          },
-        ]),
-      );
-    }
-    const support = checkHarnessSupport(yield* host.providers(), definition, account);
-    if (support._tag === "refused") {
-      return yield* Effect.fail(
-        createValidationError([{ path: ["harnessId"], message: support.reason }]),
+        createValidationError([{ path: [choice.field], message: choice.reason }]),
       );
     }
     const snapshots = yield* accounts.listSnapshots(providerAccountId);
     return {
       account,
-      harnessId: resolvedHarnessId,
-      definition,
-      snapshots: snapshots.filter((snapshot) => snapshot.harnessId === resolvedHarnessId),
+      harnessId: choice.harness.id,
+      definition: choice.harness,
+      snapshots: snapshots.filter((snapshot) => snapshot.harnessId === choice.harness.id),
     };
   });

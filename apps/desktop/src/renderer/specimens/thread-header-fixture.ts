@@ -22,7 +22,7 @@
 import type { Session } from "@hercule/contract";
 import { buildCheckout, buildRepo, buildWorkspace } from "@hercule/client-core/threads/testing";
 import {
-  buildSpecimenAccount,
+  buildSpecimenProviderAccount,
   buildSpecimenSession,
   CLAUDE_OPUS,
   CLAUDE_SONNET,
@@ -235,12 +235,12 @@ export const THREAD_HEADER_RECORDS: SidebarRecords = {
   workspaces: [RESULT_WORKSPACE],
   resources: [PAYMENTS_REPO],
   accounts: [
-    buildSpecimenAccount("a-claude", "anthropic/anthropic", "claude-code/claude-code", [
+    buildSpecimenProviderAccount("a-claude", "anthropic/anthropic", "claude-code/claude-code", [
       SONNET,
       CLAUDE_OPUS,
       HAIKU,
     ]),
-    buildSpecimenAccount("a-codex", "openai/openai", "codex/codex", [GPT_54, GPT_MINI]),
+    buildSpecimenProviderAccount("a-codex", "openai/openai", "codex/codex", [GPT_54, GPT_MINI]),
   ],
 };
 

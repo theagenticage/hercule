@@ -362,7 +362,7 @@ export const harnessesQuery = (client: HerculeClient) =>
  * providers and the harnesses. A screen that names or lists accounts calls it
  * in its loader, so nothing below the route suspends.
  */
-export const ensureAccountReads = (queryClient: QueryClient, client: HerculeClient) =>
+export const ensureProviderAccountReads = (queryClient: QueryClient, client: HerculeClient) =>
   Promise.all([
     queryClient.ensureQueryData(providerAccountsQuery(client)),
     queryClient.ensureQueryData(providersQuery(client)),

@@ -826,7 +826,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Publishes that a device login on a runner ended. The controller daemon
-     * probes the instance again, and the probe says whether the login worked.
+     * probes the Provider Account again, and the probe says whether the login worked.
      */
     reportedLoginEnded: (
       id: string,

@@ -16,7 +16,11 @@
  */
 import type { ModelDescriptor, ProviderAccount } from "@hercule/contract";
 import { describeModelCount } from "../model-count";
-import { buildProviderAccountName, findAccountNameIfAmbiguous } from "../provider-accounts";
+import {
+  buildProviderAccountName,
+  findProviderAccountNameIfAmbiguous,
+  resolveThreadHarnessId,
+} from "../provider-accounts";
 import { buildSignInTarget, findSnapshotOn, type SignInTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";
@@ -56,7 +60,7 @@ export interface ModelMenuLane {
   readonly older: readonly ModelMenuRow[];
 }
 
-export interface ModelMenuAccountRow {
+export interface ModelMenuProviderAccountRow {
   readonly providerAccountId: string;
   readonly harnessId: string;
   readonly name: string;
@@ -78,7 +82,7 @@ export interface ModelMenu {
   readonly filterable: boolean;
   readonly recent: readonly ModelMenuRecentRow[];
   readonly current: ModelMenuLane;
-  readonly others: readonly ModelMenuAccountRow[];
+  readonly others: readonly ModelMenuProviderAccountRow[];
 }
 
 export interface ModelMenuView {
@@ -103,7 +107,7 @@ export const buildModelMenu = (
   // run in its own default harness once picked.
   const findHarnessId = (account: ProviderAccount): string =>
     account.id === current.providerAccountId
-      ? (current.harnessId ?? account.defaultHarnessId)
+      ? resolveThreadHarnessId(account, current.harnessId)
       : account.defaultHarnessId;
   const findSnapshot = (account: ProviderAccount) =>
     findSnapshotOn(account, findHarnessId(account), runner?.id);
@@ -149,7 +153,11 @@ export const buildModelMenu = (
             ...pair,
             name: descriptor.name,
             harnessId: findHarnessId(held),
-            account: findAccountNameIfAmbiguous(catalogs.accounts, catalogs.providers, held),
+            account: findProviderAccountNameIfAmbiguous(
+              catalogs.accounts,
+              catalogs.providers,
+              held,
+            ),
             dimmed:
               view.kind === "active" && held.id !== current.providerAccountId
                 ? ACCOUNT_FIXED

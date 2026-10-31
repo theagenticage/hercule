@@ -4,9 +4,11 @@
  * call. There is one builder so no frame can disagree with another about an
  * account's home, model argument or credential.
  */
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import type * as SqlClient from "effect/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   createInvalidStateError,
@@ -15,7 +17,7 @@ import {
   type NotFound,
 } from "@hercule/contract";
 import type { HarnessAccount } from "@hercule/protocol";
-import { checkHarnessSupport, PluginHost } from "../plugins";
+import { decideProviderAccountHarness, PluginHost } from "../plugins";
 import { readProviderAccountCredential, Secrets } from "../secrets";
 import { resolveHarnessHome } from "./harness-home";
 import { providerAccountRepository } from "./repository";
@@ -40,7 +42,7 @@ import { providerAccountRepository } from "./repository";
  * instead of letting a key of the runner's own stand in. The plaintext lives
  * only while the frame is built and then on the wire.
  */
-export const prepareHarnessAccount = (
+const prepareHarnessAccount = (
   providerAccountId: string,
   harnessId: string,
 ): Effect.Effect<
@@ -57,16 +59,16 @@ export const prepareHarnessAccount = (
       return yield* Effect.fail(createNotFoundError("no such provider account"));
     }
     const account = found.value;
-    const definition = (yield* host.harnesses()).find((candidate) => candidate.id === harnessId);
-    if (definition === undefined) {
-      return yield* Effect.fail(
-        createInvalidStateError(`this build carries no ${harnessId} harness`),
-      );
+    const choice = decideProviderAccountHarness(
+      yield* host.providers(),
+      yield* host.harnesses(),
+      account,
+      harnessId,
+    );
+    if (choice._tag === "refused") {
+      return yield* Effect.fail(createInvalidStateError(choice.reason));
     }
-    const support = checkHarnessSupport(yield* host.providers(), definition, account);
-    if (support._tag === "refused") {
-      return yield* Effect.fail(createInvalidStateError(support.reason));
-    }
+    const { support } = choice;
     const harnessHome = resolveHarnessHome(account, harnessId);
     if (support.credentialVariable === undefined) {
       return { providerAccountId, harnessHome, modelArgument: support.modelArgument };
@@ -91,3 +93,34 @@ export const prepareHarnessAccount = (
       },
     };
   });
+
+const make = Effect.gen(function* () {
+  // What `prepareHarnessAccount` reads, captured once here so the services
+  // that send frames need none of it from their callers.
+  const context = yield* Effect.context<SqlClient.SqlClient | PluginHost | Secrets>();
+  return {
+    /** Builds the `HarnessAccount` for one account in one harness; see `prepareHarnessAccount`. */
+    prepare: (
+      providerAccountId: string,
+      harnessId: string,
+    ): Effect.Effect<HarnessAccount, NotFound | InvalidState | SqlError> =>
+      Effect.provideContext(prepareHarnessAccount(providerAccountId, harnessId), context),
+  };
+});
+
+/**
+ * Prepares the `HarnessAccount` every frame to a runner carries. It is a
+ * service so that the places that send such frames (probes, sign-in, session
+ * dispatch and text generation) do not each repeat the services the builder
+ * reads.
+ */
+export class HarnessAccounts extends Context.Service<
+  HarnessAccounts,
+  Effect.Success<typeof make>
+>()("hercule/controller/provider-accounts/HarnessAccounts") {}
+
+export const HarnessAccountsLayer: Layer.Layer<
+  HarnessAccounts,
+  never,
+  SqlClient.SqlClient | PluginHost | Secrets
+> = Layer.effect(HarnessAccounts)(make);

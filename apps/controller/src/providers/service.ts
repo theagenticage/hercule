@@ -21,6 +21,7 @@ const make = Effect.gen(function* () {
         const registered = yield* host.providers();
         return registered.map((definition) => ({
           id: definition.id,
+          pluginId: definition.pluginId,
           displayName: definition.displayName,
           kinds: definition.kinds,
         }));

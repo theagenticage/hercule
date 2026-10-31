@@ -93,30 +93,30 @@ const buildSnapshot = (
 });
 
 /** What makes an account belong to a provider: its provider, kind and default harness. */
-interface AccountProvider {
+interface ProviderAccountBase {
   readonly providerId: string;
   readonly kind: string;
   readonly harnessId: string;
 }
 
-const ANTHROPIC: AccountProvider = {
+const ANTHROPIC: ProviderAccountBase = {
   providerId: "anthropic/anthropic",
   kind: "subscription-per-machine",
   harnessId: "claude-code/claude-code",
 };
 
-const OPENAI: AccountProvider = {
+const OPENAI: ProviderAccountBase = {
   providerId: "openai/openai",
   kind: "subscription-per-machine",
   harnessId: "codex/codex",
 };
 
-const ZAI: AccountProvider = { providerId: "zai/zai", kind: "api-key", harnessId: "pi/pi" };
+const ZAI: ProviderAccountBase = { providerId: "zai/zai", kind: "api-key", harnessId: "pi/pi" };
 
 const buildProviderAccount = (
   id: string,
   label: string | null,
-  provider: AccountProvider,
+  provider: ProviderAccountBase,
   snapshots: ProviderAccount["snapshots"],
 ): ProviderAccount => ({
   id,
@@ -773,13 +773,13 @@ const buildUnauthenticatedSnapshot = (runnerId: string): ProviderAccount["snapsh
   models: [],
 });
 
-const LOGGED_OUT = buildProviderAccount("01a06d02-1000-7000-8000-000000000004", null, ANTHROPIC, [
+const SIGNED_OUT = buildProviderAccount("01a06d02-1000-7000-8000-000000000004", null, ANTHROPIC, [
   buildUnauthenticatedSnapshot(RUNNER.id),
 ]);
 
 /** The same account after the sign-in in the test below has finished. */
-const LOGGED_IN: ProviderAccount = {
-  ...LOGGED_OUT,
+const SIGNED_IN: ProviderAccount = {
+  ...SIGNED_OUT,
   snapshots: [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
       {
@@ -798,18 +798,18 @@ const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=1";
 describe("Composer: a sign-in updates the open draft", () => {
   it("blocks the draft with the sign-in message, then uses the new model list and spawns with it", async () => {
     const user = userEvent.setup();
-    let held: readonly ProviderAccount[] = [LOGGED_OUT];
+    let held: readonly ProviderAccount[] = [SIGNED_OUT];
     const { api } = await openApp(
-      [LOGGED_OUT],
+      [SIGNED_OUT],
       {},
       {
         "GET /api/v1/provider-accounts": () => ({ body: held }),
-        [`POST /api/v1/provider-accounts/${LOGGED_OUT.id}/sign-in`]: {
+        [`POST /api/v1/provider-accounts/${SIGNED_OUT.id}/sign-in`]: {
           body: { url: AUTHORIZE_URL },
         },
-        [`POST /api/v1/provider-accounts/${LOGGED_OUT.id}/sign-in-code`]: () => {
-          held = [LOGGED_IN];
-          return { body: LOGGED_IN };
+        [`POST /api/v1/provider-accounts/${SIGNED_OUT.id}/sign-in-code`]: () => {
+          held = [SIGNED_IN];
+          return { body: SIGNED_IN };
         },
         "POST /api/v1/sessions": { body: NEW_SESSION },
       },
@@ -860,7 +860,7 @@ describe("Composer: a sign-in updates the open draft", () => {
     });
     expect(spawn.body).toMatchObject({
       prompt: "Fix the login bug",
-      providerAccountId: LOGGED_OUT.id,
+      providerAccountId: SIGNED_OUT.id,
       model: "claude-sonnet-5",
       runnerId: RUNNER.id,
     });
@@ -930,7 +930,7 @@ const CODEX = buildProviderAccount("01a06d02-1000-7000-8000-000000000014", null,
 ]);
 
 /** Another provider's account, which nobody has signed in to on this machine. */
-const OTHER_LOGGED_OUT = buildProviderAccount(
+const OTHER_SIGNED_OUT = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000015",
   null,
   OPENAI,
@@ -1030,10 +1030,10 @@ describe("Composer: model menu shapes", () => {
   it("(d) shows an unauthenticated account as one dimmed row with its own Sign in", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
-      [ACCOUNT_A, OTHER_LOGGED_OUT],
+      [ACCOUNT_A, OTHER_SIGNED_OUT],
       {},
       {
-        [`POST /api/v1/provider-accounts/${OTHER_LOGGED_OUT.id}/sign-in`]: {
+        [`POST /api/v1/provider-accounts/${OTHER_SIGNED_OUT.id}/sign-in`]: {
           body: { url: AUTHORIZE_URL },
         },
       },

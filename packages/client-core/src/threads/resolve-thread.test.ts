@@ -96,7 +96,7 @@ const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
   buildSnapshot({ runnerId: MOSS.id, models: [SONNET, OPUS, HAIKU] }),
 ]);
 
-/** Logged in on the remote runner only; on the local one it is installed but logged out. */
+/** Signed in on the remote runner only; on the local one it is installed but signed out. */
 const CODEX = buildProviderAccount(OPENAI_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
   buildSnapshot({
@@ -105,7 +105,7 @@ const CODEX = buildProviderAccount(OPENAI_IDENTITY, [
   }),
 ]);
 
-/** Logged in on the local, remote and moss runners, each with another default model. */
+/** Signed in on the local, remote and moss runners, each with another default model. */
 const TEAM = buildProviderAccount({ ...OPENAI_IDENTITY, id: "account-team", label: "Team" }, [
   buildSnapshot({ runnerId: LOCAL.id, models: [{ ...GPT, slug: "team-local" }] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [{ ...GPT, slug: "team-remote" }] }),
@@ -306,8 +306,8 @@ describe("resolveThreadConfig: a draft's runner", () => {
     expect(resolved).toMatchObject({ kind: "draft", runner: offline, diagnosticRunner: undefined });
   });
 
-  it("keeps a picked runner on which the new account is installed but logged out", () => {
-    // Codex has a logged-out snapshot on the local runner. The remote one is picked first.
+  it("keeps a picked runner on which the new account is installed but signed out", () => {
+    // Codex has a signed-out snapshot on the local runner. The remote one is picked first.
     const base = { ...BASE, runnerId: REMOTE.id };
     const resolved = resolveDraft(
       applyThreadChoices(
@@ -355,13 +355,13 @@ describe("resolveThreadConfig: a draft's runner", () => {
   });
 
   it("leaves the draft with no runner when its account has no default one, and names a reference runner apart", () => {
-    const loggedOut = buildProviderAccount(ANTHROPIC_IDENTITY, [
+    const signedOut = buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
     ]);
     const resolved = resolveDraft(
       {},
-      { ...CATALOGS, accounts: [loggedOut] },
-      { ...BASE, providerAccountId: loggedOut.id, model: null, runnerId: null },
+      { ...CATALOGS, accounts: [signedOut] },
+      { ...BASE, providerAccountId: signedOut.id, model: null, runnerId: null },
     );
     expect(resolved.config.runnerId).toBeNull();
     expect(resolved).toMatchObject({ runner: undefined, diagnosticRunner: LOCAL });

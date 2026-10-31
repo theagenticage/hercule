@@ -69,12 +69,14 @@ export type ProviderAccountId = Schema.Schema.Type<typeof ProviderAccountId>;
  *
  * A word starts with a letter or digit, so `.` and `..` never match. Each
  * segment is at most 64 characters, the limit ids have. The
- * folder `providers/homes` is the parent of the derived homes, never an account's.
+ * folder `providers/homes` is the parent of the derived homes, never an
+ * account's. The name `homes` is refused in any letter case, because a
+ * case-insensitive disk (macOS) would make `Homes` the same folder.
  */
 export const HarnessHome = Schema.String.check(
   Schema.isMaxLength(256),
   Schema.isPattern(
-    /^providers\/(?:(?!homes$)[A-Za-z0-9_-]{1,64}|homes\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})$/,
+    /^providers\/(?:(?![Hh][Oo][Mm][Ee][Ss]$)[A-Za-z0-9_-]{1,64}|homes\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})$/,
     {
       title: "harness home",
       description:
@@ -144,9 +146,35 @@ export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
  */
 export const MAX_SECRET_VALUE_LENGTH = 64 * 1024;
 
+/** Variables a credential can never be written to: the harness process depends on them. */
+const RESERVED_CREDENTIAL_VARIABLES: ReadonlyArray<string> = [
+  "PATH",
+  "HOME",
+  "SHELL",
+  "USER",
+  "TMPDIR",
+  "NODE_OPTIONS",
+  "GH_TOKEN",
+  // Where each harness keeps its Harness Home; the runner sets these itself.
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
+  "PI_CODING_AGENT_DIR",
+];
+
+/** Variable name prefixes a credential can never use: they load code or belong to Hercule and git. */
+const RESERVED_CREDENTIAL_PREFIXES: ReadonlyArray<string> = ["LD_", "DYLD_", "HERCULE_", "GIT_"];
+
 /**
  * The name of the environment variable a harness reads an account's key or
  * token from: capital letters, digits and underscores, starting with a letter.
+ * Names the runner or the system own are refused, because a credential written
+ * to one of them could redirect the harness or load foreign code:
+ *
+ * - `PATH`, `HOME`, `SHELL`, `USER`, `TMPDIR`, `NODE_OPTIONS`, `GH_TOKEN`;
+ * - anything starting with `LD_`, `DYLD_`, `HERCULE_` or `GIT_`;
+ * - the variables that locate a harness's home: `CLAUDE_CONFIG_DIR`,
+ *   `CODEX_HOME`, `PI_CODING_AGENT_DIR`.
+ *
  * Plugins check their declarations against this same schema, so a harness
  * cannot register a variable the wire then refuses.
  */
@@ -156,6 +184,12 @@ export const CredentialVariable = Schema.String.check(
     description: "an environment variable name in upper case",
   }),
   Schema.isMaxLength(128),
+  Schema.makeFilter<string>((name) =>
+    RESERVED_CREDENTIAL_VARIABLES.includes(name) ||
+    RESERVED_CREDENTIAL_PREFIXES.some((prefix) => name.startsWith(prefix))
+      ? `${name} is reserved for the harness process and cannot hold a credential; choose the variable the provider's own SDK reads, such as ZAI_API_KEY`
+      : undefined,
+  ),
 );
 
 /**
@@ -203,13 +237,26 @@ export type HarnessCredential = Schema.Schema.Type<typeof HarnessCredential>;
  * - `credential` is absent for an account whose harness declares no variable
  *   for its kind, such as a per-machine account whose login is in the Harness
  *   Home.
+ *
+ * The account id inside `harnessHome` must equal `providerAccountId`. Without
+ * that, a frame could point one account's harness at the folder, login and
+ * key of another.
  */
 export const HarnessAccount = Schema.Struct({
   providerAccountId: ProviderAccountId,
   harnessHome: HarnessHome,
   modelArgument: ModelArgument,
   credential: Schema.optionalKey(HarnessCredential),
-});
+}).check(
+  Schema.makeFilter((account) => {
+    // The home is `providers/<id>` or `providers/homes/<id>/...`.
+    const [, first, second] = account.harnessHome.split("/");
+    const homeAccountId = first === "homes" ? second : first;
+    return homeAccountId === account.providerAccountId
+      ? undefined
+      : `harnessHome ${account.harnessHome} belongs to Provider Account ${homeAccountId}, not ${account.providerAccountId}`;
+  }),
+);
 
 export type HarnessAccount = Schema.Schema.Type<typeof HarnessAccount>;
 

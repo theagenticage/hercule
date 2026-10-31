@@ -8,7 +8,8 @@ import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contra
 import { describeModelCount } from "./model-count";
 import {
   buildProviderAccountName,
-  listAccountCredentialFields,
+  findDefaultHarnessSnapshot,
+  listProviderAccountCredentialFields,
   requiresSignInPerMachine,
 } from "./provider-accounts";
 import type { CredentialField } from "./connection-types";
@@ -118,9 +119,7 @@ export const buildProviderRows = (
   accounts.flatMap((account) => {
     const harness = harnesses.find((each) => each.id === account.defaultHarnessId);
     if (harness === undefined) return [];
-    const snapshot = account.snapshots.find(
-      (each) => each.harnessId === harness.id && each.runnerId === runner.id,
-    );
+    const snapshot = findDefaultHarnessSnapshot(account, runner.id);
     const adapter = (runner.facts?.adapters ?? []).includes(harness.id);
     // The binary name the runner reports from its `PATH` is the harness's
     // `binaryName`, so no lookup table is needed.
@@ -157,7 +156,7 @@ export const buildProviderRows = (
         signInLabel: signedIn ? "Sign in again" : "Sign in",
         credentialFields:
           usable && !perMachine
-            ? listAccountCredentialFields(providers, account).map((field) =>
+            ? listProviderAccountCredentialFields(providers, account).map((field) =>
                 buildOffer(field, signedIn),
               )
             : [],

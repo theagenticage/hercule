@@ -29,6 +29,7 @@ import {
   type NodeRunState,
   type RunOverlay,
 } from "./graph-model";
+import { resolveThreadHarnessId } from "./provider-accounts";
 import { readTimestamps } from "./run-display";
 import { formatTokenCount } from "./subagents/describe";
 import { formatAccessMode } from "./threads/access-modes";
@@ -229,7 +230,10 @@ const listAgentStepFacts = (
 ): ReadonlyArray<NodeFact> => {
   const agent = agents.find((each) => each.id === step.agent);
   const account = accounts.find((each) => each.id === agent?.providerAccountId);
-  const harnessId = agent?.harnessId ?? account?.defaultHarnessId ?? "";
+  const harnessId =
+    account === undefined
+      ? (agent?.harnessId ?? "")
+      : resolveThreadHarnessId(account, agent?.harnessId);
   const model = step.model ?? agent?.model?.model;
   const accessMode = step.accessMode ?? agent?.accessMode;
   const outputFields = describeOutputFields(step.outputSchema);

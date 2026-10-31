@@ -22,6 +22,18 @@ describe("the Recent list", () => {
     expect(readRecentModels(WORK)).toEqual([]);
   });
 
+  it("keeps the list a release before Provider Accounts stored under the key instanceId", () => {
+    localStorage.setItem(
+      `recent-models:${HOME}`,
+      JSON.stringify([{ instanceId: "claude", model: "a" }]),
+    );
+    rememberRecentModel(HOME, { providerAccountId: "claude", model: "b" });
+    expect(readRecentModels(HOME)).toEqual([
+      { providerAccountId: "claude", model: "b" },
+      { providerAccountId: "claude", model: "a" },
+    ]);
+  });
+
   it("starts again from an unreadable stored list", () => {
     localStorage.setItem(`recent-models:${HOME}`, "not json");
     rememberRecentModel(HOME, { providerAccountId: "claude", model: "opus" });

@@ -13,13 +13,9 @@
  * signed in (spec 06 §15.5).
  */
 import type { ProviderAccount } from "@hercule/contract";
+import { listSignedInDefaultHarnessSnapshots } from "../provider-accounts";
 
 export const findDefaultProviderAccountId = (accounts: readonly ProviderAccount[]): string | null =>
-  accounts.find((account) =>
-    account.snapshots.some(
-      (snapshot) =>
-        snapshot.harnessId === account.defaultHarnessId && snapshot.auth.status === "ok",
-    ),
-  )?.id ??
+  accounts.find((account) => listSignedInDefaultHarnessSnapshots(account).length > 0)?.id ??
   accounts[0]?.id ??
   null;

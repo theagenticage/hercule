@@ -3,11 +3,11 @@
  * how it signs in. Every screen reads these from here, so no two screens name
  * the same account differently.
  */
-import type { AccountKind, Provider, ProviderAccount } from "@hercule/contract";
+import type { AccountKind, CapabilitySnapshot, Provider, ProviderAccount } from "@hercule/contract";
 import type { CredentialField } from "./connection-types";
 
 /** The part of an account that decides its name. */
-type NamedAccount = Pick<ProviderAccount, "providerId" | "label">;
+type NamedProviderAccount = Pick<ProviderAccount, "providerId" | "label">;
 
 /**
  * Returns the name of the account: its provider's display name, then " · "
@@ -17,7 +17,7 @@ type NamedAccount = Pick<ProviderAccount, "providerId" | "label">;
  */
 export const buildProviderAccountName = (
   providers: readonly Provider[],
-  account: NamedAccount,
+  account: NamedProviderAccount,
 ): string => {
   const providerName =
     providers.find((provider) => provider.id === account.providerId)?.displayName ??
@@ -30,7 +30,7 @@ export const buildProviderAccountName = (
  * account's provider, or `null` when it is the only one. A single account
  * does not need a name to tell it apart.
  */
-export const findAccountNameIfAmbiguous = (
+export const findProviderAccountNameIfAmbiguous = (
   accounts: readonly ProviderAccount[],
   providers: readonly Provider[],
   account: ProviderAccount,
@@ -39,8 +39,53 @@ export const findAccountNameIfAmbiguous = (
     ? buildProviderAccountName(providers, account)
     : null;
 
+/**
+ * Returns the id of the plugin that registered the account's Provider, or
+ * `null` when no registered Provider matches the account's provider id any
+ * more. The id comes from the Provider itself, never from its qualified id.
+ */
+export const findProviderPluginId = (
+  providers: readonly Provider[],
+  account: Pick<ProviderAccount, "providerId">,
+): string | null =>
+  providers.find((provider) => provider.id === account.providerId)?.pluginId ?? null;
+
+/**
+ * Returns the harness a thread, an Agent or an assistant runs in on `account`:
+ * the harness it names, or the account's default harness when it names none.
+ */
+export const resolveThreadHarnessId = (
+  account: Pick<ProviderAccount, "defaultHarnessId">,
+  harnessId: string | null | undefined,
+): string => harnessId ?? account.defaultHarnessId;
+
+/**
+ * Returns the account's snapshot in its default harness on the runner
+ * `runnerId`, or `undefined` when that runner has not probed it. Callers decide
+ * what the snapshot's `auth` means for them.
+ */
+export const findDefaultHarnessSnapshot = (
+  account: Pick<ProviderAccount, "defaultHarnessId" | "snapshots">,
+  runnerId: string,
+): CapabilitySnapshot | undefined =>
+  account.snapshots.find(
+    (snapshot) => snapshot.harnessId === account.defaultHarnessId && snapshot.runnerId === runnerId,
+  );
+
+/**
+ * Returns the account's snapshots in its default harness that found it signed
+ * in, one for each runner. The list is empty when no runner has the account
+ * signed in there.
+ */
+export const listSignedInDefaultHarnessSnapshots = (
+  account: Pick<ProviderAccount, "defaultHarnessId" | "snapshots">,
+): readonly CapabilitySnapshot[] =>
+  account.snapshots.filter(
+    (snapshot) => snapshot.harnessId === account.defaultHarnessId && snapshot.auth.status === "ok",
+  );
+
 /** Returns the Account Kind the account was created as, or `undefined` when its provider no longer declares it. */
-export const findAccountKind = (
+export const findProviderAccountKind = (
   providers: readonly Provider[],
   account: Pick<ProviderAccount, "providerId" | "kind">,
 ): AccountKind | undefined =>
@@ -58,23 +103,25 @@ export const requiresSignInPerMachine = (
   providers: readonly Provider[],
   account: Pick<ProviderAccount, "providerId" | "kind">,
 ): boolean =>
-  findAccountKind(providers, account)?.setup.some((step) => step.kind === "harness-login") ?? false;
+  findProviderAccountKind(providers, account)?.setup.some(
+    (step) => step.kind === "harness-login",
+  ) ?? false;
 
 /**
  * Returns the fields the user types in to set the account's credential, from
  * its kind's `credentials` setup steps, such as the `apiKey` field. Returns
  * none for a kind that signs in on each machine.
  */
-export const listAccountCredentialFields = (
+export const listProviderAccountCredentialFields = (
   providers: readonly Provider[],
   account: Pick<ProviderAccount, "providerId" | "kind">,
 ): readonly CredentialField[] =>
-  (findAccountKind(providers, account)?.setup ?? []).flatMap((step) =>
+  (findProviderAccountKind(providers, account)?.setup ?? []).flatMap((step) =>
     step.kind === "credentials" ? step.fields : [],
   );
 
 /** The line under an account's name, in the two parts the card keeps apart so a long identity can be cut short. */
-export interface AccountIdentityLine {
+export interface ProviderAccountIdentityLine {
   /** The identity the account is signed in as, such as "rogier@acme.com", or the kind's title when none is known. */
   readonly text: string;
   /** The plan the vendor reports, such as "Max", or `null` when no identity or no plan is known. */
@@ -87,10 +134,10 @@ export interface AccountIdentityLine {
  * Otherwise `text` is the title of the account's kind, such as "API key", or
  * the kind's id when the provider no longer declares it.
  */
-export const describeAccountIdentity = (
+export const describeProviderAccountIdentity = (
   providers: readonly Provider[],
   account: Pick<ProviderAccount, "providerId" | "kind" | "identity" | "planLabel">,
-): AccountIdentityLine =>
+): ProviderAccountIdentityLine =>
   account.identity === null
-    ? { text: findAccountKind(providers, account)?.title ?? account.kind, plan: null }
+    ? { text: findProviderAccountKind(providers, account)?.title ?? account.kind, plan: null }
     : { text: account.identity, plan: account.planLabel };

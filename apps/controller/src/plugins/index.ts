@@ -12,7 +12,7 @@ export {
   type RunningIngest,
 } from "./ingest";
 export type { RegisteredHarness } from "./harnesses";
-export { checkHarnessSupport, type HarnessRefusal, type HarnessSupport } from "./harness-support";
+export { decideProviderAccountHarness } from "./harness-support";
 export type { RegisteredProvider } from "./providers";
 export { IngestExecutor } from "./ingest-executor";
 export { deriveCatalogJsonSchema } from "./json-schema";

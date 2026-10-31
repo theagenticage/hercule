@@ -3,7 +3,7 @@
  * Provider Account an assistant runs on and the model it uses there.
  */
 import { toIdTail, type Provider, type ProviderAccount } from "@hercule/contract";
-import { buildProviderAccountName } from "../provider-accounts";
+import { buildProviderAccountName, resolveThreadHarnessId } from "../provider-accounts";
 import { buildThreadModelField } from "../threads/model-field";
 import type { AssistantDraft } from "./form";
 
@@ -98,7 +98,7 @@ export const buildAssistantProviderField = (
       buildProviderAccountName(providers, account),
       buildThreadModelField(
         account,
-        findHarnessId(account) ?? account.defaultHarnessId,
+        resolveThreadHarnessId(account, findHarnessId(account)),
         null,
         undefined,
       ).options,
@@ -123,7 +123,7 @@ export const buildAssistantProviderField = (
   }
   return {
     groups,
-    harnessId: account === undefined ? null : (assistant.harnessId ?? account.defaultHarnessId),
+    harnessId: account === undefined ? null : resolveThreadHarnessId(account, assistant.harnessId),
     hint:
       account === undefined
         ? ""

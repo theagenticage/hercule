@@ -55,8 +55,9 @@
  * - the accounts read as Anthropic, Anthropic · work, OpenAI and Z.ai, with
  *   the ids of their instances, the identity the snapshots agreed on, and no
  *   identity where they disagreed;
- * - sessions, the Agent, the assistant, `textGeneration.model` and the thread
- *   default read back with an account and a harness;
+ * - sessions read back with an account and a harness; the Agent, the assistant,
+ *   `textGeneration.model` and the thread default read back with an account and
+ *   no harness, which means the account's default;
  * - the Z.ai key reaches the runner decrypted, in the account's original
  *   home: a stand-in `pi` on the controller's PATH records the key and the
  *   home it was run in when the account is probed;
@@ -1838,16 +1839,16 @@ describe("upgrading from the previous edge release", () => {
       expect(upgradedFacts).toEqual(expectedFacts);
       expect(new Set(upgradedAdapters)).toEqual(new Set(expectedAdapters));
 
-      // An Agent and an assistant name the account and the harness they ran on.
-      // A migrated row names its harness itself, so a later change of the
-      // account's default harness cannot move it.
+      // An Agent and an assistant name their account and leave the harness to
+      // the account's default, which is the harness they ran in. A concrete
+      // harness would stop them from ever moving to another account.
       const readAssistant = expectJson<SeededAgent & { mainConversationId: string }>(
         await runCli(["assistant", "read", assistant.id, "--json"], upgraded),
       );
       expect(readAssistant.mainConversationId).toBe(assistant.mainConversationId);
       expect(readAssistant).toMatchObject({
         providerAccountId: claudeInstance.id,
-        harnessId: "claude-code/claude-code",
+        harnessId: null,
       });
       expect(readAssistant).not.toHaveProperty("instanceId");
       const readAgent = expectJson<SeededAgent>(
@@ -1857,7 +1858,7 @@ describe("upgrading from the previous edge release", () => {
         id: agent.id,
         name: "upgrade-agent",
         providerAccountId: codexInstance.id,
-        harnessId: "codex/codex",
+        harnessId: null,
       });
       expect(readAgent).not.toHaveProperty("instanceId");
 
@@ -1868,11 +1869,10 @@ describe("upgrading from the previous edge release", () => {
       }>(await runCli(["settings", "read", "--json"], upgraded));
       expect(upgradedSettings.controller["textGeneration.model"]).toEqual({
         providerAccountId: piInstance.id,
-        harnessId: "pi/pi",
         model: textGenerationModel.model,
       });
       expect(upgradedSettings.user["thread.providerAccountId"]).toBe(createdProvider.id);
-      expect(upgradedSettings.user["thread.harnessId"]).toBe("claude-code/claude-code");
+      expect(upgradedSettings.user).not.toHaveProperty(["thread.harnessId"]);
       expect(upgradedSettings.user).not.toHaveProperty(["thread.instanceId"]);
 
       const readConversation = expectJson<{ id: string; assistantId: string }>(

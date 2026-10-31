@@ -295,15 +295,35 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Lists the value of one user setting for every user that has set it. A
+     * stored value this version cannot read is left out, as `allForUser`
+     * reads it as unset. Used to find what still names a record, for example
+     * the Provider Accounts that users have as their default.
+     */
+    listUserValues: <K extends SettingKey<"user">>(
+      key: K,
+    ): Effect.Effect<ReadonlyArray<SettingValue<"user", K>>, SqlError> =>
+      Effect.flatMap(
+        sql<KeyValueRow>`SELECT key, value FROM user_settings WHERE key = ${key}`,
+        (rows) =>
+          Effect.map(
+            Effect.forEach(rows, (row) => Effect.option(decode("user", key, row.value))),
+            (decoded) => decoded.flatMap(Option.toArray) as Array<SettingValue<"user", K>>,
+          ),
+      ),
+
+    /**
      * Returns what is needed to decide which harnesses the Provider Account
      * with this id can run in (its provider, its account kind and its default
      * harness), or `None` when there is no such account. Used to check a
-     * setting that names an account. The query is here, not in the
-     * provider-accounts domain, because that domain imports the runners
-     * domain, which imports settings, so settings cannot import the account
-     * repository without a cycle.
+     * setting that names an account.
+     *
+     * The query is here, not in the provider-accounts domain, because that
+     * domain imports the runners domain, which imports settings, so settings
+     * cannot import the account repository without a cycle. It reads three
+     * plain columns, so it does not duplicate the account domain's rules.
      */
-    readProviderAccountHarnessFacts: (
+    readProviderAccountKind: (
       providerAccountId: string,
     ): Effect.Effect<
       Option.Option<{

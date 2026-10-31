@@ -128,7 +128,7 @@ const make = Effect.gen(function* () {
   // enforces `session.query` on the caller, and deleting an agent is not a
   // read of anybody's sessions.
   const sessions = yield* sessionRepository;
-  const { buildAgentRecordComposer, validateAgentAccountHarness, validateAgentProfile } =
+  const { buildAgentRecordComposer, validateAgentProviderAccountHarness, validateAgentProfile } =
     yield* buildAgentFieldChecks;
   const audit = yield* AuditLog;
   const observer = yield* AgentObserver;
@@ -209,7 +209,10 @@ const make = Effect.gen(function* () {
             // read before the transaction can be deleted between that read and
             // the insert, which would store an agent that names a row that is
             // gone.
-            yield* validateAgentAccountHarness(decoded.providerAccountId, decoded.harnessId);
+            yield* validateAgentProviderAccountHarness(
+              decoded.providerAccountId,
+              decoded.harnessId,
+            );
             yield* validateAgentProfile(actor, decoded.permissionProfileId);
             // One clock read, inside the transaction. The row and the event
             // that records the row carry the same instant, so a new agent's
@@ -282,22 +285,32 @@ const make = Effect.gen(function* () {
             // of an update that changes no rows and reports success, and an
             // assistant is refused before its fields are checked.
             const current = yield* readPlainAgentOrFail(id);
+            // Moving the agent to another account without naming a harness
+            // puts it on that account's default harness. Keeping the old
+            // harness would refuse most moves, since a harness usually runs
+            // only the providers of the account it was chosen for.
+            const written =
+              edit.providerAccountId !== undefined &&
+              edit.providerAccountId !== current.providerAccountId &&
+              edit.harnessId === undefined
+                ? { ...edit, harnessId: null }
+                : edit;
             // Inside the write set. A profile or an account that is deleted
             // between the check and the update would leave the agent naming a
             // row that is gone. Changing either the account or the harness
             // checks the pair the agent will have afterwards, so a harness
             // the new account cannot run is refused instead of being kept.
-            if (edit.providerAccountId !== undefined || edit.harnessId !== undefined) {
-              yield* validateAgentAccountHarness(
-                edit.providerAccountId ?? current.providerAccountId,
-                edit.harnessId === undefined ? current.harnessId : edit.harnessId,
+            if (written.providerAccountId !== undefined || written.harnessId !== undefined) {
+              yield* validateAgentProviderAccountHarness(
+                written.providerAccountId ?? current.providerAccountId,
+                written.harnessId === undefined ? current.harnessId : written.harnessId,
               );
             }
             if (edit.permissionProfileId !== undefined) {
               yield* validateAgentProfile(actor, edit.permissionProfileId);
             }
             const at = yield* nowIso;
-            yield* agents.update(id, edit, at);
+            yield* agents.update(id, written, at);
             yield* audit.append({
               kind: "agent.updated",
               actor: yield* currentStamp,

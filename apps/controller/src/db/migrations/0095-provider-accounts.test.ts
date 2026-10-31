@@ -569,7 +569,7 @@ describe("the provider accounts migration", () => {
       expect(sessions).toHaveLength(2);
     });
 
-    it("points an agent or assistant at its account and harness", async () => {
+    it("points an agent or assistant at its account and leaves its harness to the account's default", async () => {
       const agents = await runOnFreshDatabase(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
@@ -585,7 +585,7 @@ describe("the provider accounts migration", () => {
       );
 
       expect(agents).toMatchObject([
-        { provider_account_id: bytes(CODEX_DEFAULT), harness_id: CODEX, kind: "agent" },
+        { provider_account_id: bytes(CODEX_DEFAULT), harness_id: null, kind: "agent" },
         { provider_account_id: bytes(DELETED_INSTANCE), harness_id: null, kind: "assistant" },
       ]);
     });
@@ -631,7 +631,7 @@ describe("the provider accounts migration", () => {
       return Object.fromEntries(rows.map((row) => [`${row.scope}:${row.key}`, row]));
     });
 
-    it("renames every user's Thread default instance, and adds the harness it ran", async () => {
+    it("renames every user's Thread default instance and sets no harness", async () => {
       const settings = await runOnFreshDatabase(
         Effect.gen(function* () {
           yield* arrangeInstances;
@@ -650,16 +650,14 @@ describe("the provider accounts migration", () => {
         value: JSON.stringify(uuidToString(bytes(CODEX_WORK))),
         updated_at: minute(5),
       });
-      expect(settings["193:thread.harnessId"]?.value).toBe(JSON.stringify(CODEX));
+      expect(Object.keys(settings).filter((key) => key.includes("thread.harnessId"))).toEqual([]);
       expect(settings["193:thread.model"]?.value).toBe('"gpt-5"');
       expect(settings["194:thread.providerAccountId"]?.value).toBe(
         JSON.stringify(uuidToString(bytes(PI_SECOND))),
       );
-      expect(settings["194:thread.harnessId"]?.value).toBe(JSON.stringify(PI));
-      expect(settings["195:thread.harnessId"]?.value).toBe("null");
     });
 
-    it("rewrites a chosen text generation model to an account, its harness and the model", async () => {
+    it("rewrites a chosen text generation model to an account and the model, with no harness", async () => {
       const settings = await runOnFreshDatabase(
         Effect.gen(function* () {
           yield* arrangeInstances;
@@ -674,7 +672,6 @@ describe("the provider accounts migration", () => {
 
       expect(parseJson(settings["controller:textGeneration.model"]!.value)).toEqual({
         providerAccountId: uuidToString(bytes(PI_SECOND)),
-        harnessId: PI,
         model: "glm-5.3-flash",
       });
     });

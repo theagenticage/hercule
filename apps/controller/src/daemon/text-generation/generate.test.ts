@@ -14,6 +14,7 @@ import { uuidFromString, withTransaction } from "../../db";
 import { readEventsOfKind } from "../../events/testing";
 import { PluginHost } from "../../plugins";
 import { buildPluginStack } from "../../plugins/testing";
+import { HarnessAccountsLayer } from "../../provider-accounts";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
 import {
   LastTextGenerationFailure,
@@ -52,7 +53,7 @@ const TARGET: TextGenerationTarget = {
   _tag: "resolved",
   failureKey: FAILURE_KEY,
   providerAccountId: ACCOUNT_ID,
-  accountName: "OpenAI",
+  providerAccountName: "OpenAI",
   harnessId: "codex/codex",
   model: "codex-mini",
   runnerIds: ["runner-1"],
@@ -120,6 +121,7 @@ const buildServiceLayer = (
   { target = Ref.makeUnsafe<TextGenerationTarget>(TARGET), disconnected = [] }: Stubs,
 ) =>
   TextGenerationLayer.pipe(
+    Layer.provideMerge(HarnessAccountsLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         LastTextGenerationFailureLayer,

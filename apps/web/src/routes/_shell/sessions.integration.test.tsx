@@ -64,7 +64,7 @@ const buildSnapshot = (
   models: [{ slug: "default", name: "Default", imageInput: null, options: [] }],
 });
 
-const buildClaudeCodeAccount = (
+const buildClaudeCodeProviderAccount = (
   snapshots: ReadonlyArray<ProviderAccount["snapshots"][number]>,
 ): ProviderAccount => ({
   id: CLAUDE_ID,
@@ -148,7 +148,7 @@ const getNewThreadControl = (): HTMLElement => {
 
 describe("Sessions", () => {
   it("says a thread needs a runner when none is detected on this machine", async () => {
-    await openApp({ runners: [], accounts: [buildClaudeCodeAccount([])], local: null });
+    await openApp({ runners: [], accounts: [buildClaudeCodeProviderAccount([])], local: null });
 
     await waitFor(() => {
       expect(readPageText()).toContain("No runner has been detected on this machine.");
@@ -157,7 +157,11 @@ describe("Sessions", () => {
   });
 
   it("sends the user to Fleet when the machine has no harness on it", async () => {
-    await openApp({ runners: [BARE], accounts: [buildClaudeCodeAccount([])], local: BARE.id });
+    await openApp({
+      runners: [BARE],
+      accounts: [buildClaudeCodeProviderAccount([])],
+      local: BARE.id,
+    });
 
     await waitFor(() => {
       expect(readPageText()).toContain("No coding harness was found on this machine.");
@@ -172,7 +176,7 @@ describe("Sessions", () => {
   it("offers a sign-in for an installed harness whose account is not signed in", async () => {
     await openApp({
       runners: [MOSS],
-      accounts: [buildClaudeCodeAccount([NOT_SIGNED_IN])],
+      accounts: [buildClaudeCodeProviderAccount([NOT_SIGNED_IN])],
       local: MOSS.id,
     });
 
@@ -186,7 +190,7 @@ describe("Sessions", () => {
   it("tells a user setting up providers that background tasks use a text generation model, and links to where to change it", async () => {
     await openApp({
       runners: [MOSS],
-      accounts: [buildClaudeCodeAccount([NOT_SIGNED_IN])],
+      accounts: [buildClaudeCodeProviderAccount([NOT_SIGNED_IN])],
       local: MOSS.id,
     });
 
@@ -201,7 +205,7 @@ describe("Sessions", () => {
   it("is ready once the account on this machine is signed in", async () => {
     await openApp({
       runners: [MOSS],
-      accounts: [buildClaudeCodeAccount([SIGNED_IN])],
+      accounts: [buildClaudeCodeProviderAccount([SIGNED_IN])],
       local: MOSS.id,
     });
 
@@ -215,7 +219,7 @@ describe("Sessions", () => {
 
   it("signs in from this screen, on the runner on the browser's machine", async () => {
     const user = userEvent.setup();
-    let held = [buildClaudeCodeAccount([NOT_SIGNED_IN])];
+    let held = [buildClaudeCodeProviderAccount([NOT_SIGNED_IN])];
     const { api } = await openApp({
       runners: [MOSS],
       accounts: held,
@@ -227,12 +231,9 @@ describe("Sessions", () => {
           if ((call.body as { code: string }).code !== "the-whole-code") {
             return { status: 400, body: buildErrorBody("validation", "Invalid code.") };
           }
-          held = [buildClaudeCodeAccount([SIGNED_IN])];
+          held = [buildClaudeCodeProviderAccount([SIGNED_IN])];
           return { body: held[0] };
         },
-        // Every finished sign-in is followed by a probe, so this screen shows
-        // the machine's current state.
-        [`POST /api/v1/runners/${MOSS.id}/probe`]: () => ({ body: SIGNED_IN }),
       },
     });
 
@@ -253,31 +254,8 @@ describe("Sessions", () => {
     await waitFor(() => {
       expect(readPageText()).toContain("Anthropic is ready.");
     });
-  });
-
-  it("shows the error when the probe after a sign-in fails", async () => {
-    const user = userEvent.setup();
-    await openApp({
-      runners: [MOSS],
-      accounts: [buildClaudeCodeAccount([NOT_SIGNED_IN])],
-      local: MOSS.id,
-      extra: {
-        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: { body: { url: AUTHORIZE_URL } },
-        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in-code`]: {
-          body: buildClaudeCodeAccount([SIGNED_IN]),
-        },
-        [`POST /api/v1/runners/${MOSS.id}/probe`]: {
-          status: 500,
-          body: buildErrorBody("internal", "moss stopped answering"),
-        },
-      },
-    });
-
-    await user.click(await screen.findByRole("button", { name: /sign in/i }));
-    await user.type(await screen.findByLabelText("Code", { exact: true }), "the-whole-code");
-    await user.click(screen.getByRole("button", { name: /submit/i }));
-
-    expect((await screen.findByRole("alert")).textContent).toBe("moss stopped answering");
+    // The controller probes the account when a sign-in ends, so the screen asks for no probe.
+    expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 });
 
@@ -300,8 +278,10 @@ describe("Sessions > an account that needs a key", () => {
     },
   };
 
-  const buildPiAccount = (snapshot: ProviderAccount["snapshots"][number]): ProviderAccount => ({
-    ...buildClaudeCodeAccount([snapshot]),
+  const buildPiProviderAccount = (
+    snapshot: ProviderAccount["snapshots"][number],
+  ): ProviderAccount => ({
+    ...buildClaudeCodeProviderAccount([snapshot]),
     id: PI_ID,
     providerId: "zai/zai",
     kind: "api-key",
@@ -313,7 +293,7 @@ describe("Sessions > an account that needs a key", () => {
 
   it("asks for the key on this screen, and shows ready once it is saved", async () => {
     const user = userEvent.setup();
-    let held = [buildPiAccount(PI_NOT_SIGNED_IN)];
+    let held = [buildPiProviderAccount(PI_NOT_SIGNED_IN)];
     const { api } = await openApp({
       runners: [WITH_PI],
       accounts: held,
@@ -321,7 +301,7 @@ describe("Sessions > an account that needs a key", () => {
       extra: {
         "GET /api/v1/provider-accounts": () => ({ body: held }),
         [`PATCH /api/v1/provider-accounts/${PI_ID}`]: () => {
-          held = [buildPiAccount(PI_SIGNED_IN)];
+          held = [buildPiProviderAccount(PI_SIGNED_IN)];
           return { body: held[0] };
         },
       },

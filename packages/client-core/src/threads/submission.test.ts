@@ -154,7 +154,7 @@ describe("buildSubmission: a draft thread", () => {
   });
 
   it("sends the default runner and model of the account picked, not the draft's own", () => {
-    // The draft runs Claude on the local runner. Codex is logged in on the
+    // The draft runs Claude on the local runner. Codex is signed in on the
     // remote runner only, and the picks hold the account alone.
     const codex = buildProviderAccount(OPENAI_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),

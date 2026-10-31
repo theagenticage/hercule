@@ -22,7 +22,13 @@ export interface StoredProviderAccount {
   /** The id of one of the provider's account kinds. */
   readonly kind: string;
   readonly label: string | null;
+  /**
+   * Who the account is signed in as, such as an email address. Only the
+   * upgrade from the previous version sets it, from the snapshots runners
+   * reported. Ticket #934 makes the first sign-in set it.
+   */
   readonly identity: string | null;
+  /** The plan the account is on. Set the same way as `identity`. */
   readonly planLabel: string | null;
   /** The qualified id of the harness a session uses when it names none. */
   readonly defaultHarnessId: string;
@@ -34,7 +40,7 @@ export interface StoredProviderAccount {
   readonly updatedAt: string;
 }
 
-export interface NewProviderAccount {
+interface NewProviderAccount {
   readonly providerId: string;
   readonly kind: string;
   readonly label: string | null;
@@ -43,11 +49,11 @@ export interface NewProviderAccount {
 }
 
 /** The columns an update may set. An absent field leaves its column unchanged. */
-export interface ProviderAccountEdit {
+interface ProviderAccountEdit {
   readonly label?: string | null;
 }
 
-interface AccountRow {
+interface ProviderAccountRow {
   readonly id: Uint8Array;
   readonly provider_id: string;
   readonly kind: string;
@@ -65,7 +71,7 @@ const ACCOUNT_COLUMNS =
   "id, provider_id, kind, label, identity, plan_label, default_harness_id, " +
   "legacy_home_folder, legacy_home_harness_id, created_at, updated_at";
 
-const toAccount = (row: AccountRow): StoredProviderAccount => ({
+const toStoredProviderAccount = (row: ProviderAccountRow): StoredProviderAccount => ({
   id: uuidToString(row.id),
   providerId: row.provider_id,
   kind: row.kind,
@@ -140,20 +146,20 @@ const make = Effect.gen(function* () {
     /** Returns every account, oldest first and then by id, so two listings match. */
     list: (): Effect.Effect<ReadonlyArray<StoredProviderAccount>, SqlError> =>
       Effect.map(
-        sql<AccountRow>`
+        sql<ProviderAccountRow>`
           SELECT ${sql.literal(ACCOUNT_COLUMNS)} FROM provider_accounts
           ORDER BY created_at, id
         `,
-        (rows) => rows.map(toAccount),
+        (rows) => rows.map(toStoredProviderAccount),
       ),
 
     one: (id: string): Effect.Effect<Option.Option<StoredProviderAccount>, SqlError> =>
       Effect.map(
-        sql<AccountRow>`
+        sql<ProviderAccountRow>`
           SELECT ${sql.literal(ACCOUNT_COLUMNS)} FROM provider_accounts
           WHERE id = ${uuidFromString(id)}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), toAccount),
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toStoredProviderAccount),
       ),
 
     /** Returns whether the controller has any account at all. */
@@ -223,7 +229,11 @@ const make = Effect.gen(function* () {
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM provider_accounts WHERE id = ${uuidFromString(id)}`),
 
-    snapshots: (): Effect.Effect<ReadonlyArray<StoredSnapshot>, SqlError | Schema.SchemaError> =>
+    /** Lists the snapshots of every account in one query, ordered by account, harness and runner. */
+    listAllSnapshots: (): Effect.Effect<
+      ReadonlyArray<StoredSnapshot>,
+      SqlError | Schema.SchemaError
+    > =>
       Effect.flatMap(
         sql<SnapshotRow>`
           SELECT ${sql.literal(SNAPSHOT_COLUMNS)} FROM capability_snapshots

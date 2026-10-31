@@ -18,7 +18,11 @@ describe("provider.query", () => {
     );
 
     expect(providers).toHaveLength(1);
-    expect(providers[0]).toMatchObject({ id: ACME_PROVIDER_ID, displayName: "Acme" });
+    expect(providers[0]).toMatchObject({
+      id: ACME_PROVIDER_ID,
+      pluginId: "acme",
+      displayName: "Acme",
+    });
     expect(
       providers[0]?.kinds.map((kind) => [
         kind.id,

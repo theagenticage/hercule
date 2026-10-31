@@ -161,7 +161,7 @@ export const providerAccount = HttpApiGroup.make("providerAccount")
       params: { id: Id },
       payload: ProviderAccountSignInCodeInput,
       success: ProviderAccount,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

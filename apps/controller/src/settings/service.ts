@@ -31,7 +31,7 @@ import { requireUserActor, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { checkHarnessSupport, PluginHost } from "../plugins";
+import { decideProviderAccountHarness, PluginHost } from "../plugins";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 import { validateTimezone } from "./timezone";
 
@@ -47,6 +47,10 @@ const GITHUB_DEFAULT = "github.defaultConnectionId";
 const NOT_GITHUB = "that connection is not a GitHub connection";
 
 const TEXT_GENERATION_MODEL = "textGeneration.model";
+
+const THREAD_PROVIDER_ACCOUNT = "thread.providerAccountId";
+
+const THREAD_HARNESS = "thread.harnessId";
 
 const NO_SUCH_ACCOUNT = "that provider account does not exist";
 
@@ -83,50 +87,77 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Checks that `textGeneration.model`, when the patch chooses a model, names
-   * an existing Provider Account and a harness that account can run in (the
-   * account's default harness when the choice names none). Fails with a
-   * validation error otherwise, because a text generation set to such a pair
-   * could never run. The error names the part that is wrong, and says why.
+   * Checks that a setting that names a Provider Account names one that exists,
+   * and that it can run in the harness (the account's default harness when
+   * `harnessId` is absent or null). Fails with a validation error otherwise,
+   * because a setting pointing at such a pair could never run. The error names
+   * the part that is wrong and says why. `pathOf` gives the path of the
+   * account or of the harness within the patch.
    */
-  const validateTextGenerationAccount = (
-    patch: SettingsPatch,
+  const validateProviderAccountHarness = (
+    providerAccountId: string,
+    harnessId: string | null | undefined,
+    pathOf: (field: "providerAccountId" | "harnessId") => ReadonlyArray<string>,
   ): Effect.Effect<void, Validation | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
-      const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
-      if (chosen === undefined || typeof chosen === "string") return;
-      const account = yield* settings.readProviderAccountHarnessFacts(chosen.providerAccountId);
+      const account = yield* settings.readProviderAccountKind(providerAccountId);
       if (Option.isNone(account)) {
         return yield* Effect.fail(
-          createValidationError([
-            {
-              path: ["controller", TEXT_GENERATION_MODEL, "providerAccountId"],
-              message: NO_SUCH_ACCOUNT,
-            },
-          ]),
+          createValidationError([{ path: pathOf("providerAccountId"), message: NO_SUCH_ACCOUNT }]),
         );
       }
-      const harnessId = chosen.harnessId ?? account.value.defaultHarnessId;
-      const harnessPath = chosen.harnessId === undefined ? "providerAccountId" : "harnessId";
-      const definition = (yield* host.harnesses()).find((one) => one.id === harnessId);
-      if (definition === undefined) {
+      const choice = decideProviderAccountHarness(
+        yield* host.providers(),
+        yield* host.harnesses(),
+        account.value,
+        harnessId,
+      );
+      if (choice._tag === "refused") {
         return yield* Effect.fail(
-          createValidationError([
-            {
-              path: ["controller", TEXT_GENERATION_MODEL, harnessPath],
-              message: `this build carries no ${harnessId} harness`,
-            },
-          ]),
+          createValidationError([{ path: pathOf(choice.field), message: choice.reason }]),
         );
       }
-      const support = checkHarnessSupport(yield* host.providers(), definition, account.value);
-      if (support._tag === "refused") {
-        return yield* Effect.fail(
-          createValidationError([
-            { path: ["controller", TEXT_GENERATION_MODEL, harnessPath], message: support.reason },
-          ]),
-        );
+    });
+
+  /** Checks the account and harness of `textGeneration.model`, when the patch chooses a model. */
+  const validateTextGenerationProviderAccount = (
+    patch: SettingsPatch,
+  ): Effect.Effect<void, Validation | SqlError | Schema.SchemaError> => {
+    const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
+    if (chosen === undefined || typeof chosen === "string") return Effect.void;
+    return validateProviderAccountHarness(chosen.providerAccountId, chosen.harnessId, (field) => [
+      "controller",
+      TEXT_GENERATION_MODEL,
+      field,
+    ]);
+  };
+
+  /**
+   * Checks the account and harness of the caller's Thread default, when the
+   * patch sets either. A key the patch leaves out keeps its stored value, so
+   * the pair checked is the one the settings will hold afterwards. Nothing is
+   * checked while no account is set, since a harness means nothing without one.
+   */
+  const validateThreadProviderAccount = (
+    patch: SettingsPatch,
+    userId: string,
+  ): Effect.Effect<void, Validation | SqlError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const patched = patch.user;
+      if (
+        patched === undefined ||
+        (patched[THREAD_PROVIDER_ACCOUNT] === undefined && patched[THREAD_HARNESS] === undefined)
+      ) {
+        return;
       }
+      const stored = yield* settings.allForUser(userId);
+      const providerAccountId = patched[THREAD_PROVIDER_ACCOUNT] ?? stored[THREAD_PROVIDER_ACCOUNT];
+      if (providerAccountId === undefined) return;
+      yield* validateProviderAccountHarness(
+        providerAccountId,
+        patched[THREAD_HARNESS] === undefined ? stored[THREAD_HARNESS] : patched[THREAD_HARNESS],
+        (field) => ["user", field === "harnessId" ? THREAD_HARNESS : THREAD_PROVIDER_ACCOUNT],
+      );
     });
 
   const readSettingsState = (
@@ -220,7 +251,8 @@ const make = Effect.gen(function* () {
             // account deleted between the check and the write would leave the
             // setting pointing at nothing.
             yield* validateGithubConnection(patch);
-            yield* validateTextGenerationAccount(patch);
+            yield* validateTextGenerationProviderAccount(patch);
+            yield* validateThreadProviderAccount(patch, actor.userId);
             const written = [
               ...(patch.controller === undefined
                 ? []

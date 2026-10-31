@@ -87,6 +87,7 @@ import {
 import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
 import { PluginHost } from "../plugins";
+import { providerAccountRepository } from "../provider-accounts";
 import {
   afterCommit,
   announce,
@@ -522,6 +523,12 @@ const INPUT_DIRECTION: SortDirection = "asc";
 const NO_SUCH_INPUT = "no such input on that session";
 
 /**
+ * The error message for a session whose Provider Account was deleted. The
+ * session is kept as history, but nothing can run it any more.
+ */
+export const ACCOUNT_DELETED = "The account this thread ran on was deleted.";
+
+/**
  * Returns the refusal of `markDone` for the session `id`, which is not a
  * Thread. The whole call changed nothing, so the message says which id to
  * remove.
@@ -748,6 +755,7 @@ const make = Effect.gen(function* () {
   const requestSubscriptions = yield* permissionRequestSubscriptions;
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
+  const providerAccounts = yield* providerAccountRepository;
   const subagents = yield* subagentRepository;
   const readSession = readSessionOrFail(sessions);
   const tokens = yield* SessionTokens;
@@ -930,6 +938,13 @@ const make = Effect.gen(function* () {
         if (!session.inputWaiting) return false;
         if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
         if (isResumeHeld(session)) return false;
+        // Checked here, in the transaction that queues the session, and not
+        // before it: an account deleted in between would leave a queued
+        // session that dispatch can never prepare. The account delete runs
+        // in a transaction too, so one of the two sees the other.
+        if (Option.isNone(yield* providerAccounts.one(session.providerAccountId))) {
+          return yield* Effect.fail(createInvalidStateError(ACCOUNT_DELETED));
+        }
         // Whether a resume makes the session unfinished again depends on its
         // kind (a step's session by its Run, a Done Thread not at all). So
         // the one rule for "unfinished" is asked before and after the change.
@@ -1352,6 +1367,48 @@ const make = Effect.gen(function* () {
         yield* requestSubscriptions.endWithdrawn(endedIds, withdrawn);
       }
       yield* forgetSessions(ended);
+    });
+
+  /**
+   * Ends a queued session whose start can never be sent, such as one whose
+   * Provider Account is gone, and stores `message` as a `session.exited` row
+   * on its stream, where the user reads why. Does nothing when the session is
+   * no longer queued. Joins the caller's transaction.
+   *
+   * The exit reason is `crash`, which spec 06 section 4.1 gives to a failed
+   * start (`session.exited` with reason `crash`). No process ever ran here,
+   * but the start failed before it could be sent, and it was not a person's
+   * stop. The protocol has no more specific reason, and adding one would
+   * change the wire format for the same outcome.
+   */
+  const endUnstartable = (
+    sessionId: string,
+    message: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const ended = yield* sessions.endQueued(sessionId, at);
+      if (Option.isNone(ended)) return;
+      yield* sessions.append(sessionId, {
+        seq: 0,
+        at,
+        event: {
+          _tag: "session.exited",
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          reason: "crash",
+          message,
+        },
+      });
+      yield* audit.append({
+        kind: "session.stopped",
+        actor: SYSTEM_ACTOR,
+        payload: { sessionId, reason: "crash", message },
+        at,
+      });
+      yield* announce({ _tag: "transcript", sessionId });
+      yield* endSessions([ended.value], "crash", message);
     });
 
   /**
@@ -2074,7 +2131,6 @@ const make = Effect.gen(function* () {
         const decidedSkills = new Map<string | null, ReadonlyArray<SessionLibrarySkill>>();
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
-        const unpreparable: Array<string> = [];
         const inputless: Array<string> = [];
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
@@ -2096,20 +2152,34 @@ const make = Effect.gen(function* () {
               continue;
             }
             // Read per row, before the row leaves the queue: an account that
-            // cannot be prepared (it is gone, or its key fails to decrypt) is
-            // one session's problem, and failing here would roll back every
-            // other session claimed in this batch. The key is read now rather
-            // than stored, like the GitHub account's token: the frame is the
-            // only place it is written down. Start, resume and fork all
-            // queue the session and come through here, so each of them sends
-            // the same home.
-            const harnessAccount = yield* Effect.option(
-              needs.prepareHarnessAccount(row.providerAccountId, row.harnessId),
-            );
-            if (Option.isNone(harnessAccount)) {
-              unpreparable.push(row.id);
+            // cannot be prepared is one session's problem, and failing here
+            // would roll back every other session claimed in this batch. The
+            // key is read now rather than stored, like the GitHub account's
+            // token: the frame is the only place it is written down. Start,
+            // resume and fork all queue the session and come through here, so
+            // each of them sends the same home.
+            //
+            // A refusal (`NotFound`, `InvalidState`) ends the session with
+            // the reason. Retrying could never mend it without a person
+            // acting, and meanwhile the session would be logged on every pass
+            // and would block deleting its account. The one error that can
+            // pass by itself, a database failure, is not caught: it rolls
+            // this claim back and the next pass tries again.
+            const prepared = yield* needs
+              .prepareHarnessAccount(row.providerAccountId, row.harnessId)
+              .pipe(
+                Effect.map((harnessAccount) => ({ harnessAccount })),
+                Effect.catchIf(
+                  (error): error is NotFound | InvalidState =>
+                    error instanceof NotFound || error instanceof InvalidState,
+                  (refused) => Effect.succeed({ refusal: refused.error.message }),
+                ),
+              );
+            if ("refusal" in prepared) {
+              yield* endUnstartable(row.id, prepared.refusal, at);
               continue;
             }
+            const { harnessAccount } = prepared;
             // A start always carries an input. Every path that queues a
             // session stores its input first, and the input a queued session
             // starts with cannot be cancelled, so only data stored by an
@@ -2200,7 +2270,7 @@ const make = Effect.gen(function* () {
                 // not.
                 input: buildTurnInput(row, input),
                 harnessId: row.harnessId,
-                harnessAccount: harnessAccount.value,
+                harnessAccount,
                 spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
                 token,
                 ...(connectionId === null ? {} : { githubConnectionId: connectionId }),
@@ -2236,14 +2306,6 @@ const make = Effect.gen(function* () {
           yield* Effect.logError(
             "skipped queued sessions whose stored spec no longer decodes; they stay queued",
             skipped,
-          );
-        }
-        if (unpreparable.length > 0) {
-          yield* Effect.logError(
-            "skipped queued sessions whose provider account could not be prepared for their " +
-              "harness, because the account is gone, the pair cannot run, or the stored key " +
-              "could not be decrypted; they stay queued",
-            unpreparable,
           );
         }
         // Logged once per session, not on every pass, because such a row

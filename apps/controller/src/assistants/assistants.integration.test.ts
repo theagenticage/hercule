@@ -351,7 +351,7 @@ describe("assistant.create", () => {
       expect(response.status).toBe(409);
       const refused = await readErrorBody(response);
       expect(refused.code, refused.text).toBe("invalid_state");
-      expect(refused.message).toContain("add a provider account first");
+      expect(refused.message).toContain("this version cannot add one yet");
       expect((await listAssistants(arranged)).map((assistant) => assistant.name)).toEqual([
         "Hercule",
       ]);
@@ -487,7 +487,7 @@ describe("assistant.update", () => {
     });
   });
 
-  it("refuses a harness the account cannot run, and an account that cannot run the saved harness", async () => {
+  it("refuses a harness the account cannot run, and an account that cannot run the harness it names", async () => {
     await withAssistants(async (arranged) => {
       const [oldest, next] = await listAccountsOldestFirst(arranged);
       const created = await createAssistant(arranged, {
@@ -498,9 +498,7 @@ describe("assistant.update", () => {
 
       for (const fields of [
         { harnessId: next!.defaultHarnessId },
-        // The saved harness belongs to the oldest account, so moving the
-        // assistant alone is refused.
-        { providerAccountId: next!.id },
+        { providerAccountId: next!.id, harnessId: oldest!.defaultHarnessId },
       ]) {
         const refused = await readErrorBody(await requestUpdate(arranged, created.id, fields));
         expect(refused.code, refused.text).toBe("validation");
@@ -508,10 +506,9 @@ describe("assistant.update", () => {
       }
       expect(await readAssistant(arranged, created.id)).toEqual(created);
 
-      const moved = await requestUpdate(arranged, created.id, {
-        providerAccountId: next!.id,
-        harnessId: null,
-      });
+      // Moving without naming a harness puts the assistant on the new
+      // account's default harness.
+      const moved = await requestUpdate(arranged, created.id, { providerAccountId: next!.id });
       expect(moved.status, await moved.clone().text()).toBe(200);
       expect(await moved.json()).toMatchObject({ providerAccountId: next!.id, harnessId: null });
     });

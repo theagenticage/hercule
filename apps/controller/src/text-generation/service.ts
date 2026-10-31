@@ -5,8 +5,8 @@
  * no tools, no workspace, no transcript and no turn, and nothing is stored but
  * the audit entry, so a call lost to a restart leaves nothing to clean up.
  *
- * The controller holds no provider login, so it cannot call a model itself:
- * every call runs on a runner, through a harness that is logged in there. The
+ * The controller holds no sign-in to a provider, so it cannot call a model itself:
+ * every call runs on a runner, through a harness that is signed in there. The
  * controller daemon owns the wire to the runners, so it implements this
  * service; the domains, such as the runs engine, only call it.
  */

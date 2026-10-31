@@ -631,6 +631,66 @@ describe("the text generation model", () => {
   });
 });
 
+describe("the Thread default account", () => {
+  const readFirstAccount = async (
+    base: string,
+    token: string,
+  ): Promise<{ readonly id: string; readonly defaultHarnessId: string }> => {
+    const response = await get(base, "/api/v1/provider-accounts", token);
+    const accounts = (await response.json()) as ReadonlyArray<{
+      readonly id: string;
+      readonly defaultHarnessId: string;
+    }>;
+    return accounts[0]!;
+  };
+
+  it("accepts an existing provider account, with the harness it can run or none", async () => {
+    await withSettings(async (base, token) => {
+      const account = await readFirstAccount(base, token);
+      for (const user of [
+        { "thread.providerAccountId": account.id },
+        { "thread.providerAccountId": account.id, "thread.harnessId": account.defaultHarnessId },
+        { "thread.providerAccountId": account.id, "thread.harnessId": null },
+      ]) {
+        const response = await patchSettings(base, token, { user });
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect((await readSettings(base, token)).user).toMatchObject(user);
+      }
+    });
+  });
+
+  it("rejects an account that does not exist, naming the key, and keeps the stored value", async () => {
+    await withSettings(async (base, token) => {
+      const account = await readFirstAccount(base, token);
+      await patchSettings(base, token, { user: { "thread.providerAccountId": account.id } });
+
+      const response = await patchSettings(base, token, {
+        user: { "thread.providerAccountId": "0199e0e7-0000-7000-8000-0000000000aa" },
+      });
+
+      expect(await readErrorCode(response)).toBe("validation");
+      expect((await readSettings(base, token)).user["thread.providerAccountId"]).toBe(account.id);
+    });
+  });
+
+  it("rejects a harness the account cannot run, with or without the account in the patch", async () => {
+    await withSettings(async (base, token) => {
+      const account = await readFirstAccount(base, token);
+      await patchSettings(base, token, { user: { "thread.providerAccountId": account.id } });
+
+      for (const user of [
+        { "thread.providerAccountId": account.id, "thread.harnessId": "other/other" },
+        // The account comes from the stored value, so the pair checked is the one stored afterwards.
+        { "thread.harnessId": "other/other" },
+      ]) {
+        const response = await patchSettings(base, token, { user });
+        expect(await readErrorCode(response), JSON.stringify(user)).toBe("validation");
+      }
+      expect((await readSettings(base, token)).user["thread.harnessId"]).toBeUndefined();
+    });
+  });
+});
+
 describe("the text generation model changes", () => {
   it("emit once a write of the setting commits, and not for other keys or a refused write", async () => {
     const emissions = await run(

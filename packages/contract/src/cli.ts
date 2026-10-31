@@ -2546,10 +2546,6 @@ export const CLI = {
       runnerId: { flag: "runner", help: "The same machine the sign-in was started on." },
       code: { flag: "code", help: "The code the browser showed; one line, no newlines." },
     },
-    errors: {
-      conflict:
-        "the sign-in is for someone other than the person this account belongs to; sign in again as that person",
-    },
   },
 
   "connection.query": {

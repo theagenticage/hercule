@@ -12,7 +12,7 @@ import {
   PROVIDERS,
   buildProviderAccount,
   buildSnapshot,
-  type AccountIdentity,
+  type ProviderAccountIdentity,
 } from "../providers.testing";
 import { buildAssistantProviderField } from "./provider-field";
 
@@ -35,7 +35,7 @@ const SIGNED_IN = { status: "ok", identity: "rogier@example.com" } as const;
 
 /** Returns an account with one snapshot that has `auth`, or none when `auth` is null. */
 const buildAccount = (
-  identity: AccountIdentity,
+  identity: ProviderAccountIdentity,
   id: string,
   auth: CapabilitySnapshot["auth"] | null,
 ): ProviderAccount => ({

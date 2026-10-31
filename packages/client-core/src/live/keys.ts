@@ -255,7 +255,12 @@ export const queryKeys = {
   providerAccounts: (): LiveQueryKey => ["provider-accounts"],
   /** Not a live topic: the providers a build registers change only with the build. */
   providers: (): LiveQueryKey => ["providers"],
-  /** Not a live topic: the harnesses a build registers change only with the build. */
+  /**
+   * The harnesses a build registers, and for each runner whether it has the
+   * harness installed and its version. The registered set changes only with
+   * the build; the per-runner install state changes with a runner, so a push
+   * on the `runner` topic refetches this read.
+   */
   harnesses: (): LiveQueryKey => ["harnesses"],
   controller: (): LiveQueryKey => ["controller"],
   workflows: (): LiveQueryKey => ["workflows"],
@@ -441,10 +446,18 @@ export const buildQueryKeys = (
   // facts, starts or stops accepting placements, or is changed by a user,
   // never on a timer. And only a screen that shows the controller's read
   // refetches it.
+  //
+  // The harness list is refetched too, because it holds each runner's install
+  // state and version of every harness, which the runner's facts change.
   if (topic === "runner") {
     return ids.length === 0
-      ? [queryKeys.runners(), queryKeys.runner(), queryKeys.controller()]
-      : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id)), queryKeys.controller()];
+      ? [queryKeys.runners(), queryKeys.runner(), queryKeys.harnesses(), queryKeys.controller()]
+      : [
+          queryKeys.runners(),
+          ...ids.map((id) => queryKeys.runner(id)),
+          queryKeys.harnesses(),
+          queryKeys.controller(),
+        ];
   }
   if (topic === "workspace") {
     return ids.length === 0

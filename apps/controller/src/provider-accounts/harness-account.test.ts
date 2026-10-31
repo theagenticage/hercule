@@ -3,7 +3,7 @@ import { Effect, Redacted } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
-import { prepareHarnessAccount } from "./harness-account";
+import { HarnessAccounts } from "./harness-account";
 import {
   addAccount,
   ALPHA_HARNESS_ID,
@@ -13,6 +13,11 @@ import {
   MACHINE_KIND,
   runWithAccounts,
 } from "./testing";
+
+const prepareHarnessAccount = (providerAccountId: string, harnessId: string) =>
+  Effect.flatMap(HarnessAccounts, (harnessAccounts) =>
+    harnessAccounts.prepare(providerAccountId, harnessId),
+  );
 
 const MISSING = "0199e0e7-9999-7000-8000-000000000000";
 
@@ -26,7 +31,7 @@ const storeKey = (accountId: string, value: string) =>
     );
   });
 
-describe("prepareHarnessAccount", () => {
+describe("HarnessAccounts.prepare", () => {
   it("sends the derived home, the model argument and the decrypted key for a key account", async () => {
     const account = await runWithAccounts(
       Effect.gen(function* () {

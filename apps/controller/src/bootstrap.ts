@@ -105,6 +105,8 @@ import {
   registry,
 } from "./plugins";
 import {
+  HarnessAccounts,
+  HarnessAccountsLayer,
   ProviderAccountProbes,
   ProviderAccountProbesLayer,
   ProviderAccountService,
@@ -112,6 +114,7 @@ import {
   seedProviderAccounts,
 } from "./provider-accounts";
 import { seed } from "./seed";
+import { readSetupComplete } from "./setup";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
@@ -171,11 +174,7 @@ const ensureSetupUrl = (
 ): Effect.Effect<string | undefined, SqlError | HerculeHomeError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql<{
-      readonly completed_at: string | null;
-    }>`SELECT completed_at FROM setup_state WHERE singleton = 1`;
-
-    if (rows[0]?.completed_at != null) {
+    if (yield* readSetupComplete) {
       // Once setup is complete no token is outstanding, so clear both the file
       // and the row: the column holds a hash only while a token is outstanding.
       yield* withTransaction(
@@ -261,6 +260,7 @@ export type ControllerServices =
   | IngestLoops
   | ConnectionTypes
   | RunnerConnections
+  | HarnessAccounts
   | ProviderAccountProbes
   | ProviderAccountService
   | SessionService
@@ -367,6 +367,7 @@ export const bootWith = <A, E>(
      * `RunnerConnections`.
      */
     const withFleet = ProviderAccountProbesLayer.pipe(
+      Layer.provideMerge(HarnessAccountsLayer),
       Layer.provideMerge(RunnerConnectionsLayer),
       Layer.provideMerge(catalog),
     );
@@ -472,7 +473,7 @@ export const bootWith = <A, E>(
         // After the catalog, because a default account is created only for a
         // provider this build registered. Temporary: ticket #934 adds
         // `providerAccount.create` and removes this seed.
-        yield* seedProviderAccounts;
+        yield* seedProviderAccounts(yield* readSetupComplete);
       }
 
       const url = yield* ensureSetupUrl(paths, bootstrap);

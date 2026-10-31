@@ -9,7 +9,7 @@
  * It answers the controller on its own, the way a healthy runner does:
  *
  * - a ping with a pong;
- * - a probe with a logged-in report that offers two models, each with a
+ * - a probe with a signed-in report that offers two models, each with a
  *   reasoning effort and a fast mode, or, after `setSignedIn(false)`, with a
  *   report that the harness has no login;
  * - a login start with the URL of a sign-in page where the user pastes a
@@ -123,7 +123,7 @@ const MODEL_OPTIONS: ReadonlyArray<ModelOption> = [
 ];
 
 /**
- * A logged-in report with two models, so a test can pick a model other than
+ * A signed-in report with two models, so a test can pick a model other than
  * the default, and options on both, so it can pick an option.
  */
 const PROBE_RESULT: ProbeResult = {

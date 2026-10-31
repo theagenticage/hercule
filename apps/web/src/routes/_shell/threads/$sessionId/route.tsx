@@ -7,7 +7,7 @@ import {
   answeredAssistantQuery,
   localRunnerQuery,
   projectsQuery,
-  ensureAccountReads,
+  ensureProviderAccountReads,
   resourcesQuery,
   runnersQuery,
   sessionQuery,
@@ -42,7 +42,7 @@ export const Route = createFileRoute("/_shell/threads/$sessionId")({
       context.queryClient.ensureQueryData(sessionQuery(context.client, params.sessionId)),
       context.queryClient.ensureQueryData(subagentsQuery(context.client, params.sessionId)),
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      ensureAccountReads(context.queryClient, context.client),
+      ensureProviderAccountReads(context.queryClient, context.client),
       // The header shows the thread's project and the other threads in its
       // workspace. These lists are prefetched rather than ensured: if the
       // controller cannot list them, the header is plainer, but the screen

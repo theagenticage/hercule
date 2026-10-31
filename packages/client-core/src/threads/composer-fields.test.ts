@@ -76,14 +76,14 @@ const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
 ]);
 
 /** Returns another account at the same provider, so the pill has an account to name. */
-const buildNamedAccount = (id: string, label: string): ProviderAccount => ({
+const buildNamedProviderAccount = (id: string, label: string): ProviderAccount => ({
   ...CLAUDE,
   id,
   label,
 });
 
-const WORK = buildNamedAccount("account-claude-work", "work");
-const PERSONAL = buildNamedAccount("account-claude-personal", "personal");
+const WORK = buildNamedProviderAccount("account-claude-work", "work");
+const PERSONAL = buildNamedProviderAccount("account-claude-personal", "personal");
 
 /** Probed on no runner: the account exists, but it has no catalog. */
 const NOT_HERE = buildProviderAccount(ANTHROPIC_IDENTITY, []);

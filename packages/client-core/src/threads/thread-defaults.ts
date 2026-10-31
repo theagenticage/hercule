@@ -22,6 +22,7 @@ import type {
   SettingsState,
 } from "@hercule/contract";
 import type { ThreadConfig } from "./config";
+import { resolveThreadHarnessId } from "../provider-accounts";
 import { findDefaultProviderAccountId } from "./default-provider-account";
 import { buildThreadModelField, type ThreadModelField } from "./model-field";
 import { buildRunnerMenu } from "./runner-menu";
@@ -81,7 +82,7 @@ export const findDefaultModel = (
  * model comes from the account's first snapshot in the harness, so Settings
  * still lists the models of an account whose runners are all offline.
  */
-export const computeAccountDefaults = (
+export const computeProviderAccountDefaults = (
   account: ProviderAccount,
   harnessId: string,
   runners: readonly Runner[],
@@ -114,12 +115,12 @@ export const computeThreadDefaults = (
     account !== undefined && account.id === settingsUser["thread.providerAccountId"]
       ? (settingsUser["thread.harnessId"] ?? null)
       : null;
-  const forAccount =
+  const forProviderAccount =
     account === undefined
       ? { runnerId: null, model: null }
-      : computeAccountDefaults(
+      : computeProviderAccountDefaults(
           account,
-          harnessId ?? account.defaultHarnessId,
+          resolveThreadHarnessId(account, harnessId),
           runners,
           thisMacRunnerId,
         );
@@ -130,9 +131,9 @@ export const computeThreadDefaults = (
     // A stored model that the resolved runner does not offer is still the
     // user's choice. It stays picked and the model menu shows that it is not
     // offered there, rather than silently replacing it with another model.
-    model: settingsUser["thread.model"] ?? forAccount.model,
+    model: settingsUser["thread.model"] ?? forProviderAccount.model,
     accessMode: settingsUser["thread.accessMode"] ?? DEFAULT_ACCESS_MODE,
-    runnerId: forAccount.runnerId,
+    runnerId: forProviderAccount.runnerId,
     profileId:
       settingsUser["thread.profileId"] ??
       profiles.find((profile) => profile.name === DEFAULT_PROFILE_NAME)?.id ??

@@ -16,6 +16,7 @@ import type {
   TextGenerationModel,
   TextGenerationStatus,
 } from "@hercule/contract";
+import { listSignedInDefaultHarnessSnapshots, resolveThreadHarnessId } from "./provider-accounts";
 import { describeAge } from "./threads/age";
 import { describeAgent } from "./threads/model-name";
 
@@ -34,7 +35,7 @@ export interface TextGenerationField {
 }
 
 /** A model from a Provider Account, as the setting stores it or the status reports it. */
-type AccountModel = Exclude<TextGenerationModel, "automatic" | "off">;
+type ProviderAccountModel = Exclude<TextGenerationModel, "automatic" | "off">;
 
 /**
  * Returns the name of the model text generation runs on, such as
@@ -44,13 +45,15 @@ type AccountModel = Exclude<TextGenerationModel, "automatic" | "off">;
 export const describeTextGenerationModel = (
   providers: readonly Provider[],
   accounts: readonly ProviderAccount[],
-  model: AccountModel,
+  model: ProviderAccountModel,
 ): string => {
   const account = accounts.find((each) => each.id === model.providerAccountId);
   return describeAgent(
     providers,
     account,
-    model.harnessId ?? account?.defaultHarnessId ?? "",
+    account === undefined
+      ? (model.harnessId ?? "")
+      : resolveThreadHarnessId(account, model.harnessId),
     model.model,
   );
 };
@@ -77,14 +80,19 @@ export const describeTextGenerationRecap = (
  * harness out and one that names the account's default harness are the same
  * choice, so both give the same key.
  */
-const buildModelKey = (accounts: readonly ProviderAccount[], model: AccountModel): string =>
-  [
+const buildModelKey = (
+  accounts: readonly ProviderAccount[],
+  model: ProviderAccountModel,
+): string => {
+  const account = accounts.find((each) => each.id === model.providerAccountId);
+  return [
     model.providerAccountId,
-    model.harnessId ??
-      accounts.find((each) => each.id === model.providerAccountId)?.defaultHarnessId ??
-      "",
+    account === undefined
+      ? (model.harnessId ?? "")
+      : resolveThreadHarnessId(account, model.harnessId),
     model.model,
   ].join("/");
+};
 
 /**
  * Returns the model select: Automatic first, then one entry per Provider
@@ -117,11 +125,7 @@ export const buildTextGenerationField = (
 
   const offered: TextGenerationChoice[] = accounts.flatMap((account) => {
     const slugs = new Set(
-      account.snapshots
-        .filter(
-          (snapshot) =>
-            snapshot.harnessId === account.defaultHarnessId && snapshot.auth.status === "ok",
-        )
+      listSignedInDefaultHarnessSnapshots(account)
         .flatMap((snapshot) => snapshot.models)
         .filter((model) => model.isLegacy !== true)
         .map((model) => model.slug),

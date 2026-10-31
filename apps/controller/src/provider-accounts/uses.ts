@@ -2,16 +2,17 @@
  * Finds what still points at a Provider Account, which is what makes deleting
  * it unsafe (spec 06 section 15.7).
  *
- * These are reads of tables other domains own: agents and assistants, the
- * controller and user settings, and sessions. Those domains import this one,
- * so this one cannot import them back, and the check has to run in the same
- * transaction as the delete anyway.
+ * The Text Generation model and the users' Thread defaults are read through
+ * the settings domain, which this domain may import. Agents (with the
+ * assistants) and sessions import this domain, so it cannot import them back.
+ * Their tables are read with SQL here instead, which is also what lets the
+ * check run in the same transaction as the delete.
  */
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { uuidFromString } from "../db";
+import { Settings } from "../settings";
 
 /** What uses an account. Every field empty, zero or false means the account can be deleted. */
 export interface ProviderAccountUses {
@@ -27,21 +28,16 @@ export interface ProviderAccountUses {
   readonly runningSessions: number;
 }
 
-/** Decodes the `textGeneration.model` setting when it names an account: `automatic` and `off` do not. */
-const decodeChosenModel = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ providerAccountId: Schema.String })),
-);
-
-const decodeJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.String));
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const settings = yield* Settings;
 
   return {
     /**
-     * Returns what uses the account. A setting is compared by its decoded JSON
-     * value, not by its text, so spacing or escaping in the stored text cannot
-     * hide a reference. A stored value that is not JSON uses nothing.
+     * Returns what uses the account. The settings are compared by their
+     * decoded values, not by their stored text, so spacing or escaping in the
+     * text cannot hide a reference. A stored setting that cannot be decoded
+     * uses nothing, because it reads as unset everywhere else too.
      */
     findUses: (providerAccountId: string): Effect.Effect<ProviderAccountUses, SqlError> =>
       Effect.gen(function* () {
@@ -49,13 +45,8 @@ const make = Effect.gen(function* () {
         const agentRows = yield* sql<{ readonly name: string; readonly kind: string }>`
           SELECT name, kind FROM agents WHERE provider_account_id = ${id} ORDER BY name
         `;
-        const textGeneration = yield* sql<{ readonly value: string }>`
-          SELECT value FROM settings
-          WHERE scope = 'controller' AND key = 'textGeneration.model'
-        `;
-        const threadDefaults = yield* sql<{ readonly value: string }>`
-          SELECT value FROM user_settings WHERE key = 'thread.providerAccountId'
-        `;
+        const textGeneration = (yield* settings.all())["textGeneration.model"];
+        const threadDefaults = yield* settings.listUserValues("thread.providerAccountId");
         const sessionRows = yield* sql<{ readonly count: number }>`
           SELECT count(*) AS count FROM sessions
           WHERE provider_account_id = ${id}
@@ -64,14 +55,11 @@ const make = Effect.gen(function* () {
         return {
           agents: agentRows.filter((row) => row.kind === "agent").map((row) => row.name),
           assistants: agentRows.filter((row) => row.kind === "assistant").map((row) => row.name),
-          usedByTextGeneration: textGeneration.some((row) => {
-            const chosen = decodeChosenModel(row.value);
-            return chosen._tag === "Some" && chosen.value.providerAccountId === providerAccountId;
-          }),
-          threadDefaultUsers: threadDefaults.filter((row) => {
-            const chosen = decodeJsonString(row.value);
-            return chosen._tag === "Some" && chosen.value === providerAccountId;
-          }).length,
+          usedByTextGeneration:
+            typeof textGeneration === "object" &&
+            textGeneration.providerAccountId === providerAccountId,
+          threadDefaultUsers: threadDefaults.filter((chosen) => chosen === providerAccountId)
+            .length,
           runningSessions: sessionRows[0]?.count ?? 0,
         };
       }),

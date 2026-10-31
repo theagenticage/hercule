@@ -618,6 +618,31 @@ describe("a plugin that registers a provider", () => {
     expect(message).toContain("catalogSource");
   });
 
+  it("is errored, naming the fields, when a credentials step is not exactly one field named apiKey", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const withFields = (fields: ReadonlyArray<{ name: string; label: string }>) =>
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [{ ...definition.kinds[0], setup: [{ kind: "credentials", fields }] }],
+        },
+      ]);
+
+    for (const fields of [
+      [{ name: "token", label: "Token" }],
+      [
+        { name: "apiKey", label: "API key" },
+        { name: "orgId", label: "Organization" },
+      ],
+    ]) {
+      const message = await bootAndReadError(withFields(fields));
+
+      expect(message).toContain(
+        `the fields ${fields.map((field) => field.name).join(", ")}; a credentials step must have exactly one field, named apiKey`,
+      );
+    }
+  });
+
   it("is errored when an account kind has a setup step the core cannot draw", async () => {
     const definition = buildProviderDefinition("vendor");
     const message = await bootAndReadError(

@@ -23,7 +23,11 @@ import type {
   WorkspaceStatus,
 } from "@hercule/contract";
 import { buildAccessModeMenu, type AccessModeMenuItem } from "./access-modes";
-import { buildProviderAccountName, findAccountNameIfAmbiguous } from "../provider-accounts";
+import {
+  buildProviderAccountName,
+  findProviderAccountNameIfAmbiguous,
+  resolveThreadHarnessId,
+} from "../provider-accounts";
 import { buildSignInTarget, type SignInTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadKind } from "./config";
 import { buildRunnerMenu, findDimmedReason, type RunnerMenuRow } from "./runner-menu";
@@ -204,7 +208,8 @@ export const buildComposerFields = (
 ): ComposerFields => {
   const { config, kind, snapshot, descriptor } = resolved;
   const account = catalogs.accounts.find((each) => each.id === config.providerAccountId);
-  const harnessId = account === undefined ? null : (config.harnessId ?? account.defaultHarnessId);
+  const harnessId =
+    account === undefined ? null : resolveThreadHarnessId(account, config.harnessId);
   const harness = catalogs.harnesses.find((each) => each.id === harnessId);
   const resources = catalogs.resources ?? [];
   const workspaces = catalogs.workspaces ?? [];
@@ -266,7 +271,7 @@ export const buildComposerFields = (
         account:
           account === undefined
             ? null
-            : findAccountNameIfAmbiguous(catalogs.accounts, catalogs.providers, account),
+            : findProviderAccountNameIfAmbiguous(catalogs.accounts, catalogs.providers, account),
         // A slug the snapshot no longer offers is still the thread's model, so
         // the pill shows the slug rather than going blank.
         name: descriptor?.name ?? config.model,

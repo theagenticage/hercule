@@ -432,7 +432,7 @@ describe("the harness an agent runs in", () => {
     });
   });
 
-  it("rejects moving an agent to an account that cannot run its harness, and keeps the agent as it was", async () => {
+  it("rejects moving an agent to an account that cannot run the harness it names, and keeps the agent as it was", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAgentOnAccount(
         arranged,
@@ -443,12 +443,30 @@ describe("the harness an agent runs in", () => {
       const refused = await parseRefusal(
         await updateAgent(arranged, agent.id, {
           providerAccountId: findProviderAccountId(arranged, "harnesses/codex"),
+          harnessId: "harnesses/claude",
         }),
       );
 
       expect(refused.code).toBe("validation");
       expect(refused.text).toContain("harnessId");
       expect(await readAgent(arranged, agent.id)).toEqual(agent);
+    });
+  });
+
+  it("puts an agent on the new account's default harness when it moves and names no harness", async () => {
+    await withFleet(async (arranged) => {
+      const agent = await createAgentOnAccount(
+        arranged,
+        findProviderAccountId(arranged, "harnesses/claude"),
+        { harnessId: "harnesses/claude" },
+      );
+
+      const response = await updateAgent(arranged, agent.id, {
+        providerAccountId: findProviderAccountId(arranged, "harnesses/codex"),
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({ harnessId: null });
     });
   });
 

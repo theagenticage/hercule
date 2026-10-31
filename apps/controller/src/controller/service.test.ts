@@ -136,7 +136,7 @@ describe("controller.read text generation", () => {
 
     expect(result.textGeneration).toEqual({
       model: null,
-      unavailableReason: expect.stringContaining("no up-to-date runner") as unknown,
+      unavailableReason: expect.stringContaining("pick a model in Settings › System") as unknown,
       lastFailure: null,
     });
   });

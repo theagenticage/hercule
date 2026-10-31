@@ -18,21 +18,13 @@ const run = <A, E>(body: Effect.Effect<A, E, PluginHost | SqlClient.SqlClient | 
     }).pipe(Effect.provide(buildPluginStack()), asUser) as Effect.Effect<A, E, never>,
   );
 
-const markSetupComplete = Effect.flatMap(SqlClient.SqlClient, (sql) =>
-  withTransaction(
-    sql,
-    sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
-        VALUES (1, NULL, '2026-10-31T00:00:00.000Z')`,
-  ),
-);
-
 const listAccounts = Effect.flatMap(providerAccountRepository, (accounts) => accounts.list());
 
 describe("seedProviderAccounts", () => {
   it("creates the three defaults on a fresh install, oldest first, audited by the system", async () => {
     const outcome = await run(
       Effect.gen(function* () {
-        yield* seedProviderAccounts;
+        yield* seedProviderAccounts(false);
         return {
           accounts: yield* listAccounts,
           audit: yield* readEventsOfKind("providerAccount.created"),
@@ -59,9 +51,9 @@ describe("seedProviderAccounts", () => {
   it("changes nothing on a second boot", async () => {
     const accounts = await run(
       Effect.gen(function* () {
-        yield* seedProviderAccounts;
+        yield* seedProviderAccounts(false);
         const before = yield* listAccounts;
-        yield* seedProviderAccounts;
+        yield* seedProviderAccounts(false);
         return { before, after: yield* listAccounts };
       }),
     );
@@ -72,8 +64,7 @@ describe("seedProviderAccounts", () => {
   it("creates nothing once setup is complete, so a deleted account stays deleted", async () => {
     const accounts = await run(
       Effect.gen(function* () {
-        yield* markSetupComplete;
-        yield* seedProviderAccounts;
+        yield* seedProviderAccounts(true);
         return yield* listAccounts;
       }),
     );
@@ -96,7 +87,7 @@ describe("seedProviderAccounts", () => {
             at: "2026-10-31T00:00:00.000Z",
           }),
         );
-        yield* seedProviderAccounts;
+        yield* seedProviderAccounts(false);
         return yield* listAccounts;
       }),
     );

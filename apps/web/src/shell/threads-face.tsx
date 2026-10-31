@@ -9,7 +9,7 @@ import {
   decideAssistantPresence,
   findNewestConversationSession,
   findAnsweredAssistantId,
-  hasLoggedInRunner,
+  hasSignedInRunner,
   type DraftPlace,
   type HerculeClient,
   type Live,
@@ -92,7 +92,7 @@ export function ThreadsFace({
     accountsRead !== undefined &&
     providersRead !== undefined &&
     harnessesRead !== undefined &&
-    !hasLoggedInRunner(runners, accountsRead, providersRead, harnessesRead);
+    !hasSignedInRunner(runners, accountsRead, providersRead, harnessesRead);
   // The runner on this browser's machine. It decides whether the project's
   // main workspace already exists where the draft would run.
   const { detectLocalRunner } = useRouteContext({ from: "/_shell" });
