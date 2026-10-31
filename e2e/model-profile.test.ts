@@ -5,8 +5,7 @@
  * default entry, and deleting the profile clears the project's choice.
  *
  * Everything the test arranges and checks goes through the CLI, the surface
- * agents use, except one profile update that goes over HTTP (see the call).
- * Only the arrangement of a runner needs more: a scripted runner
+ * agents use. Only the arrangement of a runner needs more: a scripted runner
  * (`apps/desktop/scripts`) joins the controller and answers probes and session
  * starts, so no harness, model or login is involved and no tokens are spent.
  * The controller's own runner is never asked to host a thread: every spawn
@@ -177,15 +176,26 @@ describe("a project's Model Profile", () => {
       const created = await runJson<Profile>(["model-profile", "create", "--name", "Review"]);
       expect(created.name).toBe("Review");
       const entry = { providerAccountId: secondAccountId, model: PROFILE_MODEL, harnessId: null };
-      // The CLI's update row cannot send an empty list (each `--dismissed-new-models`
-      // value is one element), so this one call goes over HTTP.
-      await fleet.call("PATCH", `/model-profiles/${created.id}`, {
-        expectedRevision: created.revision,
-        name: "Review",
-        accounts: [{ providerAccountId: secondAccountId, harnessId: null, entries: [entry] }],
-        defaultEntry: entry,
-        dismissedNewModels: [],
-      });
+      await runJson(
+        [
+          "model-profile",
+          "update",
+          created.id,
+          "--expected-revision",
+          String(created.revision),
+          "--name",
+          "Review",
+          "--default-entry",
+          JSON.stringify(entry),
+        ],
+        // The sections, then the dismissed models: one JSON list per line.
+        [
+          JSON.stringify([
+            { providerAccountId: secondAccountId, harnessId: null, entries: [entry] },
+          ]),
+          "[]",
+        ].join("\n"),
+      );
 
       // 2. A project that names it.
       const project = await runJson<Project>([

@@ -13,6 +13,7 @@ const taskUpdate = lookUpCommand("task", "update");
 const projectUpdate = lookUpCommand("project", "update");
 const sessionInput = lookUpCommand("session", "input");
 const setPassword = lookUpCommand("user", "set-password");
+const modelProfileUpdate = lookUpCommand("model-profile", "update");
 
 const refuseStdinRead = () => Promise.reject(new Error("stdin was read"));
 const stubStdin = (text: string) => () => Promise.resolve(text);
@@ -116,6 +117,46 @@ describe("user set-password", () => {
     await expect(parseArguments(setPassword, [], stubStdin("only-one\n"))).rejects.toThrow(
       /1 line\(s\), but 2 fields/,
     );
+  });
+});
+
+// Tests that a full-profile replace can send lists, including empty ones.
+describe("model-profile update", () => {
+  const flags = ["--expected-revision", "3", "--name", "Main", "--default-entry", "null"];
+
+  it("reads the sections and the dismissed models as two JSON lists on stdin", async () => {
+    const section = { providerAccountId: "a1", harnessId: null, entries: [] };
+    const dismissed = { providerAccountId: "a1", model: "m1" };
+    const args = await parseArguments(
+      modelProfileUpdate,
+      [ID, ...flags],
+      stubStdin(`${JSON.stringify([section])}\n${JSON.stringify([dismissed])}\n`),
+    );
+    expect(args.payload).toEqual({
+      expectedRevision: 3,
+      name: "Main",
+      defaultEntry: null,
+      accounts: [section],
+      dismissedNewModels: [dismissed],
+    });
+  });
+
+  it("sends empty lists for both", async () => {
+    const args = await parseArguments(modelProfileUpdate, [ID, ...flags], stubStdin("[]\n[]\n"));
+    expect(args.payload["accounts"]).toEqual([]);
+    expect(args.payload["dismissedNewModels"]).toEqual([]);
+  });
+
+  it("refuses a list given inline, and names the stdin form", async () => {
+    await expect(
+      parseArguments(modelProfileUpdate, [ID, ...flags, "--accounts", "[]"], refuseStdinRead),
+    ).rejects.toThrow(/--accounts-stdin/);
+  });
+
+  it("refuses stdin that is not two lines", async () => {
+    await expect(
+      parseArguments(modelProfileUpdate, [ID, ...flags], stubStdin("[]\n")),
+    ).rejects.toThrow(/1 line\(s\), but 2 fields/);
   });
 });
 

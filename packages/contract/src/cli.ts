@@ -2683,7 +2683,7 @@ export const CLI = {
   },
   "modelProfile.update": {
     command: "model-profile update",
-    help: "Replaces a whole Model Profile: the stored profile becomes exactly what you send. Read it first with `hercule model-profile read` and send every part, changed or not, together with the revision you read. The call fails with `conflict` when the profile changed since; read it again and make your change on that. A section sent without `entries` gets its Provider's default model selection, now if the account's catalog has been read, otherwise when its first read succeeds. `entries: []` means no entries. Every entry carries the account id, the model slug and a harness id or null.",
+    help: "Replaces a whole Model Profile: the stored profile becomes exactly what you send. Read it first with `hercule model-profile read` and send every part, changed or not, together with the revision you read. The call fails with `conflict` when the profile changed since; read it again and make your change on that. The sections and the dismissed models are read from stdin as two lines, each one JSON list written on a single line (`jq -c` does that): the sections first, then the dismissed models. `[]` means none. A section sent without `entries` gets its Provider's default model selection, now if the account's catalog has been read, otherwise when its first read succeeds. `entries: []` means no entries. Every entry carries the account id, the model slug and a harness id or null.",
     examples: [
       {
         args: [
@@ -2692,13 +2692,13 @@ export const CLI = {
           "3",
           "--name",
           "Main",
-          "--accounts",
-          '[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","harnessId":null,"entries":[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","model":"claude-opus-5-5","harnessId":null}]}]',
           "--default-entry",
           '{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","model":"claude-opus-5-5","harnessId":null}',
-          "--dismissed-new-models",
-          "[]",
         ],
+        stdin: [
+          '[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","harnessId":null,"entries":[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","model":"claude-opus-5-5","harnessId":null}]}]',
+          "[]",
+        ].join("\n"),
       },
     ],
     fields: {
@@ -2714,16 +2714,18 @@ export const CLI = {
       },
       name: { flag: "name", help: "The profile's name; unique among the profiles." },
       accounts: {
+        stdin: true,
         flag: "accounts",
-        help: 'The sections in menu order as inline JSON: [{"providerAccountId":"<id>","harnessId":<harness id or null>,"entries":[{"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}]}]. Leave "entries" off a section to give it the Provider\'s default selection.',
+        help: 'The sections in menu order, the first line of stdin, as a JSON list on one line: [{"providerAccountId":"<id>","harnessId":<harness id or null>,"entries":[{"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}]}]. Leave "entries" off a section to give it the Provider\'s default selection.',
       },
       defaultEntry: {
         flag: "default-entry",
-        help: 'The entry new threads start on as inline JSON, {"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}, or null for none. It must be one of the entries.',
+        help: 'The entry new threads start on as inline JSON, {"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}, or the word null for none. It must be one of the entries.',
       },
       dismissedNewModels: {
+        stdin: true,
         flag: "dismissed-new-models",
-        help: 'The models the profile no longer announces as new, as inline JSON: [{"providerAccountId":"<id>","model":"<slug>"}]. Send [] for none.',
+        help: 'The models the profile no longer announces as new, the second line of stdin, as a JSON list on one line: [{"providerAccountId":"<id>","model":"<slug>"}]. Write [] for none.',
       },
     },
     errors: {

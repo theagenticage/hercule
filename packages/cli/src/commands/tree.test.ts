@@ -253,12 +253,13 @@ describe("a command's fields against the schema", () => {
     expect(send!.payload.find((field) => field.name === "text")?.stdin).toBe(true);
   });
 
-  it("takes at most one field from stdin, except the two passwords", () => {
+  it("takes at most one field from stdin, except the two passwords and the two lists of a Model Profile", () => {
     for (const command of COMMANDS) {
       const stdin = [...command.positionals, ...command.payload, ...command.query].filter(
         (field) => field.stdin,
       );
-      const expected = command.id === "user.setPassword" ? 2 : 1;
+      const expected =
+        command.id === "user.setPassword" || command.id === "modelProfile.update" ? 2 : 1;
       expect(
         stdin.length,
         `${readSpelling(command)} reads ${stdin.length} fields from stdin`,
@@ -266,6 +267,10 @@ describe("a command's fields against the schema", () => {
     }
     expect(
       findCommandByWords(["user", "set-password"])!.payload.filter((field) => field.stdin).length,
+    ).toBe(2);
+    expect(
+      findCommandByWords(["model-profile", "update"])!.payload.filter((field) => field.stdin)
+        .length,
     ).toBe(2);
   });
 
@@ -336,6 +341,7 @@ describe("the placeholders a usage line shows", () => {
     "provider-account refresh": "<account-id>",
     "model-profile read": "<profile-id>",
     "model-profile update": "<profile-id>",
+    "model-profile delete": "<profile-id>",
     "assistant read": "<assistant-id>",
     "assistant update": "<assistant-id>",
     "assistant delete": "<assistant-id>",

@@ -293,8 +293,8 @@ const COMMANDS: Record<string, string> = {
 /**
  * Every field whose value is read from stdin rather than given inline, keyed
  * `<operation> <field>`. A command has one stdin channel, so `user.setPassword`
- * is left out here and checked on its own below: it is the one command that
- * reads two fields, one per line.
+ * and `modelProfile.update` are left out here and checked on their own below:
+ * they are the two commands that read two fields, one per line.
  */
 const STDIN_FIELDS = [
   "setup.complete password",
@@ -564,7 +564,10 @@ describe("the nouns", () => {
 describe("the stdin fields", () => {
   it("marks exactly the fields the spec lists", () => {
     const marked = listVisibleFields()
-      .filter(([id, , field]) => field.stdin === true && id !== "user.setPassword")
+      .filter(
+        ([id, , field]) =>
+          field.stdin === true && id !== "user.setPassword" && id !== "modelProfile.update",
+      )
       .map(([id, name]) => `${id} ${name}`);
     expect(marked.sort()).toEqual([...STDIN_FIELDS].sort());
   });
@@ -574,6 +577,13 @@ describe("the stdin fields", () => {
       .filter(([, field]) => field.stdin === true)
       .map(([name]) => name);
     expect(marked.sort()).toEqual(["current", "next"]);
+  });
+
+  it("reads the sections and the dismissed models of model-profile update from stdin", () => {
+    const marked = Object.entries(table["modelProfile.update"]?.fields ?? {})
+      .filter(([, field]) => field.stdin === true)
+      .map(([name]) => name);
+    expect(marked.sort()).toEqual(["accounts", "dismissedNewModels"]);
   });
 });
 
