@@ -399,7 +399,7 @@ export const SPECIMEN_KINDS: Readonly<Record<string, AccountKind>> = {
   },
   opencodeGo: {
     id: "go-key",
-    title: "OpenCode Go key",
+    title: "Go key",
     description:
       "From your OpenCode Go subscription, in the OpenCode console at opencode.ai. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
     setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
@@ -407,7 +407,7 @@ export const SPECIMEN_KINDS: Readonly<Record<string, AccountKind>> = {
   },
   opencodeZen: {
     id: "zen-key",
-    title: "OpenCode Zen key",
+    title: "Zen key",
     description:
       "From your OpenCode Zen balance, in the OpenCode console at opencode.ai. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
     setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],

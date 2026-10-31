@@ -10,7 +10,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber, Logger } from "effect";
 import { TestClock } from "effect/testing";
-import type { HarnessCredential, ProbeResult } from "@hercule/protocol";
+import { MAX_PROBE_MODELS, type HarnessCredential, type ProbeResult } from "@hercule/protocol";
 import { makePiAdapter } from "./adapter";
 import {
   buildFakePiSeam,
@@ -174,6 +174,53 @@ describe("the pi adapter's probe", () => {
       "GLM-5.3-Flash",
       "GLM-5.3 Highspeed",
     ]);
+  });
+
+  describe("a provider that lists many models", () => {
+    const listModels = (count: number) => ({
+      get_available_models: () => ({
+        success: true,
+        data: {
+          models: Array.from({ length: count }, (_, index) => ({
+            provider: "zai",
+            id: `model-${String(index)}`,
+            name: `Model ${String(index)}`,
+            reasoning: false,
+            input: ["text"],
+          })),
+        },
+      }),
+    });
+
+    const probeCollectingWarnings = (count: number) => {
+      const warnings: Array<string> = [];
+      const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(String(message));
+      });
+      const { seam } = buildFakePiSeam({ answers: listModels(count) });
+      const probing = makePiAdapter(seam)
+        .probe(buildContext(createPiHome()), { readUsage: false })
+        .pipe(Effect.provide(Logger.layer([collecting])));
+      return { result: Effect.runPromise(probing), warnings };
+    };
+
+    it("reports every model up to the protocol's cap, as OpenCode Zen's 68 need", async () => {
+      const { result, warnings } = probeCollectingWarnings(68);
+
+      expect((await result).models).toHaveLength(68);
+      expect(warnings.filter((warning) => warning.includes("dropped"))).toEqual([]);
+    });
+
+    it("cuts a longer list at the cap and warns once with how many models it dropped", async () => {
+      const { result, warnings } = probeCollectingWarnings(MAX_PROBE_MODELS + 5);
+
+      const probed = await result;
+      expect(probed.models).toHaveLength(MAX_PROBE_MODELS);
+      expect(probed.models[0]?.slug).toBe("model-0");
+      expect(warnings.filter((warning) => warning.includes("dropped"))).toEqual([
+        `pi listed ${String(MAX_PROBE_MODELS + 5)} models and the probe reports ${String(MAX_PROBE_MODELS)}, so 5 were dropped`,
+      ]);
+    });
   });
 
   it("declares pi's image size limit on the models that take images, and no images on the rest", async () => {

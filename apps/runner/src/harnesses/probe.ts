@@ -7,7 +7,12 @@ import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { ProbeResult, UsageReading } from "@hercule/protocol";
+import {
+  MAX_PROBE_MODELS,
+  type ModelDescriptor,
+  type ProbeResult,
+  type UsageReading,
+} from "@hercule/protocol";
 import { truncateFact } from "./text";
 
 /** Long enough for a harness starting cold, short enough that the Fleet page does not look hung. */
@@ -24,6 +29,22 @@ export const buildFailedProbe = (harnessVersion: string | null, message: string)
   models: [],
   usage: null,
 });
+
+/**
+ * Returns the first `MAX_PROBE_MODELS` models of `catalog`, so the probe result
+ * fits the protocol. When it cuts, it logs one warning with the number of
+ * models dropped, because a Model Catalog that lost models without a word
+ * would look complete. `harness` names the harness in the log line.
+ */
+export const limitModelCatalog = (
+  harness: string,
+  catalog: ReadonlyArray<ModelDescriptor>,
+): Effect.Effect<ReadonlyArray<ModelDescriptor>> =>
+  catalog.length <= MAX_PROBE_MODELS
+    ? Effect.succeed(catalog)
+    : Effect.logWarning(
+        `${harness} listed ${String(catalog.length)} models and the probe reports ${String(MAX_PROBE_MODELS)}, so ${String(catalog.length - MAX_PROBE_MODELS)} were dropped`,
+      ).pipe(Effect.as(catalog.slice(0, MAX_PROBE_MODELS)));
 
 /** The longest a probe's optional usage read may take, when the probe has the time. */
 export const USAGE_READ_DEADLINE: Duration.Duration = Duration.seconds(5);

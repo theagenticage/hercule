@@ -93,6 +93,21 @@ describe("parseGoUsageBody", () => {
     expect(parseGoUsageBody({ usage: {} }, TAKEN_AT)).toEqual({ readings: [] });
   });
 
+  it("gives no reading for a window without a percent, and still reads the others", () => {
+    const { weekly, monthly } = RECORDED.usage;
+    const body = { usage: { rolling: { status: "ok" }, weekly, monthly } };
+
+    expect(parseGoUsageBody(body, TAKEN_AT)).toMatchObject({
+      readings: [{ window: "weekly" }, { window: "monthly" }],
+    });
+  });
+
+  it("reads a window without a status as not rate-limited", () => {
+    expect(parseGoUsageBody({ usage: { rolling: { percent: 5 } } }, TAKEN_AT)).toMatchObject({
+      readings: [{ window: "five-hour", usedPercent: 5, hit: false }],
+    });
+  });
+
   it("gives resetsAt null when the reset time is missing or not a date", () => {
     const body = {
       usage: {
@@ -123,7 +138,7 @@ describe("parseGoUsageBody", () => {
     ["a body without usage", {}],
     ["an error body", { type: "error", error: { type: "EntitlementError", message: "no" } }],
     ["a percent that is text", { usage: { rolling: { status: "ok", percent: "5" } } }],
-    ["a window without a percent", { usage: { rolling: { status: "ok" } } }],
+    ["a status that is a number", { usage: { rolling: { status: 1, percent: 5 } } }],
     ["a window that is not an object", { usage: { rolling: 5 } }],
   ])("throws on %s, which is a defect of the plugin or of OpenCode", (_name, body) => {
     expect(() => parseGoUsageBody(body, TAKEN_AT)).toThrow();

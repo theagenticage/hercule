@@ -45,8 +45,8 @@ describe("the OpenCode provider", () => {
     expect(definition.id).toBe("opencode");
     expect(definition.displayName).toBe("OpenCode");
     expect(definition.kinds.map((kind) => [kind.id, kind.title])).toEqual([
-      ["go-key", "OpenCode Go key"],
-      ["zen-key", "OpenCode Zen key"],
+      ["go-key", "Go key"],
+      ["zen-key", "Zen key"],
     ]);
     for (const kind of definition.kinds) {
       expect(kind.setup).toEqual([

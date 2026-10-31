@@ -4822,6 +4822,11 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - **The menu's time is one run on a busy Mac,** with up to 60 entries. The profile of 7 accounts and 4 profiles that spec 17's budget names was not built for this reading. A menu with more than 60 entries in one profile was not measured.
 - **Not measured:** processes, memory, idle work and the work per streamed token with the Models section open (the perf script was not run), and the picker's time to open on a catalog of hundreds of models. The section and the menu add no timer, no polling and no live topic of their own: `modelProfile.query` is a shell read renewed by the `provider` topic the shell already holds.
 
+**OpenCode and MiniMax, slice 49,** recorded 2026-10-31 for [#941](https://github.com/theagenticage/hercule/issues/941). No renderer or main-process code changed, so there is nothing to measure in processes, memory, idle work, work per streamed token or bundle bytes.
+
+- **The cost is plugin data only.** Each read of the plugins' marks carries about 1.9 kB more: MiniMax's path is 1,827 bytes and OpenCode's about 95.
+- **Not measured:** everything else in the table above, because nothing on the desktop ran differently.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.

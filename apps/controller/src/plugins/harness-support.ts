@@ -113,7 +113,7 @@ export const decideProviderAccountHarness = (
   }
   const support = harness.runs.find((candidate) => candidate.providerId === provider.id);
   const supportedKind = support?.kinds.find((candidate) => candidate.kind === kind.id);
-  if (support === undefined || supportedKind === undefined) {
+  if (supportedKind === undefined) {
     return {
       _tag: "refused",
       field,

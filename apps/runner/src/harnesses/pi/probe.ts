@@ -14,16 +14,10 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
-import {
-  MAX_FACT_ITEMS,
-  type ModelDescriptor,
-  type ModelOption,
-  type ProbeResult,
-  type SnapshotAuth,
-} from "@hercule/protocol";
+import type { ModelDescriptor, ModelOption, ProbeResult, SnapshotAuth } from "@hercule/protocol";
 import type { InstallOutcome } from "../index";
 import { makeInstall } from "../install";
-import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
+import { PROBE_DEADLINE, buildFailedProbe, limitModelCatalog } from "../probe";
 import type { Ran, Run } from "../process";
 import { truncateFact } from "../text";
 import { makeRpc, type PiSpawn } from "./rpc";
@@ -138,7 +132,6 @@ const buildCatalog = (
         typeof model.name === "string" &&
         model.name !== "",
     )
-    .slice(0, MAX_FACT_ITEMS)
     .map((model) => ({
       slug: truncateFact(model.id as string),
       name: truncateFact(model.name as string),
@@ -287,11 +280,11 @@ const fetchCatalog = (
       Effect.runFork(rpc.pump);
       return rpc.send({ type: "get_available_models" }).pipe(
         Effect.mapError((failure) => failure.message),
-        Effect.map((answer) => {
+        Effect.flatMap((answer) => {
           const models = (
             answer["data"] as { readonly models?: ReadonlyArray<PiModel> } | undefined
           )?.models;
-          return buildCatalog(models ?? [], provider);
+          return limitModelCatalog("pi", buildCatalog(models ?? [], provider));
         }),
       );
     },

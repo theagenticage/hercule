@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { ProviderDefinition } from "@hercule/plugin-host";
 import { minimax } from "./index";
-import { parseRemainsBody } from "./quota";
+import { parsePlanUsageBody } from "./usage";
 
 /** Returns the definition the plugin gives the catalog, captured from its registration. */
 const captureProviderDefinition = (): ProviderDefinition => {
@@ -87,7 +87,7 @@ describe("the MiniMax provider", () => {
       ),
     );
 
-    expect(registered).toEqual([{ "plan-key": parseRemainsBody }]);
+    expect(registered).toEqual([{ "plan-key": parsePlanUsageBody }]);
   });
 
   it("reads its Model Catalog from pi and brings the current models into a profile", () => {

@@ -9,6 +9,7 @@ import {
   MAX_CHECKOUTS,
   MAX_FRAME_BYTES,
   MAX_LOGIN_CODE_SECONDS,
+  MAX_PROBE_MODELS,
   MAX_REPOSITORY_SKILLS,
   MAX_SKILL_DESCRIPTION_LENGTH,
   MAX_SKIPPED_REASON_LENGTH,
@@ -465,8 +466,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 17, the version that added Account Usage", () => {
-    expect(PROTOCOL_VERSION).toBe(17);
+  it("is 18, the version that raised the most models a probe lists", () => {
+    expect(PROTOCOL_VERSION).toBe(18);
   });
 });
 
@@ -567,6 +568,20 @@ describe("the runner-to-controller catalogue", () => {
       result: { models: [{ imageInput: null }] },
     });
     expect(decodeFromRunner(reportWith({ maxBytes: 0 }))._tag).toBe("Failure");
+  });
+
+  it("carries up to MAX_PROBE_MODELS models on a probe result, and refuses more", () => {
+    const [model] = probeResult.models;
+    const reportWith = (count: number) => ({
+      _tag: "probeReport",
+      requestId: REQUEST_ID,
+      providerAccountId: PROVIDER_ACCOUNT_ID,
+      result: { ...probeResult, models: Array.from({ length: count }, () => model) },
+    });
+    // 68 is how many models pi lists for OpenCode Zen, more than the 64 of every other list.
+    expect(decodeFromRunner(reportWith(68))._tag).toBe("Success");
+    expect(decodeFromRunner(reportWith(MAX_PROBE_MODELS))._tag).toBe("Success");
+    expect(decodeFromRunner(reportWith(MAX_PROBE_MODELS + 1))._tag).toBe("Failure");
   });
 
   it("carries usage readings on a probe result and on a session's usage report", () => {

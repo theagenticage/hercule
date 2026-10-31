@@ -13,6 +13,8 @@ const ModelRemain = Schema.Struct({
   model_name: Schema.String,
   /** When the short window ends, in milliseconds since the epoch. */
   end_time: OptionalNumber,
+  /** Newer plans send this instead of `end_time`: the milliseconds left in the short window. */
+  remains_time: OptionalNumber,
   current_interval_total_count: OptionalNumber,
   /** Despite its name, the count that is left in the window, not the count used. */
   current_interval_usage_count: OptionalNumber,
@@ -21,6 +23,8 @@ const ModelRemain = Schema.Struct({
   current_interval_status: OptionalNumber,
   /** When the weekly window ends, in milliseconds since the epoch. */
   weekly_end_time: OptionalNumber,
+  /** Newer plans send this instead of `weekly_end_time`: the milliseconds left in the weekly window. */
+  weekly_remains_time: OptionalNumber,
   current_weekly_total_count: OptionalNumber,
   /** Despite its name, the count that is left in the window, not the count used. */
   current_weekly_usage_count: OptionalNumber,
@@ -35,7 +39,7 @@ type ModelRemain = Schema.Schema.Type<typeof ModelRemain>;
  * The answer of MiniMax's plan usage endpoint. Errors come back as HTTP 200
  * with a non-zero `base_resp.status_code`, so the same shape holds both.
  */
-const RemainsBody = Schema.Struct({
+const PlanUsageBody = Schema.Struct({
   base_resp: Schema.Struct({
     status_code: Schema.Number,
     status_msg: Schema.optionalKey(Schema.String),
@@ -43,7 +47,7 @@ const RemainsBody = Schema.Struct({
   model_remains: Schema.optionalKey(Schema.Array(ModelRemain)),
 });
 
-const decodeRemainsBody = Schema.decodeUnknownSync(RemainsBody);
+const decodePlanUsageBody = Schema.decodeUnknownSync(PlanUsageBody);
 
 /**
  * The status codes that mean MiniMax refused the key, from its error code
@@ -57,21 +61,49 @@ const decodeRemainsBody = Schema.decodeUnknownSync(RemainsBody);
  *
  * Not here: `2062`, "no active M Plan subscription when querying usage". The
  * key may be fine and the subscription lapsed or not started, which Hercule
- * does not tell apart yet, so it is thrown like any other failure.
+ * does not tell apart yet, so it is thrown like any other failure: the caller
+ * logs it and the account keeps its last readings.
  */
 const KEY_REFUSED_CODES: ReadonlySet<number> = new Set([1004, 2049, 2057]);
+
+/** Code 2057, "not token plan token", whose refusal text is ours rather than MiniMax's. */
+const PAY_AS_YOU_GO_KEY_CODE = 2057;
+
+/**
+ * What the user reads when a pay-as-you-go key was added as a plan key.
+ * MiniMax's own words for it ("not token plan token") do not say what to do.
+ */
+const PAY_AS_YOU_GO_KEY_REFUSAL =
+  "This is a pay-as-you-go key, not a plan key. Add it to MiniMax as a pay-as-you-go key.";
 
 const STATUS_EXHAUSTED = 2;
 const STATUS_UNLIMITED = 3;
 
-/** The model family the text models belong to, which is the only row Hercule shows: `MiniMax-M*`. */
+/** The row name newer plans use for the text models. */
+const GENERAL_MODEL_NAME = "general";
+
+/** The row names older plans use for the text models: `MiniMax-M*`. */
 const TEXT_MODEL_PREFIX = "MiniMax-M";
 
 /** Converts milliseconds since the epoch to a timestamp, or `null` when there is none or it is out of range. */
-const convertResetTime = (millis: number | null | undefined): Timestamp | null => {
+const convertEpochMillis = (millis: number | null | undefined): Timestamp | null => {
   if (millis === null || millis === undefined) return null;
   const date = new Date(millis);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
+/**
+ * Returns when a window resets: `endTime` when MiniMax sent it, otherwise
+ * `takenAt` plus `remainingMillis`, otherwise `null`.
+ */
+const readResetTime = (
+  endTime: number | null | undefined,
+  remainingMillis: number | null | undefined,
+  takenAt: Timestamp,
+): Timestamp | null => {
+  if (endTime !== null && endTime !== undefined) return convertEpochMillis(endTime);
+  if (remainingMillis === null || remainingMillis === undefined) return null;
+  return convertEpochMillis(Date.parse(takenAt) + remainingMillis);
 };
 
 /**
@@ -90,6 +122,7 @@ const readWindow = (
     readonly remainingPercent: number | null | undefined;
     readonly status: number | null | undefined;
     readonly endTime: number | null | undefined;
+    readonly remainingMillis: number | null | undefined;
   },
   takenAt: Timestamp,
 ): UsageReading | undefined => {
@@ -114,8 +147,8 @@ const readWindow = (
     kind: "window",
     window,
     usedPercent: Math.min(100, Math.max(0, usedPercent)),
-    resetsAt: convertResetTime(fields.endTime),
-    hit: fields.status === STATUS_EXHAUSTED || usedPercent >= 100,
+    resetsAt: readResetTime(fields.endTime, fields.remainingMillis, takenAt),
+    hit: usedPercent >= 100,
     takenAt,
   };
 };
@@ -131,6 +164,7 @@ const readTextModelWindows = (row: ModelRemain, takenAt: Timestamp): Array<Usage
         remainingPercent: row.current_interval_remaining_percent,
         status: row.current_interval_status,
         endTime: row.end_time,
+        remainingMillis: row.remains_time,
       },
       takenAt,
     ),
@@ -142,6 +176,7 @@ const readTextModelWindows = (row: ModelRemain, takenAt: Timestamp): Array<Usage
         remainingPercent: row.current_weekly_remaining_percent,
         status: row.current_weekly_status,
         endTime: row.weekly_end_time,
+        remainingMillis: row.weekly_remains_time,
       },
       takenAt,
     ),
@@ -151,9 +186,11 @@ const readTextModelWindows = (row: ModelRemain, takenAt: Timestamp): Array<Usage
  * Turns the JSON answer of MiniMax's plan usage endpoint
  * (`GET /v1/token_plan/remains`) into readings, stamping each with `takenAt`.
  *
- * - Only the text model row (`MiniMax-M*`) is read. The image, speech and
- *   video rows have limits of their own and are not shown, and counting them
- *   too would count the same plan twice.
+ * - Only the text model row is read: `general` on newer plans, `MiniMax-M*`
+ *   on older ones. When an answer has both, `general` wins: a plan that lists
+ *   both has moved to `general`. The
+ *   image, speech and video rows have limits of their own and are not shown,
+ *   and counting them too would count the same plan twice.
  * - The short window is the five-hour window and the long one is the weekly
  *   window. MiniMax's plan FAQ gives them as five hours and seven days, and
  *   the fields of an official sample answer span exactly five hours.
@@ -162,17 +199,22 @@ const readTextModelWindows = (row: ModelRemain, takenAt: Timestamp): Array<Usage
  * - `*_usage_count` holds the count that is left, in spite of its name, as
  *   MiniMax's own command line tool reads it. The `*_remaining_percent`
  *   fields, where a plan sends them, are preferred over the counts.
- * - `resetsAt` is the window's end time, or `null` when MiniMax sent none.
+ * - `resetsAt` is the window's end time. Newer plans send the milliseconds
+ *   left (`remains_time`, `weekly_remains_time`) instead, and then it is
+ *   `takenAt` plus those. It is `null` when MiniMax sent neither.
  *
  * Returns `{ refused }` with MiniMax's own message when the answer says the
- * key is refused (see `KEY_REFUSED_CODES`). Throws when the answer is not the
- * documented shape, or is a failure that says nothing about the key: the
- * caller logs that and leaves the account as it is.
+ * key is refused (see `KEY_REFUSED_CODES`), except for a pay-as-you-go key,
+ * where it says what to do about it. Throws when the answer is not the
+ * documented shape, or is a failure that says nothing about the key, such as
+ * 2062 (no active plan): the caller logs the failure and the account keeps its
+ * last readings.
  */
-export const parseRemainsBody: ParseUsageBody = (body, takenAt) => {
-  const answer = decodeRemainsBody(body);
+export const parsePlanUsageBody: ParseUsageBody = (body, takenAt) => {
+  const answer = decodePlanUsageBody(body);
   const { status_code: code, status_msg: message } = answer.base_resp;
   if (code !== 0) {
+    if (code === PAY_AS_YOU_GO_KEY_CODE) return { refused: PAY_AS_YOU_GO_KEY_REFUSAL };
     if (KEY_REFUSED_CODES.has(code)) return { refused: message ?? "Not authorized" };
     throw new Error(
       `the MiniMax usage endpoint answered status_code ${code}${message === undefined ? "" : `: ${message}`}`,
@@ -181,6 +223,8 @@ export const parseRemainsBody: ParseUsageBody = (body, takenAt) => {
   if (answer.model_remains === undefined) {
     throw new Error("the MiniMax usage endpoint answered success without model_remains");
   }
-  const textRow = answer.model_remains.find((row) => row.model_name.startsWith(TEXT_MODEL_PREFIX));
+  const textRow =
+    answer.model_remains.find((row) => row.model_name === GENERAL_MODEL_NAME) ??
+    answer.model_remains.find((row) => row.model_name.startsWith(TEXT_MODEL_PREFIX));
   return { readings: textRow === undefined ? [] : readTextModelWindows(textRow, takenAt) };
 };

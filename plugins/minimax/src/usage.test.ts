@@ -4,7 +4,7 @@
  * exhausted, and errors that come back as HTTP 200 with a status code.
  */
 import { describe, expect, it } from "vitest";
-import { parseRemainsBody } from "./quota";
+import { parsePlanUsageBody } from "./usage";
 
 const TAKEN_AT = "2026-10-31T12:00:00.000Z";
 
@@ -59,6 +59,26 @@ const MINIMAX_CLI_SAMPLE = {
   ],
 };
 
+/**
+ * The answer of a newer plan. The row is the one recorded in MiniMax's command
+ * line tool issue https://github.com/MiniMax-AI/cli/issues/165 (fixed there in
+ * 1.0.16); the issue shows only the row, so the `base_resp` around it is the
+ * one every successful answer has. The text row is named `general`, has no
+ * counts, and gives the time left in each window instead of its end.
+ */
+const NEWER_PLAN_ANSWER = {
+  base_resp: { status_code: 0 },
+  model_remains: [
+    {
+      model_name: "general",
+      current_interval_remaining_percent: 99,
+      current_weekly_remaining_percent: 99,
+      remains_time: 14998196,
+      weekly_remains_time: 547798196,
+    },
+  ],
+};
+
 /** The text row of the sample, which the tests change one field at a time. */
 const TEXT_ROW = MINIMAX_CLI_SAMPLE.model_remains[0]!;
 
@@ -67,9 +87,9 @@ const answerWith = (row: object) => ({
   model_remains: [{ ...TEXT_ROW, ...row }],
 });
 
-describe("parseRemainsBody", () => {
+describe("parsePlanUsageBody", () => {
   it("reads only the text row of the sample: the usage count is what is left, so 228 of 1500 left is 84.8 percent used", () => {
-    const result = parseRemainsBody(MINIMAX_CLI_SAMPLE, TAKEN_AT);
+    const result = parsePlanUsageBody(MINIMAX_CLI_SAMPLE, TAKEN_AT);
 
     if (!("readings" in result)) throw new Error("the sample was expected to give readings");
     expect(result.readings).toHaveLength(1);
@@ -85,9 +105,73 @@ describe("parseRemainsBody", () => {
     expect(reading?.kind === "window" ? reading.usedPercent : undefined).toBeCloseTo(84.8, 6);
   });
 
+  it("reads the `general` row of a newer plan, with reset times from the time left", () => {
+    expect(parsePlanUsageBody(NEWER_PLAN_ANSWER, TAKEN_AT)).toEqual({
+      readings: [
+        {
+          kind: "window",
+          window: "five-hour",
+          usedPercent: 1,
+          // 12:00:00.000 plus 14998196 ms.
+          resetsAt: "2026-10-31T16:09:58.196Z",
+          hit: false,
+          takenAt: TAKEN_AT,
+        },
+        {
+          kind: "window",
+          window: "weekly",
+          usedPercent: 1,
+          // 12:00:00.000 plus 547798196 ms.
+          resetsAt: "2026-11-06T20:09:58.196Z",
+          hit: false,
+          takenAt: TAKEN_AT,
+        },
+      ],
+    });
+  });
+
+  it("prefers the `general` row over a MiniMax-M row in the same answer, and the end time over the time left", () => {
+    const body = {
+      base_resp: { status_code: 0 },
+      model_remains: [
+        TEXT_ROW,
+        {
+          model_name: "general",
+          current_interval_remaining_percent: 70,
+          end_time: 1776373200000,
+          remains_time: 1000,
+        },
+      ],
+    };
+
+    expect(parsePlanUsageBody(body, TAKEN_AT)).toEqual({
+      readings: [
+        {
+          kind: "window",
+          window: "five-hour",
+          usedPercent: 30,
+          resetsAt: "2026-04-16T21:00:00.000Z",
+          hit: false,
+          takenAt: TAKEN_AT,
+        },
+      ],
+    });
+  });
+
+  it("gives resetsAt null when a window has neither an end time nor a time left", () => {
+    const body = {
+      base_resp: { status_code: 0 },
+      model_remains: [{ model_name: "general", current_interval_remaining_percent: 50 }],
+    };
+
+    expect(parsePlanUsageBody(body, TAKEN_AT)).toMatchObject({
+      readings: [{ window: "five-hour", usedPercent: 50, resetsAt: null }],
+    });
+  });
+
   it("reads the weekly window, and prefers the remaining percent over the counts", () => {
     expect(
-      parseRemainsBody(
+      parsePlanUsageBody(
         answerWith({
           current_interval_remaining_percent: 40,
           current_weekly_total_count: 5000,
@@ -125,14 +209,14 @@ describe("parseRemainsBody", () => {
       current_weekly_status: 3,
     });
 
-    expect(parseRemainsBody(body, TAKEN_AT)).toEqual({
+    expect(parsePlanUsageBody(body, TAKEN_AT)).toEqual({
       readings: [expect.objectContaining({ window: "five-hour" })],
     });
   });
 
   it("marks an exhausted window as hit at 100 percent, even when the counts are missing", () => {
     expect(
-      parseRemainsBody(
+      parsePlanUsageBody(
         answerWith({
           current_interval_status: 2,
           current_interval_total_count: 0,
@@ -150,11 +234,11 @@ describe("parseRemainsBody", () => {
   });
 
   it("gives no reading for a window with no percent and a total of 0, and none when there is no text row", () => {
-    expect(parseRemainsBody(answerWith({ current_interval_total_count: 0 }), TAKEN_AT)).toEqual({
+    expect(parsePlanUsageBody(answerWith({ current_interval_total_count: 0 }), TAKEN_AT)).toEqual({
       readings: [],
     });
     expect(
-      parseRemainsBody(
+      parsePlanUsageBody(
         { ...MINIMAX_CLI_SAMPLE, model_remains: MINIMAX_CLI_SAMPLE.model_remains.slice(1) },
         TAKEN_AT,
       ),
@@ -164,7 +248,7 @@ describe("parseRemainsBody", () => {
   // Recorded live on 2026-10-31 with a bogus key: HTTP 200 and this body.
   it("refuses the recorded answer to a bogus key", () => {
     expect(
-      parseRemainsBody(
+      parsePlanUsageBody(
         {
           base_resp: {
             status_code: 1004,
@@ -181,13 +265,25 @@ describe("parseRemainsBody", () => {
   });
 
   // From MiniMax's error code list, https://platform.minimax.io/docs/api-reference/errorcode.
-  it.each([
-    [2049, "invalid api key"],
-    [2057, "not token plan token"],
-  ])("refuses with MiniMax's words on the documented key failure code %s", (code, message) => {
+  it("refuses with MiniMax's words on the documented key failure code 2049", () => {
     expect(
-      parseRemainsBody({ base_resp: { status_code: code, status_msg: message } }, TAKEN_AT),
-    ).toEqual({ refused: message });
+      parsePlanUsageBody(
+        { base_resp: { status_code: 2049, status_msg: "invalid api key" } },
+        TAKEN_AT,
+      ),
+    ).toEqual({ refused: "invalid api key" });
+  });
+
+  it("refuses code 2057 with words that say what to do, not MiniMax's own", () => {
+    expect(
+      parsePlanUsageBody(
+        { base_resp: { status_code: 2057, status_msg: "not token plan token" } },
+        TAKEN_AT,
+      ),
+    ).toEqual({
+      refused:
+        "This is a pay-as-you-go key, not a plan key. Add it to MiniMax as a pay-as-you-go key.",
+    });
   });
 
   it.each([
@@ -195,7 +291,7 @@ describe("parseRemainsBody", () => {
     [1002, "rate limit"],
   ])("throws on code %s, which says nothing about the key", (code, message) => {
     expect(() =>
-      parseRemainsBody({ base_resp: { status_code: code, status_msg: message } }, TAKEN_AT),
+      parsePlanUsageBody({ base_resp: { status_code: code, status_msg: message } }, TAKEN_AT),
     ).toThrow(`status_code ${code}: ${message}`);
   });
 
@@ -208,6 +304,6 @@ describe("parseRemainsBody", () => {
     ["a row without a model name", answerWith({ model_name: undefined })],
     ["a count that is text", answerWith({ current_interval_usage_count: "228" })],
   ])("throws on %s, which is a defect of the plugin or of MiniMax", (_name, body) => {
-    expect(() => parseRemainsBody(body, TAKEN_AT)).toThrow();
+    expect(() => parsePlanUsageBody(body, TAKEN_AT)).toThrow();
   });
 });

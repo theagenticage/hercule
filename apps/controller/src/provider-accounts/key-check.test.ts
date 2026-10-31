@@ -5,9 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Layer, Redacted } from "effect";
 import * as HttpClient from "effect/http/HttpClient";
-import type { AccountKind, Plugin } from "@hercule/plugin-host";
-import { minimax } from "@hercule/plugin-minimax";
-import { opencode } from "@hercule/plugin-opencode";
+import type { AccountKind } from "@hercule/plugin-host";
 import type { RegisteredProvider } from "../plugins";
 import {
   ProviderKeyRequests,
@@ -35,18 +33,12 @@ const checkKey = async (
   key: string,
   answer: () => FakeProviderAnswer,
   timeout?: Duration.Duration,
-  target: { readonly provider: RegisteredProvider; readonly kind: AccountKind } = {
-    provider: PROVIDER,
-    kind: KIND,
-  },
 ) => {
   const api = buildFakeProviderApi(answer);
   const outcome = await Effect.runPromise(
     Effect.gen(function* () {
       const keyRequests = yield* ProviderKeyRequests;
-      return yield* Effect.exit(
-        keyRequests.check(target.provider, target.kind, Redacted.make(key)),
-      );
+      return yield* Effect.exit(keyRequests.check(PROVIDER, KIND, Redacted.make(key)));
     }).pipe(
       Effect.provide(
         ProviderKeyRequestsLayer.pipe(
@@ -83,21 +75,58 @@ describe("ProviderKeyRequests.check", () => {
     ]);
   });
 
-  it.each([401, 403])(
-    "refuses the key with Validation carrying the provider's own words on a %s",
-    async (status) => {
+  it.each([
+    {
+      name: "a 401",
+      status: 401,
+      body: { error: { type: "auth", message: "invalid  x-api-key\nsee docs" } },
+      message: "invalid x-api-key see docs",
+    },
+    {
+      name: "a 403",
+      status: 403,
+      body: { error: { type: "auth", message: "invalid  x-api-key\nsee docs" } },
+      message: "invalid x-api-key see docs",
+    },
+    // OpenCode Go's usage endpoint for a key without a Go subscription. The body
+    // is built from the source of OpenCode's route, not recorded from a live call
+    // (2026-10-31). Its top-level `type` field is one the others do not have.
+    {
+      name: "OpenCode's 403 for a key without Go",
+      status: 403,
+      body: {
+        type: "error",
+        error: { type: "EntitlementError", message: "OpenCode Go subscription required." },
+      },
+      message: "OpenCode Go subscription required.",
+    },
+    // MiniMax's answer to a bogus key, recorded live on 2026-10-31. Its error
+    // has an `http_code`, and the body a `request_id`, that the others do not.
+    {
+      name: "MiniMax's 401",
+      status: 401,
+      body: {
+        type: "error",
+        error: {
+          type: "authorized_error",
+          message:
+            "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)",
+          http_code: "401",
+        },
+        request_id: "x",
+      },
+      message:
+        "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)",
+    },
+  ])(
+    "refuses the key with Validation carrying the provider's own words on $name",
+    async ({ status, body, message }) => {
       const { outcome } = await checkKey(
         "sk-bad",
-        () =>
-          new Response(
-            JSON.stringify({ error: { type: "auth", message: "invalid  x-api-key\nsee docs" } }),
-            { status },
-          ),
+        () => new Response(JSON.stringify(body), { status }),
       );
 
-      expect(readFailure(outcome)).toMatchObject({
-        error: { code: "validation", message: "invalid x-api-key see docs" },
-      });
+      expect(readFailure(outcome)).toMatchObject({ error: { code: "validation", message } });
     },
   );
 
@@ -223,88 +252,5 @@ describe("ProviderKeyRequests.check", () => {
     for (const { outcome } of failures) {
       expect(JSON.stringify(readFailure(outcome))).not.toContain("sk-very-secret");
     }
-  });
-});
-
-/**
- * Returns what the key check is given for one account kind of a shipped
- * plugin: the kind as the plugin declares it, and its provider.
- */
-const readShippedKind = (plugin: Plugin, kindId: string) => {
-  let kind: AccountKind | undefined;
-  let provider: RegisteredProvider | undefined;
-  Effect.runSync(
-    Effect.orDie(
-      plugin.register({
-        providers: {
-          register: (definition) =>
-            Effect.sync(() => {
-              provider = {
-                id: definition.id,
-                displayName: definition.displayName,
-              } as RegisteredProvider;
-              kind = definition.kinds.find((one) => one.id === kindId);
-            }),
-        },
-      }),
-    ),
-  );
-  if (provider === undefined || kind === undefined) throw new Error(`no account kind ${kindId}`);
-  return { provider, kind };
-};
-
-/**
- * Refusals recorded from the live services of OpenCode and MiniMax. Each body
- * has a different shape, so what the user reads depends on every one of them
- * getting through the check to its message.
- */
-describe("ProviderKeyRequests.check on the recorded refusals of OpenCode and MiniMax", () => {
-  it.each([
-    {
-      name: "a key the OpenCode Zen list refuses",
-      plugin: opencode,
-      kind: "zen-key",
-      status: 401,
-      body: { error: { type: "server_error", message: "Invalid credential" } },
-      message: "Invalid credential",
-    },
-    {
-      name: "a key without Go on the OpenCode Go usage endpoint",
-      plugin: opencode,
-      kind: "go-key",
-      status: 403,
-      body: {
-        type: "error",
-        error: { type: "EntitlementError", message: "OpenCode Go subscription required." },
-      },
-      message: "OpenCode Go subscription required.",
-    },
-    {
-      name: "a bogus MiniMax key",
-      plugin: minimax,
-      kind: "plan-key",
-      status: 401,
-      body: {
-        type: "error",
-        error: {
-          type: "authorized_error",
-          message:
-            "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)",
-          http_code: "401",
-        },
-        request_id: "x",
-      },
-      message:
-        "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)",
-    },
-  ])("shows the provider's message for $name", async ({ plugin, kind, status, body, message }) => {
-    const { outcome } = await checkKey(
-      "sk-bad",
-      () => new Response(JSON.stringify(body), { status }),
-      undefined,
-      readShippedKind(plugin, kind),
-    );
-
-    expect(readFailure(outcome)).toMatchObject({ error: { code: "validation", message } });
   });
 });

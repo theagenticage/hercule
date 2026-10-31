@@ -22,6 +22,7 @@ import {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
+  MAX_PROBE_MODELS,
   MAX_SECRET_VALUE_LENGTH,
   Seq,
   Sequenced,
@@ -93,6 +94,7 @@ export {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
+  MAX_PROBE_MODELS,
   MAX_SECRET_VALUE_LENGTH,
   Sequenced,
   StorageId,
@@ -173,8 +175,12 @@ export {
  *   `AccountUsageReported` frame. An older peer cannot decode them, so the two
  *   refuse each other at hello. The new frame needs no capability, because the
  *   bump already keeps it away from an older runner or controller.
+ * - Version 18 raised the most models a probe result may list from 64 to
+ *   `MAX_PROBE_MODELS` (256). A controller on 17 cannot decode a list of more
+ *   than 64 models and would close the socket on it, so the two refuse each
+ *   other at hello.
  */
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -483,7 +489,7 @@ export type SnapshotAuth = Schema.Schema.Type<typeof SnapshotAuth>;
 export const ProbeResult = Schema.Struct({
   harnessVersion: Schema.NullOr(Fact),
   auth: SnapshotAuth,
-  models: Schema.Array(ModelDescriptor).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  models: Schema.Array(ModelDescriptor).check(Schema.isMaxLength(MAX_PROBE_MODELS)),
   /**
    * The account's usage as the harness read it. `null` when the request did
    * not ask for it, or when the harness has no usage to give.

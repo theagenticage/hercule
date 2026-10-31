@@ -5,7 +5,7 @@ import {
   type Plugin,
   type ProviderDefinition,
 } from "@hercule/plugin-host";
-import { parseRemainsBody } from "./quota";
+import { parsePlanUsageBody } from "./usage";
 
 /**
  * The MiniMax mark, path data only, on the 16x16 grid a plugin's mark uses. It
@@ -62,7 +62,8 @@ const definition: ProviderDefinition = {
       // session runs on one, is confirmed (spec 16 open item).
       // A pay-as-you-go key entered as a plan key likely passes this check. The
       // first usage read then gets status 2057 "not token plan token", which the
-      // parser reads as a refusal, so the account shows MiniMax's own words.
+      // parser reads as a refusal, and the account tells the user to add the key
+      // as a pay-as-you-go key.
       keyCheck: {
         url: "https://api.minimax.io/v1/models",
         headers: { authorization: "Bearer {apiKey}" },
@@ -101,7 +102,7 @@ export const minimax: Plugin = {
     mark: { paths: [MINIMAX_MARK_PATH] },
   },
   register: (host) =>
-    registerProvider(host, definition, { parseUsageBody: { "plan-key": parseRemainsBody } }),
+    registerProvider(host, definition, { parseUsageBody: { "plan-key": parsePlanUsageBody } }),
   // Nothing runs on the controller for a provider yet: the definition above is
   // everything the plugin contributes.
   activate: () => Effect.succeed(Effect.void),

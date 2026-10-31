@@ -37,6 +37,7 @@ import {
 } from "../testing";
 import {
   pointAtFakeModel,
+  redirectProviderToFakeServer,
   startFakeModelServer,
   startScriptedModelServer,
   type FakeModelServer,
@@ -531,28 +532,60 @@ describe.skipIf(binary === undefined)(
  * Checks that the real pi runs each kind of key the `pi` plugin pairs with a
  * provider that has a built-in pi provider of its own. A session gets only the
  * account's model argument and its key in a variable, so what matters is that
- * pi picks the provider the argument names and sends the key to it. The model
- * server is the fake one: `models.json` points the pi provider at it, and it
- * records the `Authorization` header it received.
+ * pi picks the provider the argument names, runs one of that provider's own
+ * models on that provider's own transport, and sends the key the way that
+ * transport does. `models.json` changes only the provider's `baseUrl`, to the
+ * fake model server, so the built-in model and its client stay the real ones.
+ * The server records the key header it received: `Authorization` on
+ * `openai-completions`, `x-api-key` on `anthropic-messages`.
  *
  * The rows repeat what the plugins declare, because the runner cannot import
- * a plugin.
+ * a plugin. Each model is one the pinned pi version lists for the provider
+ * under the row's transport.
  */
 describe.skipIf(binary === undefined)("a real pi on the keys of OpenCode and MiniMax", () => {
   const REPLY = "The fake model answers.";
 
   it.each([
-    { kind: "go-key", modelArgument: "opencode-go/{model}", variable: "OPENCODE_API_KEY" },
-    { kind: "zen-key", modelArgument: "opencode/{model}", variable: "OPENCODE_API_KEY" },
-    { kind: "pay-as-you-go-key", modelArgument: "minimax/{model}", variable: "MINIMAX_API_KEY" },
-    { kind: "plan-key", modelArgument: "minimax/{model}", variable: "MINIMAX_API_KEY" },
-  ])(
-    "completes a turn on a $kind and sends the key to the model server",
-    async ({ kind, modelArgument, variable }) => {
+    {
+      kind: "go-key",
+      modelArgument: "opencode-go/{model}",
+      variable: "OPENCODE_API_KEY",
+      model: "glm-5.3-flash",
+      transport: "openai-completions",
+    },
+    {
+      kind: "zen-key",
+      modelArgument: "opencode/{model}",
+      variable: "OPENCODE_API_KEY",
+      model: "glm-5.3-flash",
+      transport: "openai-completions",
+    },
+    {
+      kind: "pay-as-you-go-key",
+      modelArgument: "minimax/{model}",
+      variable: "MINIMAX_API_KEY",
+      model: "MiniMax-M2.7",
+      transport: "anthropic-messages",
+    },
+    {
+      kind: "plan-key",
+      modelArgument: "minimax/{model}",
+      variable: "MINIMAX_API_KEY",
+      model: "MiniMax-M2.7",
+      transport: "anthropic-messages",
+    },
+  ] as const)(
+    "completes a turn on a $kind over $transport and sends the key the way that transport does",
+    async ({ kind, modelArgument, variable, model, transport }) => {
       const upstream = startScriptedModelServer(() => ({ text: REPLY }));
       upstreams.push(upstream);
       const home = createScratchDir();
-      pointAtFakeModel(home, readPiProvider(modelArgument), upstream.baseUrl);
+      redirectProviderToFakeServer(
+        home,
+        readPiProvider(modelArgument),
+        transport === "anthropic-messages" ? upstream.anthropicBaseUrl : upstream.baseUrl,
+      );
       const fakeKey = `fake-${kind}-key-${crypto.randomUUID()}`;
       const sessionId = crypto.randomUUID();
       const seen: Array<HarnessEvent> = [];
@@ -567,7 +600,7 @@ describe.skipIf(binary === undefined)("a real pi on the keys of OpenCode and Min
       await Effect.runPromise(
         pi.startSession(
           sessionId,
-          { ...buildSpec("fake-model"), providerAccountId: crypto.randomUUID() },
+          { ...buildSpec(model), providerAccountId: crypto.randomUUID() },
           {
             ...buildContext(home, createScratchDir(), { variable, value: fakeKey }),
             binary: binary!,
@@ -587,7 +620,16 @@ describe.skipIf(binary === undefined)("a real pi on the keys of OpenCode and Min
 
       expect(listCompletedTurns(seen)[0]?.state).toBe("completed");
       expect(readAssistantText(seen)).toBe(REPLY);
-      expect(upstream.authorizations()).toEqual([`Bearer ${fakeKey}`]);
+      expect(
+        upstream.requests().map((body) => (JSON.parse(body) as { model: string }).model),
+      ).toEqual([model]);
+      if (transport === "anthropic-messages") {
+        expect(upstream.apiKeyHeaders()).toEqual([fakeKey]);
+        expect(upstream.authorizations()).toEqual([null]);
+      } else {
+        expect(upstream.authorizations()).toEqual([`Bearer ${fakeKey}`]);
+        expect(upstream.apiKeyHeaders()).toEqual([null]);
+      }
     },
     BUDGET_MS,
   );

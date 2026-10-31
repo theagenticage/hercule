@@ -10,7 +10,6 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { CODEX_VERSION, VERSION } from "@hercule/home/version";
 import {
-  MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   type AdapterError,
   type ModelDescriptor,
@@ -20,7 +19,12 @@ import {
 } from "@hercule/protocol";
 import type { InstallOutcome, HarnessRunnerContext, ProbeOptions } from "../index";
 import { makeInstall } from "../install";
-import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "../probe";
+import {
+  PROBE_DEADLINE,
+  buildFailedProbe,
+  limitModelCatalog,
+  readUsageWithinProbeBudget,
+} from "../probe";
 import type { Run } from "../process";
 import { now } from "../../report";
 import { truncateFact } from "../text";
@@ -214,7 +218,6 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
   models
     // The protocol does not allow an empty slug or name.
     .filter((model) => model.id !== "" && model.displayName !== "")
-    .slice(0, MAX_FACT_ITEMS)
     .map((model) => ({
       slug: truncateFact(model.id),
       name: truncateFact(model.displayName),
@@ -248,7 +251,7 @@ export const makeProbe =
             onFailure: (error) =>
               Effect.succeed(buildFailedProbe(null, describeRpcError(host, error))),
             onSuccess: (initialized) =>
-              Effect.match(
+              Effect.matchEffect(
                 Effect.gen(function* () {
                   const account = yield* readAccount(host);
                   const hasApiKey = ctx.credential !== undefined;
@@ -268,16 +271,22 @@ export const makeProbe =
                 }),
                 {
                   onFailure: (error) =>
-                    buildFailedProbe(
-                      parseVersion(initialized.userAgent),
-                      describeRpcError(host, error),
+                    Effect.succeed(
+                      buildFailedProbe(
+                        parseVersion(initialized.userAgent),
+                        describeRpcError(host, error),
+                      ),
                     ),
-                  onSuccess: ({ account, hasApiKey, models, usage }) => ({
-                    harnessVersion: parseVersion(initialized.userAgent),
-                    auth: buildAuth(account, hasApiKey),
-                    models: buildCatalog(models.data),
-                    usage,
-                  }),
+                  onSuccess: ({ account, hasApiKey, models, usage }) =>
+                    Effect.map(
+                      limitModelCatalog("Codex", buildCatalog(models.data)),
+                      (catalog) => ({
+                        harnessVersion: parseVersion(initialized.userAgent),
+                        auth: buildAuth(account, hasApiKey),
+                        models: catalog,
+                        usage,
+                      }),
+                    ),
                 },
               ),
           }),

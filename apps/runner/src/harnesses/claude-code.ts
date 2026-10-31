@@ -34,7 +34,6 @@ import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
   AdapterFailed,
   AnswerNotDelivered,
-  MAX_FACT_ITEMS,
   SessionNotRunning,
   SteerRefused,
   type AccessMode,
@@ -116,7 +115,12 @@ import {
   type ClaudeUsageAnswer,
 } from "./claude-code-usage";
 import { makeInstall } from "./install";
-import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "./probe";
+import {
+  PROBE_DEADLINE,
+  buildFailedProbe,
+  limitModelCatalog,
+  readUsageWithinProbeBudget,
+} from "./probe";
 import type { LoginCommand } from "./login";
 import { SETUP_TOKEN_FOLDER_PREFIX } from "./setup-token-folder";
 import { runProcess, type Run } from "./process";
@@ -312,8 +316,7 @@ const buildModelDescriptor = (model: Model): ModelDescriptor => {
 /**
  * Returns the model catalog: the models the CLI listed, then the legacy models
  * it did not list. A listed model replaces a legacy one with the same slug,
- * because the list is what this machine really offers. The catalog is cut to
- * the size the protocol accepts, or the whole report would fail to encode.
+ * because the list is what this machine really offers.
  */
 const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescriptor> => {
   // The protocol does not accept an empty slug or name.
@@ -321,10 +324,7 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
     .filter((model) => model.value !== "" && model.displayName !== "")
     .map(buildModelDescriptor);
   const listed = new Set(probed.map((model) => model.slug));
-  return [...probed, ...LEGACY_MODELS.filter((model) => !listed.has(model.slug))].slice(
-    0,
-    MAX_FACT_ITEMS,
-  );
+  return [...probed, ...LEGACY_MODELS.filter((model) => !listed.has(model.slug))];
 };
 
 /**
@@ -1955,14 +1955,15 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
       const gather = Effect.gen(function* () {
         const startedAt = yield* Clock.currentTimeMillis;
         const harnessVersion = yield* readVersion(ctx, binary);
-        return yield* Effect.match(queryHarness(ctx, binary, options, startedAt), {
-          onFailure: (message) => buildFailedProbe(harnessVersion, message),
-          onSuccess: ({ account, models, usage }) => ({
-            harnessVersion,
-            auth: buildAuth(account),
-            models: buildCatalog(models),
-            usage,
-          }),
+        return yield* Effect.matchEffect(queryHarness(ctx, binary, options, startedAt), {
+          onFailure: (message) => Effect.succeed(buildFailedProbe(harnessVersion, message)),
+          onSuccess: ({ account, models, usage }) =>
+            Effect.map(limitModelCatalog("Claude Code", buildCatalog(models)), (catalog) => ({
+              harnessVersion,
+              auth: buildAuth(account),
+              models: catalog,
+              usage,
+            })),
         });
       });
       return Effect.map(

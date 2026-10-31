@@ -46,7 +46,8 @@ const ALPHA = buildHarness("alpha", [
     providerId: "vendor/vendor",
     kinds: [
       { kind: "api-key", modelArgument: "vendor/{model}", credentialVariable: "VENDOR_API_KEY" },
-      { kind: "subscription", modelArgument: "vendor/{model}" },
+      // A different argument from `api-key`, so a test sees each kind get its own.
+      { kind: "subscription", modelArgument: "vendor-sub/{model}" },
     ],
     models: "own-list",
   },
@@ -92,12 +93,16 @@ describe("decideProviderAccountHarness", () => {
     });
   });
 
-  it("returns no credential variable for a kind whose login lives in the Harness Home", () => {
+  it("returns no credential variable for a kind whose login lives in the Harness Home, and that kind's own model argument", () => {
     expect(
       decideProviderAccountHarness(PROVIDERS, HARNESSES, { ...ACCOUNT, kind: "subscription" }),
     ).toMatchObject({
       _tag: "chosen",
-      support: { credentialVariable: undefined, credentialSecretName: undefined },
+      support: {
+        modelArgument: "vendor-sub/{model}",
+        credentialVariable: undefined,
+        credentialSecretName: undefined,
+      },
     });
   });
 
