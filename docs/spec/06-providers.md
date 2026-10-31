@@ -910,13 +910,13 @@ Sandboxing is enforced by Codex (Seatbelt on macOS, bubblewrap on Linux; WSL1 un
 
 *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **One home per account per harness: the Harness Home.** Each (Provider Account, harness) pair has its own isolated home on every runner, and every session runs inside its pair's home. Everything this section says about an instance's home holds for a Harness Home.
 
-- **The folder is derived.** It is `<storage dir>/homes/<providerAccountId>/<harnessId>/`, with the qualified harness id as two folder levels (`claude-code/claude-code`). So two harnesses never share a folder, and they must not: Claude Code and pi both write a `settings.json` at the top of their home.
+- **The folder is derived.** It is `<storage dir>/providers/homes/<providerAccountId>/<harnessId>/` *(Amended 2026-10-31, [#406](https://github.com/theagenticage/hercule/issues/406).)*, with the qualified harness id as two folder levels (`claude-code/claude-code`). So two harnesses never share a folder, and they must not: Claude Code and pi both write a `settings.json` at the top of their home.
 - **A migrated account keeps its old folder for its old harness.** An account made from a provider instance (section 19) carries `legacyHomeFolder`, the instance's folder name, and `legacyHomeHarnessId`, the harness that instance ran. For that harness, its home stays `<storage dir>/providers/<legacyHomeFolder>/`, so its sign-ins, its transcripts and its resume keep working. The folders never move, because moving one is unsafe:
   - Codex stores the absolute path of every thread's rollout file in its SQLite state and never corrects it, so resume fails after a move.
   - On macOS, Claude Code names its Keychain login after a hash of the config folder's path (section 10.1), so a moved folder loses its login.
-- **A second harness on a migrated account gets a derived home.** Derived homes live under `homes/` and legacy homes under `providers/`, so a derived home never sits inside a legacy one, even though a migrated account keeps the instance's id. Everything under `providers/` is a legacy home.
+- **A second harness on a migrated account gets a derived home.** Derived homes live under `providers/homes/`, and a legacy home is `providers/<instanceId>/`. An instance id is a UUID and never `homes`, so a derived home never sits inside a legacy one, even though a migrated account keeps the instance's id. Every other folder under `providers/` is a legacy home.
 - **One function resolves a home.** `resolveHarnessHome(account, harnessId)` on the controller returns the legacy folder when the account has one and the harness is its legacy harness, and the derived folder otherwise. It is the only code that reads `legacyHomeFolder`.
-- **The controller sends the folder.** Every frame that runs a harness for an account carries it as `harnessHome`, a path relative to the runner's storage directory (`homes/<providerAccountId>/<harnessId>` or `providers/<legacyHomeFolder>`): session start, resume and fork, probe, sign-in, and text generation ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). The runner joins it to its storage directory and never derives a home from an id itself.
+- **The controller sends the folder.** Every frame that runs a harness for an account carries it as `harnessHome`, a path relative to the runner's storage directory (`providers/homes/<providerAccountId>/<harnessId>` or `providers/<legacyHomeFolder>`): session start, resume and fork, probe, sign-in, and text generation ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). The runner joins it to its storage directory and never derives a home from an id itself.
 
 Every provider instance has its own isolated provider home (one instance = one login = one home; never per session), and every session runs inside its instance's home, so user-global instructions, skills, packages and memory never leak into Hercule sessions (constraint from the [memory-interface prototype](https://github.com/theagenticage/hercule/issues/31): Codex picked up `~/.codex/AGENTS.md` and pi discovered `~/.claude/skills` until isolated). The handed knobs are the config-dir variables, `--setting-sources project`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`; the rest of the table are spec additions supported by the research:
 
@@ -1638,7 +1638,16 @@ An account kind declares its setup as steps from the fixed set a Connection type
 - **`subscription-per-machine`** has one `harness-login` step: the harness's own headless login, on a runner the user picks (section 11). Other runners are signed in later, from the account.
 - **`subscription-token`** has one `harness-login` step too. Hercule runs `claude setup-token` on a runner that has Claude Code, the user opens the URL and pastes the code back, and the controller stores the token as the account's `token` (section 10.1). Pasting a token made elsewhere is not offered, so Hercule always knows when the token was made.
 
-A key is not checked when it is entered. The account's first catalog read checks it: a key the provider refuses makes the account `failed`, with the provider's own words (section 15.6).
+~~A key is not checked when it is entered. The account's first catalog read checks it: a key the provider refuses makes the account `failed`, with the provider's own words (section 15.6).~~ *(Amended 2026-10-31, [#406](https://github.com/theagenticage/hercule/issues/406).)* **A key is checked when it is entered.** Before anything is stored, the controller runs the Provider's key check: one cheap read of the provider's own API, made with the key.
+
+- Anthropic: `GET https://api.anthropic.com/v1/models`.
+- OpenAI: `GET https://api.openai.com/v1/models`.
+- OpenRouter: `GET https://openrouter.ai/api/v1/key`, which also returns the key's limit and `expires_at`.
+- Z.ai, OpenCode and MiniMax: the provider's own models or account endpoint.
+
+A key the provider refuses fails `providerAccount.create`, or the `update` that replaces it, with `validation` carrying the provider's own words, and nothing is stored. When the provider cannot be reached, the call fails with `invalid_state`, saying which provider could not be reached and to try again: a key that could not be checked is never stored. Calling a provider with an API key is what the key is for; only a subscription credential is never sent to a vendor by Hercule itself (section 18.2).
+
+**Verify at build time:** the key-check endpoint for Z.ai, OpenCode (Go and Zen) and MiniMax (both kinds).
 
 ### 15.3 Names
 
