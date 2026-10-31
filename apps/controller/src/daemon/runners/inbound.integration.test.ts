@@ -103,7 +103,7 @@ const reportStarted = (arranged: Arranged, sessionId: string): void =>
     sessionId,
     at,
     _tag: "session.started",
-    providerRefs: { nativeSessionId: "native-1" },
+    harnessRefs: { nativeSessionId: "native-1" },
   });
 
 /**

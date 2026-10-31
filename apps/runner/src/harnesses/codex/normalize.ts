@@ -1,5 +1,5 @@
 /**
- * Converts the app-server's notifications into normalized provider events.
+ * Converts the app-server's notifications into normalized harness events.
  * It takes one decoded frame and mutable state for one Codex thread, and
  * returns events. It uses no process, no socket, and no clock other than the
  * wall clock. Spec 06 section 6 owns the event taxonomy.
@@ -30,7 +30,7 @@ import {
   type ItemKind,
   type ItemStatus,
   type OutputSchema,
-  type ProviderEvent,
+  type HarnessEvent,
   type StreamKind,
   type StructuredResult,
   type SubagentId,
@@ -394,7 +394,7 @@ const buildContentDelta = (
   state: Normalizing,
   delta: ReturnType<typeof readDelta>,
   streamKind: StreamKind,
-): ReadonlyArray<ProviderEvent> => [
+): ReadonlyArray<HarnessEvent> => [
   {
     _tag: "content.delta",
     ...buildCodexThreadEnvelope(state),
@@ -432,7 +432,7 @@ const reportLateFrame = (state: Normalizing, method: string, turnId: string): vo
 const buildMissingMessageText = (
   state: Normalizing,
   params: ItemCompletedNotification,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const { item } = params;
   if (item.type !== "agentMessage" || item.text === "" || state.streamedMessages.has(item.id)) {
     return [];
@@ -461,7 +461,7 @@ const buildReasoningDelta = (
   state: Normalizing,
   params: AgentMessageDeltaNotification,
   channel: Channel,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const delta = readDelta(params);
   if (isLateTurn(state, delta.turnId)) {
     reportLateFrame(state, "a reasoning delta", delta.turnId);
@@ -640,7 +640,7 @@ const classifyError = (info: CodexErrorInfo | null | undefined): string => {
   return truncateFact(Object.keys(info)[0] ?? "unknown");
 };
 
-const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<ProviderEvent> => {
+const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<HarnessEvent> => {
   const turn = params.turnId === "" ? {} : { turnId: truncateFact(params.turnId) };
   const failure = classifyError(params.error.codexErrorInfo);
   // Codex is already retrying, so reporting an error here would mark the turn
@@ -776,7 +776,7 @@ type NotificationParams<Method extends NotificationMethod> = Extract<
  * dropped). The function receives the params already typed for its method.
  */
 type NotificationDecision<Method extends NotificationMethod> =
-  | ((state: Normalizing, params: NotificationParams<Method>) => ReadonlyArray<ProviderEvent>)
+  | ((state: Normalizing, params: NotificationParams<Method>) => ReadonlyArray<HarnessEvent>)
   | string;
 
 /** The params of a `turn/plan/updated` notification. */
@@ -805,7 +805,7 @@ const buildRuntimeMessage = (
   message: string,
   payload: unknown,
   turnId?: string,
-): ProviderEvent => ({
+): HarnessEvent => ({
   _tag: tag,
   ...buildCodexThreadEnvelope(state),
   ...buildNotificationRaw(payload),
@@ -851,7 +851,7 @@ const describeItem = (
 const onItemStarted = (
   state: Normalizing,
   params: ItemStartedNotification,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   // An item that starts in a turn other than the running one would show as
   // work that never ends, because that turn's end has already been reported.
   const turnId = requireText(params.turnId, "turnId");
@@ -887,7 +887,7 @@ const onItemStarted = (
 const buildReviewNotice = (
   state: Normalizing,
   params: ItemCompletedNotification,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const { item } = params;
   const turnId = readRunningTurnId(state, params.turnId);
   if (item.type === "enteredReviewMode") {
@@ -906,7 +906,7 @@ const buildReviewNotice = (
 const onItemCompleted = (
   state: Normalizing,
   params: ItemCompletedNotification,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   // A completion for a turn other than the running one still completes its
   // item, which started earlier. It changes nothing else: its turn is over, so
   // it is not the running turn's answer, and its text cannot stream any more.
@@ -962,7 +962,7 @@ const onItemCompleted = (
 const completeTodoList = (
   state: Normalizing,
   endedTurnId?: string,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const shown = state.todoList;
   if (shown === undefined || (endedTurnId !== undefined && shown.turnId !== endedTurnId)) return [];
   state.todoList = undefined;
@@ -983,7 +983,7 @@ const completeTodoList = (
 const onTurnStarted = (
   state: Normalizing,
   params: TurnStartedNotification,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const turnId = ensureId(params.turn.id);
   // A todo list left open by a turn whose completion never arrived would show
   // as work that never ends.
@@ -1009,7 +1009,7 @@ const onTurnStarted = (
 const onTurnCompleted = (
   state: Normalizing,
   params: TurnCompletedNotification,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const ended = Object.hasOwn(TURN_STATES, params.turn.status)
     ? TURN_STATES[params.turn.status]
     : undefined;
@@ -1064,7 +1064,7 @@ const buildTodoSteps = (plan: PlanUpdate["plan"]): ReadonlyArray<TodoStep> =>
  * with more than `MAX_TODO_STEPS` steps leaves the item as it is and returns a
  * warning, because a cut list would show a count that is wrong.
  */
-const onPlanUpdated = (state: Normalizing, params: PlanUpdate): ReadonlyArray<ProviderEvent> => {
+const onPlanUpdated = (state: Normalizing, params: PlanUpdate): ReadonlyArray<HarnessEvent> => {
   if (!Array.isArray(params.plan)) throw new Error("plan is not a list");
   if (params.turnId !== state.openTurnId) return [];
   if (params.plan.length > MAX_TODO_STEPS) {
@@ -1133,7 +1133,7 @@ const buildSummaryText = (params: {
 const buildThreadWarning = (
   state: Normalizing,
   params: { readonly threadId: string | null; readonly message: string },
-): ReadonlyArray<ProviderEvent> => [
+): ReadonlyArray<HarnessEvent> => [
   buildRuntimeMessage(
     state,
     "runtime.warning",
@@ -1373,7 +1373,7 @@ const buildUnknownFrameEvents = (
   state: Normalizing,
   frame: NotificationFrame,
   error?: unknown,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const label = buildFrameLabel(frame);
   state.reports.reportUnknownMessage(label, error);
   const running = state.openTurnId;
@@ -1386,7 +1386,7 @@ const buildUnknownFrameEvents = (
     kind: "unknown",
     detail: { label } satisfies UnknownItemDetail,
   } as const;
-  const items: ReadonlyArray<ProviderEvent> = [
+  const items: ReadonlyArray<HarnessEvent> = [
     { _tag: "item.started", ...common, ...buildNotificationRaw(frame) },
     { _tag: "item.completed", ...common, status: "completed" },
   ];
@@ -1408,7 +1408,7 @@ const buildUnknownFrameEvents = (
 const failUnreadableCompletion = (
   state: Normalizing,
   frame: NotificationFrame,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const params = frame.params;
   if (!isRecord(params) || !isRecord(params.item)) return [];
   const { id, type } = params.item;
@@ -1441,7 +1441,7 @@ const failUnreadableCompletion = (
 export const normalize = (
   state: Normalizing,
   frame: NotificationFrame,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   // Only the table's own keys count, so a method named like an object method,
   // such as `constructor`, finds nothing.
   const decision = Object.hasOwn(DECISIONS_BY_METHOD, frame.method)

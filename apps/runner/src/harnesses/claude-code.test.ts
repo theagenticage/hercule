@@ -40,7 +40,7 @@ import {
   type OpenRequest,
   type OutputSchema,
   type ProbeResult,
-  type ProviderEvent,
+  type HarnessEvent,
   type QuestionAnswers,
   type SessionSpec,
   type TextGenerationOutcome,
@@ -54,7 +54,7 @@ import {
 } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import { resolveSkillReferences, type LoadedSkills } from "../skills";
-import type { AdapterTurnInput, EditMarks, ProviderAdapter, ProviderRunnerContext } from "./index";
+import type { AdapterTurnInput, EditMarks, HarnessAdapter, HarnessRunnerContext } from "./index";
 import * as testing from "./testing";
 import {
   buildAgentCall,
@@ -70,7 +70,7 @@ const HERCULE_TOOL = {
   claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
 
-const CONTEXT: ProviderRunnerContext = {
+const CONTEXT: HarnessRunnerContext = {
   cwd: null,
   attachmentsDir: null,
   editMarks: null,
@@ -433,21 +433,21 @@ const SPEC: SessionSpec = {
   timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
 };
 
-const WORKING: ProviderRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
+const WORKING: HarnessRunnerContext = { ...CONTEXT, cwd: "/var/hercule/runner/scratch/one" };
 
 /**
  * The context of a Thread that sees User Material. For Claude the paths are
  * empty: the runner links the material into the instance's home instead, and
  * the field being present is what marks the session.
  */
-const THREAD: ProviderRunnerContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
+const THREAD: HarnessRunnerContext = { ...WORKING, userMaterial: testing.NO_USER_MATERIAL_PATHS };
 
 /** A fake harness for a session. The test sends it messages one at a time. */
 interface Driving {
-  readonly adapter: ProviderAdapter;
+  readonly adapter: HarnessAdapter;
   readonly options: Array<Options>;
   readonly sent: Array<SDKUserMessage>;
-  readonly seen: Array<ProviderEvent>;
+  readonly seen: Array<HarnessEvent>;
   readonly say: (message: unknown) => void;
   readonly end: () => void;
   readonly die: (reason: Error) => void;
@@ -468,7 +468,7 @@ interface Driving {
 const createDriving = (): Driving => {
   const options: Array<Options> = [];
   const sent: Array<SDKUserMessage> = [];
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   const queued: Array<unknown> = [];
   const waiting: Array<(result: IteratorResult<unknown>) => void> = [];
   const failing: Array<(reason: Error) => void> = [];
@@ -613,23 +613,23 @@ const waitUntil = (what: string, ready: () => boolean): Promise<void> =>
   testing.waitUntil(what, ready, WAIT_DEADLINE_MS);
 
 /** Waits until the session has ended, whatever ended it. */
-const awaitSessionEnd = (seen: ReadonlyArray<ProviderEvent>): Promise<void> =>
+const awaitSessionEnd = (seen: ReadonlyArray<HarnessEvent>): Promise<void> =>
   waitUntil("ended the session", () => seen.some((event) => event._tag === "session.exited"));
 
-const listEventTags = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+const listEventTags = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<string> =>
   seen.map((event) => event._tag);
 
 /** Returns the item events of one kind, in the order they were published. */
 const filterItems = (
-  seen: ReadonlyArray<ProviderEvent>,
+  seen: ReadonlyArray<HarnessEvent>,
   kind: string,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: "item.started" | "item.completed" }>> =>
+): ReadonlyArray<Extract<HarnessEvent, { _tag: "item.started" | "item.completed" }>> =>
   seen.filter(
-    (event): event is Extract<ProviderEvent, { _tag: "item.started" | "item.completed" }> =>
+    (event): event is Extract<HarnessEvent, { _tag: "item.started" | "item.completed" }> =>
       (event._tag === "item.started" || event._tag === "item.completed") && event.kind === kind,
   );
 
-const listOpenedTurns = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+const listOpenedTurns = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<string> =>
   seen.flatMap((event) => (event._tag === "turn.started" ? [event.turnId] : []));
 
 describe("a Claude Code session", () => {
@@ -647,7 +647,7 @@ describe("a Claude Code session", () => {
     expect(listEventTags(run.seen)).toEqual(["session.started"]);
     // This event is the only way the controller learns the native id: the
     // report of this runner's sessions is sent only once, at hello.
-    expect(run.seen[0]?.providerRefs).toEqual({ nativeSessionId: binding.nativeSessionId });
+    expect(run.seen[0]?.harnessRefs).toEqual({ nativeSessionId: binding.nativeSessionId });
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([binding]);
   });
 
@@ -823,7 +823,7 @@ describe("a Claude Code session", () => {
     readonly skillOverrides: Record<string, string>;
   }
 
-  const startAndReadSettings = async (spec: SessionSpec, ctx: ProviderRunnerContext) => {
+  const startAndReadSettings = async (spec: SessionSpec, ctx: HarnessRunnerContext) => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, spec, ctx));
     const [options] = run.options;
@@ -1847,7 +1847,7 @@ const parkToolCall = (
 const respond = (run: Driving, requestId: string, decision: ApprovalDecision): Promise<void> =>
   Effect.runPromise(run.adapter.respondToApprovalRequest(SESSION, requestId, decision));
 
-const listOpenedRequests = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<OpenRequest> =>
+const listOpenedRequests = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<OpenRequest> =>
   seen.flatMap((event) => (event._tag === "request.opened" ? [event.request] : []));
 
 /**
@@ -1855,7 +1855,7 @@ const listOpenedRequests = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<O
  * picks: the subagent id, or `undefined` for the session's own agent.
  */
 const listRequestAskers = (
-  seen: ReadonlyArray<ProviderEvent>,
+  seen: ReadonlyArray<HarnessEvent>,
   tag: "request.opened" | "request.resolved",
 ): ReadonlyArray<{ readonly requestId: string; readonly subagentId: string | undefined }> =>
   seen.flatMap((event) => {
@@ -1867,7 +1867,7 @@ const listRequestAskers = (
   });
 
 /** Returns how each request was resolved: its decision or its answers. */
-const listResolutions = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<unknown> =>
+const listResolutions = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<unknown> =>
   seen.flatMap((event): ReadonlyArray<unknown> =>
     event._tag !== "request.resolved"
       ? []
@@ -1945,8 +1945,8 @@ const buildSubagentFinished = (subagentId: string) =>
 
 /** Returns where the first event with this tag and this subagent is in `seen`, or -1. */
 const findSubagentEvent = (
-  seen: ReadonlyArray<ProviderEvent>,
-  tag: ProviderEvent["_tag"],
+  seen: ReadonlyArray<HarnessEvent>,
+  tag: HarnessEvent["_tag"],
   subagentId: string,
 ): number =>
   seen.findIndex(
@@ -2999,7 +2999,7 @@ const ANSWER = { verdict: "accept", confidence: 0.9 };
 const runTurnToCompletion = async (
   spec: SessionSpec,
   result: unknown,
-): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+): Promise<Extract<HarnessEvent, { _tag: "turn.completed" }>> => {
   const run = createDriving();
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, WORKING));
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
@@ -3008,7 +3008,7 @@ const runTurnToCompletion = async (
     run.seen.some((event) => event._tag === "turn.completed"),
   );
   const completed = run.seen.find(
-    (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+    (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
       event._tag === "turn.completed",
   );
   expect(completed, "no turn was completed").toBeDefined();
@@ -3884,7 +3884,7 @@ describe("a text generation", () => {
   const createGenerating = (
     answer: ReadonlyArray<unknown> | Error | "hangs",
     closing?: Promise<void>,
-  ): { readonly adapter: ProviderAdapter; readonly queries: Array<Query> } => {
+  ): { readonly adapter: HarnessAdapter; readonly queries: Array<Query> } => {
     const queries: Array<Query> = [];
     const seam: ClaudeSeam = {
       query: () => {
@@ -3916,8 +3916,8 @@ describe("a text generation", () => {
   };
 
   const generate = (
-    adapter: ProviderAdapter,
-    context: ProviderRunnerContext = CONTEXT,
+    adapter: HarnessAdapter,
+    context: HarnessRunnerContext = CONTEXT,
   ): Promise<TextGenerationOutcome> =>
     Effect.runPromise(
       Effect.catch(

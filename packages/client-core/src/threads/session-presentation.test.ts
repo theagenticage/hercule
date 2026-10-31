@@ -78,8 +78,8 @@ const lone = (id: string, minute: number, over: Partial<Session> = {}): Session 
 const done = (minute: number): Pick<Session, "done"> => ({ done: { at: at(minute), by: "user" } });
 
 const INSTANCES = [
-  { id: "i-claude", providerId: "claude-code", snapshots: [] },
-  { id: "i-codex", providerId: "codex", snapshots: [] },
+  { id: "i-claude", harnessId: "claude-code", snapshots: [] },
+  { id: "i-codex", harnessId: "codex", snapshots: [] },
 ] as unknown as Parameters<typeof prepareSessionPresentation>[0]["instances"];
 
 /** Returns the presentation of `sessions`, with the fixture's projects, workspaces and machine. */
@@ -230,7 +230,7 @@ describe("a group's row", () => {
       status: "working",
       activityAt: at(5),
       ask: null,
-      providerId: "claude-code",
+      harnessId: "claude-code",
       branch: "main",
       machine: "moss",
       summary: null,
@@ -359,7 +359,7 @@ describe("a group's row", () => {
       const row = describeOnly([thread("s-1"), reviewer({ openRequests: [ask("r-1")] })]);
 
       expect(row.ask).toEqual({ askerLabel: "review", question: "Run git push?" });
-      expect(row.providerId).toBe("codex");
+      expect(row.harnessId).toBe("codex");
     });
 
     it("asks the question alone, with the lead's provider, when the lead asks", () => {
@@ -369,7 +369,7 @@ describe("a group's row", () => {
       ]);
 
       expect(row.ask).toEqual({ askerLabel: null, question: "Run git push?" });
-      expect(row.providerId).toBe("claude-code");
+      expect(row.harnessId).toBe("claude-code");
     });
   });
 

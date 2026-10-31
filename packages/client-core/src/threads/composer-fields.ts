@@ -4,7 +4,7 @@
  *
  * - its workspace and runner, because a session stays on the runner it
  *   started on;
- * - its access mode, because no provider adapter can switch the mode of a
+ * - its access mode, because no harness adapter can switch the mode of a
  *   running session.
  *
  * Only the model and its options can still change, and only within the
@@ -43,9 +43,9 @@ export interface ComposerField {
   readonly locked: string | null;
 }
 
-/** The model pill: the provider logo, the account name when it is needed, and the model. */
+/** The model pill: the harness logo, the account name when it is needed, and the model. */
 export interface ModelPill {
-  readonly providerId: string | null;
+  readonly harnessId: string | null;
   readonly account: string | null;
   readonly name: string | null;
 }
@@ -255,7 +255,7 @@ export const buildComposerFields = (
     },
     model: {
       pill: {
-        providerId: instance?.providerId ?? null,
+        harnessId: instance?.harnessId ?? null,
         account: instance === undefined ? null : findAccountName(catalogs.instances, instance),
         // A slug the snapshot no longer offers is still the thread's model, so
         // the pill shows the slug rather than going blank.

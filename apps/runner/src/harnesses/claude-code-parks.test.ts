@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PermissionResult } from "@anthropic-ai/claude-agent-sdk";
-import type { ProviderEvent, SubagentId } from "@hercule/protocol";
+import type { HarnessEvent, SubagentId } from "@hercule/protocol";
 import { openPark, withdrawParksAskedBy, type Parks } from "./claude-code-parks";
 
 const STAMPING = {
@@ -16,7 +16,7 @@ const STAMPING = {
  */
 const openApprovalPark = (
   parks: Parks,
-  emitted: Array<ProviderEvent>,
+  emitted: Array<HarnessEvent>,
   requestId: string,
   subagentId: SubagentId | undefined,
   reported = true,
@@ -41,7 +41,7 @@ const openApprovalPark = (
 describe("withdrawParksAskedBy", () => {
   it("cancels only the parks the given subagents asked, and keeps the session's own agent's", async () => {
     const parks: Parks = new Map();
-    const emitted: Array<ProviderEvent> = [];
+    const emitted: Array<HarnessEvent> = [];
     void openApprovalPark(parks, emitted, "r-own", undefined);
     const asked = openApprovalPark(parks, emitted, "r-a", "agent-a");
     void openApprovalPark(parks, emitted, "r-b", "agent-b");
@@ -59,7 +59,7 @@ describe("withdrawParksAskedBy", () => {
 describe("a park whose request was never reported", () => {
   it("denies the harness when withdrawn, and reports no end for a request nobody saw open", async () => {
     const parks: Parks = new Map();
-    const emitted: Array<ProviderEvent> = [];
+    const emitted: Array<HarnessEvent> = [];
     const asked = openApprovalPark(parks, emitted, "r-a", "agent-a", false);
 
     parks.get("r-a")!.withdraw();

@@ -26,7 +26,7 @@ export const findAccountName = (
   instances: readonly ProviderInstance[],
   instance: ProviderInstance,
 ): string | null =>
-  instances.filter((each) => each.providerId === instance.providerId).length > 1
+  instances.filter((each) => each.harnessId === instance.harnessId).length > 1
     ? instance.name
     : null;
 

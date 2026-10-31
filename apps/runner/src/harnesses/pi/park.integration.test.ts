@@ -16,7 +16,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import type { AccessMode, ProviderEvent, SessionSpec } from "@hercule/protocol";
+import type { AccessMode, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { pi } from "./adapter";
 import { cleanupHomes, buildContext, TEST_ZAI_KEY, SPEC, filterByTag, waitUntil } from "./testing";
 import { createScratchHome } from "../testing";
@@ -56,7 +56,7 @@ interface Live {
   readonly sessionId: string;
   /** The session's working directory, where its files should be written. */
   readonly cwd: string;
-  readonly seen: Array<ProviderEvent>;
+  readonly seen: Array<HarnessEvent>;
   readonly stop: () => Promise<void>;
 }
 
@@ -77,7 +77,7 @@ const startLiveSession = async (
     env: { PATH: process.env["PATH"] ?? "" },
   };
   const sessionId = crypto.randomUUID();
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(pi.events, (event) =>
       Effect.sync(() => {
@@ -107,17 +107,17 @@ const waitReportingEvents = (live: Live, what: string, ready: () => boolean): Pr
 
 const listOpenedRequests = (
   live: Live,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: "request.opened" }>> =>
+): ReadonlyArray<Extract<HarnessEvent, { _tag: "request.opened" }>> =>
   filterByTag(live.seen, "request.opened");
 
 const findOpenedRequest = (
   live: Live,
-): Extract<ProviderEvent, { _tag: "request.opened" }> | undefined => listOpenedRequests(live)[0];
+): Extract<HarnessEvent, { _tag: "request.opened" }> | undefined => listOpenedRequests(live)[0];
 
 const findItemEnd = (
   live: Live,
   itemId: string,
-): Extract<ProviderEvent, { _tag: "item.completed" }> | undefined =>
+): Extract<HarnessEvent, { _tag: "item.completed" }> | undefined =>
   filterByTag(live.seen, "item.completed").find((event) => event.itemId === itemId);
 
 const hasFinishedCommand = (live: Live, itemId: string): boolean =>

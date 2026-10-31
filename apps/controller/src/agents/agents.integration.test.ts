@@ -5,19 +5,19 @@
  *
  * A machine is needed for two of the assertions:
  *
- * - `unenforced` is read from the instance's provider definition.
+ * - `unenforced` is read from the instance's harness definition.
  * - A delete must be rejected while a session spawned from the agent still
  *   runs.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import type { Agent as AgentRecord, Assistant, Session } from "@hercule/contract";
 import { withTransaction } from "../db";
 import { del, get, post, readErrorBody, send } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import {
   spawnThreadUnder,
   at,
@@ -32,17 +32,17 @@ import {
   type Arranged,
 } from "../sessions/testing";
 
-/** A provider that enforces a tool restriction natively, as Claude Code does. */
-const CLAUDE: ProviderDefinition = buildProviderDefinition("claude-provider", { token: "t" });
+/** A harness that enforces a tool restriction natively, as Claude Code does. */
+const CLAUDE: HarnessDefinition = buildHarnessDefinition("claude-provider", { token: "t" });
 
-/** A provider that enforces a tool restriction natively, as pi does. */
-const PI: ProviderDefinition = buildProviderDefinition("pi-provider", { token: "t" });
+/** A harness that enforces a tool restriction natively, as pi does. */
+const PI: HarnessDefinition = buildHarnessDefinition("pi-provider", { token: "t" });
 
-/** A provider that stores a tool restriction but enforces none, as Codex does. */
-const CODEX: ProviderDefinition = {
-  ...buildProviderDefinition("codex-provider", { token: "t" }),
+/** A harness that stores a tool restriction but enforces none, as Codex does. */
+const CODEX: HarnessDefinition = {
+  ...buildHarnessDefinition("codex-provider", { token: "t" }),
   declared: {
-    ...buildProviderDefinition("codex-provider").declared,
+    ...buildHarnessDefinition("codex-provider").declared,
     disallowedTools: "unsupported",
   },
 };
@@ -79,9 +79,9 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
 /** A well-formed id that matches no record. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
 
-const findInstanceId = (arranged: Arranged, providerId: string): string => {
-  const found = arranged.instances.find((instance) => instance.providerId === providerId);
-  expect(found, providerId).toBeDefined();
+const findInstanceId = (arranged: Arranged, harnessId: string): string => {
+  const found = arranged.instances.find((instance) => instance.harnessId === harnessId);
+  expect(found, harnessId).toBeDefined();
   return found!.id;
 };
 
@@ -174,7 +174,7 @@ const driveSessionToBusy = async (arranged: Arranged, session: Session): Promise
     sessionId: session.id,
     at,
     _tag: "session.started",
-    providerRefs: { nativeSessionId: `native-${session.id}` },
+    harnessRefs: { nativeSessionId: `native-${session.id}` },
   });
   await waitForSession(arranged, session.id, (one) => one.status === "busy");
 };

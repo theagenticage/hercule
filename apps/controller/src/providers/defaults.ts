@@ -23,9 +23,9 @@ export const ensureProviderInstances: Effect.Effect<
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
   const registered = yield* host.providers();
-  // A map, so two plugins that register the same provider still get one instance.
+  // A map, so two plugins that register the same harness still get one instance.
   const missing = new Map(registered.map((definition) => [definition.id, definition]));
-  for (const providerId of yield* instances.providersWithInstance()) missing.delete(providerId);
+  for (const harnessId of yield* instances.harnessesWithInstance()) missing.delete(harnessId);
   if (missing.size === 0) return;
   const at = yield* nowIso;
   yield* withTransaction(
@@ -35,7 +35,7 @@ export const ensureProviderInstances: Effect.Effect<
       (definition) =>
         Effect.gen(function* () {
           const instance = yield* instances.insert({
-            providerId: definition.id,
+            harnessId: definition.id,
             name: definition.displayName,
             config: definition.defaultConfig,
             at,
@@ -43,7 +43,7 @@ export const ensureProviderInstances: Effect.Effect<
           yield* audit.append({
             kind: "provider.created",
             actor: SYSTEM_ACTOR,
-            payload: { instanceId: instance.id, providerId: instance.providerId },
+            payload: { instanceId: instance.id, harnessId: instance.harnessId },
             record: { topic: "provider", id: instance.id },
             at,
           });

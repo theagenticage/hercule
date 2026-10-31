@@ -195,13 +195,13 @@ export const Toolchain = Schema.Struct({
 
 export type Toolchain = Schema.Schema.Type<typeof Toolchain>;
 
-export const ProviderBinary = Schema.Struct({
+export const HarnessBinary = Schema.Struct({
   name: Fact,
   present: Schema.Boolean,
   path: Schema.optionalKey(Fact),
 });
 
-export type ProviderBinary = Schema.Schema.Type<typeof ProviderBinary>;
+export type HarnessBinary = Schema.Schema.Type<typeof HarnessBinary>;
 
 /**
  * What a runner knows about the machine it is on. This is state where the
@@ -216,9 +216,9 @@ export const RunnerFacts = Schema.Struct({
   totalMemoryBytes: Bytes,
   docker: Schema.Boolean,
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
-  providers: Schema.Array(ProviderBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  providers: Schema.Array(HarnessBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /**
-   * The provider ids this runner build has an adapter for. A fact about the
+   * The harness ids this runner build has an adapter for. A fact about the
    * binary rather than the machine, so the fleet view can show "no adapter in
    * this runner build" instead of finding out by trying and failing.
    */
@@ -457,7 +457,7 @@ export const ProbeRequest = Schema.Struct({
   _tag: Schema.Literal("probeRequest"),
   requestId: RequestId,
   instanceId: InstanceId,
-  providerId: Fact,
+  harnessId: Fact,
   config: Schema.Json,
   /** The instance's credentials, which its config never holds; `{}` when none. */
   secrets: InstanceSecrets,
@@ -477,7 +477,7 @@ export type ProbeReport = Schema.Schema.Type<typeof ProbeReport>;
 export const InstallRequest = Schema.Struct({
   _tag: Schema.Literal("installRequest"),
   requestId: RequestId,
-  providerId: Fact,
+  harnessId: Fact,
 });
 
 export type InstallRequest = Schema.Schema.Type<typeof InstallRequest>;
@@ -517,7 +517,7 @@ export const LoginStart = Schema.Struct({
   _tag: Schema.Literal("loginStart"),
   requestId: RequestId,
   instanceId: InstanceId,
-  providerId: Fact,
+  harnessId: Fact,
 });
 
 export type LoginStart = Schema.Schema.Type<typeof LoginStart>;

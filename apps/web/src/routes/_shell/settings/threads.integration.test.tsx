@@ -63,7 +63,7 @@ const buildProviderInstance = (
   snapshots: ProviderInstance["snapshots"],
 ): ProviderInstance => ({
   id,
-  providerId: "claude-code",
+  harnessId: "claude-code",
   secretFields: [],
   name: displayName,
   config: {},

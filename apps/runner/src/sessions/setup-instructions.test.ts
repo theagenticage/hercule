@@ -8,7 +8,7 @@ import {
 } from "@hercule/protocol";
 import { appendSetupInstructions } from "./setup-instructions";
 
-const target = { runnerId: "runner-7", providerId: "codex", instanceId: "instance-3" };
+const target = { runnerId: "runner-7", harnessId: "codex", instanceId: "instance-3" };
 
 describe("appendSetupInstructions", () => {
   it("adds the install command to a missing harness", () => {

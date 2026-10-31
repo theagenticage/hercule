@@ -28,7 +28,7 @@ import { github } from "@hercule/plugin-github";
 import { withTransaction } from "../db";
 import { appendIngestedEvent } from "../events";
 import { get, post, type ServerHarness } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import {
   spawnThreadWithGrants,
   at,
@@ -87,7 +87,7 @@ export const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
  */
 export const READS_RAW = "event.raw != null";
 
-export const PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
+export const PROVIDER = buildHarnessDefinition("full-provider", { token: "t" });
 
 export const FACTS: RunnerFacts = {
   os: "darwin",

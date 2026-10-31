@@ -53,7 +53,7 @@ import {
   computeSubagentAfter,
   createBareSubagent,
 } from "../../../../controller/src/sessions/subagents";
-import type { OutputSchema, ProviderEvent, SessionSpec } from "@hercule/protocol";
+import type { OutputSchema, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
   FIXTURE_PROMPT,
@@ -73,7 +73,7 @@ import {
   startAsyncQuestionModel,
   startMockModel,
 } from "./mock-model.testing";
-import type { ProviderRunnerContext } from "../index";
+import type { HarnessRunnerContext } from "../index";
 import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
 
@@ -109,7 +109,7 @@ const createHomeWithLogin = (): string => {
   return home;
 };
 
-const buildContext = (home: string): ProviderRunnerContext => ({
+const buildContext = (home: string): HarnessRunnerContext => ({
   cwd: createScratchDir("cwd"),
   attachmentsDir: null,
   editMarks: null,
@@ -130,7 +130,7 @@ const buildContext = (home: string): ProviderRunnerContext => ({
  * `developer_instructions` config value, the setting that the app-server's
  * `developerInstructions` param overrides.
  */
-const renderPrompt = async (ctx: ProviderRunnerContext): Promise<string> => {
+const renderPrompt = async (ctx: HarnessRunnerContext): Promise<string> => {
   const { seam, spawns, requests } = buildScriptedSeam();
   await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
   const { developerInstructions } = listSentParams(requests, "thread/start")[0] as {
@@ -445,7 +445,7 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
     mkdirSync(join(home, "codex"));
     writeFileSync(join(home, "codex", "config.toml"), model.config);
     const { adapter, listSkills } = makeSkillListingAdapter();
-    const seen: Array<ProviderEvent> = [];
+    const seen: Array<HarnessEvent> = [];
     const subscriber = Effect.runFork(
       Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
     );
@@ -520,7 +520,7 @@ describe.skipIf(binary === undefined)(
       mkdirSync(join(home, "codex"));
       writeFileSync(join(home, "codex", "config.toml"), model.config);
       const { adapter, listSkills } = makeSkillListingAdapter();
-      const seen: Array<ProviderEvent> = [];
+      const seen: Array<HarnessEvent> = [];
       const subscriber = Effect.runFork(
         Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
       );
@@ -594,8 +594,8 @@ const SESSION_SPEC: SessionSpec = {
 const TURN_DEADLINE = Duration.seconds(120);
 
 const waitForEvent = async (
-  seen: ReadonlyArray<ProviderEvent>,
-  tag: ProviderEvent["_tag"],
+  seen: ReadonlyArray<HarnessEvent>,
+  tag: HarnessEvent["_tag"],
 ): Promise<void> => {
   const deadline = Date.now() + Duration.toMillis(TURN_DEADLINE);
   while (!seen.some((event) => event._tag === tag)) {
@@ -614,7 +614,7 @@ const waitForEvent = async (
  * the adapter shows those, and what Codex complains about depends on the
  * machine (a mock model it has no metadata for, a sandbox it cannot set up).
  */
-const listWarnings = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<ProviderEvent> =>
+const listWarnings = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<HarnessEvent> =>
   seen.filter((event) => event._tag === "runtime.warning" && event.raw === undefined);
 
 /**
@@ -622,7 +622,7 @@ const listWarnings = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<Provide
  * subagent each event belongs to, and the state of each completed turn, so a
  * test that misses its deadline shows what Codex reported on the way.
  */
-const describeEvents = (seen: ReadonlyArray<ProviderEvent>): string =>
+const describeEvents = (seen: ReadonlyArray<HarnessEvent>): string =>
   seen
     .map((event) => {
       if (event._tag === "runtime.warning") return `runtime.warning (${event.message})`;
@@ -637,7 +637,7 @@ const describeEvents = (seen: ReadonlyArray<ProviderEvent>): string =>
  * with `name` and the events seen so far.
  */
 const waitForFixture = async (
-  seen: ReadonlyArray<ProviderEvent>,
+  seen: ReadonlyArray<HarnessEvent>,
   name: string,
   predicate: () => boolean,
 ): Promise<void> => {
@@ -653,8 +653,8 @@ const waitForFixture = async (
  * into. Each session needs a new subscriber, because the stream never replays
  * past events.
  */
-const collectEvents = (): Array<ProviderEvent> => {
-  const seen: Array<ProviderEvent> = [];
+const collectEvents = (): Array<HarnessEvent> => {
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(codex.events, (event) => Effect.sync(() => void seen.push(event))),
   );
@@ -670,7 +670,7 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
     sessionId: string,
     outputSchema: OutputSchema,
     text: string,
-  ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+  ): Promise<Extract<HarnessEvent, { _tag: "turn.completed" }>> => {
     const seen = collectEvents();
     await Effect.runPromise(
       codex.startSession(
@@ -684,7 +684,7 @@ describe.skipIf(!authed)("a real Codex session under an output schema", () => {
     await Effect.runPromise(codex.stopSession(sessionId, "stopped"));
     await waitForEvent(seen, "session.exited");
     return seen.find(
-      (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+      (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
         event._tag === "turn.completed",
     )!;
   };
@@ -759,7 +759,7 @@ describe.skipIf(binary === undefined)(
             };
           },
         });
-        const seen: Array<ProviderEvent> = [];
+        const seen: Array<HarnessEvent> = [];
         const subscriber = Effect.runFork(
           Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
         );
@@ -767,12 +767,12 @@ describe.skipIf(binary === undefined)(
           waitForFixture(seen, "Codex fixture", predicate);
         const childCompletions = () =>
           seen.filter(
-            (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+            (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
               event._tag === "turn.completed" && event.subagentId !== undefined,
           );
         const approvals = () =>
           seen.filter(
-            (event): event is Extract<ProviderEvent, { _tag: "request.opened" }> =>
+            (event): event is Extract<HarnessEvent, { _tag: "request.opened" }> =>
               event._tag === "request.opened",
           );
         const sessionId =
@@ -848,7 +848,7 @@ describe.skipIf(binary === undefined)(
               .map((event) => (event._tag === "turn.started" ? event.model : undefined)),
           ).toEqual(["gpt-5.4", "gpt-5.4"]);
           const commands = seen.filter(
-            (event): event is Extract<ProviderEvent, { _tag: "item.started" }> =>
+            (event): event is Extract<HarnessEvent, { _tag: "item.started" }> =>
               event._tag === "item.started" &&
               event.subagentId !== undefined &&
               event.kind === "command_execution",
@@ -915,7 +915,7 @@ describe.skipIf(binary === undefined)(
       mkdirSync(join(home, "codex"));
       writeFileSync(join(home, "codex", "config.toml"), model.config);
       const adapter = makeCodexAdapter({ run: runProcess, appServer: spawnAppServer });
-      const seen: Array<ProviderEvent> = [];
+      const seen: Array<HarnessEvent> = [];
       const subscriber = Effect.runFork(
         Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
       );
@@ -1073,7 +1073,7 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
               },
         run: runProcess,
       });
-      const seen: Array<ProviderEvent> = [];
+      const seen: Array<HarnessEvent> = [];
       const subscriber = Effect.runFork(
         Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
       );
@@ -1258,7 +1258,7 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
       `model_catalog_json = ${JSON.stringify(catalog)}\n${model.config}`,
     );
     const adapter = makeCodexAdapter({ appServer: spawnAppServer, run: runProcess });
-    const seen: Array<ProviderEvent> = [];
+    const seen: Array<HarnessEvent> = [];
     const subscriber = Effect.runFork(
       Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
     );
@@ -1365,7 +1365,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
       const home = createScratchDir("usage-resume");
       mkdirSync(join(home, "codex"));
       writeFileSync(join(home, "codex", "config.toml"), model.config);
-      const context: ProviderRunnerContext = {
+      const context: HarnessRunnerContext = {
         ...buildContext(home),
         env: { PATH: process.env["PATH"] ?? "", HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
       };
@@ -1386,7 +1386,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
         return child;
       };
       let adapter = makeCodexAdapter({ appServer: spawnTracked, run: runProcess });
-      const seen: Array<ProviderEvent> = [];
+      const seen: Array<HarnessEvent> = [];
       const subscribe = () =>
         Effect.runFork(
           Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
@@ -1396,7 +1396,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
         waitForFixture(seen, "Codex resume fixture", predicate);
       const childCompletions = () =>
         seen.filter(
-          (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+          (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
             event._tag === "turn.completed" && event.subagentId !== undefined,
         );
       const rootCompletions = () =>
@@ -1463,7 +1463,7 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
         const latestChildUsage = () => {
           const report = seen
             .filter(
-              (event): event is Extract<ProviderEvent, { _tag: "session.usage.updated" }> =>
+              (event): event is Extract<HarnessEvent, { _tag: "session.usage.updated" }> =>
                 event._tag === "session.usage.updated" && event.subagentId === childId,
             )
             .at(-1);

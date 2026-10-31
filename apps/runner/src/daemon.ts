@@ -21,7 +21,7 @@ import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
 import { openFileClock } from "./edit-marks";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
-import { providerLogins } from "./providers";
+import { harnessLogins } from "./harnesses";
 import { sessions } from "./sessions";
 import { makeSessionSkillsFolders } from "./skills";
 import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
@@ -291,7 +291,7 @@ export const runDaemon = (
             socketPath,
             credentials,
             githubTokenCopies,
-            providerLogins,
+            harnessLogins,
             sessions,
             binDir,
             herculeTool,

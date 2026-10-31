@@ -17,11 +17,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
 import * as Effect from "effect/Effect";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
 import type {
   LocalAttachment,
-  ProviderRunnerContext,
+  HarnessRunnerContext,
   TextGenerationContext,
   UserMaterial,
 } from "./index";
@@ -48,7 +48,7 @@ export const createScratchHome = (label: string): string => {
  * found the binary and made an empty scratch directory for the call. The
  * directory is removed by `cleanupHomes`, because an adapter never removes it.
  */
-export const buildTextGenerationContext = (ctx: ProviderRunnerContext): TextGenerationContext => ({
+export const buildTextGenerationContext = (ctx: HarnessRunnerContext): TextGenerationContext => ({
   ...ctx,
   binary: ctx.binary ?? "/usr/local/bin/harness",
   cwd: createScratchHome("text-generation"),
@@ -121,11 +121,11 @@ export const waitUntil = async (
  */
 export const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
 
-export const filterByTag = <Tag extends ProviderEvent["_tag"]>(
-  seen: ReadonlyArray<ProviderEvent>,
+export const filterByTag = <Tag extends HarnessEvent["_tag"]>(
+  seen: ReadonlyArray<HarnessEvent>,
   tag: Tag,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>
-  seen.filter((event): event is Extract<ProviderEvent, { _tag: Tag }> => event._tag === tag);
+): ReadonlyArray<Extract<HarnessEvent, { _tag: Tag }>> =>
+  seen.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
 
 /**
  * User Material with no paths: what a Thread gets when its user has none of

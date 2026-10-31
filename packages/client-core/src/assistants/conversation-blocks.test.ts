@@ -31,8 +31,8 @@ import {
   type OpenReplyBlock,
 } from "./conversation-blocks";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemKind = Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
+type HarnessEvent = TranscriptRow["event"];
+type ItemKind = Extract<HarnessEvent, { _tag: "item.started" }>["kind"];
 
 const NOW = new Date("2026-10-07T12:00:00.000Z");
 const TODAY = "2026-10-07T09:00:00.000Z";
@@ -43,7 +43,7 @@ const IDLE = buildSession({ id: "s1", status: "idle", conversationId: "c1" });
 let position = 0;
 
 /** Wraps an event in a transcript row at the next position. */
-const buildRow = (event: ProviderEvent): TranscriptRow => ({
+const buildRow = (event: HarnessEvent): TranscriptRow => ({
   position: ++position,
   at: event.at,
   event,

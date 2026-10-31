@@ -22,7 +22,7 @@ import {
 } from "../../../runner/src/workspaces/testing";
 import { get, post, send } from "../http/testing";
 import { startSentWorkflow } from "../runs/testing";
-import { buildProviderDefinition, createPluginFixture } from "../plugins/testing";
+import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 import {
   spawnSessionOrFail,
   waitForFrames,
@@ -285,7 +285,7 @@ describe("workspace.attach", () => {
           plugins: [
             createPluginFixture({
               id: "providers",
-              definitions: [buildProviderDefinition("test-provider")],
+              definitions: [buildHarnessDefinition("test-provider")],
             }).plugin,
           ],
         },

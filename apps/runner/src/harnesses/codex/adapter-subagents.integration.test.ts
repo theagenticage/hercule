@@ -2,7 +2,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Schema, Stream } from "effect";
 import { makeCodexAdapter } from "./adapter";
-import { ProviderEvent } from "@hercule/protocol";
+import { HarnessEvent } from "@hercule/protocol";
 import {
   buildContext,
   buildScriptedSeam,
@@ -66,7 +66,7 @@ const createDelayedMetadataSession = async () => {
       };
     },
   });
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
@@ -103,9 +103,9 @@ const requestCommand = (server: Spawn, threadId: string, id: string | number): v
     },
   });
 
-const validateEvents = (seen: ReadonlyArray<ProviderEvent>): void => {
+const validateEvents = (seen: ReadonlyArray<HarnessEvent>): void => {
   for (const event of seen)
-    expect(Schema.is(ProviderEvent)(event), JSON.stringify(event)).toBe(true);
+    expect(Schema.is(HarnessEvent)(event), JSON.stringify(event)).toBe(true);
 };
 
 describe("independent Codex subagent conversations", () => {

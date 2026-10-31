@@ -21,8 +21,8 @@ import {
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Logger } from "effect";
-import { CLAUDE_CODE, CODEX, PI } from "../providers";
-import { cleanupHomes, createScratchHome, NO_USER_MATERIAL_PATHS } from "../providers/testing";
+import { CLAUDE_CODE, CODEX, PI } from "../harnesses";
+import { cleanupHomes, createScratchHome, NO_USER_MATERIAL_PATHS } from "../harnesses/testing";
 import { provisionUserMaterial } from "./index";
 
 afterAll(cleanupHomes);
@@ -57,7 +57,7 @@ const createHomes = (): { readonly home: string; readonly instanceHome: string }
  * every warning logged while doing so.
  */
 const provisionCapturingWarnings = (
-  providerId: string,
+  harnessId: string,
   instanceHome: string,
   env: Record<string, string>,
 ) => {
@@ -66,17 +66,14 @@ const provisionCapturingWarnings = (
     if (logLevel === "Warn") warnings.push(String(message));
   });
   const material = Effect.runSync(
-    Effect.provide(
-      provisionUserMaterial(providerId, instanceHome, env),
-      Logger.layer([collecting]),
-    ),
+    Effect.provide(provisionUserMaterial(harnessId, instanceHome, env), Logger.layer([collecting])),
   );
   return { material, warnings };
 };
 
 /** Provisions the user's material for one Thread and returns the material. */
-const provision = (providerId: string, instanceHome: string, env: Record<string, string>) =>
-  provisionCapturingWarnings(providerId, instanceHome, env).material;
+const provision = (harnessId: string, instanceHome: string, env: Record<string, string>) =>
+  provisionCapturingWarnings(harnessId, instanceHome, env).material;
 
 describe("Claude Code's material", () => {
   it("links each entry of the user's .claude directory that exists, and only those", () => {

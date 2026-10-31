@@ -26,7 +26,7 @@ import type {
   ModelSelection,
   OpenRequest,
   ProbeResult,
-  ProviderEvent,
+  HarnessEvent,
   SendResult,
   SessionBinding,
   SessionSpec,
@@ -49,8 +49,8 @@ import {
 import type {
   AdapterTurnInput,
   LocalAttachment,
-  ProviderAdapter,
-  ProviderRunnerContext,
+  HarnessAdapter,
+  HarnessRunnerContext,
   TextGenerationContext,
   UserMaterial,
 } from "../index";
@@ -329,7 +329,7 @@ const buildModelChangeFailure = (
 interface Held {
   readonly binding: SessionBinding;
   readonly spec: SessionSpec;
-  readonly ctx: ProviderRunnerContext;
+  readonly ctx: HarnessRunnerContext;
   /** The pi binary the session's own agent runs, which its subagents run too. */
   readonly binary: string;
   /** The session's own agent, whose pi process is the session's. */
@@ -665,7 +665,7 @@ type AgentLaunch =
  * folders in checkout order. The order is the precedence, because pi keeps the
  * first skill of a name.
  */
-const listSkillFolders = (ctx: ProviderRunnerContext): ReadonlyArray<string> => [
+const listSkillFolders = (ctx: HarnessRunnerContext): ReadonlyArray<string> => [
   ...(ctx.librarySkillsFolder === undefined ? [] : [ctx.librarySkillsFolder]),
   ...(ctx.repositorySkillsFolders ?? []),
 ];
@@ -684,7 +684,7 @@ const listSkillFolders = (ctx: ProviderRunnerContext): ReadonlyArray<string> => 
  */
 const buildArgv = (
   spec: SessionSpec,
-  ctx: ProviderRunnerContext,
+  ctx: HarnessRunnerContext,
   selection: ModelSelection,
   launch: AgentLaunch,
   extensionFile: string,
@@ -849,7 +849,7 @@ const findTextGenerationViolation = (frame: unknown): string | undefined => {
  * matches is the answer, anything else is invalid output with the reason.
  */
 const decideTextGenerationOutcome = (
-  turn: Extract<ProviderEvent, { readonly _tag: "turn.completed" }>,
+  turn: Extract<HarnessEvent, { readonly _tag: "turn.completed" }>,
 ): TextGenerationOutcome => {
   const result = turn.structuredResult;
   if (turn.state !== "completed" || result === undefined) {
@@ -863,14 +863,14 @@ const decideTextGenerationOutcome = (
     : { outcome: "invalid-output", reason: result.reason };
 };
 
-export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
+export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
   // run here and keeps `findAdapter` the synchronous lookup every other caller
   // already treats it as.
-  const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+  const published = Effect.runSync(PubSub.unbounded<HarnessEvent>());
   const sessions = new Map<string, Held>();
 
-  const emit = (event: ProviderEvent): void => {
+  const emit = (event: HarnessEvent): void => {
     PubSub.publishUnsafe(published, event);
   };
 
@@ -1181,7 +1181,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       turnId,
       text: dialog.prompt,
       steered: false,
-      providerRefs: { nativeSessionId: held.binding.nativeSessionId },
+      harnessRefs: { nativeSessionId: held.binding.nativeSessionId },
     })) {
       emit(event);
     }
@@ -1339,7 +1339,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
       startSubagent(held, agent, dialog);
       return;
     }
-    let completed: Extract<ProviderEvent, { _tag: "turn.completed" }> | undefined;
+    let completed: Extract<HarnessEvent, { _tag: "turn.completed" }> | undefined;
     for (const event of normalize(agent.state, line, frame)) {
       // A `subagent` call normally ends after its subagent replied. One that
       // ends first, because its turn was aborted, no longer waits for the
@@ -1494,7 +1494,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * when a write fails.
    */
   const prepareHome = (
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
     sessionId: string,
     instructions: string | undefined,
   ): void => {
@@ -1505,7 +1505,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 
   const buildEnv = (
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
     extra: Readonly<Record<string, string | undefined>> = {},
   ): Record<string, string | undefined> => {
     const key = ctx.secrets[ZAI_KEY.secret];
@@ -1540,7 +1540,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * every agent gets the marks directory.
    */
   const buildAgentEnv = (
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
     spec: SessionSpec,
     depth: number,
     extensionFile: string,
@@ -1764,14 +1764,14 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     );
 
   return {
-    providerId: PI,
+    harnessId: PI,
     binaryName: PI_BINARY,
 
     events: Stream.fromPubSub(published),
 
     // The pi plugin's config holds the Z.ai key as a secret, which reaches the
     // adapter in the context. The adapter uses nothing else from that config.
-    probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> =>
+    probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> =>
       ctx.binary === undefined
         ? Effect.succeed(buildFailedProbe(null, `no ${PI_BINARY} on this machine`))
         : probe(ctx.binary, ctx.home, buildEnv(ctx)),
@@ -1903,7 +1903,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           eventId: crypto.randomUUID(),
           sessionId,
           at: now(),
-          providerRefs: { nativeSessionId },
+          harnessRefs: { nativeSessionId },
         });
         return binding;
       }),
@@ -1987,7 +1987,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           skillReferences: input.skillReferences,
           senderSessionId: input.senderSessionId,
           steered,
-          providerRefs: { nativeSessionId: held.binding.nativeSessionId },
+          harnessRefs: { nativeSessionId: held.binding.nativeSessionId },
         })) {
           emit(event);
         }
@@ -2096,7 +2096,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   };
 };
 
-export const pi: ProviderAdapter = makePiAdapter({
+export const pi: HarnessAdapter = makePiAdapter({
   spawn: spawnPi,
   run: runProcess,
   killProcessesHolding,

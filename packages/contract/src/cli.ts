@@ -2299,9 +2299,9 @@ export const CLI = {
         help: "The runner's id, or a tail of eight or more characters.",
         resolves: "runner.query",
       },
-      providerId: {
+      harnessId: {
         flag: "provider",
-        help: "Which harness to install, by provider id such as claude-code or codex; not an instance id.",
+        help: "Which harness to install, by harness id such as claude-code or codex; not an instance id.",
       },
     },
   },
@@ -2429,7 +2429,7 @@ export const CLI = {
 
   "provider.query": {
     command: "provider list",
-    help: "Lists the Provider Instances: one row per account of a provider. Each has its own config and its own vendor login. Placement and spawning route on the instance id, never on the provider id.",
+    help: "Lists the Provider Instances: one row per account of a provider. Each has its own config and its own vendor login. Placement and spawning route on the instance id, never on the harness id.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -2450,9 +2450,9 @@ export const CLI = {
     help: "Opens a Provider Instance: one account of one provider, with its own provider home on every runner. The config is a JSON object validated against the provider's own schema. Log the new instance in on a machine with `hercule provider login`.",
     examples: [{ args: ["--provider", "claude-code", "--name", "work"], stdin: "{}" }],
     fields: {
-      providerId: {
+      harnessId: {
         flag: "provider",
-        help: "Which provider to open an account of, by provider id such as claude-code or codex.",
+        help: "Which harness to open an account of, by harness id such as claude-code or codex.",
       },
       name: {
         flag: "name",
@@ -3709,7 +3709,7 @@ export const CLI = {
       },
       accessMode: {
         flag: "access-mode",
-        help: "What the provider adapter enforces for this session. Without it, a Thread takes the user's thread setting, or the calling session's own access mode. A mode the provider does not support falls back to a less permissive one, never a more permissive one, and the reply shows which mode the session actually got.",
+        help: "What the harness adapter enforces for this session. Without it, a Thread takes the user's thread setting, or the calling session's own access mode. A mode the provider does not support falls back to a less permissive one, never a more permissive one, and the reply shows which mode the session actually got.",
       },
       runnerId: {
         flag: "runner",

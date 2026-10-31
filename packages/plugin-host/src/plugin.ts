@@ -2,7 +2,7 @@ import { Effect, Option, Redacted, Schema } from "effect";
 import type { PluginManifest } from "./manifest";
 import type {
   EventSourceContribution,
-  ProviderDefinition,
+  HarnessDefinition,
   WorkflowActionContribution,
 } from "./contributions";
 import type {
@@ -19,8 +19,8 @@ export class PluginError extends Schema.TaggedError<PluginError>()("PluginError"
 /** Stops everything `activate` started. */
 export type Deactivate = Effect.Effect<void, PluginError>;
 
-export interface ProviderRegistration {
-  readonly register: (definition: ProviderDefinition) => Effect.Effect<void, PluginError>;
+export interface HarnessRegistration {
+  readonly register: (definition: HarnessDefinition) => Effect.Effect<void, PluginError>;
 }
 
 export interface EventSourceRegistration {
@@ -38,7 +38,7 @@ export interface WorkflowActionRegistration {
  * receives a runtime service.
  */
 export interface RegistrationHost {
-  readonly providers?: ProviderRegistration;
+  readonly providers?: HarnessRegistration;
   readonly connections?: ConnectionRegistration;
   readonly eventSources?: EventSourceRegistration;
   readonly workflowActions?: WorkflowActionRegistration;
@@ -93,9 +93,9 @@ export interface Plugin {
  * message the user reads in Settings. The three functions below do the same
  * for the other registration services.
  */
-export const registerProvider = (
+export const registerHarness = (
   host: RegistrationHost,
-  definition: ProviderDefinition,
+  definition: HarnessDefinition,
 ): Effect.Effect<void, PluginError> =>
   host.providers === undefined
     ? Effect.fail(new PluginError({ message: "the providers capability was not granted" }))

@@ -9,7 +9,7 @@
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import type { SqlError } from "effect/sql/SqlError";
-import { listSecretFields, type ProviderDefinition } from "@hercule/plugin-host";
+import { listSecretFields, type HarnessDefinition } from "@hercule/plugin-host";
 import type { SecretDecryptError } from "./cipher";
 import { buildProviderInstanceOwner, Secrets } from "./repository";
 
@@ -26,11 +26,11 @@ import { buildProviderInstanceOwner, Secrets } from "./repository";
  */
 export const readInstanceSecrets = (
   secrets: Secrets["Service"],
-  definitions: ReadonlyArray<ProviderDefinition>,
+  definitions: ReadonlyArray<HarnessDefinition>,
   instanceId: string,
-  providerId: string,
+  harnessId: string,
 ): Effect.Effect<Record<string, string>, SqlError | SecretDecryptError> => {
-  const definition = definitions.find((one) => one.id === providerId);
+  const definition = definitions.find((one) => one.id === harnessId);
   const declared =
     definition === undefined
       ? []

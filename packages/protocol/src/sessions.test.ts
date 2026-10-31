@@ -10,7 +10,7 @@ import {
   MAX_ANSWERS_LENGTH,
   isAsyncQuestion,
   ContextCompactionDetail,
-  ProviderEvent,
+  HarnessEvent,
   parseStoredEvent,
   SessionBinding,
   SessionInputResult,
@@ -25,12 +25,12 @@ import {
   ImageGenerationDetail,
   TurnInput,
   UnknownItemDetail,
-  type ProviderEvent as Event,
+  type HarnessEvent as Event,
 } from "./sessions";
 
 const decode = (
   schema:
-    | typeof ProviderEvent
+    | typeof HarnessEvent
     | typeof SessionSpec
     | typeof SessionBinding
     | typeof SessionStart
@@ -69,7 +69,7 @@ const start = {
   requestId: "0199e0e7-0000-7000-8000-00000000000d",
   sessionId: SESSION_ID,
   input: { text: "fix the login bug" },
-  providerId: "claude-code",
+  harnessId: "claude-code",
   config: {},
   /** `{}` rather than absent, for an instance with no credential stored. */
   secrets: {},
@@ -83,7 +83,7 @@ const start = {
  * every optional field is exercised somewhere.
  */
 const events: ReadonlyArray<Event> = [
-  { _tag: "session.started", ...baseFields, providerRefs: { threadId: "abc" } },
+  { _tag: "session.started", ...baseFields, harnessRefs: { threadId: "abc" } },
   { _tag: "session.exited", ...baseFields, reason: "process_exit" },
   {
     _tag: "subagent.started",
@@ -202,7 +202,7 @@ const requests = [
 ] as const;
 
 /**
- * The tags the arms of `ProviderEvent` decode, the `unknown` arm included. The
+ * The tags the arms of `HarnessEvent` decode, the `unknown` arm included. The
  * member that only decodes an event of a tag no arm has is not counted: it has
  * no tag of its own.
  */
@@ -215,12 +215,12 @@ const listTags = (schema: unknown): ReadonlyArray<string> => {
 
 describe("the normalized event taxonomy", () => {
   it.each(events)("round-trips $_tag unchanged", (event) => {
-    const encoded = Schema.encodeSync(ProviderEvent)(event);
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(encoded))).toEqual(event);
+    const encoded = Schema.encodeSync(HarnessEvent)(event);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(encoded))).toEqual(event);
   });
 
   it("has exactly the members the round-trip cases cover", () => {
-    expect(listTags(ProviderEvent)).toEqual(events.map((event) => event._tag));
+    expect(listTags(HarnessEvent)).toEqual(events.map((event) => event._tag));
   });
 
   it.each(requests)("accepts a $kind request with the detail that kind has", (request) => {
@@ -229,16 +229,15 @@ describe("the normalized event taxonomy", () => {
       ...baseFields,
       request: { requestId: "r1", itemId: "i1", ...request },
     };
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(opened))).toEqual(opened);
   });
 
   it("needs the base fields on every member", () => {
     for (const event of events) {
       for (const key of ["eventId", "sessionId", "at"]) {
-        expect(
-          decode(ProviderEvent, omitKey(event, key))._tag,
-          `${event._tag} without ${key}`,
-        ).toBe("Failure");
+        expect(decode(HarnessEvent, omitKey(event, key))._tag, `${event._tag} without ${key}`).toBe(
+          "Failure",
+        );
       }
     }
   });
@@ -253,7 +252,7 @@ describe("the normalized event taxonomy", () => {
       status: "completed",
       raw: { source: "claude.sdk.message", payload: { type: "prompt_suggestion", ids: ["a"] } },
     };
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(passthrough))).toEqual(
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(passthrough))).toEqual(
       passthrough,
     );
   });
@@ -266,15 +265,15 @@ describe("the normalized event taxonomy", () => {
       itemId: "i1",
       kind: "review",
     };
-    expect(decode(ProviderEvent, item)._tag).toBe("Failure");
+    expect(decode(HarnessEvent, item)._tag).toBe("Failure");
     expect(
-      decode(ProviderEvent, { _tag: "session.exited", ...baseFields, reason: "killed" })._tag,
+      decode(HarnessEvent, { _tag: "session.exited", ...baseFields, reason: "killed" })._tag,
     ).toBe("Failure");
     expect(
-      decode(ProviderEvent, { _tag: "turn.completed", ...baseFields, state: "aborted" })._tag,
+      decode(HarnessEvent, { _tag: "turn.completed", ...baseFields, state: "aborted" })._tag,
     ).toBe("Failure");
     expect(
-      decode(ProviderEvent, {
+      decode(HarnessEvent, {
         _tag: "content.delta",
         ...baseFields,
         turnId: "t1",
@@ -283,12 +282,12 @@ describe("the normalized event taxonomy", () => {
         delta: "x",
       })._tag,
     ).toBe("Failure");
-    expect(decode(ProviderEvent, { _tag: "request.opened", ...baseFields })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { _tag: "request.opened", ...baseFields })._tag).toBe("Failure");
     // A detail that belongs to another kind: the kind and its detail are
     // validated as a pair, so a surface that reads the kind can trust the
     // detail.
     expect(
-      decode(ProviderEvent, {
+      decode(HarnessEvent, {
         _tag: "request.opened",
         ...baseFields,
         request: {
@@ -304,7 +303,7 @@ describe("the normalized event taxonomy", () => {
 
   it("accepts one or more structured questions, and rejects a request with none", () => {
     const decodeQuestionRequest = (questions: unknown) =>
-      decode(ProviderEvent, {
+      decode(HarnessEvent, {
         _tag: "request.opened",
         ...baseFields,
         request: {
@@ -341,7 +340,7 @@ describe("the normalized event taxonomy", () => {
         },
       },
     };
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(withPreview))).toEqual({
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(withPreview))).toEqual({
       ...withPreview,
       request: {
         ...withPreview.request,
@@ -376,7 +375,7 @@ describe("the normalized event taxonomy", () => {
       },
     };
 
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(opened))).toEqual(opened);
   });
 
   it("recognizes an async question, and no other request", () => {
@@ -403,20 +402,20 @@ describe("the normalized event taxonomy", () => {
       request: { requestId: "r1", itemId: "i1", kind: "question", detail: { questions: [secret] } },
     };
 
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(opened))).toEqual(opened);
   });
 
   it("requires the turn id on both the start and the completion of a turn", () => {
     for (const tag of ["turn.started", "turn.completed"]) {
       const complete = { _tag: tag, ...baseFields, turnId: "t1", state: "completed" };
-      expect(decode(ProviderEvent, complete)._tag, tag).toBe("Success");
-      expect(decode(ProviderEvent, omitKey(complete, "turnId"))._tag, tag).toBe("Failure");
+      expect(decode(HarnessEvent, complete)._tag, tag).toBe("Success");
+      expect(decode(HarnessEvent, omitKey(complete, "turnId"))._tag, tag).toBe("Failure");
     }
   });
 
   it("accepts a harness message far longer than a fact, and rejects only a document", () => {
     const decodeWarning = (message: string) =>
-      decode(ProviderEvent, { _tag: "runtime.warning", ...baseFields, message })._tag;
+      decode(HarnessEvent, { _tag: "runtime.warning", ...baseFields, message })._tag;
     // Stack traces arrive here, and a rejected frame costs the runner its
     // socket, so the limit is well above a fact's.
     expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH))).toBe("Success");
@@ -425,9 +424,9 @@ describe("the normalized event taxonomy", () => {
 
   it("accepts a notice inside a turn and between turns, but not without a message", () => {
     const notice = { _tag: "runtime.notice", ...baseFields, message: "Recalled 2 memories" };
-    expect(decode(ProviderEvent, notice)._tag).toBe("Success");
-    expect(decode(ProviderEvent, { ...notice, turnId: "t1" })._tag).toBe("Success");
-    expect(decode(ProviderEvent, omitKey(notice, "message"))._tag).toBe("Failure");
+    expect(decode(HarnessEvent, notice)._tag).toBe("Success");
+    expect(decode(HarnessEvent, { ...notice, turnId: "t1" })._tag).toBe("Success");
+    expect(decode(HarnessEvent, omitKey(notice, "message"))._tag).toBe("Failure");
   });
 
   it("gives a delta no length limit, because the payload is not a fact about a peer", () => {
@@ -439,12 +438,12 @@ describe("the normalized event taxonomy", () => {
       streamKind: "assistant_text",
       delta: "x".repeat(100_000),
     };
-    expect(decode(ProviderEvent, delta)._tag).toBe("Success");
+    expect(decode(HarnessEvent, delta)._tag).toBe("Success");
   });
 
   it("rejects a negative or fractional token count", () => {
     const decodeUsage = (value: unknown) =>
-      decode(ProviderEvent, {
+      decode(HarnessEvent, {
         _tag: "session.usage.updated",
         ...baseFields,
         usage: { inputTokens: value, outputTokens: 0 },
@@ -469,7 +468,7 @@ describe("an event whose tag this build does not know", () => {
   };
 
   it("decodes as an unknown event that keeps the received event whole", () => {
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(received))).toEqual({
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(received))).toEqual({
       _tag: "unknown",
       originalType: "turn.paused",
       payload: received,
@@ -479,48 +478,48 @@ describe("an event whose tag this build does not know", () => {
 
   it("takes the subagent from the received event", () => {
     const decoded = Effect.runSync(
-      Schema.decodeUnknownEffect(ProviderEvent)({ ...received, subagentId: "agent-b" }),
+      Schema.decodeUnknownEffect(HarnessEvent)({ ...received, subagentId: "agent-b" }),
     );
     expect(decoded).toMatchObject({ _tag: "unknown", subagentId: "agent-b" });
   });
 
   it("writes an unknown event as it is, so it reads back the same", () => {
-    const unknown = Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(received));
-    const encoded = Schema.encodeSync(ProviderEvent)(unknown);
+    const unknown = Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(received));
+    const encoded = Schema.encodeSync(HarnessEvent)(unknown);
     expect(encoded).toEqual(unknown);
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(encoded))).toEqual(unknown);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(encoded))).toEqual(unknown);
   });
 
   it("fails without the fields every event has", () => {
     for (const key of ["eventId", "sessionId", "at"]) {
-      expect(decode(ProviderEvent, omitKey(received, key))._tag, key).toBe("Failure");
+      expect(decode(HarnessEvent, omitKey(received, key))._tag, key).toBe("Failure");
     }
   });
 
   it("fails for an event with no string tag", () => {
-    expect(decode(ProviderEvent, { ...received, _tag: 7 })._tag).toBe("Failure");
-    expect(decode(ProviderEvent, omitKey(received, "_tag"))._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...received, _tag: 7 })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, omitKey(received, "_tag"))._tag).toBe("Failure");
   });
 
   it("fails for a tag that is not a fact, because the UI draws the tag", () => {
-    expect(decode(ProviderEvent, { ...received, _tag: "" })._tag).toBe("Failure");
-    expect(decode(ProviderEvent, { ...received, _tag: "x".repeat(513) })._tag).toBe("Failure");
-    expect(decode(ProviderEvent, { ...received, _tag: "x".repeat(512) })._tag).toBe("Success");
+    expect(decode(HarnessEvent, { ...received, _tag: "" })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...received, _tag: "x".repeat(513) })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...received, _tag: "x".repeat(512) })._tag).toBe("Success");
   });
 
   it("never takes in a malformed event of a tag it knows", () => {
     const exited = { _tag: "session.exited", ...baseFields, reason: "process_exit" };
-    expect(decode(ProviderEvent, { ...exited, reason: "killed" })._tag).toBe("Failure");
-    expect(decode(ProviderEvent, omitKey(exited, "reason"))._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...exited, reason: "killed" })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, omitKey(exited, "reason"))._tag).toBe("Failure");
     const turn = { _tag: "turn.completed", ...baseFields, turnId: "t1", state: "completed" };
-    expect(decode(ProviderEvent, turn)._tag).toBe("Success");
-    expect(decode(ProviderEvent, omitKey(turn, "turnId"))._tag).toBe("Failure");
+    expect(decode(HarnessEvent, turn)._tag).toBe("Success");
+    expect(decode(HarnessEvent, omitKey(turn, "turnId"))._tag).toBe("Failure");
   });
 
   it("does not wrap an unknown event a second time", () => {
     const unknown = { _tag: "unknown", ...baseFields, originalType: "turn.paused", payload: 1 };
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(unknown))).toEqual(unknown);
-    expect(decode(ProviderEvent, omitKey(unknown, "originalType"))._tag).toBe("Failure");
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(unknown))).toEqual(unknown);
+    expect(decode(HarnessEvent, omitKey(unknown, "originalType"))._tag).toBe("Failure");
   });
 });
 
@@ -528,7 +527,7 @@ describe("parsing an event back from storage", () => {
   it("turns a stored event of a tag this build does not know into the unknown event", () => {
     const stored = { _tag: "turn.paused", ...baseFields, turnId: "t1", subagentId: "agent-b" };
     const read = parseStoredEvent(JSON.stringify(stored));
-    expect(read).toEqual(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(stored)));
+    expect(read).toEqual(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(stored)));
     expect(read).toMatchObject({
       _tag: "unknown",
       originalType: "turn.paused",
@@ -536,7 +535,7 @@ describe("parsing an event back from storage", () => {
       subagentId: "agent-b",
     });
     // The row can be served: encoding it for a transcript response succeeds.
-    expect(Schema.encodeSync(ProviderEvent)(read)).toEqual(read);
+    expect(Schema.encodeSync(HarnessEvent)(read)).toEqual(read);
   });
 
   it("returns a stored event of a known tag as parsed, without decoding it", () => {
@@ -561,13 +560,13 @@ describe("parsing an event back from storage", () => {
 describe("an event's subagent", () => {
   it.each(AGENT_EVENTS)("names the subagent a $_tag belongs to", (event) => {
     const attributed = { ...event, subagentId: "agent-b" };
-    const decoded = Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(attributed));
+    const decoded = Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(attributed));
     expect(decoded).toEqual(attributed);
   });
 
   it.each(AGENT_EVENTS)("belongs to the session's own agent when a $_tag names none", (event) => {
     const decoded = Effect.runSync(
-      Schema.decodeUnknownEffect(ProviderEvent)(omitKey(event, "subagentId")),
+      Schema.decodeUnknownEffect(HarnessEvent)(omitKey(event, "subagentId")),
     );
     expect("subagentId" in decoded).toBe(false);
   });
@@ -577,7 +576,7 @@ describe("an event's subagent", () => {
     // part of their shape, so it is dropped on decode.
     for (const event of [events[0], events[1]]) {
       const decoded = Effect.runSync(
-        Schema.decodeUnknownEffect(ProviderEvent)({ ...event, subagentId: "agent-b" }),
+        Schema.decodeUnknownEffect(HarnessEvent)({ ...event, subagentId: "agent-b" }),
       );
       expect("subagentId" in decoded, event?._tag).toBe(false);
     }
@@ -585,17 +584,17 @@ describe("an event's subagent", () => {
 
   it("introduces a subagent with its id alone, every other field being optional", () => {
     const minimal = { _tag: "subagent.started", ...baseFields, subagentId: "agent-b" };
-    expect(decode(ProviderEvent, minimal)._tag).toBe("Success");
-    expect(decode(ProviderEvent, omitKey(minimal, "subagentId"))._tag).toBe("Failure");
+    expect(decode(HarnessEvent, minimal)._tag).toBe("Success");
+    expect(decode(HarnessEvent, omitKey(minimal, "subagentId"))._tag).toBe("Failure");
   });
 
   it("refuses a subagent id with a colon, which would make its live topic ambiguous", () => {
     const turn = { _tag: "turn.started", ...baseFields, turnId: "t1" };
-    expect(decode(ProviderEvent, { ...turn, subagentId: "a:b" })._tag).toBe("Failure");
-    expect(decode(ProviderEvent, { ...turn, subagentId: "" })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...turn, subagentId: "a:b" })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...turn, subagentId: "" })._tag).toBe("Failure");
     const started = { _tag: "subagent.started", ...baseFields, subagentId: "agent-b" };
-    expect(decode(ProviderEvent, { ...started, subagentId: "a:b" })._tag).toBe("Failure");
-    expect(decode(ProviderEvent, { ...started, parentSubagentId: "a:b" })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...started, subagentId: "a:b" })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...started, parentSubagentId: "a:b" })._tag).toBe("Failure");
   });
 });
 
@@ -663,7 +662,7 @@ describe("what the controller sends for a session", () => {
     // Only the supervisor knows why it stopped a session, so the reason has to
     // exist in the exit event's vocabulary.
     for (const reason of ["inactivity_timeout", "absolute_timeout"]) {
-      expect(decode(ProviderEvent, { _tag: "session.exited", ...baseFields, reason })._tag).toBe(
+      expect(decode(HarnessEvent, { _tag: "session.exited", ...baseFields, reason })._tag).toBe(
         "Success",
       );
     }
@@ -956,7 +955,7 @@ describe("the frames that answer a Request an agent is parked on", () => {
 describe("incomplete token accounting", () => {
   it("rejects legacy counts alongside an incomplete report instead of stripping the warning", () => {
     expect(
-      decode(ProviderEvent, {
+      decode(HarnessEvent, {
         _tag: "session.usage.updated",
         ...baseFields,
         usage: { inputTokens: 100, outputTokens: 10 },
@@ -1039,12 +1038,12 @@ describe("an item update", () => {
   };
 
   it("decodes and keeps the whole detail it carries", () => {
-    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(update))).toEqual(update);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(HarnessEvent)(update))).toEqual(update);
   });
 
   it("is refused without an item id or with a kind outside the vocabulary", () => {
-    expect(decode(ProviderEvent, { ...update, itemId: undefined })._tag).toBe("Failure");
-    expect(decode(ProviderEvent, { ...update, kind: "checklist" })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...update, itemId: undefined })._tag).toBe("Failure");
+    expect(decode(HarnessEvent, { ...update, kind: "checklist" })._tag).toBe("Failure");
   });
 });
 

@@ -221,7 +221,7 @@ describe("buildComposerFields", () => {
 
   it("names no account in the pill when the provider has one instance", () => {
     expect(composeDraft(buildCatalogs([CLAUDE]), buildConfig()).model.pill).toEqual({
-      providerId: "claude-code",
+      harnessId: "claude-code",
       account: null,
       name: "Claude Sonnet 5",
     });
@@ -234,7 +234,7 @@ describe("buildComposerFields", () => {
     );
 
     expect(fields.model.pill).toEqual({
-      providerId: "claude-code",
+      harnessId: "claude-code",
       account: "personal",
       name: "Claude Sonnet 5",
     });

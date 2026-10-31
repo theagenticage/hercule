@@ -411,7 +411,7 @@ describe("buildAllSetRecap", () => {
 
     expect(recap).toEqual({
       providerNames: "Claude",
-      providerId: "claude-code",
+      harnessId: "claude-code",
       gitHubAccount: "rogier",
       project: { id: PROJECT_ID, name: "webshop", repository: "rogier/webshop" },
     });
@@ -437,8 +437,8 @@ describe("buildAllSetRecap", () => {
     });
 
     expect(recap.providerNames).toBeNull();
-    // The row still draws a mark: the first provider listed.
-    expect(recap.providerId).toBe("claude-code");
+    // The row still draws a mark: the first harness listed.
+    expect(recap.harnessId).toBe("claude-code");
     expect(recap.gitHubAccount).toBeNull();
     expect(recap.project?.repository).toBeNull();
   });

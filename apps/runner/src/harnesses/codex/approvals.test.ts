@@ -20,7 +20,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { AnswerNotDelivered } from "@hercule/protocol";
-import type { ApprovalDecision, ProviderEvent, QuestionAnswers } from "@hercule/protocol";
+import type { ApprovalDecision, HarnessEvent, QuestionAnswers } from "@hercule/protocol";
 import {
   type Answered,
   startBusySession,
@@ -66,7 +66,7 @@ const pushServerRequest = async (
 
 const awaitOpenedRequest = async (
   run: Run,
-): Promise<Extract<ProviderEvent, { _tag: "request.opened" }>> => {
+): Promise<Extract<HarnessEvent, { _tag: "request.opened" }>> => {
   await waitUntil("opened the request", () => filterByTag(run.seen, "request.opened").length === 1);
   return filterByTag(run.seen, "request.opened")[0]!;
 };

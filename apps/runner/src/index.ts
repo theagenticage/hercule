@@ -32,7 +32,7 @@ import { runCredentialAction } from "./credentials";
 import { runDaemon } from "./daemon";
 import { runJoinCommand } from "./join";
 import { runLocalRunner } from "./local";
-import { providerLogins } from "./providers";
+import { harnessLogins } from "./harnesses";
 import { sessions } from "./sessions";
 import { setController } from "./set-controller";
 
@@ -106,7 +106,7 @@ const runUntilStopped = async (
         // Stop any provider login in progress. A login process blocked on
         // stdin would otherwise outlive this process, still waiting for a
         // credential.
-        Effect.ensuring(providerLogins.stopAll),
+        Effect.ensuring(harnessLogins.stopAll),
         Effect.provide(
           makeProcessLogLayer({
             home: options.home,

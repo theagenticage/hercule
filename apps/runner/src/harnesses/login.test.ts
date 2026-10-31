@@ -20,7 +20,7 @@ import {
   type LoginChild,
   type LoginSpawn,
 } from "./login";
-import type { ProviderRunnerContext } from "./index";
+import type { HarnessRunnerContext } from "./index";
 import { NO_CONTROLLER_UPLOADER } from "./testing";
 
 const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
@@ -28,7 +28,7 @@ const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
 /** The request id of the `loginStart` that starts a test's login. */
 const REQUEST = "0199e0e7-0000-7000-8000-0000000000a1";
 
-const CONTEXT: ProviderRunnerContext = {
+const CONTEXT: HarnessRunnerContext = {
   cwd: null,
   attachmentsDir: null,
   editMarks: null,
@@ -459,7 +459,7 @@ describe("more than one login at a time", () => {
 describe("a device login", () => {
   // A real directory, because the adapter creates the instance's Codex home and
   // neutral home when it builds the command, just as it does for a session.
-  const CODEX_CONTEXT: ProviderRunnerContext = {
+  const CODEX_CONTEXT: HarnessRunnerContext = {
     cwd: null,
     attachmentsDir: null,
     editMarks: null,

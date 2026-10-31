@@ -76,7 +76,7 @@ export const TextGenerationRequest = Schema.Struct({
   _tag: Schema.Literal("textGenerationRequest"),
   requestId: Fact,
   instanceId: InstanceId,
-  providerId: Fact,
+  harnessId: Fact,
   config: Schema.Json,
   /** The instance's credentials, which its config never holds; `{}` when none. */
   secrets: InstanceSecrets,

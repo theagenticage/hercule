@@ -10,7 +10,7 @@ import dev.hercule.android.wire.ConversationSenderRole
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
 import dev.hercule.android.wire.ModelSelection
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.Question
 import dev.hercule.android.wire.QuestionOption
 import dev.hercule.android.wire.QuestionRequest
@@ -112,15 +112,15 @@ fun buildMessage(position: Long, text: String, role: ConversationSenderRole = Co
     )
 
 /** Builds transcript rows, numbering their positions in order. */
-fun buildTranscript(vararg events: ProviderEvent): List<TranscriptRow> =
+fun buildTranscript(vararg events: HarnessEvent): List<TranscriptRow> =
     events.mapIndexed { index, event -> TranscriptRow(index.toLong(), AT.toString(), event) }
 
-fun turnStarted(subagentId: String? = null) = ProviderEvent.TurnStarted(subagentId = subagentId, turnId = "turn-1")
+fun turnStarted(subagentId: String? = null) = HarnessEvent.TurnStarted(subagentId = subagentId, turnId = "turn-1")
 
 fun itemStarted(id: String, kind: ItemKind, detail: Map<String, String> = emptyMap(), subagentId: String? = null) =
-    ProviderEvent.ItemStarted(subagentId, "turn-1", id, kind, buildDetail(detail))
+    HarnessEvent.ItemStarted(subagentId, "turn-1", id, kind, buildDetail(detail))
 
 fun itemCompleted(id: String, kind: ItemKind, detail: Map<String, String> = emptyMap(), subagentId: String? = null) =
-    ProviderEvent.ItemCompleted(subagentId, "turn-1", id, kind, buildDetail(detail), ItemStatus.Completed)
+    HarnessEvent.ItemCompleted(subagentId, "turn-1", id, kind, buildDetail(detail), ItemStatus.Completed)
 
 private fun buildDetail(detail: Map<String, String>) = JsonObject(detail.mapValues { JsonPrimitive(it.value) })

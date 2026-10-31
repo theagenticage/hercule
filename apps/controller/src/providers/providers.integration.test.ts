@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Schema } from "effect";
 import type { LiveMessage } from "@hercule/contract";
-import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
+import { secret, type Plugin, type HarnessDefinition } from "@hercule/plugin-host";
 import {
   collectPushes,
   completeSetup,
@@ -21,13 +21,13 @@ import {
   waitWithin,
   type ServerHarness,
 } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 
-const ALPHA = buildProviderDefinition("alpha-provider", { token: "alpha-default" });
-const BETA = buildProviderDefinition("beta-provider", { token: "beta-default" });
+const ALPHA = buildHarnessDefinition("alpha-provider", { token: "alpha-default" });
+const BETA = buildHarnessDefinition("beta-provider", { token: "beta-default" });
 
 const SINGLE = {
-  ...buildProviderDefinition("single-provider", { token: "the-only-one" }),
+  ...buildHarnessDefinition("single-provider", { token: "the-only-one" }),
   supportsMultipleInstances: false,
 };
 
@@ -41,7 +41,7 @@ const withProviders = (body: (harness: ServerHarness) => Promise<void>): Promise
 
 interface ProviderInstance {
   readonly id: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly name: string;
   readonly config: Record<string, unknown>;
   readonly snapshots: ReadonlyArray<unknown>;
@@ -69,9 +69,9 @@ const listInstances = async (
 
 const filterByProvider = (
   instances: ReadonlyArray<ProviderInstance>,
-  providerId: string,
+  harnessId: string,
 ): ReadonlyArray<ProviderInstance> =>
-  instances.filter((instance) => instance.providerId === providerId);
+  instances.filter((instance) => instance.harnessId === harnessId);
 
 const readInstance = async (base: string, token: string, id: string): Promise<ProviderInstance> => {
   const response = await get(base, `/api/v1/providers/${id}`, token);
@@ -127,7 +127,7 @@ describe("GET /providers after a boot", () => {
 
       const instances = await listInstances(base, token);
 
-      expect(instances.map((instance) => instance.providerId).sort()).toEqual([
+      expect(instances.map((instance) => instance.harnessId).sort()).toEqual([
         "alpha-provider",
         "beta-provider",
       ]);
@@ -158,14 +158,14 @@ describe("GET /providers after a boot", () => {
       expect(alpha).toBeDefined();
 
       expect((await del(base, `/api/v1/providers/${alpha!.id}`, token)).status).toBe(200);
-      expect((await listInstances(base, token)).map((instance) => instance.providerId)).toEqual([
+      expect((await listInstances(base, token)).map((instance) => instance.harnessId)).toEqual([
         "beta-provider",
       ]);
 
       await reboot();
 
       const after = await listInstances(base, token);
-      expect(after.map((instance) => instance.providerId).sort()).toEqual([
+      expect(after.map((instance) => instance.harnessId).sort()).toEqual([
         "alpha-provider",
         "beta-provider",
       ]);
@@ -184,14 +184,14 @@ describe("the writes on /providers", () => {
 
       const instance = await parseCreatedInstance(
         await createInstance(base, token, {
-          providerId: "alpha-provider",
+          harnessId: "alpha-provider",
           name: "second account",
           config: { token: "a-second-token" },
         }),
       );
 
       expect(instance).toMatchObject({
-        providerId: "alpha-provider",
+        harnessId: "alpha-provider",
         name: "second account",
         config: { token: "a-second-token" },
       });
@@ -219,7 +219,7 @@ describe("the writes on /providers", () => {
 
       const rejected = await readApiError(
         await createInstance(base, token, {
-          providerId: "alpha-provider",
+          harnessId: "alpha-provider",
           name: "no token",
           config: {},
         }),
@@ -252,7 +252,7 @@ describe("the writes on /providers", () => {
 
       const rejected = await readApiError(
         await createInstance(base, token, {
-          providerId: "gamma-provider",
+          harnessId: "gamma-provider",
           name: "gamma",
           config: { token: "t" },
         }),
@@ -291,7 +291,7 @@ describe("the writes on /providers", () => {
 
         const refused = await readApiError(
           await createInstance(base, token, {
-            providerId: "single-provider",
+            harnessId: "single-provider",
             name: "second account",
             config: { token: "another" },
           }),
@@ -319,7 +319,7 @@ describe("the writes on /providers", () => {
       // instance's config may hold sensitive values.
       expect(await readLastProviderPayload(sql)).toEqual({
         instanceId: alpha!.id,
-        providerId: "alpha-provider",
+        harnessId: "alpha-provider",
         name: alpha!.name,
       });
 
@@ -359,7 +359,7 @@ describe("live messages about a provider instance", () => {
           // back would arrive as one message.
           const instance = yield* Effect.promise(() =>
             createInstance(harness.base, token, {
-              providerId: "alpha-provider",
+              harnessId: "alpha-provider",
               name: "second account",
               config: { token: "a-second-token" },
             }).then(parseCreatedInstance),
@@ -410,8 +410,8 @@ describe("the secretFields of an instance", () => {
   const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
   const KEY_VALUE = "a-paid-credential-nobody-else-holds";
 
-  const KEYED: ProviderDefinition = {
-    ...buildProviderDefinition("keyed-provider", { token: "keyed-default" }),
+  const KEYED: HarnessDefinition = {
+    ...buildHarnessDefinition("keyed-provider", { token: "keyed-default" }),
     configSchema: Schema.Struct({
       token: Schema.String,
       zaiApiKey: secret({ title: KEY_TITLE, description: KEY_DESCRIPTION }),

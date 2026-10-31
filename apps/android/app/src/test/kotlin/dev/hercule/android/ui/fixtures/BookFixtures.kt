@@ -26,7 +26,7 @@ import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
 import dev.hercule.android.wire.ModelSelection
 import dev.hercule.android.wire.Project
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.Question
 import dev.hercule.android.wire.QuestionOption
 import dev.hercule.android.wire.QuestionRequest
@@ -181,7 +181,7 @@ fun buildBookOfficeState(): OfficeUiState = OfficeUiState(
  * thread docks it.
  */
 fun buildBookThreadState(request: SessionRequest = PUSH_REQUEST): ThreadUiState {
-    val transcript = FIX_TRANSCRIPT.dropLast(1) + FIX_TRANSCRIPT.last().copy(event = ProviderEvent.RequestOpened(request = request))
+    val transcript = FIX_TRANSCRIPT.dropLast(1) + FIX_TRANSCRIPT.last().copy(event = HarnessEvent.RequestOpened(request = request))
     return ThreadUiState(
         title = "Fix 3‑D Secure checkout for EU cards",
         face = OfficeFace(FIX_ID, Pose.Waiting, isAssistant = false),
@@ -326,8 +326,8 @@ private val CAUSE_MESSAGE = listOf(
  * agent's first message at 2m 14s, three edits and the test run, the agent's second message, and
  * the Request to push at 09:31.
  */
-private val FIX_STEPS: List<Pair<Int, ProviderEvent>> = listOf<Pair<Int, ProviderEvent>>(
-    0 to ProviderEvent.TurnStarted(turnId = TURN_ID, model = "claude-opus-5-5"),
+private val FIX_STEPS: List<Pair<Int, HarnessEvent>> = listOf<Pair<Int, HarnessEvent>>(
+    0 to HarnessEvent.TurnStarted(turnId = TURN_ID, model = "claude-opus-5-5"),
 ) + runItem(
     0, 0, "it-ask", ItemKind.UserMessage,
     buildJsonObject {
@@ -351,7 +351,7 @@ private val FIX_STEPS: List<Pair<Int, ProviderEvent>> = listOf<Pair<Int, Provide
     runTool(190, 195, "it-modal", ItemKind.FileChange, "Edit", "file_path", "src/checkout/3ds-modal.tsx") +
     runTool(210, 300, "it-run-tests", ItemKind.CommandExecution, "Bash", "command", "pnpm test checkout") +
     runItem(431, 434, "it-ready", ItemKind.AssistantMessage, null, "Tests pass. Ready to push the branch and open a pull request.") +
-    listOf(1740 to ProviderEvent.RequestOpened(request = PUSH_REQUEST))
+    listOf(1740 to HarnessEvent.RequestOpened(request = PUSH_REQUEST))
 
 /** The Fix thread's transcript rows: [FIX_STEPS] with positions from 1. */
 private val FIX_TRANSCRIPT: List<TranscriptRow> = FIX_STEPS.mapIndexed { index, (seconds, event) ->
@@ -362,11 +362,11 @@ private val FIX_TRANSCRIPT: List<TranscriptRow> = FIX_STEPS.mapIndexed { index, 
  * Returns the events of one item that runs from [from] to [to] seconds: its start with [detail],
  * the [text] it wrote when given, and its completion.
  */
-private fun runItem(from: Int, to: Int, itemId: String, kind: ItemKind, detail: JsonObject?, text: String? = null): List<Pair<Int, ProviderEvent>> =
+private fun runItem(from: Int, to: Int, itemId: String, kind: ItemKind, detail: JsonObject?, text: String? = null): List<Pair<Int, HarnessEvent>> =
     listOfNotNull(
-        from to ProviderEvent.ItemStarted(turnId = TURN_ID, itemId = itemId, kind = kind, detail = detail),
-        text?.let { to to ProviderEvent.ContentDelta(turnId = TURN_ID, itemId = itemId, streamKind = StreamKind.AssistantText, delta = it) },
-        to to ProviderEvent.ItemCompleted(turnId = TURN_ID, itemId = itemId, kind = kind, detail = detail, status = ItemStatus.Completed),
+        from to HarnessEvent.ItemStarted(turnId = TURN_ID, itemId = itemId, kind = kind, detail = detail),
+        text?.let { to to HarnessEvent.ContentDelta(turnId = TURN_ID, itemId = itemId, streamKind = StreamKind.AssistantText, delta = it) },
+        to to HarnessEvent.ItemCompleted(turnId = TURN_ID, itemId = itemId, kind = kind, detail = detail, status = ItemStatus.Completed),
     )
 
 /**

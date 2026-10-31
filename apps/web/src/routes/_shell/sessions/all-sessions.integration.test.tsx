@@ -42,7 +42,7 @@ const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
 const buildClaudeCodeInstance = () => ({
   id: CLAUDE_ID,
-  providerId: "claude-code",
+  harnessId: "claude-code",
   name: "Claude Code",
   config: {},
   displayName: "Claude Code",

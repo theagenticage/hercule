@@ -1,7 +1,7 @@
 import { useRef, type JSX } from "react";
 import { PREVIOUS_QUESTION_LABEL, type ModelPill } from "@hercule/client-core";
 import { IMAGE_MIME_TYPES } from "@hercule/contract";
-import { cn, ProviderLogo } from "@hercule/ui";
+import { cn, HarnessLogo } from "@hercule/ui";
 
 const GLYPH =
   "inline-flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted";
@@ -171,7 +171,7 @@ export function PreviousButton({
 }
 
 /**
- * Renders the model pill's content: the provider logo, the account when a
+ * Renders the model pill's content: the harness logo, the account when a
  * provider has two, and the model name.
  *
  * The parts are laid out as a flex row rather than inline text, because the
@@ -183,7 +183,7 @@ export function PreviousButton({
 export function PillLabel({ pill }: { readonly pill: ModelPill }): JSX.Element {
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      {pill.providerId === null ? null : <ProviderLogo providerId={pill.providerId} />}
+      {pill.harnessId === null ? null : <HarnessLogo harnessId={pill.harnessId} />}
       {pill.account === null ? null : (
         <span className="shrink-0 text-faint">{pill.account}</span>
       )}{" "}

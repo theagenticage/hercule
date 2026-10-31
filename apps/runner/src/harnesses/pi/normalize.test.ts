@@ -19,7 +19,7 @@ import {
   ContextCompactionDetail,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
-  ProviderEvent,
+  HarnessEvent,
   UnknownItemDetail,
   type SubagentId,
 } from "@hercule/protocol";
@@ -75,21 +75,21 @@ const buildTestState = () =>
 const normalizeEvents = (
   running: ReturnType<typeof buildNormalizingState>,
   events: ReadonlyArray<Record<string, unknown>>,
-): ReadonlyArray<ProviderEvent> => events.flatMap((event) => normalize(running, buildLine(event)));
+): ReadonlyArray<HarnessEvent> => events.flatMap((event) => normalize(running, buildLine(event)));
 
 /** Normalizes a whole sequence of events against a fresh state, the common case. */
 const normalizeFromStart = (
   events: ReadonlyArray<Record<string, unknown>>,
-): ReadonlyArray<ProviderEvent> => normalizeEvents(buildTestState(), events);
+): ReadonlyArray<HarnessEvent> => normalizeEvents(buildTestState(), events);
 
-const listEventTags = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+const listEventTags = (events: ReadonlyArray<HarnessEvent>): ReadonlyArray<string> =>
   events.map((event) => event._tag);
 
-const filterByTag = <Tag extends ProviderEvent["_tag"]>(
-  events: ReadonlyArray<ProviderEvent>,
+const filterByTag = <Tag extends HarnessEvent["_tag"]>(
+  events: ReadonlyArray<HarnessEvent>,
   tag: Tag,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>
-  events.filter((event): event is Extract<ProviderEvent, { _tag: Tag }> => event._tag === tag);
+): ReadonlyArray<Extract<HarnessEvent, { _tag: Tag }>> =>
+  events.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
 
 const buildMessageUpdate = (assistantMessageEvent: Record<string, unknown>) => ({
   type: "message_update",
@@ -780,12 +780,12 @@ describe("a line from pi that is not a valid event", () => {
  * Every event they produce is encoded with the protocol schema, so an event the
  * controller could not accept fails here.
  */
-const encodeEvent = Schema.encodeUnknownSync(ProviderEvent);
+const encodeEvent = Schema.encodeUnknownSync(HarnessEvent);
 
 const normalizeAndEncode = (
   running: ReturnType<typeof buildNormalizingState>,
   events: ReadonlyArray<Record<string, unknown>>,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const produced = normalizeEvents(running, events);
   for (const event of produced) encodeEvent(event);
   return produced;

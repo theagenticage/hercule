@@ -19,7 +19,7 @@ import {
   switchBranch,
   type Workspaces,
 } from "../workspaces";
-import type { ProviderRunnerContext } from "../providers";
+import type { HarnessRunnerContext } from "../harnesses";
 import { endSentence } from "../report";
 import {
   listWorkspaceRepositorySkills,
@@ -55,7 +55,7 @@ export interface Machine {
   /** `<home>/runner/bin`, holding the `hercule` symlink, prepended to a session's `PATH`. */
   readonly binDir: string;
   /** The skill and the Claude plugin directory, prepared once at runner start (spec 06 section 9.3). */
-  readonly herculeTool: ProviderRunnerContext["herculeTool"];
+  readonly herculeTool: HarnessRunnerContext["herculeTool"];
   /** What a session reads as `HERCULE_API_URL`. */
   readonly controllerUrl: string;
   /** The runner's own environment. A session's environment is built on top of it. */
@@ -75,7 +75,7 @@ const PRIMARY_WORKSPACE_REASON =
 /** The context a session start resolved on this machine. */
 export interface Resolved {
   /** The adapter's context, except for its edit marks, which need the session's edit watch. */
-  readonly ctx: Omit<ProviderRunnerContext, "editMarks">;
+  readonly ctx: Omit<HarnessRunnerContext, "editMarks">;
   /** The scratch directory, removed when the session exits. Undefined for a session that has a workspace. */
   readonly scratch: string | undefined;
   /** The directory the session's images are cached in, removed when the session exits. */
@@ -371,7 +371,7 @@ export const resolveSessionContext = (
       // keeps the harness isolated from the user's installation.
       const userMaterial =
         frame.userMaterial === true
-          ? yield* provisionUserMaterial(frame.providerId, home, machine.baseEnv)
+          ? yield* provisionUserMaterial(frame.harnessId, home, machine.baseEnv)
           : undefined;
       return {
         scratch: placed.scratch,

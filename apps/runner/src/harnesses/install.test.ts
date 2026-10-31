@@ -6,10 +6,10 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import { makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
-import type { ProviderRunnerContext } from "./index";
+import type { HarnessRunnerContext } from "./index";
 import { NO_CONTROLLER_UPLOADER } from "./testing";
 
-const CONTEXT: ProviderRunnerContext = {
+const CONTEXT: HarnessRunnerContext = {
   cwd: null,
   attachmentsDir: null,
   editMarks: null,

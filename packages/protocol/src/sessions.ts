@@ -49,10 +49,10 @@ export type AccessMode = Schema.Schema.Type<typeof AccessMode>;
  */
 const PositiveMillis = Schema.Int.check(Schema.isGreaterThan(0));
 
-/** The provider's original report, retained without interpreting its payload. */
-export const ProviderReport = Schema.Struct({ source: Fact, payload: Schema.Json });
+/** The harness's original report, retained without interpreting its payload. */
+export const HarnessReport = Schema.Struct({ source: Fact, payload: Schema.Json });
 
-export type ProviderReport = Schema.Schema.Type<typeof ProviderReport>;
+export type HarnessReport = Schema.Schema.Type<typeof HarnessReport>;
 
 /**
  * The harness's own id for a subagent, unique within its session: the Claude
@@ -77,7 +77,7 @@ export type SubagentId = Schema.Schema.Type<typeof SubagentId>;
  *   session's own agent did. The adapter needs this tree to stop a continued
  *   subagent together with the subagents below it, because a harness such as
  *   Claude Code names no parent agent in its frames;
- * - `lastUsageReport` is the original provider report behind the latest
+ * - `lastUsageReport` is the original harness report behind the latest
  *   accepted usage snapshot. The adapter can restore its native counter
  *   baseline without counting that history again.
  */
@@ -85,7 +85,7 @@ export const ContinuedSubagent = Schema.Struct({
   subagentId: SubagentId,
   itemId: Schema.optionalKey(Fact),
   parentSubagentId: Schema.optionalKey(SubagentId),
-  lastUsageReport: Schema.optionalKey(ProviderReport),
+  lastUsageReport: Schema.optionalKey(HarnessReport),
 });
 
 export type ContinuedSubagent = Schema.Schema.Type<typeof ContinuedSubagent>;
@@ -132,7 +132,7 @@ export const DisallowedTool = Schema.String.check(
 /**
  * What the controller sends for one session: ids, never paths. A workspace's
  * path on disk belongs to the runner, and the controller never stores it. The
- * runner resolves the spec to a `ProviderRunnerContext` on its own machine.
+ * runner resolves the spec to a `HarnessRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, apart from `coordination`,
  * which is never stored. A field is added here only when something sends it.
@@ -604,10 +604,10 @@ const base = {
   /** An ISO-8601 timestamp, from the runner's own clock. */
   at: Fact,
   /** Native ids: thread id, vendor item id, tool_use id. */
-  providerRefs: Schema.optionalKey(
+  harnessRefs: Schema.optionalKey(
     Schema.Record(Fact, Schema.String.check(Schema.isMaxLength(MAX_FACT_LENGTH))),
   ),
-  raw: Schema.optionalKey(ProviderReport),
+  raw: Schema.optionalKey(HarnessReport),
 };
 
 const defineEvent = <const Tag extends string, Fields extends Schema.Struct.Fields>(
@@ -981,7 +981,7 @@ export type RequestResolution =
   | { readonly decision: ApprovalDecision }
   | { readonly answers: QuestionAnswers };
 
-/** Every event this build of the protocol knows, which `ProviderEvent` decodes strictly. */
+/** Every event this build of the protocol knows, which `HarnessEvent` decodes strictly. */
 const KNOWN_EVENTS = [
   SessionStarted,
   SessionExited,
@@ -1031,7 +1031,7 @@ const readEventTags = (member: (typeof KNOWN_EVENTS)[number]): ReadonlyArray<str
     : member.members.map((branch) => branch.fields._tag.literal);
 
 /**
- * The tags `ProviderEvent` has an arm for, `unknown` included. Derived from
+ * The tags `HarnessEvent` has an arm for, `unknown` included. Derived from
  * the arms, so a new event is known the moment it is added to `KNOWN_EVENTS`.
  */
 const ARM_TAGS: ReadonlySet<string> = new Set([
@@ -1096,15 +1096,15 @@ const UnrecognisedEvent = Schema.StructWithRest(
  * their own, which keeps the lookup: decoding a known event stays about as
  * fast as before the `unknown` arm existed.
  */
-export const ProviderEvent = Schema.Union([
+export const HarnessEvent = Schema.Union([
   Schema.Union([...KNOWN_EVENTS, UnknownEvent]),
   UnrecognisedEvent,
 ]);
 
-export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
+export type HarnessEvent = Schema.Schema.Type<typeof HarnessEvent>;
 
 /**
- * Parses the JSON text of a stored event into a `ProviderEvent`. The text is
+ * Parses the JSON text of a stored event into a `HarnessEvent`. The text is
  * trusted: the controller wrote it itself, so it is well-formed JSON of an
  * object with a string `_tag`, and the function does not check that. Fails
  * only when the text is not valid JSON.
@@ -1120,9 +1120,9 @@ export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
  * event has, which protocol 11 guarantees. A row whose envelope this build
  * cannot encode is not supported.
  */
-export const parseStoredEvent = (text: string): ProviderEvent => {
+export const parseStoredEvent = (text: string): HarnessEvent => {
   const stored = JSON.parse(text) as ReceivedEvent;
-  return ARM_TAGS.has(stored._tag) ? (stored as ProviderEvent) : wrapUnknownEvent(stored);
+  return ARM_TAGS.has(stored._tag) ? (stored as HarnessEvent) : wrapUnknownEvent(stored);
 };
 
 /**
@@ -1161,7 +1161,7 @@ export const SessionStart = Schema.Struct({
   sessionId: SessionId,
   /** The input the session starts with: its oldest waiting Queued Input row. */
   input: TurnInput,
-  providerId: Fact,
+  harnessId: Fact,
   config: Schema.Json,
   /** The instance's credentials, which its config never holds; `{}` when none. */
   secrets: InstanceSecrets,
@@ -1374,7 +1374,7 @@ export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
 export const SessionEvent = Schema.Struct({
   _tag: Schema.Literal("sessionEvent"),
   ...Sequenced.fields,
-  event: ProviderEvent,
+  event: HarnessEvent,
 });
 
 export type SessionEvent = Schema.Schema.Type<typeof SessionEvent>;

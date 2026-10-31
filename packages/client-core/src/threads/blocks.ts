@@ -34,11 +34,11 @@ import {
   type ThreadUserMessage,
 } from "./turns";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
-type ItemUpdated = Extract<ProviderEvent, { _tag: "item.updated" }>;
-type ItemCompleted = Extract<ProviderEvent, { _tag: "item.completed" }>;
-type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
+type HarnessEvent = TranscriptRow["event"];
+type ItemStarted = Extract<HarnessEvent, { _tag: "item.started" }>;
+type ItemUpdated = Extract<HarnessEvent, { _tag: "item.updated" }>;
+type ItemCompleted = Extract<HarnessEvent, { _tag: "item.completed" }>;
+type TurnEndState = Extract<HarnessEvent, { _tag: "turn.completed" }>["state"];
 
 /** A tool item in a work stretch, with what its summary and its row show. */
 export interface WorkItem extends ThreadItem {

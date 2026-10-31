@@ -180,7 +180,7 @@ const buildServices = (
     ),
     // One connection map and one probe driver: the socket route and every
     // service must use the same `RunnerConnections`. The catalog is provided
-    // to the probe driver, which reads provider definitions from it.
+    // to the probe driver, which reads harness definitions from it.
     Layer.provideMerge(
       ProviderProbesLayer.pipe(
         Layer.provideMerge(RunnerConnectionsLayer),

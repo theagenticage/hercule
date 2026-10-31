@@ -33,9 +33,9 @@ import {
   SteerRefused,
   AdapterFailed,
 } from "@hercule/protocol";
-import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
+import type { OutputSchema, ProbeResult, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
-import type { EditMarks, ProviderRunnerContext } from "../index";
+import type { EditMarks, HarnessRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { RPC_DEADLINE } from "./rpc";
@@ -488,7 +488,7 @@ describe("the home directories a session's app-server gets", () => {
   it("moves HOME for a Thread that sees the user's material too, and gives it the instance's own CODEX_HOME", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
-    const ctx: ProviderRunnerContext = {
+    const ctx: HarnessRunnerContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, HOME: "/Users/someone" },
       userMaterial: NO_USER_MATERIAL_PATHS,
@@ -508,7 +508,7 @@ describe("the home directories a session's app-server gets", () => {
   });
 
   it("runs a Thread's commands in the user's real HOME, and no other session's", async () => {
-    const startWith = async (userMaterial: ProviderRunnerContext["userMaterial"]) => {
+    const startWith = async (userMaterial: HarnessRunnerContext["userMaterial"]) => {
       const home = createCodexHome();
       const { seam, spawns } = buildScriptedSeam();
       const ctx = buildContext(home);
@@ -1492,7 +1492,7 @@ const startSessionPair = async (): Promise<ReturnType<typeof createDriving>> => 
 };
 
 const listExitReasons = (
-  seen: ReadonlyArray<ProviderEvent>,
+  seen: ReadonlyArray<HarnessEvent>,
   sessionId: string,
 ): ReadonlyArray<string> =>
   filterByTag(seen, "session.exited")
@@ -1885,7 +1885,7 @@ describe("the two Codex features this adapter must never use", () => {
     // methods only to drop them, so it is not a call.
     const calls = grepSource(["thread/shell", "Command", "\\|process/", "spawn"].join(""))
       .split("\n")
-      .filter((line) => !line.startsWith("apps/runner/src/providers/codex/normalize.ts:"));
+      .filter((line) => !line.startsWith("apps/runner/src/harnesses/codex/normalize.ts:"));
     expect(calls.join("\n")).toBe("");
   });
 
@@ -2010,9 +2010,9 @@ describe("the user's own instructions on a Codex Thread", () => {
 
   /** Returns a context for a Thread whose user's instructions file is `instructionsFile`. */
   const buildThreadContext = (
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
     instructionsFile: string,
-  ): ProviderRunnerContext => ({
+  ): HarnessRunnerContext => ({
     ...ctx,
     herculeTool: TOOL,
     userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
@@ -2175,7 +2175,7 @@ const runTurnToCompletion = async (
   spec: SessionSpec,
   items: ReadonlyArray<Record<string, unknown>>,
   status: "completed" | "failed" | "interrupted" = "completed",
-): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+): Promise<Extract<HarnessEvent, { _tag: "turn.completed" }>> => {
   const run = createDriving();
   await Effect.runPromise(
     run.adapter.startSession(SESSION, spec, { ...run.ctx, herculeTool: TOOL }),
@@ -2494,7 +2494,7 @@ const createDelayedMetadataSession = async (spec: SessionSpec = SPEC, answers: A
       };
     },
   });
-  const seen: ProviderEvent[] = [];
+  const seen: HarnessEvent[] = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) =>
       Effect.sync(() => {
@@ -2675,7 +2675,7 @@ describe("bounded Codex subagent discovery", () => {
       cacheWriteTokens: 0,
     });
     expect(reports.at(-1)?.raw).toBeUndefined();
-    expect(reports.at(-1)?.providerRefs).toBeUndefined();
+    expect(reports.at(-1)?.harnessRefs).toBeUndefined();
     expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 3 frames");
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
   });
@@ -3999,7 +3999,7 @@ describe("notifications that name no thread", () => {
     return logged;
   };
 
-  const listWarningMessages = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+  const listWarningMessages = (seen: ReadonlyArray<HarnessEvent>): ReadonlyArray<string> =>
     filterByTag(seen, "runtime.warning").map((event) => event.message);
 
   it("reaches the session when Codex sends it during start-up, after session.started", async () => {

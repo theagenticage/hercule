@@ -225,16 +225,16 @@ const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
 /** Returns a provider instance whose one capability snapshot lists `models`. */
 export const buildInstance = (
   id: string,
-  providerId: string,
+  harnessId: string,
   displayName: string,
   models: ReadonlyArray<SpecimenModel>,
 ): ProviderInstance => ({
   id,
-  providerId,
+  harnessId,
   name: displayName,
   config: {},
   displayName,
-  binaryName: providerId,
+  binaryName: harnessId,
   declared: {
     steering: "native",
     fork: "native",

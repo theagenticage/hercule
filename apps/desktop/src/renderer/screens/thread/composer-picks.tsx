@@ -13,7 +13,7 @@ import { SlidersIcon } from "../../icons/sliders";
 import { ComposerMenu } from "./composer-menu";
 import { ModelMenu } from "./model-menu";
 import { OptionsMenu } from "./options-menu";
-import { ProviderLogo } from "./provider-logo";
+import { HarnessLogo } from "./harness-logo";
 
 /**
  * Renders the model options pick in a composer's row: the options' values in
@@ -102,9 +102,7 @@ export function ModelPick({
       triggerClassName="pick pick--pill"
       trigger={
         <>
-          {pill.providerId === null ? null : (
-            <ProviderLogo providerId={pill.providerId} size={13} />
-          )}
+          {pill.harnessId === null ? null : <HarnessLogo harnessId={pill.harnessId} size={13} />}
           {pill.account === null ? null : <span className="faint">{pill.account}</span>}
           <span className="pick-name">{pill.name ?? "No model"}</span>
         </>

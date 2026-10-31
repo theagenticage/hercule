@@ -37,7 +37,7 @@ import { atMost, bounded } from "../strings";
  */
 export {
   Capabilities as RunnerCapabilities,
-  ProviderBinary as RunnerProvider,
+  HarnessBinary,
   RunnerFacts,
   RunnerWatermark,
   Toolchain as RunnerToolchain,
@@ -230,7 +230,7 @@ export const runner = HttpApiGroup.make("runner")
     }),
     HttpApiEndpoint.post("installHarness", "/runners/:id/install-harness", {
       params: { id: Id },
-      payload: Schema.Struct({ providerId: Schema.String }),
+      payload: Schema.Struct({ harnessId: Schema.String }),
       success: RunnerDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

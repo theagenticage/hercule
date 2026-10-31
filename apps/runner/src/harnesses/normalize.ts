@@ -17,7 +17,7 @@ export interface Envelope {
   readonly eventId: string;
   readonly sessionId: string;
   readonly at: string;
-  readonly providerRefs: Readonly<Record<string, string>>;
+  readonly harnessRefs: Readonly<Record<string, string>>;
 }
 
 /**
@@ -42,12 +42,12 @@ export const clampCount = (value: unknown): number =>
  */
 export const buildEnvelope = (
   sessionId: string,
-  providerRefs: Readonly<Record<string, string>>,
+  harnessRefs: Readonly<Record<string, string>>,
 ): Envelope => ({
   eventId: crypto.randomUUID(),
   sessionId,
   at: now(),
-  providerRefs,
+  harnessRefs,
 });
 
 /**

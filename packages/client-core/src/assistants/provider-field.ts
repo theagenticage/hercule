@@ -25,8 +25,8 @@ interface AssistantProviderGroup {
 
 interface AssistantProviderField {
   readonly groups: readonly AssistantProviderGroup[];
-  /** The provider of the assistant's instance, for its logo, or `null` when the instance is gone. */
-  readonly providerId: string | null;
+  /** The harness of the assistant's instance, for its logo, or `null` when the instance is gone. */
+  readonly harnessId: string | null;
   /**
    * The account the assistant's instance is logged in as, else the instance's
    * display name, or "" when the instance is gone.
@@ -98,7 +98,7 @@ export const buildAssistantProviderField = (
   }
   return {
     groups,
-    providerId: instance?.providerId ?? null,
+    harnessId: instance?.harnessId ?? null,
     hint:
       instance === undefined
         ? ""

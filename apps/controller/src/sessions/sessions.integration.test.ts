@@ -29,7 +29,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type {
   ModelDescriptor,
   ProbeRequest,
-  ProviderEvent,
+  HarnessEvent,
   RunnerFacts,
   SessionInterrupt as SessionInterruptFrame,
   SessionStart,
@@ -48,7 +48,7 @@ import {
   SKILLS_CAPABILITY,
   SteerRefused,
 } from "@hercule/protocol";
-import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
 import type { Profile, Runner, Session } from "@hercule/contract";
 import {
   collectPushes,
@@ -65,7 +65,7 @@ import {
 } from "../http/testing";
 import { Live } from "../daemon";
 import { UUID_PATTERN, withTransaction } from "../db";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import { importTestSkill } from "../skills/testing";
 import { sessionRepository } from "./repository";
 import {
@@ -97,14 +97,14 @@ import {
   waitForConversationSessions,
 } from "../conversations/testing";
 
-/** A provider that supports everything natively: the instance a plain spawn uses. */
-const FULL = buildProviderDefinition("full-provider", { token: "t" });
+/** A harness that supports everything natively: the instance a plain spawn uses. */
+const FULL = buildHarnessDefinition("full-provider", { token: "t" });
 
-/** The provider for the access-mode fallback tests: it supports up to `auto-accept-edits`. */
-const LIMITED: ProviderDefinition = {
-  ...buildProviderDefinition("limited-provider", { token: "t" }),
+/** The harness for the access-mode fallback tests: it supports up to `auto-accept-edits`. */
+const LIMITED: HarnessDefinition = {
+  ...buildHarnessDefinition("limited-provider", { token: "t" }),
   declared: {
-    ...buildProviderDefinition("limited-provider").declared,
+    ...buildHarnessDefinition("limited-provider").declared,
     steering: "unsupported",
     accessModes: {
       "approval-required": "native",
@@ -116,13 +116,13 @@ const LIMITED: ProviderDefinition = {
 };
 
 /**
- * A provider that supports no access mode at all: even `approval-required` is
+ * A harness that supports no access mode at all: even `approval-required` is
  * unsupported, so the fallback has no lower mode to substitute.
  */
-const BARE: ProviderDefinition = {
-  ...buildProviderDefinition("bare-provider", { token: "t" }),
+const BARE: HarnessDefinition = {
+  ...buildHarnessDefinition("bare-provider", { token: "t" }),
   declared: {
-    ...buildProviderDefinition("bare-provider").declared,
+    ...buildHarnessDefinition("bare-provider").declared,
     accessModes: {
       "approval-required": "unsupported",
       "auto-accept-edits": "unsupported",
@@ -246,9 +246,9 @@ const withFleet = (
     ...options,
   });
 
-const findInstanceId = (arranged: Arranged, providerId: string): string => {
-  const found = arranged.instances.find((instance) => instance.providerId === providerId);
-  expect(found, providerId).toBeDefined();
+const findInstanceId = (arranged: Arranged, harnessId: string): string => {
+  const found = arranged.instances.find((instance) => instance.harnessId === harnessId);
+  expect(found, harnessId).toBeDefined();
   return found!.id;
 };
 
@@ -355,12 +355,12 @@ const readCrashGuardArmed = async (arranged: Arranged, id: string): Promise<bool
 const at = "2026-09-07T10:00:00.000Z";
 
 /** Builds the events of one ordinary turn, each with its sequence number. */
-const buildTranscript = (sessionId: string): ReadonlyArray<readonly [number, ProviderEvent]> => {
+const buildTranscript = (sessionId: string): ReadonlyArray<readonly [number, HarnessEvent]> => {
   const base = { eventId: crypto.randomUUID(), sessionId, at };
   const turnId = "t1";
   const itemId = "i1";
   return [
-    [1, { ...base, _tag: "session.started", providerRefs: { nativeSessionId: "native-1" } }],
+    [1, { ...base, _tag: "session.started", harnessRefs: { nativeSessionId: "native-1" } }],
     [2, { ...base, _tag: "turn.started", turnId }],
     [
       3,
@@ -571,7 +571,7 @@ describe("session.spawn", () => {
 
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(session.id);
-      expect(start.providerId).toBe("full-provider");
+      expect(start.harnessId).toBe("full-provider");
       expect(start.spec).toEqual({
         instanceId: session.instanceId,
         workspaceId: null,
@@ -2557,7 +2557,7 @@ describe("transcript.read", () => {
     id: string,
     query = "",
   ): Promise<{
-    items: ReadonlyArray<{ position: number; event: ProviderEvent }>;
+    items: ReadonlyArray<{ position: number; event: HarnessEvent }>;
     nextCursor?: string;
   }> => {
     const response = await get(
@@ -4449,7 +4449,7 @@ const startBusySessionOn = async (
     ...base,
     eventId: crypto.randomUUID(),
     _tag: "session.started",
-    providerRefs: { nativeSessionId: `native-${session.id}` },
+    harnessRefs: { nativeSessionId: `native-${session.id}` },
   });
   reportEvent(machine.wire, 2, {
     ...base,
@@ -4731,7 +4731,7 @@ describe("session.input into an exited session", () => {
         sessionId: session.id,
         at,
         _tag: "session.started",
-        providerRefs: { nativeSessionId: "native-2" },
+        harnessRefs: { nativeSessionId: "native-2" },
       });
 
       const bound = await waitForSession(arranged, session.id, (one) => one.status !== "starting");
@@ -4994,7 +4994,7 @@ describe("session.input into an exited session", () => {
         );
         expect(read.status, await read.clone().text()).toBe(200);
         const body = (await read.json()) as {
-          items: ReadonlyArray<{ position: number; event: ProviderEvent }>;
+          items: ReadonlyArray<{ position: number; event: HarnessEvent }>;
         };
         return body.items.some(
           (row) => row.event._tag === "item.completed" && row.event.itemId === "i2",

@@ -1,6 +1,6 @@
 /**
  * Tests which adapters this runner build includes, and which the session
- * supervisor receives. The registry is the only place a provider id becomes an
+ * supervisor receives. The registry is the only place a harness id becomes an
  * adapter, so a provider missing from it shows up everywhere in the product as
  * "no adapter in this build".
  */
@@ -22,10 +22,10 @@ import { NO_CONTROLLER_UPLOADER } from "./testing";
 afterAll(cleanTemporaries);
 
 describe("the adapters in this runner build", () => {
-  it("finds Codex by the provider id and binary name its plugin declares", () => {
+  it("finds Codex by the harness id and binary name its plugin declares", () => {
     const codex = findAdapter("codex");
 
-    expect(codex?.providerId).toBe("codex");
+    expect(codex?.harnessId).toBe("codex");
     expect(codex?.binaryName).toBe("codex");
     expect(ADAPTER_IDS).toContain("codex");
     // The existing Claude Code adapter is still registered.
@@ -95,10 +95,10 @@ describe("the adapters in this runner build", () => {
 });
 
 describe("the pi adapter in this runner build", () => {
-  it("finds pi by the provider id and binary name its plugin declares", () => {
+  it("finds pi by the harness id and binary name its plugin declares", () => {
     const pi = findAdapter("pi");
 
-    expect(pi?.providerId).toBe("pi");
+    expect(pi?.harnessId).toBe("pi");
     expect(pi?.binaryName).toBe("pi");
     expect(ADAPTER_IDS).toContain("pi");
     // The existing adapters are still registered.

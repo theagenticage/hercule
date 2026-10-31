@@ -28,7 +28,7 @@ const RUNNER_ID = "01a06d02-beff-7037-9f5b-042822015952";
 
 const CODEX: ProviderInstance = {
   id: "01a06d02-1000-7000-8000-000000000001",
-  providerId: "codex",
+  harnessId: "codex",
   name: "Codex",
   config: {},
   displayName: "Codex",

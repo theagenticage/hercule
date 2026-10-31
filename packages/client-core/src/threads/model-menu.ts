@@ -43,14 +43,14 @@ export interface ModelMenuRow {
 
 export interface ModelMenuRecentRow extends RecentModel {
   readonly name: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly account: string | null;
   readonly dimmed: string | null;
 }
 
 export interface ModelMenuLane {
   readonly instanceId: string | null;
-  readonly providerId: string | null;
+  readonly harnessId: string | null;
   /** The section's one-word label, or `null` while no account is picked. */
   readonly label: string | null;
   readonly rows: readonly ModelMenuRow[];
@@ -60,7 +60,7 @@ export interface ModelMenuLane {
 
 export interface ModelMenuInstanceRow {
   readonly instanceId: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly name: string;
   readonly identity: string | null;
   readonly planLabel: string | null;
@@ -142,7 +142,7 @@ export const buildModelMenu = (
           {
             ...pair,
             name: descriptor.name,
-            providerId: held.providerId,
+            harnessId: held.harnessId,
             account: findAccountName(catalogs.instances, held),
             dimmed: view.kind === "active" && held.id !== current.instanceId ? ACCOUNT_FIXED : null,
           },
@@ -152,7 +152,7 @@ export const buildModelMenu = (
 
     current: {
       instanceId: current.instanceId,
-      providerId: instance?.providerId ?? null,
+      harnessId: instance?.harnessId ?? null,
       label: instance === undefined ? null : buildInstanceLabel(catalogs.instances, instance),
       rows: shown
         .filter(({ descriptor, row }) => !isFoldable(descriptor, row))
@@ -187,7 +187,7 @@ export const buildModelMenu = (
         return [
           {
             instanceId: each.id,
-            providerId: each.providerId,
+            harnessId: each.harnessId,
             name: buildInstanceLabel(catalogs.instances, each),
             identity: snapshot?.auth.identity ?? null,
             planLabel: snapshot?.auth.planLabel ?? null,

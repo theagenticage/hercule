@@ -104,7 +104,7 @@ const buildInstanceSnapshot = (
 
 const INSTANCE_STARTED: ProviderInstance = {
   id: SESSION.instanceId,
-  providerId: "claude-code",
+  harnessId: "claude-code",
   secretFields: [],
   name: "personal",
   config: {},

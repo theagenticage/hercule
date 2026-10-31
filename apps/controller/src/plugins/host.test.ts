@@ -21,7 +21,7 @@ import {
   type FeedDeclaration,
   type Plugin,
   type PluginCapability,
-  type ProviderDefinition,
+  type HarnessDefinition,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import { withTransaction } from "../db";
@@ -34,7 +34,7 @@ import {
   NOTE_APPEND_ACTION,
   notesPlugin,
   buildPluginStack,
-  buildProviderDefinition,
+  buildHarnessDefinition,
   IDLE_FEEDS,
   IDLE_INGEST_OPEN,
 } from "./testing";
@@ -50,11 +50,11 @@ describe("PluginHost.boot on an empty database", () => {
   it("lists every registry plugin enabled, unconfigured, with its one contribution", async () => {
     const alpha = createPluginFixture({
       id: "alpha",
-      definitions: [buildProviderDefinition("alpha-provider", { model: "alpha-default" })],
+      definitions: [buildHarnessDefinition("alpha-provider", { model: "alpha-default" })],
     });
     const beta = createPluginFixture({
       id: "beta",
-      definitions: [buildProviderDefinition("beta-provider", { model: "beta-default" })],
+      definitions: [buildHarnessDefinition("beta-provider", { model: "beta-default" })],
     });
 
     const details = await run(
@@ -228,7 +228,7 @@ describe("a plugin whose register fails", () => {
 
   it("is errored, naming the path, when a contribution contains a function", async () => {
     const definition = {
-      ...buildProviderDefinition("callback-provider", {}),
+      ...buildHarnessDefinition("callback-provider", {}),
       defaultConfig: { onStart: () => undefined } as unknown as Schema.Json,
     };
     const callback = createPluginFixture({ id: "callback", definitions: [definition] });
@@ -257,7 +257,7 @@ describe("a plugin whose register fails", () => {
   it("is errored, keeping every other plugin's rows, when it registers one id twice", async () => {
     const twice = createPluginFixture({
       id: "twice",
-      definitions: [buildProviderDefinition("same", {}), buildProviderDefinition("same", {})],
+      definitions: [buildHarnessDefinition("same", {}), buildHarnessDefinition("same", {})],
     });
     const other = createPluginFixture({ id: "other" });
 
@@ -288,7 +288,7 @@ describe("a plugin whose register fails", () => {
       id: "unrenderable",
       definitions: [
         {
-          ...buildProviderDefinition("deep-provider", {}),
+          ...buildHarnessDefinition("deep-provider", {}),
           configSchema: Schema.Struct({ server: Schema.Struct({ host: Schema.String }) }),
         },
       ],
@@ -314,7 +314,7 @@ describe("a plugin whose register fails", () => {
     const shouty = createPluginFixture({
       id: "shouty",
       definitions: [
-        { ...buildProviderDefinition("shouty-provider", {}), displayName: "S".repeat(129) },
+        { ...buildHarnessDefinition("shouty-provider", {}), displayName: "S".repeat(129) },
       ],
     });
 
@@ -335,9 +335,9 @@ describe("a plugin whose register fails", () => {
       id: "extra",
       definitions: [
         {
-          ...buildProviderDefinition("extra-provider", {}),
+          ...buildHarnessDefinition("extra-provider", {}),
           onStart: () => undefined,
-        } as ProviderDefinition,
+        } as HarnessDefinition,
       ],
     });
 
@@ -488,7 +488,7 @@ describe("a secret field declared outside a provider", () => {
     } | null;
     expect(refused?._tag).toBe("refused");
     expect(refused?.reason.kind).toBe("unsupportedConfigSchema");
-    expect(refused?.reason.message).toContain("provider definition only");
+    expect(refused?.reason.message).toContain("harness definition only");
     expect(keyed.hosts).toEqual([]);
   });
 
@@ -531,7 +531,7 @@ describe("a secret field declared outside a provider", () => {
     } | null;
     expect(errored?._tag).toBe("errored");
     expect(errored?.message).toContain("keyed-connection/vault");
-    expect(errored?.message).toContain("provider definition only");
+    expect(errored?.message).toContain("harness definition only");
     expect(detail.contributions).toEqual([]);
   });
 });
@@ -631,12 +631,12 @@ describe("a config field that loads its choices from the account", () => {
     expect(detail.contributions).toEqual([]);
   });
 
-  it("marks the plugin errored when a provider definition marks a field, naming the provider", async () => {
+  it("marks the plugin errored when a harness definition marks a field, naming the harness", async () => {
     const choosy = createPluginFixture({
       id: "choosy",
       definitions: [
         {
-          ...buildProviderDefinition("choosy-provider", {}),
+          ...buildHarnessDefinition("choosy-provider", {}),
           configSchema: TEAM_FIELD,
         },
       ],

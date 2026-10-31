@@ -14,7 +14,7 @@ import { uuidFromString, withTransaction } from "../db";
 import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
 import { SETUP_TOKEN, completeSetup, del, get, post, send, withServer } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import {
   listFrames,
   waitForFrames,
@@ -1263,7 +1263,7 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
     plugins: [
       createPluginFixture({
         id: "providers",
-        definitions: [buildProviderDefinition("full-provider", { token: "t" })],
+        definitions: [buildHarnessDefinition("full-provider", { token: "t" })],
       }).plugin,
     ],
     facts: FLEET_FACTS,

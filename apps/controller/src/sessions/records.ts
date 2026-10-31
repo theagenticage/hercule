@@ -11,14 +11,14 @@
  * field, the field drops off the list.
  *
  * `sessionRecordComposer` is an effect rather than a plain function because
- * the provider definitions live in the plugin host. Every caller outside this
+ * the harness definitions live in the plugin host. Every caller outside this
  * domain builds session records here, so two callers that read the same row
  * always agree on what it means.
  *
  * There are two effects, one inside the other, and both levels matter:
  *
  * - The outer effect reads the plugin host once, when the service is built.
- * - The inner effect reads the provider definitions once per call, so a page
+ * - The inner effect reads the harness definitions once per call, so a page
  *   of sessions is built against one list of definitions instead of one per
  *   row.
  */
@@ -53,7 +53,7 @@ export const sessionRecordComposer: Effect.Effect<
 
   return Effect.map(host.providers(), (definitions) => (stored: StoredSession): Session => ({
     ...Struct.omit(stored, [
-      "providerId",
+      "harnessId",
       "disallowedTools",
       "crashGuardArmed",
       "inputWaiting",
@@ -73,6 +73,6 @@ export const sessionRecordComposer: Effect.Effect<
     ),
     ...buildUsageFields(stored.usage),
     resumeHeld: isResumeHeld(stored),
-    unenforced: listUnenforcedFields(definitions, stored.providerId, stored.disallowedTools),
+    unenforced: listUnenforcedFields(definitions, stored.harnessId, stored.disallowedTools),
   }));
 });

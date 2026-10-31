@@ -10,9 +10,9 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
-import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
+import { secret, type Plugin, type HarnessDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, ProbeRequest, RunnerFacts, SessionStart } from "@hercule/protocol";
-import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../../plugins/testing";
 import { withTransaction } from "../../db";
 import { send } from "../../http/testing";
 import {
@@ -30,17 +30,17 @@ const KEY_TITLE = "Z.ai API key";
 const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
 const KEY_VALUE = "a-paid-credential-nobody-else-holds";
 
-/** A provider whose config has one secret field, like pi's. */
-const KEYED: ProviderDefinition = {
-  ...buildProviderDefinition("keyed-provider", { token: "t" }),
+/** A harness whose config has one secret field, like pi's. */
+const KEYED: HarnessDefinition = {
+  ...buildHarnessDefinition("keyed-provider", { token: "t" }),
   configSchema: Schema.Struct({
     token: Schema.String,
     zaiApiKey: secret({ title: KEY_TITLE, description: KEY_DESCRIPTION }),
   }),
 };
 
-/** A provider with no secret fields, for frames that carry no secrets. */
-const PLAIN: ProviderDefinition = buildProviderDefinition("plain-provider", { token: "t" });
+/** A harness with no secret fields, for frames that carry no secrets. */
+const PLAIN: HarnessDefinition = buildHarnessDefinition("plain-provider", { token: "t" });
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
   createPluginFixture({ id: "keyed", definitions: [KEYED, PLAIN] }).plugin,

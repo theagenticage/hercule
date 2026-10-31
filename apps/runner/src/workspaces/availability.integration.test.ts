@@ -27,7 +27,7 @@ import {
 import { makeAttachmentCache } from "../attachments";
 import { makeSessionSkillsFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
-import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "../harnesses/testing";
 
 afterAll(cleanTemporaries);
 
@@ -70,7 +70,7 @@ const refuseSessionPlacement = async (
     requestId: createId(),
     sessionId: createId(),
     input: { text: "hello" },
-    providerId: "claude-code",
+    harnessId: "claude-code",
     config: {},
     secrets: {},
     token: "fixture-token",

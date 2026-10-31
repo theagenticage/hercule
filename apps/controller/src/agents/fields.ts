@@ -77,19 +77,19 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
       host.providers(),
       (definitions) =>
         (stored: StoredAgent): Agent => ({
-          ...Struct.omit(stored, ["providerId", "kind"]),
-          unenforced: listUnenforcedFields(definitions, stored.providerId, stored.disallowedTools),
+          ...Struct.omit(stored, ["harnessId", "kind"]),
+          unenforced: listUnenforcedFields(definitions, stored.harnessId, stored.disallowedTools),
         }),
     ),
 
     /**
-     * Returns the provider id of the instance an agent names. Fails with
+     * Returns the harness id of the instance an agent names. Fails with
      * `Validation` if the instance does not exist, or if this build does not
      * include its provider. It does not check what the machines that host the
-     * provider can do now: an agent is a stored configuration, not a
+     * harness can do now: an agent is a stored configuration, not a
      * placement.
      */
-    readProviderIdOrFail: (
+    readHarnessIdOrFail: (
       instanceId: string,
     ): Effect.Effect<string, Validation | SqlError | Schema.SchemaError> =>
       Effect.gen(function* () {
@@ -99,21 +99,21 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
             createValidationError([{ path: ["instanceId"], message: NO_SUCH_INSTANCE }]),
           );
         }
-        const providerId = instance.value.providerId;
+        const harnessId = instance.value.harnessId;
         const definitions = yield* host.providers();
-        if (!definitions.some((definition) => definition.id === providerId)) {
+        if (!definitions.some((definition) => definition.id === harnessId)) {
           return yield* Effect.fail(
             createValidationError([
               {
                 path: ["instanceId"],
                 message:
-                  `this build carries no ${providerId} provider; ` +
+                  `this build carries no ${harnessId} provider; ` +
                   "name an instance of a provider this build carries",
               },
             ]),
           );
         }
-        return providerId;
+        return harnessId;
       }),
 
     /**

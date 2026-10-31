@@ -25,7 +25,7 @@ import type {
   ContinuedSubagent,
   ItemKind,
   OutputSchema,
-  ProviderEvent,
+  HarnessEvent,
   StreamKind,
   StructuredResult,
   TextGenerationOutcome,
@@ -486,7 +486,7 @@ const buildWebFields = (toolName: string, input: unknown): Record<string, string
   return value === undefined ? {} : { [field]: value };
 };
 
-type Emit = Array<ProviderEvent>;
+type Emit = Array<HarnessEvent>;
 
 /**
  * Opens a turn if none is open. Returns the turn id and the events to emit:
@@ -498,7 +498,7 @@ type Emit = Array<ProviderEvent>;
  */
 export const openTurn = (
   state: Normalizing,
-): { readonly turnId: string; readonly events: ReadonlyArray<ProviderEvent> } => {
+): { readonly turnId: string; readonly events: ReadonlyArray<HarnessEvent> } => {
   const open = state.turnId;
   if (open !== undefined) return { turnId: open, events: [] };
   const turnId = state.mint();
@@ -616,7 +616,7 @@ const buildItemStarted = (
   itemId: string,
   kind: ItemKind,
   detail?: unknown,
-): ProviderEvent => ({
+): HarnessEvent => ({
   _tag: "item.started",
   eventId: state.mint(),
   sessionId: state.sessionId,
@@ -634,7 +634,7 @@ const buildItemUpdated = (
   itemId: string,
   kind: ItemKind,
   detail: unknown,
-): ProviderEvent => ({
+): HarnessEvent => ({
   _tag: "item.updated",
   eventId: state.mint(),
   sessionId: state.sessionId,
@@ -653,7 +653,7 @@ const buildItemCompleted = (
   kind: ItemKind,
   status: "completed" | "failed",
   detail?: unknown,
-): ProviderEvent => ({
+): HarnessEvent => ({
   _tag: "item.completed",
   eventId: state.mint(),
   sessionId: state.sessionId,
@@ -672,7 +672,7 @@ const buildContentDelta = (
   itemId: string,
   streamKind: StreamKind,
   text: string,
-): ProviderEvent => ({
+): HarnessEvent => ({
   _tag: "content.delta",
   eventId: state.mint(),
   sessionId: state.sessionId,
@@ -770,7 +770,7 @@ export const buildRuntimeEvent = (
   tag: RuntimeEventTag,
   text: string,
   subagentId?: string,
-): ProviderEvent => ({
+): HarnessEvent => ({
   _tag: tag,
   eventId: state.mint(),
   sessionId: state.sessionId,
@@ -806,7 +806,7 @@ const introduceSubagent = (
   const agentType = readInputString(task, "agentType");
   // Built before `introduced` is set, so a field that fails to convert leaves
   // the subagent to be introduced by its next frame.
-  const started: ProviderEvent = {
+  const started: HarnessEvent = {
     _tag: "subagent.started",
     eventId: state.mint(),
     sessionId: state.sessionId,
@@ -1582,7 +1582,7 @@ const onResult = (
 ): void => {
   const usage = readUsage(sdk);
   const turnState = readTurnState(sdk);
-  const usageUpdate: ProviderEvent = {
+  const usageUpdate: HarnessEvent = {
     _tag: "session.usage.updated",
     eventId: state.mint(),
     sessionId: state.sessionId,
@@ -1749,7 +1749,7 @@ const completeCompaction = (
  * when no later message will. A compaction past its boundary completes without
  * a summary. One without a boundary fails. Leaves the turn to the caller.
  */
-export const completeCompactionAtEnd = (state: Normalizing, out: Array<ProviderEvent>): void => {
+export const completeCompactionAtEnd = (state: Normalizing, out: Array<HarnessEvent>): void => {
   const boundary = state.compaction?.boundary;
   if (boundary === undefined) completeCompactionItem(state, out, "failed");
   else completeCompactionItem(state, out, "completed", boundary);
@@ -1996,7 +1996,7 @@ const isSubagentStart = (sdk: SDKMessage): boolean =>
  * frame being normalized: the turn's start, a subagent's brief, and the
  * Requests the adapter deferred until the turn opened.
  */
-const isTurnOpeningEvent = (event: ProviderEvent): boolean =>
+const isTurnOpeningEvent = (event: HarnessEvent): boolean =>
   event._tag === "turn.started" ||
   event._tag === "request.opened" ||
   (event._tag === "item.started" && event.kind === "user_message") ||
@@ -2017,7 +2017,7 @@ const isTurnOpeningEvent = (event: ProviderEvent): boolean =>
  * `unknown` item with a label, because the CLI ships weekly and a `TypeError`
  * here would take a live session down.
  */
-export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<ProviderEvent> => {
+export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<HarnessEvent> => {
   const out = normalizeFrame(state, sdk);
   if (isSubagentStart(sdk)) out.push(...releaseHeldFrames(state));
   return out;

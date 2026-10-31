@@ -24,7 +24,7 @@ import {
   withServer,
   type ServerHarness,
 } from "../http/testing";
-import { buildProviderDefinition, createPluginFixture } from "../plugins/testing";
+import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 import { Settings, SettingsLayer } from "../settings";
 import { PasswordCost, TEST_PASSWORD_PARAMS, Users, UsersLayer, verifyPassword } from "../users";
 import { Setup, SetupLayer } from "./service";
@@ -241,9 +241,9 @@ describe("setup.complete", () => {
  * controller has.
  */
 const PROVIDERS = [
-  buildProviderDefinition("claude-provider", { token: "t" }),
-  buildProviderDefinition("codex-provider", { token: "t" }),
-  buildProviderDefinition("pi-provider", { token: "t" }),
+  buildHarnessDefinition("claude-provider", { token: "t" }),
+  buildHarnessDefinition("codex-provider", { token: "t" }),
+  buildHarnessDefinition("pi-provider", { token: "t" }),
 ];
 
 const withProviders = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>

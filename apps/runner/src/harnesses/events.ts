@@ -3,7 +3,7 @@
  * than events it reads from the harness's output. Also the helper that makes an
  * id valid for the protocol.
  */
-import type { AttachmentReference, ProviderEvent, SubagentId } from "@hercule/protocol";
+import type { AttachmentReference, HarnessEvent, SubagentId } from "@hercule/protocol";
 import { now } from "../report";
 import { truncateFact } from "./text";
 
@@ -50,8 +50,8 @@ export const buildUserMessage = (input: {
   /** The session whose agent sent the input, or undefined when no other agent did. */
   readonly senderSessionId?: string | undefined;
   /** The harness's own ids for the item, if the adapter has any. */
-  readonly providerRefs?: Readonly<Record<string, string>>;
-}): readonly [ProviderEvent, ProviderEvent] => {
+  readonly harnessRefs?: Readonly<Record<string, string>>;
+}): readonly [HarnessEvent, HarnessEvent] => {
   const item = {
     sessionId: input.sessionId,
     at: now(),
@@ -77,7 +77,7 @@ export const buildUserMessage = (input: {
         : { skills: [...new Set(input.skillReferences.map((skill) => skill.referenceName))] }),
       ...(input.senderSessionId === undefined ? {} : { senderSessionId: input.senderSessionId }),
     },
-    ...(input.providerRefs === undefined ? {} : { providerRefs: input.providerRefs }),
+    ...(input.harnessRefs === undefined ? {} : { harnessRefs: input.harnessRefs }),
   } as const;
   return [
     { _tag: "item.started", eventId: crypto.randomUUID(), ...item },

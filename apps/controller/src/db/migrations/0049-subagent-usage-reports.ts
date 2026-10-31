@@ -1,5 +1,5 @@
 /**
- * Keeps the provider report behind a subagent's latest accepted usage snapshot.
+ * Keeps the harness report behind a subagent's latest accepted usage snapshot.
  * An adapter receives it on a resume to restore its native counter baseline.
  * Existing rows have no report; the adapter must obtain a baseline itself.
  * The controller stores the report unchanged and never interprets its payload.

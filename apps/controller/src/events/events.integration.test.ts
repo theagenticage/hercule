@@ -25,7 +25,7 @@ import {
   withServer,
   type ServerHarness,
 } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import { readEvent } from "./testing";
 import {
   spawnThreadUnder,
@@ -128,7 +128,7 @@ const withEvents = (
  * credential without `event.emit`. The github plugin is loaded too, because the
  * rejected call must be one that would otherwise have worked.
  */
-const PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
+const PROVIDER = buildHarnessDefinition("full-provider", { token: "t" });
 
 const FACTS: RunnerFacts = {
   os: "darwin",

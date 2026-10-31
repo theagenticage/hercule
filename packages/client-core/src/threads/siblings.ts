@@ -98,8 +98,8 @@ export interface SessionTab {
   readonly activityAt: string;
   /** Whether the session is a Thread marked Done. */
   readonly done: boolean;
-  /** The provider of the session's instance, such as `claude-code`, or `null` when the instance is unknown. */
-  readonly providerId: string | null;
+  /** The harness of the session's instance, such as `claude-code`, or `null` when the instance is unknown. */
+  readonly harnessId: string | null;
   /** The display name of the model the session runs on. */
   readonly model: string;
 }
@@ -177,7 +177,7 @@ export const describeSessionTab = ({
     status: decideThreadRowStatus(session, runner),
     activityAt: session.lastActivityAt,
     done,
-    providerId: instance?.providerId ?? null,
+    harnessId: instance?.harnessId ?? null,
     model: findModelName(instance, session.modelSelection.model),
   };
 };

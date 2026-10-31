@@ -6,7 +6,7 @@ import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.Invalidate
 import dev.hercule.android.wire.InvalidateKind
 import dev.hercule.android.wire.Project
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.Runner
 import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.TapItem
@@ -412,7 +412,7 @@ internal fun mergeConversationMessages(
  * `trimToRunningTurn`.
  */
 internal fun trimToRunningTurn(rows: List<TranscriptRow>): List<TranscriptRow> {
-    val start = rows.indexOfLast { it.event is ProviderEvent.TurnStarted }
+    val start = rows.indexOfLast { it.event is HarnessEvent.TurnStarted }
     return if (start <= 0) rows else rows.subList(start, rows.size).toList()
 }
 

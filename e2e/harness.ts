@@ -241,7 +241,7 @@ export interface Snapshot {
 /** A Provider Instance as `provider.query` returns it. */
 export interface Instance {
   readonly id: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly snapshots: ReadonlyArray<Snapshot>;
 }
 
@@ -293,7 +293,7 @@ export async function readClaudeInstance(options: {
   readonly url: string;
   readonly apiKey: string;
 }): Promise<Instance> {
-  const found = (await listInstances(options)).find((one) => one.providerId === "claude-code");
+  const found = (await listInstances(options)).find((one) => one.harnessId === "claude-code");
   if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
   return found;
 }
@@ -608,9 +608,9 @@ export interface LoginTarget {
   readonly apiKey: string;
 }
 
-/** One harness (a Provider) that the live skill tests drive, and how they drive it. */
+/** One harness that the live skill tests drive, and how they drive it. */
 export interface LiveHarness {
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly label: string;
   /** Returns the input that runs the library skill or the user's skill `name`. */
   readonly invokeSkill: (name: string) => string;
@@ -663,7 +663,7 @@ function findMissingBinary(name: string): string | undefined {
  */
 export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
   {
-    providerId: "claude-code",
+    harnessId: "claude-code",
     label: "Claude Code",
     invokeSkill: (name) => `/${name}`,
     invokeRepositorySkill: (checkout, name) => `/repo-${checkout}:${name}`,
@@ -681,7 +681,7 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
     },
   },
   {
-    providerId: "codex",
+    harnessId: "codex",
     label: "Codex",
     invokeSkill: (name) => `$${name}`,
     invokeRepositorySkill: (_checkout, name) => `$${name}`,
@@ -703,7 +703,7 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
     },
   },
   {
-    providerId: "pi",
+    harnessId: "pi",
     label: "pi",
     invokeSkill: (name) => `/skill:${name}`,
     invokeRepositorySkill: (_checkout, name) => `/skill:${name}`,
@@ -764,9 +764,9 @@ export async function prepareHarness(
 ): Promise<PreparedHarness> {
   const { home, binary, url, apiKey, runnerId, runnerHome } = options;
   const instance = (await listInstances({ url, apiKey })).find(
-    (one) => one.providerId === harness.providerId,
+    (one) => one.harnessId === harness.harnessId,
   );
-  if (instance === undefined) throw new Error(`no ${harness.providerId} instance was seeded`);
+  if (instance === undefined) throw new Error(`no ${harness.harnessId} instance was seeded`);
   await harness.lendLogin({ runnerHome, url, apiKey }, instance.id);
   const snapshot = await probeUntilLoggedIn({ home, binary, runnerId, instanceId: instance.id });
   const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);

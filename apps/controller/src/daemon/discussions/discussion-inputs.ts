@@ -13,7 +13,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { InvalidState, NotFound, Validation } from "@hercule/contract";
-import type { ProviderDefinition } from "@hercule/plugin-host";
+import type { HarnessDefinition } from "@hercule/plugin-host";
 import { CurrentActor } from "../../actor";
 import { withTransaction } from "../../db";
 import { DiscussionService, type DiscussionInputDraft } from "../../discussions";
@@ -125,7 +125,7 @@ const make = Effect.gen(function* () {
    */
   const readSteering = (
     session: StoredSession,
-  ): Effect.Effect<Option.Option<ProviderDefinition["declared"]["steering"]>, SqlError> =>
+  ): Effect.Effect<Option.Option<HarnessDefinition["declared"]["steering"]>, SqlError> =>
     resolved(session.instanceId).pipe(
       Effect.map(({ definition }) => Option.some(definition.declared.steering)),
       Effect.catchIf(

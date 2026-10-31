@@ -11,7 +11,7 @@ import { GitHubMark, LogoMark } from "../../logos";
 import type { ProjectTint } from "../project-tile";
 import "../project-tile.css";
 import { Warning } from "../step";
-import { ProviderLogo } from "../thread/provider-logo";
+import { HarnessLogo } from "../thread/harness-logo";
 
 /**
  * Renders All set for `username` in `timezone`, from `recap`. `tint` is the
@@ -80,9 +80,7 @@ export function AllSet({
         </RecapRow>
         <RecapRow
           mark={
-            recap.providerId === null ? null : (
-              <ProviderLogo providerId={recap.providerId} size={16} />
-            )
+            recap.harnessId === null ? null : <HarnessLogo harnessId={recap.harnessId} size={16} />
           }
           name={<b>{recap.providerNames ?? "No provider yet"}</b>}
         >

@@ -24,7 +24,7 @@ import type {
   ExitReason,
   ModelSelection,
   ProbeResult,
-  ProviderEvent,
+  HarnessEvent,
   QuestionAnswers,
   RequestResolution,
   SendResult,
@@ -48,8 +48,8 @@ import type { LoginCommand } from "../login";
 import type {
   AdapterTurnInput,
   EditMarks,
-  ProviderAdapter,
-  ProviderRunnerContext,
+  HarnessAdapter,
+  HarnessRunnerContext,
   TextGenerationContext,
   UserMaterial,
 } from "../index";
@@ -463,7 +463,7 @@ const START_MARK_HOOK_HASH =
  * TOML takes a JSON string as a basic string, so the values are written with
  * `JSON.stringify`.
  */
-const buildStartMarkHookOverrides = (ctx: ProviderRunnerContext): ReadonlyArray<string> =>
+const buildStartMarkHookOverrides = (ctx: HarnessRunnerContext): ReadonlyArray<string> =>
   ctx.editMarks === null
     ? []
     : [
@@ -498,7 +498,7 @@ const buildStartMarkHookOverrides = (ctx: ProviderRunnerContext): ReadonlyArray<
  * TOML takes a JSON string as a basic string, so the path is written with
  * `JSON.stringify`, which also escapes any quote or backslash in it.
  */
-const buildThreadHomeOverrides = (ctx: ProviderRunnerContext): ReadonlyArray<string> => {
+const buildThreadHomeOverrides = (ctx: HarnessRunnerContext): ReadonlyArray<string> => {
   const home = ctx.env["HOME"];
   return ctx.userMaterial === undefined || home === undefined
     ? []
@@ -524,7 +524,7 @@ const buildThreadHomeOverrides = (ctx: ProviderRunnerContext): ReadonlyArray<str
 const buildDeveloperInstructions = (
   spec: SessionSpec,
   userInstructions: string | undefined,
-  herculeTool: ProviderRunnerContext["herculeTool"],
+  herculeTool: HarnessRunnerContext["herculeTool"],
 ): string =>
   joinInstructions([
     herculeTool.orientation,
@@ -673,11 +673,11 @@ const stripImageBytes = (frame: NotificationFrame): void => {
   if (Array.isArray(items)) items.forEach(dropResult);
 };
 
-export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
+export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
   // run here and keeps `findAdapter` the synchronous lookup every other caller
   // already treats it as.
-  const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+  const published = Effect.runSync(PubSub.unbounded<HarnessEvent>());
   const sessions = new Map<string, Held>();
   /**
    * One app-server per session, not per instance. The session's own token is
@@ -690,7 +690,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    */
   const hosts = new Map<string, Host>();
 
-  const emit = (event: ProviderEvent): void => {
+  const emit = (event: HarnessEvent): void => {
     PubSub.publishUnsafe(published, event);
   };
 
@@ -773,7 +773,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * This is done here, not in the shared session context, because a moved
    * `HOME` breaks Claude's Keychain lookup.
    */
-  const prepareEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => {
+  const prepareEnv = (ctx: HarnessRunnerContext): Record<string, string | undefined> => {
     const codexHome = join(ctx.home, "codex");
     const neutral = join(ctx.home, "home");
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
@@ -883,7 +883,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * from creating the home folders is not taken for a missing binary.
    */
   const openHost = (
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
     binary: string,
     sessionId?: string,
     overrides: ReadonlyArray<string> = [],
@@ -965,7 +965,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const startSessionHost = (
     sessionId: string,
     spec: SessionSpec,
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
     binary: string,
   ): Effect.Effect<Host, AdapterError> =>
     Effect.suspend(() => {
@@ -1604,7 +1604,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
                 turnId: sent.turnId,
                 text: buildAnswerMessage(question, texts),
                 steered: sent.delivery === "steered",
-                providerRefs: { threadId: held.binding.nativeSessionId },
+                harnessRefs: { threadId: held.binding.nativeSessionId },
               })) {
                 emit(event);
               }
@@ -1660,7 +1660,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    */
   const buildThreadParams = (
     spec: SessionSpec,
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
     userInstructions: string | undefined,
   ): Pick<
     ThreadStartParams,
@@ -1728,14 +1728,14 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   return {
-    providerId: CODEX,
+    harnessId: CODEX,
     binaryName: CODEX_BINARY,
 
     events: Stream.fromPubSub(published),
 
-    // Every shipped provider's config schema is empty, so the Codex adapter
+    // Every shipped harness's config schema is empty, so the Codex adapter
     // takes nothing from it and does not name the argument.
-    probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> =>
+    probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> =>
       ctx.binary === undefined
         ? Effect.succeed(buildFailedProbe(null, `no ${CODEX_BINARY} on this machine`))
         : probe(ctx, ctx.binary),
@@ -1824,7 +1824,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           eventId: crypto.randomUUID(),
           sessionId,
           at: now(),
-          providerRefs: { nativeSessionId: opened },
+          harnessRefs: { nativeSessionId: opened },
         });
         // After `session.started`, so a warning sent during start-up reads as
         // coming after the session began. Nothing can arrive in between: the
@@ -1865,7 +1865,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               skillReferences: skills.translated,
               senderSessionId: input.senderSessionId,
               steered: sent.delivery === "steered",
-              providerRefs: { threadId: held.binding.nativeSessionId },
+              harnessRefs: { threadId: held.binding.nativeSessionId },
             })) {
           emit(event);
         }
@@ -1967,7 +1967,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
      * instance's own home directories, like a session does, so the credential
      * is saved where the app-server looks for it.
      */
-    login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
+    login: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
       command: [binary, "login", "--device-auth"],
       env: prepareEnv(ctx),
       userCode: USER_CODE,
@@ -1977,7 +1977,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 };
 
-export const codex: ProviderAdapter = makeCodexAdapter({
+export const codex: HarnessAdapter = makeCodexAdapter({
   appServer: spawnAppServer,
   run: runProcess,
 });

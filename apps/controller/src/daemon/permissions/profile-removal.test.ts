@@ -87,7 +87,7 @@ const insertAgent = (
       sql,
       agents.insert({
         kind,
-        providerId: "claude-provider",
+        harnessId: "claude-provider",
         name,
         systemPrompt: "do the work",
         instanceId: uuidToString(mintUuid()),

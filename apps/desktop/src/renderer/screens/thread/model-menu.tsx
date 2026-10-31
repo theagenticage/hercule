@@ -12,7 +12,7 @@ import {
 } from "@hercule/client-core";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { MenuLine } from "./menu-line";
-import { ProviderLogo } from "./provider-logo";
+import { HarnessLogo } from "./harness-logo";
 
 type ModelRow = ModelMenuModel["current"]["rows"][number];
 
@@ -60,10 +60,10 @@ export function ModelMenu({
   const menu = buildModelMenu(catalogs, config, { kind, filter, recent });
   const { current } = menu;
 
-  const renderModelRow = (providerId: string | null, row: ModelRow): JSX.Element => (
+  const renderModelRow = (harnessId: string | null, row: ModelRow): JSX.Element => (
     <MenuLine
       key={`${row.instanceId}:${row.slug}`}
-      glyph={providerId === null ? null : <ProviderLogo providerId={providerId} size={13} />}
+      glyph={harnessId === null ? null : <HarnessLogo harnessId={harnessId} size={13} />}
       name={row.name}
       detail={describeModelRow(row)}
       current={row.current}
@@ -97,7 +97,7 @@ export function ModelMenu({
           {menu.recent.map((row) => (
             <MenuLine
               key={`${row.instanceId}:${row.model}`}
-              glyph={<ProviderLogo providerId={row.providerId} size={13} />}
+              glyph={<HarnessLogo harnessId={row.harnessId} size={13} />}
               name={row.name}
               detail={row.account}
               note={row.dimmed}
@@ -114,9 +114,9 @@ export function ModelMenu({
       {current.rows.length === 0 && current.older.length === 0 ? null : (
         <div className="pop-sec">
           {current.label === null ? null : <div className="q-h">{current.label}</div>}
-          {current.rows.map((row) => renderModelRow(current.providerId, row))}
+          {current.rows.map((row) => renderModelRow(current.harnessId, row))}
           {current.older.length === 0 ? null : older ? (
-            current.older.map((row) => renderModelRow(current.providerId, row))
+            current.older.map((row) => renderModelRow(current.harnessId, row))
           ) : (
             <button
               type="button"
@@ -137,12 +137,12 @@ export function ModelMenu({
             instance.dimmed === null && instance.rows.length > 0 ? (
               <Fragment key={instance.instanceId}>
                 <div className="q-h">{instance.name}</div>
-                {instance.rows.map((row) => renderModelRow(instance.providerId, row))}
+                {instance.rows.map((row) => renderModelRow(instance.harnessId, row))}
               </Fragment>
             ) : (
               <MenuLine
                 key={instance.instanceId}
-                glyph={<ProviderLogo providerId={instance.providerId} size={13} />}
+                glyph={<HarnessLogo harnessId={instance.harnessId} size={13} />}
                 name={instance.name}
                 detail={describeAccountRow(instance)}
                 note={instance.dimmed ?? instance.models}

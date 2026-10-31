@@ -7,7 +7,7 @@ import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import type { OpenRequest, ProviderEvent, SessionSpec, Usage } from "@hercule/protocol";
+import type { OpenRequest, HarnessEvent, SessionSpec, Usage } from "@hercule/protocol";
 import type { InputNotDelivered } from "@hercule/protocol";
 import { now } from "../../report";
 import { buildInputStopped, buildSessionNotRunning } from "../adapter-error-builders";
@@ -118,7 +118,7 @@ export const makeCodexThreads = (options: {
   readonly rootThreadId: string;
   readonly spec: SessionSpec;
   readonly rpc: Rpc;
-  readonly emit: (event: ProviderEvent) => void;
+  readonly emit: (event: HarnessEvent) => void;
   readonly dispatch: (
     thread: CodexThreadState,
     frame: CodexThreadFrame,
@@ -856,7 +856,7 @@ export const makeCodexThreads = (options: {
     /** Emits each child's report and a fresh aggregate envelope for its session. */
     recordUsage: (
       thread: CodexThreadState,
-      event: Extract<ProviderEvent, { _tag: "session.usage.updated" }>,
+      event: Extract<HarnessEvent, { _tag: "session.usage.updated" }>,
     ): void => {
       thread.usage = event.usage ?? event.usageReport.counts;
       if (event.subagentId !== undefined) options.emit(event);

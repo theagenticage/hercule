@@ -104,7 +104,7 @@ type ItemStartedBody = Extract<EventBody, { _tag: "item.started" }>;
 /** The kind of item a transcript row starts. */
 type ItemKind = ItemStartedBody["kind"];
 
-/** What the provider reports about an item as it starts and completes. */
+/** What the harness reports about an item as it starts and completes. */
 type ItemDetail = NonNullable<ItemStartedBody["detail"]>;
 
 /** One event of the transcript, and how many seconds after `TURN_START` it happened. */
@@ -307,7 +307,7 @@ const COMPACTION_SUMMARY = [
 
 /**
  * The Fix thread with the runtime notices, the labelled unknown step and the
- * finished compaction the provider reports, which the book never draws:
+ * finished compaction the harness reports, which the book never draws:
  *
  * - "Conversation was cleared", before the turn starts, in no turn;
  * - "Recalled 3 memories", between two reads of the first stretch;

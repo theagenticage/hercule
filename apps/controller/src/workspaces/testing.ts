@@ -23,7 +23,7 @@ import {
 } from "@hercule/plugin-host";
 import { withTransaction } from "../db";
 import { get, post } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import {
   reportEvent,
   spawnSessionOrFail,
@@ -74,7 +74,7 @@ export const withFleet = (
     plugins: [
       createPluginFixture({
         id: "providers",
-        definitions: [buildProviderDefinition("test-provider")],
+        definitions: [buildHarnessDefinition("test-provider")],
       }).plugin,
       ...(options.plugins ?? []),
     ],

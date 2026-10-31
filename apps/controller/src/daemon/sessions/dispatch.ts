@@ -144,9 +144,9 @@ const make = Effect.gen(function* () {
               return yield* sessions.claimStarts(runnerId, room, {
                 readGithubAccount: accounts.readGithubAccount,
                 readGitIdentity: accounts.readGitIdentity,
-                readSecrets: (instanceId, providerId) =>
+                readSecrets: (instanceId, harnessId) =>
                   Effect.flatMap(host.providers(), (registered) =>
-                    readInstanceSecrets(secrets, registered, instanceId, providerId),
+                    readInstanceSecrets(secrets, registered, instanceId, harnessId),
                   ),
                 buildCoordination: (sessionId) =>
                   Effect.provideService(

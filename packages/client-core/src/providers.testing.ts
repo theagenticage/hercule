@@ -63,16 +63,16 @@ const DECLARED: ProviderInstance["declared"] = {
 };
 
 export const buildInstance = (
-  providerId: string,
+  harnessId: string,
   displayName: string,
   snapshots: ProviderInstance["snapshots"] = [],
 ): ProviderInstance => ({
-  id: `instance-${providerId}`,
-  providerId,
+  id: `instance-${harnessId}`,
+  harnessId,
   name: displayName,
   config: {},
   displayName,
-  binaryName: providerId === "claude-code" ? "claude" : providerId,
+  binaryName: harnessId === "claude-code" ? "claude" : harnessId,
   declared: DECLARED,
   secretFields: [],
   snapshots,

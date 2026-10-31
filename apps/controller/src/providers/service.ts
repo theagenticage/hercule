@@ -24,7 +24,7 @@ import {
   decodeAgainst,
   listSecretFields,
   excludeSecretFields,
-  type ProviderDefinition,
+  type HarnessDefinition,
 } from "@hercule/plugin-host";
 import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
@@ -114,7 +114,7 @@ const ProbeInput = Schema.Struct({ runnerId: Id, instanceId: Id });
 
 export type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
 
-const InstallInput = Schema.Struct({ runnerId: Id, providerId: Schema.String });
+const InstallInput = Schema.Struct({ runnerId: Id, harnessId: Schema.String });
 
 export type InstallInput = Schema.Schema.Type<typeof InstallInput>;
 
@@ -167,7 +167,7 @@ const describeLoginFailure = (answer: LoginAnswer): string =>
  * name.
  */
 const readConfig = (
-  definition: ProviderDefinition,
+  definition: HarnessDefinition,
   config: Schema.Json,
 ): Effect.Effect<void, Validation> =>
   Effect.asVoid(
@@ -199,7 +199,7 @@ const make = Effect.gen(function* () {
    * never what it is.
    */
   const listInstanceSecretFields = (
-    definition: ProviderDefinition,
+    definition: HarnessDefinition,
     stored: ReadonlyArray<SecretNameRef>,
   ): ProviderInstance["secretFields"] =>
     listSecretFields(definition.configSchema).map((field) => ({
@@ -209,7 +209,7 @@ const make = Effect.gen(function* () {
 
   const buildProviderInstance = (
     stored: StoredInstance,
-    definition: ProviderDefinition,
+    definition: HarnessDefinition,
     snapshots: ReadonlyArray<StoredSnapshot>,
     held: ReadonlyArray<SecretNameRef>,
   ): ProviderInstance => ({
@@ -226,7 +226,7 @@ const make = Effect.gen(function* () {
         harnessVersion: snapshot.harnessVersion,
         versionVerdict: computeVersionVerdict(
           snapshot.harnessVersion,
-          findVersionFloor(stored.providerId),
+          findVersionFloor(stored.harnessId),
         ),
         auth: snapshot.auth,
         models: snapshot.models,
@@ -246,7 +246,7 @@ const make = Effect.gen(function* () {
       stored.map((row) => row.id),
     );
     return stored.flatMap((row) => {
-      const definition = known.get(row.providerId);
+      const definition = known.get(row.harnessId);
       return definition === undefined
         ? []
         : [buildProviderInstance(row, definition, snapshots, held.get(row.id) ?? [])];
@@ -267,7 +267,7 @@ const make = Effect.gen(function* () {
       const snapshots = yield* instances.listSnapshots(id);
       const held = yield* secrets.refs(OWNER_KIND, [id]);
       const found = Option.flatMap(stored, (row) =>
-        Option.map(Option.fromNullishOr(known.get(row.providerId)), (definition) =>
+        Option.map(Option.fromNullishOr(known.get(row.harnessId)), (definition) =>
           buildProviderInstance(row, definition, snapshots, held.get(id) ?? []),
         ),
       );
@@ -277,15 +277,15 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const readProviderDefinitionOrFail = (
+  const readHarnessDefinitionOrFail = (
     id: string,
-  ): Effect.Effect<ProviderDefinition, Validation | SqlError> =>
+  ): Effect.Effect<HarnessDefinition, Validation | SqlError> =>
     Effect.flatMap(definitions, (known) => {
       const definition = known.get(id);
       return definition === undefined
         ? Effect.fail(
             createValidationError([
-              { path: ["providerId"], message: `no plugin registered the provider ${id}` },
+              { path: ["harnessId"], message: `no plugin registered the provider ${id}` },
             ]),
           )
         : Effect.succeed(definition);
@@ -300,11 +300,11 @@ const make = Effect.gen(function* () {
 
   const validateRunnerCanDrive = (
     runnerId: string,
-    providerId: string,
+    harnessId: string,
     field: string,
   ): Effect.Effect<void, AskError> =>
     Effect.flatMap(readRunnerOrFail(runnerId), (runner) =>
-      requireAdapter(runner, providerId, field),
+      requireAdapter(runner, harnessId, field),
     );
 
   const askRunner = (
@@ -354,7 +354,7 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const instance = yield* readInstanceOrFail(id);
-        yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        yield* validateRunnerCanDrive(runnerId, instance.harnessId, "runnerId");
         const requestId = crypto.randomUUID();
         // Expected before the runner is asked, because a device login that
         // fails at once can report its end before this fiber reads the answer.
@@ -364,7 +364,7 @@ const make = Effect.gen(function* () {
         yield* probes.expectLoginEnd(runnerId, id, requestId);
         const answer = yield* askRunner(
           runnerId,
-          { _tag: "loginStart", requestId, instanceId: id, providerId: instance.providerId },
+          { _tag: "loginStart", requestId, instanceId: id, harnessId: instance.harnessId },
           yield* ProviderLoginDeadline,
         ).pipe(Effect.onError(() => probes.forgetLoginEnd(runnerId, requestId)));
         if (answer._tag !== "loginUrl") {
@@ -407,7 +407,7 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const instance = yield* readInstanceOrFail(id);
-        yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        yield* validateRunnerCanDrive(runnerId, instance.harnessId, "runnerId");
         const answer = yield* askRunner(
           runnerId,
           { _tag: "loginCode", requestId: crypto.randomUUID(), instanceId: id, code },
@@ -499,14 +499,14 @@ const make = Effect.gen(function* () {
     installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.installHarness");
-        const { runnerId, providerId } = yield* Effect.mapError(
+        const { runnerId, harnessId } = yield* Effect.mapError(
           decodeInstall(input),
           createDecodeValidationError,
         );
-        yield* validateRunnerCanDrive(runnerId, providerId, "providerId");
+        yield* validateRunnerCanDrive(runnerId, harnessId, "harnessId");
         const answer = yield* connections.asked(
           runnerId,
-          { _tag: "installRequest", requestId: crypto.randomUUID(), providerId },
+          { _tag: "installRequest", requestId: crypto.randomUUID(), harnessId },
           HARNESS_INSTALL_DEADLINE,
         );
         if (Option.isNone(answer) || answer.value._tag !== "installResult") {
@@ -532,7 +532,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("provider.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
-        const definition = yield* readProviderDefinitionOrFail(decoded.providerId);
+        const definition = yield* readHarnessDefinitionOrFail(decoded.harnessId);
         yield* readConfig(definition, decoded.config);
         return yield* withTransaction(
           sql,
@@ -541,11 +541,11 @@ const make = Effect.gen(function* () {
             // single-account provider two instances.
             if (!definition.supportsMultipleInstances) {
               const existing = yield* instances.list();
-              if (existing.some((row) => row.providerId === definition.id)) {
+              if (existing.some((row) => row.harnessId === definition.id)) {
                 return yield* Effect.fail(
                   createValidationError([
                     {
-                      path: ["providerId"],
+                      path: ["harnessId"],
                       message: `${definition.displayName} supports only one account, and one already exists`,
                     },
                   ]),
@@ -559,7 +559,7 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "provider.created",
               actor: yield* currentStamp,
-              payload: { instanceId: stored.id, providerId: stored.providerId },
+              payload: { instanceId: stored.id, harnessId: stored.harnessId },
               record: { topic: "provider", id: stored.id },
               at,
             });
@@ -591,7 +591,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const before = yield* readInstanceOrFail(id);
             if (patch.config !== undefined) {
-              yield* Effect.flatMap(readProviderDefinitionOrFail(before.providerId), (definition) =>
+              yield* Effect.flatMap(readHarnessDefinitionOrFail(before.harnessId), (definition) =>
                 readConfig(definition, patch.config as Schema.Json),
               );
             }
@@ -651,7 +651,7 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "provider.deleted",
               actor: yield* currentStamp,
-              payload: { instanceId: id, providerId: stored.providerId, name: stored.name },
+              payload: { instanceId: id, harnessId: stored.harnessId, name: stored.name },
               record: { topic: "provider", id },
               at,
             });

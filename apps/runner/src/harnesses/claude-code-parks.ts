@@ -13,7 +13,7 @@ import type { PermissionResult, PermissionUpdate } from "@anthropic-ai/claude-ag
 import type {
   ApprovalDecision,
   OpenRequest,
-  ProviderEvent,
+  HarnessEvent,
   QuestionAnswers,
   RequestResolution,
   SubagentId,
@@ -191,7 +191,7 @@ const buildAnsweredResult = (
 export const openPark = (
   parks: Parks,
   stamping: EventStamping,
-  emit: (event: ProviderEvent) => void,
+  emit: (event: HarnessEvent) => void,
   call: ParkedCall,
 ): { readonly result: Promise<PermissionResult>; readonly opened: RequestOpened } => {
   const { request, subagentId } = call;

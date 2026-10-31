@@ -16,7 +16,7 @@ import {
   type ModelOption,
   type ProbeResult,
 } from "@hercule/protocol";
-import type { InstallOutcome, ProviderRunnerContext } from "../index";
+import type { InstallOutcome, HarnessRunnerContext } from "../index";
 import { makeInstall } from "../install";
 import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Run } from "../process";
@@ -194,12 +194,9 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
  */
 export const makeProbe =
   (
-    openHost: (
-      ctx: ProviderRunnerContext,
-      binary: string,
-    ) => Effect.Effect<AppServer, AdapterError>,
+    openHost: (ctx: HarnessRunnerContext, binary: string) => Effect.Effect<AppServer, AdapterError>,
   ) =>
-  (ctx: ProviderRunnerContext, binary: string): Effect.Effect<ProbeResult> => {
+  (ctx: HarnessRunnerContext, binary: string): Effect.Effect<ProbeResult> => {
     // A probe starts its own process and kills it when done. Sharing a
     // session's connection would keep an app-server alive for a Fleet page
     // nobody is looking at any more.

@@ -482,7 +482,7 @@ const buildHoverDetails = (
     machine: row.machine,
     branch: row.branch,
     model: lead.model,
-    providerId: lead.providerId,
+    harnessId: lead.harnessId,
     members: row.summary === null ? [] : row.summary.membersByUrgency,
   };
 };

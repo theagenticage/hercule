@@ -1,17 +1,17 @@
 import { Effect, Schema } from "effect";
 import {
   HOST_API,
-  registerProvider,
+  registerHarness,
   type Plugin,
-  type ProviderDefinition,
+  type HarnessDefinition,
 } from "@hercule/plugin-host";
 
 /**
  * What `codex app-server` can do, at the version Hercule pins. Every value is a
  * fact, so the controller and the UI decide what to offer from these values
- * rather than from the provider's name.
+ * rather than from the harness's name.
  */
-const definition: ProviderDefinition = {
+const definition: HarnessDefinition = {
   id: "codex",
   displayName: "Codex",
   binaryName: "codex",
@@ -47,8 +47,8 @@ export const codex: Plugin = {
     capabilities: ["providers"],
     configSchema: Schema.Struct({}),
   },
-  register: (host) => registerProvider(host, definition),
-  // Nothing runs on the controller for a provider: the runner runs sessions,
+  register: (host) => registerHarness(host, definition),
+  // Nothing runs on the controller for a harness: the runner runs sessions,
   // based on the definition above.
   activate: () => Effect.succeed(Effect.void),
 };

@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { Session } from "@hercule/contract";
-import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
 import {
   MAX_OUTPUT_SCHEMA_LENGTH,
   type ModelDescriptor,
@@ -20,7 +20,7 @@ import {
 } from "@hercule/protocol";
 import { withTransaction } from "../../db";
 import { del, get, post, send } from "../../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../../plugins/testing";
 import {
   spawnThreadUnder,
   findInstanceId,
@@ -53,17 +53,17 @@ import {
   type Frame,
 } from "../../workspaces/testing";
 
-/** A provider that supports everything natively, and is not the thread default. */
-const ALPHA: ProviderDefinition = buildProviderDefinition("alpha-provider", { token: "t" });
+/** A harness that supports everything natively, and is not the thread default. */
+const ALPHA: HarnessDefinition = buildHarnessDefinition("alpha-provider", { token: "t" });
 
-/** The provider the tests set as the thread default. */
-const BETA: ProviderDefinition = buildProviderDefinition("beta-provider", { token: "t" });
+/** The harness the tests set as the thread default. */
+const BETA: HarnessDefinition = buildHarnessDefinition("beta-provider", { token: "t" });
 
-/** A provider that stores a tool restriction but does not enforce it, like Codex. */
-const GAMMA: ProviderDefinition = {
-  ...buildProviderDefinition("gamma-provider", { token: "t" }),
+/** A harness that stores a tool restriction but does not enforce it, like Codex. */
+const GAMMA: HarnessDefinition = {
+  ...buildHarnessDefinition("gamma-provider", { token: "t" }),
   declared: {
-    ...buildProviderDefinition("gamma-provider").declared,
+    ...buildHarnessDefinition("gamma-provider").declared,
     disallowedTools: "unsupported",
   },
 };

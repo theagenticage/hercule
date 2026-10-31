@@ -5,7 +5,7 @@ import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.ConversationSenderRole
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.SessionStatus
 import dev.hercule.android.wire.StreamKind
@@ -92,8 +92,8 @@ private class RunningTurn(
  * harness can complete an item under a later turn.
  */
 private fun readRunningTurn(rows: List<TranscriptRow>, reply: AssistantReply): RunningTurn? {
-    val start = rows.indexOfLast { it.event is ProviderEvent.TurnStarted }
-    val turnId = (rows.getOrNull(start)?.event as? ProviderEvent.TurnStarted)?.turnId ?: return null
+    val start = rows.indexOfLast { it.event is HarnessEvent.TurnStarted }
+    val turnId = (rows.getOrNull(start)?.event as? HarnessEvent.TurnStarted)?.turnId ?: return null
 
     val texts = mutableListOf<AssistantText>()
     val byId = HashMap<String, AssistantText>()
@@ -108,17 +108,17 @@ private fun readRunningTurn(rows: List<TranscriptRow>, reply: AssistantReply): R
 
     for (row in rows.subList(start + 1, rows.size)) {
         when (val event = row.event) {
-            is ProviderEvent.TurnCompleted -> if (event.turnId == turnId && end == null) end = TurnEnd(row.at, event.state)
-            is ProviderEvent.SessionExited, ProviderEvent.SessionStarted -> if (end == null) end = TurnEnd(row.at, null)
-            is ProviderEvent.ItemStarted ->
+            is HarnessEvent.TurnCompleted -> if (event.turnId == turnId && end == null) end = TurnEnd(row.at, event.state)
+            is HarnessEvent.SessionExited, HarnessEvent.SessionStarted -> if (end == null) end = TurnEnd(row.at, null)
+            is HarnessEvent.ItemStarted ->
                 if (event.kind == ItemKind.AssistantMessage && event.turnId == turnId && event.itemId !in byId) placeText(event.itemId)
-            is ProviderEvent.ContentDelta -> {
+            is HarnessEvent.ContentDelta -> {
                 if (event.streamKind != StreamKind.AssistantText || event.turnId != turnId) continue
                 val text = byId[event.itemId] ?: (if (reply == AssistantReply.TurnEnd) placeText(event.itemId) else null) ?: continue
                 text.rowText += event.delta
                 if (withTextRow.add(text.itemId)) lastText = text
             }
-            is ProviderEvent.ItemCompleted -> {
+            is HarnessEvent.ItemCompleted -> {
                 val text = byId[event.itemId]
                 if (text != null && text.status == null) {
                     text.status = event.status
@@ -281,8 +281,8 @@ internal fun findOpenItem(rows: List<TranscriptRow>): String? {
     val completed = HashSet<String>()
     for (row in rows) {
         when (val event = row.event) {
-            is ProviderEvent.ItemStarted -> if (event.kind != ItemKind.UserMessage) started += event.itemId
-            is ProviderEvent.ItemCompleted -> if (event.kind != ItemKind.UserMessage) completed += event.itemId
+            is HarnessEvent.ItemStarted -> if (event.kind != ItemKind.UserMessage) started += event.itemId
+            is HarnessEvent.ItemCompleted -> if (event.kind != ItemKind.UserMessage) completed += event.itemId
             else -> Unit
         }
     }

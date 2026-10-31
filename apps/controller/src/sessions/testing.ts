@@ -33,7 +33,7 @@ import {
   type ProbeRequest,
   type RunnerFacts,
   type RunnerToController as RunnerMessage,
-  type ProviderEvent,
+  type HarnessEvent,
   type RepositorySkillsInspect,
   type RepositorySkillsInspection,
   type RepositorySkillsPreview,
@@ -43,7 +43,7 @@ import {
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
-import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
 import type {
   Grant,
   Input,
@@ -54,7 +54,7 @@ import type {
   SessionSpawnInput,
 } from "@hercule/contract";
 import { WORKSPACE_ACTION_IDS } from "../plugins";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import {
   completeSetup,
   get,
@@ -201,7 +201,7 @@ export const waitForFrames = <T extends ControllerMessage>(
   });
 
 /** Sends one normalized event from this runner, with the given sequence number. */
-export const reportEvent = (wire: Wire, seq: number, event: ProviderEvent): void =>
+export const reportEvent = (wire: Wire, seq: number, event: HarnessEvent): void =>
   wire.send({ _tag: "sessionEvent", seq, event });
 
 const decodeFrame = (raw: unknown): ControllerMessage =>
@@ -347,7 +347,7 @@ const dial = (
 
 export interface ProviderInstance {
   readonly id: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly snapshots: ReadonlyArray<unknown>;
 }
 
@@ -513,10 +513,10 @@ export const withFleet = (
   }, options);
 };
 
-/** Returns the id of the provider instance created for a provider, by the provider's id. */
-export const findInstanceId = (arranged: Arranged, providerId: string): string => {
-  const found = arranged.instances.find((instance) => instance.providerId === providerId);
-  expect(found, providerId).toBeDefined();
+/** Returns the id of the provider instance created for a harness, by the harness id. */
+export const findInstanceId = (arranged: Arranged, harnessId: string): string => {
+  const found = arranged.instances.find((instance) => instance.harnessId === harnessId);
+  expect(found, harnessId).toBeDefined();
   return found!.id;
 };
 
@@ -590,7 +590,7 @@ export const spawnSessionOrFail = async (arranged: Arranged, body: unknown): Pro
  * runner, the profile lookup and the start frame are set up in one place.
  */
 
-const AGENT_PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
+const AGENT_HARNESS = buildHarnessDefinition("full-provider", { token: "t" });
 
 const AGENT_FACTS = {
   os: "darwin",
@@ -617,18 +617,18 @@ export const withAgentFleet = (
   body: (arranged: Arranged) => Promise<void>,
   {
     plugins = [],
-    steering = AGENT_PROVIDER.declared.steering,
+    steering = AGENT_HARNESS.declared.steering,
     ...options
   }: Omit<FleetOptions, "plugins" | "facts" | "models"> & {
     readonly plugins?: ReadonlyArray<Plugin>;
-    readonly steering?: ProviderDefinition["declared"]["steering"];
+    readonly steering?: HarnessDefinition["declared"]["steering"];
   } = {},
 ): Promise<void> =>
   withFleet(body, {
     plugins: [
       createPluginFixture({
         id: "providers",
-        definitions: [{ ...AGENT_PROVIDER, declared: { ...AGENT_PROVIDER.declared, steering } }],
+        definitions: [{ ...AGENT_HARNESS, declared: { ...AGENT_HARNESS.declared, steering } }],
       }).plugin,
       ...plugins,
     ],
@@ -837,7 +837,7 @@ export const spawnThreadUnder = async (
     sessionId: opened.id,
     at,
     _tag: "session.started",
-    providerRefs: { nativeSessionId: "native-1" },
+    harnessRefs: { nativeSessionId: "native-1" },
   });
   const session = await waitForSession(arranged, opened.id, (one) => one.status === "busy");
   return { session, token };

@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { OutputSchema, ProviderEvent, SessionSpec, SubagentId } from "@hercule/protocol";
+import type { OutputSchema, HarnessEvent, SessionSpec, SubagentId } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import type { EditMarks } from "../index";
 import {
@@ -202,7 +202,7 @@ const awaitReply = async (parent: Spawn, subagent: StartedSubagent): Promise<Sub
 const filterEventsByAgent = (
   run: DrivenAdapter,
   subagentId: SubagentId | undefined,
-): ReadonlyArray<ProviderEvent> =>
+): ReadonlyArray<HarnessEvent> =>
   run.seen.filter(
     (event) =>
       event._tag !== "subagent.started" &&
@@ -213,7 +213,7 @@ const filterEventsByAgent = (
 const awaitTurnCompleted = async (
   run: DrivenAdapter,
   subagentId: SubagentId | undefined,
-): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+): Promise<Extract<HarnessEvent, { _tag: "turn.completed" }>> => {
   const find = () =>
     filterByTag(run.seen, "turn.completed").find((event) => event.subagentId === subagentId);
   await waitUntil(

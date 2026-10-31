@@ -14,7 +14,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import {
   startBusySession,
   cleanupHomes,
@@ -85,7 +85,7 @@ const parkOnCommand = (): Promise<DrivenAdapter> => parkOnTool("bash", { command
 
 const awaitOpenedRequest = async (
   run: DrivenAdapter,
-): Promise<Extract<ProviderEvent, { _tag: "request.opened" }>> => {
+): Promise<Extract<HarnessEvent, { _tag: "request.opened" }>> => {
   await waitUntil("docked the request", () => filterByTag(run.seen, "request.opened").length === 1);
   return filterByTag(run.seen, "request.opened")[0]!;
 };
@@ -102,7 +102,7 @@ const awaitAnswer = async (run: DrivenAdapter, id: string): Promise<Record<strin
 
 const awaitResolvedRequest = async (
   run: DrivenAdapter,
-): Promise<Extract<ProviderEvent, { _tag: "request.resolved"; decision: unknown }>> => {
+): Promise<Extract<HarnessEvent, { _tag: "request.resolved"; decision: unknown }>> => {
   await waitUntil("ended the park", () => filterByTag(run.seen, "request.resolved").length === 1);
   const [resolved] = filterByTag(run.seen, "request.resolved");
   // pi parks only on approvals, so a request it resolves always carries a decision.

@@ -206,7 +206,7 @@ describe("toolchains", () => {
   });
 });
 
-describe("provider binaries", () => {
+describe("harness binaries", () => {
   it("lists every known provider, present or not", async () => {
     const { codex, ...withoutCodex } = FULL;
     expect(codex).toBeDefined();
@@ -358,7 +358,7 @@ describe("adapters", () => {
     expect((await probePrinted({ git: GIT })).adapters).toEqual(["claude-code", "codex", "pi"]);
   });
 
-  it("still reports every provider binary and whether it is installed", async () => {
+  it("still reports every harness binary and whether it is installed", async () => {
     const { codex, ...withoutCodex } = FULL;
     expect(codex).toBeDefined();
 

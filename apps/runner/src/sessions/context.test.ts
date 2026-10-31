@@ -26,7 +26,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { Effect } from "effect";
 import type { SessionStart } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "./context";
-import { NO_USER_MATERIAL_PATHS } from "../providers/testing";
+import { NO_USER_MATERIAL_PATHS } from "../harnesses/testing";
 
 import {
   addBranch,
@@ -40,7 +40,7 @@ import {
 import { makeAttachmentCache } from "../attachments";
 import { inspectRepositorySkills, makeSessionSkillsFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
-import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "../harnesses/testing";
 
 /**
  * The file system as the tests see it:
@@ -139,7 +139,7 @@ const buildSessionStart = (overrides: Partial<SessionStart> = {}): SessionStart 
   requestId: "0199e0e7-0000-7000-8000-0000000000fc",
   sessionId: SESSION,
   input: { text: "hi" },
-  providerId: "claude-code",
+  harnessId: "claude-code",
   config: {},
   secrets: {},
   token: "a-session-token",

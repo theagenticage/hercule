@@ -12,11 +12,11 @@ import type {
   TextGenerationOutcome,
   TextGenerationRequest,
 } from "@hercule/protocol";
-import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
 import { SYSTEM_ACTOR } from "../../actor";
 import { uuidFromString, withTransaction } from "../../db";
 import { get, send } from "../../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../../plugins/testing";
 import {
   findInstanceId,
   waitForFrames,
@@ -36,9 +36,9 @@ const SECRET_INSTRUCTIONS = "Name the thread in four words";
 const SECRET_INPUT = "the user pasted a private key here";
 const TITLE = "Fix the login bug";
 
-/** The three providers `automatic` tries, each suggesting a model of its own. */
-const withSuggestion = (id: string, model: string): ProviderDefinition => ({
-  ...buildProviderDefinition(id, { token: "t" }),
+/** The three harnesses `automatic` tries, each suggesting a model of its own. */
+const withSuggestion = (id: string, model: string): HarnessDefinition => ({
+  ...buildHarnessDefinition(id, { token: "t" }),
   suggestedTextGenerationModel: model,
 });
 
@@ -196,7 +196,7 @@ describe("a text generation that succeeds", () => {
       );
       expect(request).toMatchObject({
         instanceId: findInstanceId(arranged, "codex"),
-        providerId: "codex",
+        harnessId: "codex",
         secrets: {},
         spec: {
           model: "codex-mini",
@@ -478,7 +478,7 @@ describe("the model automatic chooses", () => {
 
       expect(result).toEqual({ ok: true, value: { title: TITLE } });
       expect(requestsOn(arranged)[0]).toMatchObject({
-        providerId: "pi",
+        harnessId: "pi",
         spec: { model: "pi-small" },
       });
     });
@@ -566,7 +566,7 @@ describe("a model the user chose", () => {
 
       expect(requestsOn(arranged)[0]).toMatchObject({
         instanceId: pi,
-        providerId: "pi",
+        harnessId: "pi",
         spec: { model: "haiku" },
       });
       expect(await readStatus(arranged)).toMatchObject({

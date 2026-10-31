@@ -18,8 +18,7 @@ const FLOORS: ReadonlyMap<string, string> = new Map([
   ["pi", PI_VERSION],
 ]);
 
-export const findVersionFloor = (providerId: string): string | null =>
-  FLOORS.get(providerId) ?? null;
+export const findVersionFloor = (harnessId: string): string | null => FLOORS.get(harnessId) ?? null;
 
 /**
  * Parses the first three dot-separated components of a version as numbers, so

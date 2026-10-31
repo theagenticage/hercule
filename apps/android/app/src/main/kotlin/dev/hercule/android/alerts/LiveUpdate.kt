@@ -6,7 +6,7 @@ import dev.hercule.android.wire.CommandApproval
 import dev.hercule.android.wire.FileChangeApproval
 import dev.hercule.android.wire.FileReadApproval
 import dev.hercule.android.wire.ItemKind
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.QuestionRequest
 import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.SessionRequest
@@ -117,12 +117,12 @@ private data class Step(val kind: ItemKind, val detail: JsonElement?, val isDone
  */
 private fun readCurrentTurnSteps(transcript: List<TranscriptRow>): List<Step> {
     val events = transcript.map { it.event }
-    val start = events.indexOfLast { it is ProviderEvent.TurnStarted && it.subagentId == null }
+    val start = events.indexOfLast { it is HarnessEvent.TurnStarted && it.subagentId == null }
     if (start < 0) return emptyList()
     return events.drop(start + 1).mapNotNull { event ->
         when (event) {
-            is ProviderEvent.ItemStarted -> event.takeIf { it.subagentId == null }?.let { Step(it.kind, it.detail, isDone = false) }
-            is ProviderEvent.ItemCompleted -> event.takeIf { it.subagentId == null }?.let { Step(it.kind, it.detail, isDone = true) }
+            is HarnessEvent.ItemStarted -> event.takeIf { it.subagentId == null }?.let { Step(it.kind, it.detail, isDone = false) }
+            is HarnessEvent.ItemCompleted -> event.takeIf { it.subagentId == null }?.let { Step(it.kind, it.detail, isDone = true) }
             else -> null
         }
     }.filter { it.kind != ItemKind.AssistantMessage && it.kind != ItemKind.Reasoning }

@@ -24,30 +24,30 @@ import kotlinx.serialization.json.jsonObject
 data class TranscriptRow(
     val position: Long,
     val at: String,
-    val event: ProviderEvent,
+    val event: HarnessEvent,
 )
 
 /**
  * One event a harness reported, picked by the wire's `_tag`. A tag this build does not know
  * decodes to [Unknown] instead of failing the whole page.
  *
- * The envelope every event carries (`eventId`, `sessionId`, `at`, `providerRefs`, `raw`) is
+ * The envelope every event carries (`eventId`, `sessionId`, `at`, `harnessRefs`, `raw`) is
  * not modelled: the enclosing [TranscriptRow] already gives the position and time, and the
  * session is known from the request. `subagentId`, where present, names the subagent the
  * event belongs to; null means the session's own agent.
  */
-@Serializable(with = ProviderEventSerializer::class)
-sealed interface ProviderEvent {
+@Serializable(with = HarnessEventSerializer::class)
+sealed interface HarnessEvent {
     /** The session's process started. */
     @Serializable
-    data object SessionStarted : ProviderEvent
+    data object SessionStarted : HarnessEvent
 
     /** The session's process ended. [message] explains the exit when the reason alone does not. */
     @Serializable
     data class SessionExited(
         val reason: ExitReason,
         val message: String? = null,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /** A subagent was introduced, before any event of its own. */
     @Serializable
@@ -58,14 +58,14 @@ sealed interface ProviderEvent {
         val itemId: String? = null,
         val description: String? = null,
         val agentType: String? = null,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     @Serializable
     data class TurnStarted(
         val subagentId: String? = null,
         val turnId: String,
         val model: String? = null,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     @Serializable
     data class TurnCompleted(
@@ -75,7 +75,7 @@ sealed interface ProviderEvent {
         val usage: Usage? = null,
         val costUsd: Double? = null,
         val error: String? = null,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /**
      * An item began. [detail] is any JSON value, usually an object whose keys differ per
@@ -89,7 +89,7 @@ sealed interface ProviderEvent {
         val itemId: String,
         val kind: ItemKind,
         val detail: JsonElement? = null,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /** An item ended. [detail] follows the same rules as on [ItemStarted]. */
     @Serializable
@@ -100,7 +100,7 @@ sealed interface ProviderEvent {
         val kind: ItemKind,
         val detail: JsonElement? = null,
         val status: ItemStatus,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /** Text appended to one item's stream. Append deltas in order, keyed by [itemId]. */
     @Serializable
@@ -110,7 +110,7 @@ sealed interface ProviderEvent {
         val itemId: String,
         val streamKind: StreamKind,
         val delta: String,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /**
      * A token snapshot. [usage] is null when the harness could only report an incomplete
@@ -120,14 +120,14 @@ sealed interface ProviderEvent {
     data class SessionUsageUpdated(
         val subagentId: String? = null,
         val usage: Usage? = null,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     @Serializable
     data class RuntimeWarning(
         val subagentId: String? = null,
         val turnId: String? = null,
         val message: String,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /** Neutral information about the session, such as "Conversation was cleared". Nothing went wrong. */
     @Serializable
@@ -135,7 +135,7 @@ sealed interface ProviderEvent {
         val subagentId: String? = null,
         val turnId: String? = null,
         val message: String,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /** [errorClass] is an open vocabulary, such as `rate_limit`; show it as it is. */
     @Serializable
@@ -144,7 +144,7 @@ sealed interface ProviderEvent {
         val turnId: String? = null,
         @SerialName("class") val errorClass: String,
         val message: String? = null,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /**
      * An agent asked [request]. It waits for the answer, except for an async question, which the
@@ -154,7 +154,7 @@ sealed interface ProviderEvent {
     data class RequestOpened(
         val subagentId: String? = null,
         val request: SessionRequest,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /**
      * An agent stopped waiting on a request: with a [decision] for an approval, or with the
@@ -166,7 +166,7 @@ sealed interface ProviderEvent {
         val requestId: String,
         val decision: ApprovalDecision? = null,
         val answers: QuestionAnswers? = null,
-    ) : ProviderEvent
+    ) : HarnessEvent
 
     /**
      * An event this build has no class for. [json] holds the whole event. It arrives in one of two
@@ -176,8 +176,8 @@ sealed interface ProviderEvent {
      *   `originalType` and the event itself in `payload`;
      * - a raw event with a `_tag` this build does not know, from a controller newer than the app.
      */
-    @Serializable(with = UnknownProviderEventSerializer::class)
-    data class Unknown(val json: JsonObject) : ProviderEvent {
+    @Serializable(with = UnknownHarnessEventSerializer::class)
+    data class Unknown(val json: JsonObject) : HarnessEvent {
         /** The tag the event arrived with, or null when the JSON holds none. */
         val originalType: String?
             get() = if (json.readString("_tag") == UNKNOWN_EVENT_TAG) json.readString("originalType") else json.readString("_tag")
@@ -263,36 +263,36 @@ value class StreamKind(val wire: String) {
 /** The `_tag` of the controller's own event for a tag it did not know. */
 private const val UNKNOWN_EVENT_TAG = "unknown"
 
-/** Picks the [ProviderEvent] subtype from the event's `_tag`. */
-object ProviderEventSerializer :
-    JsonContentPolymorphicSerializer<ProviderEvent>(ProviderEvent::class) {
-    override fun selectDeserializer(element: JsonElement): DeserializationStrategy<ProviderEvent> =
+/** Picks the [HarnessEvent] subtype from the event's `_tag`. */
+object HarnessEventSerializer :
+    JsonContentPolymorphicSerializer<HarnessEvent>(HarnessEvent::class) {
+    override fun selectDeserializer(element: JsonElement): DeserializationStrategy<HarnessEvent> =
         when (element.jsonObject.readString("_tag")) {
-            "session.started" -> ProviderEvent.SessionStarted.serializer()
-            "session.exited" -> ProviderEvent.SessionExited.serializer()
-            "subagent.started" -> ProviderEvent.SubagentStarted.serializer()
-            "turn.started" -> ProviderEvent.TurnStarted.serializer()
-            "turn.completed" -> ProviderEvent.TurnCompleted.serializer()
-            "item.started" -> ProviderEvent.ItemStarted.serializer()
-            "item.completed" -> ProviderEvent.ItemCompleted.serializer()
-            "content.delta" -> ProviderEvent.ContentDelta.serializer()
-            "session.usage.updated" -> ProviderEvent.SessionUsageUpdated.serializer()
-            "runtime.warning" -> ProviderEvent.RuntimeWarning.serializer()
-            "runtime.notice" -> ProviderEvent.RuntimeNotice.serializer()
-            "runtime.error" -> ProviderEvent.RuntimeError.serializer()
-            "request.opened" -> ProviderEvent.RequestOpened.serializer()
-            "request.resolved" -> ProviderEvent.RequestResolved.serializer()
-            else -> UnknownProviderEventSerializer
+            "session.started" -> HarnessEvent.SessionStarted.serializer()
+            "session.exited" -> HarnessEvent.SessionExited.serializer()
+            "subagent.started" -> HarnessEvent.SubagentStarted.serializer()
+            "turn.started" -> HarnessEvent.TurnStarted.serializer()
+            "turn.completed" -> HarnessEvent.TurnCompleted.serializer()
+            "item.started" -> HarnessEvent.ItemStarted.serializer()
+            "item.completed" -> HarnessEvent.ItemCompleted.serializer()
+            "content.delta" -> HarnessEvent.ContentDelta.serializer()
+            "session.usage.updated" -> HarnessEvent.SessionUsageUpdated.serializer()
+            "runtime.warning" -> HarnessEvent.RuntimeWarning.serializer()
+            "runtime.notice" -> HarnessEvent.RuntimeNotice.serializer()
+            "runtime.error" -> HarnessEvent.RuntimeError.serializer()
+            "request.opened" -> HarnessEvent.RequestOpened.serializer()
+            "request.resolved" -> HarnessEvent.RequestResolved.serializer()
+            else -> UnknownHarnessEventSerializer
         }
 }
 
-/** Reads and writes a [ProviderEvent.Unknown] as the JSON object it holds. */
-object UnknownProviderEventSerializer : KSerializer<ProviderEvent.Unknown> {
+/** Reads and writes a [HarnessEvent.Unknown] as the JSON object it holds. */
+object UnknownHarnessEventSerializer : KSerializer<HarnessEvent.Unknown> {
     override val descriptor: SerialDescriptor = JsonObject.serializer().descriptor
 
-    override fun deserialize(decoder: Decoder): ProviderEvent.Unknown =
-        ProviderEvent.Unknown((decoder as JsonDecoder).decodeJsonElement().jsonObject)
+    override fun deserialize(decoder: Decoder): HarnessEvent.Unknown =
+        HarnessEvent.Unknown((decoder as JsonDecoder).decodeJsonElement().jsonObject)
 
-    override fun serialize(encoder: Encoder, value: ProviderEvent.Unknown) =
+    override fun serialize(encoder: Encoder, value: HarnessEvent.Unknown) =
         (encoder as JsonEncoder).encodeJsonElement(value.json)
 }

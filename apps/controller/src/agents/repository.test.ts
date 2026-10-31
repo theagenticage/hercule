@@ -24,7 +24,7 @@ const insertAgent = (name: string, permissionProfileId: string, at: string) =>
       sql,
       agents.insert({
         kind: "agent",
-        providerId: "claude-provider",
+        harnessId: "claude-provider",
         name,
         systemPrompt: "do the work",
         instanceId: mintId(),

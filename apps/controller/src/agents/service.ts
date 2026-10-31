@@ -129,7 +129,7 @@ const make = Effect.gen(function* () {
   // enforces `session.query` on the caller, and deleting an agent is not a
   // read of anybody's sessions.
   const sessions = yield* sessionRepository;
-  const { buildAgentRecordComposer, readProviderIdOrFail, validateAgentProfile } =
+  const { buildAgentRecordComposer, readHarnessIdOrFail, validateAgentProfile } =
     yield* buildAgentFieldChecks;
   const audit = yield* AuditLog;
   const observer = yield* AgentObserver;
@@ -210,7 +210,7 @@ const make = Effect.gen(function* () {
             // read before the transaction can be deleted between that read and
             // the insert, which would store an agent that names a row that is
             // gone.
-            const providerId = yield* readProviderIdOrFail(decoded.instanceId);
+            const harnessId = yield* readHarnessIdOrFail(decoded.instanceId);
             yield* validateAgentProfile(actor, decoded.permissionProfileId);
             // One clock read, inside the transaction. The row and the event
             // that records the row carry the same instant, so a new agent's
@@ -218,7 +218,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const agent = yield* agents.insert({
               kind: "agent",
-              providerId,
+              harnessId,
               name: decoded.name,
               systemPrompt: decoded.systemPrompt,
               instanceId: decoded.instanceId,
@@ -286,7 +286,7 @@ const make = Effect.gen(function* () {
             // Inside the write set. A profile or an instance that is deleted
             // between the check and the update would leave the agent naming a
             // row that is gone.
-            if (edit.instanceId !== undefined) yield* readProviderIdOrFail(edit.instanceId);
+            if (edit.instanceId !== undefined) yield* readHarnessIdOrFail(edit.instanceId);
             if (edit.permissionProfileId !== undefined) {
               yield* validateAgentProfile(actor, edit.permissionProfileId);
             }

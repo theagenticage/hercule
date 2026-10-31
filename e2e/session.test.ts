@@ -63,7 +63,7 @@ const waitForLoggedInInstance = async (): Promise<Instance | undefined> => {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   for (;;) {
     const claude = (await listInstances({ url, apiKey })).find(
-      (one) => one.providerId === "claude-code",
+      (one) => one.harnessId === "claude-code",
     );
     if (claude?.snapshots.some((snapshot) => snapshot.auth.status === "ok") === true) return claude;
     if (Date.now() > deadline) return undefined;

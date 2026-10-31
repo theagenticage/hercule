@@ -111,7 +111,7 @@ const buildProviderInstance = (
   snapshots: ProviderInstance["snapshots"],
 ): ProviderInstance => ({
   id,
-  providerId: "claude-code",
+  harnessId: "claude-code",
   secretFields: [],
   name,
   config: {},
@@ -936,7 +936,7 @@ const CODEX: ProviderInstance = {
       buildModel("gpt-5-codex", "GPT-5 Codex", { isDefault: true }),
     ]),
   ]),
-  providerId: "codex",
+  harnessId: "codex",
   binaryName: "codex",
 };
 
@@ -945,7 +945,7 @@ const OTHER_LOGGED_OUT: ProviderInstance = {
   ...buildProviderInstance("01a06d02-1000-7000-8000-000000000015", "openai", "Codex", [
     buildUnauthenticatedSnapshot(RUNNER.id),
   ]),
-  providerId: "codex",
+  harnessId: "codex",
   binaryName: "codex",
 };
 

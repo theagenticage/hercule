@@ -11,7 +11,7 @@
     "apps/controller/src/http/bundle.ts",
     "apps/web/src/routeTree.gen.ts",
     "apps/desktop/src/renderer/routeTree.gen.ts",
-    "apps/runner/src/providers/codex/generated/",
+    "apps/runner/src/harnesses/codex/generated/",
     ".playwright-cli",
     // The Android app's Gradle state and build output.
     "apps/android/.gradle/",

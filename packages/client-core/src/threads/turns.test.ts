@@ -3,7 +3,7 @@
  * into turns, and `readUserSender`, which reads who sent a user message.
  *
  * The fixtures use the Claude adapter's real shapes (spec 06 §6.3, and
- * `apps/runner/src/providers/claude-code.ts` / `claude-code-normalize.ts`):
+ * `apps/runner/src/harnesses/claude-code.ts` / `claude-code-normalize.ts`):
  *
  * - a `user_message` item has `detail: { text }` on both `item.started` and
  *   `item.completed`;

@@ -15,7 +15,7 @@
  * less than an earlier one. So the introduction, `subagent.started`, fills a
  * field only while it is empty and never overwrites one.
  */
-import type { ItemKind, ProviderEvent, ProviderReport, SubagentId } from "@hercule/protocol";
+import type { ItemKind, HarnessEvent, HarnessReport, SubagentId } from "@hercule/protocol";
 import type { Subagent, SubagentStatus } from "@hercule/contract";
 import { attributeEvent, TOOL_CALL_KINDS } from "./stream";
 import {
@@ -46,7 +46,7 @@ export interface StoredSubagent {
   readonly result: string | undefined;
   readonly usage: StoredTokenUsage | undefined;
   readonly usageProcess: StoredTokenUsage | undefined;
-  readonly lastUsageReport: ProviderReport | undefined;
+  readonly lastUsageReport: HarnessReport | undefined;
   readonly startedAt: string;
   readonly endedAt: string | undefined;
 }
@@ -203,7 +203,7 @@ export const createBareSubagent = (
  *   introduces (spec 06 section 13.2).
  */
 const findSubagentsNamedBy = (
-  event: ProviderEvent,
+  event: HarnessEvent,
 ): { readonly owner: SubagentId | undefined; readonly listed: ReadonlyArray<SubagentId> } => {
   const owner = event._tag === "subagent.started" ? event.subagentId : attributeEvent(event);
   const listed =
@@ -220,7 +220,7 @@ const findSubagentsNamedBy = (
  * come from the session's own agent and name no subagent, so for them the
  * list is empty and nothing is read.
  */
-export const findSubagentsToRead = (event: ProviderEvent): "all" | ReadonlyArray<SubagentId> => {
+export const findSubagentsToRead = (event: HarnessEvent): "all" | ReadonlyArray<SubagentId> => {
   if (event._tag === "session.started") return "all";
   const { owner, listed } = findSubagentsNamedBy(event);
   return owner === undefined ? listed : [owner, ...listed];
@@ -302,7 +302,7 @@ export interface SubagentEventFacts {
  */
 export const computeSubagentsAfter = (
   sessionId: string,
-  event: ProviderEvent,
+  event: HarnessEvent,
   records: ReadonlyMap<SubagentId, StoredSubagent>,
   facts: SubagentEventFacts,
 ): ReadonlyArray<StoredSubagent> => {
@@ -336,7 +336,7 @@ export const computeSubagentsAfter = (
  */
 export const computeSubagentAfter = (
   record: StoredSubagent,
-  event: ProviderEvent,
+  event: HarnessEvent,
   facts: SubagentEventFacts = {},
 ): StoredSubagent => {
   const next = applyEventToSubagent(record, event, facts);
@@ -349,7 +349,7 @@ export const computeSubagentAfter = (
 /** Applies one event to a record, without checking whether anything changed. */
 const applyEventToSubagent = (
   record: StoredSubagent,
-  event: ProviderEvent,
+  event: HarnessEvent,
   facts: SubagentEventFacts,
 ): StoredSubagent => {
   switch (event._tag) {

@@ -9,7 +9,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { AnswerNotDelivered, MAX_MESSAGE_LENGTH, ProviderEvent } from "@hercule/protocol";
+import { AnswerNotDelivered, MAX_MESSAGE_LENGTH, HarnessEvent } from "@hercule/protocol";
 import { RPC_DEADLINE } from "./rpc";
 import {
   buildRefusal,
@@ -172,12 +172,12 @@ describe("a Codex async question", () => {
       },
     });
     // The text comes before the item completes, and the Request after it.
-    const at = (matches: (event: ProviderEvent) => boolean): number => run.seen.findIndex(matches);
+    const at = (matches: (event: HarnessEvent) => boolean): number => run.seen.findIndex(matches);
     const completed = at((event) => event._tag === "item.completed" && event.itemId === ITEM_ID);
     expect(at((event) => event._tag === "content.delta")).toBeLessThan(completed);
     expect(completed).toBeLessThan(at((event) => event._tag === "request.opened"));
     for (const event of run.seen)
-      expect(Schema.is(ProviderEvent)(event), JSON.stringify(event)).toBe(true);
+      expect(Schema.is(HarnessEvent)(event), JSON.stringify(event)).toBe(true);
   });
 
   it("delivers an answer to a busy agent as one steer, shows it readably, and closes the Request after", async () => {

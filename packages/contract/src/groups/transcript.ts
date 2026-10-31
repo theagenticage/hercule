@@ -14,13 +14,13 @@
  * It returns passages: the text of one message that matched, with where it
  * came from. An assistant recalls its own conversations with `agentId: "me"`.
  *
- * A row carries the normalized `ProviderEvent` verbatim, which is the same
+ * A row carries the normalized `HarnessEvent` verbatim, which is the same
  * document the runner reported except for `content.delta`, where the controller
  * coalesces a run of deltas into one row ([04-state-store, Streaming deltas are
  * coalesced]). Nothing else is folded, rewritten or dropped.
  */
 import { Schema } from "effect";
-import { ProviderEvent, StructuredResult, SubagentId } from "@hercule/protocol";
+import { HarnessEvent, StructuredResult, SubagentId } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
@@ -46,7 +46,7 @@ export const TranscriptPosition = Schema.Int.check(Schema.isGreaterThanOrEqualTo
 export const TranscriptRow = Schema.Struct({
   position: Schema.Int,
   at: Schema.String,
-  event: ProviderEvent,
+  event: HarnessEvent,
 });
 
 export type TranscriptRow = Schema.Schema.Type<typeof TranscriptRow>;

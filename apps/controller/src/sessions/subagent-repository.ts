@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { ProviderReport, type SubagentId } from "@hercule/protocol";
+import { HarnessReport, type SubagentId } from "@hercule/protocol";
 import type { SortDirection, SubagentStatus } from "@hercule/contract";
 import {
   buildKeyset,
@@ -76,7 +76,7 @@ const toStoredSubagent = (row: SubagentRow): StoredSubagent => ({
   lastUsageReport:
     row.last_usage_report === null
       ? undefined
-      : Schema.decodeUnknownSync(ProviderReport)(JSON.parse(row.last_usage_report)),
+      : Schema.decodeUnknownSync(HarnessReport)(JSON.parse(row.last_usage_report)),
   startedAt: row.started_at,
   endedAt: row.ended_at ?? undefined,
 });

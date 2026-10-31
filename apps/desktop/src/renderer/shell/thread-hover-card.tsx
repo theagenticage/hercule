@@ -17,7 +17,7 @@ import { BranchIcon } from "../icons/branch";
 import { LaptopIcon } from "../icons/laptop";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
 import { AgentLabel, StatusSlot } from "../screens/session-status";
-import { ProviderLogo } from "../screens/thread/provider-logo";
+import { HarnessLogo } from "../screens/thread/harness-logo";
 import { SessionMark } from "./sidebar-rows";
 import "./thread-hover-card.css";
 
@@ -35,8 +35,8 @@ export interface ThreadHoverDetails {
   readonly branch: string | null;
   /** The model's name, or `null` when it is not known. */
   readonly model: string | null;
-  /** The id of the model's provider, whose mark shows before the model's name. */
-  readonly providerId: string | null;
+  /** The id of the model's harness, whose mark shows before the model's name. */
+  readonly harnessId: string | null;
   /**
    * The sessions of a group of several, the most urgent first
    * (`GroupSummary.membersByUrgency`), or none for a thread alone, whose card
@@ -87,7 +87,7 @@ function MemberRow({ member }: { readonly member: GroupMember }): JSX.Element {
     <div className="thread-hover-member">
       <SessionMark dot={member.dot} done={member.done} />
       <span className="thread-hover-member-name">{member.label}</span>
-      <AgentLabel providerId={member.providerId} model={member.model} />
+      <AgentLabel harnessId={member.harnessId} model={member.model} />
       <StatusSlot id={statusId} status={member.status} activityAt={member.activityAt} onScreen />
     </div>
   );
@@ -166,8 +166,8 @@ export function ThreadHoverCard({
           {members.length > 0 || details.model === null ? null : (
             <DetailRow
               icon={
-                details.providerId === null ? null : (
-                  <ProviderLogo providerId={details.providerId} size={ICON_SIZE} />
+                details.harnessId === null ? null : (
+                  <HarnessLogo harnessId={details.harnessId} size={ICON_SIZE} />
                 )
               }
             >

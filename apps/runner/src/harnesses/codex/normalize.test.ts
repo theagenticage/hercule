@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { ProviderEvent } from "@hercule/protocol";
+import { HarnessEvent } from "@hercule/protocol";
 import {
   normalize,
   buildNormalizingState,
@@ -49,20 +49,20 @@ const buildTestState = () => buildNormalizingState(SESSION, THREAD, undefined, I
 const normalizeNotes = (
   running: ReturnType<typeof buildNormalizingState>,
   notes: ReadonlyArray<Note>,
-): ReadonlyArray<ProviderEvent> => notes.flatMap((frame) => normalize(running, frame));
+): ReadonlyArray<HarnessEvent> => notes.flatMap((frame) => normalize(running, frame));
 
 /** Normalizes a sequence of notifications against a fresh state, which is the common case. */
-const normalizeFromStart = (notes: ReadonlyArray<Note>): ReadonlyArray<ProviderEvent> =>
+const normalizeFromStart = (notes: ReadonlyArray<Note>): ReadonlyArray<HarnessEvent> =>
   normalizeNotes(buildTestState(), notes);
 
-const listEventTags = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+const listEventTags = (events: ReadonlyArray<HarnessEvent>): ReadonlyArray<string> =>
   events.map((event) => event._tag);
 
-const filterByTag = <Tag extends ProviderEvent["_tag"]>(
-  events: ReadonlyArray<ProviderEvent>,
+const filterByTag = <Tag extends HarnessEvent["_tag"]>(
+  events: ReadonlyArray<HarnessEvent>,
   tag: Tag,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: Tag }>> =>
-  events.filter((event): event is Extract<ProviderEvent, { _tag: Tag }> => event._tag === tag);
+): ReadonlyArray<Extract<HarnessEvent, { _tag: Tag }>> =>
+  events.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
 
 /** Builds a `Turn`, trimmed to the fields a normalizer could read. */
 const buildTurn = (status: string) => ({
@@ -156,7 +156,7 @@ describe("what a whole Codex turn normalizes to", () => {
     expect(events).not.toEqual([]);
     for (const event of events) {
       // Without the thread id, nothing links the event to the native thread.
-      expect(event.providerRefs?.["threadId"]).toBe(THREAD);
+      expect(event.harnessRefs?.["threadId"]).toBe(THREAD);
       // A delta has no copy of its frame: a turn has thousands of deltas, and
       // the event already holds the delta itself. Every other event names the
       // channel of the payload it holds.
@@ -385,7 +385,7 @@ const buildRawDelta = (text: string): Note =>
   buildReasoningNote("item/reasoning/textDelta", { delta: text, contentIndex: 0 });
 
 const listStreamedDeltas = (
-  events: ReadonlyArray<ProviderEvent>,
+  events: ReadonlyArray<HarnessEvent>,
 ): ReadonlyArray<readonly [string, string]> =>
   filterByTag(events, "content.delta").map((event) => [event.streamKind, event.delta] as const);
 
@@ -630,7 +630,7 @@ describe("what a session reports about its usage and its errors", () => {
   });
 });
 
-const readItemDetail = (events: ReadonlyArray<ProviderEvent>): unknown =>
+const readItemDetail = (events: ReadonlyArray<HarnessEvent>): unknown =>
   filterByTag(events, "item.completed")[0]?.detail;
 
 describe("the detail a surface shows for an item without opening it", () => {
@@ -842,9 +842,9 @@ describe("a subagent's native thread", () => {
       expect(event).toMatchObject({
         sessionId: SESSION,
         subagentId: CHILD,
-        providerRefs: { threadId: CHILD },
+        harnessRefs: { threadId: CHILD },
       });
-      expect(Schema.is(ProviderEvent)(event), event._tag).toBe(true);
+      expect(Schema.is(HarnessEvent)(event), event._tag).toBe(true);
     }
   });
 
@@ -1195,8 +1195,8 @@ describe("a method or a status named like an object method", () => {
 });
 
 /** Encodes every event with the protocol schema, which is what the runner does before it sends one. */
-const encodeAll = (events: ReadonlyArray<ProviderEvent>): void => {
-  const encode = Schema.encodeUnknownSync(ProviderEvent);
+const encodeAll = (events: ReadonlyArray<HarnessEvent>): void => {
+  const encode = Schema.encodeUnknownSync(HarnessEvent);
   for (const event of events) expect(() => encode(event), event._tag).not.toThrow();
 };
 

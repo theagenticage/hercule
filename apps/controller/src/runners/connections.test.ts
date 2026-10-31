@@ -348,7 +348,7 @@ it("reports a text generation request as not sent when the runner is not connect
     _tag: "textGenerationRequest",
     requestId: "text-generation-request",
     instanceId: "instance",
-    providerId: "codex",
+    harnessId: "codex",
     config: {},
     secrets: {},
     spec: {

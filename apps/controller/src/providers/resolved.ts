@@ -1,5 +1,5 @@
 /**
- * Resolves a provider instance to its row and the provider definition behind
+ * Resolves a provider instance to its row and the harness definition behind
  * it, and checks from a runner's stored snapshot whether the runner can run it.
  *
  * Opening, forking and steering a session all need both, so they are
@@ -10,7 +10,7 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { ProviderDefinition } from "@hercule/plugin-host";
+import type { HarnessDefinition } from "@hercule/plugin-host";
 import { createValidationError, type Validation } from "@hercule/contract";
 import { PluginHost } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "./repository";
@@ -22,9 +22,9 @@ import { providerRepository, type StoredSnapshot } from "./repository";
 export const NO_PLACEMENT =
   "no connected runner is logged in to that provider instance; log in on a machine first";
 
-/** A provider instance's provider definition and its stored snapshots, one per runner. */
+/** A provider instance's harness definition and its stored snapshots, one per runner. */
 export interface Resolved {
-  readonly definition: ProviderDefinition;
+  readonly definition: HarnessDefinition;
   readonly snapshots: ReadonlyArray<StoredSnapshot>;
 }
 
@@ -36,7 +36,7 @@ export interface Resolved {
 export const isLoggedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status === "ok";
 
 /**
- * Builds a function that resolves an instance id to its provider definition
+ * Builds a function that resolves an instance id to its harness definition
  * and snapshots. The function fails with a validation error if the instance
  * does not exist, or if this build has no such provider. Each service builds
  * it once, as it does a repository, so the plugin catalog and the rows are
@@ -59,13 +59,13 @@ export const resolvedInstance: Effect.Effect<
         );
       }
       const registered = yield* host.providers();
-      const definition = registered.find((one) => one.id === found.value.providerId);
+      const definition = registered.find((one) => one.id === found.value.harnessId);
       if (definition === undefined) {
         return yield* Effect.fail(
           createValidationError([
             {
               path: ["instanceId"],
-              message: `this build carries no ${found.value.providerId} provider`,
+              message: `this build carries no ${found.value.harnessId} provider`,
             },
           ]),
         );

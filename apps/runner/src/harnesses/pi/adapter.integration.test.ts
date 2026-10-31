@@ -15,7 +15,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
+import type { OutputSchema, ProbeResult, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
   FIXTURE_PROMPT,
@@ -25,7 +25,7 @@ import {
 } from "@hercule/protocol/testing";
 import { ensureRootBoundary } from "../../workspaces";
 import { pi } from "./adapter";
-import type { ProviderRunnerContext, UserMaterial } from "../index";
+import type { HarnessRunnerContext, UserMaterial } from "../index";
 import { buildContext, SPEC } from "./testing";
 import {
   cleanupHomes,
@@ -50,7 +50,7 @@ const BUDGET_MS = 180_000;
 const PATIENCE_MS = BUDGET_MS / 2;
 
 /** Builds a context with the real binary, the given secrets, and fresh directories for this run. */
-const buildLiveContext = (secrets: Readonly<Record<string, string>>): ProviderRunnerContext => ({
+const buildLiveContext = (secrets: Readonly<Record<string, string>>): HarnessRunnerContext => ({
   ...buildContext(createScratchDir(), createScratchDir(), secrets),
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
@@ -64,7 +64,7 @@ const buildSpec = (model: string): SessionSpec => ({
 });
 
 const waitReportingEvents = (
-  seen: ReadonlyArray<ProviderEvent>,
+  seen: ReadonlyArray<HarnessEvent>,
   what: string,
   ready: () => boolean,
 ): Promise<void> =>
@@ -74,21 +74,21 @@ const waitReportingEvents = (
     PATIENCE_MS,
   );
 
-const readAssistantText = (seen: ReadonlyArray<ProviderEvent>): string =>
+const readAssistantText = (seen: ReadonlyArray<HarnessEvent>): string =>
   filterByTag(seen, "content.delta")
     .filter((event) => event.streamKind === "assistant_text")
     .map((event) => event.delta)
     .join("");
 
 const listCompletedTurns = (
-  seen: ReadonlyArray<ProviderEvent>,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: "turn.completed" }>> =>
+  seen: ReadonlyArray<HarnessEvent>,
+): ReadonlyArray<Extract<HarnessEvent, { _tag: "turn.completed" }>> =>
   filterByTag(seen, "turn.completed");
 
 const listCompletedItems = (
-  seen: ReadonlyArray<ProviderEvent>,
+  seen: ReadonlyArray<HarnessEvent>,
   kind: string,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: "item.completed" }>> =>
+): ReadonlyArray<Extract<HarnessEvent, { _tag: "item.completed" }>> =>
   filterByTag(seen, "item.completed").filter((event) => event.kind === kind);
 
 describe.skipIf(binary === undefined || key === "")("a real pi session on a real GLM model", () => {
@@ -98,7 +98,7 @@ describe.skipIf(binary === undefined || key === "")("a real pi session on a real
       async () => {
         const ctx = buildLiveContext({ zaiApiKey: key });
         const sessionId = crypto.randomUUID();
-        const seen: Array<ProviderEvent> = [];
+        const seen: Array<HarnessEvent> = [];
         Effect.runFork(
           Stream.runForEach(pi.events, (event) =>
             Effect.sync(() => {
@@ -158,9 +158,9 @@ const STRUCTURED_MODEL = "glm-5.3-flash";
 const runTurnUnderSchema = async (
   outputSchema: OutputSchema,
   text: string,
-): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+): Promise<Extract<HarnessEvent, { _tag: "turn.completed" }>> => {
   const sessionId = crypto.randomUUID();
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(pi.events, (event) =>
       Effect.sync(() => {

@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* AssistantSessions;
   const sessionService = yield* SessionService;
   const sessionRows = yield* sessionRepository;
-  const { buildAgentRecordComposer, readProviderIdOrFail, validateAgentProfile } =
+  const { buildAgentRecordComposer, readHarnessIdOrFail, validateAgentProfile } =
     yield* buildAgentFieldChecks;
 
   /**
@@ -237,12 +237,12 @@ const make = Effect.gen(function* () {
    * reach that by deleting every instance.
    */
   const readDefaultInstanceOrFail: Effect.Effect<
-    { readonly id: string; readonly providerId: string },
+    { readonly id: string; readonly harnessId: string },
     InvalidState | SqlError | Schema.SchemaError
   > = Effect.gen(function* () {
     const carried = new Set((yield* host.providers()).map((definition) => definition.id));
     const [oldest] = (yield* instances.list())
-      .filter((instance) => carried.has(instance.providerId))
+      .filter((instance) => carried.has(instance.harnessId))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     if (oldest === undefined) {
       return yield* Effect.fail(
@@ -252,7 +252,7 @@ const make = Effect.gen(function* () {
         ),
       );
     }
-    return { id: oldest.id, providerId: oldest.providerId };
+    return { id: oldest.id, harnessId: oldest.harnessId };
   });
 
   /** Records a change to the assistant, so every client showing it reads it again. */
@@ -360,7 +360,7 @@ const make = Effect.gen(function* () {
                 ? yield* readDefaultInstanceOrFail
                 : {
                     id: decoded.instanceId,
-                    providerId: yield* readProviderIdOrFail(decoded.instanceId),
+                    harnessId: yield* readHarnessIdOrFail(decoded.instanceId),
                   };
             const permissionProfileId =
               decoded.permissionProfileId ?? (yield* readDefaultProfileIdOrFail);
@@ -371,7 +371,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const agent = yield* agents.insert({
               kind: "assistant",
-              providerId: instance.providerId,
+              harnessId: instance.harnessId,
               name: decoded.name,
               systemPrompt: decoded.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
               instanceId: instance.id,
@@ -460,7 +460,7 @@ const make = Effect.gen(function* () {
             const { fields: stored } = yield* readAssistantOrFail(id);
             yield* validateScheduleTimezones({ heartbeat, rotation }, stored);
             if (agentEdit.instanceId !== undefined) {
-              yield* readProviderIdOrFail(agentEdit.instanceId);
+              yield* readHarnessIdOrFail(agentEdit.instanceId);
             }
             if (agentEdit.permissionProfileId !== undefined) {
               yield* validateAgentProfile(actor, agentEdit.permissionProfileId);

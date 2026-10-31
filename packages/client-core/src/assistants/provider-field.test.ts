@@ -14,17 +14,17 @@ const CODEX = "01a06d02-7600-7000-8000-000000000003";
 
 const buildInstance = (
   id: string,
-  providerId: string,
+  harnessId: string,
   name: string,
   displayName: string,
   auth: ProviderInstance["snapshots"][number]["auth"] | null,
 ): ProviderInstance => ({
   id,
-  providerId,
+  harnessId,
   name,
   config: {},
   displayName,
-  binaryName: providerId,
+  binaryName: harnessId,
   declared: {} as ProviderInstance["declared"],
   secretFields: [],
   snapshots:
@@ -79,7 +79,7 @@ describe("buildAssistantProviderField", () => {
         ],
       },
     ]);
-    expect(field.providerId).toBe("claude-code");
+    expect(field.harnessId).toBe("claude-code");
     expect(field.hint).toBe("rogier@example.com");
   });
 
@@ -166,7 +166,7 @@ describe("buildAssistantProviderField", () => {
         label,
         choices: [{ instanceId: WORK, model, label: `${label} · ${model ?? "Default model"}` }],
       });
-      expect(field.providerId).toBeNull();
+      expect(field.harnessId).toBeNull();
       expect(field.hint).toBe("");
     },
   );

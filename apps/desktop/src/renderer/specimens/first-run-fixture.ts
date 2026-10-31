@@ -93,13 +93,13 @@ const BARE_STUDIO: Runner = {
 /** Returns a provider instance with one snapshot on studio-mac, logged in or not. */
 const buildInstance = (
   id: string,
-  providerId: string,
+  harnessId: string,
   displayName: string,
   binaryName: string,
   loggedIn: boolean,
 ): ProviderInstance => ({
   id,
-  providerId,
+  harnessId,
   name: displayName,
   config: {},
   displayName,

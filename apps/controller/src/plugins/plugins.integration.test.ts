@@ -25,7 +25,7 @@ import {
 } from "../http/testing";
 import { registry as shipped } from "./registry";
 import {
-  buildProviderDefinition,
+  buildHarnessDefinition,
   createIntakeFixture,
   createPluginFixture,
   IDLE_FEEDS,
@@ -65,7 +65,7 @@ const buildPlugins = (): ReadonlyArray<Plugin> =>
     createPluginFixture({
       id: "alpha",
       configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
-      definitions: [buildProviderDefinition("alpha-provider", { model: "alpha-provider-default" })],
+      definitions: [buildHarnessDefinition("alpha-provider", { model: "alpha-provider-default" })],
     }),
     createPluginFixture({ id: "beta" }),
     createPluginFixture({ id: "outdated", hostApi: HOST_API + 1 }),

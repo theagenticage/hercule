@@ -71,16 +71,16 @@ interface Snapshot {
 
 const buildProviderInstance = (
   id: string,
-  providerId: string,
+  harnessId: string,
   displayName: string,
   snapshots: readonly Snapshot[],
 ) => ({
   id,
-  providerId,
+  harnessId,
   name: displayName,
   config: {},
   displayName,
-  binaryName: providerId === "claude-code" ? "claude" : providerId,
+  binaryName: harnessId === "claude-code" ? "claude" : harnessId,
   declared: DECLARED,
   secretFields: [] as ReadonlyArray<ProviderSecretField>,
   snapshots,

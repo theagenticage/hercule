@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderDefinition } from "@hercule/plugin-host";
-import { buildProviderDefinition } from "../plugins/testing";
+import type { HarnessDefinition } from "@hercule/plugin-host";
+import { buildHarnessDefinition } from "../plugins/testing";
 import { listUnenforcedFields } from "./enforcement";
 
-const ENFORCING: ProviderDefinition = buildProviderDefinition("claude-provider");
+const ENFORCING: HarnessDefinition = buildHarnessDefinition("claude-provider");
 
-const IGNORING: ProviderDefinition = {
-  ...buildProviderDefinition("codex-provider"),
+const IGNORING: HarnessDefinition = {
+  ...buildHarnessDefinition("codex-provider"),
   declared: { ...ENFORCING.declared, disallowedTools: "unsupported" },
 };
 
-const CATALOG: ReadonlyArray<ProviderDefinition> = [ENFORCING, IGNORING];
+const CATALOG: ReadonlyArray<HarnessDefinition> = [ENFORCING, IGNORING];
 
 describe("listUnenforcedFields", () => {
   it("returns disallowedTools when the provider stores the list but does not enforce it", () => {

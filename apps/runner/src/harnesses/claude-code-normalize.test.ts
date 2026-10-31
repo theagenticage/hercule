@@ -12,7 +12,7 @@ import {
   ContextCompactionDetail,
   MAX_FRAME_BYTES,
   MAX_MESSAGE_LENGTH,
-  ProviderEvent,
+  HarnessEvent,
   UnknownItemDetail,
   type ContinuedSubagent,
   type OutputSchema,
@@ -85,10 +85,10 @@ const OUTPUT_SCHEMA: OutputSchema = {
 };
 
 /**
- * A provider event. `formatEvent` turns each one into a short line, so a whole
+ * A harness event. `formatEvent` turns each one into a short line, so a whole
  * turn reads as a list.
  */
-type Event = Schema.Schema.Type<typeof ProviderEvent>;
+type Event = Schema.Schema.Type<typeof HarnessEvent>;
 
 const formatEvent = (event: Event): string => {
   const line = formatEventBody(event);
@@ -930,7 +930,7 @@ describe("an interrupted turn", () => {
 });
 
 describe("encoding the events with the protocol schema", () => {
-  const encode = Schema.encodeUnknownSync(ProviderEvent);
+  const encode = Schema.encodeUnknownSync(HarnessEvent);
 
   it("encodes every event a whole turn produces", () => {
     const running = buildTestState();
@@ -1768,7 +1768,7 @@ describe("a context compaction", () => {
   });
 
   it("encodes every event of the sequence with the protocol schema", () => {
-    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const encode = Schema.encodeUnknownSync(HarnessEvent);
     const running = buildStateInTurn();
     for (const message of COMPACT_SEQUENCE) {
       for (const event of normalize(running, message as SDKMessage)) {
@@ -2522,7 +2522,7 @@ describe("whether any agent is working", () => {
 
 describe("encoding a subagent's events with the protocol schema", () => {
   it("encodes every event a subagent's life produces", () => {
-    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const encode = Schema.encodeUnknownSync(HarnessEvent);
     const running = buildTestState();
     const messages = [
       buildAgentCall(null, AGENT_CALL, "finder"),
@@ -2639,7 +2639,7 @@ describe("server tool, MCP tool and result blocks", () => {
   const SERVER_TOOL = "srvtoolu_01WebSearch000000000001";
   const MCP_TOOL = "mcptoolu_01LinearIssues0000001";
 
-  const encode = Schema.encodeUnknownSync(ProviderEvent);
+  const encode = Schema.encodeUnknownSync(HarnessEvent);
 
   /** Builds an assistant message that holds the given content blocks. */
   const buildBlocks = (content: ReadonlyArray<unknown>, id = MESSAGE) => ({
@@ -3672,7 +3672,7 @@ describe("the todo list", () => {
   });
 
   it("encodes every todo event with the protocol schema", () => {
-    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const encode = Schema.encodeUnknownSync(HarnessEvent);
     const events = run([
       ...writeTodos(lastId(1), [todo("a")]),
       ...writeTodos(lastId(2), [todo("b")]),

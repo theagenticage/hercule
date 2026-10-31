@@ -43,7 +43,7 @@ import { Mark } from "../marks";
 import { ProjectTile } from "../screens/project-tile";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
 import { AgentLabel, StatusSlot } from "../screens/session-status";
-import { ProviderLogo } from "../screens/thread/provider-logo";
+import { HarnessLogo } from "../screens/thread/harness-logo";
 import { buildItemHeight, type SectionKey, type SidebarItemOf } from "./sidebar-items";
 
 /**
@@ -426,13 +426,13 @@ const KEEP_TAIL_LENGTH = 8;
  * fit before them.
  */
 function DetailLine({
-  providerId,
+  harnessId,
   clip,
   keep,
   asking = false,
   done = false,
 }: {
-  readonly providerId: string | null;
+  readonly harnessId: string | null;
   readonly clip: ReactNode;
   readonly keep: string;
   readonly asking?: boolean;
@@ -443,8 +443,8 @@ function DetailLine({
       <span className={done ? "side-glyph side-glyph--done" : "side-glyph"}>
         {done ? (
           <CheckIcon size={ROW_GLYPH_SIZE} />
-        ) : providerId === null ? null : (
-          <ProviderLogo providerId={providerId} size={ROW_GLYPH_SIZE} />
+        ) : harnessId === null ? null : (
+          <HarnessLogo harnessId={harnessId} size={ROW_GLYPH_SIZE} />
         )}
       </span>
       <span className="side-detail-clip">{clip}</span>
@@ -809,7 +809,7 @@ export const GroupRow = memo(function GroupRow({
       secondLine={
         <>
           <DetailLine
-            providerId={row.providerId}
+            harnessId={row.harnessId}
             clip={
               ask === null ? (
                 row.placeLabel.clip
@@ -922,7 +922,7 @@ export const GroupLine = memo(function GroupLine({
       >
         <SessionMark dot={member.dot} done={member.done} />
         <span className="side-m-name">{member.label}</span>
-        <AgentLabel providerId={member.providerId} model={member.model} />
+        <AgentLabel harnessId={member.harnessId} model={member.model} />
         <StatusSlot
           id={statusId}
           status={member.status}
@@ -1052,7 +1052,7 @@ export const DoneGroupRow = memo(function DoneGroupRow({
       status={<span className="side-end" />}
       secondLine={
         <DetailLine
-          providerId={row.providerId}
+          harnessId={row.harnessId}
           clip={
             several ? `${String(threadCount)} threads · done ${doneWords}` : `Done ${doneWords}`
           }
@@ -1110,7 +1110,7 @@ export const DraftRow = memo(function DraftRow({
             </span>
             <span className="side-end">draft</span>
           </span>
-          <DetailLine providerId={null} clip={item.placeClip} keep={item.placeKeep} />
+          <DetailLine harnessId={null} clip={item.placeClip} keep={item.placeKeep} />
         </span>
       </div>
     </div>

@@ -17,7 +17,7 @@ import {
   type AccessMode,
   type DisallowedTool,
   type ModelSelection,
-  type ProviderEvent,
+  type HarnessEvent,
   type SubagentId,
 } from "@hercule/protocol";
 import {
@@ -165,13 +165,13 @@ export interface StoredSession {
    */
   readonly conversationDeleted: boolean;
   /**
-   * The provider behind the session's instance, and the tool families its
-   * spec disallowed. Both are used to work out whether the provider enforces
+   * The harness behind the session's instance, and the tool families its
+   * spec disallowed. Both are used to work out whether the harness enforces
    * the restriction. They are read on every read, not stored, because the
-   * adapter in a later binary may enforce what this one ignores. `providerId`
+   * adapter in a later binary may enforce what this one ignores. `harnessId`
    * is `null` once the instance is deleted.
    */
-  readonly providerId: string | null;
+  readonly harnessId: string | null;
   readonly disallowedTools: ReadonlyArray<DisallowedTool>;
 }
 
@@ -378,7 +378,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   reopenedAt: row.reopened_at,
   inputWaiting: row.input_waiting === 1,
   conversationDeleted: row.conversation_deleted === 1,
-  providerId: row.provider_id,
+  harnessId: row.provider_id,
   disallowedTools:
     row.disallowed_tools === null
       ? []
@@ -441,7 +441,7 @@ export interface QueuedSession {
   readonly spec: string;
   readonly checkoutBranch: string | null;
   readonly githubConnectionId: string | null;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly config: unknown;
   /** The Agent the session was spawned from; `null` for a Thread. */
   readonly agentId: string | null;
@@ -466,7 +466,7 @@ export interface IngestState {
 export interface StoredStreamRow {
   readonly position: number;
   readonly at: string;
-  readonly event: ProviderEvent;
+  readonly event: HarnessEvent;
 }
 
 export interface TranscriptPageRequest {
@@ -1044,7 +1044,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(sessionId);
-        const event: ProviderEvent = {
+        const event: HarnessEvent = {
           _tag: "runtime.warning",
           eventId: crypto.randomUUID(),
           sessionId,
@@ -1447,7 +1447,7 @@ const make = Effect.gen(function* () {
             checkoutBranch: row.checkout_branch,
             githubConnectionId:
               row.github_connection_id === null ? null : uuidToString(row.github_connection_id),
-            providerId: row.provider_id,
+            harnessId: row.provider_id,
             config: JSON.parse(row.config) as unknown,
             agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
             conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),

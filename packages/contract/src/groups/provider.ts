@@ -74,7 +74,7 @@ export type ProviderSecretField = Schema.Schema.Type<typeof ProviderSecretField>
 
 export const ProviderInstance = Schema.Struct({
   id: Id,
-  providerId: Schema.String,
+  harnessId: Schema.String,
   name: ProviderInstanceName,
   config: Schema.Json,
   displayName: Schema.String,
@@ -90,9 +90,9 @@ export const ProviderInstance = Schema.Struct({
 
 export type ProviderInstance = Schema.Schema.Type<typeof ProviderInstance>;
 
-/** The payload of `provider.create`. The config is validated against the provider's own schema. */
+/** The payload of `provider.create`. The config is validated against the harness's own schema. */
 export const ProviderInstanceCreateInput = Schema.Struct({
-  providerId: Schema.String,
+  harnessId: Schema.String,
   name: ProviderInstanceName,
   config: Schema.Json,
 });

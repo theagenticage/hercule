@@ -19,7 +19,7 @@ import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";
 import { makeAttachmentCache } from "../../../../runner/src/attachments";
 import { makeSessionSkillsFolders } from "../../../../runner/src/skills";
 import { openFileClock } from "../../../../runner/src/edit-marks";
-import { NO_CONTROLLER_UPLOADER } from "../../../../runner/src/providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "../../../../runner/src/harnesses/testing";
 import { resolveSessionContext } from "../../../../runner/src/sessions/context";
 import {
   makeTestWorkspaces,
@@ -173,7 +173,7 @@ const createLegacyInstallation = async () => {
           eventId: createFixtureId(),
           sessionId: session.id,
           at: OLD,
-          providerRefs: { nativeSessionId: session.nativeSessionId },
+          harnessRefs: { nativeSessionId: session.nativeSessionId },
         };
         yield* sql`INSERT INTO session_stream (session_id,position,runner_seq,at,event)
         VALUES (${uuidFromString(session.id)},1,1,${OLD},${JSON.stringify(event)})`;

@@ -26,7 +26,7 @@ import {
   type LoginResult,
   type LoginUrl,
 } from "@hercule/protocol";
-import type { ProviderAdapter, ProviderRunnerContext } from "./index";
+import type { HarnessAdapter, HarnessRunnerContext } from "./index";
 import { truncateFact } from "./text";
 
 export interface LoginChild {
@@ -170,8 +170,8 @@ export interface Logins {
   readonly start: (
     requestId: string,
     instanceId: string,
-    adapter: ProviderAdapter,
-    ctx: ProviderRunnerContext,
+    adapter: HarnessAdapter,
+    ctx: HarnessRunnerContext,
   ) => Effect.Effect<LoginAnswer>;
   readonly submit: (instanceId: string, code: string) => Effect.Effect<LoginAnswer>;
   /**
@@ -334,7 +334,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     start: (requestId, instanceId, adapter, ctx) =>
       Effect.gen(function* () {
         if (adapter.login === undefined) {
-          return buildLoginFailed(`${adapter.providerId} has no login in this runner build`);
+          return buildLoginFailed(`${adapter.harnessId} has no login in this runner build`);
         }
         if (ctx.binary === undefined) {
           return buildLoginFailed(`no ${adapter.binaryName} on this machine`);

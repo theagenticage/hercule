@@ -25,9 +25,9 @@ import { findOpenItem } from "../threads/open-item";
 import { describePose, type Pose } from "../threads/pose";
 import { formatDayStamp } from "../time-context";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemStatus = Extract<ProviderEvent, { _tag: "item.completed" }>["status"];
-type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
+type HarnessEvent = TranscriptRow["event"];
+type ItemStatus = Extract<HarnessEvent, { _tag: "item.completed" }>["status"];
+type TurnEndState = Extract<HarnessEvent, { _tag: "turn.completed" }>["state"];
 
 /** The day stamp above the first message of each day: "Today", "Yesterday", "4 Sep" or "4 Sep 2025". */
 export interface DayStampBlock {

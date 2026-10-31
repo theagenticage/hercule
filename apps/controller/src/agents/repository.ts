@@ -38,10 +38,10 @@ export interface StoredAgent {
   readonly id: string;
   readonly kind: AgentKind;
   /**
-   * The provider behind its instance, used to work out what that provider will
+   * The harness behind its instance, used to work out what that harness will
    * not enforce; `null` once the instance is gone.
    */
-  readonly providerId: string | null;
+  readonly harnessId: string | null;
   readonly name: string;
   readonly systemPrompt: string;
   readonly instanceId: string;
@@ -60,9 +60,9 @@ export interface StoredAgent {
  */
 export interface NewAgent extends Omit<
   StoredAgent,
-  "id" | "providerId" | "createdAt" | "updatedAt"
+  "id" | "harnessId" | "createdAt" | "updatedAt"
 > {
-  readonly providerId: string;
+  readonly harnessId: string;
   /** The time the row is created, used as both its `createdAt` and its `updatedAt`. */
   readonly at: string;
 }
@@ -74,7 +74,7 @@ export interface NewAgent extends Omit<
  * The kind is fixed at insert: a plain agent never becomes an assistant.
  */
 export type AgentEdit = Partial<
-  Omit<StoredAgent, "id" | "kind" | "providerId" | "createdAt" | "updatedAt">
+  Omit<StoredAgent, "id" | "kind" | "harnessId" | "createdAt" | "updatedAt">
 >;
 
 export interface AgentPageRequest {
@@ -112,7 +112,7 @@ const COLUMNS =
 const toAgent = (row: AgentRow): StoredAgent => ({
   id: uuidToString(row.id),
   kind: row.kind as AgentKind,
-  providerId: row.provider_id,
+  harnessId: row.provider_id,
   name: row.name,
   systemPrompt: row.system_prompt,
   instanceId: uuidToString(row.instance_id),
@@ -182,7 +182,7 @@ const make = Effect.gen(function* () {
         return {
           id: uuidToString(id),
           kind: agent.kind,
-          providerId: agent.providerId,
+          harnessId: agent.harnessId,
           name: agent.name,
           systemPrompt: agent.systemPrompt,
           instanceId: agent.instanceId,

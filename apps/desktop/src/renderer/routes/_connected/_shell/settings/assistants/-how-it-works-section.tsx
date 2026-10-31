@@ -26,7 +26,7 @@ import { DisallowedToolsRow } from "../../../../../screens/settings/assistants/d
 import { SettingRow } from "../../../../../screens/settings/setting-row";
 import { SettingTextRow } from "../../../../../screens/settings/setting-text-row";
 import { useTextDraft } from "../../../../../screens/settings/use-text-draft";
-import { ProviderLogo } from "../../../../../screens/thread/provider-logo";
+import { HarnessLogo } from "../../../../../screens/thread/harness-logo";
 import { useSavedAssistantField } from "./-saved-assistant-field";
 
 const REPLY_MODES: ReadonlyArray<{ readonly value: AssistantReply; readonly label: string }> = [
@@ -193,7 +193,7 @@ function ProviderRow({ assistant }: { readonly assistant: Assistant }): JSX.Elem
       error={provider.error}
       control={(labels) => (
         <span className="field field--select">
-          {field.providerId !== null && <ProviderLogo providerId={field.providerId} size={13} />}
+          {field.harnessId !== null && <HarnessLogo harnessId={field.harnessId} size={13} />}
           <select
             {...labels}
             value={encodeProviderChoice(provider.value)}

@@ -64,7 +64,7 @@ export const ContributionWord = ContributionName.check(
  * contributes. `defaultConfig` is a value rather than a function, because a
  * function cannot be stored in the catalog.
  */
-export const ProviderDefinition = Schema.Struct({
+export const HarnessDefinition = Schema.Struct({
   id: ContributionName,
   displayName: ContributionName,
   /** The harness's executable name on `PATH`, which links a runner's facts to an instance. */
@@ -85,7 +85,7 @@ export const ProviderDefinition = Schema.Struct({
   suggestedTextGenerationModel: Schema.optionalKey(Schema.NonEmptyString),
 });
 
-export type ProviderDefinition = Schema.Schema.Type<typeof ProviderDefinition>;
+export type HarnessDefinition = Schema.Schema.Type<typeof HarnessDefinition>;
 
 /**
  * One event kind, as the plugin that emits it declares it: the schema of the

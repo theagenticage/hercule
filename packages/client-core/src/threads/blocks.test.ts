@@ -15,8 +15,8 @@ import { buildSessionAgentState, buildSubagentAgentState } from "./agent-state";
 import { appendSendingMessages, buildThreadBlocks, type ThreadBlock } from "./blocks";
 import { buildWorkRows } from "./work-rows";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemKind = Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
+type HarnessEvent = TranscriptRow["event"];
+type ItemKind = Extract<HarnessEvent, { _tag: "item.started" }>["kind"];
 
 const START = Date.parse("2026-09-30T09:00:00.000Z");
 
@@ -26,7 +26,7 @@ const buildInstant = (seconds: number): string => new Date(START + seconds * 100
 let position = 0;
 
 /** Wraps an event in a transcript row at the next position. */
-const buildRow = (event: ProviderEvent): TranscriptRow => ({
+const buildRow = (event: HarnessEvent): TranscriptRow => ({
   position: ++position,
   at: event.at,
   event,

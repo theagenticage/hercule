@@ -95,7 +95,7 @@ describe("listWorkspaceSessionTabs", () => {
   // The sessions of the workspace, as the sidebar's read holds them.
   const HELD = SESSIONS.map((session) => ({ ...session, ...IN_3F1 }));
   const INSTANCES = [
-    { id: "i-claude", providerId: "claude-code", snapshots: [] },
+    { id: "i-claude", harnessId: "claude-code", snapshots: [] },
   ] as unknown as readonly ProviderInstance[];
   const reads = (workspaces: readonly Workspace[] = [THREAD_3F1]) => ({
     workspaces,
@@ -137,7 +137,7 @@ describe("listWorkspaceSessionTabs", () => {
         status: "working",
         activityAt: AT,
         done: false,
-        providerId: "claude-code",
+        harnessId: "claude-code",
         model: "claude-sonnet-5",
       },
       expect.objectContaining({ sessionId: "s-finished", done: true, status: "age" }),

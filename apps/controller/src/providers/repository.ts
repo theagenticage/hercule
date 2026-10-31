@@ -11,12 +11,12 @@ import { ModelDescriptor, type ProbeResult } from "@hercule/protocol";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 
 /**
- * An instance as it is stored. The fields from the provider definition are
+ * An instance as it is stored. The fields from the harness definition are
  * added when it is read.
  */
 export interface StoredInstance {
   readonly id: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly name: string;
   readonly config: Schema.Json;
   readonly createdAt: string;
@@ -24,7 +24,7 @@ export interface StoredInstance {
 }
 
 export interface NewInstance {
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly name: string;
   readonly config: Schema.Json;
   readonly at: string;
@@ -56,7 +56,7 @@ const decodeConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Jso
 const toInstance = (row: InstanceRow): Effect.Effect<StoredInstance, Schema.SchemaError> =>
   Effect.map(decodeConfig(row.config), (config) => ({
     id: uuidToString(row.id),
-    providerId: row.provider_id,
+    harnessId: row.provider_id,
     name: row.name,
     config,
     createdAt: row.created_at,
@@ -141,7 +141,7 @@ const make = Effect.gen(function* () {
           }),
       ),
 
-    providersWithInstance: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
+    harnessesWithInstance: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
         sql<{
           readonly provider_id: string;
@@ -154,12 +154,12 @@ const make = Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
           INSERT INTO provider_instances (id, provider_id, name, config, created_at, updated_at)
-          VALUES (${id}, ${instance.providerId}, ${instance.name},
+          VALUES (${id}, ${instance.harnessId}, ${instance.name},
                   ${JSON.stringify(instance.config)}, ${instance.at}, ${instance.at})
         `;
         return {
           id: uuidToString(id),
-          providerId: instance.providerId,
+          harnessId: instance.harnessId,
           name: instance.name,
           config: instance.config,
           createdAt: instance.at,

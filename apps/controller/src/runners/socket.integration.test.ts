@@ -1623,7 +1623,7 @@ const withRegistry = (
 
 interface Instance {
   readonly id: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly snapshots: ReadonlyArray<{
     readonly runnerId: string;
     readonly harnessVersion: string | null;
@@ -1641,10 +1641,10 @@ const listInstances = async (base: string, token: string): Promise<ReadonlyArray
 const findInstanceFor = async (
   base: string,
   token: string,
-  providerId: string,
+  harnessId: string,
 ): Promise<Instance> => {
-  const found = (await listInstances(base, token)).find((one) => one.providerId === providerId);
-  expect(found, `no instance for ${providerId}`).toBeDefined();
+  const found = (await listInstances(base, token)).find((one) => one.harnessId === harnessId);
+  expect(found, `no instance for ${harnessId}`).toBeDefined();
   return found!;
 };
 
@@ -1682,9 +1682,9 @@ describe("probing a runner's provider instances", () => {
       return asked.length >= count ? asked : undefined;
     });
 
-  const buildNoAdapterResult = (providerId: string): ProbeResult => ({
+  const buildNoAdapterResult = (harnessId: string): ProbeResult => ({
     harnessVersion: null,
-    auth: { status: "error", message: `no adapter for ${providerId} in this runner build` },
+    auth: { status: "error", message: `no adapter for ${harnessId} in this runner build` },
     models: [],
   });
 
@@ -1702,20 +1702,20 @@ describe("probing a runner's provider instances", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const all = await listInstances(harness.base, token);
-      // The three built-in providers, each with the instance the boot created.
-      expect(all.map((one) => one.providerId).sort()).toEqual(["claude-code", "codex", "pi"]);
+      // The three built-in harnesses, each with the instance the boot created.
+      expect(all.map((one) => one.harnessId).sort()).toEqual(["claude-code", "codex", "pi"]);
 
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, all.length);
-        // One request per instance, keyed by instance id, never provider id:
+        // One request per instance, keyed by instance id, never harness id:
         // one provider can have several accounts.
         expect([...asked].map((request) => request.instanceId).sort()).toEqual(
           [...all].map((one) => one.id).sort(),
         );
         for (const request of asked) {
           const instance = all.find((one) => one.id === request.instanceId);
-          expect(request.providerId).toBe(instance?.providerId);
+          expect(request.harnessId).toBe(instance?.harnessId);
         }
 
         for (const request of asked) {
@@ -1725,9 +1725,9 @@ describe("probing a runner's provider instances", () => {
             requestId: request.requestId,
             instanceId: request.instanceId,
             result:
-              instance.providerId === "claude-code"
+              instance.harnessId === "claude-code"
                 ? buildProbeResult("2.1.263")
-                : buildNoAdapterResult(instance.providerId),
+                : buildNoAdapterResult(instance.harnessId),
           });
         }
 
@@ -1755,7 +1755,7 @@ describe("probing a runner's provider instances", () => {
       const first = await enlist(harness);
       const second = await enlist(harness);
       const all = await listInstances(harness.base, token);
-      const claude = all.find((one) => one.providerId === "claude-code")!;
+      const claude = all.find((one) => one.harnessId === "claude-code")!;
 
       const one = await greet(harness.base, first.credential);
       const two = await greet(harness.base, second.credential);
@@ -2009,8 +2009,8 @@ describe("installing a harness on a runner", () => {
     ],
   };
 
-  const installHarness = (base: string, token: string, id: string, providerId: string) =>
-    send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { providerId }, token });
+  const installHarness = (base: string, token: string, id: string, harnessId: string) =>
+    send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { harnessId }, token });
 
   it("runs the installer, stores the facts the runner then reports, and probes the harness", async () => {
     await withRegistry(async (harness) => {
@@ -2028,14 +2028,14 @@ describe("installing a harness on a runner", () => {
         const claude = (
           (await providers.json()) as ReadonlyArray<{
             id: string;
-            providerId: string;
+            harnessId: string;
           }>
-        ).find((one) => one.providerId === "claude-code")!;
+        ).find((one) => one.harnessId === "claude-code")!;
         const before = listProbeRequests(wire).length;
 
         const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
         const request = await waitForFrame<InstallRequest>(wire, "installRequest");
-        expect(request.providerId).toBe("claude-code");
+        expect(request.harnessId).toBe("claude-code");
         // The runner reports its new facts, then reports that the install
         // finished: the response must not show the machine as it was before.
         wire.send({ _tag: "factsReport", facts: INSTALLED });
@@ -2185,7 +2185,7 @@ describe("logging a runner's provider instance in", () => {
         // Keyed by instance, because the credential is stored in the
         // instance's own config directory.
         expect(request.instanceId).toBe(claude.id);
-        expect(request.providerId).toBe("claude-code");
+        expect(request.harnessId).toBe("claude-code");
         wire.send({ _tag: "loginUrl", requestId: request.requestId, url: AUTHORIZE_URL });
 
         const response = await pending;

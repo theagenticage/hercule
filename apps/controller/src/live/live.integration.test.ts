@@ -64,7 +64,7 @@ import {
 import type { Plugin } from "@hercule/plugin-host";
 import { readEvent } from "../events/testing";
 import { buildRunnerSocketUrl } from "../runners/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import {
   collectMessages,
   collectPushes,
@@ -1376,7 +1376,7 @@ const SESSION_TOPIC_MODELS = [
 const buildSessionTopicPlugins = (): ReadonlyArray<Plugin> => [
   createPluginFixture({
     id: "session-topics",
-    definitions: [buildProviderDefinition("session-topic-provider", { token: "t" })],
+    definitions: [buildHarnessDefinition("session-topic-provider", { token: "t" })],
   }).plugin,
 ];
 

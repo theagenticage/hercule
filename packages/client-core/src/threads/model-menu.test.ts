@@ -182,14 +182,14 @@ describe("buildModelMenu: recent", () => {
       instanceId: CODEX.id,
       model: GPT.slug,
       name: "GPT-5",
-      providerId: "codex",
+      harnessId: "codex",
       account: null,
     });
     expect(menu.recent[1]).toMatchObject({
       instanceId: PERSONAL.id,
       model: OPUS.slug,
       name: "Claude Opus 5",
-      providerId: "claude-code",
+      harnessId: "claude-code",
       account: "personal",
     });
   });

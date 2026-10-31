@@ -34,7 +34,7 @@ import {
   lintOutputSchema,
   type AdapterError,
   type ExitReason,
-  type ProviderEvent,
+  type HarnessEvent,
   type RunnerToController,
   type SendResult,
   type SessionInput,
@@ -46,14 +46,14 @@ import {
   type SubagentId,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
-import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
+import { describeMissingAdapter, type AdapterTurnInput, type HarnessAdapter } from "../harnesses";
 import {
   buildAdapterFailed,
   buildInputStopped,
   buildSessionAlreadyRunning,
   buildSessionNotRunning,
   buildSessionStopping,
-} from "../providers/adapter-error-builders";
+} from "../harnesses/adapter-error-builders";
 import { describeCause, endSentence, now } from "../report";
 import {
   buildLoadedSkills,
@@ -141,7 +141,7 @@ interface Live {
   readonly inputCancellation: InputCancellation;
   /** Completes when the adapter has bound the harness, before the first input is delivered. */
   readonly harnessReady: Deferred.Deferred<void>;
-  readonly adapter: ProviderAdapter;
+  readonly adapter: HarnessAdapter;
   readonly scratch: string | undefined;
   /** The directory the session's attached images are cached in. Removed with the entry. */
   readonly attachmentsDir: string;
@@ -530,7 +530,7 @@ const stageWorkspaceSkills = (
  * the session has no workspace or its workspace has no checkouts.
  */
 interface PreparedStart {
-  readonly adapter: ProviderAdapter;
+  readonly adapter: HarnessAdapter;
   readonly resolved: Resolved;
   /** The plugin folders of the workspace's repository skills, empty when it offers none. */
   readonly repositorySkillsFolders: ReadonlyArray<string>;
@@ -541,7 +541,7 @@ interface PreparedStart {
  * Creates the session supervisor. Call it once per process: the session table
  * and the sequence counter it holds belong to the process, not to a connection.
  */
-export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervising => {
+export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Supervising => {
   const live = new Map<string, Live>();
   let lastSeq = 0;
   /**
@@ -600,7 +600,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   };
 
   /** Checks whether the adapter holds a session of this id right now. */
-  const isHeldBy = (adapter: ProviderAdapter, sessionId: string): Effect.Effect<boolean> =>
+  const isHeldBy = (adapter: HarnessAdapter, sessionId: string): Effect.Effect<boolean> =>
     Effect.map(adapter.listSessions, (bindings) =>
       bindings.some((binding) => binding.sessionId === sessionId),
     );
@@ -811,7 +811,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * clock is updated before the send, so anyone who has seen the frame knows
    * the clock already reflects the event.
    */
-  const sendFittedEvent = (event: ProviderEvent): Effect.Effect<void> =>
+  const sendFittedEvent = (event: HarnessEvent): Effect.Effect<void> =>
     Effect.gen(function* () {
       const held = live.get(event.sessionId);
       if (held !== undefined) {
@@ -935,7 +935,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    *
    * This runs before `fitEventToFrame`, which never drops `editedFiles`.
    */
-  const attachEditedFiles = (event: ProviderEvent): Effect.Effect<ProviderEvent> =>
+  const attachEditedFiles = (event: HarnessEvent): Effect.Effect<HarnessEvent> =>
     Effect.gen(function* () {
       if (event._tag !== "item.completed" || event.kind !== "file_change") return event;
       if (event.status !== "completed") return event;
@@ -961,7 +961,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * them. The bookkeeping in
    * `sendFittedEvent` sees the events as sent, not as the adapter made them.
    */
-  const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
+  const sendSequenced = (event: HarnessEvent): Effect.Effect<void> =>
     sequencing.withPermits(1)(
       Effect.flatMap(attachEditedFiles(event), (attached) =>
         Effect.forEach(fitEventToFrame(attached), sendFittedEvent, { discard: true }),
@@ -973,7 +973,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * start, a completed turn or an exit (`reportWorkspace`). The workspace id
    * is read before the send, because an exit removes the session's entry.
    */
-  const forwardEvent = (event: ProviderEvent): Effect.Effect<void> => {
+  const forwardEvent = (event: HarnessEvent): Effect.Effect<void> => {
     const workspaceId =
       event._tag === "session.started" ||
       event._tag === "session.exited" ||
@@ -1288,10 +1288,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             exitReason: undefined,
           });
         }
-        const adapter = adapters.find((one) => one.providerId === frame.providerId);
+        const adapter = adapters.find((one) => one.harnessId === frame.harnessId);
         if (adapter === undefined) {
           return yield* Effect.fail(
-            buildCrashedStartFromText(describeMissingAdapter(frame.providerId)),
+            buildCrashedStartFromText(describeMissingAdapter(frame.harnessId)),
           );
         }
         // Ask the adapter, not the `live` table. In practice the controller
@@ -1514,7 +1514,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         const librarySkillsFolder = findLibrarySkillsFolder(arrived);
         const setupTarget = {
           runnerId: connection.runnerId,
-          providerId: frame.providerId,
+          harnessId: frame.harnessId,
           instanceId: frame.spec.instanceId,
         };
         const held: Live = {

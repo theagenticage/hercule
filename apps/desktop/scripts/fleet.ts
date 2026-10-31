@@ -260,7 +260,7 @@ function waitForLoggedInProbe(
   return pollUntil(
     async () => {
       const instances = await call<ReadonlyArray<ProviderInstance>>("GET", "/providers");
-      const claudeCode = instances.find((instance) => instance.providerId === "claude-code");
+      const claudeCode = instances.find((instance) => instance.harnessId === "claude-code");
       if (claudeCode === undefined) throw new Error("the controller has no Claude Code instance");
       const probed = claudeCode.snapshots.some(
         (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",

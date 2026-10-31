@@ -33,7 +33,7 @@ import {
   type Query,
   type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { ProviderEvent, type OutputSchema, type SessionSpec } from "@hercule/protocol";
+import { HarnessEvent, type OutputSchema, type SessionSpec } from "@hercule/protocol";
 import {
   ASSESSOR_SYSTEM_PROMPT,
   FIXTURE_PROMPT,
@@ -45,7 +45,7 @@ import { prepareTooling } from "../sessions/tooling";
 import { claudeCode, makeClaudeCodeAdapter } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import { runProcess } from "./process";
-import type { ProviderRunnerContext } from "./index";
+import type { HarnessRunnerContext } from "./index";
 import { NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "./testing";
 import { ensureRootBoundary } from "../workspaces";
 
@@ -71,8 +71,8 @@ const createTemporaryHome = (): string => {
  * The directory is created on first use, so a run that skips every test here
  * writes nothing.
  */
-let tool: ProviderRunnerContext["herculeTool"] | undefined;
-const prepareTool = (): ProviderRunnerContext["herculeTool"] => {
+let tool: HarnessRunnerContext["herculeTool"] | undefined;
+const prepareTool = (): HarnessRunnerContext["herculeTool"] => {
   if (tool === undefined) {
     const under = createTemporaryHome();
     const {
@@ -101,7 +101,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
   it(
     "reports an empty config directory as not logged in, with the machine's version and models",
     async () => {
-      const context: ProviderRunnerContext = {
+      const context: HarnessRunnerContext = {
         cwd: null,
         attachmentsDir: null,
         editMarks: null,
@@ -166,8 +166,8 @@ const SPEC: SessionSpec = {
 const TURN_DEADLINE = Duration.seconds(90);
 
 const waitForEvent = async (
-  seen: ReadonlyArray<ProviderEvent>,
-  tag: ProviderEvent["_tag"],
+  seen: ReadonlyArray<HarnessEvent>,
+  tag: HarnessEvent["_tag"],
 ): Promise<void> => {
   const deadline = Date.now() + Duration.toMillis(TURN_DEADLINE);
   while (!seen.some((event) => event._tag === tag)) {
@@ -213,7 +213,7 @@ describe.skipIf(!authed)("a real Claude Code session on this machine", () => {
   it(
     "starts, replies to one prompt inside a turn, and exits when stopped",
     async () => {
-      const seen: Array<ProviderEvent> = [];
+      const seen: Array<HarnessEvent> = [];
       Effect.runFork(
         Stream.runForEach(claudeCode.events, (event) => Effect.sync(() => void seen.push(event))),
       );
@@ -308,8 +308,8 @@ const waitForTranscript = async (nativeSessionId: string): Promise<string | unde
  */
 const buildContext = (
   cwd: string,
-  herculeTool: ProviderRunnerContext["herculeTool"] = prepareTool(),
-): ProviderRunnerContext => ({
+  herculeTool: HarnessRunnerContext["herculeTool"] = prepareTool(),
+): HarnessRunnerContext => ({
   cwd,
   attachmentsDir: null,
   editMarks: null,
@@ -332,8 +332,8 @@ const buildContext = (
  * into. Each session needs its own subscriber, because the stream never replays
  * past events.
  */
-const collectEvents = (): Array<ProviderEvent> => {
-  const seen: Array<ProviderEvent> = [];
+const collectEvents = (): Array<HarnessEvent> => {
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(claudeCode.events, (event) => Effect.sync(() => void seen.push(event))),
   );
@@ -602,7 +602,7 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
     sessionId: string,
     outputSchema: OutputSchema,
     text: string,
-  ): Promise<Extract<ProviderEvent, { _tag: "turn.completed" }>> => {
+  ): Promise<Extract<HarnessEvent, { _tag: "turn.completed" }>> => {
     const seen = collectEvents();
     await Effect.runPromise(
       claudeCode.startSession(
@@ -616,7 +616,7 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
     await Effect.runPromise(claudeCode.stopSession(sessionId, "stopped"));
     await waitForEvent(seen, "session.exited");
     return seen.find(
-      (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+      (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
         event._tag === "turn.completed",
     )!;
   };
@@ -788,7 +788,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       },
       run: runProcess,
     });
-    const context: ProviderRunnerContext = {
+    const context: HarnessRunnerContext = {
       cwd: repository?.checkout ?? scratch,
       attachmentsDir: null,
       editMarks: null,
@@ -983,7 +983,7 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
       },
       run: runProcess,
     });
-    const context: ProviderRunnerContext = {
+    const context: HarnessRunnerContext = {
       cwd: workspaceRoot,
       attachmentsDir: null,
       editMarks: null,
@@ -1159,7 +1159,7 @@ const countToolResults = (request: MockRequest): number =>
  */
 const createRealAdapter = (): {
   readonly adapter: ReturnType<typeof makeClaudeCodeAdapter>;
-  readonly seen: ReadonlyArray<ProviderEvent>;
+  readonly seen: ReadonlyArray<HarnessEvent>;
   readonly running: () => Query | undefined;
 } => {
   let running: Query | undefined;
@@ -1180,7 +1180,7 @@ const createRealAdapter = (): {
     },
     run: runProcess,
   });
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
@@ -1261,7 +1261,7 @@ describe.skipIf(binary === undefined)(
           : { text: "done" },
       );
       const { adapter, seen, running } = createRealAdapter();
-      const context: ProviderRunnerContext = {
+      const context: HarnessRunnerContext = {
         cwd: workspaceRoot,
         attachmentsDir: null,
         editMarks: null,
@@ -1421,7 +1421,7 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
     }
     const mock = startMockApi(decide);
     const { adapter, seen } = createRealAdapter();
-    const context: ProviderRunnerContext = {
+    const context: HarnessRunnerContext = {
       cwd: workspace,
       attachmentsDir: null,
       editMarks: null,
@@ -1458,7 +1458,7 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
     };
   };
 
-  const listOpenedRequests = (seen: ReadonlyArray<ProviderEvent>) =>
+  const listOpenedRequests = (seen: ReadonlyArray<HarnessEvent>) =>
     seen.flatMap((event) => (event._tag === "request.opened" ? [event.request] : []));
 
   it(
@@ -1631,7 +1631,7 @@ const readShellToolCallIds = (frame: SDKMessage): ReadonlyArray<string> =>
  * `undefined` when it opened none.
  */
 const findRequestIdForToolCall = (
-  events: ReadonlyArray<ProviderEvent>,
+  events: ReadonlyArray<HarnessEvent>,
   toolUseId: string,
 ): string | undefined =>
   events.flatMap((event) =>
@@ -1641,7 +1641,7 @@ const findRequestIdForToolCall = (
   )[0];
 
 /** Returns the SDK message an event carries as its raw payload, or `undefined`. */
-const readRawFrame = (event: ProviderEvent): Readonly<Record<string, unknown>> | undefined => {
+const readRawFrame = (event: HarnessEvent): Readonly<Record<string, unknown>> | undefined => {
   const payload: unknown = event.raw?.payload;
   return typeof payload === "object" && payload !== null && !Array.isArray(payload)
     ? (payload as Readonly<Record<string, unknown>>)
@@ -1657,22 +1657,22 @@ const isProgressReport = (frame: Readonly<Record<string, unknown>> | undefined):
  * The adapter puts the payload on the first event it emits for the frame
  * itself, after any event that opens a turn.
  */
-const findEventCarryingFrame = (events: ReadonlyArray<ProviderEvent>, frame: SDKMessage): number =>
+const findEventCarryingFrame = (events: ReadonlyArray<HarnessEvent>, frame: SDKMessage): number =>
   events.findIndex((event) => readRawFrame(event)?.["uuid"] === frame.uuid);
 
 /** Checks whether an event belongs to the session's own agent rather than a subagent. */
-const isOwnAgentEvent = (event: ProviderEvent): boolean =>
+const isOwnAgentEvent = (event: HarnessEvent): boolean =>
   !("subagentId" in event) || event.subagentId === undefined;
 
 /** What one replay of a recorded run produced. */
 interface Replay {
   /** Every event the adapter emitted, in order, up to and including `session.exited`. */
-  readonly events: ReadonlyArray<ProviderEvent>;
+  readonly events: ReadonlyArray<HarnessEvent>;
   /**
    * The events the adapter emitted for the recorded run itself, before the
    * replay stopped the session.
    */
-  readonly eventsBeforeStop: ReadonlyArray<ProviderEvent>;
+  readonly eventsBeforeStop: ReadonlyArray<HarnessEvent>;
   /** The decision each `canUseTool` call returned, by tool call id. */
   readonly decisions: ReadonlyMap<string, unknown>;
   /** The subagent id of each `stopTask` the adapter sent the harness, in order. */
@@ -1736,7 +1736,7 @@ const replayFixture = async (
     run: () => Effect.succeed({ code: 0, stdout: "", stderr: "" }),
   });
 
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
@@ -1844,14 +1844,14 @@ const replayFixture = async (
 };
 
 describe("a recorded Claude Code run with a nested subagent, replayed", () => {
-  let events: ReadonlyArray<ProviderEvent> = [];
+  let events: ReadonlyArray<HarnessEvent> = [];
   let decisions: ReadonlyMap<string, unknown> = new Map();
   beforeAll(async () => {
     ({ events, decisions } = await replayFixture(REPLAY_SESSION, FIXTURE));
   });
 
   it("encodes every event with the protocol schema", () => {
-    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const encode = Schema.encodeUnknownSync(HarnessEvent);
     for (const event of events) expect(() => encode(event), JSON.stringify(event)).not.toThrow();
   });
 
@@ -1871,7 +1871,7 @@ describe("a recorded Claude Code run with a nested subagent, replayed", () => {
     expect(completed).toEqual([
       expect.objectContaining({
         state: "completed",
-        turnId: (started[0] as Extract<ProviderEvent, { _tag: "turn.started" }>).turnId,
+        turnId: (started[0] as Extract<HarnessEvent, { _tag: "turn.started" }>).turnId,
       }),
     ]);
 
@@ -1990,7 +1990,7 @@ describe("a recorded Claude Code run with a nested subagent, replayed", () => {
       expect(completed, subagentId).toEqual([
         expect.objectContaining({
           state: "completed",
-          turnId: (started[0] as Extract<ProviderEvent, { _tag: "turn.started" }>).turnId,
+          turnId: (started[0] as Extract<HarnessEvent, { _tag: "turn.started" }>).turnId,
         }),
       ]);
       for (const field of ["usage", "costUsd", "structuredResult"]) {
@@ -2098,26 +2098,26 @@ const STOP_SCENARIOS: ReadonlyMap<string, ReadonlyArray<FixtureLine>> = (() => {
 
 /** Returns the `turn.completed` events of one agent, or of the session's own agent. */
 const listTurnEnds = (
-  events: ReadonlyArray<ProviderEvent>,
+  events: ReadonlyArray<HarnessEvent>,
   subagentId: string | undefined,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: "turn.completed" }>> =>
+): ReadonlyArray<Extract<HarnessEvent, { _tag: "turn.completed" }>> =>
   events.filter(
-    (event): event is Extract<ProviderEvent, { _tag: "turn.completed" }> =>
+    (event): event is Extract<HarnessEvent, { _tag: "turn.completed" }> =>
       event._tag === "turn.completed" && event.subagentId === subagentId,
   );
 
 /** Returns the `turn.started` events of one agent, or of the session's own agent. */
 const listTurnStarts = (
-  events: ReadonlyArray<ProviderEvent>,
+  events: ReadonlyArray<HarnessEvent>,
   subagentId: string | undefined,
-): ReadonlyArray<Extract<ProviderEvent, { _tag: "turn.started" }>> =>
+): ReadonlyArray<Extract<HarnessEvent, { _tag: "turn.started" }>> =>
   events.filter(
-    (event): event is Extract<ProviderEvent, { _tag: "turn.started" }> =>
+    (event): event is Extract<HarnessEvent, { _tag: "turn.started" }> =>
       event._tag === "turn.started" && event.subagentId === subagentId,
   );
 
 /** Returns the ids of the turns that started and have not completed. */
-const listOpenTurnIds = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> => {
+const listOpenTurnIds = (events: ReadonlyArray<HarnessEvent>): ReadonlyArray<string> => {
   const ended = new Set(
     events.flatMap((event) => (event._tag === "turn.completed" ? [event.turnId] : [])),
   );
@@ -2131,7 +2131,7 @@ const listOpenTurnIds = (events: ReadonlyArray<ProviderEvent>): ReadonlyArray<st
  * `interrupted`, its last turn ended `interrupted`, and none of its turns ended
  * `completed` after the first one interrupted.
  */
-const expectStopped = (events: ReadonlyArray<ProviderEvent>, subagentId: string): void => {
+const expectStopped = (events: ReadonlyArray<HarnessEvent>, subagentId: string): void => {
   const ends = listTurnEnds(events, subagentId);
   const stopped = ends.findIndex((end) => end.state === "interrupted");
   expect(stopped, `${subagentId} has no interrupted turn`).toBeGreaterThanOrEqual(0);
@@ -2167,7 +2167,7 @@ describe("a recorded Claude Code run whose subagents the host stopped, replayed"
   });
 
   it("encodes every event with the protocol schema", () => {
-    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const encode = Schema.encodeUnknownSync(HarnessEvent);
     for (const event of replay.events) {
       expect(() => encode(event), JSON.stringify(event)).not.toThrow();
     }
@@ -2230,7 +2230,7 @@ describe("a recorded Claude Code run interrupted while only a subagent works, re
   });
 
   it("encodes every event with the protocol schema", () => {
-    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const encode = Schema.encodeUnknownSync(HarnessEvent);
     for (const event of replay.events) {
       expect(() => encode(event), JSON.stringify(event)).not.toThrow();
     }
@@ -2325,7 +2325,7 @@ describe.skipIf(binary === undefined)(
           },
           run: runProcess,
         });
-        const context: ProviderRunnerContext = {
+        const context: HarnessRunnerContext = {
           cwd: checkout,
           attachmentsDir: null,
           editMarks: null,

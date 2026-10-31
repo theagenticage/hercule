@@ -19,7 +19,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
+import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { pi } from "./adapter";
 import { SUBAGENT_TOOL } from "./extension";
 import { cleanupHomes, buildContext, TEST_ZAI_KEY, SPEC, filterByTag, waitUntil } from "./testing";
@@ -140,7 +140,7 @@ const callBash = (marker: string): FakeToolCall => ({
 
 interface Live {
   readonly sessionId: string;
-  readonly seen: Array<ProviderEvent>;
+  readonly seen: Array<HarnessEvent>;
   readonly requestLog: ModelRequestLog;
   readonly upstream: FakeModelServer;
   readonly stop: () => Promise<void>;
@@ -178,7 +178,7 @@ const startLiveSession = async (
     env: { PATH: process.env["PATH"] ?? "" },
   };
   const sessionId = crypto.randomUUID();
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(pi.events, (event) =>
       Effect.sync(() => {
@@ -225,7 +225,7 @@ const describeProgress = (live: Live): string => {
 const waitReportingEvents = (live: Live, what: string, ready: () => boolean): Promise<void> =>
   waitUntil(() => `${what}, having ${describeProgress(live)}`, ready, STEP_MS);
 
-type EventWithTag<Tag extends ProviderEvent["_tag"]> = Extract<ProviderEvent, { _tag: Tag }>;
+type EventWithTag<Tag extends HarnessEvent["_tag"]> = Extract<HarnessEvent, { _tag: Tag }>;
 
 /** Returns the subagent the parent started with the given description, once it has started. */
 const findSubagent = (
@@ -238,7 +238,7 @@ const findSubagent = (
 const filterEventsByAgent = (
   live: Live,
   subagentId: string | undefined,
-): ReadonlyArray<ProviderEvent> =>
+): ReadonlyArray<HarnessEvent> =>
   live.seen.filter(
     (event) =>
       event._tag !== "subagent.started" &&
@@ -429,7 +429,7 @@ describe.skipIf(binary === undefined)("a real pi session with subagents", () => 
       expect(mainEnd.state).toBe("completed");
       expect("subagentId" in mainEnd).toBe(false);
       // The main turn ends after both of its children.
-      const indexOf = (event: ProviderEvent | undefined): number =>
+      const indexOf = (event: HarnessEvent | undefined): number =>
         event === undefined ? -1 : live.seen.indexOf(event);
       expect(indexOf(mainEnd)).toBeGreaterThan(indexOf(findTurnEnd(live, childA.subagentId)));
       expect(indexOf(mainEnd)).toBeGreaterThan(indexOf(findTurnEnd(live, childB.subagentId)));

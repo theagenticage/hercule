@@ -16,7 +16,7 @@
  * carried the `Agent` call, so the registry records the owner of every agent
  * call it sees.
  */
-import type { ContinuedSubagent, ProviderEvent, SubagentId } from "@hercule/protocol";
+import type { ContinuedSubagent, HarnessEvent, SubagentId } from "@hercule/protocol";
 import { truncateFact } from "./text";
 
 /**
@@ -72,7 +72,7 @@ export interface Subagent {
 }
 
 /** A `request.opened` event, the only kind of event that waits for a subagent's turn. */
-export type RequestOpened = Extract<ProviderEvent, { readonly _tag: "request.opened" }>;
+export type RequestOpened = Extract<HarnessEvent, { readonly _tag: "request.opened" }>;
 
 /**
  * Everything the normalizer knows about the session's subagents.

@@ -27,7 +27,7 @@ import {
   HOST_API,
   PluginError,
   PluginManifest,
-  ProviderDefinition,
+  HarnessDefinition,
   listChoiceFields,
   listSecretFields,
   type ActivationContext,
@@ -169,7 +169,7 @@ const CONNECTION_TYPE = "connection-type";
 
 // An unknown key fails the decode rather than being stripped: dropping a field
 // the host does not know would make an unserializable value look accepted.
-const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
+const decodeHarness = Schema.decodeUnknownEffect(HarnessDefinition, {
   errors: "all",
   onExcessProperty: "error",
 });
@@ -250,7 +250,7 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
  * the field is built from the schema rejected here.
  */
 const SECRET_FIELDS_ARE_PROVIDER_ONLY =
-  "a secret-valued config field is supported on a provider definition only";
+  "a secret-valued config field is supported on a harness definition only";
 
 /**
  * Only a Connection's config form can load choices from the external account,
@@ -396,7 +396,7 @@ const inspectManifest = (
 const buildRegistrationHost = (
   manifest: PluginManifest,
   declared: Array<NewContribution>,
-  live: Array<ProviderDefinition>,
+  live: Array<HarnessDefinition>,
   types: Array<Omit<RegisteredConnectionType, "feeds">>,
   kinds: Map<string, RegisteredEventKind>,
   sources: Array<RegisteredEventSource>,
@@ -407,9 +407,7 @@ const buildRegistrationHost = (
         providers: {
           register: (definition) =>
             Effect.gen(function* () {
-              const decoded = yield* decodeProvider(definition).pipe(
-                Effect.mapError(toPluginError),
-              );
+              const decoded = yield* decodeHarness(definition).pipe(Effect.mapError(toPluginError));
               if (listChoiceFields(decoded.configSchema).length > 0) {
                 return yield* Effect.fail(
                   new PluginError({
@@ -575,10 +573,10 @@ const make = Effect.gen(function* () {
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
-  const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
-  /** Every event kind this boot registered, by name. Set at boot, like the providers. */
+  const providers = yield* Ref.make<ReadonlyArray<HarnessDefinition>>([]);
+  /** Every event kind this boot registered, by name. Set at boot, like the harnesses. */
   const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
-  /** Every event source this boot registered, in registry order. Set at boot, like the providers. */
+  /** Every event source this boot registered, in registry order. Set at boot, like the harnesses. */
   const eventSources = yield* Ref.make<ReadonlyArray<RegisteredEventSource>>([]);
   /**
    * Every workflow action this boot registered, built-in ones included, keyed
@@ -760,7 +758,7 @@ const make = Effect.gen(function* () {
     plugin: Plugin,
     manifest: PluginManifest,
     declared: Array<NewContribution>,
-    live: Array<ProviderDefinition>,
+    live: Array<HarnessDefinition>,
     types: Array<Omit<RegisteredConnectionType, "feeds">>,
     kinds: Map<string, RegisteredEventKind>,
     sources: Array<RegisteredEventSource>,
@@ -926,7 +924,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const booted = new Map<string, Entry>();
         const catalog: Array<NewContribution> = [];
-        const registeredProviders: Array<ProviderDefinition> = [];
+        const registeredHarnesses: Array<HarnessDefinition> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
         const registeredKinds = new Map<string, RegisteredEventKind>();
         const registeredSources: Array<RegisteredEventSource> = [];
@@ -978,7 +976,7 @@ const make = Effect.gen(function* () {
           }
 
           const declared: Array<NewContribution> = [];
-          const live: Array<ProviderDefinition> = [];
+          const live: Array<HarnessDefinition> = [];
           // A plugin may register a type's event source before or after the
           // type itself, so each type gets its feeds once the pass is over.
           const types: Array<Omit<RegisteredConnectionType, "feeds">> = [];
@@ -998,7 +996,7 @@ const make = Effect.gen(function* () {
           const registered = status._tag !== "errored";
           if (registered) {
             catalog.push(...declared);
-            registeredProviders.push(...live);
+            registeredHarnesses.push(...live);
             registeredTypes.push(
               ...types.map((type) => ({
                 ...type,
@@ -1029,7 +1027,7 @@ const make = Effect.gen(function* () {
           }),
         );
         yield* Ref.set(entries, booted);
-        yield* Ref.set(providers, registeredProviders);
+        yield* Ref.set(providers, registeredHarnesses);
         yield* Ref.set(eventKinds, registeredKinds);
         yield* Ref.set(eventSources, registeredSources);
         yield* Ref.set(workflowActions, registeredActions);
@@ -1055,8 +1053,8 @@ const make = Effect.gen(function* () {
     loaded: (): Effect.Effect<ReadonlyArray<LoadedPlugin>> =>
       Effect.map(Ref.get(entries), (booted) => [...booted.values()].map(toLoadedPlugin)),
 
-    /** Returns every provider this boot registered, in registry order. */
-    providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),
+    /** Returns every harness this boot registered, in registry order. */
+    providers: (): Effect.Effect<ReadonlyArray<HarnessDefinition>> => Ref.get(providers),
 
     /** Returns every event kind this boot registered, by name. */
     eventKinds: (): Effect.Effect<ReadonlyMap<string, RegisteredEventKind>> => Ref.get(eventKinds),

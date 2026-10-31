@@ -17,8 +17,8 @@
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
-import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
-import type { ProviderRunnerContext } from "../index";
+import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
+import type { HarnessRunnerContext } from "../index";
 import type { Ran } from "../process";
 import {
   CWD,
@@ -50,7 +50,7 @@ export const buildContext = (
   home: string,
   cwd: string | null = null,
   secrets: Readonly<Record<string, string>> = { zaiApiKey: TEST_ZAI_KEY },
-): ProviderRunnerContext => ({
+): HarnessRunnerContext => ({
   cwd,
   attachmentsDir: null,
   editMarks: null,
@@ -399,16 +399,16 @@ export const createDriving = (
   cwd: string | null = CWD,
 ): {
   readonly adapter: ReturnType<typeof makePiAdapter>;
-  readonly ctx: ProviderRunnerContext;
+  readonly ctx: HarnessRunnerContext;
   readonly spawns: Array<Spawn>;
   readonly sent: Array<Sent>;
   readonly runs: Array<RunCall>;
   readonly cleanedFiles: Array<string>;
-  readonly seen: Array<ProviderEvent>;
+  readonly seen: Array<HarnessEvent>;
 } => {
   const { seam, spawns, sent, runs, cleanedFiles } = buildFakePiSeam(behaviour);
   const adapter = makePiAdapter(seam);
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );
@@ -435,7 +435,7 @@ export const listSentCommands = (
  * default.
  */
 type SessionContextOverrides = Partial<
-  Pick<ProviderRunnerContext, "editMarks" | "librarySkillsFolder" | "repositorySkillsFolders">
+  Pick<HarnessRunnerContext, "editMarks" | "librarySkillsFolder" | "repositorySkillsFolders">
 >;
 
 /**

@@ -3,26 +3,26 @@ import { cn } from "../primitives/cn";
 import { CLAUDE_MARK, OPENAI_MARK } from "../logos/marks";
 
 /**
- * The SVG path of each provider's monochrome mark, by provider id. The marks
+ * The SVG path of each harness's monochrome mark, by harness id. The marks
  * ship with the app (`../logos`, from lobehub's MIT-licensed set) and are never
- * fetched at runtime. `ProviderLogo` draws them in the current colour, on model
+ * fetched at runtime. `HarnessLogo` draws them in the current colour, on model
  * rows, account rows and the composer's pill.
  *
- * pi has no mark of its own, so `ProviderLogo` draws it as the character π.
+ * pi has no mark of its own, so `HarnessLogo` draws it as the character π.
  */
 const MARKS: Readonly<Record<string, string>> = {
   "claude-code": CLAUDE_MARK,
   codex: OPENAI_MARK,
 };
 
-export function ProviderLogo({
-  providerId,
+export function HarnessLogo({
+  harnessId,
   className,
 }: {
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly className?: string;
 }): JSX.Element | null {
-  if (providerId === "pi") {
+  if (harnessId === "pi") {
     return (
       <span aria-hidden="true" className={cn("font-mono leading-none", className)}>
         π
@@ -30,7 +30,7 @@ export function ProviderLogo({
     );
   }
 
-  const mark = MARKS[providerId];
+  const mark = MARKS[harnessId];
   if (mark === undefined) return null;
 
   return (

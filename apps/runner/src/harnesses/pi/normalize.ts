@@ -1,5 +1,5 @@
 /**
- * Converts pi's event lines into normalized provider events. The input is one
+ * Converts pi's event lines into normalized harness events. The input is one
  * raw line from pi's stdout and a small mutable state per session; the output
  * is a list of events. Nothing here touches a process or a socket, and the
  * only clock read is the wall clock. Spec 06 section 6 owns the event taxonomy.
@@ -18,7 +18,7 @@ import type {
   ContextCompactionDetail,
   ItemKind,
   OutputSchema,
-  ProviderEvent,
+  HarnessEvent,
   StreamKind,
   StructuredResult,
   SubagentId,
@@ -401,7 +401,7 @@ const classifyStop = (message: PiMessage | undefined): Normalizing["stopped"] =>
  * uses pi's own error message and a class name for what failed, so an error
  * type this build does not know still reaches the user.
  */
-const buildRuntimeError = (state: Normalizing, name: string, message: string): ProviderEvent => ({
+const buildRuntimeError = (state: Normalizing, name: string, message: string): HarnessEvent => ({
   _tag: "runtime.error",
   ...buildAgentEnvelope(state),
   ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
@@ -440,7 +440,7 @@ const recordStop = (state: Normalizing, message: PiMessage | undefined): void =>
 const warnIfCutOff = (
   state: Normalizing,
   message: PiMessage | undefined,
-): ReadonlyArray<ProviderEvent> =>
+): ReadonlyArray<HarnessEvent> =>
   message?.stopReason === "length"
     ? [
         buildRuntimeWarning(
@@ -459,14 +459,14 @@ const buildRuntimeMessage = (
   state: Normalizing,
   tag: "runtime.warning" | "runtime.notice",
   message: string,
-): ProviderEvent => ({
+): HarnessEvent => ({
   _tag: tag,
   ...buildAgentEnvelope(state),
   ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
   message: truncateMessage(message),
 });
 
-const buildRuntimeWarning = (state: Normalizing, message: string): ProviderEvent =>
+const buildRuntimeWarning = (state: Normalizing, message: string): HarnessEvent =>
   buildRuntimeMessage(state, "runtime.warning", message);
 
 /** The two kinds of streamed assistant content, and the item kind and stream kind of each. */
@@ -559,7 +559,7 @@ const buildToolDetail = (
 const readToolOutput = (result: PiToolResult | undefined): string =>
   (result?.content ?? []).map((part) => part.text ?? "").join("");
 
-const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEvent> => {
+const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<HarnessEvent> => {
   const delta = event.assistantMessageEvent;
   const type = typeof delta?.type === "string" ? delta.type : "";
   const index = typeof delta?.contentIndex === "number" ? delta.contentIndex : -1;
@@ -608,7 +608,7 @@ const onBlockEvent = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
     : [];
 };
 
-const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEvent> => {
+const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<HarnessEvent> => {
   const toolName = typeof event.toolName === "string" ? event.toolName : "";
   const callId = typeof event.toolCallId === "string" ? event.toolCallId : "";
   const kind = Object.hasOwn(TOOL_KINDS, toolName) ? TOOL_KINDS[toolName]! : "tool_call";
@@ -638,7 +638,7 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
   ];
 };
 
-const onToolUpdate = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEvent> => {
+const onToolUpdate = (state: Normalizing, event: PiEvent): ReadonlyArray<HarnessEvent> => {
   const item = state.tools.get(typeof event.toolCallId === "string" ? event.toolCallId : "");
   if (item === undefined) return [];
   const output = readToolOutput(event.partialResult);
@@ -662,7 +662,7 @@ const onToolUpdate = (state: Normalizing, event: PiEvent): ReadonlyArray<Provide
       ];
 };
 
-const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<ProviderEvent> => {
+const onToolEnd = (state: Normalizing, event: PiEvent): ReadonlyArray<HarnessEvent> => {
   const callId = typeof event.toolCallId === "string" ? event.toolCallId : "";
   const item = state.tools.get(callId);
   if (item === undefined) return [];
@@ -709,7 +709,7 @@ const buildCompletedDetail = (item: Running & { readonly subagentId?: SubagentId
  * never ended. Returns the `item.completed` events. An item nobody completes
  * would show a spinner for the rest of the session.
  */
-const failOpenItems = (state: Normalizing, turnId: string): ReadonlyArray<ProviderEvent> => {
+const failOpenItems = (state: Normalizing, turnId: string): ReadonlyArray<HarnessEvent> => {
   const open = [
     ...state.blocks.values(),
     ...state.tools.values(),
@@ -757,7 +757,7 @@ const judgeTurn = (state: Normalizing, ended: TurnState): StructuredResult | und
  * changed it. Exported because the adapter also reports a subagent's count
  * when the session ends while the subagent runs.
  */
-export const buildUsageEvents = (state: Normalizing): ReadonlyArray<ProviderEvent> => [
+export const buildUsageEvents = (state: Normalizing): ReadonlyArray<HarnessEvent> => [
   ...(state.subagentId === undefined
     ? []
     : [
@@ -784,7 +784,7 @@ export const buildUsageEvents = (state: Normalizing): ReadonlyArray<ProviderEven
 export const endTurn = (
   state: Normalizing,
   ended?: Normalizing["stopped"],
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   const turnId = state.turnId;
   if (turnId === undefined) return [];
   const stopped = ended ?? state.stopped;
@@ -837,7 +837,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * from zero. Called once per turn, by whichever event needs the turn announced
  * first.
  */
-const announceTurn = (state: Normalizing): ProviderEvent => {
+const announceTurn = (state: Normalizing): HarnessEvent => {
   state.announced = true;
   resetTotals(state.turnTotals);
   state.lastAssistantText = "";
@@ -865,7 +865,7 @@ const ensureAnnouncedTurn = (
   state: Normalizing,
 ): {
   readonly turnId: string;
-  readonly opening: ReadonlyArray<ProviderEvent>;
+  readonly opening: ReadonlyArray<HarnessEvent>;
   readonly synthetic: boolean;
 } => {
   if (state.announced) return { turnId: ensureTurnId(state), opening: [], synthetic: false };
@@ -888,7 +888,7 @@ const buildUnknownItem = (
   event: unknown,
   label: string,
   error?: unknown,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   state.reportUnknownMessage(label, error);
   const turn = ensureAnnouncedTurn(state);
   const itemId = crypto.randomUUID();
@@ -935,7 +935,7 @@ const COMPACTION_TRIGGERS: Readonly<Record<string, "auto" | "manual">> = {
 const ensureCompaction = (
   state: Normalizing,
   reason: unknown,
-): { readonly running: RunningCompaction; readonly events: Array<ProviderEvent> } => {
+): { readonly running: RunningCompaction; readonly events: Array<HarnessEvent> } => {
   if (state.compaction !== undefined) return { running: state.compaction, events: [] };
   const turn = ensureAnnouncedTurn(state);
   const trigger =
@@ -1198,7 +1198,7 @@ type PiEventType =
   | "extension_error";
 
 /** What the adapter does with one kind of pi event: a handler that returns its events, or the reason nothing is shown. */
-type PiEventHandler = (state: Normalizing, event: PiEvent) => ReadonlyArray<ProviderEvent>;
+type PiEventHandler = (state: Normalizing, event: PiEvent) => ReadonlyArray<HarnessEvent>;
 type PiEventDecision = PiEventHandler | string;
 
 /**
@@ -1256,7 +1256,7 @@ export const normalize = (
    * arrives without it.
    */
   decoded?: unknown,
-): ReadonlyArray<ProviderEvent> => {
+): ReadonlyArray<HarnessEvent> => {
   let event: PiEvent;
   if (decoded === undefined) {
     try {

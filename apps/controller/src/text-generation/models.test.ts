@@ -5,10 +5,10 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { ProviderDefinition } from "@hercule/plugin-host";
+import type { HarnessDefinition } from "@hercule/plugin-host";
 import { TEXT_GENERATION_CAPABILITY, type ProbeResult } from "@hercule/protocol";
 import { nowIso, uuidFromString, withTransaction } from "../db";
-import { buildPluginStack, buildProviderDefinition, createPluginFixture } from "../plugins/testing";
+import { buildPluginStack, buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 import { PluginHost } from "../plugins";
 import { providerRepository } from "../providers";
 import { runnerRepository } from "../runners";
@@ -17,8 +17,8 @@ import { Settings, SettingsLayer } from "../settings";
 import { TextGenerationModels, TextGenerationModelsLayer } from "./models";
 import { inTransaction } from "../db/testing";
 
-const withSuggestion = (id: string, model: string): ProviderDefinition => ({
-  ...buildProviderDefinition(id, { token: "t" }),
+const withSuggestion = (id: string, model: string): HarnessDefinition => ({
+  ...buildHarnessDefinition(id, { token: "t" }),
   suggestedTextGenerationModel: model,
 });
 
@@ -81,12 +81,12 @@ const run = <A>(
       const sql = yield* SqlClient.SqlClient;
       const at = yield* nowIso;
       const ids: Record<string, string> = {};
-      for (const providerId of ["codex", "pi", "claude-code"]) {
-        ids[providerId] = (yield* withTransaction(
+      for (const harnessId of ["codex", "pi", "claude-code"]) {
+        ids[harnessId] = (yield* withTransaction(
           sql,
           instances.insert({
-            providerId,
-            name: providerId,
+            harnessId,
+            name: harnessId,
             config: { token: "t" },
             at,
           }),
@@ -137,7 +137,7 @@ describe("automatic", () => {
 
     expect(target).toMatchObject({
       _tag: "resolved",
-      instance: { providerId: "pi" },
+      instance: { harnessId: "pi" },
       model: "pi-small",
       runnerIds: [expect.any(String) as unknown],
     });
@@ -157,7 +157,7 @@ describe("automatic", () => {
 
     expect(target).toMatchObject({
       _tag: "resolved",
-      instance: { providerId: "claude-code" },
+      instance: { harnessId: "claude-code" },
       model: "haiku",
     });
   });
@@ -173,7 +173,7 @@ describe("automatic", () => {
       }),
     );
 
-    expect(target).toMatchObject({ _tag: "resolved", instance: { providerId: "pi" } });
+    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "pi" } });
   });
 
   it("skips an instance that is logged in only on a runner without the text generation capability", async () => {
@@ -187,7 +187,7 @@ describe("automatic", () => {
       }),
     );
 
-    expect(target).toMatchObject({ _tag: "resolved", instance: { providerId: "pi" } });
+    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "pi" } });
   });
 
   it("lists every runner that could take the call", async () => {
@@ -259,7 +259,7 @@ describe("automatic", () => {
       }),
     );
 
-    expect(target).toMatchObject({ _tag: "resolved", instance: { providerId: "codex" } });
+    expect(target).toMatchObject({ _tag: "resolved", instance: { harnessId: "codex" } });
   });
 });
 
@@ -299,7 +299,7 @@ describe("a chosen instance and model", () => {
 
     expect(target).toMatchObject({
       _tag: "resolved",
-      instance: { providerId: "pi" },
+      instance: { harnessId: "pi" },
       model: "not-in-any-catalog",
       runnerIds: [],
     });

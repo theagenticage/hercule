@@ -1,5 +1,5 @@
 /**
- * The provider adapters built into this runner.
+ * The harness adapters built into this runner.
  */
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -13,7 +13,7 @@ import type {
   TextGenerationOutcome,
   TextGenerationSpec,
   ModelSelection,
-  ProviderEvent,
+  HarnessEvent,
   QuestionAnswers,
   SendResult,
   SessionBinding,
@@ -30,7 +30,7 @@ import { PI, pi } from "./pi";
 import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
 
-export interface ProviderRunnerContext {
+export interface HarnessRunnerContext {
   /**
    * Where a session runs: the workspace path, or the scratch directory the
    * runner made for a session with no workspace. For a text generation, the
@@ -180,7 +180,7 @@ export interface EditMarks {
  * The context of a text generation. The runner has already found the harness
  * binary and made the call's scratch directory, so both are present here.
  */
-export type TextGenerationContext = ProviderRunnerContext & {
+export type TextGenerationContext = HarnessRunnerContext & {
   readonly binary: string;
   readonly cwd: string;
 };
@@ -219,7 +219,7 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
  *
  * Skills are not User Material: a session's skills come from the Skill
  * Library, in its library skills folder
- * (`ProviderRunnerContext.librarySkillsFolder`).
+ * (`HarnessRunnerContext.librarySkillsFolder`).
  */
 export interface UserMaterial {
   /** Directories of prompt templates the harness loads explicitly. */
@@ -233,12 +233,12 @@ export interface InstallOutcome {
   readonly message?: string;
 }
 
-export interface ProviderAdapter {
-  readonly providerId: string;
+export interface HarnessAdapter {
+  readonly harnessId: string;
   /** The harness binary's name on `PATH`, used to resolve `binary`. */
   readonly binaryName: string;
   /** Side-effect free: makes no API call and writes nothing outside `ctx.home`. */
-  readonly probe: (ctx: ProviderRunnerContext, config: Schema.Json) => Effect.Effect<ProbeResult>;
+  readonly probe: (ctx: HarnessRunnerContext, config: Schema.Json) => Effect.Effect<ProbeResult>;
   /**
    * Takes an environment rather than a context, because an install is per machine, not per
    * instance.
@@ -247,7 +247,7 @@ export interface ProviderAdapter {
     env: Readonly<Record<string, string | undefined>>,
   ) => Effect.Effect<InstallOutcome>;
   /** Takes the binary separately, because a login needs a machine that already has the harness. */
-  readonly login?: (ctx: ProviderRunnerContext, binary: string) => LoginCommand;
+  readonly login?: (ctx: HarnessRunnerContext, binary: string) => LoginCommand;
 
   /**
    * Makes one text generation: a single model call with the spec's
@@ -281,7 +281,7 @@ export interface ProviderAdapter {
    * session started misses that session's earlier events. The runner
    * subscribes once, at startup.
    */
-  readonly events: Stream.Stream<ProviderEvent>;
+  readonly events: Stream.Stream<HarnessEvent>;
 
   /**
    * Starts one session and returns its binding. The caller passes the Hercule
@@ -301,7 +301,7 @@ export interface ProviderAdapter {
   readonly startSession: (
     sessionId: string,
     spec: SessionSpec,
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
   ) => Effect.Effect<SessionBinding, AdapterError>;
 
   /**
@@ -387,33 +387,33 @@ export interface ProviderAdapter {
   readonly listSessions: Effect.Effect<ReadonlyArray<SessionBinding>>;
 }
 
-const ADAPTERS: ReadonlyMap<string, ProviderAdapter> = new Map([
+const ADAPTERS: ReadonlyMap<string, HarnessAdapter> = new Map([
   [CLAUDE_CODE, claudeCode],
   [CODEX, codex],
   [PI, pi],
 ]);
 
 /** Every adapter in this build. The session supervisor listens to the events of each. */
-export const adapters: ReadonlyArray<ProviderAdapter> = [...ADAPTERS.values()];
+export const adapters: ReadonlyArray<HarnessAdapter> = [...ADAPTERS.values()];
 
 export const ADAPTER_IDS: ReadonlyArray<string> = [...ADAPTERS.keys()];
 
-export const findAdapter = (providerId: string): ProviderAdapter | undefined =>
-  ADAPTERS.get(providerId);
+export const findAdapter = (harnessId: string): HarnessAdapter | undefined =>
+  ADAPTERS.get(harnessId);
 
 /**
  * One per process rather than per connection, because a login's child process outlives a dropped
  * connection.
  */
-export const providerLogins = makeLogins(spawnLogin);
+export const harnessLogins = makeLogins(spawnLogin);
 
 export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 
 export { CLAUDE_CODE, CODEX, PI };
 
 /**
- * Returns the message for a provider that this runner has no adapter for,
- * which happens when the controller knows a provider that this runner build does not.
+ * Returns the message for a harness that this runner has no adapter for,
+ * which happens when the controller knows a harness that this runner build does not.
  */
-export const describeMissingAdapter = (providerId: string): string =>
-  `This runner does not support the provider "${providerId}". Update the runner, or run the session on another runner.`;
+export const describeMissingAdapter = (harnessId: string): string =>
+  `This runner does not support the provider "${harnessId}". Update the runner, or run the session on another runner.`;

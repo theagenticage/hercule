@@ -77,7 +77,7 @@ const buildSnapshot = (auth: Readonly<Record<string, string>>) => ({
 
 const buildClaudeCodeInstance = (snapshots: ReadonlyArray<ReturnType<typeof buildSnapshot>>) => ({
   id: CLAUDE_ID,
-  providerId: "claude-code",
+  harnessId: "claude-code",
   name: "Claude Code",
   config: {},
   displayName: "Claude Code",
@@ -314,7 +314,7 @@ describe("Sessions > a harness that needs a key", () => {
   const buildPiInstance = (set: boolean) => ({
     ...buildClaudeCodeInstance([PI_SNAPSHOT]),
     id: PI_ID,
-    providerId: "pi",
+    harnessId: "pi",
     name: "pi",
     displayName: "pi",
     binaryName: "pi",

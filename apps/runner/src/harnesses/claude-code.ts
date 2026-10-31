@@ -1,5 +1,5 @@
 /**
- * The Claude Code provider adapter, and the only file that calls the vendor
+ * The Claude Code harness adapter, and the only file that calls the vendor
  * SDK. The other `claude-code-*` files import only its types.
  *
  * The probe sends no prompt and uses the SDK's control requests instead,
@@ -43,7 +43,7 @@ import {
   type ModelOption,
   type OpenRequest,
   type ProbeResult,
-  type ProviderEvent,
+  type HarnessEvent,
   type QuestionAnswers,
   type SendResult,
   type SessionBinding,
@@ -98,8 +98,8 @@ import {
 import type {
   AdapterTurnInput,
   EditMarks,
-  ProviderAdapter,
-  ProviderRunnerContext,
+  HarnessAdapter,
+  HarnessRunnerContext,
   TextGenerationContext,
 } from "./index";
 import { makeInstall } from "./install";
@@ -353,7 +353,7 @@ const buildAuth = (account: Account): ProbeResult["auth"] => {
  * directory. `HOME` is not changed, because overriding it makes the CLI report
  * the login of a different account.
  */
-const buildEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => ({
+const buildEnv = (ctx: HarnessRunnerContext): Record<string, string | undefined> => ({
   ...ctx.env,
   CLAUDE_CONFIG_DIR: ctx.home,
   // Without this, the harness could update itself during a probe and install
@@ -367,7 +367,7 @@ const buildEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined
  * The CLI still writes into its config directory, which is why the probe uses
  * the instance's own directory.
  */
-const buildProbeOptions = (ctx: ProviderRunnerContext, binary: string): Options => ({
+const buildProbeOptions = (ctx: HarnessRunnerContext, binary: string): Options => ({
   pathToClaudeCodeExecutable: binary,
   settingSources: [],
   strictMcpConfig: true,
@@ -636,7 +636,7 @@ const readQueryResult = async (
  * Hercule's plugin, the library skills folder, then the repository folders in
  * the order given.
  */
-const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
+const buildPlugins = (ctx: HarnessRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
   ...(ctx.librarySkillsFolder === undefined
     ? []
@@ -725,7 +725,7 @@ const SESSION_SETTINGS_FILE = "claude-settings.json";
  * be read within the limits, or when the file cannot be written.
  */
 const buildSessionSettings = (
-  ctx: ProviderRunnerContext,
+  ctx: HarnessRunnerContext,
   loadsProject: boolean,
 ): Effect.Effect<string | Settings, AdapterFailed> =>
   Effect.flatMap(
@@ -935,7 +935,7 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
  * reachable (spec 06 section 9.1).
  */
 const buildSessionOptions = (
-  ctx: ProviderRunnerContext,
+  ctx: HarnessRunnerContext,
   spec: SessionSpec,
   binary: string,
   native: Options,
@@ -1109,14 +1109,14 @@ interface Live {
   inputGeneration: number;
 }
 
-export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
+export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
   // Creating an unbounded PubSub only allocates memory, so it is safe to run
   // synchronously here. That keeps `findAdapter` a synchronous lookup, which is
   // how every caller already uses it.
-  const published = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+  const published = Effect.runSync(PubSub.unbounded<HarnessEvent>());
   const live = new Map<string, Live>();
 
-  const emit = (event: ProviderEvent): void => {
+  const emit = (event: HarnessEvent): void => {
     PubSub.publishUnsafe(published, event);
   };
 
@@ -1362,7 +1362,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
    * cancelled, because a Request closes when its agent's turn ends, and its
    * end must be reported before the turn's.
    */
-  const publishMessageEvents = (held: Live, events: ReadonlyArray<ProviderEvent>): void => {
+  const publishMessageEvents = (held: Live, events: ReadonlyArray<HarnessEvent>): void => {
     for (const event of events) {
       if (event._tag === "turn.completed" && event.subagentId !== undefined) {
         withdrawParksAskedBy(held.parks, new Set([event.subagentId]));
@@ -1453,7 +1453,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       // which nobody can answer.
       withdrawAllParks(held.parks);
       // A compaction still running has no later message to complete it.
-      const compactionEnd: Array<ProviderEvent> = [];
+      const compactionEnd: Array<HarnessEvent> = [];
       completeCompactionAtEnd(held.state, compactionEnd);
       for (const event of compactionEnd) emit(event);
       // Compare by identity: a session started again under the same id has a
@@ -1469,7 +1469,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     }
   };
 
-  const readVersion = (ctx: ProviderRunnerContext, binary: string): Effect.Effect<string | null> =>
+  const readVersion = (ctx: HarnessRunnerContext, binary: string): Effect.Effect<string | null> =>
     Effect.map(seam.run([binary, "--version"], buildEnv(ctx)), (ran) => {
       if (ran.code !== 0) return null;
       // Report an unrecognised version as printed. The protocol does not
@@ -1479,7 +1479,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     });
 
   const queryHarness = (
-    ctx: ProviderRunnerContext,
+    ctx: HarnessRunnerContext,
     binary: string,
   ): Effect.Effect<{ account: Account; models: ReadonlyArray<Model> }, string> =>
     Effect.acquireUseRelease(
@@ -1500,7 +1500,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     );
 
   return {
-    providerId: CLAUDE_CODE,
+    harnessId: CLAUDE_CODE,
     binaryName: CLAUDE_BINARY,
 
     events: Stream.fromPubSub(published),
@@ -1508,7 +1508,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     startSession: (
       sessionId: string,
       spec: SessionSpec,
-      ctx: ProviderRunnerContext,
+      ctx: HarnessRunnerContext,
     ): Effect.Effect<SessionBinding, AdapterError> =>
       Effect.gen(function* () {
         const binary = ctx.binary;
@@ -1581,7 +1581,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           eventId: held.state.mint(),
           sessionId,
           at: held.state.now(),
-          providerRefs: { nativeSessionId: binding.nativeSessionId },
+          harnessRefs: { nativeSessionId: binding.nativeSessionId },
         });
         return binding;
       }),
@@ -1768,9 +1768,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           }),
       ),
 
-    // Every shipped provider's config schema is empty, so the Claude adapter
+    // Every shipped harness's config schema is empty, so the Claude adapter
     // does not read the config and leaves out that parameter.
-    probe: (ctx: ProviderRunnerContext): Effect.Effect<ProbeResult> => {
+    probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> => {
       const binary = ctx.binary;
       if (binary === undefined) {
         return Effect.succeed(buildFailedProbe(null, `no ${CLAUDE_BINARY} on this machine`));
@@ -1802,7 +1802,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
      * purpose: if a browser opened, the CLI would switch to a `localhost`
      * callback, which a browser on another machine cannot reach.
      */
-    login: (ctx: ProviderRunnerContext, binary: string): LoginCommand => ({
+    login: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
       command: [binary, "auth", "login"],
       env: { ...buildEnv(ctx), BROWSER: "false" },
     }),
@@ -1819,7 +1819,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 };
 
-export const claudeCode: ProviderAdapter = makeClaudeCodeAdapter({
+export const claudeCode: HarnessAdapter = makeClaudeCodeAdapter({
   stream: ({ options, input, closeWaitsForExit }) => {
     // Only a text generation starts the CLI itself. A session keeps the SDK's
     // own start and its own way of stopping.

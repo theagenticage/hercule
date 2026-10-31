@@ -9,7 +9,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import type { OutputSchema, TextGenerationOutcome, TextGenerationSpec } from "@hercule/protocol";
 import { buildTextGenerationContext } from "../testing";
-import type { ProviderAdapter } from "../index";
+import type { HarnessAdapter } from "../index";
 import { makePiAdapter } from "./adapter";
 import {
   ACCESS_MODE_VARIABLE,
@@ -58,7 +58,7 @@ const USAGE = { input: 261, output: 27, cacheRead: 0, cacheWrite: 0, cost: { tot
  * with becomes a `failed` outcome, as the runner does.
  */
 const generate = (
-  adapter: ProviderAdapter,
+  adapter: HarnessAdapter,
   home: string = createPiHome(),
 ): Effect.Effect<TextGenerationOutcome> =>
   Effect.catch(

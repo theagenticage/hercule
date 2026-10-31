@@ -28,7 +28,7 @@
 import {
   isAsyncQuestion,
   type ItemKind,
-  type ProviderEvent,
+  type HarnessEvent,
   type StreamKind,
   type SubagentId,
 } from "@hercule/protocol";
@@ -45,7 +45,7 @@ export const DELTA_FLUSH_BYTES = 4 * 1024;
 /** The text held for one (item, stream kind), and where it came from. */
 interface Held {
   /** The first delta held. The merged row keeps its id and timestamp. */
-  readonly first: Extract<ProviderEvent, { _tag: "content.delta" }>;
+  readonly first: Extract<HarnessEvent, { _tag: "content.delta" }>;
   readonly text: string;
   /** The sequence number of the last delta merged in. Writing the row is idempotent on it. */
   readonly seq: number;
@@ -77,7 +77,7 @@ export interface Folded {
 export interface StreamRow {
   readonly seq: number;
   readonly at: string;
-  readonly event: ProviderEvent;
+  readonly event: HarnessEvent;
 }
 
 export const startTracking = (from: Omit<Tracked, "buffers">): Tracked => ({
@@ -91,7 +91,7 @@ export const startTracking = (from: Omit<Tracked, "buffers">): Tracked => ({
  * agent that started the subagent, so it is stored under its
  * `parentSubagentId` rather than the id it introduces (spec 06 section 13.2).
  */
-export const attributeEvent = (event: ProviderEvent): SubagentId | undefined => {
+export const attributeEvent = (event: HarnessEvent): SubagentId | undefined => {
   if (event._tag === "subagent.started") return event.parentSubagentId;
   return "subagentId" in event ? event.subagentId : undefined;
 };
@@ -167,7 +167,7 @@ const toFlushedRow = (held: Held): StreamRow => ({
  * changes nothing. Only the session's own agent moves the status: a subagent's
  * turn never makes the session busy or idle.
  */
-const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => {
+const computeStatusAfter = (event: HarnessEvent): SessionStatus | undefined => {
   if (attributeEvent(event) !== undefined) return undefined;
   switch (event._tag) {
     case "session.started":
@@ -185,7 +185,7 @@ const computeStatusAfter = (event: ProviderEvent): SessionStatus | undefined => 
 
 /** An event that can open or close one of the Requests a session waits on. */
 export type RequestEvent = Extract<
-  ProviderEvent,
+  HarnessEvent,
   { readonly _tag: "request.opened" | "request.resolved" | "turn.completed" | "session.exited" }
 >;
 
@@ -193,7 +193,7 @@ export type RequestEvent = Extract<
 export type RequestClosingEvent = Exclude<RequestEvent, { readonly _tag: "request.opened" }>;
 
 /** Checks whether an event can open or close one of the Requests a session waits on. */
-export const isRequestEvent = (event: ProviderEvent): event is RequestEvent =>
+export const isRequestEvent = (event: HarnessEvent): event is RequestEvent =>
   event._tag === "request.opened" ||
   event._tag === "request.resolved" ||
   event._tag === "turn.completed" ||
@@ -270,7 +270,7 @@ export const compareOpenRequests = (
 export const fold = (
   tracked: Tracked,
   reported: number,
-  event: ProviderEvent,
+  event: HarnessEvent,
 ): Folded | undefined => {
   const seq = tracked.base + reported;
   if (seq <= tracked.lastSeq) return undefined;

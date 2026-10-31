@@ -23,7 +23,7 @@ import { useMinutesLeft } from "../../app/age-clock";
 import { providersQuery } from "../../app/queries";
 import { ExternalIcon } from "../../icons/external";
 import { DeviceCodeSteps, DoneMark, FormField, MarkedRow, NumberedStep, WaitLine } from "../step";
-import { ProviderLogo } from "../thread/provider-logo";
+import { HarnessLogo } from "../thread/harness-logo";
 
 /**
  * Renders `row`, the provider instance as its runner `runnerId` sees it: its
@@ -103,7 +103,7 @@ export function ProviderLogin({
     mutationFn: () =>
       client.runner.installHarness({
         params: { id: runnerId },
-        payload: { providerId: row.providerId },
+        payload: { harnessId: row.harnessId },
       }),
     onSuccess: () =>
       Promise.all([
@@ -139,7 +139,7 @@ export function ProviderLogin({
 
   return (
     <MarkedRow
-      mark={<ProviderLogo providerId={row.providerId} size={18} />}
+      mark={<HarnessLogo harnessId={row.harnessId} size={18} />}
       name={row.name}
       detail={row.location}
       detailMono={row.path !== null}

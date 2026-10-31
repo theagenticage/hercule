@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { ProviderDefinition } from "@hercule/plugin-host";
+import type { HarnessDefinition } from "@hercule/plugin-host";
 import type { Assistant, Conversation, ProviderInstance } from "@hercule/contract";
 import {
   completeSetup,
@@ -22,13 +22,13 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { uuidFromString, withTransaction } from "../db";
-import { buildProviderDefinition, createPluginFixture } from "../plugins/testing";
+import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 
-/** Three providers, in the order the shipped plugin registry lists the harnesses. */
-const PROVIDERS: ReadonlyArray<ProviderDefinition> = [
-  buildProviderDefinition("claude-provider", { token: "t" }),
-  buildProviderDefinition("codex-provider", { token: "t" }),
-  buildProviderDefinition("pi-provider", { token: "t" }),
+/** Three harnesses, in the order the shipped plugin registry lists the harnesses. */
+const PROVIDERS: ReadonlyArray<HarnessDefinition> = [
+  buildHarnessDefinition("claude-provider", { token: "t" }),
+  buildHarnessDefinition("codex-provider", { token: "t" }),
+  buildHarnessDefinition("pi-provider", { token: "t" }),
 ];
 
 /** The system prompt an assistant gets when the create names none. */

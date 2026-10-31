@@ -24,7 +24,7 @@ import {
   SteerRefused,
   type AdapterError,
   type ModelSelection,
-  type ProviderEvent,
+  type HarnessEvent,
   type SessionInputResult,
   type SessionStart,
 } from "@hercule/protocol";
@@ -72,7 +72,7 @@ let homes: Array<string> = [];
 /**
  * Builds a real plugin host with no plugins. It is needed because a session
  * record lists what its provider does not enforce, and that list is read from
- * the provider definitions the host holds.
+ * the harness definitions the host holds.
  */
 const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClient>) =>
   PluginHostLayer.pipe(
@@ -188,11 +188,11 @@ const buildSpec = (instanceId: string, model: string): SessionSpec => ({
 });
 
 /**
- * Inserts a provider instance row. A start frame's `providerId` and `config`
+ * Inserts a provider instance row. A start frame's `harnessId` and `config`
  * come from this row, which `oldestQueued` joins in.
  */
 const insertInstance = (
-  providerId: string,
+  harnessId: string,
   config: Readonly<Record<string, unknown>>,
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
@@ -202,7 +202,7 @@ const insertInstance = (
       sql,
       sql`
         INSERT INTO provider_instances (id, provider_id, name, config, created_at, updated_at)
-        VALUES (${id}, ${providerId}, 'an instance', ${JSON.stringify(config)}, ${at}, ${at})
+        VALUES (${id}, ${harnessId}, 'an instance', ${JSON.stringify(config)}, ${at}, ${at})
       `,
     );
     return uuidToString(id);
@@ -444,7 +444,7 @@ describe("SessionService.claimStarts", () => {
 
     const branch = frames.get(result.onBranch)!;
     expect(branch._tag).toBe("sessionStart");
-    expect(branch.providerId).toBe("an-adapter");
+    expect(branch.harnessId).toBe("an-adapter");
     expect(branch.config).toEqual({ token: "t", baseUrl: "https://api" });
     // Decoded from the spec the row stores, not built again from other fields.
     expect(branch.spec).toStrictEqual(result.specOnBranch);
@@ -1695,7 +1695,7 @@ describe("SessionService.queryPassages", () => {
         streamKind,
         delta: text,
       }) as const;
-    const rows: ReadonlyArray<readonly [string, string, ProviderEvent]> = [
+    const rows: ReadonlyArray<readonly [string, string, HarnessEvent]> = [
       [agentRun, t[0]!, { _tag: "item.started", ...userMessage("launch the rocket today") }],
       [
         agentRun,

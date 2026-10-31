@@ -244,7 +244,7 @@ const isPage = (
  *   line belongs to, the time the line already starts with, and the turn and
  *   item ids, which a reader cannot look up;
  * - `_tag`, because the line prints it as its own column;
- * - `providerRefs` and `raw`, the vendor's original data. A line with them
+ * - `harnessRefs` and `raw`, the vendor's original data. A line with them
  *   would be a JSON dump; `--json` shows them.
  *
  * What is left is the event's own payload, which is the part that differs
@@ -255,7 +255,7 @@ const TRANSCRIPT_NOISE = new Set([
   "eventId",
   "sessionId",
   "at",
-  "providerRefs",
+  "harnessRefs",
   "raw",
   "turnId",
   "itemId",

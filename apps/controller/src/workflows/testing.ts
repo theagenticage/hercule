@@ -26,7 +26,7 @@ import {
   type ServerOptions,
 } from "../http/testing";
 import {
-  buildProviderDefinition,
+  buildHarnessDefinition,
   createPluginFixture,
   IDLE_FEEDS,
   IDLE_INGEST_OPEN,
@@ -41,8 +41,8 @@ export const ABSENT_ID = "0192f0a1-0000-7000-8000-00000000dead";
 /** The token the local GitHub connection type accepts. */
 export const ACCEPTED_GITHUB_TOKEN = "ghp_a-token";
 
-/** The provider an agent step's Agent runs on. */
-export const AGENT_PROVIDER = buildProviderDefinition("test-provider", { token: "t" });
+/** The harness an agent step's Agent runs on. */
+export const AGENT_HARNESS = buildHarnessDefinition("test-provider", { token: "t" });
 
 /**
  * A local stand-in for the GitHub plugin, with its Connection type and the one
@@ -149,7 +149,7 @@ export const withSetUpController = (
     {
       ...timings,
       plugins: [
-        createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
+        createPluginFixture({ id: "providers", definitions: [AGENT_HARNESS] }).plugin,
         localGithubPlugin,
         ...additionalPlugins,
       ],
@@ -327,9 +327,9 @@ export const createAgent = async (base: string, token: string): Promise<string> 
   const providers = await get(base, "/api/v1/providers", token);
   expect(providers.status, await providers.clone().text()).toBe(200);
   const instance = (
-    (await providers.json()) as ReadonlyArray<{ id: string; providerId: string }>
-  ).find((provider) => provider.providerId === AGENT_PROVIDER.id);
-  expect(instance, AGENT_PROVIDER.id).toBeDefined();
+    (await providers.json()) as ReadonlyArray<{ id: string; harnessId: string }>
+  ).find((provider) => provider.harnessId === AGENT_HARNESS.id);
+  expect(instance, AGENT_HARNESS.id).toBeDefined();
   const profiles = await get(base, "/api/v1/profiles", token);
   expect(profiles.status, await profiles.clone().text()).toBe(200);
   const profile = (

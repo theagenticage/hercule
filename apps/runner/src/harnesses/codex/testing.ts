@@ -10,8 +10,8 @@
  */
 import { join } from "node:path";
 import { Effect, Stream } from "effect";
-import type { ProviderEvent, SessionSpec } from "@hercule/protocol";
-import type { ProviderRunnerContext } from "../index";
+import type { HarnessEvent, SessionSpec } from "@hercule/protocol";
+import type { HarnessRunnerContext } from "../index";
 import {
   CWD,
   createLines,
@@ -35,7 +35,7 @@ export {
 
 export const createCodexHome = (): string => createScratchHome("codex");
 
-export const buildContext = (home: string, cwd: string | null = null): ProviderRunnerContext => ({
+export const buildContext = (home: string, cwd: string | null = null): HarnessRunnerContext => ({
   cwd,
   attachmentsDir: null,
   editMarks: null,
@@ -304,15 +304,15 @@ export const createDriving = (
   cwd: string | null = CWD,
 ): {
   readonly adapter: ReturnType<typeof makeCodexAdapter>;
-  readonly ctx: ProviderRunnerContext;
+  readonly ctx: HarnessRunnerContext;
   readonly spawns: Array<Spawn>;
   readonly requests: Array<Sent>;
   readonly answered: Array<Answered>;
-  readonly seen: Array<ProviderEvent>;
+  readonly seen: Array<HarnessEvent>;
 } => {
   const { seam, spawns, requests, answered } = buildScriptedSeam(answers);
   const adapter = makeCodexAdapter(seam);
-  const seen: Array<ProviderEvent> = [];
+  const seen: Array<HarnessEvent> = [];
   Effect.runFork(
     Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
   );

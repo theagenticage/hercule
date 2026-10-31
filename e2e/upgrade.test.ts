@@ -342,7 +342,7 @@ interface SeededInput {
 
 interface SeededProvider {
   readonly id: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly name: string;
 }
 
@@ -454,7 +454,7 @@ function summarizeMessage(message: SeededMessage): {
 }
 
 function summarizeProvider(provider: SeededProvider): SeededProvider {
-  return { id: provider.id, providerId: provider.providerId, name: provider.name };
+  return { id: provider.id, harnessId: provider.harnessId, name: provider.name };
 }
 
 /** Returns the session's fields that survive the upgrade unchanged. */
@@ -956,7 +956,7 @@ describe("upgrading from the previous edge release", () => {
         ),
       );
       expect(createdProvider).toMatchObject({
-        providerId: "claude-code",
+        harnessId: "claude-code",
         name: PROVIDER_NAME,
       });
 
@@ -1235,7 +1235,7 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(readProvider).toMatchObject({
         id: createdProvider.id,
-        providerId: "claude-code",
+        harnessId: "claude-code",
         name: PROVIDER_NAME,
       });
       const upgradedProviders = readListedItems<SeededProvider>(
