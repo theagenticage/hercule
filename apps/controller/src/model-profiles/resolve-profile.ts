@@ -10,14 +10,14 @@ import {
   findSnapshotModel,
   isModelMissingFromHarness,
   type EntryProblem,
-  ModelCatalog,
-  ModelProfile,
-  ProviderAccount,
-  ProviderAccountReadinessState,
-  ResolvedModelProfileAccount,
-  ResolvedModelProfileEntry,
+  type ModelCatalog,
+  type ModelProfile,
+  type ModelProfileEntry,
+  type ProviderAccount,
+  type ProviderAccountReadinessState,
+  type ResolvedModelProfileAccount,
+  type ResolvedModelProfileEntry,
 } from "@hercule/contract";
-import type { ModelProfileEntry } from "@hercule/contract";
 import {
   decideProviderAccountHarness,
   findCredentialSecretName,

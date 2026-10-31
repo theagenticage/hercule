@@ -37,6 +37,8 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  type Answer,
+  type Call,
   type Handler,
 } from "../../../../app/testing";
 
@@ -184,7 +186,10 @@ const playProfile = (initial: ModelProfile): Record<string, Handler> => {
 };
 
 /** Opens Settings > Providers over `profile`, with the key that runs in two harnesses and an OpenAI account. */
-const openModels = async (profile: ModelProfile = MAIN) => {
+const openModels = async (
+  profile: ModelProfile = MAIN,
+  overrides: Record<string, Handler> = {},
+) => {
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
@@ -198,6 +203,7 @@ const openModels = async (profile: ModelProfile = MAIN) => {
     "GET /api/v1/providers": { body: KEY_PROVIDERS },
     "GET /api/v1/harnesses": { body: KEY_HARNESSES },
     ...playProfile(profile),
+    ...overrides,
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
   await renderApp(fake, { path: "/settings/providers" });
@@ -277,6 +283,8 @@ describe("Settings > Providers > Models > a row's Runs in", () => {
     await waitFor(() => {
       expect(getRow("Anthropic", "Opus 5.5").querySelector(".pm-inharness")).not.toBeNull();
     });
+    // The row is a new element in its new harness, and it has the focus.
+    expect(document.activeElement).toBe(getRow("Anthropic", "Opus 5.5"));
 
     menu = await openRowMenu(getRow("Anthropic", "Opus 5.5"));
     expect(listRadios(menu).map((radio) => radio.getAttribute("aria-checked"))).toEqual([
@@ -323,12 +331,44 @@ describe("Settings > Providers > Models > a row's Runs in", () => {
     await waitFor(() => {
       expect(getRow("Anthropic", "Opus 5.5", 1).querySelector(".pm-inharness")).not.toBeNull();
     });
+    // The row the menu was opened on keeps the focus; the new row does not take it.
+    expect(document.activeElement).toBe(getRow("Anthropic", "Opus 5.5"));
     // Both entries now hold the model, so neither offers it again, and each strikes the other's harness.
     const secondMenu = await openRowMenu(getRow("Anthropic", "Opus 5.5", 1));
     expect(
       within(secondMenu).queryByRole("menuitem", { name: /^Also offer in/, hidden: true }),
     ).toBeNull();
     expect(within(secondMenu).getByText("Already in the menu in Claude Code")).toBeTruthy();
+  });
+
+  it("leaves the focus alone when the save of a Runs in change fails, and a later change does not pull it back", async () => {
+    const played = playProfile(MAIN)[`PATCH ${PROFILE_PATH}`] as (call: Call) => Answer;
+    let refuseNext = true;
+    const calls = await openModels(MAIN, {
+      [`PATCH ${PROFILE_PATH}`]: (call) => {
+        if (!refuseNext) return played(call);
+        refuseNext = false;
+        return { status: 400, body: buildErrorBody("validation", "Not today.") };
+      },
+    });
+
+    const menu = await openRowMenu(getRow("Anthropic", "Opus 5.5"));
+    await choose(within(menu).getByRole("menuitem", { name: "Also offer in pi", hidden: true }));
+    await screen.findByRole("alert");
+    // The user moves on: the focus goes to another control, then a later save changes the list.
+    screen.getByRole("button", { name: "Add a model from Anthropic" }).focus();
+    const sonnetMenu = await openRowMenu(getRow("Anthropic", "Sonnet 5.5"));
+    await choose(
+      within(sonnetMenu).getByRole("menuitem", { name: "Take out of the menu", hidden: true }),
+    );
+
+    await waitFor(() => {
+      expect(listUpdates(calls)).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Sonnet 5.5", { selector: "b" })).toBeNull();
+    });
+    expect(document.activeElement).not.toBe(getRow("Anthropic", "Opus 5.5"));
   });
 
   it("shows a harness that does not know the model struck, with its reason, and cannot be picked", async () => {

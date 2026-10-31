@@ -47,9 +47,10 @@ const joinClassNames = (...names: readonly string[]): string =>
  * - A row drags within the section, and Alt+Up and Alt+Down move the
  *   focused row. The new order shows at once; `onMoveEntry` saves it, once
  *   when a drag drops and once for each key press, and the order the
- *   controller sends back replaces the one shown. After a key press the
- *   focus stays on the moved row, though the browser drops the focus of an
- *   element that its list moves.
+ *   controller sends back replaces the one shown. The focus stays on the
+ *   moved row after a key press, after "Runs in" moves the row to another
+ *   harness, and on the row that "Also offer in" was pressed on, though the
+ *   browser drops the focus of an element that its list moves or replaces.
  * - A section that waits for its account's first Model Catalog read says so
  *   and offers no "Add a model", because the read will fill the section.
  * - A section with no entry says so.
@@ -77,48 +78,98 @@ export function ModelProfileSection({
   readonly isNew: boolean;
   readonly drag: SectionDrag;
   readonly addModel: ReactNode;
-  readonly onMoveEntry: (entry: ResolvedModelProfileEntry, toIndex: number) => Promise<void>;
+  /** Saves the move and resolves to whether it was saved; it never rejects. */
+  readonly onMoveEntry: (entry: ResolvedModelProfileEntry, toIndex: number) => Promise<boolean>;
   /** Sets the harness the account's models run in; `null` follows the account's default. */
   readonly onSetHarness: (harnessId: string | null) => void;
-  /** Opens the account's sheet, where its default harness is set. */
-  readonly onOpenAccount: () => void;
+  /** Opens the account's sheet, where its default harness is set, with the account's id and name. */
+  readonly onOpenAccount: (providerAccountId: string, name: string) => void;
   readonly onMakeDefault: (entry: ResolvedModelProfileEntry) => void;
-  readonly onMoveToHarness: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
-  readonly onAlsoOfferIn: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
+  /** Saves the move to the harness and resolves to whether it was saved; it never rejects. */
+  readonly onMoveToHarness: (
+    entry: ResolvedModelProfileEntry,
+    harnessId: string | null,
+  ) => Promise<boolean>;
+  /** Saves the second entry and resolves to whether it was saved; it never rejects. */
+  readonly onAlsoOfferIn: (
+    entry: ResolvedModelProfileEntry,
+    harnessId: string | null,
+  ) => Promise<boolean>;
   readonly onTakeOut: (entry: ResolvedModelProfileEntry) => void;
 }): JSX.Element {
   const rowsByKey = new Map<string, ModelSectionRow>(section.rows.map((row) => [row.key, row]));
   const order = useOptimisticOrder(section.rows.map(({ key }) => key));
-  const saveMove = (key: string, toIndex: number): Promise<void> => {
+  /** Moves the row at once and saves it; resolves to whether a save was made and worked. */
+  const saveMove = async (key: string, toIndex: number): Promise<boolean> => {
     const row = rowsByKey.get(key);
-    if (row === undefined) return Promise.resolve();
-    return order.move(key, toIndex, () => onMoveEntry(row.entry, toIndex));
+    if (row === undefined) return false;
+    let saved = false;
+    await order.move(key, toIndex, async () => {
+      saved = await onMoveEntry(row.entry, toIndex);
+    });
+    return saved;
   };
   const rowDrag = useDragReorder(order.keys, (key, toIndex) => {
     // `onMoveEntry` never rejects: a failed save shows above the sections.
     void saveMove(key, toIndex);
   });
   const rowElements = useRef(new Map<string, HTMLLIElement>());
-  // The row to focus once the controller's order arrives and the list moves it.
-  const refocus = useRef<{ readonly key: string; readonly order: string } | null>(null);
+  // The row to focus once the controller's answer arrives and the list moves
+  // it or replaces it. A row is named by its model and the harness it runs in,
+  // not by its key, because moving a row to another harness changes its key.
+  const refocus = useRef<{
+    readonly model: string;
+    readonly resolvedHarnessId: string;
+    readonly order: string;
+  } | null>(null);
   const orderText = order.keys.join("\n");
 
   useLayoutEffect(() => {
     const pending = refocus.current;
     if (pending === null || pending.order === orderText) return;
+    const target = section.rows.find(
+      ({ entry }) =>
+        entry.model === pending.model && entry.resolvedHarnessId === pending.resolvedHarnessId,
+    );
+    const element = target === undefined ? undefined : rowElements.current.get(target.key);
+    if (element === undefined) return;
     refocus.current = null;
-    rowElements.current.get(pending.key)?.focus({ preventScroll: true });
-  }, [orderText]);
+    // The user may have moved on while the save ran: take the focus back only
+    // when the move dropped it, or left it in one of the section's rows.
+    const { activeElement } = document;
+    const dropped =
+      activeElement === null ||
+      activeElement === document.body ||
+      [...rowElements.current.values()].some((row) => row.contains(activeElement));
+    if (dropped) element.focus({ preventScroll: true });
+  }, [orderText, section.rows]);
 
-  const moveBy = (key: string, offset: -1 | 1): void => {
-    const to = order.keys.indexOf(key) + offset;
+  /**
+   * Focuses the row of `model` in `resolvedHarnessId` once the list changes
+   * because of `save`. When `save` resolves to false nothing changes, so the
+   * focus is left alone: a later move of the list must not pull it back.
+   */
+  const refocusAfterSave = (
+    model: string,
+    resolvedHarnessId: string,
+    save: () => Promise<boolean>,
+  ): void => {
+    const pending = { model, resolvedHarnessId, order: orderText };
+    refocus.current = pending;
+    void save().then((saved) => {
+      if (!saved && refocus.current === pending) refocus.current = null;
+    });
+  };
+
+  const moveBy = (row: ModelSectionRow, offset: -1 | 1): void => {
+    const to = order.keys.indexOf(row.key) + offset;
     if (to < 0 || to >= order.keys.length) return;
-    refocus.current = { key, order: orderText };
-    void saveMove(key, to);
+    refocusAfterSave(row.entry.model, row.entry.resolvedHarnessId, () => saveMove(row.key, to));
   };
 
   const rows = order.keys.flatMap((key) => rowsByKey.get(key) ?? []);
-  const buildRowProps = (key: string): ComponentProps<"li"> => {
+  const buildRowProps = (row: ModelSectionRow): ComponentProps<"li"> => {
+    const { key } = row;
     const dropSide = rowDrag.dropMark?.key === key ? rowDrag.dropMark.side : null;
     return {
       ...rowDrag.getSourceProps(key),
@@ -140,7 +191,7 @@ export function ModelProfileSection({
         const offset = readAltArrowOffset(event);
         if (offset === null) return;
         event.preventDefault();
-        moveBy(key, offset);
+        moveBy(row, offset);
       },
     };
   };
@@ -179,7 +230,9 @@ export function ModelProfileSection({
           accountName={section.name}
           profileName={profileName}
           onPick={onSetHarness}
-          onChangeAccountHarness={onOpenAccount}
+          onChangeAccountHarness={() => {
+            onOpenAccount(section.providerAccountId, section.name);
+          }}
         />
       </div>
       {rows.length === 0 ? null : (
@@ -189,15 +242,24 @@ export function ModelProfileSection({
               key={row.key}
               row={row}
               profileName={profileName}
-              rowProps={buildRowProps(row.key)}
+              rowProps={buildRowProps(row)}
               onMakeDefault={() => {
                 onMakeDefault(row.entry);
               }}
               onMoveToHarness={(harnessId) => {
-                onMoveToHarness(row.entry, harnessId);
+                // The row's key holds its harness, so the row comes back as a
+                // new element and the focus it had is lost.
+                const moved = row.runsIn.find((choice) => choice.harnessId === harnessId);
+                refocusAfterSave(
+                  row.entry.model,
+                  moved?.resolvedHarnessId ?? row.entry.resolvedHarnessId,
+                  () => onMoveToHarness(row.entry, harnessId),
+                );
               }}
               onAlsoOfferIn={(harnessId) => {
-                onAlsoOfferIn(row.entry, harnessId);
+                refocusAfterSave(row.entry.model, row.entry.resolvedHarnessId, () =>
+                  onAlsoOfferIn(row.entry, harnessId),
+                );
               }}
               onTakeOut={() => {
                 onTakeOut(row.entry);

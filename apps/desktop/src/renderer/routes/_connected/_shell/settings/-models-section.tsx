@@ -22,7 +22,7 @@ import { useOpenModelProfile } from "./-open-model-profile";
  * `flashProviderAccountId` is the account just added to the open profile,
  * whose section flashes once. `onAddAccount` opens the add-account sheet,
  * which the page owns; the profile's "New account…" calls it. `onOpenAccount`
- * opens the sheet of an account.
+ * opens the sheet of an account, given its id and name.
  *
  * Everything it reads is a shell read that the live connection keeps current,
  * so opening the section sends no request.
@@ -36,7 +36,7 @@ export function ModelsSection({
   readonly client: HerculeClient;
   readonly flashProviderAccountId: string | null;
   readonly onAddAccount: () => void;
-  readonly onOpenAccount: (providerAccountId: string) => void;
+  readonly onOpenAccount: (providerAccountId: string, name: string) => void;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
   const { profile, profiles, openProfile } = useOpenModelProfile(client);

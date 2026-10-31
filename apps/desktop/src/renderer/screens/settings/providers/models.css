@@ -240,9 +240,12 @@
   font-size: var(--t-11);
   line-height: 1.4;
 }
+/* Only the name is struck through; the reason under it stays readable. */
 .pm-hrow.is-off .pm-hname {
   color: var(--faint);
   font-weight: var(--w-regular);
+  text-decoration: line-through;
+  text-decoration-color: var(--line);
 }
 .pm-hrow.is-off .pm-radio {
   opacity: 0.4;
@@ -427,6 +430,17 @@
 }
 .pm-choice-why {
   line-height: 1.35;
+}
+/* A harness that cannot be picked has its name struck through, not its note
+   or its reason. A line does not run through an inline-block, and `pre` keeps
+   the space that separates the note from the name. */
+.pm-rowmenu [role="menuitemradio"][aria-disabled="true"] .pm-choice-text > span:first-child {
+  text-decoration: line-through;
+  text-decoration-color: var(--line);
+}
+.pm-choice-note {
+  display: inline-block;
+  white-space: pre;
 }
 .pm-rowmenu [role="menuitemradio"][aria-disabled="true"] .pm-radio {
   opacity: 0.4;

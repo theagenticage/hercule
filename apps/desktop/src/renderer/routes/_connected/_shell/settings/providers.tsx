@@ -1,7 +1,6 @@
 import { Suspense, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { buildProviderAccountName } from "@hercule/client-core";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import {
   harnessesQuery,
@@ -82,7 +81,6 @@ export const Route = createFileRoute("/_connected/_shell/settings/providers")({
 function Providers(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
-  const providers = useSuspenseQuery(providersQuery(client)).data;
   const { profile: openProfile } = useOpenModelProfile(client);
   const [sheet, setSheet] = useState<OpenSheet | null>(null);
   const [adding, setAdding] = useState(false);
@@ -141,10 +139,8 @@ function Providers(): JSX.Element {
         onAddAccount={() => {
           setAdding(true);
         }}
-        onOpenAccount={(providerAccountId) => {
-          const account = accounts.find(({ id }) => id === providerAccountId);
-          if (account === undefined) return;
-          setSheet({ providerAccountId, name: buildProviderAccountName(providers, account) });
+        onOpenAccount={(providerAccountId, name) => {
+          setSheet({ providerAccountId, name });
         }}
       />
       {adding && (

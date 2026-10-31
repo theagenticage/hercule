@@ -16,8 +16,7 @@ import { buildProviderAccountName, findProviderPluginId } from "../provider-acco
 import { isMachineProblemReason } from "./entry-problem";
 import {
   buildSectionHarnessChoices,
-  type HarnessOption,
-  type HarnessTarget,
+  type ModelProfileHarnessChoice,
   type SectionHarness,
 } from "./profile-harnesses";
 import {
@@ -47,9 +46,9 @@ export interface ModelSectionRow {
    */
   readonly problem: string | null;
   /** The harnesses the entry can run in, struck through where it cannot; empty when there are fewer than two. */
-  readonly runsIn: readonly HarnessOption[];
+  readonly runsIn: readonly ModelProfileHarnessChoice[];
   /** The harnesses the model can be offered in as another entry. */
-  readonly alsoOfferIn: readonly HarnessTarget[];
+  readonly alsoOfferIn: readonly ModelProfileHarnessChoice[];
 }
 
 /** One account's section of the profile. */

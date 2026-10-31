@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { CapabilitySnapshot } from "./groups/provider-account";
+import type { Harness } from "./groups/harness";
+import type { CapabilitySnapshot, ModelDescriptor } from "./groups/provider-account";
 import { findSnapshotModel, isModelMissingFromHarness } from "./harness-models";
 
-const model = (slug: string, name: string) =>
-  ({
-    slug,
-    name,
-    options: [],
-    supportsImageInput: false,
-  }) as unknown as CapabilitySnapshot["models"][number];
+const model = (slug: string, name: string): ModelDescriptor => ({
+  slug,
+  name,
+  imageInput: null,
+  options: [],
+});
 
 const snapshot = (
   harnessId: string,
@@ -16,22 +16,27 @@ const snapshot = (
   slugs: ReadonlyArray<string>,
   status: "ok" | "unauthenticated" = "ok",
   name = "probe",
-): CapabilitySnapshot =>
-  ({
-    runnerId: "runner-1",
-    harnessId,
-    probedAt,
-    harnessVersion: null,
-    versionVerdict: "supported",
-    auth: { status },
-    models: slugs.map((slug) => model(slug, `${name} ${slug}`)),
-  }) as unknown as CapabilitySnapshot;
+): CapabilitySnapshot => ({
+  runnerId: "01a06d02-8000-7000-8000-000000000001",
+  harnessId,
+  probedAt,
+  harnessVersion: null,
+  versionVerdict: "ok",
+  auth: { status },
+  models: slugs.map((slug) => model(slug, `${name} ${slug}`)),
+});
 
-const piRuns = (models: "own-list" | "catalog") =>
-  ({
-    id: "pi/pi",
-    runs: [{ providerId: "anthropic", accountKinds: ["api-key"], models }],
-  }) as never;
+/** A pi that runs Anthropic API keys, with its own model list or the provider's whole catalog. */
+const piRuns = (models: "all" | "own-list"): Pick<Harness, "id" | "runs"> => ({
+  id: "pi/pi",
+  runs: [
+    {
+      providerId: "anthropic/anthropic",
+      kinds: [{ kind: "api-key", modelArgument: "anthropic/{model}" }],
+      models,
+    },
+  ],
+});
 
 describe("findSnapshotModel", () => {
   it("returns the model from the newest ok snapshot of that harness that lists the slug", () => {
@@ -58,7 +63,7 @@ describe("findSnapshotModel", () => {
 
 describe("isModelMissingFromHarness", () => {
   const account = (snapshots: ReadonlyArray<CapabilitySnapshot>) => ({
-    providerId: "anthropic",
+    providerId: "anthropic/anthropic",
     snapshots,
   });
 
@@ -74,7 +79,7 @@ describe("isModelMissingFromHarness", () => {
     ]);
     expect(isModelMissingFromHarness(unprobed, piRuns("own-list"), "gpt-6")).toBe(false);
     const probed = account([snapshot("pi/pi", "2026-10-01T00:00:00.000Z", ["glm-5"])]);
-    expect(isModelMissingFromHarness(probed, piRuns("catalog"), "gpt-6")).toBe(false);
+    expect(isModelMissingFromHarness(probed, piRuns("all"), "gpt-6")).toBe(false);
     expect(isModelMissingFromHarness(probed, undefined, "gpt-6")).toBe(false);
   });
 });

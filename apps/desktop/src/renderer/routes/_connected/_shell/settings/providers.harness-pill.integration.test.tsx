@@ -117,12 +117,15 @@ const buildMain = (openAiHarnessId: "pi/pi" | null): ModelProfile =>
   );
 
 /** Opens Settings > Providers over the profile `main`, whose updates the controller accepts as they come. */
-const openModels = async (main: ModelProfile = buildMain("pi/pi")) => {
+const openModels = async (
+  main: ModelProfile = buildMain("pi/pi"),
+  runners: typeof RUNNERS_WITH_PI = RUNNERS_WITH_PI,
+) => {
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
       accounts: IDENTITIES.map(buildAccount),
-      runners: RUNNERS_WITH_PI,
+      runners,
       modelProfiles: [main],
     }),
     "GET /api/v1/providers": { body: OPENAI_IN_PI_PROVIDERS },
@@ -202,6 +205,29 @@ describe("Settings > Providers > Models > the harness pill", () => {
     expect(codex.textContent).toContain(
       "Anthropic allows a Claude subscription only in Claude Code",
     );
+  });
+
+  it("shows the account's default harness line and the machines it is not on, both under 'Same as the account'", async () => {
+    const [moss] = RUNNERS_WITH_PI;
+    const withCodex = (present: boolean) => [
+      ...moss!.facts.harnesses.filter(({ name }) => name !== "codex"),
+      { name: "codex", present },
+    ];
+    await openModels(buildMain(null), [
+      { ...moss!, name: "moss", facts: { ...moss!.facts, harnesses: withCodex(true) } },
+      {
+        ...moss!,
+        id: "01a06d02-8000-7000-8000-000000000c02",
+        name: "beelink",
+        facts: { ...moss!.facts, harnesses: withCodex(false) },
+      },
+    ]);
+
+    const popover = await openPopover("OpenAI");
+
+    const follow = getOption(popover, /^Same as the account · Codex/);
+    expect(follow.textContent).toContain("The account's default harness.");
+    expect(follow.textContent).toContain("Not on beelink");
   });
 
   it("sends one update that names pi for the section when pi is picked", async () => {

@@ -5,6 +5,7 @@
  * harness is struck through for the same reason wherever it is drawn.
  */
 import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contract";
+import { findHarnessName } from "./model-profiles/profile-entries";
 import { formatNameList } from "./name-list";
 import { buildProviderAccountName, findProviderAccountKind } from "./provider-accounts";
 
@@ -44,11 +45,13 @@ export const isHarnessInstalledOnRunner = (harness: Harness, runner: Runner): bo
     (binary) => binary.name === harness.binaryName && binary.present,
   );
 
+/** Returns the runners that are not retired. */
+export const listActiveRunners = (runners: ReadonlyArray<Runner>): ReadonlyArray<Runner> =>
+  runners.filter((runner) => runner.lifecycle !== "retired");
+
 /** Checks whether the harness is installed on at least one runner that is not retired. */
 const isInstalledOnAnyRunner = (harness: Harness, runners: ReadonlyArray<Runner>): boolean =>
-  runners.some(
-    (runner) => runner.lifecycle !== "retired" && isHarnessInstalledOnRunner(harness, runner),
-  );
+  listActiveRunners(runners).some((runner) => isHarnessInstalledOnRunner(harness, runner));
 
 /**
  * Checks that the harness lists the account's provider and kind among what it
@@ -100,15 +103,16 @@ export const listProviderAccountHarnessChoices = (
 ): ReadonlyArray<ProviderAccountHarnessChoice> => {
   const kind = findProviderAccountKind(providers, account);
   const providerName = buildProviderAccountName(providers, { ...account, label: null });
-  const nameOf = (harnessId: string): string =>
-    harnesses.find((harness) => harness.id === harnessId)?.displayName ?? harnessId;
 
   const decideReason = (harness: Harness): string | null => {
     if (kind === undefined) {
       return `${providerName} no longer offers this kind of account`;
     }
     if (!kind.harnesses.includes(harness.id)) {
-      return `${providerName} allows ${withArticle(readKindNoun(kind.title))} only in ${formatNameList(kind.harnesses.map(nameOf), "and")}`;
+      return `${providerName} allows ${withArticle(readKindNoun(kind.title))} only in ${formatNameList(
+        kind.harnesses.map((harnessId) => findHarnessName(harnesses, harnessId)),
+        "and",
+      )}`;
     }
     if (!doesHarnessRunAccountKind(account, harness)) {
       return `${harness.displayName} can't run ${providerName}'s ${readKindNoun(kind.title)}`;

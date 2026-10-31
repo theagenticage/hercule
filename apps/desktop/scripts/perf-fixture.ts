@@ -325,7 +325,8 @@ interface MainSectionFixture {
 /**
  * The sections of "Main" in the Providers launch, as positions in the list of
  * `buildProviderAccountFixtures`: 60 model rows in all, so the page draws
- * sections as long as a real setup's, with every slice 45 control in use:
+ * sections as long as a real setup's, with a section and some rows set to run
+ * in a harness other than their account's default:
  *
  * - position 4 (an Anthropic key) is set to run in pi;
  * - position 6 (an OpenAI key) offers `gpt-5` twice, in Codex and in pi, and

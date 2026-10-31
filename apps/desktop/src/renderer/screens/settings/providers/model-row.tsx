@@ -40,9 +40,9 @@ export function ModelRow({
   readonly profileName: string;
   readonly rowProps: ComponentProps<"li">;
   readonly onMakeDefault: () => void;
-  /** Called with the `harnessId` of the picked "Runs in" option, other than the current one. */
+  /** Called with the `harnessId` of the picked "Runs in" choice, other than the current one. */
   readonly onMoveToHarness: (harnessId: string | null) => void;
-  /** Called with the `harnessId` of the "Also offer in" target. */
+  /** Called with the `harnessId` of the "Also offer in" choice. */
   readonly onAlsoOfferIn: (harnessId: string | null) => void;
   readonly onTakeOut: () => void;
 }): JSX.Element {
@@ -92,34 +92,37 @@ export function ModelRow({
             <div className="pm-menu-h" aria-hidden="true">
               Runs in
             </div>
-            {row.runsIn.map((option) => {
-              const struck = option.unavailableReason !== null;
-              const itemProps = buildItemProps(`runs-in:${option.resolvedHarnessId}`, {
-                checked: option.isCurrent,
+            {row.runsIn.map((choice) => {
+              const struck = choice.unavailableReason !== null;
+              const itemProps = buildItemProps(`runs-in:${choice.resolvedHarnessId}`, {
+                checked: choice.isCurrent,
                 disabled: struck,
               });
               return (
                 <button
-                  key={option.resolvedHarnessId}
+                  key={choice.resolvedHarnessId}
                   type="button"
                   {...itemProps}
                   className={[itemProps.className, "pm-choice"].filter(Boolean).join(" ")}
                   onClick={() => {
                     if (struck) return;
                     close();
-                    if (!option.isCurrent) onMoveToHarness(option.harnessId);
+                    if (!choice.isCurrent) onMoveToHarness(choice.harnessId);
                   }}
                 >
-                  <span className={option.isCurrent ? "pm-radio is-on" : "pm-radio"} />
+                  <span
+                    className={choice.isCurrent ? "pm-radio is-on" : "pm-radio"}
+                    aria-hidden="true"
+                  />
                   <span className="pm-choice-text">
                     <span>
-                      {option.name}
-                      {option.harnessId === null ? (
+                      {choice.name}
+                      {choice.harnessId === null ? (
                         <small className="pm-choice-note"> like the account</small>
                       ) : null}
                     </span>
-                    {option.unavailableReason === null ? null : (
-                      <small className="pm-choice-why">{option.unavailableReason}</small>
+                    {choice.unavailableReason === null ? null : (
+                      <small className="pm-choice-why">{choice.unavailableReason}</small>
                     )}
                   </span>
                 </button>
@@ -127,18 +130,18 @@ export function ModelRow({
             })}
           </div>
         )}
-        {row.alsoOfferIn.map((target) => (
+        {row.alsoOfferIn.map((choice) => (
           <button
-            key={target.resolvedHarnessId}
+            key={choice.resolvedHarnessId}
             type="button"
-            {...buildItemProps(`also-offer:${target.resolvedHarnessId}`)}
+            {...buildItemProps(`also-offer:${choice.resolvedHarnessId}`)}
             onClick={() => {
               close();
-              onAlsoOfferIn(target.harnessId);
+              onAlsoOfferIn(choice.harnessId);
             }}
           >
             <PlusIcon size={13} />
-            {`Also offer in ${target.name}`}
+            {`Also offer in ${choice.name}`}
           </button>
         ))}
         <div className="pm-menu-sep" role="separator" />

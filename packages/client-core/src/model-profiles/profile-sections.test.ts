@@ -274,27 +274,31 @@ const readSection = (
   )[0]!;
 
 describe("the section's harness pill", () => {
-  it("reads 'Same as the account' with the account's harness while the section follows it", () => {
+  it("makes 'Same as the account' with the account's harness the current choice while the section follows it", () => {
     const { harness } = readSection([]);
 
-    expect(harness).toMatchObject({
+    expect(harness.choices.find(({ isCurrent }) => isCurrent)).toMatchObject({
+      harnessId: null,
       resolvedHarnessId: CLAUDE,
-      label: "Same as the account · Claude Code",
-      followsAccount: true,
+      name: "Same as the account · Claude Code",
     });
   });
 
-  it("reads the harness's name once the profile names one for the section", () => {
+  it("makes the harness the profile names for the section the current choice", () => {
     const { harness } = readSection([], { harnessId: PI, resolvedHarnessId: PI });
 
-    expect(harness).toMatchObject({ resolvedHarnessId: PI, label: "pi", followsAccount: false });
+    expect(harness.choices.find(({ isCurrent }) => isCurrent)).toMatchObject({
+      harnessId: PI,
+      resolvedHarnessId: PI,
+      name: "pi",
+    });
   });
 
   it("lists 'Same as the account' first, then every harness, and checks what the section is set to", () => {
     const { harness } = readSection([], { harnessId: PI, resolvedHarnessId: PI });
 
     expect(
-      harness.options.map(({ harnessId, name, isCurrent }) => [harnessId, name, isCurrent]),
+      harness.choices.map(({ harnessId, name, isCurrent }) => [harnessId, name, isCurrent]),
     ).toEqual([
       [null, "Same as the account · Claude Code", false],
       [CLAUDE, "Claude Code", false],
@@ -310,7 +314,7 @@ describe("the section's harness pill", () => {
     )[0]!;
 
     expect(section.harness.isFixed).toBe(true);
-    expect(section.harness.options.find(({ harnessId }) => harnessId === "pi/pi")).toMatchObject({
+    expect(section.harness.choices.find(({ harnessId }) => harnessId === "pi/pi")).toMatchObject({
       unavailableReason: "Anthropic allows a Claude subscription only in Claude Code",
     });
   });
@@ -319,10 +323,30 @@ describe("the section's harness pill", () => {
     expect(readSection([]).harness.isFixed).toBe(false);
   });
 
+  it("is not fixed while the section is stuck in a struck harness and another harness can be picked", () => {
+    // pi is on no machine, and the section is set to it: Claude Code is the way out.
+    const { harness } = readSection(
+      [],
+      { harnessId: PI, resolvedHarnessId: PI },
+      { runners: [WITH_CLAUDE] },
+    );
+
+    expect(harness.choices.find(({ isCurrent }) => isCurrent)).toMatchObject({
+      unavailableReason: "pi is on no machine",
+    });
+    expect(harness.isFixed).toBe(false);
+  });
+
+  it("is fixed when the only harness that can be picked is the one the section runs in", () => {
+    const { harness } = readSection([], {}, { runners: [WITH_CLAUDE] });
+
+    expect(harness.isFixed).toBe(true);
+  });
+
   it("strikes a harness that is on no machine, with the account sheet's words", () => {
     const { harness } = readSection([], {}, { runners: [WITH_CLAUDE] });
 
-    expect(harness.options.find(({ harnessId }) => harnessId === PI)).toMatchObject({
+    expect(harness.choices.find(({ harnessId }) => harnessId === PI)).toMatchObject({
       unavailableReason: "pi is on no machine",
     });
   });
@@ -330,7 +354,7 @@ describe("the section's harness pill", () => {
   it("notes the machines a pickable harness is not on", () => {
     const { harness } = readSection([], {}, { runners: [WITH_CLAUDE_AND_PI, OTHER_MACHINE] });
 
-    const notes = harness.options.map(({ harnessId, note }) => [harnessId, note]);
+    const notes = harness.choices.map(({ harnessId, note }) => [harnessId, note]);
     expect(notes).toEqual([
       [null, null],
       [CLAUDE, null],
@@ -346,7 +370,7 @@ describe("the section's harness pill", () => {
       buildProfileEntry(KEY_IDENTITY, "opus", { name: "Opus 5" }),
     ]);
 
-    expect(harness.options.find(({ harnessId }) => harnessId === PI)).toMatchObject({
+    expect(harness.choices.find(({ harnessId }) => harnessId === PI)).toMatchObject({
       unavailableReason: "pi doesn't know Sonnet 5 and Haiku 5",
     });
   });
@@ -360,7 +384,7 @@ describe("the section's harness pill", () => {
       { ...KEY_CATALOGS, accounts: [buildProviderAccount(keyInPi, [piModels("opus")])] },
     )[0]!;
 
-    expect(section.harness.options.find(({ harnessId }) => harnessId === PI)).toMatchObject({
+    expect(section.harness.choices.find(({ harnessId }) => harnessId === PI)).toMatchObject({
       unavailableReason: null,
       isCurrent: false,
     });
@@ -376,12 +400,34 @@ describe("the section's harness pill", () => {
       { accounts: [buildProviderAccount(KEY_IDENTITY, [piModels("sonnet")])] },
     );
 
-    expect(harness.options.find(({ harnessId }) => harnessId === PI)).toMatchObject({
+    expect(harness.choices.find(({ harnessId }) => harnessId === PI)).toMatchObject({
       unavailableReason: "Sonnet 5 would be in the menu twice in pi",
     });
   });
 
-  it("checks the 'Same as the account' option against the account's harness", () => {
+  it("checks the 'Same as the account' choice against the account's harness", () => {
+    // The account's default is pi, which does not know the follower "sonnet".
+    const keyInPi = { ...KEY_IDENTITY, harnessId: PI };
+    const section = buildModelProfileSections(
+      buildModelProfile([
+        buildProfileSection(
+          keyInPi,
+          [buildProfileEntry(keyInPi, "sonnet", { name: "Sonnet 5", resolvedHarnessId: CLAUDE })],
+          { harnessId: CLAUDE, resolvedHarnessId: CLAUDE },
+        ),
+      ]),
+      { ...KEY_CATALOGS, accounts: [buildProviderAccount(keyInPi, [piModels("opus")])] },
+    )[0]!;
+
+    expect(section.harness.choices[0]).toMatchObject({
+      harnessId: null,
+      resolvedHarnessId: PI,
+      isCurrent: false,
+      unavailableReason: "pi doesn't know Sonnet 5",
+    });
+  });
+
+  it("does not strike 'Same as the account' when no entry follows the section", () => {
     const keyInPi = { ...KEY_IDENTITY, harnessId: PI };
     const section = buildModelProfileSections(
       buildModelProfile([
@@ -394,8 +440,23 @@ describe("the section's harness pill", () => {
       { ...KEY_CATALOGS, accounts: [buildProviderAccount(keyInPi, [piModels("sonnet")])] },
     )[0]!;
 
-    // The one entry is named, so nothing follows the section and nothing is struck.
-    expect(section.harness.options[0]).toMatchObject({ harnessId: null, unavailableReason: null });
+    expect(section.harness.choices[0]).toMatchObject({ harnessId: null, unavailableReason: null });
+  });
+
+  it("strikes 'Same as the account' when the account's default harness has no plugin any more", () => {
+    const keyInGone = { ...KEY_IDENTITY, harnessId: "gone/gone" };
+    const section = buildModelProfileSections(
+      buildModelProfile([
+        buildProfileSection(keyInGone, [], { harnessId: PI, resolvedHarnessId: PI }),
+      ]),
+      { ...KEY_CATALOGS, accounts: [buildProviderAccount(keyInGone, [piModels("opus")])] },
+    )[0]!;
+
+    expect(section.harness.choices[0]).toMatchObject({
+      harnessId: null,
+      name: "Same as the account · gone/gone",
+      unavailableReason: "gone/gone is not installed in this Hercule",
+    });
   });
 
   it("never strikes what the section is set to for its entries", () => {
@@ -404,7 +465,7 @@ describe("the section's harness pill", () => {
       resolvedHarnessId: PI,
     });
 
-    expect(harness.options.find(({ harnessId }) => harnessId === PI)).toMatchObject({
+    expect(harness.choices.find(({ harnessId }) => harnessId === PI)).toMatchObject({
       unavailableReason: null,
       isCurrent: true,
     });
@@ -413,12 +474,12 @@ describe("the section's harness pill", () => {
   it("keeps a harness the section is set to that no longer exists, checked, last", () => {
     const { harness } = readSection([], { harnessId: "gone/gone", resolvedHarnessId: "gone/gone" });
 
-    expect(harness.options.at(-1)).toMatchObject({
+    expect(harness.choices.at(-1)).toMatchObject({
       harnessId: "gone/gone",
       name: "gone/gone",
       isCurrent: true,
+      unavailableReason: "gone/gone is not installed in this Hercule",
     });
-    expect(harness.label).toBe("gone/gone");
   });
 });
 
@@ -520,7 +581,7 @@ describe("a row's harness choices", () => {
       [buildProfileEntry(KEY_IDENTITY, "opus", { resolvedHarnessId: PI })],
       { harnessId: PI, resolvedHarnessId: PI },
     ).rows;
-    expect(soleRow!.alsoOfferIn).toEqual([
+    expect(soleRow!.alsoOfferIn).toMatchObject([
       { harnessId: CLAUDE, resolvedHarnessId: CLAUDE, name: "Claude Code" },
     ]);
 
@@ -528,7 +589,7 @@ describe("a row's harness choices", () => {
       [buildProfileEntry(KEY_IDENTITY, "opus", { harnessId: CLAUDE, resolvedHarnessId: CLAUDE })],
       { harnessId: PI, resolvedHarnessId: PI },
     ).rows;
-    expect(offeredRow!.alsoOfferIn).toEqual([
+    expect(offeredRow!.alsoOfferIn).toMatchObject([
       { harnessId: null, resolvedHarnessId: PI, name: "pi" },
     ]);
   });
