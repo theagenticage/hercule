@@ -22,6 +22,7 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 | `@hercule/plugin-anthropic` | the `anthropic/anthropic` provider |
 | `@hercule/plugin-openai` | the `openai/openai` provider |
 | `@hercule/plugin-zai` | the `zai/zai` provider |
+| `@hercule/plugin-openrouter` | the `openrouter/openrouter` provider, with an API key, whose models the controller reads from OpenRouter's API |
 | `@hercule/plugin-opencode` | the `opencode/opencode` provider, with a Go key and a Zen key |
 | `@hercule/plugin-minimax` | the `minimax/minimax` provider, with a pay-as-you-go key and a plan key |
 | `@hercule/plugin-github` | the `github` connection type, the event source that polls GitHub, and the workflow actions on issues and pull requests |

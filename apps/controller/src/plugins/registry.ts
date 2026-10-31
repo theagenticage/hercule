@@ -14,6 +14,7 @@ import { linear } from "@hercule/plugin-linear";
 import { minimax } from "@hercule/plugin-minimax";
 import { opencode } from "@hercule/plugin-opencode";
 import { openai } from "@hercule/plugin-openai";
+import { openrouter } from "@hercule/plugin-openrouter";
 import { pi } from "@hercule/plugin-pi";
 import { sentry } from "@hercule/plugin-sentry";
 import { zai } from "@hercule/plugin-zai";
@@ -25,6 +26,7 @@ export const registry: ReadonlyArray<Plugin> = [
   anthropic,
   openai,
   zai,
+  openrouter,
   opencode,
   minimax,
   github,

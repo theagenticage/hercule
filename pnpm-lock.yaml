@@ -114,6 +114,9 @@ importers:
       '@hercule/plugin-opencode':
         specifier: workspace:*
         version: link:../../plugins/opencode
+      '@hercule/plugin-openrouter':
+        specifier: workspace:*
+        version: link:../../plugins/openrouter
       '@hercule/plugin-pi':
         specifier: workspace:*
         version: link:../../plugins/pi
@@ -593,6 +596,15 @@ importers:
         version: 4.0.7
 
   plugins/opencode:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
+
+  plugins/openrouter:
     dependencies:
       '@hercule/plugin-host':
         specifier: workspace:*

@@ -97,7 +97,9 @@ export {
 } from "./providers";
 
 // What a usage or catalog parser takes and returns, so a plugin names them without linking the protocol.
-export type { CatalogModel, Timestamp, UsageReading } from "@hercule/protocol";
+// `CatalogModel` is also exported as a schema, so a catalog parser can check what it builds.
+export { CatalogModel } from "@hercule/protocol";
+export type { Timestamp, UsageReading } from "@hercule/protocol";
 
 export { checkEmittedEvent } from "./check-event";
 
