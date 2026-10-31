@@ -26,6 +26,7 @@ import {
   buildPluginWithProviderPerHarness,
   createPluginFixture,
 } from "../../plugins/testing";
+import { modelProfileRepository } from "../../model-profiles";
 import { providerAccountRepository } from "../../provider-accounts";
 import {
   spawnThreadUnder,
@@ -1101,6 +1102,328 @@ describe("placeSession for a session that starts a Thread", () => {
       expect(spec["systemPrompt"]).toBeUndefined();
       expect(spec["disallowedTools"]).toBeUndefined();
       expect(spec["outputSchema"]).toBeUndefined();
+    });
+  });
+});
+
+describe("placeSession in a project with a Model Profile", () => {
+  /** One entry of a Model Profile, as the test files it. `harnessId` null follows the section or the account. */
+  interface TestEntry {
+    readonly providerAccountId: string;
+    readonly model: string;
+    readonly harnessId: string | null;
+  }
+
+  /**
+   * Creates a Model Profile with one section holding `defaultEntry` as its only
+   * entry (or an empty profile when `defaultEntry` is null), then a project that
+   * names the profile. Returns the project's id. The profile row is written
+   * directly, because only the profile's contents matter to these tests, not
+   * the catalog read that would otherwise fill it.
+   */
+  const createProjectWithProfile = async (
+    arranged: Arranged,
+    name: string,
+    defaultEntry: TestEntry | null,
+    sectionHarnessId: string | null = null,
+  ): Promise<string> => {
+    const written = await arranged.harness.runWithLiveSessions(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const profiles = yield* modelProfileRepository;
+        return yield* withTransaction(
+          sql,
+          profiles.insert({
+            name: `${name} profile`,
+            body: {
+              accounts:
+                defaultEntry === null
+                  ? []
+                  : [
+                      {
+                        providerAccountId: defaultEntry.providerAccountId,
+                        harnessId: sectionHarnessId,
+                        entries: [defaultEntry],
+                      },
+                    ],
+              defaultEntry,
+              dismissedNewModels: [],
+            },
+            at: yield* nowIso,
+          }),
+        );
+      }),
+    );
+    if (written._tag !== "Success") throw new Error("the profile was not inserted");
+    const response = await post(
+      arranged.harness.base,
+      "/api/v1/projects",
+      { name, modelProfileId: written.value },
+      arranged.token,
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    return ((await response.json()) as { readonly id: string }).id;
+  };
+
+  /**
+   * Sets the user's thread default to beta's `fast`, then returns the ids of
+   * beta and alpha. The project's entry is on alpha, so the thread default
+   * and the project's entry can never be mistaken for each other.
+   */
+  const setUp = async (arranged: Arranged) => {
+    const alpha = findProviderAccountId(arranged, "harnesses/alpha");
+    const beta = findProviderAccountId(arranged, "harnesses/beta");
+    await setThreadDefaults(arranged, {
+      "thread.providerAccountId": beta,
+      "thread.harnessId": "harnesses/beta",
+      "thread.model": "fast",
+    });
+    return { alpha, beta };
+  };
+
+  const spawnThread = (arranged: Arranged, fields: Record<string, unknown>) =>
+    spawnSessionOrFail(arranged, { prompt: "hello", ...fields });
+
+  it("starts the user's Thread on the profile's default entry, with none of the user's options", async () => {
+    await withFleet(async (arranged) => {
+      const { alpha } = await setUp(arranged);
+      const projectId = await createProjectWithProfile(arranged, "Docs", {
+        providerAccountId: alpha,
+        model: "swift",
+        harnessId: null,
+      });
+
+      const thread = await spawnThread(arranged, { projectId });
+
+      expect(thread).toMatchObject({
+        projectId,
+        providerAccountId: alpha,
+        harnessId: "harnesses/alpha",
+        modelSelection: { model: "swift", options: {} },
+      });
+    });
+  });
+
+  it("takes the entry's harness, else its section's harness, else the account's default", async () => {
+    await withFleet(async (arranged) => {
+      const alpha = findProviderAccountId(arranged, "harnesses/alpha");
+      const own = await createProjectWithProfile(
+        arranged,
+        "Own harness",
+        { providerAccountId: alpha, model: "swift", harnessId: "harnesses/alpha" },
+        null,
+      );
+
+      const thread = await spawnThread(arranged, { projectId: own });
+
+      expect(thread.harnessId).toBe("harnesses/alpha");
+    });
+    await withFleet(async (arranged) => {
+      const first = findProviderAccountId(arranged, "multi/delta");
+      const projectId = await createProjectWithProfile(
+        arranged,
+        "Section harness",
+        { providerAccountId: first, model: "swift", harnessId: null },
+        "multi/epsilon",
+      );
+      await post(
+        arranged.harness.base,
+        `/api/v1/runners/${arranged.runnerId}/probe`,
+        { providerAccountId: first, harnessId: "multi/epsilon" },
+        arranged.token,
+      );
+
+      const thread = await spawnThread(arranged, { projectId });
+
+      expect(thread).toMatchObject({
+        providerAccountId: first,
+        harnessId: "multi/epsilon",
+        modelSelection: { model: "swift", options: {} },
+      });
+    });
+  });
+
+  it("lets a model the call names win over the profile", async () => {
+    await withFleet(async (arranged) => {
+      const { alpha, beta } = await setUp(arranged);
+      const projectId = await createProjectWithProfile(arranged, "Docs", {
+        providerAccountId: alpha,
+        model: "swift",
+        harnessId: null,
+      });
+
+      const thread = await spawnThread(arranged, { projectId, model: "clever" });
+
+      // The call named a model, so the profile is not consulted: the account is the thread default's.
+      expect(thread).toMatchObject({
+        providerAccountId: beta,
+        modelSelection: { model: "clever", options: {} },
+      });
+    });
+  });
+
+  it("does not apply the profile's model to another account the call names", async () => {
+    await withFleet(async (arranged) => {
+      const { alpha, beta } = await setUp(arranged);
+      const projectId = await createProjectWithProfile(arranged, "Docs", {
+        providerAccountId: alpha,
+        model: "swift",
+        harnessId: null,
+      });
+
+      const thread = await spawnThread(arranged, { projectId, providerAccountId: beta });
+
+      expect(thread.providerAccountId).toBe(beta);
+      expect(thread.modelSelection.model).toBe("clever");
+    });
+  });
+
+  it("falls back to the user's thread default for an empty profile and for no profile", async () => {
+    await withFleet(async (arranged) => {
+      const { beta } = await setUp(arranged);
+      const empty = await createProjectWithProfile(arranged, "Empty", null);
+      const none = await createProject(arranged, "Plain");
+
+      for (const projectId of [empty, none]) {
+        const thread = await spawnThread(arranged, { projectId });
+        expect(thread).toMatchObject({
+          providerAccountId: beta,
+          modelSelection: { model: "fast", options: {} },
+        });
+      }
+    });
+  });
+
+  it("stays on a default entry that cannot run, and refuses it, instead of choosing another", async () => {
+    await withFleet(async (arranged) => {
+      await setUp(arranged);
+      const projectId = await createProjectWithProfile(arranged, "Docs", {
+        providerAccountId: findProviderAccountId(arranged, "harnesses/alpha"),
+        model: "swift",
+        // Alpha's provider does not allow this harness.
+        harnessId: "harnesses/beta",
+      });
+
+      const response = await spawnSession(arranged, { prompt: "hello", projectId });
+
+      expect(response.status, await response.clone().text()).toBe(400);
+    });
+  });
+
+  describe("for a Thread a session starts", () => {
+    /** Starts the session that calls `session.spawn`: on alpha, with `fast` and its `effort` option. */
+    const startCaller = async (arranged: Arranged, fields: Record<string, unknown> = {}) =>
+      spawnThreadUnder(
+        arranged,
+        await createProfile(arranged, "thread-starter", ["session.spawn", "thread.start"]),
+        {
+          providerAccountId: findProviderAccountId(arranged, "harnesses/alpha"),
+          model: "fast",
+          options: { effort: "high" },
+          ...fields,
+        },
+      );
+
+    const spawnThreadAs = async (
+      arranged: Arranged,
+      token: string,
+      fields: Record<string, unknown>,
+    ) => {
+      const response = await post(
+        arranged.harness.base,
+        "/api/v1/sessions",
+        { prompt: "a job for you", ...fields },
+        token,
+      );
+      expect(response.status, await response.clone().text()).toBe(200);
+      return (await response.json()) as Session;
+    };
+
+    it("starts on the project's entry, not on a copy of the caller", async () => {
+      await withFleet(async (arranged) => {
+        const beta = findProviderAccountId(arranged, "harnesses/beta");
+        const projectId = await createProjectWithProfile(arranged, "Docs", {
+          providerAccountId: beta,
+          model: "swift",
+          harnessId: null,
+        });
+        const caller = await startCaller(arranged);
+
+        const named = await spawnThreadAs(arranged, caller.token, { projectId });
+
+        // The caller's `fast` and `effort: high` stay behind.
+        expect(named).toMatchObject({
+          providerAccountId: beta,
+          modelSelection: { model: "swift", options: {} },
+        });
+      });
+    });
+
+    it("starts on the entry of the caller's own project when the call names none", async () => {
+      await withFleet(async (arranged) => {
+        const beta = findProviderAccountId(arranged, "harnesses/beta");
+        const projectId = await createProjectWithProfile(arranged, "Docs", {
+          providerAccountId: beta,
+          model: "swift",
+          harnessId: null,
+        });
+        const caller = await startCaller(arranged, { projectId });
+
+        const thread = await spawnThreadAs(arranged, caller.token, {});
+
+        expect(thread).toMatchObject({
+          projectId,
+          providerAccountId: beta,
+          modelSelection: { model: "swift", options: {} },
+        });
+      });
+    });
+
+    it("still copies the caller in a project without a profile", async () => {
+      await withFleet(async (arranged) => {
+        const alpha = findProviderAccountId(arranged, "harnesses/alpha");
+        const projectId = await createProject(arranged, "Plain");
+        const caller = await startCaller(arranged, { projectId });
+
+        const thread = await spawnThreadAs(arranged, caller.token, {});
+
+        expect(thread).toMatchObject({
+          projectId,
+          providerAccountId: alpha,
+          modelSelection: { model: "fast", options: { effort: "high" } },
+        });
+      });
+    });
+  });
+
+  it("leaves a spawn from an Agent on the Agent's own entry", async () => {
+    await withFleet(async (arranged) => {
+      const alpha = findProviderAccountId(arranged, "harnesses/alpha");
+      const beta = findProviderAccountId(arranged, "harnesses/beta");
+      const projectId = await createProjectWithProfile(arranged, "Docs", {
+        providerAccountId: beta,
+        model: "swift",
+        harnessId: null,
+      });
+      const agent = await createAgent(arranged, {
+        name: `assessor-${crypto.randomUUID()}`,
+        systemPrompt: "You assess tasks.",
+        providerAccountId: alpha,
+        permissionProfileId: (await readProfileNamed(arranged, "worker")).id,
+        accessMode: "auto-accept-edits",
+        model: "fast",
+      });
+
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: "assess",
+        agentId: agent.id,
+        projectId,
+      });
+
+      expect(session).toMatchObject({
+        providerAccountId: alpha,
+        modelSelection: { model: "fast", options: {} },
+      });
     });
   });
 });
