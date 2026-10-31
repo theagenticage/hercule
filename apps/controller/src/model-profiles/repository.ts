@@ -12,7 +12,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { StoredProfileBody } from "./profile-body";
+import { findNamedHarnessId, StoredProfileBody } from "./profile-body";
 
 /** A profile as it is stored. */
 export interface StoredModelProfile {
@@ -34,6 +34,14 @@ interface ModelProfileRow {
   readonly updated_at: string;
 }
 
+/** The entry a new Thread starts on, as placement applies it. */
+export interface StartingEntry {
+  readonly providerAccountId: string;
+  /** The entry's own or its section's harness; `undefined` means the account's default harness. */
+  readonly harnessId: string | undefined;
+  readonly model: string;
+}
+
 const decodeBody = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredProfileBody));
 
 const encodeBody = Schema.encodeEffect(Schema.fromJsonString(StoredProfileBody));
@@ -53,7 +61,7 @@ const toStoredProfile = (
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  return {
+  const repository = {
     /** Returns every profile, in the order they were created. */
     list: (): Effect.Effect<ReadonlyArray<StoredModelProfile>, SqlError | Schema.SchemaError> =>
       Effect.flatMap(
@@ -78,6 +86,34 @@ const make = Effect.gen(function* () {
             ? Effect.succeed(Option.none())
             : Effect.map(toStoredProfile(rows[0]), Option.some),
       ),
+
+    /**
+     * Returns the entry a new Thread starts on for the profile: its default
+     * entry, with the harness the entry or its section names. Returns `None`
+     * when the profile does not exist or has no default entry. It reads the
+     * rows and checks no grant, because the caller is starting a Thread, not
+     * reading the profile.
+     */
+    readStartingEntry: (
+      id: string,
+    ): Effect.Effect<Option.Option<StartingEntry>, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const profile = yield* repository.one(id);
+        if (Option.isNone(profile)) return Option.none();
+        const { accounts, defaultEntry } = profile.value.body;
+        if (defaultEntry === null) return Option.none();
+        const section = accounts.find(
+          (candidate) => candidate.providerAccountId === defaultEntry.providerAccountId,
+        );
+        return Option.some({
+          providerAccountId: defaultEntry.providerAccountId,
+          harnessId:
+            (section === undefined
+              ? defaultEntry.harnessId
+              : findNamedHarnessId(defaultEntry, section)) ?? undefined,
+          model: defaultEntry.model,
+        });
+      }),
 
     /** Returns whether a profile with this id exists. */
     exists: (id: string): Effect.Effect<boolean, SqlError> =>
@@ -149,6 +185,7 @@ const make = Effect.gen(function* () {
         `;
       }),
   };
+  return repository;
 });
 
 export const modelProfileRepository = make;

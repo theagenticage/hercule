@@ -13,5 +13,5 @@
  */
 export { ModelProfileLookupLayer } from "./lookup";
 export { ModelProfileMembershipLayer } from "./membership";
-export { modelProfileRepository, type StoredModelProfile } from "./repository";
+export { modelProfileRepository, type StartingEntry, type StoredModelProfile } from "./repository";
 export { ModelProfileService, ModelProfileServiceLayer, type UpdateInput } from "./service";

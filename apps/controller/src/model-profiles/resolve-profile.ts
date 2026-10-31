@@ -28,7 +28,7 @@ import {
   findSnapshotModel,
   isModelMissingFromHarness,
 } from "./harness-evidence";
-import type { StoredSection } from "./profile-body";
+import { findNamedHarnessId, type StoredSection } from "./profile-body";
 import type { StoredModelProfile } from "./repository";
 
 /** A runner that is online and not draining, so a session can start on it now. */
@@ -114,7 +114,7 @@ const resolveEntry = (
   world: ResolutionWorld,
 ): ResolvedModelProfileEntry => {
   const account = findStoredAccount(world, entry.providerAccountId);
-  const resolvedHarnessId = entry.harnessId ?? section.harnessId ?? account.defaultHarnessId;
+  const resolvedHarnessId = findNamedHarnessId(entry, section) ?? account.defaultHarnessId;
   const catalog = world.catalogs.find((one) => one.providerAccountId === account.id);
   const catalogItem = catalog?.models.find((one) => one.slug === entry.model);
   const snapshotModel = findSnapshotModel(account, resolvedHarnessId, entry.model);

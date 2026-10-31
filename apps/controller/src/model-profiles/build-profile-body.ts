@@ -21,6 +21,7 @@ import {
 import { describeHarnessLacksModel, isModelMissingFromHarness } from "./harness-evidence";
 import {
   buildSelectionEntries,
+  findNamedHarnessId,
   isSameEntry,
   pickSelectionDefault,
   type StoredProfileBody,
@@ -47,7 +48,7 @@ const collectHeldEntryKeys = (
     const account = world.accounts.find((one) => one.id === section.providerAccountId);
     if (account === undefined) continue;
     for (const entry of section.entries ?? []) {
-      const harnessId = entry.harnessId ?? section.harnessId ?? account.defaultHarnessId;
+      const harnessId = findNamedHarnessId(entry, section) ?? account.defaultHarnessId;
       held.add(buildEntryKey(account.id, entry.model, harnessId));
     }
   }
@@ -163,7 +164,7 @@ const findEntryIssues = (
     }
     const harnessIssue = findHarnessIssue(entry.harnessId, account, entryPath, world);
     if (harnessIssue !== undefined) issues.push(harnessIssue);
-    const harnessId = entry.harnessId ?? section.harnessId ?? account.defaultHarnessId;
+    const harnessId = findNamedHarnessId(entry, section) ?? account.defaultHarnessId;
     const key = buildEntryKey(account.id, entry.model, harnessId);
     const first = firstIndexOfKey.get(key);
     if (first === undefined) {

@@ -776,44 +776,33 @@ const make = Effect.gen(function* () {
 
   /**
    * Returns the thread defaults with the account, harness, model and options
-   * of the project's Model Profile default entry in their place, as one
-   * selection. Returns the defaults unchanged when the project is deleted,
-   * names no profile, names one that no longer exists, or names an empty one
-   * (no default entry).
+   * of the Model Profile's default entry in their place, as one selection.
+   * Returns the defaults unchanged when the project names no profile
+   * (`modelProfileId` is `undefined`), names one that no longer exists, or
+   * names an empty one (no default entry).
    *
-   * The harness is the entry's own, else its section's, else undefined, which
-   * means the account's default harness. The user's or the calling session's
-   * options are dropped because they belong to another model. The entry stays
-   * the choice even when it cannot run now, so no other entry runs in its
-   * place. Placement then applies its ordinary account, harness and runner
-   * checks to the entry, as to any model source. It does not check that the
-   * model is in the account's Model Catalog, for any source (an explicit model,
-   * the thread default, an Agent's model or this entry). A client greys the
-   * entry out from its resolved problem before the start.
+   * The harness is the one the entry or its section names, else undefined,
+   * which means the account's default harness. The user's or the calling
+   * session's options are dropped because they belong to another model. The
+   * entry stays the choice even when it cannot run now, so no other entry
+   * runs in its place. Placement then applies its ordinary account, harness
+   * and runner checks to the entry, as to any model source. It does not check
+   * that the model is in the account's Model Catalog, for any source (an
+   * explicit model, the thread default, an Agent's model or this entry). A
+   * client greys the entry out from its resolved problem before the start.
    *
-   * This reads the profile straight from its rows. It checks no grant,
-   * because the caller is starting a Thread, not reading the profile.
+   * This checks no grant, because the caller is starting a Thread, not
+   * reading the profile.
    */
   const applyProjectDefaultEntry = (
     defaults: ThreadDefaults,
-    projectId: string,
+    modelProfileId: string | undefined,
   ): Effect.Effect<ThreadDefaults, SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
-      const project = yield* projectRows.live(projectId);
-      if (Option.isNone(project) || project.value.modelProfileId === undefined) return defaults;
-      const profile = yield* modelProfiles.one(project.value.modelProfileId);
-      const entry = Option.isSome(profile) ? profile.value.body.defaultEntry : null;
-      if (Option.isNone(profile) || entry === null) return defaults;
-      const section = profile.value.body.accounts.find(
-        (candidate) => candidate.providerAccountId === entry.providerAccountId,
-      );
-      return {
-        ...defaults,
-        providerAccountId: entry.providerAccountId,
-        harnessId: entry.harnessId ?? section?.harnessId ?? undefined,
-        model: entry.model,
-        options: undefined,
-      };
+      if (modelProfileId === undefined) return defaults;
+      const entry = yield* modelProfiles.readStartingEntry(modelProfileId);
+      if (Option.isNone(entry)) return defaults;
+      return { ...defaults, ...entry.value, options: undefined };
     });
 
   /**
@@ -876,17 +865,6 @@ const make = Effect.gen(function* () {
         onSome: (profile) => Effect.succeed(profile.id),
       }),
     );
-
-  /** Fails with a validation error when `projectId` names no live project. */
-  const validateLiveProject = (projectId: string): Effect.Effect<void, Validation | SqlError> =>
-    Effect.gen(function* () {
-      const live = yield* resources.liveProjects([projectId]);
-      if (live.length === 0) {
-        return yield* Effect.fail(
-          createValidationError([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
-        );
-      }
-    });
 
   /**
    * Writes the workspace and the session in one transaction, joining the
@@ -1404,17 +1382,28 @@ const make = Effect.gen(function* () {
             }
           }
           const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
-          if (decoded.projectId !== undefined) yield* validateLiveProject(decoded.projectId);
           const projectId = decoded.projectId ?? threadDefaults?.projectId;
+          // A project the call names must be live. One inherited from the
+          // caller was checked when its defaults were copied.
+          const project =
+            projectId === undefined ? Option.none() : yield* projectRows.live(projectId);
+          if (decoded.projectId !== undefined && Option.isNone(project)) {
+            return yield* Effect.fail(
+              createValidationError([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
+            );
+          }
           // A Thread that names no model starts on its project's default entry
           // when the project has a profile (spec 06 section 17.9). An Agent
           // keeps its own entry.
           if (
             threadDefaults !== undefined &&
             decoded.model === undefined &&
-            projectId !== undefined
+            Option.isSome(project)
           ) {
-            threadDefaults = yield* applyProjectDefaultEntry(threadDefaults, projectId);
+            threadDefaults = yield* applyProjectDefaultEntry(
+              threadDefaults,
+              project.value.modelProfileId,
+            );
           }
           // A session's spawn runs on the caller's runner and in the caller's
           // workspace unless the call names its own. The user's and the

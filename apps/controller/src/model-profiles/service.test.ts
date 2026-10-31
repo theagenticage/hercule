@@ -7,7 +7,7 @@
  * runs nothing. The database starts with the profile "Main".
  */
 import { describe, expect, it } from "vitest";
-import { Clock, Effect } from "effect";
+import { Clock, Effect, Option } from "effect";
 import {
   MAX_DISMISSED_NEW_MODELS,
   MAX_MODEL_PROFILE_ACCOUNTS,
@@ -33,6 +33,7 @@ import {
   storeCredential,
 } from "../provider-accounts/testing";
 import { buildModel, runWithProfiles, storeCatalog } from "./testing";
+import { modelProfileRepository } from "./repository";
 import { ModelProfileService } from "./service";
 
 const MISSING = "0199e0e7-9999-7000-8000-000000000000";
@@ -1025,6 +1026,90 @@ describe("resolving entries", () => {
     );
 
     expect(resolved.problem).toMatchObject({ reason: "no-runner" });
+  });
+});
+
+describe("reading the starting entry", () => {
+  /** Writes one entry of a new account to Main as its default, and reads the starting entry. */
+  const readStartingEntryOf = (options: {
+    readonly defaultHarnessId?: string;
+    readonly sectionHarnessId: string | null;
+    readonly entryHarnessId: string | null;
+  }) =>
+    Effect.gen(function* () {
+      const account = yield* addAccount({
+        kind: KEY_KIND,
+        label: "work",
+        ...(options.defaultHarnessId === undefined
+          ? {}
+          : { defaultHarnessId: options.defaultHarnessId }),
+      });
+      const main = yield* readMain;
+      const chosen = entry(account.id, "current", options.entryHarnessId);
+      yield* update(main, {
+        accounts: [
+          { providerAccountId: account.id, harnessId: options.sectionHarnessId, entries: [chosen] },
+        ],
+        defaultEntry: chosen,
+      });
+      const repository = yield* modelProfileRepository;
+      const starting = yield* repository.readStartingEntry(main.id);
+      return { accountId: account.id, starting };
+    });
+
+  it("starts on the harness the entry names", async () => {
+    const { accountId, starting } = await runWithProfiles(
+      readStartingEntryOf({ sectionHarnessId: null, entryHarnessId: ALPHA_HARNESS_ID }),
+    );
+
+    expect(starting).toEqual(
+      Option.some({ providerAccountId: accountId, harnessId: ALPHA_HARNESS_ID, model: "current" }),
+    );
+  });
+
+  it("starts on the harness the section names when the entry names none", async () => {
+    const { accountId, starting } = await runWithProfiles(
+      readStartingEntryOf({ sectionHarnessId: ALPHA_HARNESS_ID, entryHarnessId: null }),
+    );
+
+    expect(starting).toEqual(
+      Option.some({ providerAccountId: accountId, harnessId: ALPHA_HARNESS_ID, model: "current" }),
+    );
+  });
+
+  it("leaves the harness undefined, the account's default, when neither names one", async () => {
+    const { accountId, starting } = await runWithProfiles(
+      readStartingEntryOf({
+        defaultHarnessId: BETA_HARNESS_ID,
+        sectionHarnessId: null,
+        entryHarnessId: null,
+      }),
+    );
+
+    expect(starting).toEqual(
+      Option.some({ providerAccountId: accountId, harnessId: undefined, model: "current" }),
+    );
+  });
+
+  it("returns none for a profile without a default entry", async () => {
+    const starting = await runWithProfiles(
+      Effect.gen(function* () {
+        const main = yield* readMain;
+        yield* update(main, { accounts: [], defaultEntry: null });
+        const repository = yield* modelProfileRepository;
+        return yield* repository.readStartingEntry(main.id);
+      }),
+    );
+
+    expect(starting).toEqual(Option.none());
+  });
+
+  it("returns none for a profile that does not exist", async () => {
+    const starting = await runWithProfiles(
+      Effect.flatMap(modelProfileRepository, (repository) => repository.readStartingEntry(MISSING)),
+    );
+
+    expect(starting).toEqual(Option.none());
   });
 });
 
