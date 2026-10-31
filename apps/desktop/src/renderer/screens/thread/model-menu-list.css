@@ -1,0 +1,75 @@
+/* The model menu's list. The composer's menu is a flex column of the filter,
+   this list, and for a thread that has started, its foot; the list scrolls
+   inside it, so the filter stays in view, and the whole menu is at most 60%
+   of the window's height (spec 17 §The composer). */
+.model-menu {
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+}
+.model-menu-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The rule between the filter and the list that follows it. */
+.pop-sec:has(> .menu-filter) + .model-menu-list {
+  border-top: 1px solid var(--divider);
+}
+
+/* A Model Profile's head: Bureau's lane label (`.q-h`), made a button, with a
+   chevron at the right that points down while the profile is unfolded. The
+   book draws no accordion, so this follows the prototype's `.ac-h`, which
+   sets the profiles apart with a rule between them. */
+.ac + .ac {
+  border-top: 1px solid var(--divider);
+}
+.ac-head {
+  padding: 4px 8px;
+}
+.ac-head .q-h {
+  width: 100%;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.ac-head .q-h:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ac-head .q-h[aria-expanded="true"] {
+  color: var(--ink);
+}
+.ac-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The number of entries sits at the right, before the chevron. */
+.ac-count {
+  margin-left: auto;
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.ac-head .q-h > svg {
+  flex: none;
+  /* Lines the chevron's tip up with the check mark of the rows below. */
+  margin-right: -1px;
+  color: var(--faint);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.ac-head .q-h[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+/* Under its head, the first section needs no rule above it. */
+.ac-head + .pop-sec {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* Not in the book. A lane that a screen outside the composer lights, such as
+   the Providers page's preview when the pointer is on an account card. */
+.pop-sec.is-lit {
+  background: var(--hover);
+}

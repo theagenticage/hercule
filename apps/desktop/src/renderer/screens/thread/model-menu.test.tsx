@@ -1,13 +1,15 @@
 /**
  * Tests the model menu's content: on a Draft Thread, Recent and one lane per
  * account with the entries that cannot run dimmed with their reason and a
- * Sign in link; on a thread that has started, the flat list and its note; and
- * the choice each row makes.
+ * Sign in link; with several Model Profiles, the heads of the accordion; on a
+ * thread that has started, the flat list and its note; and the choice each
+ * row makes.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  buildModelMenu,
   readThreadConfig,
   type RecentModel,
   type SignInTarget,
@@ -29,6 +31,7 @@ import {
 } from "@hercule/client-core/testing";
 import { SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
 import { ModelMenu } from "./model-menu";
+import { ModelMenuList } from "./model-menu-list";
 
 const MOSS = SIDEBAR_FIXTURE.runners[0]!;
 
@@ -91,12 +94,14 @@ const renderMenu = ({
   config = CONFIG,
   kind = "draft",
   recent = [],
+  lastOpenProfileId = null,
 }: {
   readonly accounts?: readonly ProviderAccount[];
   readonly profiles?: readonly ModelProfile[];
   readonly config?: ThreadConfig;
   readonly kind?: ThreadKind;
   readonly recent?: readonly RecentModel[];
+  readonly lastOpenProfileId?: string | null;
 } = {}) => {
   const catalogs: ThreadCatalogs = {
     accounts,
@@ -108,6 +113,7 @@ const renderMenu = ({
   };
   const onChoose = vi.fn<(choice: ThreadChoice) => void>();
   const onSignIn = vi.fn<(target: SignInTarget) => void>();
+  const rememberOpenProfile = vi.fn<(profileId: string) => void>();
   render(
     <ModelMenu
       catalogs={catalogs}
@@ -116,11 +122,13 @@ const renderMenu = ({
       kind={kind}
       runnerId={null}
       readRecent={() => recent}
+      readLastOpenProfileId={() => lastOpenProfileId}
+      rememberOpenProfile={rememberOpenProfile}
       onChoose={onChoose}
       onSignIn={onSignIn}
     />,
   );
-  return { onChoose, onSignIn };
+  return { onChoose, onSignIn, rememberOpenProfile };
 };
 
 /** Returns the words of a row, without the words a Provider's mark draws as its fallback initial. */
@@ -233,7 +241,180 @@ describe("the model menu of a Draft Thread", () => {
   it("says so when the user has no model in the menu yet", () => {
     renderMenu({ profiles: [buildModelProfile([])] });
 
-    expect(screen.getByText("No models in your profile yet.")).toBeTruthy();
+    expect(screen.getByText("No models in this profile yet.")).toBeTruthy();
+  });
+});
+
+/** The profile "Work": Claude's Haiku, and Codex's GPT, which cannot run on moss. */
+const HAIKU = claudeEntry("claude-haiku-5", "Claude Haiku 5");
+const WORK: ModelProfile = buildModelProfile(
+  [buildProfileSection(ANTHROPIC_IDENTITY, [HAIKU]), buildProfileSection(OPENAI_IDENTITY, [GPT])],
+  { id: "profile-work", name: "Work" },
+);
+
+/** Returns the heads of the accordion, in order. */
+const readHeads = (): readonly HTMLElement[] => [
+  ...document.querySelectorAll<HTMLElement>("button[aria-expanded]"),
+];
+
+describe("the model menu of a Draft Thread with several Model Profiles", () => {
+  it("has a head per profile, with the profile that holds the current entry unfolded", () => {
+    renderMenu({ profiles: [MAIN, WORK] });
+
+    const heads = readHeads();
+    expect(heads.map((head) => head.textContent)).toEqual(["Main3", "Work2"]);
+    expect(heads.map((head) => head.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+    // Only the unfolded profile's lanes are drawn.
+    expect(screen.queryByText("Claude Haiku 5")).toBeNull();
+    expect(screen.getByText("Claude Opus 5")).toBeTruthy();
+  });
+
+  it("has no heads when the user has one profile", () => {
+    renderMenu({ profiles: [MAIN] });
+
+    expect(readHeads()).toEqual([]);
+  });
+
+  it("unfolds a clicked head and folds the other, without changing the draft's model, and remembers it", async () => {
+    const user = userEvent.setup();
+    const { onChoose, rememberOpenProfile } = renderMenu({ profiles: [MAIN, WORK] });
+
+    await user.click(screen.getByRole("button", { name: /^Work/ }));
+
+    expect(readHeads().map((head) => head.getAttribute("aria-expanded"))).toEqual([
+      "false",
+      "true",
+    ]);
+    expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
+    expect(screen.queryByText("Claude Opus 5")).toBeNull();
+    expect(rememberOpenProfile.mock.calls).toEqual([["profile-work"]]);
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("opens on the profile open last when the current entry is in neither", () => {
+    const elsewhere: ThreadConfig = { ...CONFIG, model: "claude-unlisted" };
+    renderMenu({ profiles: [MAIN, WORK], config: elsewhere, lastOpenProfileId: "profile-work" });
+
+    expect(readHeads().map((head) => head.getAttribute("aria-expanded"))).toEqual([
+      "false",
+      "true",
+    ]);
+  });
+
+  it("shows each profile's own Recent entries under its head", async () => {
+    const user = userEvent.setup();
+    renderMenu({ profiles: [MAIN, WORK], recent: [recentOf(HAIKU), recentOf(OPUS)] });
+
+    expect(readSections()[0]).toEqual(["Recent", "Claude Opus 5"]);
+    await user.click(screen.getByRole("button", { name: /^Work/ }));
+    expect(readSections()[0]).toEqual(["Recent", "Claude Haiku 5"]);
+  });
+
+  it("dims an entry of the unfolded profile with its reason", () => {
+    renderMenu({
+      profiles: [MAIN, WORK],
+      lastOpenProfileId: "profile-work",
+      config: { ...CONFIG, model: HAIKU.model },
+    });
+
+    const row = screen.getByText("GPT-5.4").closest(".line")!;
+    expect(row.classList.contains("line--dimmed")).toBe(true);
+    expect(within(row as HTMLElement).getByText("not signed in on moss")).toBeTruthy();
+  });
+
+  it("unfolds every profile with a match while filtering, and leaves out the others", async () => {
+    const user = userEvent.setup();
+    const many = ["1", "2", "3", "4", "5", "6", "7", "8"].map((version) =>
+      claudeEntry(`claude-haiku-${version}`, `Claude Haiku ${version}`),
+    );
+    const big = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, many)], {
+      id: "profile-big",
+      name: "Big",
+    });
+    renderMenu({ profiles: [MAIN, WORK, big] });
+
+    await user.type(screen.getByRole("textbox", { name: "Filter models" }), "haiku");
+
+    // Main holds no Haiku, so its head is gone; Work and Big are both unfolded.
+    expect(
+      readHeads().map((head) => [head.textContent, head.getAttribute("aria-expanded")]),
+    ).toEqual([
+      ["Work2", "true"],
+      ["Big8", "true"],
+    ]);
+    await user.clear(screen.getByRole("textbox", { name: "Filter models" }));
+    await user.type(screen.getByRole("textbox", { name: "Filter models" }), "zzz");
+    expect(screen.getByText("No model matches.")).toBeTruthy();
+    expect(readHeads()).toEqual([]);
+  });
+
+  it("reaches every head and row with the Tab key, and a head opens with Enter", async () => {
+    const user = userEvent.setup();
+    renderMenu({ profiles: [MAIN, WORK] });
+
+    const stops: (string | null)[] = [];
+    for (let stop = 0; stop < 5; stop += 1) {
+      await user.tab();
+      stops.push(document.activeElement?.textContent ?? null);
+    }
+
+    // The first head, the unfolded profile's two entries and the Sign in on
+    // the third, then the second head.
+    expect(stops).toEqual(["Main3", "Claude Sonnet 5", "Claude Opus 5", "Sign in", "Work2"]);
+    await user.keyboard("{Enter}");
+    expect(document.activeElement?.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
+  });
+});
+
+describe("the list of a model menu drawn by another screen", () => {
+  /** Builds the menu of a Draft Thread with the profile "Main" unfolded, and draws its list. */
+  const renderList = (props: Partial<Parameters<typeof ModelMenuList>[0]> = {}) => {
+    const catalogs: ThreadCatalogs = {
+      accounts: [CLAUDE, CODEX],
+      providers: PROVIDERS,
+      harnesses: HARNESSES,
+      modelProfiles: [MAIN],
+      runners: SIDEBAR_FIXTURE.runners,
+      thisMacRunnerId: null,
+    };
+    const menu = buildModelMenu(catalogs, CONFIG, {
+      kind: "draft",
+      filter: "",
+      recent: [],
+      openedProfileId: null,
+      lastOpenProfileId: null,
+      runnerId: null,
+    });
+    render(
+      <ModelMenuList
+        menu={menu}
+        providers={PROVIDERS}
+        plugins={[]}
+        onChoose={() => undefined}
+        onOpenProfile={() => undefined}
+        {...props}
+      />,
+    );
+  };
+
+  it("reports the pointer entering and leaving the lane of an account", async () => {
+    const user = userEvent.setup();
+    const onEnterLane = vi.fn<(providerAccountId: string) => void>();
+    const onLeaveLane = vi.fn<(providerAccountId: string) => void>();
+    renderList({ onEnterLane, onLeaveLane });
+
+    await user.hover(screen.getByText("Claude Opus 5"));
+    expect(onEnterLane.mock.calls).toEqual([[CLAUDE.id]]);
+    await user.unhover(screen.getByText("Claude Opus 5"));
+    expect(onLeaveLane.mock.calls).toEqual([[CLAUDE.id]]);
+  });
+
+  it("lights the lane of the highlighted account only", () => {
+    renderList({ highlightedAccountId: CODEX.id });
+
+    const lit = [...document.querySelectorAll(".pop-sec.is-lit")];
+    expect(lit.map((lane) => readWords(lane.firstElementChild!))).toEqual(["OpenAI"]);
   });
 });
 

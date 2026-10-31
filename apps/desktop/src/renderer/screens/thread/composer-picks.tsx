@@ -13,6 +13,7 @@ import {
 } from "@hercule/client-core";
 import type { ModelOption } from "@hercule/contract";
 import { pluginsQuery } from "../../app/queries";
+import { readLastOpenProfileId, rememberOpenProfile } from "../../app/recent-models";
 import { SlidersIcon } from "../../icons/sliders";
 import { ComposerMenu } from "./composer-menu";
 import { ModelMenu } from "./model-menu";
@@ -83,8 +84,10 @@ export function OptionsPick({
  * closes before it is called. `disabled` leaves the trigger drawn but unable
  * to open the menu.
  *
- * The menu reads nothing when it opens: the profiles, the accounts and the
- * plugins are the shell's reads, already in the cache.
+ * The menu reads nothing from the controller when it opens: the profiles, the
+ * accounts and the plugins are the shell's reads, already in the cache. It
+ * reads the profile open last from this device's storage, and stores the one
+ * the user opens.
  */
 export function ModelPick({
   pill,
@@ -107,7 +110,7 @@ export function ModelPick({
   readonly onChoose: (choice: ThreadChoice) => void;
   readonly onSignIn?: ((target: SignInTarget) => void) | undefined;
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { client, url } = useRouteContext({ from: "/_connected" }).controller;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   return (
     <ComposerMenu
@@ -132,6 +135,10 @@ export function ModelPick({
           kind={kind}
           runnerId={runnerId}
           readRecent={readRecent}
+          readLastOpenProfileId={() => readLastOpenProfileId(url)}
+          rememberOpenProfile={(profileId) => {
+            rememberOpenProfile(url, profileId);
+          }}
           onChoose={(choice) => {
             onChoose(choice);
             close();
