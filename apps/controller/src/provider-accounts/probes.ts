@@ -124,6 +124,8 @@ const make = Effect.gen(function* () {
   // A wake needs no payload, and one unread change already says that a
   // snapshot was stored, so the PubSub keeps only the latest.
   const snapshotWrites = yield* PubSub.sliding<void>(1);
+  // Same reasoning as `snapshotWrites`, for a stored or cleared credential expiry.
+  const credentialExpiryWrites = yield* PubSub.sliding<void>(1);
   // The millisecond of the last stamp handed out. Two probes of one pair that
   // share a millisecond could not be put in order by their stamps.
   let lastStampMillis = 0;
@@ -403,6 +405,24 @@ const make = Effect.gen(function* () {
      * the snapshots it missed.
      */
     snapshotChanges: Stream.fromPubSub(snapshotWrites),
+
+    /**
+     * Emits once each time a credential expiry is stored or cleared and the
+     * write commits, so the watcher of expiries plans its wait again. A
+     * subscriber that falls behind gets one emission for all the changes it
+     * missed.
+     */
+    credentialExpiryChanges: Stream.fromPubSub(credentialExpiryWrites),
+
+    /**
+     * Records that an account's credential expiry was stored or cleared, so
+     * `credentialExpiryChanges` emits once the transaction commits (at once
+     * outside a transaction). Does not store the expiry.
+     */
+    notifyCredentialExpiryChanged: (): Effect.Effect<void> =>
+      afterCommit(() => {
+        PubSub.publishUnsafe(credentialExpiryWrites, undefined);
+      }),
 
     /**
      * Returns the earliest time after `afterMillis` (epoch milliseconds) at

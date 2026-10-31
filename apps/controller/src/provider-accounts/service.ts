@@ -73,7 +73,7 @@ import { ProviderKeyRequests } from "./provider-key-requests";
 import type { StoredModelCatalogSummary } from "./model-catalog-repository";
 import { ModelCatalogs } from "./model-catalogs";
 import { ModelProfileMembership } from "./model-profile-membership";
-import type { ReadStamp } from "./probes";
+import { ProviderAccountProbes, type ReadStamp } from "./probes";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
@@ -177,6 +177,22 @@ const make = Effect.gen(function* () {
   const catalogs = yield* ModelCatalogs;
   const accountRunners = yield* ProviderAccountRunners;
   const membership = yield* ModelProfileMembership;
+  const probes = yield* ProviderAccountProbes;
+
+  /**
+   * Stores or clears (`null`) the account's credential expiry, and wakes the
+   * daemon's watcher of expiries so it plans its wait for the new date. Call
+   * it in a transaction.
+   */
+  const storeCredentialExpiry = (
+    id: string,
+    expiresAt: string | null,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.andThen(
+      accounts.setCredentialExpiry(id, expiresAt, at),
+      probes.notifyCredentialExpiryChanged(),
+    );
 
   const announceAccountChanged = (id: string): Effect.Effect<void> =>
     announce({ _tag: "record", topic: "provider", id, kind: "updated" });
@@ -624,7 +640,7 @@ const make = Effect.gen(function* () {
           ? stored === reported
           : Date.parse(stored) === Date.parse(reported);
       if (unchanged) return;
-      yield* accounts.setCredentialExpiry(account.id, reported, yield* nowIso);
+      yield* storeCredentialExpiry(account.id, reported, yield* nowIso);
       yield* announceAccountChanged(account.id);
     });
 
@@ -866,7 +882,7 @@ const make = Effect.gen(function* () {
               yield* accounts.advanceCredentialGeneration(id, at);
               // The old key's expiry does not apply to the new key. The next
               // usage read of the provider sets the new key's, if it has one.
-              yield* accounts.setCredentialExpiry(id, null, at);
+              yield* storeCredentialExpiry(id, null, at);
               // The new key may be someone else's, so its readings no longer apply.
               yield* accountUsage.clear(id);
             }
@@ -1075,7 +1091,7 @@ const make = Effect.gen(function* () {
                 );
               }
               yield* secrets.set(buildProviderAccountOwner(id), secretName, Redacted.make(token));
-              yield* accounts.setCredentialExpiry(id, computeTokenExpiry(at), at);
+              yield* storeCredentialExpiry(id, computeTokenExpiry(at), at);
               // The new token may belong to someone else. See spec 06 section 11.
               yield* accounts.clearIdentity(id, at);
               // The new token may be someone else's, so its readings no longer apply.
@@ -1368,4 +1384,5 @@ export const ProviderAccountServiceLayer: Layer.Layer<
   | ModelCatalogs
   | ProviderAccountRunners
   | ModelProfileMembership
+  | ProviderAccountProbes
 > = Layer.effect(ProviderAccountService)(make);

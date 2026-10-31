@@ -29,6 +29,7 @@ import {
   ProviderAccountProbesLayer,
   ProviderAccountRunners,
   ProviderAccountRunnersLayer,
+  ProviderAccountService,
   ProviderAccountServiceLayer,
   ProviderKeyRequestsLayer,
   providerAccountRepository,
@@ -42,13 +43,17 @@ import {
   buildAccountPlugins,
   buildCataloguedPlugin,
   buildFakeProviderApi,
+  buildMeteredPlugin,
   CATALOGUED_CATALOG_URL,
   CATALOGUED_KEY_KIND,
   CATALOGUED_PROVIDER_ID,
   KEY_KIND,
   MACHINE_KIND,
+  METERED_KEY_KIND,
+  METERED_PROVIDER_ID,
   setTokenExpiry,
   SIGNED_IN,
+  storeCredential,
   TOKEN_KIND,
 } from "../../provider-accounts/testing";
 import { LocalRunnerId, RunnerConnections } from "../../runners";
@@ -194,6 +199,7 @@ const run = <A, E>(
     | HarnessAccounts
     | ProviderAccountProbing
     | ProviderAccountProbes
+    | ProviderAccountService
     | ProviderAccountRunners
     | AccountUsage
     | ModelCatalogs
@@ -210,6 +216,7 @@ const run = <A, E>(
           ...buildAccountPlugins(),
           ...buildMultiHarnessPlugins(),
           buildCataloguedPlugin(),
+          buildMeteredPlugin(),
         ]),
       );
       return yield* body;
@@ -1522,8 +1529,13 @@ describe("the announcement of an expiring token", () => {
     ) => Effect.Effect<
       A,
       E,
-      ProviderAccountProbing | ProviderAccountProbes | SqlClient.SqlClient | Secrets
+      | ProviderAccountProbing
+      | ProviderAccountProbes
+      | ProviderAccountService
+      | SqlClient.SqlClient
+      | Secrets
     >,
+    providerApi?: HttpClient.HttpClient,
   ) => {
     const announced: Array<Change> = [];
     const listener = {
@@ -1540,11 +1552,14 @@ describe("the announcement of an expiring token", () => {
         | HarnessAccounts
         | ProviderAccountProbing
         | ProviderAccountProbes
+        | ProviderAccountService
         | ProviderAccountRunners
         | ModelCatalogs
         | SqlClient.SqlClient
         | Secrets
       >,
+      [],
+      providerApi,
     );
   };
 
@@ -1652,5 +1667,43 @@ describe("the announcement of an expiring token", () => {
     );
 
     expect(announcedAfterChange).toBe(1);
+  });
+
+  it("plans again when a usage read stores an expiry, so the account is announced when the key expires", async () => {
+    const expiry = new Date(Date.now() + 300).toISOString();
+    const api = buildFakeProviderApi(
+      () => new Response(JSON.stringify({ used: 40, expires: expiry })),
+    );
+    const announcedAfterRead = await runAnnouncing(
+      (announced) =>
+        Effect.gen(function* () {
+          const probing = yield* ProviderAccountProbing;
+          const account = yield* addAccount({
+            providerId: METERED_PROVIDER_ID,
+            kind: METERED_KEY_KIND,
+          });
+          yield* storeCredential(account.id, "apiKey", "sk-live");
+          // The driver plans with no expiry at all: its next wake is the hourly sweep.
+          const driver = yield* Effect.forkChild(probing.driving);
+          yield* Effect.sleep(Duration.millis(30));
+          // No probe runs in this test: the read alone stores the expiry.
+          yield* (yield* ProviderAccountService).readUsageWithKey(account.id);
+          const afterRead = announced.filter((change) =>
+            announcesProvider(change, account.id),
+          ).length;
+          yield* waitUntil(
+            () =>
+              announced.filter((change) => announcesProvider(change, account.id)).length >
+              afterRead,
+          );
+          yield* Fiber.interrupt(driver);
+          return (
+            announced.filter((change) => announcesProvider(change, account.id)).length - afterRead
+          );
+        }),
+      api.client,
+    );
+
+    expect(announcedAfterRead).toBe(1);
   });
 });

@@ -546,15 +546,17 @@ const make = Effect.gen(function* () {
    * Runs forever. Waits for the next expiry of a stored key or token and
    * announces the account on the `provider` topic then, because a credential
    * that expires changes nothing that is stored. The wait is planned again
-   * whenever a snapshot is stored. A new token comes with a sign-in, and a
-   * sign-in always ends in a stored snapshot, so this covers a token that
-   * changes without a clock of its own. With no expiry to wait for, it waits
-   * for the next snapshot.
+   * whenever a snapshot is stored or a credential expiry is stored or cleared,
+   * because a usage read can report a new expiry and a new key clears the old
+   * one, and neither stores a snapshot. With no expiry to wait for, it waits
+   * for the next of those.
    */
   const watchCredentialExpiries: Effect.Effect<void> = Effect.gen(function* () {
     const replan = yield* Queue.dropping<void>(1);
     yield* Effect.forkScoped(
-      Stream.runForEach(probes.snapshotChanges, () => Queue.offer(replan, undefined)),
+      Stream.runForEach(Stream.merge(probes.snapshotChanges, probes.credentialExpiryChanges), () =>
+        Queue.offer(replan, undefined),
+      ),
     );
     let announcedUntil = yield* Clock.currentTimeMillis;
     while (true) {
