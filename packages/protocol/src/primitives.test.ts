@@ -123,6 +123,7 @@ describe("a Harness Account", () => {
     providerAccountId: ACCOUNT_ID,
     harnessHome: `providers/homes/${ACCOUNT_ID}/pi/pi`,
     modelArgument: "zai/{model}",
+    credentialVariables: ["ZAI_API_KEY"],
   };
 
   it("accepts an account without a credential, and one with it", () => {
@@ -148,8 +149,9 @@ describe("a Harness Account", () => {
     );
   });
 
-  it("needs the id, the home and the model argument", () => {
+  it("needs the id, the home, the model argument and the credential variables", () => {
     expect(isAccepted(HarnessAccount, omitField(account, "providerAccountId"))).toBe(false);
+    expect(isAccepted(HarnessAccount, omitField(account, "credentialVariables"))).toBe(false);
     expect(isAccepted(HarnessAccount, omitField(account, "harnessHome"))).toBe(false);
     expect(isAccepted(HarnessAccount, omitField(account, "modelArgument"))).toBe(false);
   });
@@ -170,6 +172,7 @@ describe("a Harness Account", () => {
   it("refuses a credential variable that is not an upper-case environment variable name", () => {
     const withVariable = (variable: string) => ({
       ...account,
+      credentialVariables: [variable],
       credential: { variable, value: "sk-test" },
     });
     for (const variable of ["", "zai_api_key", "1KEY", "A-B", "A B", "A=B", "PATH\n"]) {
@@ -181,6 +184,7 @@ describe("a Harness Account", () => {
   it("refuses a credential variable the harness process depends on", () => {
     const withVariable = (variable: string) => ({
       ...account,
+      credentialVariables: [variable],
       credential: { variable, value: "sk-test" },
     });
     for (const variable of [
@@ -206,10 +210,49 @@ describe("a Harness Account", () => {
     expect(isAccepted(HarnessAccount, withVariable("USERNAME_KEY"))).toBe(true);
   });
 
-  it("accepts a credential variable without a value, for an account with no key stored", () => {
+  it("refuses a credential without a value", () => {
     expect(
       isAccepted(HarnessAccount, { ...account, credential: { variable: "ZAI_API_KEY" } }),
+    ).toBe(false);
+  });
+
+  it("refuses a credential whose variable is not one of the credential variables", () => {
+    const credential = { variable: "ZAI_API_KEY", value: "sk-test" };
+    expect(isAccepted(HarnessAccount, { ...account, credential })).toBe(true);
+    expect(
+      isAccepted(HarnessAccount, {
+        ...account,
+        credentialVariables: ["ANTHROPIC_API_KEY"],
+        credential,
+      }),
+    ).toBe(false);
+    expect(isAccepted(HarnessAccount, { ...account, credentialVariables: [], credential })).toBe(
+      false,
+    );
+  });
+
+  it("accepts credential variables for an account that has no credential", () => {
+    expect(
+      isAccepted(HarnessAccount, {
+        ...account,
+        credentialVariables: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
+      }),
     ).toBe(true);
+    expect(isAccepted(HarnessAccount, { ...account, credentialVariables: [] })).toBe(true);
+  });
+
+  it("refuses credential variables that repeat, are reserved or are too many", () => {
+    expect(
+      isAccepted(HarnessAccount, {
+        ...account,
+        credentialVariables: ["ZAI_API_KEY", "ZAI_API_KEY"],
+      }),
+    ).toBe(false);
+    expect(isAccepted(HarnessAccount, { ...account, credentialVariables: ["PATH"] })).toBe(false);
+    const many = (count: number) =>
+      Array.from({ length: count }, (_, index) => `KEY_${String(index)}`);
+    expect(isAccepted(HarnessAccount, { ...account, credentialVariables: many(64) })).toBe(true);
+    expect(isAccepted(HarnessAccount, { ...account, credentialVariables: many(65) })).toBe(false);
   });
 
   it("carries a credential value as long as the API accepts a secret", () => {
@@ -227,7 +270,11 @@ describe("a Harness Account", () => {
 
   it("refuses an empty credential value", () => {
     expect(
-      isAccepted(HarnessAccount, { ...account, credential: { variable: "KEY", value: "" } }),
+      isAccepted(HarnessAccount, {
+        ...account,
+        credentialVariables: ["KEY"],
+        credential: { variable: "KEY", value: "" },
+      }),
     ).toBe(false);
   });
 });
@@ -237,6 +284,7 @@ describe("the schemas a plugin shares with the wire", () => {
     providerAccountId: ACCOUNT_ID,
     harnessHome: `providers/homes/${ACCOUNT_ID}/pi/pi`,
     modelArgument: "zai/{model}",
+    credentialVariables: [],
   };
 
   it("accepts and refuses the same model arguments as a HarnessAccount", () => {
@@ -256,7 +304,11 @@ describe("the schemas a plugin shares with the wire", () => {
   it("accepts and refuses the same credential variables as a HarnessCredential", () => {
     for (const variable of ["ZAI_API_KEY", "zai", "", "A".repeat(129)]) {
       expect(isAccepted(CredentialVariable, variable), variable).toBe(
-        isAccepted(HarnessAccount, { ...account, credential: { variable, value: "k" } }),
+        isAccepted(HarnessAccount, {
+          ...account,
+          credentialVariables: [variable],
+          credential: { variable, value: "k" },
+        }),
       );
     }
   });

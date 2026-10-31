@@ -20,6 +20,8 @@ export const Provider = Schema.Struct({
   /** The id of the plugin that registered the Provider, such as `zai`. Clients read it here and never split it off `id` (ADR 0034). */
   pluginId: Schema.String,
   displayName: Schema.String,
+  /** The qualified id of the harness a new account of this Provider starts with, such as `claude-code/claude-code`. */
+  defaultHarnessId: Schema.String,
   kinds: Schema.Array(AccountKind),
 });
 

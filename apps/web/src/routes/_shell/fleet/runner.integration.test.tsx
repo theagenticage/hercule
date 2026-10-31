@@ -60,6 +60,7 @@ const buildProviderAccount = (
   identity: null,
   planLabel: null,
   defaultHarnessId,
+  expiresAt: null,
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",

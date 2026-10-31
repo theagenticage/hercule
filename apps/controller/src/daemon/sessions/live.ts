@@ -57,7 +57,11 @@ import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import { PluginHost, type RegisteredHarness } from "../../plugins";
 import { PromotionState } from "../../promotion";
-import { providerAccountRepository } from "../../provider-accounts";
+import {
+  findModels,
+  ProviderAccountRunners,
+  providerAccountRepository,
+} from "../../provider-accounts";
 import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
@@ -233,9 +237,11 @@ const make = Effect.gen(function* () {
    * Current options are kept only when the model does not change. Fails with
    * a validation error if the runner's catalog does not offer an option.
    *
-   * The catalog is read only when options are given. Without options there is
-   * nothing to validate, and a plain turn should not wait on a lookup. The
-   * read is one snapshot row, so it can stay inside the caller's transaction.
+   * The model list is the session's runner's, else the newest any runner
+   * reported (`findModels`). It is read only when options are given. Without
+   * options there is nothing to validate, and a plain turn should not wait on
+   * a lookup. The read is a few snapshot rows, so it can stay inside the
+   * caller's transaction.
    */
   const resolveModelSelection = (
     session: StoredSession,
@@ -245,16 +251,11 @@ const make = Effect.gen(function* () {
       const model = given.model ?? session.modelSelection.model;
       const picks = given.options ?? {};
       if (Object.keys(picks).length > 0) {
-        const snapshot = yield* providerAccounts.readSnapshot(
+        const snapshots = yield* providerAccounts.listHarnessSnapshots(
           session.providerAccountId,
           session.harnessId,
-          session.runnerId,
         );
-        yield* validateOptions(
-          Option.match(snapshot, { onNone: () => [], onSome: (found) => found.models }),
-          model,
-          picks,
-        );
+        yield* validateOptions(findModels(snapshots, session.runnerId), model, picks);
       }
       const carried = model === session.modelSelection.model ? session.modelSelection.options : {};
       return { model, options: { ...carried, ...picks } };
@@ -1543,4 +1544,5 @@ export const LiveLayer: Layer.Layer<
   | AuditLog
   | Dispatch
   | PromotionState
+  | ProviderAccountRunners
 > = Layer.effect(Live)(make);

@@ -147,6 +147,7 @@ export {
   listSetupFlows,
   type ConnectionFeed,
   type ConnectionType,
+  type CredentialField,
   type SetupFlow,
 } from "./connection-types";
 export {
@@ -541,22 +542,41 @@ export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./yo
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export {
+  listProviderAccountHarnessChoices,
+  type ProviderAccountHarnessChoice,
+} from "./provider-account-harnesses";
+export {
   listProviderAccountMachines,
   type ProviderAccountMachine,
+  type ProviderAccountMachineAction,
 } from "./provider-account-machines";
+export {
+  asksForAccountLabel,
+  buildProviderAccountCreateInput,
+  isAddAccountStepFilled,
+  listSignInRunnerOptions,
+  offersKindChoice,
+  planAddAccountSteps,
+  type AddAccountDraft,
+  type AddAccountStep,
+  type SignInRunnerChoice,
+  type SignInRunnerOption,
+} from "./add-provider-account";
 export { buildProviderRows, type CredentialFieldOffer, type ProviderRow } from "./provider-rows";
 export {
   buildProviderAccountName,
   describeProviderAccountIdentity,
   type ProviderAccountIdentityLine,
   findDefaultHarnessSnapshot,
+  findHarnessLoginMethod,
   findProviderAccountKind,
   findProviderAccountNameIfAmbiguous,
   findProviderPluginId,
   listProviderAccountCredentialFields,
   listSignedInDefaultHarnessSnapshots,
-  requiresSignInPerMachine,
+  signsInPerMachine,
   resolveThreadHarnessId,
+  type HarnessLoginMethod,
 } from "./provider-accounts";
 export {
   decideDeviceLoginStep,
@@ -589,7 +609,9 @@ export {
 export { completeSetup, validatePasswordLength } from "./setup";
 export {
   addPutOffStep,
+  buildAllSetAccountOffer,
   buildAllSetRecap,
+  type AllSetAccountOffer,
   findDoneSteps,
   buildFirstRunHost,
   findGitHubAccount,

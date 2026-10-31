@@ -38,6 +38,7 @@ import { buildLook, Face } from "../../faces";
 import { useComposerImages } from "../attachments/use-composer-images";
 import { useSendOnMenuCommand } from "../session/send-key";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
+import { LazyAddProviderAccount } from "../settings/providers/lazy-add-provider-account";
 import { DraftComposer } from "./draft-composer";
 import { DraftHeader } from "./draft-header";
 import { useDraftSkills } from "./use-draft-skills";
@@ -78,7 +79,8 @@ interface SentDraft {
  *   lead: where the thread will work and on which machine, or why it cannot
  *   start yet. When the reason is an account that is not signed in on the
  *   draft's machine, a Sign in button follows it and opens the sign-in in a
- *   dialog;
+ *   dialog. When the user has no account, an Add an account button follows it
+ *   and opens the add-account sheet;
  * - the composer, see `DraftComposer`;
  * - the start cards, or the starter threads while the project has no open
  *   task, when the draft is in a project, see `StartCards`.
@@ -171,6 +173,7 @@ export function DraftScreen({
   const [scrolled, setScrolled] = useState(false);
   // The sign-in the Sign in button opened, while its dialog is open.
   const [signIn, setSignIn] = useState<SignInTarget | null>(null);
+  const [addingAccount, setAddingAccount] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const images = useComposerImages({
@@ -262,6 +265,14 @@ export function DraftScreen({
                     </button>
                   </>
                 )}
+                {!fields.blocked.addAccount ? null : (
+                  <>
+                    {" "}
+                    <button type="button" className="link" onClick={() => setAddingAccount(true)}>
+                      Add an account
+                    </button>
+                  </>
+                )}
               </p>
             )}
           </div>
@@ -314,10 +325,23 @@ export function DraftScreen({
         // behind it.
         <Suspense fallback={null}>
           <ProviderLoginDialog
+            client={client}
             providerAccountId={signIn.providerAccountId}
             runnerId={signIn.runnerId}
             onClose={() => {
               setSignIn(null);
+              fieldRef.current?.focus();
+            }}
+          />
+        </Suspense>
+      )}
+      {!addingAccount ? null : (
+        <Suspense fallback={null}>
+          <LazyAddProviderAccount
+            client={client}
+            signInMachines="all"
+            onClose={() => {
+              setAddingAccount(false);
               fieldRef.current?.focus();
             }}
           />

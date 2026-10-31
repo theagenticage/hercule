@@ -321,6 +321,7 @@ describe("recovering attachment availability", () => {
         providerAccountId: ACCOUNT_ID,
         harnessHome: `providers/${ACCOUNT_ID}`,
         modelArgument: "{model}",
+        credentialVariables: [],
       },
       token: "fixture-session-token",
       spec: {

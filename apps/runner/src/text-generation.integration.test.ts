@@ -42,6 +42,7 @@ const REQUEST: TextGenerationRequest = {
     providerAccountId: "account-1",
     harnessHome: "providers/account-1",
     modelArgument: "{model}",
+    credentialVariables: [],
   },
   spec: {
     model: "fake-model",
@@ -130,6 +131,7 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
       binary: "pi",
       env: { PATH: process.env["PATH"] ?? "" },
       modelArgument: "{model}",
+      credentialVariables: [],
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
@@ -238,6 +240,7 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
         HARNESS_ON_STDIN_END: behaviour.onStdinEnd,
       },
       modelArgument: "{model}",
+      credentialVariables: [],
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),

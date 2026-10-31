@@ -643,6 +643,223 @@ describe("a plugin that registers a provider", () => {
     }
   });
 
+  it("is errored when an account kind declares an oauth, device or pairing step, which the core does not run for accounts", async () => {
+    const definition = buildProviderDefinition("vendor");
+    for (const step of ["oauth", "device", "pairing"] as const) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          {
+            ...definition,
+            kinds: [
+              { ...definition.kinds[0], setup: [...definition.kinds[0].setup, { kind: step }] },
+            ],
+          },
+        ]),
+      );
+
+      expect(message, step).toContain("the account kind api-key of the provider vendor/vendor");
+      expect(message, step).toContain(`declares the setup step ${step}`);
+    }
+  });
+
+  it("is errored when a key kind declares no key check, because a key that cannot be checked is never stored", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const { id, title, description, setup, harnesses } = definition.kinds[0];
+    const withoutKeyCheck = { id, title, description, setup, harnesses };
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [{ ...definition, kinds: [withoutKeyCheck] }]),
+    );
+
+    expect(message).toContain("the account kind api-key of the provider vendor/vendor");
+    expect(message).toContain("declares no keyCheck");
+  });
+
+  it("is errored when a key check is not a fixed https URL", async () => {
+    const definition = buildProviderDefinition("vendor");
+    for (const url of [
+      "http://api.example.com/v1/models",
+      "ftp://api.example.com/v1/models",
+      "api.example.com/v1/models",
+      "https://api.example.com/{apiKey}/models",
+      "https://{apiKey}.example.com/models",
+    ]) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          {
+            ...definition,
+            kinds: [{ ...definition.kinds[0], keyCheck: { url, headers: {} } }],
+          },
+        ]),
+      );
+
+      expect(message, url).toContain(`its keyCheck url ${url} is not a fixed https:// URL`);
+    }
+  });
+
+  it("is errored when a key check header holds a placeholder other than {apiKey}", async () => {
+    const definition = buildProviderDefinition("vendor");
+    for (const value of ["{token}", "Bearer {apiKey} {orgId}", "{{apiKey}}", "Bearer {apiKey"]) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          {
+            ...definition,
+            kinds: [
+              {
+                ...definition.kinds[0],
+                keyCheck: {
+                  url: "https://api.example.com/v1/models",
+                  headers: { authorization: value },
+                },
+              },
+            ],
+          },
+        ]),
+      );
+
+      expect(message, value).toContain("its keyCheck header authorization holds a placeholder");
+    }
+  });
+
+  it("is errored when a key check sends no key, because a public endpoint would accept every key", async () => {
+    const definition = buildProviderDefinition("vendor");
+    for (const headers of [{}, { accept: "application/json" }]) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          {
+            ...definition,
+            kinds: [
+              {
+                ...definition.kinds[0],
+                keyCheck: { url: "https://api.example.com/v1/models", headers },
+              },
+            ],
+          },
+        ]),
+      );
+
+      expect(message).toContain("the account kind api-key of the provider vendor/vendor");
+      expect(message).toContain("its keyCheck sends no key");
+      expect(message).toContain("{apiKey}");
+    }
+  });
+
+  it("is errored when an account kind declares two credential sources", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const credentials = {
+      kind: "credentials",
+      fields: [{ name: "apiKey", label: "API key" }],
+    } as const;
+    const cases = [
+      {
+        setup: [credentials, { kind: "harness-login", method: "create-token" }],
+        expected: "both a credentials step and a harness-login step with the method create-token",
+      },
+      { setup: [credentials, credentials], expected: "more than one credentials step" },
+      {
+        setup: [
+          { kind: "harness-login", method: "create-token" },
+          { kind: "harness-login", method: "sign-in" },
+        ],
+        expected: "more than one harness-login step",
+      },
+    ] as const;
+
+    for (const { setup, expected } of cases) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          { ...definition, kinds: [{ ...definition.kinds[0], setup: [...setup] }] },
+        ]),
+      );
+
+      expect(message, expected).toContain("the account kind api-key of the provider vendor/vendor");
+      expect(message, expected).toContain(expected);
+    }
+  });
+
+  it("accepts a key kind that has a checklist beside its credentials step", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const live = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          providerPlugin("vendor", [
+            {
+              ...definition,
+              kinds: [
+                {
+                  ...definition.kinds[0],
+                  setup: [
+                    { kind: "checklist", markdown: "Get a key." },
+                    ...definition.kinds[0].setup,
+                  ],
+                },
+              ],
+            },
+          ]),
+        ]);
+        return yield* host.providers();
+      }),
+    );
+
+    expect(live.map((provider) => provider.id)).toEqual(["vendor/vendor"]);
+  });
+
+  it("accepts a key check that sends the key in several headers", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const live = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          providerPlugin("vendor", [
+            {
+              ...definition,
+              kinds: [
+                {
+                  ...definition.kinds[0],
+                  keyCheck: {
+                    url: "https://api.example.com/v1/models",
+                    headers: { "x-api-key": "{apiKey}", authorization: "Bearer {apiKey}" },
+                  },
+                },
+              ],
+            },
+          ]),
+        ]);
+        return yield* host.providers();
+      }),
+    );
+
+    expect(live.map((provider) => provider.id)).toEqual(["vendor/vendor"]);
+  });
+
+  it("is errored when its default harness is listed by none of its account kinds", async () => {
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        { ...buildProviderDefinition("vendor"), defaultHarnessId: "beta/beta" },
+      ]),
+    );
+
+    expect(message).toContain("the provider vendor/vendor has the default harness beta/beta");
+  });
+
+  it("is errored when an account kind does not list its default harness, though another kind does", async () => {
+    const definition = buildProviderDefinition("vendor", ["alpha/alpha"]);
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [
+            definition.kinds[0],
+            { ...definition.kinds[0], id: "other-key", harnesses: ["beta/beta"] },
+          ],
+        },
+      ]),
+    );
+
+    expect(message).toContain("the provider vendor/vendor has the default harness alpha/alpha");
+    expect(message).toContain("other-key");
+  });
+
   it("is errored when an account kind has a setup step the core cannot draw", async () => {
     const definition = buildProviderDefinition("vendor");
     const message = await bootAndReadError(

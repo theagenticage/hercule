@@ -45,12 +45,15 @@ describe("Sign Out", () => {
 
     await chooseMenuItem(app, "Hercule", "Sign Out");
 
-    // The sign-in screen shows once the controller has answered the logout.
-    // Its password field marks it: the new-thread screen has a "Sign in"
-    // button too when its draft cannot start, and it is on screen before.
+    // The sign-in screen shows at once: Sign Out never waits on the controller
+    // (spec 17), so the revoke is still on its way. Its password field marks
+    // the screen: the new-thread screen has a "Sign in" button too when its
+    // draft cannot start, and it is on screen before.
     await page.getByLabel("Password", { exact: true }).waitFor();
     await expect.poll(() => readSettings(userDataDir)).not.toHaveProperty("token");
-    expect(await readControllerWithToken(controller.url, token)).toBe(401);
+    // The controller revokes the token when the logout request arrives, which
+    // can be after the screen changes.
+    await expect.poll(() => readControllerWithToken(controller.url, token)).toBe(401);
     await expect.poll(() => isSignOutEnabled(app)).toBe(false);
   });
 });

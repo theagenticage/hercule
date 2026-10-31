@@ -1041,6 +1041,7 @@ const buildClaudeCode = (signedIn: boolean): ProviderAccount => ({
   identity: null,
   planLabel: null,
   defaultHarnessId: "claude-code/claude-code",
+  expiresAt: null,
   snapshots: signedIn
     ? [
         {

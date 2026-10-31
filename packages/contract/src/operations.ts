@@ -491,6 +491,11 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/provider-accounts/:id",
   },
+  "providerAccount.create": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/provider-accounts",
+  },
   "providerAccount.update": {
     requires: "infra.write",
     method: "PATCH",

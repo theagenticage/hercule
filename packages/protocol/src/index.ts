@@ -155,8 +155,14 @@ export {
  *   probe report, the login code, the session spec and the
  *   session binding carry `providerAccountId`. An older peer cannot decode any
  *   of them, so the two refuse each other at hello.
+ * - Version 16 reshaped the `HarnessAccount`: it lists every
+ *   `credentialVariables` the harness reads, and its `credential` has a value
+ *   or is absent. It also added the `method` of `loginStart` and the optional
+ *   `token` of a successful `loginResult`. An older runner would leave the
+ *   ambient key of its own environment in place and could not make a token, so
+ *   the two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -532,15 +538,29 @@ export const MAX_AUTHORIZE_URL_LENGTH = 2048;
 const AuthorizeUrl = Schema.String.check(Schema.isBetweenLength(1, MAX_AUTHORIZE_URL_LENGTH));
 
 /**
+ * What a login produces:
+ *
+ * - `sign-in`: the vendor's own login, which leaves its credential in the
+ *   account's Harness Home on the runner.
+ * - `create-token`: the vendor's command that mints a long-lived token. The
+ *   runner returns the token in the success `LoginResult`, and the controller
+ *   stores it as the account's credential. Nothing is left in the Harness Home.
+ */
+export const LoginMethod = Schema.Literals(["sign-in", "create-token"]);
+
+export type LoginMethod = Schema.Schema.Type<typeof LoginMethod>;
+
+/**
  * Asks the runner to start the vendor's own login for one Provider Account in
- * one harness. The credential lands in the account's Harness Home, which is
- * why the request carries the account.
+ * one harness. A `sign-in` credential lands in the account's Harness Home,
+ * which is why the request carries the account.
  */
 export const LoginStart = Schema.Struct({
   _tag: Schema.Literal("loginStart"),
   requestId: RequestId,
   harnessId: Fact,
   harnessAccount: HarnessAccount,
+  method: LoginMethod,
 });
 
 export type LoginStart = Schema.Schema.Type<typeof LoginStart>;
@@ -624,12 +644,19 @@ export type LoginFailed = Schema.Schema.Type<typeof LoginFailed>;
 /**
  * The result of a pasted code. `ok: false` means the vendor rejected the code,
  * and the login still accepts another one.
+ *
+ * `token` is the secret a `create-token` login produced. It is present only on
+ * a success of that method; the receiver refuses it on any other result. Like
+ * a `HarnessCredential` value it is never logged.
  */
 export const LoginResult = Schema.Struct({
   _tag: Schema.Literal("loginResult"),
   requestId: RequestId,
   ok: Schema.Boolean,
   message: Schema.optionalKey(Fact),
+  token: Schema.optionalKey(
+    Schema.String.check(Schema.isBetweenLength(1, MAX_SECRET_VALUE_LENGTH)),
+  ),
 });
 
 export type LoginResult = Schema.Schema.Type<typeof LoginResult>;

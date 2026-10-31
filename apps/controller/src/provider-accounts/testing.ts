@@ -9,7 +9,11 @@
  * - functions that insert the rows other domains own (agents, sessions,
  *   settings), which the delete check reads.
  */
-import { Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Redacted } from "effect";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { ProbeResult } from "@hercule/protocol";
@@ -23,8 +27,11 @@ import {
   createPluginFixture,
 } from "../plugins/testing";
 import { RunnerConnections, RunnerConnectionsLayer, runnerRepository } from "../runners";
+import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { SettingsLayer } from "../settings";
 import { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
+import { ProviderAccountRunners, ProviderAccountRunnersLayer } from "./account-runners";
+import { ProviderKeyCheckLayer } from "./key-check";
 import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 import { ProviderAccountService, ProviderAccountServiceLayer } from "./service";
@@ -39,6 +46,9 @@ export const KEY_KIND = "api-key";
 /** The account kind of Acme that is signed in on each machine. */
 export const MACHINE_KIND = "subscription";
 
+/** The account kind of Acme whose runner makes a token the controller keeps. */
+export const TOKEN_KIND = "subscription-token";
+
 const ACME: ProviderDefinition = {
   id: "acme",
   displayName: "Acme",
@@ -48,16 +58,28 @@ const ACME: ProviderDefinition = {
       title: "API key",
       description: "A key for Acme.",
       setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: {
+        url: "https://api.acme.test/v1/models",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
       harnesses: [ALPHA_HARNESS_ID, BETA_HARNESS_ID],
     },
     {
       id: MACHINE_KIND,
       title: "Subscription",
       description: "A plan signed in on each machine.",
-      setup: [{ kind: "harness-login" }],
+      setup: [{ kind: "harness-login", method: "sign-in" }],
+      harnesses: [ALPHA_HARNESS_ID],
+    },
+    {
+      id: TOKEN_KIND,
+      title: "Subscription token",
+      description: "A token that works on every machine.",
+      setup: [{ kind: "harness-login", method: "create-token" }],
       harnesses: [ALPHA_HARNESS_ID],
     },
   ],
+  defaultHarnessId: ALPHA_HARNESS_ID,
 };
 
 /** The plugins the tests boot: Acme, and the two harnesses that may run it. */
@@ -74,7 +96,11 @@ export const buildAccountPlugins = (): ReadonlyArray<Plugin> => [
       buildHarnessDefinition("alpha", [
         {
           providerId: ACME_PROVIDER_ID,
-          kinds: [{ kind: KEY_KIND, credentialVariable: "ACME_API_KEY" }, { kind: MACHINE_KIND }],
+          kinds: [
+            { kind: KEY_KIND, credentialVariable: "ACME_API_KEY" },
+            { kind: MACHINE_KIND },
+            { kind: TOKEN_KIND, credentialVariable: "ACME_API_KEY" },
+          ],
           modelArgument: "acme/{model}",
           models: "own-list",
         },
@@ -84,9 +110,53 @@ export const buildAccountPlugins = (): ReadonlyArray<Plugin> => [
   createPluginFixture({ id: "beta", definitions: [buildHarnessDefinition("beta", [])] }).plugin,
 ];
 
-const buildStack = () =>
+/** What the fake provider API does with a request: answer it, fail to connect, or never answer. */
+export type FakeProviderAnswer = Response | "unreachable" | "silent";
+
+/** One request the fake provider API received. */
+export interface FakeProviderRequest {
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  /** The `redirect` mode the request was sent with; `manual` means a redirect is not followed. */
+  readonly redirect: string | undefined;
+}
+
+/**
+ * A fake provider API for the key check: an `HttpClient` that answers each
+ * request as `answer` says (a 200 with an empty JSON body by default) and
+ * records the requests it received.
+ */
+export const buildFakeProviderApi = (
+  answer: (request: FakeProviderRequest) => FakeProviderAnswer = () => new Response("{}"),
+) => {
+  const requests: Array<FakeProviderRequest> = [];
+  const client = HttpClient.make((request, _url, _signal, fiber) => {
+    const received: FakeProviderRequest = {
+      url: request.url,
+      headers: { ...request.headers },
+      redirect: Context.getOrUndefined(fiber.context, FetchHttpClient.RequestInit)?.redirect,
+    };
+    requests.push(received);
+    const outcome = answer(received);
+    if (outcome === "silent") return Effect.never;
+    if (outcome === "unreachable") {
+      return Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request, cause: "connection refused" }),
+        }),
+      );
+    }
+    return Effect.succeed(HttpClientResponse.fromWeb(request, outcome));
+  });
+  return { client, requests };
+};
+
+const buildStack = (providerApi: HttpClient.HttpClient) =>
   ProviderAccountServiceLayer.pipe(
+    Layer.provideMerge(ProviderKeyCheckLayer),
+    Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
     Layer.provideMerge(ProviderAccountProbesLayer),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(HarnessAccountsLayer),
     Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(RunnerConnectionsLayer),
@@ -97,6 +167,7 @@ const buildStack = () =>
 export type AccountServices =
   | ProviderAccountService
   | ProviderAccountProbes
+  | ProviderAccountRunners
   | HarnessAccounts
   | RunnerConnections
   | PluginHost
@@ -105,14 +176,18 @@ export type AccountServices =
 
 /**
  * Runs an effect as the user on a fresh database, after the fixture plugins
- * have been booted.
+ * have been booted. Key checks go to `providerApi`, which accepts every key
+ * unless the test gives its own.
  */
-export const runWithAccounts = <A, E>(body: Effect.Effect<A, E, AccountServices>): Promise<A> =>
+export const runWithAccounts = <A, E>(
+  body: Effect.Effect<A, E, AccountServices>,
+  providerApi: HttpClient.HttpClient = buildFakeProviderApi().client,
+): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
       yield* Effect.flatMap(PluginHost, (host) => host.boot(buildAccountPlugins()));
       return yield* body;
-    }).pipe(Effect.provide(buildStack()), asUser) as Effect.Effect<A, E, never>,
+    }).pipe(Effect.provide(buildStack(providerApi)), asUser) as Effect.Effect<A, E, never>,
   );
 
 /** Inserts an account of Acme and returns its row. */
@@ -136,6 +211,39 @@ export const addAccount = (
         defaultHarnessId: account.defaultHarnessId ?? ALPHA_HARNESS_ID,
         at: yield* nowIso,
       }),
+    );
+  });
+
+/**
+ * Stores the account's credential under the Secret name its kind uses:
+ * `apiKey` for a key kind, `token` for a token kind. Needs `Secrets`, which
+ * `runWithAccounts` provides.
+ */
+export const storeCredential = (
+  accountId: string,
+  name: "apiKey" | "token",
+  value = "a-secret",
+): Effect.Effect<void, unknown, SqlClient.SqlClient | Secrets> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const secrets = yield* Secrets;
+    yield* withTransaction(
+      sql,
+      secrets.set(buildProviderAccountOwner(accountId), name, Redacted.make(value)),
+    );
+  });
+
+/** Sets the time at which the account's token expires. */
+export const setTokenExpiry = (
+  accountId: string,
+  expiresAt: string,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    yield* withTransaction(
+      sql,
+      accounts.setCredentialExpiry(accountId, expiresAt, "2026-10-31T00:00:00.000Z"),
     );
   });
 

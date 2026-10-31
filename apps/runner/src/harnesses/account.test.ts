@@ -33,29 +33,48 @@ describe("the model argument", () => {
 });
 
 describe("the credential in the environment", () => {
+  const credentialVariables = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+
   it("sets the variable the account names, over the same variable of the runner", () => {
     const env = applyCredential(
-      { PATH: "/bin", ZAI_API_KEY: "the-runners-own" },
-      { variable: "ZAI_API_KEY", value: "the-accounts" },
+      { PATH: "/bin", ANTHROPIC_API_KEY: "the-runners-own" },
+      {
+        credentialVariables,
+        credential: { variable: "ANTHROPIC_API_KEY", value: "the-accounts" },
+      },
     );
-    expect(env).toEqual({ PATH: "/bin", ZAI_API_KEY: "the-accounts" });
+    expect(env).toEqual({ PATH: "/bin", ANTHROPIC_API_KEY: "the-accounts" });
   });
 
-  it("removes the variable for an account that has none, so the runner's own key never stands in", () => {
+  it("removes every credential variable of the harness, so none of the runner's own stands in", () => {
     const env = applyCredential(
-      { PATH: "/bin", ZAI_API_KEY: "the-runners-own" },
-      { variable: "ZAI_API_KEY" },
+      {
+        PATH: "/bin",
+        ANTHROPIC_API_KEY: "the-runners-own",
+        CLAUDE_CODE_OAUTH_TOKEN: "the-runners-token",
+      },
+      { credentialVariables },
     );
     expect(env).toEqual({ PATH: "/bin" });
-    expect("ZAI_API_KEY" in env).toBe(false);
   });
 
-  it("changes nothing for an account without a credential, and never the given object", () => {
-    const original = { PATH: "/bin" };
-    const env = applyCredential(original, undefined);
-    expect(env).toEqual({ PATH: "/bin" });
+  it("removes the variables the credential does not use when it sets the one it does", () => {
+    const env = applyCredential(
+      { ANTHROPIC_API_KEY: "the-runners-own", CLAUDE_CODE_OAUTH_TOKEN: "the-runners-token" },
+      {
+        credentialVariables,
+        credential: { variable: "CLAUDE_CODE_OAUTH_TOKEN", value: "the-accounts-token" },
+      },
+    );
+    expect(env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "the-accounts-token" });
+  });
+
+  it("leaves the environment as it is when the harness has no credential variables, and never changes the given object", () => {
+    const original = { PATH: "/bin", ANTHROPIC_API_KEY: "kept" };
+    const env = applyCredential(original, { credentialVariables: [] });
+    expect(env).toEqual(original);
     expect(env).not.toBe(original);
-    applyCredential(original, { variable: "KEY", value: "v" });
-    expect(original).toEqual({ PATH: "/bin" });
+    applyCredential(original, { credentialVariables });
+    expect(original).toEqual({ PATH: "/bin", ANTHROPIC_API_KEY: "kept" });
   });
 });

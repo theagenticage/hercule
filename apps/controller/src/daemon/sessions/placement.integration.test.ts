@@ -104,10 +104,11 @@ const buildPlugins = (): ReadonlyArray<Plugin> => [
             id: "subscription",
             title: "Subscription",
             description: "A plan signed in on each machine.",
-            setup: [{ kind: "harness-login" }],
+            setup: [{ kind: "harness-login", method: "sign-in" }],
             harnesses: ["multi/delta", "multi/epsilon"],
           },
         ],
+        defaultHarnessId: "multi/delta",
       },
     ],
   }).plugin,
@@ -827,8 +828,19 @@ describe("the harness a session is placed in", () => {
 
   it("refuses a harness the account is not signed in to on any runner, as it refuses an account that is not signed in", async () => {
     await withMulti(async (arranged, { epsilonAccount }) => {
-      // Only a probe in the harness shows a runner signed in to it, and the
-      // controller probes an account in its default harness alone.
+      // A probe in the harness shows a runner signed out of it, as when the
+      // user signed out of that harness on the machine.
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
+              UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+              WHERE provider_account_id = ${uuidFromString(epsilonAccount)}
+                AND harness_id = ${DELTA_ID}`,
+          ),
+        ),
+      );
       const response = await spawnSession(arranged, {
         prompt: "hello",
         providerAccountId: epsilonAccount,

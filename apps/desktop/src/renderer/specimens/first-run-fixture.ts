@@ -43,6 +43,7 @@ import type {
   SetupTokenReadOutcome,
 } from "../../ipc/contract";
 import type { FirstRunStateName } from "./first-run-states";
+import { PROVIDERS_SIDEBAR_RECORDS } from "./settings-providers-fixture";
 
 /** What main and the controller answer in one state, and how the page gets there. */
 export interface FirstRunScene {
@@ -123,7 +124,7 @@ const PI_ID = "01a06d02-1000-7000-8000-000000000003";
 const buildAccount = (identity: ProviderAccountIdentity, signedIn: boolean): ProviderAccount =>
   buildProviderAccount(identity, [buildSnapshot(identity.harnessId, signedIn)]);
 
-/** Returns the three accounts setup creates, with the ones in `signedIn` signed in. */
+/** Returns three accounts the user has added, with the ones in `signedIn` signed in. */
 const buildProviderAccounts = (signedIn: readonly string[] = []): ProviderAccount[] => [
   buildAccount({ ...ANTHROPIC_IDENTITY, id: CLAUDE_ID }, signedIn.includes(CLAUDE_ID)),
   buildAccount({ ...OPENAI_IDENTITY, id: CODEX_ID }, signedIn.includes(CODEX_ID)),
@@ -216,6 +217,8 @@ const buildSignedInHandlers = (records: ControllerRecords): Record<string, Handl
   "GET /api/v1/provider-accounts": () => ({ body: records.accounts }),
   "GET /api/v1/providers": { body: PROVIDERS },
   "GET /api/v1/harnesses": { body: HARNESSES },
+  // The add-account sheet reads the plugins for the providers' marks, as it opens.
+  "GET /api/v1/plugins": { body: PROVIDERS_SIDEBAR_RECORDS.plugins ?? [] },
   "GET /api/v1/connections": () => ({ body: { items: records.connections } }),
   "GET /api/v1/projects": () => ({ body: { items: records.projects } }),
   "GET /api/v1/resources": () => ({ body: { items: records.resources } }),
@@ -548,6 +551,15 @@ export const FIRST_RUN_SCENES: { readonly [Name in FirstRunStateName]: () => Fir
     }),
 
   "providers-waiting": () => buildSignedInScene({ records: buildRecords({ localRunner: null }) }),
+  "providers-empty": () => buildSignedInScene({ records: buildRecords({ accounts: [] }) }),
+  "providers-add": () =>
+    buildSignedInScene({ records: buildRecords({ accounts: [] }) }, async () => {
+      await clickButton("Add an account");
+      await waitFor(
+        () => document.querySelector('dialog[open][aria-label="Add an account"]'),
+        "the add-account sheet",
+      );
+    }),
   "providers-idle": () => buildSignedInScene({}),
   "providers-claude-paste": () => {
     const records = buildRecords();

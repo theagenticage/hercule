@@ -4,7 +4,7 @@
  * connection.
  */
 import { mkdirSync, rmSync } from "node:fs";
-import { networkInterfaces } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -21,7 +21,7 @@ import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
 import { openFileClock } from "./edit-marks";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
-import { harnessLogins } from "./harnesses";
+import { harnessLogins, removeStaleSetupTokenFolders } from "./harnesses";
 import { sessions } from "./sessions";
 import { makeSessionSkillsFolders } from "./skills";
 import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
@@ -232,6 +232,9 @@ export const runDaemon = (
       rmSync(attachmentsDir, { recursive: true, force: true });
       rmSync(editMarksDir, { recursive: true, force: true });
       rmSync(sessionSkillsDir, { recursive: true, force: true });
+      // A token login keeps its scratch folder in the machine's temp directory,
+      // where a runner killed in the middle of one leaves it.
+      removeStaleSetupTokenFolders(tmpdir(), Date.now());
       const sessionSkillsFolders = makeSessionSkillsFolders({
         sessionSkillsDir,
         credential: pin.credential,

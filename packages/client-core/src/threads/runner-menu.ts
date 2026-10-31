@@ -4,7 +4,12 @@
  * account in the thread's harness; the sign-in state of other accounts does
  * not matter here.
  */
-import type { CapabilitySnapshot, ProviderAccount, Runner } from "@hercule/contract";
+import type { ProviderAccount, Runner } from "@hercule/contract";
+import {
+  decideAccountReadiness,
+  type AccountCatalogs,
+  type AccountReadiness,
+} from "./account-readiness";
 import { findSnapshotOn } from "./catalog";
 
 export interface RunnerMenuRow {
@@ -31,41 +36,53 @@ const readRunnerState = (runner: Runner): RunnerMenuRow["state"] =>
 const isRetired = (runner: Runner): boolean => runner.lifecycle === "retired";
 
 /**
- * Returns why `runner` cannot host a thread of the account whose snapshot on
- * it is `snapshot` right now, or `null` when it can: "retired", its
- * connectivity when it is not online, "draining", or "not signed in".
+ * Returns why `runner` cannot host a thread of an account that is `readiness`
+ * on it right now, or `null` when it can: "retired", its connectivity when it
+ * is not online, "draining", "not signed in", or "not installed" when the
+ * account works everywhere but the harness is not on the runner, or "harness
+ * too old" when it is older than this build supports.
  */
-export const findDimmedReason = (
-  runner: Runner,
-  snapshot: CapabilitySnapshot | undefined,
-): string | null =>
+export const findDimmedReason = (runner: Runner, readiness: AccountReadiness): string | null =>
   isRetired(runner)
     ? "retired"
     : runner.connectivity !== "online"
       ? runner.connectivity
       : runner.lifecycle === "draining"
         ? "draining"
-        : snapshot?.auth.status !== "ok"
+        : readiness === "not-signed-in"
           ? "not signed in"
-          : null;
+          : readiness === "token-missing"
+            ? "no token"
+            : readiness === "token-expired"
+              ? "token expired"
+              : readiness === "harness-too-old"
+                ? "harness too old"
+                : readiness === "harness-missing"
+                  ? "not installed"
+                  : null;
 
 /**
  * Returns one row per runner that is not retired, and the default runner: the
  * runner on this Mac when it is usable, else the first usable runner, else `null`.
  * A row is dimmed, with the reason, when its runner is not online, is
- * draining, or the account is not signed in on it in `harnessId`.
+ * draining, or the account cannot run in `harnessId` on it
+ * (`decideAccountReadiness`).
  */
 export const buildRunnerMenu = (
   runners: readonly Runner[],
   localId: string | null,
   account: ProviderAccount,
   harnessId: string,
+  catalogs: AccountCatalogs,
 ): RunnerMenu => {
   const rows = runners
     .filter((runner) => !isRetired(runner))
     .map((runner) => {
       const snapshot = findSnapshotOn(account, harnessId, runner.id);
-      const dimmed = findDimmedReason(runner, snapshot);
+      const dimmed = findDimmedReason(
+        runner,
+        decideAccountReadiness(catalogs, account, harnessId, runner),
+      );
       return {
         runnerId: runner.id,
         name: runner.name,

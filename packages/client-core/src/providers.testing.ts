@@ -54,6 +54,20 @@ export const WITH_CLAUDE: Runner = {
   },
 };
 
+/** A runner with Claude Code and Codex installed, and a build that can drive both. */
+export const WITH_AGENTS: Runner = {
+  ...BARE,
+  facts: {
+    ...BARE.facts!,
+    harnesses: [
+      { name: "claude", present: true, path: "/usr/local/bin/claude" },
+      { name: "codex", present: true, path: "/usr/local/bin/codex" },
+      { name: "pi", present: false },
+    ],
+    adapters: ["claude-code/claude-code", "codex/codex"],
+  },
+};
+
 const DECLARED: Harness["declared"] = {
   steering: "native",
   fork: "native",
@@ -75,12 +89,13 @@ export const PROVIDERS: readonly Provider[] = [
     id: "anthropic/anthropic",
     pluginId: "anthropic",
     displayName: "Anthropic",
+    defaultHarnessId: "claude-code/claude-code",
     kinds: [
       {
         id: "subscription-per-machine",
         title: "Claude subscription",
         description: "Sign in with a Claude subscription on each machine.",
-        setup: [{ kind: "harness-login" }],
+        setup: [{ kind: "harness-login", method: "sign-in" }],
         harnesses: ["claude-code/claude-code"],
       },
     ],
@@ -89,12 +104,13 @@ export const PROVIDERS: readonly Provider[] = [
     id: "openai/openai",
     pluginId: "openai",
     displayName: "OpenAI",
+    defaultHarnessId: "codex/codex",
     kinds: [
       {
         id: "subscription-per-machine",
         title: "ChatGPT subscription",
         description: "Sign in with a ChatGPT subscription on each machine.",
-        setup: [{ kind: "harness-login" }],
+        setup: [{ kind: "harness-login", method: "sign-in" }],
         harnesses: ["codex/codex"],
       },
     ],
@@ -103,6 +119,7 @@ export const PROVIDERS: readonly Provider[] = [
     id: "zai/zai",
     pluginId: "zai",
     displayName: "Z.ai",
+    defaultHarnessId: "pi/pi",
     kinds: [
       {
         id: "api-key",
@@ -207,6 +224,7 @@ export const buildProviderAccount = (
   identity: null,
   planLabel: null,
   defaultHarnessId: identity.harnessId,
+  expiresAt: null,
   snapshots: snapshots.map((snapshot) => ({
     ...snapshot,
     harnessId: snapshot.harnessId ?? identity.harnessId,

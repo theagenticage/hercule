@@ -1523,7 +1523,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     // An extra variable given as undefined is removed, even when the
     // runner's own environment sets it.
     for (const [name, value] of Object.entries(extra)) if (value === undefined) delete env[name];
-    return applyCredential(env, ctx.credential);
+    return applyCredential(env, ctx);
   };
 
   /**

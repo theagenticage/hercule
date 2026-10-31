@@ -5,5 +5,6 @@
  * and the `harness.query` listing.
  */
 export { listUnenforcedFields } from "./enforcement";
+export { buildVersionKey, harnessRepository } from "./repository";
 export { HarnessService, HarnessServiceLayer } from "./service";
 export { computeVersionVerdict, findVersionFloor } from "./version";

@@ -3,29 +3,38 @@
  * subscription or a Z.ai key, and what each runner learned about it in each
  * harness it may run in.
  *
- * This is the one domain that still sends frames to runners itself - to sign
- * an account in, probe a runner, or install a harness - instead of leaving
- * that to the controller daemon. It creates no dependency cycle, so it was
- * left as it is; moving it under the same rule is issue #209, which ticket
- * #934 absorbs.
+ * This domain holds the rows, the snapshots and the policy. Sending anything
+ * to a runner - signing an account in, probing it, installing a harness - is
+ * done by the controller daemon, which calls the finite operations here to
+ * check a request and to record its outcome.
  */
-export { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
-export { isSignedIn, NO_PLACEMENT, resolveProviderAccountHarness } from "./harness-choice";
 export {
-  ProviderAccountProbeDeadline,
-  ProviderAccountProbeInterval,
+  buildRunnerRefusal,
+  findModels,
+  ProviderAccountRunners,
+  ProviderAccountRunnersLayer,
+  type AccountHarnessPair,
+  type AccountRunners,
+} from "./account-runners";
+export { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
+export { resolveProviderAccountHarness } from "./harness-choice";
+export { ProviderKeyCheck, ProviderKeyCheckLayer, ProviderKeyCheckTimeout } from "./key-check";
+export {
   ProviderAccountProbes,
   ProviderAccountProbesLayer,
+  type ProbeOutcome,
+  type ProbePair,
 } from "./probes";
 export {
   providerAccountRepository,
   type StoredProviderAccount,
   type StoredSnapshot,
 } from "./repository";
-export { seedProviderAccounts } from "./seed";
+export { describeProviderAccount } from "./runnability";
 export {
-  describeProviderAccount,
   ProviderAccountService,
   ProviderAccountServiceLayer,
-  ProviderAccountSignInDeadline,
+  type CreateInput,
+  type SignInPreparation,
+  type UpdateInput,
 } from "./service";

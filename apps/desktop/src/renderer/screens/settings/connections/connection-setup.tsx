@@ -18,7 +18,14 @@ import { ExternalIcon } from "../../../icons/external";
 import { KeyIcon } from "../../../icons/key";
 import { QuestionIcon } from "../../../icons/question";
 import { GlassDialog } from "../../glass-dialog";
-import { DeviceCodeSteps, FormField, MarkedRow, MarkedRows, WaitLine, Warning } from "../../step";
+import {
+  CredentialFields,
+  DeviceCodeSteps,
+  MarkedRow,
+  MarkedRows,
+  WaitLine,
+  Warning,
+} from "../../step";
 import { ConnectionTypeMark } from "./connection-type-mark";
 import "./connection-setup.css";
 
@@ -311,28 +318,13 @@ function SetupForm({
         ) : null,
       )}
       {state.flow === "credentials" ? (
-        <div className="setup-fields">
-          {listCredentialFields(type).map((field, index) => (
-            <FormField
-              key={field.name}
-              label={field.label}
-              hint={field.help}
-              error={state.fieldErrors[field.name] ?? null}
-            >
-              <input
-                // A pasted credential is never read back, so it is never prefilled.
-                type="password"
-                className="mono"
-                value={values[field.name] ?? ""}
-                onChange={(event) => actions.onFieldChange(field.name, event.target.value)}
-                spellCheck={false}
-                autoComplete="off"
-                autoFocus={index === 0}
-                readOnly={state.busy}
-              />
-            </FormField>
-          ))}
-        </div>
+        <CredentialFields
+          fields={listCredentialFields(type)}
+          values={values}
+          errors={state.fieldErrors}
+          readOnly={state.busy}
+          onChange={(name, value) => actions.onFieldChange(name, value)}
+        />
       ) : state.flow === "oauth" && redirectUri !== undefined ? (
         <>
           <p className="setup-lead">Register this redirect URI with {type.displayName}:</p>

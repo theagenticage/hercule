@@ -27,8 +27,20 @@ const captureHarnessDefinition = (): HarnessDefinition => {
 };
 
 describe("the pi harness", () => {
-  it("runs Z.ai API keys from ZAI_API_KEY, under the model argument zai/{model}, with its own model list", () => {
+  it("runs the API keys of Anthropic, OpenAI and Z.ai, each under its provider's model argument, with its own model list", () => {
     expect(captureHarnessDefinition().runs).toEqual([
+      {
+        providerId: "anthropic/anthropic",
+        kinds: [{ kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" }],
+        modelArgument: "anthropic/{model}",
+        models: "own-list",
+      },
+      {
+        providerId: "openai/openai",
+        kinds: [{ kind: "api-key", credentialVariable: "OPENAI_API_KEY" }],
+        modelArgument: "openai/{model}",
+        models: "own-list",
+      },
       {
         providerId: "zai/zai",
         kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],

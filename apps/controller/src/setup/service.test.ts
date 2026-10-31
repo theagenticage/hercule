@@ -6,9 +6,15 @@ import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { buildHomePaths } from "@hercule/home";
 import type { Assistant, Conversation } from "@hercule/contract";
+import type { Plugin } from "@hercule/plugin-host";
 import { AssistantService } from "../assistants";
 import { withTransaction } from "../db";
 import { HerculeHome } from "../config";
+import {
+  buildHarnessDefinition,
+  buildProviderDefinition,
+  createPluginFixture,
+} from "../plugins/testing";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
@@ -47,7 +53,7 @@ afterEach(() => {
  * accounts of a booted controller, so the tests over HTTP below cover it.
  */
 const AssistantStub = Layer.mock(AssistantService)({
-  create: () => Effect.succeed({} as Assistant),
+  createDefaultIfNone: () => Effect.void,
 });
 
 type Deps = Setup | Users | Credentials | Settings | AuditLog | SqlClient.SqlClient;
@@ -272,6 +278,12 @@ const countRows = (harness: ServerHarness, table: string): Promise<number> =>
     ),
   );
 
+/** Deletes the account the test controller opens, to stand for a fresh install with none. */
+const deleteAllProviderAccounts = (harness: ServerHarness): Promise<void> =>
+  Effect.runPromise(
+    Effect.orDie(withTransaction(harness.sql, harness.sql`DELETE FROM provider_accounts`)),
+  ).then(() => undefined);
+
 describe("the default assistant", () => {
   it("is created by setup as Hercule, with the defaults of a name-only create, and its web conversation", async () => {
     await withProviders(async (harness) => {
@@ -351,25 +363,221 @@ describe("the default assistant", () => {
     });
   });
 
-  it("fails setup with invalid_state when there is no provider account, and writes nothing", async () => {
+  it("is not created when there is no provider account, and setup still completes", async () => {
     await withProviders(async (harness) => {
-      // The test controller opens one account, so the test deletes it to
-      // stand for an install with none.
-      await Effect.runPromise(
-        Effect.orDie(withTransaction(harness.sql, harness.sql`DELETE FROM provider_accounts`)),
+      await deleteAllProviderAccounts(harness);
+
+      const token = await completeSetup(harness.base);
+
+      expect(await listAssistants(harness, token)).toEqual([]);
+      expect(await countRows(harness, "users")).toBe(1);
+      expect(await (await get(harness.base, "/api/v1/setup")).json()).toEqual({ complete: true });
+    });
+  });
+});
+
+/*
+ * A fresh install has no Provider Account, so setup finishes without the
+ * default assistant, and the first account that is ready makes it: an account
+ * that comes with a key is ready when it is created.
+ */
+describe("the default assistant of the first provider account", () => {
+  const KEYED_HARNESS_ID = "keyed/keyed";
+
+  /**
+   * A provider with two kinds, a key and a subscription that signs in, both
+   * run by one harness. The test provider every other test uses has only the
+   * subscription kind.
+   */
+  const keyedPlugins: ReadonlyArray<Plugin> = [
+    createPluginFixture({
+      id: "keyed",
+      capabilities: ["harnesses", "providers"],
+      definitions: [
+        buildHarnessDefinition("keyed", [
+          {
+            providerId: "keyed/keyed",
+            kinds: [
+              { kind: "api-key", credentialVariable: "KEYED_API_KEY" },
+              { kind: "signed-in" },
+            ],
+            modelArgument: "{model}",
+            models: "all",
+          },
+        ]),
+      ],
+      providers: [
+        {
+          ...buildProviderDefinition("keyed", [KEYED_HARNESS_ID]),
+          kinds: [
+            ...buildProviderDefinition("keyed", [KEYED_HARNESS_ID]).kinds,
+            {
+              id: "signed-in",
+              title: "Subscription",
+              description: "A plan signed in on each machine.",
+              setup: [{ kind: "harness-login", method: "sign-in" }],
+              harnesses: [KEYED_HARNESS_ID],
+            },
+          ],
+        },
+      ],
+    }).plugin,
+  ];
+
+  const withKeyedProvider = (body: (harness: ServerHarness) => Promise<void>): Promise<void> =>
+    withServer(body, { plugins: keyedPlugins });
+
+  /** Deletes the account the test controller opens, then completes setup, as on a fresh install. */
+  const setUpWithoutAccount = async (harness: ServerHarness): Promise<string> => {
+    await deleteAllProviderAccounts(harness);
+    return completeSetup(harness.base);
+  };
+
+  /** Creates an account of the key kind, which is ready as soon as it is created. */
+  const createAccount = (harness: ServerHarness, token: string, label?: string) =>
+    post(
+      harness.base,
+      "/api/v1/provider-accounts",
+      {
+        providerId: "keyed/keyed",
+        kind: "api-key",
+        credentials: { apiKey: "sk-test" },
+        ...(label === undefined ? {} : { label }),
+      },
+      token,
+    );
+
+  it("is not created by the create of an account that signs in, which is not ready yet", async () => {
+    await withKeyedProvider(async (harness) => {
+      const token = await setUpWithoutAccount(harness);
+
+      const created = await post(
+        harness.base,
+        "/api/v1/provider-accounts",
+        { providerId: "keyed/keyed", kind: "signed-in" },
+        token,
       );
 
-      const refused = await requestSetup(harness);
-      expect(refused.status).toBe(409);
-      const error = await readErrorBody(refused);
-      expect(error.code).toBe("invalid_state");
-      expect(error.message).toContain("this version cannot add one yet");
+      expect(created.status, await created.clone().text()).toBe(200);
+      expect(await listAssistants(harness, token)).toEqual([]);
+    });
+  });
 
-      const state = await get(harness.base, "/api/v1/setup");
-      expect(await state.json()).toEqual({ complete: false });
-      for (const table of ["users", "login_tokens", "assistants", "conversations"]) {
-        expect(await countRows(harness, table), table).toBe(0);
+  it("is created as Hercule, on that account, by the create of the first account", async () => {
+    await withKeyedProvider(async (harness) => {
+      const token = await setUpWithoutAccount(harness);
+
+      const created = await createAccount(harness, token);
+      expect(created.status, await created.clone().text()).toBe(200);
+      const account = (await created.json()) as { readonly id: string };
+
+      const assistants = await listAssistants(harness, token);
+      expect(assistants.map((assistant) => assistant.name)).toEqual(["Hercule"]);
+      expect(assistants[0]!.providerAccountId).toBe(account.id);
+      expect((await harness.audit("assistant.created")).map((entry) => entry.actor)).toEqual([
+        "user",
+      ]);
+    });
+  });
+
+  it("is not created again by a second account", async () => {
+    await withKeyedProvider(async (harness) => {
+      const token = await setUpWithoutAccount(harness);
+      expect((await createAccount(harness, token)).status).toBe(200);
+
+      const second = await createAccount(harness, token, "work");
+      expect(second.status, await second.clone().text()).toBe(200);
+
+      expect(await listAssistants(harness, token)).toHaveLength(1);
+    });
+  });
+
+  it("is not created when an assistant exists already", async () => {
+    await withKeyedProvider(async (harness) => {
+      // The test controller opens an account, so setup creates Hercule; the
+      // user deletes it, and the assistant with it, then adds a second account.
+      const token = await completeSetup(harness.base);
+      const [hercule] = await listAssistants(harness, token);
+      const other = await post(harness.base, "/api/v1/assistants", { name: "Ada" }, token);
+      expect(other.ok).toBe(true);
+      expect(
+        (await send("DELETE", harness.base, `/api/v1/assistants/${hercule!.id}`, { token })).ok,
+      ).toBe(true);
+
+      const created = await createAccount(harness, token, "work");
+      expect(created.status, await created.clone().text()).toBe(200);
+
+      expect((await listAssistants(harness, token)).map((assistant) => assistant.name)).toEqual([
+        "Ada",
+      ]);
+    });
+  });
+
+  it("is created once when two first sign-ins finish together", async () => {
+    await withKeyedProvider(async (harness) => {
+      const token = await setUpWithoutAccount(harness);
+      // Two accounts that sign in: neither is ready at creation, so no
+      // assistant exists until a sign-in finishes.
+      for (const label of ["one", "two"]) {
+        const created = await post(
+          harness.base,
+          "/api/v1/provider-accounts",
+          { providerId: "keyed/keyed", kind: "signed-in", label },
+          token,
+        );
+        expect(created.status, await created.clone().text()).toBe(200);
       }
+      expect(await listAssistants(harness, token)).toEqual([]);
+
+      // A write in progress holds the writer while both completions start, so
+      // each one reaches its check before either one has created anything.
+      const writing = harness.runWithLiveSessions(
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          withTransaction(sql, Effect.sleep("150 millis")),
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const exits = await Promise.all([
+        harness.runWithLiveSessions(
+          Effect.flatMap(AssistantService, (assistants) => assistants.createDefaultIfNone()),
+        ),
+        harness.runWithLiveSessions(
+          Effect.flatMap(AssistantService, (assistants) => assistants.createDefaultIfNone()),
+        ),
+      ]);
+
+      await writing;
+      expect(exits.map((exit) => exit._tag)).toEqual(["Success", "Success"]);
+      expect(await listAssistants(harness, token)).toHaveLength(1);
+    });
+  });
+
+  it("rolls the account back when the assistant cannot be written", async () => {
+    await withKeyedProvider(async (harness) => {
+      const token = await setUpWithoutAccount(harness);
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            harness.sql,
+            harness.sql`CREATE TRIGGER fail_assistant_insert BEFORE INSERT ON assistants
+                        BEGIN SELECT RAISE(ABORT, 'forced assistant insert failure'); END`,
+          ),
+        ),
+      );
+
+      const refused = await createAccount(harness, token);
+      expect(refused.ok).toBe(false);
+
+      expect(await countRows(harness, "provider_accounts")).toBe(0);
+      expect(await countRows(harness, "assistants")).toBe(0);
+      expect(await harness.audit("providerAccount.created")).toEqual([]);
+
+      // Once the insert can succeed, the same create works.
+      await Effect.runPromise(
+        Effect.orDie(withTransaction(harness.sql, harness.sql`DROP TRIGGER fail_assistant_insert`)),
+      );
+      expect((await createAccount(harness, token)).status).toBe(200);
+      expect(await listAssistants(harness, token)).toHaveLength(1);
     });
   });
 });

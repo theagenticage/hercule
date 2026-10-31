@@ -1,5 +1,22 @@
+import type { AccountKind } from "@hercule/plugin-host";
 import type { RegisteredHarness } from "./harnesses";
-import type { RegisteredProvider } from "./providers";
+import { findCredentialSecretName, type RegisteredProvider } from "./providers";
+
+/**
+ * Returns every environment variable the harness reads a credential from,
+ * across all the providers and account kinds it runs, each once. The runner
+ * removes all of them from the harness's environment, so a key in the
+ * runner's own environment never stands in for an account's login.
+ */
+export const listCredentialVariables = (harness: RegisteredHarness): ReadonlyArray<string> => [
+  ...new Set(
+    harness.runs.flatMap((support) =>
+      support.kinds.flatMap(({ credentialVariable }) =>
+        credentialVariable === undefined ? [] : [credentialVariable],
+      ),
+    ),
+  ),
+];
 
 /** How a harness runs a Provider Account: the entry of the harness's `runs` that covers the account's provider and kind. */
 interface HarnessSupport {
@@ -7,11 +24,19 @@ interface HarnessSupport {
   readonly modelArgument: string;
   /** The environment variable the account's key goes in, or absent when the login is in the Harness Home. */
   readonly credentialVariable: string | undefined;
+  /** The name of the Secret that holds the account's credential, or absent when the login is in the Harness Home. */
+  readonly credentialSecretName: string | undefined;
 }
 
-/** The harness a Provider Account runs in, and how that harness runs it. */
+/**
+ * The harness a Provider Account runs in, and how that harness runs it. It
+ * carries the account's provider and account kind the decision looked up, so a
+ * caller that needs them does not look them up again.
+ */
 interface HarnessChoice {
   readonly _tag: "chosen";
+  readonly provider: RegisteredProvider;
+  readonly kind: AccountKind;
   readonly harness: RegisteredHarness;
   readonly support: HarnessSupport;
 }
@@ -31,7 +56,8 @@ interface HarnessRefusal {
 /**
  * Decides which harness a Provider Account runs in and whether it can. The
  * harness is `harnessId` when given, else `account.defaultHarnessId`. Returns
- * the harness and how it runs the account, or a refusal. Returns a refusal
+ * the harness, how it runs the account, and the provider and account kind
+ * the account has, or a refusal. Returns a refusal
  * for the first of these that holds, in this order (spec 06 section 15.4):
  *
  * - this build has no such provider, or no such account kind of it, so
@@ -96,10 +122,13 @@ export const decideProviderAccountHarness = (
   }
   return {
     _tag: "chosen",
+    provider,
+    kind,
     harness,
     support: {
       modelArgument: support.modelArgument,
       credentialVariable: supportedKind.credentialVariable,
+      credentialSecretName: findCredentialSecretName(kind),
     },
   };
 };

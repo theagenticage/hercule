@@ -1,364 +1,437 @@
 /**
- * Tests the probes with a stand-in for the connection to the runners, so the
- * frames the controller sends can be read and answered one by one.
+ * Tests how probe results are stored, on a real database and the real plugin
+ * host: one account is one person, so the first identity a probe reports
+ * becomes the account's, and a probe that reports someone else is stored as
+ * not signed in.
  */
-import { afterEach, describe, expect, it } from "vitest";
-import { Effect, Layer, Logger, Option, Redacted, Stream } from "effect";
+import { describe, expect, it } from "vitest";
+import { Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { ControllerToRunner, RunnerToController } from "@hercule/protocol";
-import { uuidFromString, withTransaction } from "../db";
-import { PluginHost } from "../plugins";
-import { asUser, buildPluginStack } from "../plugins/testing";
-import { RunnerConnections } from "../runners";
-import { buildProviderAccountOwner, Secrets } from "../secrets";
-import { HarnessAccountsLayer } from "./harness-account";
-import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
+import type { ProbeResult } from "@hercule/protocol";
+import { withTransaction } from "../db";
+import { ProviderAccountProbes, type ProbeOutcome } from "./probes";
 import { providerAccountRepository } from "./repository";
 import {
   addAccount,
   addRunner,
   ALPHA_HARNESS_ID,
-  buildAccountPlugins,
-  KEY_KIND,
   MACHINE_KIND,
+  runWithAccounts,
   SIGNED_IN,
 } from "./testing";
 
-interface Sent {
-  readonly runnerId: string;
-  readonly request: ControllerToRunner;
-}
+/** A probe result that shows someone signed in. */
+const signedInAs = (identity: string, planLabel?: string): ProbeResult => ({
+  ...SIGNED_IN,
+  auth: {
+    status: "ok",
+    identity,
+    ...(planLabel === undefined ? {} : { planLabel }),
+  },
+});
 
-/** Runs before a probe is answered, so a test can change the world while a runner is "thinking". */
-const beforeAnswer: { current: Effect.Effect<void> } = { current: Effect.void };
+/** When the controller sent the probes in these tests. */
+const SENT_AT = "2026-10-31T10:00:00.000Z";
 
-/** A connection that records every frame and answers each probe with `SIGNED_IN`. */
-const buildFakeConnections = (sent: Array<Sent>): RunnerConnections["Service"] =>
-  ({
-    arrivals: Stream.empty,
-    asked: (runnerId: string, request: ControllerToRunner) => {
-      sent.push({ runnerId, request });
-      if (request._tag !== "probeRequest") return Effect.succeed(Option.none());
-      const answer: RunnerToController = {
-        _tag: "probeReport",
-        requestId: request.requestId,
-        providerAccountId: request.harnessAccount.providerAccountId,
-        result: SIGNED_IN,
-      };
-      return Effect.as(beforeAnswer.current, Option.some(answer));
-    },
-  }) as unknown as RunnerConnections["Service"];
+/** What the controller read when it sent the probes in these tests. */
+const STAMP = { sentAt: SENT_AT, credentialGeneration: 0 };
 
-/** A log line the controller wrote while a test ran. */
-interface Logged {
-  readonly level: string;
-  readonly message: string;
-}
+/** Returns the snapshot of a `stored` outcome, and fails the test for any other outcome. */
+const requireStored = (outcome: ProbeOutcome) => {
+  if (outcome._tag !== "stored") throw new Error(`expected a stored snapshot, got ${outcome._tag}`);
+  return outcome.snapshot;
+};
 
-const run = <A, E>(
-  sent: Array<Sent>,
-  body: Effect.Effect<A, E, ProviderAccountProbes | SqlClient.SqlClient | Secrets>,
-  logged: Array<Logged> = [],
-) =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(buildAccountPlugins()));
-      return yield* body;
-    }).pipe(
-      Effect.provide(
-        ProviderAccountProbesLayer.pipe(
-          Layer.provideMerge(HarnessAccountsLayer),
-          Layer.provideMerge(Layer.succeed(RunnerConnections)(buildFakeConnections(sent))),
-          Layer.provideMerge(buildPluginStack()),
-        ),
-      ),
-      Effect.provide(
-        Logger.layer([
-          Logger.make<unknown, void>(({ logLevel, message }) => {
-            logged.push({ level: logLevel, message: String(message) });
-          }),
-        ]),
-      ),
-      asUser,
-    ) as Effect.Effect<A, E, never>,
-  );
-
-const snapshotsOf = (accountId: string) =>
-  Effect.flatMap(providerAccountRepository, (accounts) => accounts.listSnapshots(accountId));
-
-describe("a probe", () => {
-  it("sends the account's home, model argument and decrypted key, and stores the snapshot under the harness", async () => {
-    const sent: Array<Sent> = [];
-
-    const outcome = await run(
-      sent,
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const secrets = yield* Secrets;
-        const probes = yield* ProviderAccountProbes;
-        const account = yield* addAccount({ kind: KEY_KIND });
-        yield* withTransaction(
-          sql,
-          secrets.set(buildProviderAccountOwner(account.id), "apiKey", Redacted.make("sk-secret")),
-        );
-        const runner = yield* addRunner("laptop");
-
-        const snapshot = yield* probes.probe(runner, account.id, ALPHA_HARNESS_ID);
-
-        return { account, runner, snapshot, stored: yield* snapshotsOf(account.id) };
-      }),
-    );
-
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.runnerId).toBe(outcome.runner);
-    expect(sent[0]?.request).toMatchObject({
-      _tag: "probeRequest",
-      harnessId: ALPHA_HARNESS_ID,
-      harnessAccount: {
-        providerAccountId: outcome.account.id,
-        harnessHome: `providers/homes/${outcome.account.id}/alpha/alpha`,
-        modelArgument: "acme/{model}",
-        credential: { variable: "ACME_API_KEY", value: "sk-secret" },
-      },
-    });
-    expect(Option.getOrNull(outcome.snapshot)).toMatchObject({
-      runnerId: outcome.runner,
-      harnessId: ALPHA_HARNESS_ID,
-      auth: { status: "ok" },
-    });
-    expect(outcome.stored).toHaveLength(1);
-    expect(outcome.stored[0]).toMatchObject({
-      providerAccountId: outcome.account.id,
-      harnessId: ALPHA_HARNESS_ID,
-      runnerId: outcome.runner,
-    });
+const readAccount = (accountId: string) =>
+  Effect.gen(function* () {
+    const accounts = yield* providerAccountRepository;
+    return Option.getOrThrow(yield* accounts.one(accountId));
   });
 
-  it("fails InvalidState and sends nothing when the account cannot run in the harness", async () => {
-    const sent: Array<Sent> = [];
-
-    const failure = await run(
-      sent,
+describe("recording a probe", () => {
+  it("reports a result sent before the snapshot already stored as superseded, stores nothing, and sets no identity from it", async () => {
+    const outcome = await runWithAccounts(
       Effect.gen(function* () {
         const probes = yield* ProviderAccountProbes;
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
-        return yield* Effect.flip(probes.probe(runner, account.id, "beta/beta"));
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          { ...SIGNED_IN, auth: { status: "ok" } },
+          STAMP,
+        );
+        const stale = yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("old@example.com"),
+          { sentAt: "2026-10-31T09:59:59.000Z", credentialGeneration: 0 },
+        );
+        const accounts = yield* providerAccountRepository;
+        return {
+          stale,
+          stored: Option.getOrThrow(
+            yield* accounts.readSnapshot(account.id, ALPHA_HARNESS_ID, runner),
+          ),
+          account: yield* readAccount(account.id),
+        };
       }),
     );
 
-    expect(failure).toMatchObject({ error: { code: "invalid_state" } });
-    expect(sent).toEqual([]);
+    expect(outcome.stale).toEqual({ _tag: "superseded" });
+    expect(outcome.stored).toMatchObject({ probedAt: SENT_AT, auth: { status: "ok" } });
+    expect(outcome.stored.auth.identity).toBeUndefined();
+    expect(outcome.account.identity).toBeNull();
   });
 
-  it("fails NotFound for an account that does not exist", async () => {
-    const failure = await run(
-      [],
+  it("makes the first identity a probe reports the account's identity and plan", async () => {
+    const outcome = await runWithAccounts(
       Effect.gen(function* () {
         const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
-        return yield* Effect.flip(
-          probes.probe(runner, "0199e0e7-9999-7000-8000-000000000000", ALPHA_HARNESS_ID),
+        const snapshot = yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("rogier@work.com", "Max"),
+          STAMP,
+        );
+        return { snapshot: requireStored(snapshot), account: yield* readAccount(account.id) };
+      }),
+    );
+
+    expect(outcome.account).toMatchObject({ identity: "rogier@work.com", planLabel: "Max" });
+    expect(outcome.snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@work.com" });
+  });
+
+  it("keeps a probe that reports the same person ok, whatever the letter case", async () => {
+    const snapshot = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const first = yield* addRunner("laptop");
+        const second = yield* addRunner("desktop");
+        yield* probes.recordProbe(
+          first,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com"),
+          STAMP,
+        );
+        return requireStored(
+          yield* probes.recordProbe(
+            second,
+            account.id,
+            ALPHA_HARNESS_ID,
+            signedInAs("A@Work.com"),
+            STAMP,
+          ),
         );
       }),
     );
 
-    expect(failure).toMatchObject({ error: { code: "not_found" } });
+    expect(snapshot.auth.status).toBe("ok");
   });
-});
 
-describe("a sweep", () => {
-  it("probes each account in its default harness on every connected runner", async () => {
-    const sent: Array<Sent> = [];
-
-    const outcome = await run(
-      sent,
+  it("stores a probe that reports someone else as unauthenticated, names both people, and keeps the account's identity", async () => {
+    const outcome = await runWithAccounts(
       Effect.gen(function* () {
         const probes = yield* ProviderAccountProbes;
-        const first = yield* addAccount({ kind: MACHINE_KIND });
-        const second = yield* addAccount({ kind: KEY_KIND, label: "work" });
-        const runner = yield* addRunner("laptop");
-        yield* probes.sweepRunner(runner);
-        return { first, second };
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const first = yield* addRunner("laptop");
+        const second = yield* addRunner("desktop");
+        yield* probes.recordProbe(
+          first,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com"),
+          STAMP,
+        );
+        const other = yield* probes.recordProbe(
+          second,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("b@home.com", "Pro"),
+          STAMP,
+        );
+        const accounts = yield* providerAccountRepository;
+        return {
+          other: requireStored(other),
+          account: yield* readAccount(account.id),
+          stored: yield* accounts.readSnapshot(account.id, ALPHA_HARNESS_ID, second),
+        };
       }),
     );
 
-    expect(
-      sent.map((one) =>
-        one.request._tag === "probeRequest" ? one.request.harnessAccount.providerAccountId : "",
-      ),
-    ).toEqual([outcome.first.id, outcome.second.id]);
-    expect(
-      sent.every((one) => (one.request as { harnessId?: string }).harnessId === ALPHA_HARNESS_ID),
-    ).toBe(true);
-  });
-
-  it("sends nothing to a runner whose facts show no adapter for the harness, or no binary", async () => {
-    const sent: Array<Sent> = [];
-
-    const ready = await run(
-      sent,
-      Effect.gen(function* () {
-        const probes = yield* ProviderAccountProbes;
-        yield* addAccount({ kind: KEY_KIND });
-        const ready = yield* addRunner("ready");
-        const noAdapter = yield* addRunner("no-adapter", { adapters: [] });
-        const noBinary = yield* addRunner("no-binary", { binaryPresent: false });
-        yield* Effect.forEach([ready, noAdapter, noBinary], probes.sweepRunner, { discard: true });
-        return ready;
-      }),
-    );
-
-    expect(sent.map((one) => one.runnerId)).toEqual([ready]);
-  });
-
-  it("probes one account on every connected runner after its credential changed", async () => {
-    const sent: Array<Sent> = [];
-
-    await run(
-      sent,
-      Effect.gen(function* () {
-        const probes = yield* ProviderAccountProbes;
-        const account = yield* addAccount({ kind: KEY_KIND });
-        yield* addAccount({ kind: KEY_KIND, label: "other" });
-        yield* addRunner("laptop");
-        yield* addRunner("desktop");
-        yield* probes.sweepProviderAccount(account.id);
-        return account;
-      }),
-    );
-
-    expect(sent).toHaveLength(2);
-  });
-});
-
-describe("an account deleted while a probe was in flight", () => {
-  /** Deletes the account the moment the runner is about to answer, like a user racing the probe. */
-  const deleteWhenAnswering = (accountId: string) =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      beforeAnswer.current = withTransaction(
-        sql,
-        sql`DELETE FROM provider_accounts WHERE id = ${uuidFromString(accountId)}`,
-      ).pipe(Effect.orDie);
+    expect(outcome.other.auth).toMatchObject({
+      status: "unauthenticated",
+      identity: "b@home.com",
+      message: "Signed in as b@home.com; this account is a@work.com. Sign in again as a@work.com.",
     });
-
-  afterEach(() => {
-    beforeAnswer.current = Effect.void;
+    expect(Option.getOrThrow(outcome.stored).auth).toEqual(outcome.other.auth);
+    expect(outcome.account).toMatchObject({ identity: "a@work.com", planLabel: null });
   });
 
-  it("is logged at info, not error, when a sweep's probe finds it gone", async () => {
-    const logged: Array<Logged> = [];
-
-    const stored = await run(
-      [],
+  it("stores exactly one of two first sign-ins as someone else, when they race", async () => {
+    const statuses = await runWithAccounts(
       Effect.gen(function* () {
         const probes = yield* ProviderAccountProbes;
-        const account = yield* addAccount({ kind: KEY_KIND });
-        const runner = yield* addRunner("laptop");
-        yield* deleteWhenAnswering(account.id);
-        yield* probes.sweepRunner(runner);
-        return yield* snapshotsOf(account.id);
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const first = yield* addRunner("laptop");
+        const second = yield* addRunner("desktop");
+        const results = yield* Effect.all(
+          [
+            probes.recordProbe(
+              first,
+              account.id,
+              ALPHA_HARNESS_ID,
+              signedInAs("a@work.com"),
+              STAMP,
+            ),
+            probes.recordProbe(
+              second,
+              account.id,
+              ALPHA_HARNESS_ID,
+              signedInAs("b@home.com"),
+              STAMP,
+            ),
+          ],
+          { concurrency: "unbounded" },
+        );
+        return results.map((result) => requireStored(result).auth.status).toSorted();
       }),
-      logged,
     );
 
-    expect(stored).toEqual([]);
-    expect(logged.filter((line) => line.level === "Error")).toEqual([]);
-    expect(logged.filter((line) => line.level === "Info").map((line) => line.message)).toEqual([
-      expect.stringContaining("deleted meanwhile") as unknown,
+    expect(statuses).toEqual(["ok", "unauthenticated"]);
+  });
+
+  it("ignores the answer of a probe sent before the credential was replaced, so the new credential's own probe is not judged a mismatch", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        // The old key's probe is sent.
+        const oldStamp = yield* probes.readProbeStamp(account.id);
+        // The key is replaced, as `ProviderAccountService.update` does.
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* accounts.clearIdentity(account.id, "2026-10-31T10:00:01.000Z");
+            yield* accounts.advanceCredentialGeneration(account.id, "2026-10-31T10:00:01.000Z");
+          }),
+        );
+        // The old probe answers before the replacement's probe.
+        const old = yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("old@work.com"),
+          oldStamp,
+        );
+        const afterOld = yield* readAccount(account.id);
+        const newStamp = yield* probes.readProbeStamp(account.id);
+        const fresh = yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("new@home.com"),
+          newStamp,
+        );
+        return {
+          old,
+          afterOld,
+          fresh: requireStored(fresh),
+          account: yield* readAccount(account.id),
+        };
+      }),
+    );
+
+    expect(outcome.old).toEqual({ _tag: "superseded" });
+    expect(outcome.afterOld.identity).toBeNull();
+    expect(outcome.fresh.auth).toMatchObject({ status: "ok", identity: "new@home.com" });
+    expect(outcome.account.identity).toBe("new@home.com");
+  });
+
+  it("reports an answer from before the credential changed as superseded, and changes nothing", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        const oldStamp = yield* probes.readProbeStamp(account.id);
+        yield* probes.acceptDeviceSignIn(account.id, runner, ALPHA_HARNESS_ID);
+        const current = yield* probes.readProbeStamp(account.id);
+        yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          { ...SIGNED_IN, auth: { status: "unauthenticated" } },
+          current,
+        );
+        const old = yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("old@work.com"),
+          oldStamp,
+        );
+        const accounts = yield* providerAccountRepository;
+        return {
+          old,
+          stored: Option.getOrThrow(
+            yield* accounts.readSnapshot(account.id, ALPHA_HARNESS_ID, runner),
+          ),
+          account: yield* readAccount(account.id),
+        };
+      }),
+    );
+
+    expect(outcome.old).toEqual({ _tag: "superseded" });
+    expect(outcome.stored.auth.status).toBe("unauthenticated");
+    expect(outcome.account.identity).toBeNull();
+  });
+
+  it("leaves the account's identity alone for a probe that reports none, or that is not ok", async () => {
+    const account = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const created = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        yield* probes.recordProbe(
+          runner,
+          created.id,
+          ALPHA_HARNESS_ID,
+          {
+            ...SIGNED_IN,
+            auth: { status: "ok" },
+          },
+          STAMP,
+        );
+        yield* probes.recordProbe(
+          runner,
+          created.id,
+          ALPHA_HARNESS_ID,
+          {
+            ...SIGNED_IN,
+            auth: { status: "unauthenticated", identity: "someone@example.com" },
+          },
+          STAMP,
+        );
+        return yield* readAccount(created.id);
+      }),
+    );
+
+    expect(account.identity).toBeNull();
+  });
+});
+
+describe("probe stamps", () => {
+  it("strictly increase, also while the clock stands still", async () => {
+    const sentAt = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        yield* TestClock.setTime(Date.parse(SENT_AT));
+        const stamps = [
+          yield* probes.readProbeStamp(account.id),
+          yield* probes.readProbeStamp(account.id),
+          yield* probes.readProbeStamp(account.id),
+        ];
+        return stamps.map((stamp) => stamp.sentAt);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    expect(sentAt).toEqual([
+      "2026-10-31T10:00:00.000Z",
+      "2026-10-31T10:00:00.001Z",
+      "2026-10-31T10:00:00.002Z",
     ]);
   });
 
-  it("is logged at info, not error, when the probe after a sign-in ended finds it gone", async () => {
-    const logged: Array<Logged> = [];
-
-    await run(
-      [],
+  it("let the later probe win when two probes of one pair were sent in the same millisecond", async () => {
+    const outcome = await runWithAccounts(
       Effect.gen(function* () {
         const probes = yield* ProviderAccountProbes;
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
-        yield* probes.expectLoginEnd(runner, account.id, ALPHA_HARNESS_ID, "login-1");
-        yield* probes.recordPrintedLogin(runner, account.id, ALPHA_HARNESS_ID, "login-1", {
-          reportsEnd: true,
-        });
-        yield* deleteWhenAnswering(account.id);
-        // Fails with nothing: the end of a login is reported by a runner, and nobody awaits this call.
-        yield* probes.probeAfterLoginEnd(runner, "login-1");
-      }),
-      logged,
+        yield* TestClock.setTime(Date.parse(SENT_AT));
+        const first = yield* probes.readProbeStamp(account.id);
+        const second = yield* probes.readProbeStamp(account.id);
+        const accounts = yield* providerAccountRepository;
+        // The later probe answers first.
+        yield* probes.recordProbe(runner, account.id, ALPHA_HARNESS_ID, SIGNED_IN, second);
+        const late = yield* probes.recordProbe(
+          runner,
+          account.id,
+          ALPHA_HARNESS_ID,
+          { ...SIGNED_IN, auth: { status: "unauthenticated" } },
+          first,
+        );
+        return {
+          late,
+          stored: Option.getOrThrow(
+            yield* accounts.readSnapshot(account.id, ALPHA_HARNESS_ID, runner),
+          ),
+        };
+      }).pipe(Effect.provide(TestClock.layer())),
     );
 
-    expect(logged.filter((line) => line.level === "Error")).toEqual([]);
-    expect(logged.map((line) => line.message).join("\n")).toContain("deleted meanwhile");
+    expect(outcome.late).toEqual({ _tag: "superseded" });
+    expect(outcome.stored.auth.status).toBe("ok");
   });
 });
 
-describe("the probe after a sign-in ended", () => {
-  it("probes the account in the login's harness on the login's runner, once", async () => {
-    const sent: Array<Sent> = [];
-
-    const outcome = await run(
-      sent,
+describe("accepting a device sign-in", () => {
+  it("marks that runner's snapshot as not signed in, and leaves the other runners' snapshots alone", async () => {
+    const outcome = await runWithAccounts(
       Effect.gen(function* () {
         const probes = yield* ProviderAccountProbes;
+        const accounts = yield* providerAccountRepository;
         const account = yield* addAccount({ kind: MACHINE_KIND });
-        const runner = yield* addRunner("laptop");
-        yield* probes.expectLoginEnd(runner, account.id, ALPHA_HARNESS_ID, "login-1");
-        yield* probes.recordPrintedLogin(runner, account.id, ALPHA_HARNESS_ID, "login-1", {
-          reportsEnd: true,
-        });
-
-        yield* probes.probeAfterLoginEnd(runner, "login-1");
-        // The same end reported twice is ignored the second time.
-        yield* probes.probeAfterLoginEnd(runner, "login-1");
-
-        return { account, runner, stored: yield* snapshotsOf(account.id) };
-      }),
-    );
-
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({
-      runnerId: outcome.runner,
-      request: { _tag: "probeRequest", harnessId: ALPHA_HARNESS_ID },
-    });
-    expect(outcome.stored.map((snapshot) => snapshot.harnessId)).toEqual([ALPHA_HARNESS_ID]);
-  });
-
-  it("ignores an end that no login was waiting for", async () => {
-    const sent: Array<Sent> = [];
-
-    await run(
-      sent,
-      Effect.gen(function* () {
-        const probes = yield* ProviderAccountProbes;
-        const runner = yield* addRunner("laptop");
-        yield* probes.probeAfterLoginEnd(runner, "never-started");
-      }),
-    );
-
-    expect(sent).toEqual([]);
-  });
-
-  it("ignores an end reported by another runner than the one the login ran on", async () => {
-    const sent: Array<Sent> = [];
-
-    await run(
-      sent,
-      Effect.gen(function* () {
-        const probes = yield* ProviderAccountProbes;
-        const account = yield* addAccount({ kind: MACHINE_KIND });
-        const runner = yield* addRunner("laptop");
+        const signedIn = yield* addRunner("laptop");
         const other = yield* addRunner("desktop");
-        yield* probes.expectLoginEnd(runner, account.id, ALPHA_HARNESS_ID, "login-1");
-        yield* probes.recordPrintedLogin(runner, account.id, ALPHA_HARNESS_ID, "login-1", {
-          reportsEnd: true,
-        });
-        yield* probes.probeAfterLoginEnd(other, "login-1");
+        yield* probes.recordProbe(
+          signedIn,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com"),
+          yield* probes.readProbeStamp(account.id),
+        );
+        yield* probes.recordProbe(
+          other,
+          account.id,
+          ALPHA_HARNESS_ID,
+          signedInAs("a@work.com"),
+          yield* probes.readProbeStamp(account.id),
+        );
+        const before = Option.getOrThrow(
+          yield* accounts.readSnapshot(account.id, ALPHA_HARNESS_ID, signedIn),
+        );
+        yield* probes.acceptDeviceSignIn(account.id, signedIn, ALPHA_HARNESS_ID);
+        return {
+          before,
+          marked: Option.getOrThrow(
+            yield* accounts.readSnapshot(account.id, ALPHA_HARNESS_ID, signedIn),
+          ),
+          untouched: Option.getOrThrow(
+            yield* accounts.readSnapshot(account.id, ALPHA_HARNESS_ID, other),
+          ),
+        };
       }),
     );
 
-    expect(sent).toEqual([]);
+    expect(outcome.marked.auth).toMatchObject({
+      status: "unauthenticated",
+      message: "Checking the sign-in…",
+    });
+    expect(outcome.marked.probedAt).toBe(outcome.before.probedAt);
+    expect(outcome.untouched.auth.status).toBe("ok");
   });
 });

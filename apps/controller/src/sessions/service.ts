@@ -332,6 +332,17 @@ export interface StartNeeds {
     connectionId: string,
   ) => Effect.Effect<GitIdentity | undefined, SqlError>;
   /**
+   * Checks that the account can run in the harness on the runner the sessions
+   * start on, as it can now rather than when the session was queued. Fails
+   * with `InvalidState` and the reason when it cannot, such as a sign-in that
+   * has since ended or a harness that was removed from the runner. That ends
+   * the session like a failed `prepareHarnessAccount`.
+   */
+  readonly requireAccountRunnable: (
+    providerAccountId: string,
+    harnessId: string,
+  ) => Effect.Effect<void, InvalidState | SqlError>;
+  /**
    * Returns what the runner needs to run the harness for the account: its
    * home, model argument and credential, the credential decrypted for this
    * frame and stored nowhere (`prepareHarnessAccount`). Fails when the account
@@ -2132,6 +2143,9 @@ const make = Effect.gen(function* () {
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
         const inputless: Array<string> = [];
+        // One answer per account and harness, because every queued session of
+        // a pair gets the same one and the check reads the whole fleet.
+        const runnableRefusals = new Map<string, string | null>();
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
         // room is for sessions that can start, not for specs that cannot.
@@ -2165,6 +2179,28 @@ const make = Effect.gen(function* () {
             // and would block deleting its account. The one error that can
             // pass by itself, a database failure, is not caught: it rolls
             // this claim back and the next pass tries again.
+            //
+            // The account must also still be able to run here: the session
+            // was queued under the rule of that moment, and a sign-in or a
+            // harness may have gone since.
+            const pair = `${row.providerAccountId}/${row.harnessId}`;
+            if (!runnableRefusals.has(pair)) {
+              runnableRefusals.set(
+                pair,
+                yield* needs.requireAccountRunnable(row.providerAccountId, row.harnessId).pipe(
+                  Effect.as(null),
+                  Effect.catchIf(
+                    (error): error is InvalidState => error instanceof InvalidState,
+                    (refused) => Effect.succeed(refused.error.message),
+                  ),
+                ),
+              );
+            }
+            const notRunnable = runnableRefusals.get(pair) ?? null;
+            if (notRunnable !== null) {
+              yield* endUnstartable(row.id, notRunnable, at);
+              continue;
+            }
             const prepared = yield* needs
               .prepareHarnessAccount(row.providerAccountId, row.harnessId)
               .pipe(

@@ -34,9 +34,11 @@ const providerDefinition: ProviderDefinition = {
       title: "API key",
       description: "A key from the provider.",
       setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: { url: "https://api.example.com/v1/models", headers: {} },
       harnesses: ["fixture/fixture"],
     },
   ],
+  defaultHarnessId: "fixture/fixture",
 };
 
 describe("registerHarness", () => {

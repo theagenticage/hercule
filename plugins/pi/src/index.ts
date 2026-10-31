@@ -33,10 +33,22 @@ const definition: HarnessDefinition = {
     disallowedTools: "native",
     structuredOutput: "supported",
   },
-  // Z.ai is the only provider this build drives pi against. pi names its
-  // models `zai/<id>`, runs only the ones in its own list, and reads the key
-  // from ZAI_API_KEY.
+  // pi runs the keys of three providers. It names a model `<provider>/<id>`,
+  // runs only the ones in its own list, and reads each provider's key from that
+  // provider's usual variable.
   runs: [
+    {
+      providerId: "anthropic/anthropic",
+      kinds: [{ kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" }],
+      modelArgument: "anthropic/{model}",
+      models: "own-list",
+    },
+    {
+      providerId: "openai/openai",
+      kinds: [{ kind: "api-key", credentialVariable: "OPENAI_API_KEY" }],
+      modelArgument: "openai/{model}",
+      models: "own-list",
+    },
     {
       providerId: "zai/zai",
       kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],

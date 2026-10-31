@@ -33,12 +33,39 @@ describe("the Anthropic provider", () => {
 
     expect(definition.id).toBe("anthropic");
     expect(definition.displayName).toBe("Anthropic");
-    expect(definition.kinds).toHaveLength(1);
     const kind = definition.kinds[0];
     expect(kind.id).toBe("subscription-per-machine");
     expect(kind.title).toBe("Claude subscription, signed in on each machine");
-    expect(kind.setup).toEqual([{ kind: "harness-login" }]);
+    expect(kind.setup).toEqual([{ kind: "harness-login", method: "sign-in" }]);
     expect(kind.harnesses).toEqual(["claude-code/claude-code"]);
+  });
+
+  it("offers a Claude subscription token, made by the harness login, which runs in Claude Code only", () => {
+    const kind = captureProviderDefinition().kinds[1]!;
+
+    expect(kind.id).toBe("subscription-token");
+    expect(kind.title).toBe("Claude subscription, every machine");
+    expect(kind.setup).toEqual([{ kind: "harness-login", method: "create-token" }]);
+    expect(kind.harnesses).toEqual(["claude-code/claude-code"]);
+  });
+
+  it("offers an API key, checked against the models list, which runs in Claude Code and pi", () => {
+    const kind = captureProviderDefinition().kinds[2]!;
+
+    expect(kind.id).toBe("api-key");
+    expect(kind.title).toBe("API key");
+    expect(kind.setup).toEqual([
+      { kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] },
+    ]);
+    expect(kind.keyCheck).toEqual({
+      url: "https://api.anthropic.com/v1/models",
+      headers: { "x-api-key": "{apiKey}", "anthropic-version": "2023-06-01" },
+    });
+    expect(kind.harnesses).toEqual(["claude-code/claude-code", "pi/pi"]);
+  });
+
+  it("starts new accounts in Claude Code", () => {
+    expect(captureProviderDefinition().defaultHarnessId).toBe("claude-code/claude-code");
   });
 
   it("suggests the haiku alias for text generation", () => {

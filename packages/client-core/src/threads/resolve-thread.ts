@@ -17,7 +17,8 @@ import type {
   Workspace,
 } from "@hercule/contract";
 import { resolveThreadHarnessId } from "../provider-accounts";
-import { findSnapshotOn } from "./catalog";
+import { decideAccountReadiness } from "./account-readiness";
+import { findModelSnapshot, findSnapshotOn } from "./catalog";
 import {
   readThreadConfig,
   type Thread,
@@ -104,9 +105,10 @@ const keepOfferedOptions = (
  * Returns the runner id a draft runs on, when no existing workspace decides
  * it. In order:
  *
- * 1. The runner the user picked, while the account has a snapshot there in the
- *    draft's harness. A snapshot means the harness is installed on that
- *    runner, whatever its availability: when the runner is offline, draining
+ * 1. The runner the user picked, while the account is known there in the
+ *    draft's harness: it has a snapshot there (the harness is installed on
+ *    that runner), or it works on every runner and the harness is installed
+ *    there. Whatever the runner's availability, when it is offline, draining
  *    or the account is signed out, the draft keeps the runner and the
  *    composer says why it cannot start.
  * 2. The draft's own runner, for the account the draft started with.
@@ -120,11 +122,16 @@ const decideDraftRunnerId = (
   harnessId: string | null,
 ): string | null => {
   if (account === undefined || harnessId === null) return picks.runnerId ?? base.runnerId;
-  if (picks.runnerId != null && findSnapshotOn(account, harnessId, picks.runnerId) !== undefined)
-    return picks.runnerId;
+  const picked = catalogs.runners.find((runner) => runner.id === picks.runnerId);
+  if (
+    picked !== undefined &&
+    (findSnapshotOn(account, harnessId, picked.id) !== undefined ||
+      decideAccountReadiness(catalogs, account, harnessId, picked) === "ready")
+  )
+    return picked.id;
   return account.id === base.providerAccountId
     ? base.runnerId
-    : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, account, harnessId)
+    : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, account, harnessId, catalogs)
         .defaultRunnerId;
 };
 
@@ -172,7 +179,11 @@ const resolveDraft = (
     account === undefined || harnessId === null
       ? undefined
       : findSnapshotOn(account, harnessId, (runner ?? diagnosticRunner)?.id);
-  const descriptor = snapshot?.models.find((each) => each.slug === model);
+  const descriptor = (
+    account === undefined || harnessId === null
+      ? undefined
+      : findModelSnapshot(account, harnessId, (runner ?? diagnosticRunner)?.id)
+  )?.models.find((each) => each.slug === model);
   return {
     kind: "draft",
     config: {
@@ -207,7 +218,11 @@ const resolveActive = (
       ? undefined
       : findSnapshotOn(account, session.harnessId, session.runnerId ?? undefined);
   const model = picks.model ?? stored.model;
-  const descriptor = snapshot?.models.find((each) => each.slug === model);
+  const descriptor = (
+    account === undefined
+      ? undefined
+      : findModelSnapshot(account, session.harnessId, session.runnerId)
+  )?.models.find((each) => each.slug === model);
 
   const modelChanges = model !== stored.model;
   // The picked options that the model offers. Without a descriptor nothing

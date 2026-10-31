@@ -352,6 +352,7 @@ it("reports a text generation request as not sent when the runner is not connect
       providerAccountId: "0199e0e7-0000-7000-8000-0000000000a1",
       harnessHome: "providers/0199e0e7-0000-7000-8000-0000000000a1",
       modelArgument: "{model}",
+      credentialVariables: [],
     },
     spec: {
       model: "model",
@@ -544,6 +545,61 @@ describe("a report from a connection the runner has replaced", () => {
     const one = Option.getOrThrow(row);
     expect(one.facts?.docker, "the newer connection's hello still stands").toBe(true);
     expect(one.watermark, "a stale watermark is not a reading of this machine").toBeNull();
+  });
+});
+
+describe("a facts report", () => {
+  /** Greets a runner with `FACTS`, sends each report, then returns the first fleet traffic after them. */
+  const readTrafficAfterReports = (reports: ReadonlyArray<RunnerFacts>) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const connection = mintConnection();
+        yield* connections.greeted(runner!.id, connection, HELD, HELLO);
+        for (const facts of reports)
+          yield* connections.reportedFacts(runner!.id, connection, facts);
+        // A marker after the reports: when it is the first item, no report published anything.
+        yield* connections.placementsChanged(runner!.id);
+        const traffic = yield* connections.fleetTraffic.pipe(Stream.runHead);
+        return { runnerId: runner!.id, traffic: Option.getOrThrow(traffic) };
+      }).pipe(Effect.provide(layer), Effect.orDie),
+    );
+
+  it.each([
+    {
+      change: "a harness binary appears",
+      facts: { ...FACTS, harnesses: [{ name: "pi", present: true, path: "/bin/pi" }] },
+    },
+    {
+      change: "the runner build gains an adapter",
+      facts: { ...FACTS, adapters: [...FACTS.adapters, "pi/pi"] },
+    },
+  ])("publishes harnessesChanged when $change", async ({ facts }) => {
+    const { runnerId, traffic } = await readTrafficAfterReports([facts]);
+    expect(traffic).toEqual({ _tag: "harnessesChanged", runnerId });
+  });
+
+  it("publishes harnessesChanged when a harness binary moves or disappears", async () => {
+    const withPi = {
+      ...FACTS,
+      harnesses: [{ name: "pi", present: true, path: "/bin/pi" }],
+    };
+    const moved = await readTrafficAfterReports([
+      withPi,
+      { ...withPi, harnesses: [{ name: "pi", present: true, path: "/opt/pi" }] },
+    ]);
+    expect(moved.traffic).toEqual({ _tag: "harnessesChanged", runnerId: moved.runnerId });
+    const gone = await readTrafficAfterReports([withPi, FACTS]);
+    expect(gone.traffic).toEqual({ _tag: "harnessesChanged", runnerId: gone.runnerId });
+  });
+
+  it("publishes nothing when only something else changed, or the report repeats the hello", async () => {
+    const { runnerId, traffic } = await readTrafficAfterReports([
+      FACTS,
+      { ...FACTS, docker: true, totalMemoryBytes: 1 },
+    ]);
+    expect(traffic).toEqual({ _tag: "placementsChanged", runnerId });
   });
 });
 

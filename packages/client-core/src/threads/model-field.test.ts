@@ -2,8 +2,8 @@
  * Tests `buildThreadModelField(account, harnessId, runnerId, current)`, which
  * builds the model field of Settings > Threads: the picked account's models in
  * the harness a thread runs in, from the snapshot of the runner a new thread
- * would be placed on when there is one, else from the account's first
- * snapshot in that harness.
+ * would be placed on when it is signed in there, else from the most recently
+ * probed signed-in snapshot of any runner.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderAccount } from "@hercule/contract";
@@ -58,7 +58,7 @@ describe("buildThreadModelField", () => {
     expect(field.options.find((option) => option.slug === "claude-opus-5")?.isDefault).toBe(true);
   });
 
-  it("falls back to the account's first snapshot when none is from the local runner", () => {
+  it("falls back to another runner's snapshot when none is from the local runner", () => {
     const account: Pick<ProviderAccount, "snapshots"> = {
       snapshots: [buildSnapshot(OTHER, MODELS)],
     };
@@ -72,12 +72,29 @@ describe("buildThreadModelField", () => {
     ]);
   });
 
-  it("falls back to the first snapshot when no local runner is detected at all", () => {
+  it("falls back to a snapshot of any runner when no local runner is detected at all", () => {
     const account: Pick<ProviderAccount, "snapshots"> = {
       snapshots: [buildSnapshot(OTHER, MODELS)],
     };
 
     const field = buildThreadModelField(account, HARNESS, null, undefined);
+
+    expect(field.options.map((option) => option.slug)).toEqual([
+      "claude-sonnet-5",
+      "claude-opus-5",
+    ]);
+  });
+
+  it("reads the most recently probed signed-in list when the runner's own snapshot is signed out", () => {
+    const account: Pick<ProviderAccount, "snapshots"> = {
+      snapshots: [
+        { ...buildSnapshot(LOCAL, []), auth: { status: "unauthenticated" } },
+        { ...buildSnapshot(OTHER, [MODELS[0]!]), probedAt: "2026-09-01T00:00:00.000Z" },
+        { ...buildSnapshot("01a06d02-beff-7037-9f5b-042822015954", MODELS) },
+      ],
+    };
+
+    const field = buildThreadModelField(account, HARNESS, LOCAL, undefined);
 
     expect(field.options.map((option) => option.slug)).toEqual([
       "claude-sonnet-5",

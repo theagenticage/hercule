@@ -28,7 +28,7 @@ import { buildRunActor, CurrentActor } from "../actor";
 import { agentRepository } from "../agents";
 import { afterCommit, nowIso, withTransaction } from "../db";
 import { renderInputTemplate } from "../expressions";
-import { isSignedIn, providerAccountRepository } from "../provider-accounts";
+import { ProviderAccountRunners, providerAccountRepository } from "../provider-accounts";
 import type { PlacementCandidate } from "../runners";
 import type { StoredSession } from "../sessions";
 import { RunExecutor } from "./executor";
@@ -160,11 +160,12 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
     const executor = yield* RunExecutor;
     const agents = yield* agentRepository;
     const providerAccounts = yield* providerAccountRepository;
+    const accountRunners = yield* ProviderAccountRunners;
     const workspaceSteps = yield* WorkspaceSteps;
 
     /**
      * Returns the Agent's name and the ids of the runners that can host it:
-     * those signed in to the Agent's provider account in the Agent's harness (the
+     * those that can run the Agent's provider account in the Agent's harness (the
      * account's default when the Agent names none). Returns `undefined`
      * when the Agent no longer exists. Placing the step's session refuses a
      * deleted Agent, with a message that says so.
@@ -178,21 +179,15 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
       Effect.gen(function* () {
         const agent = yield* agents.read(agentId);
         if (Option.isNone(agent)) return undefined;
-        // The controller wrote every snapshot row itself, so one that does
-        // not decode is a bug.
         const account = yield* providerAccounts.one(agent.value.providerAccountId);
         const harnessId = agent.value.harnessId ?? Option.getOrUndefined(account)?.defaultHarnessId;
-        const snapshots =
+        const available =
           harnessId === undefined
-            ? []
-            : yield* Effect.catchTag(
-                providerAccounts.listHarnessSnapshots(agent.value.providerAccountId, harnessId),
-                "SchemaError",
-                Effect.die,
-              );
+            ? undefined
+            : yield* accountRunners.list(agent.value.providerAccountId, harnessId);
         return {
           agentName: agent.value.name,
-          runnerIds: new Set(snapshots.filter(isSignedIn).map((snapshot) => snapshot.runnerId)),
+          runnerIds: new Set(available?.runnerIds),
         };
       });
 

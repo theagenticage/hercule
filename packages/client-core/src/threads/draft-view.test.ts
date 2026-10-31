@@ -16,6 +16,7 @@ import {
   ANTHROPIC_IDENTITY,
   HARNESSES,
   PROVIDERS,
+  WITH_AGENTS,
 } from "../providers.testing";
 import { buildDraftView, type DraftReads } from "./draft-view";
 import {
@@ -63,11 +64,14 @@ const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
   }),
 ]);
 
+/** This Mac, with Claude Code installed, so the account is ready on it. */
+const MOSS_WITH_CLAUDE = { ...MOSS, facts: WITH_AGENTS.facts };
+
 const READS: DraftReads = {
   settings: SETTINGS,
   profiles: [UNRESTRICTED],
   accounts: [CLAUDE],
-  runners: [MOSS, COVE],
+  runners: [MOSS_WITH_CLAUDE, COVE],
   thisMacRunnerId: MOSS.id,
   providers: PROVIDERS,
   harnesses: HARNESSES,

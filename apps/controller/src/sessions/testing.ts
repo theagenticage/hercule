@@ -13,6 +13,7 @@
  */
 import { expect } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
@@ -56,9 +57,10 @@ import type {
   SessionSpawnInput,
 } from "@hercule/contract";
 import { nowIso, withTransaction } from "../db";
-import { PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
+import { findCredentialSecretName, PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { providerAccountRepository } from "../provider-accounts";
 import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
+import { buildProviderAccountOwner } from "../secrets";
 import {
   completeSetup,
   get,
@@ -309,7 +311,9 @@ const dial = (
           _tag: "probeReport",
           requestId: request.requestId,
           providerAccountId: request.harnessAccount.providerAccountId,
-          result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models },
+          // Newer than the floor of every shipped harness, because a runner
+          // with an older harness is not placed on.
+          result: { harnessVersion: "99.0.0", auth: { status: "ok" }, models },
         });
       }
     };
@@ -350,7 +354,11 @@ const dial = (
     setTimeout(() => reject(new Error("the controller never upgraded the connection")), 3000);
   });
 
-/** Waits until every Provider Account has been probed on this runner, and returns the accounts. */
+/**
+ * Waits until every Provider Account has been probed on this runner in its
+ * default harness, and returns the accounts. A sweep probes every harness an
+ * account can run in, so an account may hold more than one snapshot.
+ */
 const waitForEveryAccountProbed = async (
   base: string,
   token: string,
@@ -358,13 +366,17 @@ const waitForEveryAccountProbed = async (
   waitUntil("probed every account", async () => {
     const response = await get(base, "/api/v1/provider-accounts", token);
     const accounts = (await response.json()) as ReadonlyArray<ProviderAccount>;
-    return accounts.every((account) => account.snapshots.length === 1) ? accounts : undefined;
+    return accounts.every((account) =>
+      account.snapshots.some((snapshot) => snapshot.harnessId === account.defaultHarnessId),
+    )
+      ? accounts
+      : undefined;
   });
 
 /**
  * Gives every registered harness one Provider Account that runs in it (as its
- * default harness), unless one exists already. The fresh-install seed and the
- * test controller's own seed may have made some.
+ * default harness), unless one exists already. The test controller's own
+ * account may be one of them.
  */
 const arrangeAccountPerHarness = async (harness: ServerHarness): Promise<void> => {
   const exit = await harness.runWithLiveSessions(
@@ -376,7 +388,14 @@ const arrangeAccountPerHarness = async (harness: ServerHarness): Promise<void> =
       const providers = yield* host.providers();
       for (const registered of yield* host.harnesses()) {
         if (existing.some((account) => account.defaultHarnessId === registered.id)) continue;
-        const support = registered.runs[0];
+        // The provider that names this harness as its default, if the harness
+        // runs more than one provider (pi runs Anthropic, OpenAI and Z.ai).
+        const support =
+          registered.runs.find(
+            (run) =>
+              providers.find((candidate) => candidate.id === run.providerId)?.defaultHarnessId ===
+              registered.id,
+          ) ?? registered.runs[0];
         const kind = support?.kinds[0]?.kind;
         const provider = providers.find((candidate) => candidate.id === support?.providerId);
         if (provider === undefined || kind === undefined) continue;
@@ -394,6 +413,20 @@ const arrangeAccountPerHarness = async (harness: ServerHarness): Promise<void> =
           }),
         );
         existing.push(inserted);
+        // A key account runs only with its key stored, so give it one.
+        const secretName = findCredentialSecretName(
+          provider.kinds.find((candidate) => candidate.id === kind)!,
+        );
+        if (secretName !== undefined) {
+          yield* withTransaction(
+            sql,
+            harness.secrets.set(
+              buildProviderAccountOwner(inserted.id),
+              secretName,
+              Redacted.make("a-fixture-key"),
+            ),
+          );
+        }
       }
     }),
   );

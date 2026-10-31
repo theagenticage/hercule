@@ -28,6 +28,7 @@ import {
   findProviderAccountNameIfAmbiguous,
   resolveThreadHarnessId,
 } from "../provider-accounts";
+import { decideAccountReadiness, type AccountReadiness } from "./account-readiness";
 import { buildSignInTarget, type SignInTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadKind } from "./config";
 import { buildRunnerMenu, findDimmedReason, type RunnerMenuRow } from "./runner-menu";
@@ -65,6 +66,8 @@ export interface ComposerBlocked {
   readonly reason: string;
   /** The sign-in that would fix the problem, when a missing sign-in is the problem. */
   readonly signIn: SignInTarget | null;
+  /** Whether adding an account would fix the problem, because the user has none to run the thread with. */
+  readonly addAccount: boolean;
 }
 
 /** A runner the thread could be placed on, and whether it is the current one. */
@@ -162,36 +165,51 @@ const UNREADY_WORKSPACE_REASONS: Readonly<Record<Exclude<WorkspaceStatus, "ready
  * - the workspace it joins, if it joins one, which must be ready;
  * - a Provider Account to run it with, and its harness;
  * - a runner to run it on, which must not be retired, offline or draining;
- * - a sign-in for the account on that runner.
+ * - the account working on that runner (`decideAccountReadiness`): signed in
+ *   there, for an account that signs in on each machine, or the harness
+ *   installed there, for an account that works everywhere.
  *
- * Only the last one can be fixed with a button from here.
+ * Only a missing sign-in, and the lack of an account, can be fixed with a button
+ * from here.
  */
 const findBlocker = (
   joined: Workspace | undefined,
   providers: readonly Provider[],
   account: ProviderAccount | undefined,
   runner: Runner | undefined,
+  readiness: AccountReadiness,
   snapshot: CapabilitySnapshot | undefined,
 ): ComposerBlocked | null => {
+  const stop = (
+    reason: string,
+    fix: Partial<Pick<ComposerBlocked, "signIn" | "addAccount">> = {},
+  ): ComposerBlocked => ({ reason, signIn: null, addAccount: false, ...fix });
   if (joined !== undefined && joined.status !== "ready")
-    return { reason: joined.message ?? UNREADY_WORKSPACE_REASONS[joined.status], signIn: null };
-  if (account === undefined) return { reason: "No account is set up", signIn: null };
-  if (runner === undefined) return { reason: "No machine is connected", signIn: null };
-  if (runner.lifecycle === "retired") return { reason: `${runner.name} is retired`, signIn: null };
+    return stop(joined.message ?? UNREADY_WORKSPACE_REASONS[joined.status]);
+  if (account === undefined) return stop("No account is set up", { addAccount: true });
+  if (runner === undefined) return stop("No machine is connected");
+  if (runner.lifecycle === "retired") return stop(`${runner.name} is retired`);
   // A runner the user picked stays the draft's runner while it is away, so
   // the draft says why it cannot start rather than moving to another runner.
-  if (runner.connectivity !== "online")
-    return { reason: `${runner.name} is ${runner.connectivity}`, signIn: null };
-  if (runner.lifecycle === "draining")
-    return { reason: `${runner.name} is draining`, signIn: null };
+  if (runner.connectivity !== "online") return stop(`${runner.name} is ${runner.connectivity}`);
+  if (runner.lifecycle === "draining") return stop(`${runner.name} is draining`);
   const name = buildProviderAccountName(providers, account);
-  if (snapshot === undefined) return { reason: `${name} is not on ${runner.name}`, signIn: null };
-  if (snapshot.auth.status !== "ok")
-    return {
-      reason: `${name} is not signed in on ${runner.name}`,
+  if (readiness === "ready") return null;
+  if (readiness === "token-missing")
+    return stop(`${name} has no token; make one`, {
       signIn: buildSignInTarget(providers, account, runner),
-    };
-  return null;
+    });
+  if (readiness === "token-expired")
+    return stop(`${name}'s token expired; make a new one`, {
+      signIn: buildSignInTarget(providers, account, runner),
+    });
+  if (readiness === "harness-too-old")
+    return stop(`The harness on ${runner.name} is older than Hercule supports; update it`);
+  if (readiness === "harness-missing" || snapshot === undefined)
+    return stop(`${name} is not on ${runner.name}`);
+  return stop(`${name} is not signed in on ${runner.name}`, {
+    signIn: buildSignInTarget(providers, account, runner),
+  });
 };
 
 const findLockedReason = (kind: ThreadKind, field: string): string | null =>
@@ -231,7 +249,7 @@ export const buildComposerFields = (
   const menu =
     account === undefined || harnessId === null
       ? null
-      : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, account, harnessId);
+      : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, account, harnessId, catalogs);
   const countHostedSessions = (runnerId: string): number =>
     (catalogs.sessions ?? []).filter(
       (session) => session.runnerId === runnerId && session.exitedAt === null,
@@ -252,8 +270,12 @@ export const buildComposerFields = (
     })) ?? [];
   // Read from the runner rather than from its row, because the menu has no
   // row for a retired runner, and a draft can still refer to one.
+  const readiness =
+    account === undefined || harnessId === null || runner === undefined
+      ? "not-signed-in"
+      : decideAccountReadiness(catalogs, account, harnessId, runner);
   const dimmed =
-    account === undefined || runner === undefined ? null : findDimmedReason(runner, snapshot);
+    account === undefined || runner === undefined ? null : findDimmedReason(runner, readiness);
   const name = runner?.name ?? "no machine";
 
   return {
@@ -318,7 +340,9 @@ export const buildComposerFields = (
             runnerId: runner?.id ?? null,
           }),
     blocked:
-      kind === "active" ? null : findBlocker(joined, catalogs.providers, account, runner, snapshot),
+      kind === "active"
+        ? null
+        : findBlocker(joined, catalogs.providers, account, runner, readiness, snapshot),
   };
 };
 

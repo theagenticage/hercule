@@ -23,6 +23,7 @@ import {
   queryKeys,
   TYPING_PAUSE_MS,
 } from "@hercule/client-core";
+import { buildRunner } from "@hercule/client-core/threads/testing";
 import type {
   Assistant,
   Input,
@@ -96,6 +97,7 @@ const ACCOUNT_STARTED: ProviderAccount = {
   identity: "rogier@example.com",
   planLabel: "Claude Max",
   defaultHarnessId: "claude-code/claude-code",
+  expiresAt: null,
   snapshots: [
     buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       {
@@ -179,7 +181,8 @@ const RUNNER_STARTED: Runner = {
   reserved: false,
   version: "0.4.2",
   labels: [],
-  facts: null,
+  // Claude Code and Codex installed, so the accounts of the tests are ready here.
+  facts: buildRunner("", "").facts,
   watermark: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,

@@ -1034,10 +1034,11 @@ describe("buildQueryKeys", () => {
     ]);
   });
 
-  it("maps a provider push to the account list and the controller, whose text generation status follows sign-ins", () => {
+  it("maps a provider push to the account list, the controller, and the harness list, whose version verdicts come from the probes", () => {
     assert.deepStrictEqual(buildQueryKeys("provider", ["codex"]), [
       queryKeys.providerAccounts(),
       queryKeys.controller(),
+      queryKeys.harnesses(),
     ]);
   });
 

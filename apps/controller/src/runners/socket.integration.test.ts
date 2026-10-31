@@ -31,7 +31,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Option, Stream } from "effect";
+import { Duration, Effect, Option, Redacted, Stream } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   FILES_EDITED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
@@ -53,8 +54,10 @@ import {
   type RunnerToController as RunnerMessage,
 } from "@hercule/protocol";
 import type { RunnerDetail } from "@hercule/contract";
-import { uuidFromString, withTransaction } from "../db";
+import { nowIso, uuidFromString, withTransaction } from "../db";
 import { registry } from "../plugins";
+import { providerAccountRepository } from "../provider-accounts";
+import { buildProviderAccountOwner } from "../secrets";
 import {
   awaitHeldWork,
   freezeController,
@@ -483,21 +486,20 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 15 keyed the probe, sign-in and start frames by Provider Account, and replaced the
-  // harness config and secrets on them with the account's harness account, which a version 14 peer
-  // cannot decode. So versions 14 and 15 refuse each other at hello; this is the version 15
-  // controller refusing a version 14 runner.
-  it("refuses a runner on protocol version 14 and says to upgrade it", async () => {
+  // Version 16 reshaped the harness account the probe, sign-in and start frames carry, and added the
+  // login method, which a version 15 peer cannot read. So versions 15 and 16 refuse each other at
+  // hello; this is the version 16 controller refusing a version 15 runner.
+  it("refuses a runner on protocol version 15 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 14 }));
+      wire.send(buildHello({ protocolVersion: 15 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(15);
+      expect(PROTOCOL_VERSION).toBe(16);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 15 and the runner does not; " +
-          "upgrade the runner to a build that uses version 15",
+        "this controller uses runner protocol version 16 and the runner does not; " +
+          "upgrade the runner to a build that uses version 16",
       );
       expect(wire.frames).toEqual([]);
     });
@@ -1611,15 +1613,65 @@ describe("refreshing a runner's facts on demand", () => {
 });
 
 /**
+ * The accounts a user would have added by now, one per built-in harness. The
+ * test controller creates the first of them by itself, so the others are
+ * added here. The Z.ai account holds a key, as an account of its kind must.
+ */
+const ADDED_ACCOUNTS = [
+  {
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    defaultHarnessId: "claude-code/claude-code",
+  },
+  {
+    providerId: "openai/openai",
+    kind: "subscription-per-machine",
+    defaultHarnessId: "codex/codex",
+  },
+  { providerId: "zai/zai", kind: "api-key", defaultHarnessId: "pi/pi" },
+] as const;
+
+/** Adds the accounts of `ADDED_ACCOUNTS` that the controller does not have yet. */
+const addMissingAccounts = (harness: ServerHarness): Promise<void> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const accounts = yield* providerAccountRepository;
+      const present = new Set((yield* accounts.list()).map((account) => account.providerId));
+      for (const account of ADDED_ACCOUNTS) {
+        if (present.has(account.providerId)) continue;
+        yield* withTransaction(
+          harness.sql,
+          Effect.gen(function* () {
+            const added = yield* accounts.insert({ ...account, label: null, at: yield* nowIso });
+            if (account.kind !== "api-key") return;
+            yield* harness.secrets.set(
+              buildProviderAccountOwner(added.id),
+              "apiKey",
+              Redacted.make("sk-test"),
+            );
+          }),
+        );
+      }
+    }).pipe(Effect.provideService(SqlClient.SqlClient, harness.sql), Effect.orDie),
+  );
+
+/**
  * Runs `body` against a server with the real plugin registry, so "one request
- * per account" covers the three harnesses the binary really includes. The
- * probe deadline and interval are passed in like the ping interval, because a
- * real Bun server cannot run on a `TestClock`.
+ * per account" covers the three harnesses the binary really includes, each
+ * with an account. The probe deadline and interval are passed in like the ping
+ * interval, because a real Bun server cannot run on a `TestClock`.
  */
 const withRegistry = (
   body: (harness: ServerHarness) => Promise<void>,
   options: Parameters<typeof withServer>[1] = {},
-): Promise<void> => withServer(body, { ...options, plugins: registry });
+): Promise<void> =>
+  withServer(
+    async (harness) => {
+      await addMissingAccounts(harness);
+      await body(harness);
+    },
+    { ...options, plugins: registry },
+  );
 
 interface Account {
   readonly id: string;
@@ -1679,6 +1731,35 @@ describe("probing a runner's provider accounts", () => {
     });
 
   /**
+   * Waits until the controller has sent `count` probe requests, answering each
+   * one as it arrives except those for the account `hold`. A sweep sends a
+   * runner at most two probes at once, so a test that expects more than two
+   * has to answer the ones it does not care about.
+   */
+  const answerProbeRequests = (
+    wire: RunnerSocket,
+    count: number,
+    hold?: string,
+  ): Promise<ReadonlyArray<ProbeRequest>> => {
+    const answered = new Set<string>();
+    return waitUntil(`asked for ${String(count)} probes`, () => {
+      const asked = listProbeRequests(wire);
+      for (const request of asked) {
+        const { providerAccountId } = request.harnessAccount;
+        if (answered.has(request.requestId) || providerAccountId === hold) continue;
+        answered.add(request.requestId);
+        wire.send({
+          _tag: "probeReport",
+          requestId: request.requestId,
+          providerAccountId,
+          result: buildProbeResult("2.1.263"),
+        });
+      }
+      return asked.length >= count ? asked : undefined;
+    });
+  };
+
+  /**
    * The facts of a runner that could run all three harnesses: an adapter for
    * each, and each binary on the machine. A runner that lacks either is not
    * probed for that harness.
@@ -1719,7 +1800,7 @@ describe("probing a runner's provider accounts", () => {
 
       const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
-        const asked = await waitForProbeRequests(wire, all.length);
+        const asked = await answerProbeRequests(wire, all.length);
         // One request per account, keyed by account id, never harness id:
         // one harness can have several accounts.
         expect(
@@ -1728,15 +1809,6 @@ describe("probing a runner's provider accounts", () => {
         for (const request of asked) {
           const account = all.find((one) => one.id === request.harnessAccount.providerAccountId);
           expect(request.harnessId).toBe(account?.defaultHarnessId);
-        }
-
-        for (const request of asked) {
-          wire.send({
-            _tag: "probeReport",
-            requestId: request.requestId,
-            providerAccountId: request.harnessAccount.providerAccountId,
-            result: buildProbeResult("2.1.263"),
-          });
         }
 
         const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
@@ -1796,8 +1868,8 @@ describe("probing a runner's provider accounts", () => {
       const one = await greetEveryHarness(harness.base, first.credential);
       const two = await greetEveryHarness(harness.base, second.credential);
       try {
-        await waitForProbeRequests(one.wire, all.length);
-        await waitForProbeRequests(two.wire, all.length);
+        await answerProbeRequests(one.wire, all.length);
+        await answerProbeRequests(two.wire, all.length);
         const before = [listProbeRequests(one.wire).length, listProbeRequests(two.wire).length];
 
         const patched = await patchAccount(harness.base, token, zai.id, {
@@ -1831,7 +1903,7 @@ describe("probing a runner's provider accounts", () => {
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
-        const opening = await waitForProbeRequests(wire, 3);
+        const opening = await answerProbeRequests(wire, 3);
         const already = opening.length;
 
         const pending = probeNow(harness.base, token, joined.runnerId, claude.id);
@@ -1906,7 +1978,7 @@ describe("probing a runner's provider accounts", () => {
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
-        const asked = await waitForProbeRequests(wire, 3);
+        const asked = await answerProbeRequests(wire, 3, claude.id);
         const mine = asked.find(
           (request) => request.harnessAccount.providerAccountId === claude.id,
         )!;
@@ -1942,7 +2014,7 @@ describe("probing a runner's provider accounts", () => {
       const joined = await enlist(harness);
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const first = await greetEveryHarness(harness.base, joined.credential);
-      const asked = await waitForProbeRequests(first.wire, 3);
+      const asked = await answerProbeRequests(first.wire, 3, claude.id);
       const stale = asked.find(
         (request) => request.harnessAccount.providerAccountId === claude.id,
       )!;
@@ -1956,7 +2028,7 @@ describe("probing a runner's provider accounts", () => {
           result: buildProbeResult("0.0.0-superseded"),
         });
 
-        const fresh = await waitForProbeRequests(second.wire, 3);
+        const fresh = await answerProbeRequests(second.wire, 3, claude.id);
         const current = fresh.find(
           (request) => request.harnessAccount.providerAccountId === claude.id,
         )!;
@@ -1983,11 +2055,11 @@ describe("probing a runner's provider accounts", () => {
       const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
-        const asked = await waitForProbeRequests(wire, 3);
+        const asked = await answerProbeRequests(wire, 3, claude.id);
         const request = asked.find((one) => one.harnessAccount.providerAccountId === claude.id)!;
 
-        // The probes are unanswered, and their deadline is the default 20
-        // seconds. The freeze must not wait for them.
+        // Claude Code's probe is unanswered, and its deadline is the default
+        // 20 seconds. The freeze must not wait for it.
         const promotionToken = await freezeController(harness.base, token);
 
         await sendAndAwaitHeld(harness, "the probe's answer", () =>
@@ -2023,7 +2095,7 @@ describe("probing a runner's provider accounts", () => {
         try {
           // The probes after the hello, then the tick's: every account again,
           // not just the one somebody last looked at.
-          await waitForProbeRequests(wire, all.length * 2);
+          await answerProbeRequests(wire, all.length * 2);
           const second = listProbeRequests(wire).slice(all.length, all.length * 2);
           expect(
             [...second].map((request) => request.harnessAccount.providerAccountId).sort(),
@@ -2105,6 +2177,77 @@ describe("installing a harness on a runner", () => {
             .slice(before)
             .map((one) => one.harnessAccount.providerAccountId),
         ).toContain(claude.id);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("probes the runner's accounts after an update, which changes nothing the facts report shows", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: INSTALLED });
+      try {
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+        await waitUntil("probed after the greeting", () => listProbeRequests(wire)[0]);
+        const before = listProbeRequests(wire).length;
+
+        const pending = installHarness(
+          harness.base,
+          token,
+          joined.runnerId,
+          "claude-code/claude-code",
+        );
+        const request = await waitForFrame<InstallRequest>(wire, "installRequest");
+        // The same path and the same presence: only the version behind it is new.
+        wire.send({ _tag: "factsReport", facts: INSTALLED });
+        wire.send({ _tag: "installResult", requestId: request.requestId, ok: true });
+        expect((await pending).status).toBe(200);
+
+        await waitUntil("probed after the update", () => listProbeRequests(wire)[before]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("probes the runner's accounts when a facts report changes its harnesses, and not when it changes nothing about them", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: BARE });
+      try {
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+        await delay(300);
+        const before = listProbeRequests(wire).length;
+
+        wire.send({ _tag: "factsReport", facts: INSTALLED });
+        await waitUntil("probed after the harness appeared", () => listProbeRequests(wire)[before]);
+        await delay(300);
+        const afterChange = listProbeRequests(wire).length;
+
+        // The same harnesses again, with other facts changed: stored, not probed.
+        wire.send({ _tag: "factsReport", facts: INSTALLED });
+        wire.send({ _tag: "factsReport", facts: { ...INSTALLED, docker: !INSTALLED.docker } });
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.facts?.docker === !INSTALLED.docker,
+        );
+        await delay(300);
+        expect(listProbeRequests(wire)).toHaveLength(afterChange);
       } finally {
         wire.close();
       }

@@ -18,8 +18,11 @@ import type * as Exit from "effect/Exit";
 import type * as Fiber from "effect/Fiber";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as HttpServer from "effect/http/HttpServer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as RpcClient from "effect/rpc/RpcClient";
@@ -39,6 +42,7 @@ import {
 } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
 import { buildHomePaths, BootstrapConfig } from "@hercule/home";
+import type { AssistantService } from "../assistants";
 import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
@@ -61,6 +65,10 @@ import {
   TextGenerationDeadline,
   RunServiceReferenceLayer,
   DiscussionInputsReferenceLayer,
+  ProviderAccountProbeDeadline,
+  ProviderAccountProbeInterval,
+  ProviderAccountProbingLayer,
+  ProviderAccountSignInDeadline,
   SessionEditObserverLayer,
   SessionObserverLayer,
   revalidateStoredWorkflowsOrLog,
@@ -82,6 +90,7 @@ import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import {
+  buildProviderAccountOwner,
   masterKeyLayer,
   Secrets,
   secretsLayer,
@@ -89,17 +98,21 @@ import {
   type SecurityRunner,
 } from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
-import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
+import {
+  findCredentialSecretName,
+  PluginConfigsLayer,
+  PluginHost,
+  PluginHostLayer,
+  PluginsLayer,
+} from "../plugins";
 import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   providerAccountRepository,
-  ProviderAccountProbeDeadline,
-  ProviderAccountProbeInterval,
   HarnessAccountsLayer,
   ProviderAccountProbesLayer,
+  ProviderAccountRunnersLayer,
   ProviderAccountServiceLayer,
-  ProviderAccountSignInDeadline,
-  seedProviderAccounts,
+  ProviderKeyCheckLayer,
 } from "../provider-accounts";
 import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
@@ -124,7 +137,6 @@ import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../pr
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
-import { readSetupComplete } from "../setup";
 import { operationLayers } from "./routes";
 import { bodyLimits, serve } from "./server";
 import type { WebBundle } from "./static";
@@ -143,6 +155,7 @@ export const USERNAME = "rogier";
 const buildServices = (
   home: string,
   githubSkillSources: GithubSkillSources["Service"],
+  providerKeyHttpClient: HttpClient.HttpClient,
   masterKeyBackend: MasterKeyBackend = "file",
   securityRunner?: SecurityRunner,
 ) =>
@@ -181,11 +194,14 @@ const buildServices = (
         Layer.provideMerge(WorkflowValidityObserversLayer),
       ),
     ),
-    // One connection map and one probe driver: the socket route and every
-    // service must use the same `RunnerConnections`. The catalog is provided
-    // to the probe driver, which reads harness definitions from it.
+    // One connection map and one set of awaited device logins: the socket
+    // route and every service must use the same `RunnerConnections` and
+    // `ProviderAccountProbing`. The catalog is provided to the probes, which
+    // read harness definitions from it.
     Layer.provideMerge(
-      ProviderAccountProbesLayer.pipe(
+      ProviderAccountProbingLayer.pipe(
+        Layer.provideMerge(ProviderAccountProbesLayer),
+        Layer.provideMerge(ProviderAccountRunnersLayer),
         Layer.provideMerge(HarnessAccountsLayer),
         Layer.provideMerge(RunnerConnectionsLayer),
         Layer.provideMerge(
@@ -212,6 +228,9 @@ const buildServices = (
         SessionTokensLayer,
         PromotionTokensLayer,
         Layer.succeed(GithubSkillSources, githubSkillSources),
+        ProviderKeyCheckLayer.pipe(
+          Layer.provide(Layer.succeed(HttpClient.HttpClient, providerKeyHttpClient)),
+        ),
       ),
     ),
     Layer.provideMerge(
@@ -254,15 +273,16 @@ const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plug
     : [...plugins, buildPluginWithProviderPerHarness("test", [buildHarnessDefinition("test")])];
 
 /**
- * Gives a test controller one account when the shipped defaults created none,
- * so setup can create the default assistant. The account is of the first
- * registered provider's first account kind that has a registered harness to
- * run in, and that harness is its default. Runs after `seedProviderAccounts`,
- * like the real boot.
+ * Gives a test controller one account, so setup can create the default
+ * assistant. The account is of the first registered provider's first account
+ * kind that has a registered harness to run in, and that harness is its
+ * default. A kind that holds a key or token gets one stored, so the account
+ * can run. Does nothing when the controller already has an account.
  */
-const seedTestProviderAccount = Effect.gen(function* () {
+const addTestProviderAccount = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const accounts = yield* providerAccountRepository;
+  const secrets = yield* Secrets;
   const host = yield* PluginHost;
   if (yield* accounts.hasAny()) return;
   const harnesses = yield* host.harnesses();
@@ -273,19 +293,35 @@ const seedTestProviderAccount = Effect.gen(function* () {
       yield* withTransaction(
         sql,
         Effect.gen(function* () {
-          yield* accounts.insert({
+          const account = yield* accounts.insert({
             providerId: provider.id,
             kind: kind.id,
             label: null,
             defaultHarnessId: harnessId,
             at: yield* nowIso,
           });
+          const credentialName = findCredentialSecretName(kind);
+          if (credentialName !== undefined) {
+            yield* secrets.set(
+              buildProviderAccountOwner(account.id),
+              credentialName,
+              Redacted.make("test-credential"),
+            );
+          }
         }),
       );
       return;
     }
   }
-});
+}).pipe(Effect.catchTag("SecretNameError", Effect.die));
+
+/**
+ * The provider every key check reads when the test gives none: it accepts any
+ * key, and no test reaches a real provider by accident.
+ */
+const acceptingProviderKeyClient = HttpClient.make((request) =>
+  Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}"))),
+);
 
 /**
  * The GitHub a test controller reads when the test gives none: every read
@@ -367,6 +403,7 @@ export type LiveSessionsRunner = <A, E>(
 
 /** What `LiveSessionsRunner` provides. */
 export type LiveSessionsServices =
+  | AssistantService
   | Live
   | DiscussionInputs
   | DiscussionService
@@ -452,6 +489,11 @@ export interface ServerOptions {
    * fails, so no test reaches the real GitHub.
    */
   readonly githubSkillSources?: GithubSkillSources["Service"];
+  /**
+   * The HTTP client a key check goes through. Without it, every key is
+   * accepted, so no test reaches a real provider.
+   */
+  readonly providerKeyHttpClient?: HttpClient.HttpClient;
   /** The default second is too long for a test that waits several ticks. */
   readonly eventRoutingInterval?: Duration.Duration;
   /** The default minute is longer than a test can wait. */
@@ -532,8 +574,7 @@ export const withServer = (
             host.boot(buildPluginRegistry(options.plugins ?? [])),
           );
           yield* revalidateStoredWorkflowsOrLog;
-          yield* seedProviderAccounts(yield* readSetupComplete);
-          yield* seedTestProviderAccount;
+          yield* addTestProviderAccount;
         });
         yield* bootSteps;
         // A restart first interrupts every run's fiber and waits until they
@@ -636,6 +677,7 @@ export const withServer = (
         buildServices(
           home,
           options.githubSkillSources ?? unreachableGithub.service,
+          options.providerKeyHttpClient ?? acceptingProviderKeyClient,
           options.masterKeyBackend,
           options.securityRunner,
         ).pipe(

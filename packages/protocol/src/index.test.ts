@@ -127,6 +127,7 @@ const perMachineAccount = {
   providerAccountId: PROVIDER_ACCOUNT_ID,
   harnessHome: `providers/${PROVIDER_ACCOUNT_ID}`,
   modelArgument: "{model}",
+  credentialVariables: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
 } as const;
 
 /** A key account's `HarnessAccount`, with the optional credential set. */
@@ -134,6 +135,7 @@ const harnessAccount = {
   providerAccountId: PROVIDER_ACCOUNT_ID,
   harnessHome: `providers/homes/${PROVIDER_ACCOUNT_ID}/pi/pi`,
   modelArgument: "zai/{model}",
+  credentialVariables: ["ZAI_API_KEY"],
   credential: { variable: "ZAI_API_KEY", value: "sk-test" },
 } as const;
 const SESSION_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c74";
@@ -309,6 +311,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     harnessId: "claude-code/claude-code",
     // A per-machine account has no credential.
     harnessAccount: perMachineAccount,
+    method: "sign-in",
   },
   {
     _tag: "loginCode",
@@ -439,8 +442,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 15, the version whose frames carry a Provider Account", () => {
-    expect(PROTOCOL_VERSION).toBe(15);
+  it("is 16, the version whose harness account lists its credential variables", () => {
+    expect(PROTOCOL_VERSION).toBe(16);
   });
 });
 
@@ -676,6 +679,34 @@ describe("the controller-to-runner catalogue", () => {
     expect(decodeFromController({ _tag: "hello" })._tag).toBe("Failure");
     expect(decodeFromController({ _tag: "goodbye" })._tag).toBe("Failure");
     expect(decodeFromController({})._tag).toBe("Failure");
+  });
+});
+
+describe("the login frames", () => {
+  const loginStart = {
+    _tag: "loginStart",
+    requestId: REQUEST_ID,
+    harnessId: "claude-code/claude-code",
+    harnessAccount: perMachineAccount,
+    method: "create-token",
+  };
+
+  it("needs the method, and refuses a method that is not a login method", () => {
+    expect(decodeFromController(loginStart)._tag).toBe("Success");
+    expect(decodeFromController(omitKey(loginStart, "method"))._tag).toBe("Failure");
+    expect(decodeFromController({ ...loginStart, method: "oauth" })._tag).toBe("Failure");
+  });
+
+  it("carries a token on a login result, and refuses an empty one", () => {
+    const result = {
+      _tag: "loginResult",
+      requestId: REQUEST_ID,
+      ok: true,
+      token: "sk-ant-oat01-x",
+    };
+    expect(decodeFromRunner(result)._tag).toBe("Success");
+    expect(decodeFromRunner({ ...result, token: "" })._tag).toBe("Failure");
+    expect(decodeFromRunner(omitKey(result, "token"))._tag).toBe("Success");
   });
 });
 

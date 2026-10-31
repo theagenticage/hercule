@@ -14,9 +14,12 @@
  *
  * Where the two differ:
  *
- * - The book still calls the providers step by its old name, `harness`.
+ * - The book still calls the providers step by its old name, `harness`. The
+ *   app's step is "Add an account" and also lists every account, so only its
+ *   rows are comparable with the book's.
  * - The app's `providers-waiting`, the step before the runner has joined,
- *   is not in the book.
+ *   `providers-empty`, the step with no account yet, and `providers-add`, the
+ *   add-account sheet open over it, are not in the book.
  * - The app's `welcome-not-installed` is drawn like a start error, so it is
  *   compared with the book's `start-error`.
  * - The book's `already-set-up` and `remote-set-up` have no state in the
@@ -41,6 +44,8 @@ export const FIRST_RUN_STATES = [
   { step: "account", state: "error", book: { step: "account", state: "error" } },
   { step: "account", state: "submitting", book: { step: "account", state: "submitting" } },
   { step: "providers", state: "waiting", book: null },
+  { step: "providers", state: "empty", book: null },
+  { step: "providers", state: "add", book: null },
   { step: "providers", state: "idle", book: { step: "harness", state: "idle" } },
   { step: "providers", state: "claude-paste", book: { step: "harness", state: "claude-paste" } },
   { step: "providers", state: "claude-error", book: { step: "harness", state: "claude-error" } },

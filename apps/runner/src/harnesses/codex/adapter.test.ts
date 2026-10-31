@@ -86,6 +86,22 @@ const root = fileURLToPath(new URL("../../../../../", import.meta.url));
 
 afterAll(cleanupHomes);
 
+/** The arguments that give Codex the key of an account in `OPENAI_API_KEY`. */
+const API_KEY_OVERRIDES = [
+  "-c",
+  'model_provider="openai_api_key"',
+  "-c",
+  'model_providers.openai_api_key.name="OpenAI API key"',
+  "-c",
+  'model_providers.openai_api_key.base_url="https://api.openai.com/v1"',
+  "-c",
+  'model_providers.openai_api_key.env_key="OPENAI_API_KEY"',
+  "-c",
+  'model_providers.openai_api_key.wire_api="responses"',
+  "-c",
+  "model_providers.openai_api_key.supports_websockets=false",
+];
+
 const runProbe = (
   answers: Answers = {},
   options: { readonly dies?: boolean } = {},
@@ -157,6 +173,30 @@ describe("what the Codex adapter reports about a machine", () => {
       planLabel: "pro",
       backend: "chatgpt",
     });
+  });
+
+  it("reports an account with a key as ok with no identity, and keeps the model list", async () => {
+    const home = createCodexHome();
+    // The app-server reports no account for a key given through a model provider.
+    const { seam, spawns } = buildScriptedSeam({ "account/read": () => LOGGED_OUT });
+    const ctx: HarnessRunnerContext = {
+      ...buildContext(home),
+      credentialVariables: ["OPENAI_API_KEY"],
+      credential: { variable: "OPENAI_API_KEY", value: "sk-test-not-real" },
+    };
+
+    const probed = await Effect.runPromise(makeCodexAdapter(seam).probe(ctx));
+
+    expect(probed.auth).toEqual({ status: "ok", backend: "apiKey" });
+    expect(probed.models).not.toEqual([]);
+    expect(spawns[0]?.command).toEqual([
+      ctx.binary,
+      "app-server",
+      "--strict-config",
+      "-c",
+      "check_for_update_on_startup=false",
+      ...API_KEY_OVERRIDES,
+    ]);
   });
 
   it("reports an API key login as logged in, with no identity", async () => {
@@ -357,6 +397,61 @@ describe("the home directories a session's app-server gets", () => {
       if (key === "HOME") continue;
       expect(spawn.env[key]).toBe(value);
     }
+    await started;
+  });
+
+  it("reads the key of an account through a model provider of its own, and keeps it out of the arguments and the Harness Home", async () => {
+    const home = createCodexHome();
+    const { seam, spawns } = buildScriptedSeam();
+    const ctx: HarnessRunnerContext = {
+      ...buildContext(home),
+      env: { ...buildContext(home).env, OPENAI_API_KEY: "sk-from-the-runner" },
+      credentialVariables: ["OPENAI_API_KEY", "CODEX_API_KEY"],
+      credential: { variable: "OPENAI_API_KEY", value: "sk-test-not-real" },
+    };
+
+    const started = Effect.runPromise(
+      makeCodexAdapter(seam).startSession(SESSION, { ...SPEC, autoCompaction: false }, ctx),
+    ).then(
+      () => undefined,
+      () => undefined,
+    );
+    await waitUntil("spawned an app-server", () => spawns.length === 1);
+
+    const spawn = spawns[0]!;
+    // The overrides come before the session's own, and name the variable, not the key.
+    expect(spawn.command.slice(0, 5 + API_KEY_OVERRIDES.length)).toEqual([
+      ctx.binary,
+      "app-server",
+      "--strict-config",
+      "-c",
+      "check_for_update_on_startup=false",
+      ...API_KEY_OVERRIDES,
+    ]);
+    expect(spawn.command.join(" ")).not.toContain("sk-test-not-real");
+    expect(spawn.env["OPENAI_API_KEY"]).toBe("sk-test-not-real");
+    expect(existsSync(join(home, "codex", "auth.json"))).toBe(false);
+    expect(existsSync(join(home, "codex", "config.toml"))).toBe(false);
+    await started;
+  });
+
+  it("starts no model provider of its own for an account that signs in with ChatGPT, and drops a key of the runner's", async () => {
+    const home = createCodexHome();
+    const { seam, spawns } = buildScriptedSeam();
+    const ctx: HarnessRunnerContext = {
+      ...buildContext(home),
+      env: { ...buildContext(home).env, OPENAI_API_KEY: "sk-from-the-runner" },
+      credentialVariables: ["OPENAI_API_KEY"],
+    };
+
+    const started = Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx)).then(
+      () => undefined,
+      () => undefined,
+    );
+    await waitUntil("spawned an app-server", () => spawns.length === 1);
+
+    expect(spawns[0]!.command.join(" ")).not.toContain("model_provider");
+    expect(spawns[0]!.env["OPENAI_API_KEY"]).toBeUndefined();
     await started;
   });
 

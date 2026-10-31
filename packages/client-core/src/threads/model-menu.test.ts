@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { ProviderAccount, Runner } from "@hercule/contract";
 import {
   BARE,
+  WITH_AGENTS,
   buildProviderAccount,
   buildSnapshot,
   ANTHROPIC_IDENTITY,
@@ -20,7 +21,7 @@ import type { ThreadConfig } from "./config";
 import { buildModelMenu } from "./model-menu";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
-  ...BARE,
+  ...WITH_AGENTS,
   ...overrides,
 });
 
@@ -426,5 +427,36 @@ describe("buildModelMenu: the other accounts", () => {
       dimmed: "account fixed",
       signIn: null,
     });
+  });
+});
+
+describe("buildModelMenu: an account that works on every machine", () => {
+  const WITH_PI = buildRunner({
+    id: "r-pi",
+    name: "pi-box",
+    facts: {
+      ...BARE.facts!,
+      harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+      adapters: ["pi/pi"],
+    },
+  });
+  /** Probed signed in on another runner only. */
+  const PI_ELSEWHERE = buildProviderAccount(ZAI_IDENTITY, [
+    buildSnapshot({ runnerId: "r-elsewhere", harnessId: "pi/pi", models: [GPT] }),
+  ]);
+
+  it("lists the models of another runner's signed-in list on a runner it was never probed on, and does not dim it", () => {
+    const menu = buildModelMenu(
+      { ...buildCatalogs([CLAUDE, PI_ELSEWHERE]), runners: [WITH_PI], thisMacRunnerId: WITH_PI.id },
+      { ...buildConfig(CLAUDE.id, SONNET.slug), runnerId: WITH_PI.id },
+      { ...DRAFT, filter: "gpt" },
+    );
+
+    expect(menu.others[0]).toMatchObject({
+      providerAccountId: PI_ELSEWHERE.id,
+      dimmed: null,
+      signIn: null,
+    });
+    expect(menu.others[0]?.rows.map((row) => row.slug)).toEqual(["gpt-5"]);
   });
 });

@@ -1,14 +1,15 @@
 import { useRef, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useRouteContext } from "@tanstack/react-router";
-import { buildProviderRows } from "@hercule/client-core";
+import { buildProviderRows, findProviderPluginId, type HerculeClient } from "@hercule/client-core";
 import {
   harnessesQuery,
+  pluginsQuery,
   providerAccountsQuery,
   providersQuery,
   runnersQuery,
 } from "../../app/queries";
 import { GlassDialog } from "../glass-dialog";
+import { ProviderMark } from "../settings/providers/provider-mark";
 import { MarkedRows } from "../step";
 import { ProviderLogin } from "./provider-login";
 import "./provider-login.css";
@@ -25,25 +26,35 @@ import "./provider-login.css";
  * the scrim, or Cancel on the row before the sign-in ends leave the account as
  * it was.
  *
+ * `client` is the client of the controller the account belongs to. It is
+ * passed in because the first run opens this dialog outside the routes that
+ * hold a saved controller. `onSignedIn` is called once when a sign-in started
+ * here ends with the account signed in, just before the dialog closes.
+ *
  * `onClose` is called whenever the dialog closes, signed in or not. The
  * caller then unmounts it.
  */
 export function ProviderLoginDialog({
+  client,
   providerAccountId,
   runnerId,
+  onSignedIn,
   onClose,
 }: {
+  readonly client: HerculeClient;
   readonly providerAccountId: string;
   readonly runnerId: string;
+  readonly onSignedIn?: () => void;
   readonly onClose: () => void;
 }): JSX.Element {
-  const { controller } = useRouteContext({ from: "/_connected" });
-  const runners = useSuspenseQuery(runnersQuery(controller.client)).data;
-  const accounts = useSuspenseQuery(providerAccountsQuery(controller.client)).data;
-  const providers = useSuspenseQuery(providersQuery(controller.client)).data;
-  const harnesses = useSuspenseQuery(harnessesQuery(controller.client)).data;
+  const runners = useSuspenseQuery(runnersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const runner = runners.find((each) => each.id === runnerId);
+  const account = accounts.find((each) => each.id === providerAccountId);
   const row =
     runner === undefined
       ? undefined
@@ -71,11 +82,21 @@ export function ProviderLoginDialog({
         ) : (
           <MarkedRows>
             <ProviderLogin
-              client={controller.client}
+              client={client}
+              mark={
+                <ProviderMark
+                  pluginId={account === undefined ? null : findProviderPluginId(providers, account)}
+                  plugins={plugins}
+                  size={18}
+                />
+              }
               row={row}
               runnerId={runner.id}
               startOnOpen
-              onSignedIn={() => dialogRef.current?.close()}
+              onSignedIn={() => {
+                onSignedIn?.();
+                dialogRef.current?.close();
+              }}
             />
           </MarkedRows>
         )}

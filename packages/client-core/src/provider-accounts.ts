@@ -5,8 +5,8 @@
  */
 import type {
   AccountKind,
+  AccountSetupStep,
   CapabilitySnapshot,
-  Harness,
   Provider,
   ProviderAccount,
 } from "@hercule/contract";
@@ -99,28 +99,65 @@ export const findProviderAccountKind = (
     .find((provider) => provider.id === account.providerId)
     ?.kinds.find((kind) => kind.id === account.kind);
 
+/** How a `harness-login` step gets the account its credential: a login on one machine, or a token made once. */
+export type HarnessLoginMethod = Extract<AccountSetupStep, { kind: "harness-login" }>["method"];
+
 /**
- * Checks whether the account has a login on each machine: the harness that
- * runs it keeps the login in its Harness Home, because the harness declares no
- * `credentialVariable` for the account's kind (spec 06 section 2). Such an
- * account is signed in on a runner by `providerAccount.signIn`. Any other
- * account has a credential the controller keeps and every machine uses, however
- * the user obtains it.
- *
- * The harness is the one named by `harnessId`, or the account's default
- * harness. Returns `false` when that harness is not registered or does not
- * declare the account's provider and kind.
+ * Returns how the account's kind gets its credential through its harness's
+ * login, or `null` when the kind has no `harness-login` step, as a key kind
+ * does: its user types the credential in. The login is the one that
+ * `providerAccount.signIn` starts.
  */
-export const requiresSignInPerMachine = (
-  harnesses: readonly Harness[],
-  account: Pick<ProviderAccount, "providerId" | "kind" | "defaultHarnessId">,
-  harnessId?: string | null,
-): boolean => {
-  const kind = harnesses
-    .find((harness) => harness.id === resolveThreadHarnessId(account, harnessId))
-    ?.runs.find((support) => support.providerId === account.providerId)
-    ?.kinds.find((each) => each.kind === account.kind);
-  return kind !== undefined && kind.credentialVariable === undefined;
+export const findHarnessLoginMethod = (
+  providers: readonly Provider[],
+  account: Pick<ProviderAccount, "providerId" | "kind">,
+): HarnessLoginMethod | null => {
+  const step = findProviderAccountKind(providers, account)?.setup.find(
+    (each) => each.kind === "harness-login",
+  );
+  return step?.kind === "harness-login" ? step.method : null;
+};
+
+/**
+ * Checks whether the account's login lives on each machine: its kind has a
+ * `harness-login` step with the `sign-in` method, so the harness keeps the
+ * login in its Harness Home and `providerAccount.signIn` signs in one machine
+ * at a time. Any other account has a credential the controller keeps and every
+ * machine uses: a key the user types in, or a token Hercule made
+ * (`create-token`). Returns `false` when the provider no longer declares the
+ * account's kind.
+ */
+export const signsInPerMachine = (
+  providers: readonly Provider[],
+  account: Pick<ProviderAccount, "providerId" | "kind">,
+): boolean => findHarnessLoginMethod(providers, account) === "sign-in";
+
+/**
+ * Decides whether the credential the controller keeps for the account can be
+ * used now:
+ *
+ * - `not-kept`: the controller keeps no credential for the account: it signs
+ *   in on each machine, or its kind is no longer declared;
+ * - `usable`: the controller keeps a credential and it can be used;
+ * - `token-missing`: the account's kind makes a token and none was made yet;
+ * - `token-expired`: the token is past its `expiresAt`.
+ *
+ * The controller sets `expiresAt` exactly when it stores a token. A token is
+ * judged against the clock at the call, so a caller that draws again later
+ * sees it expire.
+ */
+export const decideStoredCredentialState = (
+  providers: readonly Provider[],
+  account: Pick<ProviderAccount, "providerId" | "kind" | "expiresAt">,
+): "not-kept" | "usable" | "token-missing" | "token-expired" => {
+  if (findProviderAccountKind(providers, account) === undefined) return "not-kept";
+  if (signsInPerMachine(providers, account)) return "not-kept";
+  if (account.expiresAt === null) {
+    return findHarnessLoginMethod(providers, account) === "create-token"
+      ? "token-missing"
+      : "usable";
+  }
+  return Date.parse(account.expiresAt) <= Date.now() ? "token-expired" : "usable";
 };
 
 /**

@@ -2,6 +2,7 @@ import { GITHUB_CONNECTION_TYPE, type Assistant, type Connection } from "@hercul
 import { describe, expect, it } from "vitest";
 import {
   addPutOffStep,
+  buildAllSetAccountOffer,
   buildAllSetRecap,
   findDoneSteps,
   buildFirstRunHost,
@@ -343,51 +344,33 @@ describe("buildProvidersStepText", () => {
     expect(text.rows).toEqual([]);
   });
 
-  it("names and lists only the harnesses found on the machine", () => {
+  it("asks to add an account and lists none while there is none", () => {
+    const text = buildProvidersStepText(buildProviderRows(WITH_CLAUDE, [], PROVIDERS, HARNESSES), {
+      name: "this Mac",
+      isThisMac: true,
+    });
+
+    expect(text.heading).toBe("Add an account");
+    expect(text.subheading).toBe(
+      "An account is how your agents pay for their models: a subscription you sign in to, or an API key. A sign-in runs on this Mac and stays here.",
+    );
+    expect(text.rows).toEqual([]);
+  });
+
+  it("lists every account, also one whose harness is not on the machine", () => {
     const text = buildProvidersStepText(
       buildProviderRows(WITH_CLAUDE, ACCOUNTS, PROVIDERS, HARNESSES),
       THIS_MAC,
     );
 
-    expect(text.heading).toBe("Claude Code is on this Mac");
-    expect(text.subheading).toBe(
-      "Sign in to the ones you want your agents to use. The sign-in runs on this Mac and its credential stays here.",
-    );
-    expect(text.rows.map((row) => row.name)).toEqual(["Anthropic"]);
+    expect(text.heading).toBe("Add an account");
+    expect(text.rows.map((row) => row.name)).toEqual(["Anthropic", "OpenAI", "Z.ai"]);
   });
 
-  it("joins several found harnesses with and, and says the credential stays on another machine", () => {
-    const runner = {
-      ...WITH_CLAUDE,
-      facts: {
-        ...WITH_CLAUDE.facts!,
-        harnesses: [
-          { name: "claude", present: true, path: "/usr/local/bin/claude" },
-          { name: "codex", present: true },
-          { name: "pi", present: false },
-        ],
-      },
-    };
-    const text = buildProvidersStepText(buildProviderRows(runner, ACCOUNTS, PROVIDERS, HARNESSES), {
-      name: "moss",
-      isThisMac: false,
-    });
+  it("says that a sign-in stays on another machine when Hercule runs there", () => {
+    const text = buildProvidersStepText([], { name: "moss", isThisMac: false });
 
-    expect(text.heading).toBe("Claude Code and Codex are on moss");
-    expect(text.subheading).toContain("The sign-in runs on moss and its credential stays there.");
-  });
-
-  it("lists every harness when none was found", () => {
-    const text = buildProvidersStepText(
-      buildProviderRows(BARE, ACCOUNTS, PROVIDERS, HARNESSES),
-      THIS_MAC,
-    );
-
-    expect(text.heading).toBe("Your agents need a coding tool");
-    expect(text.subheading).toBe(
-      "Hercule drives Claude Code, Codex or pi, and found none of them on this Mac. Install one and sign in to it; Hercule can install it for you.",
-    );
-    expect(text.rows).toHaveLength(3);
+    expect(text.subheading).toContain("A sign-in runs on moss and stays there.");
   });
 });
 
@@ -433,6 +416,7 @@ describe("buildAllSetRecap", () => {
     });
 
     expect(recap).toEqual({
+      hasAccount: true,
       providerNames: "Anthropic · Claude",
       harnessId: "claude-code/claude-code",
       gitHubAccount: "rogier",
@@ -460,10 +444,27 @@ describe("buildAllSetRecap", () => {
     });
 
     expect(recap.providerNames).toBeNull();
+    expect(recap.hasAccount).toBe(true);
     // The row still draws a mark: the first harness listed.
     expect(recap.harnessId).toBe("claude-code/claude-code");
     expect(recap.gitHubAccount).toBeNull();
     expect(recap.project?.repository).toBeNull();
+  });
+});
+
+describe("buildAllSetAccountOffer", () => {
+  it("offers to add an account when the user has none", () => {
+    const recap = buildAllSetRecap({ ...EVERYTHING, accounts: [], resources: [] });
+
+    expect(recap.hasAccount).toBe(false);
+    expect(buildAllSetAccountOffer(recap)).toEqual({
+      button: "Add an account",
+      line: "Agents need an account before they can take a desk. Add one from your first thread’s draft, and it can start.",
+    });
+  });
+
+  it("offers to sign in when an account exists but none is signed in", () => {
+    expect(buildAllSetAccountOffer({ hasAccount: true }).button).toBe("Sign in to an account");
   });
 });
 

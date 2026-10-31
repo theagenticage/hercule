@@ -2466,11 +2466,60 @@ export const CLI = {
       },
     },
   },
+  "providerAccount.create": {
+    command: "provider-account create",
+    help: "Creates a Provider Account at a Provider. Find the Provider's id and the kinds it offers with `hercule provider list`. A kind that takes a key (an API key) needs --credentials-stdin with the key as a JSON object on stdin, so it never appears on a command line; Hercule checks the key with the Provider first, and stores nothing when the Provider refuses it. A kind that signs in through its harness takes no credentials: create it, then run `hercule provider-account sign-in` (and `submit-sign-in-code` when asked). A Claude subscription token is made that way, not pasted. The account starts in the Provider's own harness unless you pass --default-harness.",
+    examples: [
+      {
+        args: [
+          "--provider",
+          "anthropic/anthropic",
+          "--kind",
+          "api-key",
+          "--label",
+          "work",
+          "--credentials-stdin",
+        ],
+        stdin: '{"apiKey":"sk-ant-xxx"}',
+      },
+      { args: ["--provider", "anthropic/anthropic", "--kind", "subscription-token"] },
+    ],
+    fields: {
+      providerId: {
+        flag: "provider",
+        help: "The Provider, by its qualified id such as anthropic/anthropic; `hercule provider list` shows them.",
+      },
+      kind: {
+        flag: "kind",
+        help: "The kind of account, such as api-key; `hercule provider list` shows the kinds each Provider offers.",
+      },
+      label: {
+        flag: "label",
+        help: "A name, so you can tell two accounts at one Provider apart; unique within the Provider.",
+      },
+      defaultHarnessId: {
+        flag: "default-harness",
+        help: "The harness a session uses when it names none, by its qualified harness id; `hercule harness list` shows them. Leave it off for the Provider's own harness, which is allowed even when no runner has it yet. Refused when the account cannot run in the harness you name, and when no runner has that harness installed.",
+      },
+      credentials: {
+        stdin: true,
+        flag: "credentials",
+        help: "The credential values as a JSON object keyed by the field names of the kind's credentials step, such as apiKey; read from stdin only when --credentials-stdin asks for them. Required for a kind that has that step, refused for one that has not.",
+      },
+    },
+    errors: {
+      validation:
+        "the Provider refused the key (the message carries its words), the Provider has no such kind, credentials are missing or not allowed for the kind, or the account cannot run in that default harness",
+      invalid_state: "the Provider could not be reached, or could not check the key; try again",
+      conflict: "another account at the same Provider already has that label",
+    },
+  },
   "providerAccount.update": {
     command: "provider-account update",
-    help: "Edits a Provider Account; a field you leave out is not changed. `--label null` removes the label. New credentials replace the stored ones for sessions started afterwards. Pass them as a JSON object on stdin with --credentials-stdin, so a key never appears on a command line. Which fields a kind takes is in `hercule provider list`.",
+    help: "Edits a Provider Account; a field you leave out is not changed. `--label null` removes the label. `--default-harness` changes the harness a session uses when it names none; it is refused when the account cannot run in that harness or no runner has it installed. New credentials are checked with the Provider as on create, then replace the stored ones for sessions started afterwards; a refused key changes nothing. A subscription-token account takes no credentials: it gets a new token only through `hercule provider-account sign-in`. Pass them as a JSON object on stdin with --credentials-stdin, so a key never appears on a command line. Which fields a kind takes is in `hercule provider list`.",
     examples: [
       { args: ["1f3a9c2e", "--label", "personal"] },
+      { args: ["1f3a9c2e", "--default-harness", "pi/pi"] },
       { args: ["1f3a9c2e", "--credentials-stdin"], stdin: '{"apiKey":"zai_xxx"}' },
     ],
     fields: {
@@ -2484,6 +2533,10 @@ export const CLI = {
         flag: "label",
         help: "A new name, so you can tell two accounts at one Provider apart; unique within the Provider. `null` removes it.",
       },
+      defaultHarnessId: {
+        flag: "default-harness",
+        help: "The harness a session uses when it names none, by its qualified harness id; `hercule harness list` shows them. Refused when the account cannot run in it or no runner has it installed.",
+      },
       credentials: {
         stdin: true,
         flag: "credentials",
@@ -2491,6 +2544,9 @@ export const CLI = {
       },
     },
     errors: {
+      validation:
+        "the Provider refused the new key (the message carries its words), or the account cannot run in that default harness",
+      invalid_state: "the Provider could not be reached, or could not check the new key; try again",
       conflict: "another account at the same Provider already has that label",
     },
   },
@@ -4317,7 +4373,7 @@ export const NOUNS = {
   },
   "provider-account": {
     summary: "Provider Accounts: the accounts at a Provider that sessions run on.",
-    flow: "hercule provider-account list finds an account, hercule provider-account sign-in and hercule provider-account submit-sign-in-code sign it in on a machine, hercule provider-account update changes its label or key, and hercule runner probe shows whether it is usable there.",
+    flow: "hercule provider-account create opens an account (a key kind takes its key with --credentials-stdin and is ready; a sign-in kind is created bare), hercule provider-account list finds an account, hercule provider-account sign-in and hercule provider-account submit-sign-in-code sign it in on a machine, hercule provider-account update changes its label, default harness or key, and hercule runner probe shows whether it is usable there.",
   },
   connection: {
     summary: "Connections: the named links to external accounts Hercule acts through.",

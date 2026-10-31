@@ -57,11 +57,12 @@ import { PermissionProfiles, type GrantsError, type PermissionProfile } from "..
 import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
 import {
-  isSignedIn,
-  NO_PLACEMENT,
+  buildRunnerRefusal,
+  findModels,
+  ProviderAccountRunners,
   providerAccountRepository,
   resolveProviderAccountHarness,
-  type StoredSnapshot,
+  type AccountRunners,
 } from "../../provider-accounts";
 import { resourceRepository } from "../../resources";
 import {
@@ -370,6 +371,7 @@ const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const resources = yield* resourceRepository;
   const providerAccounts = yield* providerAccountRepository;
+  const accountRunners = yield* ProviderAccountRunners;
   const host = yield* PluginHost;
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
@@ -425,26 +427,33 @@ const make = Effect.gen(function* () {
 
   /**
    * Chooses the runner for a session when the caller did not name one: the
-   * first placeable runner whose capability snapshot shows this account is
-   * signed in, in the session's harness. Fails with an invalid state error
-   * when there is none.
+   * first placeable runner that can run the account in the session's harness
+   * (`available`). Fails with an invalid state error when there is none. The
+   * message says what is missing when no runner could run the account at all,
+   * and otherwise that the runners that could are not taking work now.
    */
   const choosePlacement = (
-    snapshots: ReadonlyArray<StoredSnapshot>,
-  ): Effect.Effect<StoredSnapshot, InvalidState | SqlError> =>
+    available: AccountRunners,
+  ): Effect.Effect<string, InvalidState | SqlError> =>
     Effect.gen(function* () {
       const placeable = yield* runners.placeable();
-      const found = snapshots.find(
-        (snapshot) => isSignedIn(snapshot) && placeable.has(snapshot.runnerId),
-      );
-      if (found === undefined) return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
+      const found = available.runnerIds.find((runnerId) => placeable.has(runnerId));
+      if (found === undefined) {
+        return yield* Effect.fail(
+          createInvalidStateError(
+            available.noRunnerMessage ??
+              `no connected runner can take a session on ${available.subject} right now; ` +
+                "every machine that can run it is offline, draining or reserved",
+          ),
+        );
+      }
       return found;
     });
 
   /**
-   * Returns the snapshot of the runner the caller named. Fails when the runner
-   * does not exist, is draining or retired, or has no signed-in snapshot for
-   * this account in the harness.
+   * Checks the runner the caller named and returns its id. Fails when the
+   * runner does not exist, is draining or retired, or cannot run the account
+   * in the harness (`available`).
    *
    * A named runner is used even when it is reserved, full, or not connected
    * right now. It is checked on its own, the way `continue` checks the runner
@@ -454,8 +463,8 @@ const make = Effect.gen(function* () {
    */
   const chooseExplicitRunner = (
     runnerId: string,
-    snapshots: ReadonlyArray<StoredSnapshot>,
-  ): Effect.Effect<StoredSnapshot, InvalidState | Validation | SqlError> =>
+    available: AccountRunners,
+  ): Effect.Effect<string, InvalidState | Validation | SqlError> =>
     Effect.gen(function* () {
       const found = yield* runners.read(runnerId);
       if (Option.isNone(found)) {
@@ -469,9 +478,10 @@ const make = Effect.gen(function* () {
           createInvalidStateError(runner.lifecycle === "retired" ? RETIRED : DRAINING),
         );
       }
-      const snapshot = snapshots.find((one) => one.runnerId === runnerId && isSignedIn(one));
-      if (snapshot === undefined) return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
-      return snapshot;
+      if (!available.runnerIds.includes(runnerId)) {
+        return yield* Effect.fail(createInvalidStateError(buildRunnerRefusal(available)));
+      }
+      return runnerId;
     });
 
   /**
@@ -480,17 +490,20 @@ const make = Effect.gen(function* () {
    *
    * 0. the harness: the one requested, or else the account's default. The
    *    session stores it, so it runs in the same harness for good;
-   * 1. the runner: the one named, or else the first placeable runner;
+   * 1. the runner: the one named, or else the first placeable runner that can
+   *    run the account in the harness (`ProviderAccountRunners`);
    * 2. the access mode: the nearest one at or below the requested mode that
    *    the harness supports;
-   * 3. the model: the one requested, or else the runner's default model for
-   *    the account in that harness, with the requested options checked
-   *    against it.
+   * 3. the model: the one requested, or else the default model of the
+   *    account in that harness, with the requested options checked against
+   *    it. The model list is the chosen runner's, else the newest any runner
+   *    reported (`findModels`).
    *
    * Returns the harness id, the runner id, the access mode and the model
    * selection. Fails with `InvalidState` when no runner can take the session,
-   * the harness supports no such access mode, or the runner reported no
-   * models, and with `Validation` for an unknown account, harness, runner or
+   * the harness supports no such access mode, or no model was requested and
+   * no runner has reported a model list for the account in the harness yet,
+   * and with `Validation` for an unknown account, harness, runner or
    * option.
    */
   const resolveStartSettings = (request: {
@@ -517,13 +530,10 @@ const make = Effect.gen(function* () {
         request.providerAccountId,
         request.harnessId,
       );
-      const snapshots = yield* providerAccounts.listHarnessSnapshots(
-        request.providerAccountId,
-        harnessId,
-      );
-      const hosting = yield* request.runnerId === undefined
-        ? choosePlacement(snapshots)
-        : chooseExplicitRunner(request.runnerId, snapshots);
+      const available = yield* accountRunners.list(request.providerAccountId, harnessId);
+      const hostingRunnerId = yield* request.runnerId === undefined
+        ? choosePlacement(available)
+        : chooseExplicitRunner(request.runnerId, available);
       const accessMode = findNearestSupportedAccessMode(
         request.requestedAccessMode,
         definition.declared.accessModes,
@@ -535,20 +545,25 @@ const make = Effect.gen(function* () {
           ),
         );
       }
-      const model =
-        request.model ?? (hosting.models.find((one) => one.isDefault) ?? hosting.models[0])?.slug;
+      const models = findModels(
+        yield* providerAccounts.listHarnessSnapshots(request.providerAccountId, harnessId),
+        hostingRunnerId,
+      );
+      const model = request.model ?? (models.find((one) => one.isDefault) ?? models[0])?.slug;
       if (model === undefined) {
         return yield* Effect.fail(
-          createInvalidStateError("that runner reported no models for this account"),
+          createInvalidStateError(
+            `No model list for ${available.subject} yet. Try again in a moment.`,
+          ),
         );
       }
       // Options are validated against the model, wherever they came from. An
       // option the model does not offer is rejected by name, even when it
       // came from the Agent, rather than silently dropped.
-      yield* validateOptions(hosting.models, model, request.options);
+      yield* validateOptions(models, model, request.options);
       return {
         harnessId,
-        runnerId: hosting.runnerId,
+        runnerId: hostingRunnerId,
         accessMode,
         modelSelection: { model, options: request.options },
       };
@@ -776,34 +791,30 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the id of the oldest Provider Account that is signed in on some
+   * Returns the id of the oldest Provider Account that can run on some
    * runner, in its default harness. A Thread uses it when the user has not
-   * set `thread.providerAccountId`. Fails with an invalid state error when no
-   * account is signed in anywhere.
+   * set `thread.providerAccountId`. When no account can run anywhere it
+   * returns the oldest account anyway, so that placing the session fails
+   * with the reason that account cannot run, such as a missing sign-in.
+   * Fails with an invalid state error when there is no account at all.
    */
-  const pickSignedInProviderAccount = (): Effect.Effect<
-    string,
-    InvalidState | SqlError | Schema.SchemaError
-  > =>
+  const pickRunnableProviderAccount = (): Effect.Effect<string, InvalidState | SqlError> =>
     Effect.gen(function* () {
-      const snapshots = yield* providerAccounts.listAllSnapshots();
-      for (const account of yield* providerAccounts.list()) {
-        if (
-          snapshots.some(
-            (snapshot) =>
-              snapshot.providerAccountId === account.id &&
-              snapshot.harnessId === account.defaultHarnessId &&
-              isSignedIn(snapshot),
-          )
-        ) {
-          return account.id;
-        }
-      }
-      return yield* Effect.fail(
-        createInvalidStateError(
-          "no provider account is signed in on any runner; sign in to an account on a runner first",
-        ),
+      const all = yield* providerAccounts.list();
+      const available = yield* accountRunners.listMany(
+        all.map((account) => ({
+          providerAccountId: account.id,
+          harnessId: account.defaultHarnessId,
+        })),
       );
+      const runnable = available.findIndex((one) => one.runnerIds.length > 0);
+      const chosen = all[Math.max(runnable, 0)];
+      if (chosen === undefined) {
+        return yield* Effect.fail(
+          createInvalidStateError("there is no provider account; add one in Settings › Providers"),
+        );
+      }
+      return chosen.id;
     });
 
   const readThreadProfileId = (): Effect.Effect<string, InvalidState | GrantsError | SqlError> =>
@@ -1363,7 +1374,7 @@ const make = Effect.gen(function* () {
             decoded.providerAccountId ??
             agent?.providerAccountId ??
             threadDefaults?.providerAccountId ??
-            (yield* pickSignedInProviderAccount());
+            (yield* pickRunnableProviderAccount());
           // A harness default belongs to its account, so it applies only when
           // the session runs on that account. `undefined` means the account's
           // default harness.
@@ -1600,4 +1611,5 @@ export const PlacementLayer: Layer.Layer<
   | Dispatch
   | PromotionState
   | TextGeneration
+  | ProviderAccountRunners
 > = Layer.effect(Placement)(make);

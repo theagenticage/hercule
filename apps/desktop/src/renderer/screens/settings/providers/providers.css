@@ -281,3 +281,65 @@
   font-size: var(--t-12);
   line-height: 1.45;
 }
+
+/* The Default harness section: a radio, the harness's mark and its name. The
+   prototype's row is a 32px-high grid of the radio (14px), the mark (16px) and
+   the text, 9px apart, bleeding 8px past the section so the hover wash
+   reaches beyond the text. The prototype puts the reason after the name on
+   the same line; the reasons are sentences, which do not fit beside a name
+   in a 500px sheet, so they sit under it. */
+.pa-harnesses {
+  display: grid;
+  gap: 6px;
+}
+.pa-harness {
+  display: grid;
+  grid-template-columns: 14px 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  font-size: var(--t-13);
+  cursor: pointer;
+}
+.pa-harness > .br {
+  justify-self: center;
+}
+.pa-harness:hover:not(.is-off) {
+  background: var(--hover);
+}
+.pa-harness-text {
+  display: grid;
+  min-width: 0;
+  padding: 4px 0;
+}
+.pa-harness-text b {
+  font-weight: var(--w-medium);
+  line-height: 1.3;
+}
+.pa-harness-text small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.35;
+}
+.pa-harness.is-off {
+  cursor: default;
+}
+/* The mark is dimmed to the name's faint colour; it is a picture, so it cannot take the colour. */
+.pa-harness.is-off > :not(.choice-box, .pa-harness-text) {
+  opacity: 0.45;
+}
+.pa-harness.is-off .pa-harness-text b {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  text-decoration: line-through;
+  text-decoration-color: var(--line);
+}
+.pa-harnesses .pa-hint {
+  font-size: var(--t-11);
+}
+.pa-harnesses .fl-err {
+  margin: 0;
+}

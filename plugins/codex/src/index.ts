@@ -30,13 +30,17 @@ const definition: HarnessDefinition = {
     disallowedTools: "unsupported",
     structuredOutput: "supported",
   },
-  // The login of a ChatGPT subscription lives in the Harness Home, so the
-  // kind has no credential variable, and Codex accepts every model the account
-  // lists under its own id.
+  // The login of a ChatGPT subscription lives in the Harness Home, so that
+  // kind has no credential variable. An API key is handed over in
+  // OPENAI_API_KEY. Codex accepts every model the account lists under its own
+  // id.
   runs: [
     {
       providerId: "openai/openai",
-      kinds: [{ kind: "subscription-per-machine" }],
+      kinds: [
+        { kind: "subscription-per-machine" },
+        { kind: "api-key", credentialVariable: "OPENAI_API_KEY" },
+      ],
       modelArgument: "{model}",
       models: "all",
     },

@@ -156,6 +156,25 @@ export async function connectFleet(url: string): Promise<Fleet> {
   const call = <T>(method: string, path: string, body?: unknown): Promise<T> =>
     callApi<T>(url, token, method, path, body);
 
+  // A fresh controller has no account, and every thread the fleet spawns
+  // runs on a Claude Code account, so the fleet makes one before any runner
+  // joins. The scripted runners answer its probe as signed in.
+  const accounts = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
+  if (!accounts.some((account) => account.defaultHarnessId === "claude-code/claude-code")) {
+    await call("POST", "/provider-accounts", {
+      providerId: "anthropic/anthropic",
+      kind: "subscription-per-machine",
+    });
+  }
+  // A real install gets the default assistant with its first ready account
+  // (a sign-in on a real machine). The fleet has no sign-in to make, and
+  // some tests have no runner at all, so it creates the assistant itself.
+  const assistants = await call<{ readonly items: ReadonlyArray<unknown> }>(
+    "GET",
+    "/assistants?limit=1",
+  );
+  if (assistants.items.length === 0) await call("POST", "/assistants", { name: "Hercule" });
+
   const runners: Array<ScriptedRunner> = [];
   let providerAccountId: string | undefined;
   let spawned = 0;

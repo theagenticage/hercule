@@ -43,6 +43,7 @@ const buildAccount = (id: string, label: string | null): ProviderAccount => ({
   identity: null,
   planLabel: null,
   defaultHarnessId: "claude-code/claude-code",
+  expiresAt: null,
   snapshots: [],
   createdAt: AT,
   updatedAt: AT,

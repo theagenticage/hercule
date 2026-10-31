@@ -7,6 +7,9 @@
  * - On a runner Mac, the welcome offers only a way to another machine.
  * - Open the office starts Hercule, and a step put off and the step reached
  *   both survive a relaunch.
+ * - The providers step is "Add an account": it opens the add-account sheet,
+ *   shows the controller's refusal of a key it cannot accept, and can still
+ *   be put off.
  * - A controller already set up, as the web app's setup does, gets the
  *   sign-in screen, never the account step.
  * - A controller on another machine is never offered an install or Open the
@@ -152,6 +155,50 @@ describe("the first run on this Mac", () => {
       { label: "GitHub", number: "3", current: true },
       { label: "Project", number: "4", current: false },
     ]);
+  });
+
+  it("asks to add an account on the providers step, and shows why a key was refused", async () => {
+    const userDataDir = createUserDataDirForTest();
+    await writeStandInBinaryForTest(userDataDir, "serve");
+    const { page } = await launchForTest(userDataDir);
+
+    await page.getByRole("button", { name: "Open the office" }).click();
+    await page.getByRole("heading", { name: "Create your account" }).waitFor();
+    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByRole("button", { name: "Create account" }).click();
+
+    // A fresh controller has no account. The ladder keeps the step's name.
+    await page.getByRole("heading", { name: "Add an account", exact: true }).waitFor();
+    expect((await readLadder(page)).map(({ label, current }) => [label, current])).toEqual([
+      ["Account", false],
+      ["Providers", true],
+      ["GitHub", false],
+      ["Project", false],
+    ]);
+    expect(await page.getByRole("button", { name: "Continue", exact: true }).isDisabled()).toBe(
+      true,
+    );
+
+    await page.getByRole("button", { name: "Add an account", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "Add an account", exact: true })
+      .getByRole("button", { name: "Z.ai" })
+      .click();
+    const sheet = page.getByRole("dialog", { name: "Add Z.ai", exact: true });
+    await sheet.getByLabel("API key", { exact: true }).fill("e2e-key-the-provider-refuses");
+    await sheet.getByRole("button", { name: "Done", exact: true }).click();
+
+    // The message is the controller's: the provider's own words, or that the
+    // provider could not be reached. The test has no key a provider accepts.
+    const refusal = sheet.getByRole("alert");
+    await refusal.waitFor();
+    expect((await refusal.textContent())?.trim()).not.toBe("");
+    expect(await sheet.getByLabel("API key", { exact: true }).inputValue()).toBe(
+      "e2e-key-the-provider-refuses",
+    );
+    await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+    await sheet.waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Do this later", exact: true }).waitFor();
   });
 
   it("opens on the sign-in screen when Hercule was set up elsewhere, such as in the web app", async () => {

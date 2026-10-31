@@ -423,12 +423,25 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(id)}
       `),
 
-    /** Replaces the runner's facts with the latest report; older reports are not kept. */
-    recordFacts: (id: string, facts: RunnerFacts, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(
-        sql`UPDATE runners SET facts = ${JSON.stringify(facts)}, updated_at = ${at}
-            WHERE id = ${uuidFromString(id)}`,
-      ),
+    /**
+     * Replaces the runner's facts with the latest report; older reports are not
+     * kept. Returns the facts it replaced, or null when the runner had none
+     * (or none this build can read), so the caller can tell what changed.
+     */
+    recordFacts: (
+      id: string,
+      facts: RunnerFacts,
+      at: string,
+    ): Effect.Effect<RunnerFacts | null, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly facts: string | null }>`
+          SELECT facts FROM runners WHERE id = ${uuidFromString(id)}
+        `;
+        const previous = yield* decodeFacts(id, rows[0]?.facts ?? null);
+        yield* sql`UPDATE runners SET facts = ${JSON.stringify(facts)}, updated_at = ${at}
+                   WHERE id = ${uuidFromString(id)}`;
+        return previous;
+      }),
 
     /**
      * Stores the runner's latest watermark report. Returns whether the runner

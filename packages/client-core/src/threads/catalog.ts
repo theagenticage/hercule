@@ -25,6 +25,34 @@ export const findSnapshotOn = (
   );
 
 /**
+ * Returns the snapshot whose model list stands in for the account's Model
+ * Catalog in `harnessId` on a runner (until the catalog exists): the `ok`
+ * snapshot of `runnerId` when that runner has one, else the most recently
+ * probed `ok` snapshot on any runner, else `undefined`. The controller picks
+ * models the same way (`findModels` in its provider-accounts domain), so the
+ * composer offers the models the controller will accept. An account whose
+ * credential every runner uses can run on a runner that was never probed, and
+ * the fallback keeps its models on offer there.
+ */
+export const findModelSnapshot = (
+  account: Pick<ProviderAccount, "snapshots">,
+  harnessId: string,
+  runnerId: string | null | undefined,
+): CapabilitySnapshot | undefined => {
+  const signedIn = account.snapshots.filter(
+    (snapshot) => snapshot.harnessId === harnessId && snapshot.auth.status === "ok",
+  );
+  return (
+    signedIn.find((snapshot) => snapshot.runnerId === runnerId) ??
+    signedIn.reduce<CapabilitySnapshot | undefined>(
+      (best, snapshot) =>
+        best === undefined || snapshot.probedAt > best.probedAt ? snapshot : best,
+      undefined,
+    )
+  );
+};
+
+/**
  * What a "Sign in" action signs in: the account, the runner, and a label for
  * the pair. The runner is needed because a credential is stored on one runner
  * only, and the caller may be showing a different row.

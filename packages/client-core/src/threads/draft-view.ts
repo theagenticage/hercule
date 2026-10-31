@@ -92,6 +92,7 @@ export const buildDraftView = (
     runners,
     profiles: reads.profiles,
     thisMacRunnerId,
+    catalogs: reads,
     ...address,
   });
   const resolved = resolveThreadConfig(reads, { kind: "draft", config: base }, picks);

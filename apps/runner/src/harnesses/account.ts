@@ -7,7 +7,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { HarnessCredential, HarnessHome } from "@hercule/protocol";
+import type { HarnessAccount, HarnessHome } from "@hercule/protocol";
 
 /**
  * Returns the absolute folder of a Harness Home, which it creates with mode
@@ -35,21 +35,22 @@ export const formatModelArgument = (modelArgument: string, model: string): strin
  * Returns the environment for the harness process with the account's
  * credential applied, as a copy:
  *
- * - with a key, the variable the harness reads it from is set to the key;
- * - with a variable but no key, the variable is removed, so a key of the
- *   runner's own never stands in for an account that has none;
- * - without a credential, the environment is unchanged.
+ * - every variable in `credentialVariables` is removed first, so a key of the
+ *   runner's own (an `ANTHROPIC_API_KEY` in its shell) never stands in for the
+ *   account's login, or for the key the account does not have;
+ * - then, when the account has a credential, its variable is set to the key.
  *
  * The key goes in the environment of the harness process and nowhere else:
  * never to disk and never to a log.
  */
 export const applyCredential = (
   env: Readonly<Record<string, string | undefined>>,
-  credential: HarnessCredential | undefined,
+  account: Pick<HarnessAccount, "credentialVariables" | "credential">,
 ): Record<string, string | undefined> => {
   const applied = { ...env };
-  if (credential === undefined) return applied;
-  if (credential.value === undefined) delete applied[credential.variable];
-  else applied[credential.variable] = credential.value;
+  for (const variable of account.credentialVariables) delete applied[variable];
+  if (account.credential !== undefined) {
+    applied[account.credential.variable] = account.credential.value;
+  }
   return applied;
 };

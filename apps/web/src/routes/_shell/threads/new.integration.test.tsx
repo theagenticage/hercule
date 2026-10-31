@@ -30,7 +30,7 @@ import type {
   Workspace,
 } from "@hercule/contract";
 import { HARNESSES } from "@hercule/client-core/testing";
-import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
+import { buildRunner, buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
   buildErrorBody,
   pickRow,
@@ -50,7 +50,8 @@ const RUNNER: Runner = {
   reserved: false,
   version: "0.4.2",
   labels: [],
-  facts: null,
+  // Claude Code and Codex installed, so the accounts of the tests are ready here.
+  facts: buildRunner("", "").facts,
   watermark: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
@@ -126,6 +127,7 @@ const buildProviderAccount = (
   identity: null,
   planLabel: null,
   defaultHarnessId: provider.harnessId,
+  expiresAt: null,
   snapshots: snapshots.map((snapshot) => ({ ...snapshot, harnessId: provider.harnessId })),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",

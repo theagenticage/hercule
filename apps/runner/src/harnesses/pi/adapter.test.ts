@@ -137,9 +137,9 @@ describe("launching pi for a session", () => {
 
   it("keeps the runner's own key from an account that has none stored", async () => {
     const run = createDriving();
+    // The account has no key stored, so its frame carries no credential.
     const ctx = {
-      ...run.ctx,
-      credential: { variable: "ZAI_API_KEY" },
+      ...buildContext(run.ctx.home, run.ctx.cwd, null),
       env: { ...run.ctx.env, ZAI_API_KEY: "the runner daemon's own key" },
     };
 

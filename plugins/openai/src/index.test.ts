@@ -33,12 +33,29 @@ describe("the OpenAI provider", () => {
 
     expect(definition.id).toBe("openai");
     expect(definition.displayName).toBe("OpenAI");
-    expect(definition.kinds).toHaveLength(1);
     const kind = definition.kinds[0];
     expect(kind.id).toBe("subscription-per-machine");
     expect(kind.title).toBe("ChatGPT subscription, signed in on each machine");
-    expect(kind.setup).toEqual([{ kind: "harness-login" }]);
+    expect(kind.setup).toEqual([{ kind: "harness-login", method: "sign-in" }]);
     expect(kind.harnesses).toEqual(["codex/codex"]);
+  });
+
+  it("offers an API key, checked against the models list, which runs in Codex and pi", () => {
+    const kind = captureProviderDefinition().kinds[1]!;
+
+    expect(kind.id).toBe("api-key");
+    expect(kind.setup).toEqual([
+      { kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] },
+    ]);
+    expect(kind.keyCheck).toEqual({
+      url: "https://api.openai.com/v1/models",
+      headers: { authorization: "Bearer {apiKey}" },
+    });
+    expect(kind.harnesses).toEqual(["codex/codex", "pi/pi"]);
+  });
+
+  it("starts new accounts in Codex", () => {
+    expect(captureProviderDefinition().defaultHarnessId).toBe("codex/codex");
   });
 
   it("suggests gpt-6-luna for text generation", () => {

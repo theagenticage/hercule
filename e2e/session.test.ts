@@ -27,8 +27,13 @@ import {
   type Controller,
 } from "../scripts/controller-process";
 import {
+  CLAUDE_CODE,
+  ensureClaudeAccount,
+  LOGIN_DEADLINE_MS,
+  probeUntilLoggedIn,
   readApiKey,
   listProviderAccounts,
+  waitForEnrolledRunner,
   parseJsonOutputOrFail,
   isLiveSessionTestEnabled,
   readSession,
@@ -52,23 +57,27 @@ let apiKey: string;
 /** Long enough for a cold harness to start, connect and reply to one short prompt. */
 const TURN_DEADLINE_MS = 120_000;
 
-/** Long enough for a machine to probe the account and report that it is logged in. */
-const LOGIN_DEADLINE_MS = 60_000;
-
 /**
- * Waits for a machine to probe the Claude Code account, and returns it. Returns
- * `undefined` if no machine reported a usable login for it in time.
+ * Creates the Claude Code account, which a fresh controller does not have, and
+ * has the controller's own runner probe it until its login reports ok. Returns
+ * the account as the controller then holds it, or `undefined` if the runner
+ * reported no usable login in time.
  */
 const waitForLoggedInAccount = async (): Promise<ProviderAccount | undefined> => {
-  const deadline = Date.now() + LOGIN_DEADLINE_MS;
-  for (;;) {
-    const claude = (await listProviderAccounts({ url, apiKey })).find(
-      (one) => one.defaultHarnessId === "claude-code/claude-code",
-    );
-    if (claude?.snapshots.some((snapshot) => snapshot.auth.status === "ok") === true) return claude;
-    if (Date.now() > deadline) return undefined;
-    await Bun.sleep(500);
+  const runnerId = await waitForEnrolledRunner({ home: state.home, binary });
+  const account = await ensureClaudeAccount({ url, apiKey });
+  try {
+    await probeUntilLoggedIn({
+      home: state.home,
+      binary,
+      runnerId,
+      providerAccountId: account.id,
+      harnessId: CLAUDE_CODE,
+    });
+  } catch {
+    return undefined;
   }
+  return (await listProviderAccounts({ url, apiKey })).find((one) => one.id === account.id);
 };
 
 const read = (id: string): Promise<Session> => readSession({ home: state.home, binary, id });

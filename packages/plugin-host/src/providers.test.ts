@@ -2,23 +2,48 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { SetupStep } from "./connections";
 import { HarnessProviderSupport, HarnessWord } from "./contributions";
-import { AccountKind, ProviderDefinition } from "./providers";
+import { AccountKind, HarnessLoginStep, ProviderDefinition } from "./providers";
 
 const accepts = (schema: Schema.Top, input: unknown): boolean =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(schema as Schema.Codec<unknown>)(input))._tag ===
   "Success";
 
+const omitField = (value: Record<string, unknown>, key: string) => {
+  const copy = { ...value };
+  delete copy[key];
+  return copy;
+};
+
 const kind = {
   id: "subscription-per-machine",
   title: "Claude subscription",
   description: "Signed in on each machine.",
-  setup: [{ kind: "harness-login" }],
+  setup: [{ kind: "harness-login", method: "sign-in" }],
   harnesses: ["claude-code/claude-code"],
 };
 
 describe("an account kind", () => {
   it("can sign in with the harness's own login", () => {
     expect(accepts(AccountKind, kind)).toBe(true);
+  });
+
+  it("needs the method of its harness login, and accepts only the login methods", () => {
+    expect(accepts(HarnessLoginStep, { kind: "harness-login" })).toBe(false);
+    expect(accepts(HarnessLoginStep, { kind: "harness-login", method: "sign-in" })).toBe(true);
+    expect(accepts(HarnessLoginStep, { kind: "harness-login", method: "create-token" })).toBe(true);
+    expect(accepts(HarnessLoginStep, { kind: "harness-login", method: "paste" })).toBe(false);
+  });
+
+  it("takes a key check with a url and headers", () => {
+    const keyCheck = {
+      url: "https://api.example.com/v1/models",
+      headers: { authorization: "Bearer {apiKey}" },
+    };
+    expect(accepts(AccountKind, { ...kind, keyCheck })).toBe(true);
+    expect(accepts(AccountKind, { ...kind, keyCheck: { url: keyCheck.url } })).toBe(false);
+    expect(accepts(AccountKind, { ...kind, keyCheck: { ...keyCheck, headers: { a: 1 } } })).toBe(
+      false,
+    );
   });
 
   it("can use every step a Connection type can", () => {
@@ -46,16 +71,28 @@ describe("an account kind", () => {
 
 describe("a Connection type's setup step", () => {
   it("cannot be the harness login", () => {
-    expect(accepts(SetupStep, { kind: "harness-login" })).toBe(false);
+    expect(accepts(SetupStep, { kind: "harness-login", method: "sign-in" })).toBe(false);
   });
 });
 
 describe("a provider definition", () => {
-  const provider = { id: "anthropic", displayName: "Anthropic", kinds: [kind] };
+  const provider = {
+    id: "anthropic",
+    displayName: "Anthropic",
+    kinds: [kind],
+    defaultHarnessId: "claude-code/claude-code",
+  };
 
   it("needs at least one account kind", () => {
     expect(accepts(ProviderDefinition, provider)).toBe(true);
     expect(accepts(ProviderDefinition, { ...provider, kinds: [] })).toBe(false);
+  });
+
+  it("needs a default harness, named by qualified id", () => {
+    expect(accepts(ProviderDefinition, omitField(provider, "defaultHarnessId"))).toBe(false);
+    expect(accepts(ProviderDefinition, { ...provider, defaultHarnessId: "claude-code" })).toBe(
+      false,
+    );
   });
 
   it("takes an optional text generation model, which cannot be empty", () => {

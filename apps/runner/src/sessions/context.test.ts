@@ -147,6 +147,7 @@ const buildSessionStart = (overrides: Partial<SessionStart> = {}): SessionStart 
     providerAccountId: ACCOUNT_ID,
     harnessHome: HARNESS_HOME,
     modelArgument: "{model}",
+    credentialVariables: [],
   },
   token: "a-session-token",
   spec: {
@@ -331,6 +332,7 @@ describe("the environment a session runs with", () => {
           providerAccountId: ACCOUNT_ID,
           harnessHome: `providers/homes/${ACCOUNT_ID}/pi/pi`,
           modelArgument: "zai/{model}",
+          credentialVariables: ["ZAI_API_KEY"],
           credential: { variable: "ZAI_API_KEY", value: "the-key" },
         },
       }),
@@ -360,6 +362,7 @@ describe("the environment a session runs with", () => {
           providerAccountId: ACCOUNT_ID,
           harnessHome: `providers/homes/${ACCOUNT_ID}/codex/codex`,
           modelArgument: "{model}",
+          credentialVariables: [],
         },
       }),
       machine,

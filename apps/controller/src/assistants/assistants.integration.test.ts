@@ -58,7 +58,7 @@ interface Arranged {
 
 /**
  * Gives the controller an account for each harness after the first. The test
- * controller seeds one account for the first harness, so these are newer than
+ * controller adds one account for the first harness, so these are newer than
  * it, and the first harness's account is the oldest.
  */
 const addAccountsForOtherHarnesses = (harness: ServerHarness): Promise<void> =>
@@ -350,7 +350,7 @@ describe("assistant.create", () => {
       expect(response.status).toBe(409);
       const refused = await readErrorBody(response);
       expect(refused.code, refused.text).toBe("invalid_state");
-      expect(refused.message).toContain("this version cannot add one yet");
+      expect(refused.message).toContain("add an account first");
       expect((await listAssistants(arranged)).map((assistant) => assistant.name)).toEqual([
         "Hercule",
       ]);

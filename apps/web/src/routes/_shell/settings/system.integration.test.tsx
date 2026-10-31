@@ -34,6 +34,7 @@ const CODEX: ProviderAccount = {
   identity: "rogier@example.com",
   planLabel: "Plus",
   defaultHarnessId: "codex/codex",
+  expiresAt: null,
   snapshots: [
     {
       runnerId: RUNNER_ID,

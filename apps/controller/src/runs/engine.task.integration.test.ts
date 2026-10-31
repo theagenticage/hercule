@@ -20,6 +20,7 @@ import { readEventsOfKind } from "../events/testing";
 import { SessionTokensLayer } from "../permissions";
 import { EventKindCatalogLayer, PluginHost } from "../plugins";
 import { buildPluginStack, USER } from "../plugins/testing";
+import { ProviderAccountRunnersLayer } from "../provider-accounts";
 import { SettingsLayer } from "../settings";
 import { TaskServiceLayer } from "../tasks";
 import { TextGeneration } from "../text-generation";
@@ -67,6 +68,7 @@ const runTest = <A, E>(body: Effect.Effect<A, E, Deps>) => {
         generate: () => Effect.die("these tests make no model call"),
       }),
     ),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(buildPluginStack()),
   );
   return Effect.runPromise(

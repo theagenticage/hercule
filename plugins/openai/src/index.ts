@@ -18,7 +18,8 @@ const OPENAI_MARK_PATH =
 
 /**
  * OpenAI as a provider. A ChatGPT subscription is signed in through Codex's
- * own login on each machine, so Codex is the one harness the kind lists.
+ * own login on each machine, so Codex is the one harness that kind lists. An
+ * API key runs in Codex and in pi.
  */
 const definition: ProviderDefinition = {
   id: "openai",
@@ -29,10 +30,23 @@ const definition: ProviderDefinition = {
       title: "ChatGPT subscription, signed in on each machine",
       description:
         "Uses your ChatGPT plan through Codex. You sign in to Codex once on each machine that runs it.",
-      setup: [{ kind: "harness-login" }],
+      setup: [{ kind: "harness-login", method: "sign-in" }],
       harnesses: ["codex/codex"],
     },
+    {
+      id: "api-key",
+      title: "API key",
+      description:
+        "From the OpenAI platform. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: {
+        url: "https://api.openai.com/v1/models",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+      harnesses: ["codex/codex", "pi/pi"],
+    },
   ],
+  defaultHarnessId: "codex/codex",
   // Codex lists this model from release 0.162 on. On an older release it is
   // not in the account's model list, so Automatic passes over this provider
   // rather than ask for a model that is not there.

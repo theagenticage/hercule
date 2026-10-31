@@ -11,7 +11,8 @@
  *   to edit;
  * - a machine that joined connects to the controller in its `runner.json`,
  *   with the credential stored there;
- * - the folders a crashed run left behind are wiped at start.
+ * - the folders a crashed run left behind are wiped at start, including the
+ *   scratch folders of token logins in the temp directory.
  */
 import {
   existsSync,
@@ -20,6 +21,7 @@ import {
   mkdirSync,
   readlinkSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,6 +30,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { locateRunnerDir } from "@hercule/home";
 import { runDaemon } from "./daemon";
+import { SETUP_TOKEN_FOLDER_PREFIX } from "./harnesses/setup-token-folder";
 
 const homes: Array<string> = [];
 
@@ -108,6 +111,11 @@ describe("runDaemon", () => {
         join(storageDir, "session-skills", "0199e0e7-0000-7000-8000-0000000000ff-start", "skills"),
         { recursive: true },
       );
+      // What a killed runner leaves in the temp directory: the scratch folder
+      // of a token login, older than any login may run.
+      const leftover = mkdtempSync(join(tmpdir(), SETUP_TOKEN_FOLDER_PREFIX));
+      const longAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      utimesSync(leftover, longAgo, longAgo);
       // The loop retries for ever, so the race stops it as soon as the first
       // attempt reaches the listener.
       await Effect.runPromise(
@@ -131,6 +139,7 @@ describe("runDaemon", () => {
       expect(readlinkSync(link)).toBe(process.execPath);
       // No session outlives the process, so nothing of the last run's skills stays.
       expect(existsSync(join(storageDir, "session-skills"))).toBe(false);
+      expect(existsSync(leftover)).toBe(false);
     } finally {
       await server.stop(true);
     }

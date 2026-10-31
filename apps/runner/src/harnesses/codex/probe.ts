@@ -90,7 +90,14 @@ const USER_AGENT = /^[^/\s]+\/(\S+)/;
 const parseVersion = (userAgent: string): string | null =>
   USER_AGENT.exec(userAgent)?.[1]?.slice(0, MAX_FACT_LENGTH) ?? null;
 
-const buildAuth = ({ account }: GetAccountResponse): ProbeResult["auth"] => {
+/**
+ * Returns the auth of the probe. An account with an API key is `ok` with no
+ * identity: the app-server reports no account for a key given through a model
+ * provider, and the key works wherever Codex is installed (spec 06 section
+ * 3.2). Any other account is `ok` when Codex is signed in.
+ */
+const buildAuth = ({ account }: GetAccountResponse, hasApiKey: boolean): ProbeResult["auth"] => {
+  if (hasApiKey) return { status: "ok", backend: "apiKey" };
   if (account === null) return { status: "unauthenticated" };
   if (account.type !== "chatgpt") return { status: "ok", backend: account.type };
   return {
@@ -215,7 +222,7 @@ export const makeProbe =
                 ),
               onSuccess: ([account, models]) => ({
                 harnessVersion: parseVersion(initialized.userAgent),
-                auth: buildAuth(account),
+                auth: buildAuth(account, ctx.credential !== undefined),
                 models: buildCatalog((models as ModelListResponse).data),
               }),
             }),

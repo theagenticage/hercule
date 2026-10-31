@@ -74,12 +74,13 @@ export const buildHarnessDefinition = (
 
 /**
  * Builds a provider definition with one `api-key` account kind, entered as a
- * single `apiKey` field, that runs in the harnesses named by `harnesses`
- * (qualified ids).
+ * single `apiKey` field and a key check, that runs in the harnesses named by
+ * `harnesses` (qualified ids). The first of them is the provider's default
+ * harness.
  */
 export const buildProviderDefinition = (
   id: string,
-  harnesses: ReadonlyArray<string> = [],
+  harnesses: ReadonlyArray<string> = ["alpha/alpha"],
 ): ProviderDefinition => ({
   id,
   displayName: `Provider ${id}`,
@@ -90,8 +91,13 @@ export const buildProviderDefinition = (
       description: `A key for provider ${id}.`,
       setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
       harnesses,
+      keyCheck: {
+        url: "https://api.example.com/v1/models",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
     },
   ],
+  defaultHarnessId: harnesses[0] ?? "alpha/alpha",
 });
 
 /**
@@ -131,10 +137,11 @@ export const buildPluginWithProviderPerHarness = (
           id: SUBSCRIPTION_KIND,
           title: "Subscription",
           description: "A plan signed in on each machine.",
-          setup: [{ kind: "harness-login" }],
+          setup: [{ kind: "harness-login", method: "sign-in" }],
           harnesses: [`${pluginId}/${definition.id}`],
         },
       ],
+      defaultHarnessId: `${pluginId}/${definition.id}`,
     })),
   }).plugin;
 

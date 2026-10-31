@@ -55,6 +55,7 @@ const buildCodex = (snapshot: object) => ({
   identity: null,
   planLabel: null,
   defaultHarnessId: "codex/codex",
+  expiresAt: null,
   snapshots: [snapshot],
   createdAt: "2026-09-14T09:00:00.000Z",
   updatedAt: "2026-09-14T09:00:00.000Z",

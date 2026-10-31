@@ -63,6 +63,7 @@ export const buildContext = (
   binary: "/usr/local/bin/pi",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },
   modelArgument: "zai/{model}",
+  credentialVariables: ["ZAI_API_KEY"],
   ...(credential === null ? {} : { credential }),
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
 });

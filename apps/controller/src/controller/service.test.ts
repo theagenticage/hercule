@@ -7,7 +7,9 @@ import { withTransaction } from "../db";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { PluginHost } from "../plugins";
 import { buildPluginStack } from "../plugins/testing";
+import { ProviderAccountRunnersLayer } from "../provider-accounts";
 import { LocalRunnerId } from "../runners";
+import { Secrets } from "../secrets";
 import { Settings, SettingsLayer } from "../settings";
 import {
   LastTextGenerationFailure,
@@ -27,6 +29,7 @@ const USER: Actor = {
 const buildStack = () =>
   ControllerLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(TextGenerationModelsLayer, LastTextGenerationFailureLayer)),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer)),
     Layer.provideMerge(buildPluginStack()),
   );
@@ -46,6 +49,7 @@ const withIdentity = <A, E>(
     | LastTextGenerationFailure
     | TextGenerationModels
     | PluginHost
+    | Secrets
     | SqlClient.SqlClient
   >,
   actor: Actor | null = USER,
@@ -178,7 +182,7 @@ describe("controller.read text generation", () => {
         model: "mini",
       },
       // No runner has the account signed in, so the reason names it.
-      unavailableReason: expect.stringContaining("OpenAI signed in with the model mini") as unknown,
+      unavailableReason: expect.stringContaining("OpenAI with the model mini") as unknown,
       lastFailure: null,
     });
     expect(result.failed.textGeneration.lastFailure).toEqual({

@@ -3,7 +3,7 @@
  * way into the app. Presentational.
  */
 import type { JSX, ReactNode } from "react";
-import type { AllSetRecap, FirstRunStep } from "@hercule/client-core";
+import { buildAllSetAccountOffer, type AllSetRecap, type FirstRunStep } from "@hercule/client-core";
 import { buildLook, Face, UserAvatar } from "../../faces";
 import { QuestionIcon } from "../../icons/question";
 import { SparkleIcon } from "../../icons/sparkle";
@@ -23,8 +23,9 @@ import { HarnessLogo } from "../thread/harness-logo";
  * is why the last leave failed, or null.
  *
  * Without a signed-in account, no agent can take a desk, so the main button
- * is Sign in to an account and Open Hercule is the quiet one. Both open the
- * draft, whose own Sign in button is where the user signs in.
+ * is Add an account, or Sign in to an account when one exists, and Open
+ * Hercule is the quiet one. Both open the draft, whose own button is where
+ * the user adds or signs in.
  */
 export function AllSet({
   username,
@@ -46,6 +47,7 @@ export function AllSet({
   readonly onLeave: () => void;
 }): JSX.Element {
   const { project } = recap;
+  const accountOffer = buildAllSetAccountOffer(recap);
   const projectName = project?.name ?? "your project";
   const doItNow = (step: FirstRunStep): JSX.Element => (
     <button type="button" className="link" onClick={() => onDoItNow(step)}>
@@ -69,7 +71,7 @@ export function AllSet({
       </div>
       <p className="st-sub">
         {recap.providerNames === null
-          ? "Agents need an account before they can take a desk. Sign in from your first thread’s draft, and it can start."
+          ? accountOffer.line
           : recap.gitHubAccount === null
             ? `Your first colleague is at its desk. It can research, write and plan for ${projectName} now. For code, connect GitHub, then add ${projectName}’s repository.`
             : `Your first colleague is at its desk. Tell it what to do in ${projectName}: it works in its own workspace, and raises its hand when it needs you.`}
@@ -125,7 +127,7 @@ export function AllSet({
         {recap.providerNames === null ? (
           <>
             <button type="button" className="btn btn--accent btn--lg" onClick={onLeave}>
-              Sign in to an account
+              {accountOffer.button}
             </button>
             <button type="button" className="btn btn--quiet" onClick={onLeave}>
               Open Hercule

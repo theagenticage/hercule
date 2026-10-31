@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import {
@@ -40,6 +41,7 @@ import {
   USERNAME,
   type Controller,
 } from "../../../../scripts/controller-process";
+import { mintUuid } from "../db";
 import { promote } from "./promote";
 import { createPromotionToken, findFreePort } from "./testing";
 import { get, post, readErrorBody, send } from "../http/testing";
@@ -369,7 +371,31 @@ const expectSealedWithPointer = async (
   wire.close();
 };
 
+/**
+ * Adds a Claude subscription account to the database of a running controller,
+ * because setup creates the default assistant on an account and a fresh
+ * install has none. A real user adds it with the add-account sheet, which needs
+ * a signed-in client; this test has none before setup finishes.
+ */
+const addProviderAccount = (home: string): void => {
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const now = new Date().toISOString();
+    database
+      .query(
+        `INSERT INTO provider_accounts
+           (id, provider_id, kind, label, default_harness_id, created_at, updated_at)
+         VALUES (?, 'anthropic/anthropic', 'subscription-per-machine', NULL,
+                 'claude-code/claude-code', ?, ?)`,
+      )
+      .run(mintUuid(), now, now);
+  } finally {
+    database.close();
+  }
+};
+
 const finishSetup = async (home: string, url: string): Promise<void> => {
+  addProviderAccount(home);
   const completed = await completeSetup({ home, url });
   expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
 };

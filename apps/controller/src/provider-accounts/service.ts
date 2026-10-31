@@ -1,23 +1,22 @@
 /**
- * The Provider Account operations: reading accounts, renaming one, replacing
- * its key, deleting it, signing it in on a runner, and probing it.
+ * The Provider Account operations: reading accounts, adding one, renaming one,
+ * changing its default harness, replacing its key, and deleting it.
  *
  * An account is a row plus the snapshots runners reported for it. The record
  * is built from the row's public fields one by one, never by spreading the
  * row, so a field that is stored but not public cannot leak into a response.
  *
- * This domain sends the sign-in, probe and harness-install frames to runners
- * itself, which no other domain does: they belong in the controller daemon
- * (ADR 0033). It is kept here as an exception, because it creates no
- * dependency cycle. Issue #209 moves it, and ticket #934 absorbs #209.
+ * Signing an account in, probing it and installing a harness also send frames
+ * to runners, so the controller daemon runs them.
+ * This service holds the finite parts they call: checking that a request can
+ * be made, and recording its outcome. Of a sign-in that is `prepareSignIn`
+ * before the frames and `acceptSignIn` after them.
  *
  * A method that takes only an id does not decode it again: the transport has
  * already decoded a request's id against the contract, and a caller inside
  * the controller passes an id it read from a stored row.
  */
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -25,7 +24,6 @@ import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
   createConflictError,
   createDecodeValidationError,
@@ -33,127 +31,77 @@ import {
   createNotFoundError,
   createValidationError,
   Id,
-  ProviderAccountSignInCodeInput,
-  ProviderAccountSignInInput,
+  ProviderAccountCreateInput,
   ProviderAccountUpdateInput,
-  type CapabilitySnapshot,
   type Conflict,
   type Forbidden,
   type InvalidState,
   type NotFound,
   type ProviderAccount,
-  type ProviderAccountSignInStarted,
   type RunnerDetail,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
+import type { AccountKind } from "@hercule/plugin-host";
+import type { HarnessAccount, LoginMethod } from "@hercule/protocol";
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { PluginHost, type RegisteredHarness, type RegisteredProvider } from "../plugins";
 import {
-  NO_SUCH_RUNNER,
-  requireAdapter,
-  requireOnline,
-  RunnerConnections,
-  runnerRepository,
-  type Answer,
-} from "../runners";
+  decideProviderAccountHarness,
+  findCredentialSecretName,
+  PluginHost,
+  type RegisteredHarness,
+  type RegisteredProvider,
+} from "../plugins";
+import { NO_SUCH_RUNNER, requireAdapter, requireOnline, runnerRepository } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import type { Settings } from "../settings";
+import { buildVersionKey, harnessRepository } from "../harnesses";
 import { describeSnapshot } from "./describe-snapshot";
 import { HarnessAccounts } from "./harness-account";
-import { ProviderAccountProbeDeadline, ProviderAccountProbes } from "./probes";
+import { ProviderKeyCheck } from "./key-check";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
   type StoredSnapshot,
 } from "./repository";
+import { decideHarnessOnRunner, describeProviderAccount, findHarnessProblem } from "./runnability";
 import { providerAccountUses, type ProviderAccountUses } from "./uses";
-
-/**
- * The user is waiting in a dialog. Most of the time goes to a cold CLI
- * contacting the vendor.
- */
-const SIGN_IN_DEADLINE: Duration.Duration = Duration.seconds(30);
-
-/** Lets tests set a deadline short enough to wait for. */
-export const ProviderAccountSignInDeadline = Context.Reference<Duration.Duration>(
-  "hercule/controller/provider-accounts/ProviderAccountSignInDeadline",
-  { defaultValue: (): Duration.Duration => SIGN_IN_DEADLINE },
-);
-
-/**
- * Longer than the wait for the URL, because it covers the vendor's own
- * exchange, and giving up early would report a failure for a sign-in that in
- * fact stored a credential. But no longer than this: the HTTP server that
- * sends the response closes a request held too long, so a longer wait could
- * never be answered anyway.
- */
-const SIGN_IN_CODE_DEADLINE: Duration.Duration = Duration.minutes(2);
-
-/**
- * The runner's own 5min installer timeout plus the round trip, so a runner
- * that is still installing is not cut off by this deadline.
- */
-const HARNESS_INSTALL_DEADLINE: Duration.Duration = Duration.minutes(6);
-
-/** The account and the runner a sign-in runs on. The credential is stored on that runner only. */
-const SignInInput = Schema.Struct({ id: Id, ...ProviderAccountSignInInput.fields });
-
-type SignInInput = Schema.Schema.Type<typeof SignInInput>;
-
-const SignInCodeInput = Schema.Struct({ id: Id, ...ProviderAccountSignInCodeInput.fields });
-
-type SignInCodeInput = Schema.Schema.Type<typeof SignInCodeInput>;
 
 const UpdateInput = Schema.Struct({ id: Id, ...ProviderAccountUpdateInput.fields });
 
-type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
-
-const ProbeInput = Schema.Struct({
-  runnerId: Id,
-  providerAccountId: Id,
-  harnessId: Schema.optionalKey(Schema.String),
-});
-
-type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
-
-const InstallInput = Schema.Struct({ runnerId: Id, harnessId: Schema.String });
-
-type InstallInput = Schema.Schema.Type<typeof InstallInput>;
+export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
-const decodeSignIn = Schema.decodeUnknownEffect(SignInInput);
-const decodeSignInCode = Schema.decodeUnknownEffect(SignInCodeInput);
-const decodeProbe = Schema.decodeUnknownEffect(ProbeInput);
-const decodeInstall = Schema.decodeUnknownEffect(InstallInput);
+
+const decodeCreate = Schema.decodeUnknownEffect(ProviderAccountCreateInput);
+
+export type CreateInput = Schema.Schema.Type<typeof ProviderAccountCreateInput>;
 
 const NO_SUCH_ACCOUNT = "no such provider account";
 
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
-type AskError = ReadError | Validation | NotFound | InvalidState;
+/** How long a token Hercule made works, counted from the moment it is stored. */
+const TOKEN_LIFETIME_YEARS = 1;
 
-type LoginAnswer = LoginUrl | LoginFailed | LoginResult;
-
-const isLoginAnswer = (answer: Answer): answer is LoginAnswer =>
-  answer._tag === "loginUrl" || answer._tag === "loginFailed" || answer._tag === "loginResult";
-
-const describeSignInFailure = (answer: LoginAnswer): string =>
-  answer._tag === "loginFailed" ? answer.message : "the sign-in did not return a URL";
-
-/**
- * Names an account the way a user reads it: its provider, then its label if it
- * has one ("Anthropic · work").
- */
-export const describeProviderAccount = (
-  account: StoredProviderAccount,
-  providers: ReadonlyArray<RegisteredProvider>,
-): string => {
-  const name = providers.find((provider) => provider.id === account.providerId)?.displayName;
-  return `${name ?? account.providerId}${account.label === null ? "" : ` · ${account.label}`}`;
+/** Returns the instant a token stored at `at` stops working. */
+const computeTokenExpiry = (at: string): string => {
+  const expiry = new Date(at);
+  expiry.setUTCFullYear(expiry.getUTCFullYear() + TOKEN_LIFETIME_YEARS);
+  return expiry.toISOString();
 };
+
+/** What a sign-in needs to know before the runner is asked. */
+export interface SignInPreparation {
+  /** The qualified id of the harness the sign-in runs in: the account's default harness. */
+  readonly harnessId: string;
+  /** What the login produces: a login left on the runner, or a token for the controller to keep. */
+  readonly method: LoginMethod;
+  /** The account as the `loginStart` frame carries it. It never holds a credential. */
+  readonly harnessAccount: HarnessAccount;
+}
 
 /** Joins names into a quoted list for a message: `"a", "b"`. */
 const quoteNames = (names: ReadonlyArray<string>): string =>
@@ -197,10 +145,10 @@ const make = Effect.gen(function* () {
   const uses = yield* providerAccountUses;
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
-  const probes = yield* ProviderAccountProbes;
-  const connections = yield* RunnerConnections;
   const runners = yield* runnerRepository;
+  const reportedVersions = yield* harnessRepository;
   const secrets = yield* Secrets;
+  const keyCheck = yield* ProviderKeyCheck;
   const harnessAccounts = yield* HarnessAccounts;
 
   const buildProviderAccount = (
@@ -214,6 +162,7 @@ const make = Effect.gen(function* () {
     identity: stored.identity,
     planLabel: stored.planLabel,
     defaultHarnessId: stored.defaultHarnessId,
+    expiresAt: stored.credentialExpiresAt,
     snapshots: snapshots
       .filter((snapshot) => snapshot.providerAccountId === stored.id)
       .map(describeSnapshot),
@@ -279,62 +228,44 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Checks that the account's kind signs in with the harness's own login, and
-   * fails with `InvalidState` when it does not: a key account has nothing to
-   * sign in to.
+   * Returns the account's kind and what its sign-in produces (the `method` of
+   * the kind's `harness-login` step). Fails with `InvalidState` when the kind
+   * has no such step: a key account has nothing to sign in to.
    */
-  const requireSignInStep = (
+  const readSignInStep = (
     account: StoredProviderAccount,
-  ): Effect.Effect<void, InvalidState | SqlError> =>
-    Effect.flatMap(host.providers(), (providers) => {
+  ): Effect.Effect<{ kind: AccountKind; method: LoginMethod }, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const providers = yield* host.providers();
       const provider = providers.find((candidate) => candidate.id === account.providerId);
       const kind = provider?.kinds.find((candidate) => candidate.id === account.kind);
       if (provider === undefined || kind === undefined) {
-        return Effect.fail(
+        return yield* Effect.fail(
           createInvalidStateError(
             `this build has no ${account.providerId} provider with an account kind ${account.kind}, so it cannot sign that account in`,
           ),
         );
       }
-      return kind.setup.some((step) => step.kind === "harness-login")
-        ? Effect.void
-        : Effect.fail(
-            createInvalidStateError(
-              `${provider.displayName} ${kind.title} accounts have no sign-in step; they hold a key, which you set with \`hercule provider-account update\``,
-            ),
-          );
-    });
-
-  const askRunner = (
-    runnerId: string,
-    request: LoginStart | LoginCode,
-    deadline: Duration.Duration,
-  ): Effect.Effect<LoginAnswer, InvalidState> =>
-    Effect.gen(function* () {
-      const answer = yield* connections.asked(runnerId, request, deadline);
-      const login = Option.filter(answer, isLoginAnswer);
-      return yield* Option.match(login, {
-        // Disconnected, gone or silent all mean the same to the user: the
-        // runner did not answer.
-        onNone: () =>
-          Effect.fail(
-            createInvalidStateError(
-              `that runner did not answer the sign-in within ${Duration.format(deadline)}`,
-            ),
-          ),
-        onSome: Effect.succeed,
-      });
+      for (const step of kind.setup) {
+        if (step.kind === "harness-login") return { kind, method: step.method };
+      }
+      return yield* Effect.fail(
+        createInvalidStateError(
+          `${provider.displayName} ${kind.title} accounts have no sign-in step; they hold a key, which you set with \`hercule provider-account update\``,
+        ),
+      );
     });
 
   /**
-   * Checks the credentials of an update against the account's kind and fails
-   * with `Validation` when they do not fit. They fit when the kind has a
-   * `credentials` setup step and every name is a field of that step.
+   * Checks credentials against an account's kind and fails with `Validation`
+   * when they do not fit. They fit when the kind has a `credentials` setup
+   * step, at least one field is named and every name is a field of that step.
+   * Returns the provider and the kind, for the key check that follows.
    */
   const validateCredentials = (
-    account: StoredProviderAccount,
+    account: { readonly providerId: string; readonly kind: string },
     credentials: Readonly<Record<string, string>>,
-  ): Effect.Effect<void, Validation | SqlError> =>
+  ): Effect.Effect<{ provider: RegisteredProvider; kind: AccountKind }, Validation | SqlError> =>
     Effect.gen(function* () {
       const providers = yield* host.providers();
       const provider = providers.find((candidate) => candidate.id === account.providerId);
@@ -351,12 +282,18 @@ const make = Effect.gen(function* () {
       }
       const step = kind.setup.find((candidate) => candidate.kind === "credentials");
       if (step === undefined) {
-        const signIn = kind.setup.some((candidate) => candidate.kind === "harness-login");
+        const login = kind.setup.find((candidate) => candidate.kind === "harness-login");
+        const advice =
+          login === undefined
+            ? ""
+            : login.method === "create-token"
+              ? `: Hercule makes the token itself. Use "Make a new token" instead`
+              : "; sign in on a machine instead, with `hercule provider-account sign-in`";
         return yield* Effect.fail(
           createValidationError([
             {
               path: ["credentials"],
-              message: `${provider.displayName} ${kind.title} accounts take no credentials${signIn ? "; sign in on a machine instead, with `hercule provider-account sign-in`" : ""}`,
+              message: `${provider.displayName} ${kind.title} accounts take no credentials${advice}`,
             },
           ]),
         );
@@ -384,7 +321,76 @@ const make = Effect.gen(function* () {
           ),
         );
       }
+      return { provider, kind };
     });
+
+  /**
+   * Asks the provider whether it accepts the key in `credentials`, and fails
+   * as `ProviderKeyCheck.check` does when it does not. The key is the value of
+   * the field named like the kind's credential Secret.
+   */
+  const checkKey = (
+    provider: RegisteredProvider,
+    kind: AccountKind,
+    credentials: Readonly<Record<string, string>>,
+  ): Effect.Effect<void, Validation | InvalidState> => {
+    const name = findCredentialSecretName(kind);
+    const key = name === undefined ? undefined : credentials[name];
+    // `validateCredentials` has already checked that the kind takes this field.
+    return key === undefined
+      ? Effect.die(new Error(`the account kind ${kind.id} has no key field to check`))
+      : keyCheck.check(provider, kind, Redacted.make(key));
+  };
+
+  /**
+   * Checks that the account can run in the harness and that the harness is
+   * installed on at least one runner (spec 06 section 15.4). Fails with
+   * `Validation` on `defaultHarnessId`, with the reason, when it cannot.
+   */
+  const requireRunnableHarness = (
+    account: {
+      readonly providerId: string;
+      readonly kind: string;
+      readonly defaultHarnessId: string;
+    },
+    harnessId: string,
+  ): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const choice = decideProviderAccountHarness(
+        yield* host.providers(),
+        yield* host.harnesses(),
+        account,
+        harnessId,
+      );
+      if (choice._tag === "refused") {
+        return yield* Effect.fail(
+          createValidationError([{ path: ["defaultHarnessId"], message: choice.reason }]),
+        );
+      }
+      const fleet = yield* runners.listFacts();
+      const versions = yield* reportedVersions.readReportedVersions();
+      const problem = findHarnessProblem(
+        choice.harness,
+        fleet.map(({ id, facts }) =>
+          decideHarnessOnRunner(
+            facts,
+            choice.harness,
+            versions.get(buildVersionKey(choice.harness.id, id)) ?? null,
+          ),
+        ),
+      );
+      if (problem !== null) {
+        return yield* Effect.fail(
+          createValidationError([{ path: ["defaultHarnessId"], message: problem }]),
+        );
+      }
+    });
+
+  /** Returns the message for a label another account of the provider already has. */
+  const describeLabelClash = (providerName: string, label: string | null): string =>
+    label === null
+      ? `another ${providerName} account already has no label; give that one a label first, or give this one a label`
+      : `another ${providerName} account is already labelled "${label}"; choose another label`;
 
   return {
     /** Returns every account with its snapshots, oldest account first. */
@@ -404,6 +410,140 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Adds an account and returns it.
+     *
+     * - `providerId` and `kind` must name a registered Provider and one of
+     *   its account kinds, else `Validation`.
+     * - `credentials` is required for a kind with a `credentials` setup step
+     *   and refused for any other. A kind that signs in is created with none,
+     *   and is signed in afterwards with the account's id.
+     * - `defaultHarnessId`, when given, must be a harness the account can run
+     *   in that is installed on a runner. Left out, it is the provider's own
+     *   harness, even when that is installed nowhere yet.
+     * - `label` is required when another account of the provider exists, and
+     *   must differ from theirs (`Conflict`).
+     *
+     * A new key is checked with the provider first (see `ProviderKeyCheck`),
+     * before the write transaction opens, so no transaction waits on the
+     * network and a refused key stores nothing. The row, the credential
+     * Secret and the audit entry are then written together.
+     *
+     * `alsoWrite`, when given, runs in the same transaction after the account
+     * is written, and receives it. If it fails, the account is not created
+     * and this fails with its error. It is how a caller in a higher layer
+     * writes what the new account makes necessary, such as the default
+     * assistant, without this domain importing that domain.
+     *
+     * The caller probes the account after a key, as for `update`.
+     */
+    create: <E = never>(
+      input: CreateInput,
+      alsoWrite?: (account: ProviderAccount) => Effect.Effect<void, E>,
+    ): Effect.Effect<ProviderAccount, ReadError | Validation | Conflict | InvalidState | E> =>
+      Effect.gen(function* () {
+        yield* requireGrant("providerAccount.create");
+        const request = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
+        const providers = yield* host.providers();
+        const provider = providers.find((candidate) => candidate.id === request.providerId);
+        if (provider === undefined) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["providerId"],
+                message: `no plugin registered the provider ${request.providerId}; the registered providers are ${providers.map((candidate) => candidate.id).join(", ")}`,
+              },
+            ]),
+          );
+        }
+        const kind = provider.kinds.find((candidate) => candidate.id === request.kind);
+        if (kind === undefined) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["kind"],
+                message: `${provider.displayName} has no account kind ${request.kind}; the kinds are ${provider.kinds.map((candidate) => candidate.id).join(", ")}`,
+              },
+            ]),
+          );
+        }
+        const holdsKey = kind.setup.some((step) => step.kind === "credentials");
+        // A key kind with none given is checked too, so the message names the field to give.
+        const credentials = holdsKey ? (request.credentials ?? {}) : request.credentials;
+        if (credentials !== undefined) {
+          yield* validateCredentials(request, credentials);
+        }
+        const label = request.label ?? null;
+        const defaultHarnessId = request.defaultHarnessId ?? provider.defaultHarnessId;
+        if (request.defaultHarnessId !== undefined) {
+          yield* requireRunnableHarness(
+            { providerId: provider.id, kind: kind.id, defaultHarnessId },
+            request.defaultHarnessId,
+          );
+        }
+        /** Fails when the label is missing or taken, as the accounts stand now. */
+        const requireFreeLabel = Effect.gen(function* () {
+          const others = (yield* accounts.list()).filter(
+            (account) => account.providerId === provider.id,
+          );
+          if (label === null && others.length > 0) {
+            return yield* Effect.fail(
+              createValidationError([
+                { path: ["label"], message: "Give this one a name, so you can tell them apart." },
+              ]),
+            );
+          }
+          if (label !== null && others.some((account) => account.label === label)) {
+            return yield* Effect.fail(
+              createConflictError(describeLabelClash(provider.displayName, label)),
+            );
+          }
+        });
+        // Before the key check, so a name that cannot work costs no request.
+        yield* requireFreeLabel;
+        if (credentials !== undefined) yield* checkKey(provider, kind, credentials);
+        const created = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            // Again: another account may have been added while the key was checked.
+            yield* requireFreeLabel;
+            const stored = yield* accounts.insert({
+              providerId: provider.id,
+              kind: kind.id,
+              label,
+              defaultHarnessId,
+              at,
+            });
+            yield* Effect.forEach(
+              Object.entries(credentials ?? {}),
+              ([name, value]) =>
+                secrets.set(buildProviderAccountOwner(stored.id), name, Redacted.make(value)),
+              { discard: true },
+            );
+            yield* audit.append({
+              kind: "providerAccount.created",
+              actor: yield* currentStamp,
+              // Ids and the label, never a credential's value.
+              payload: {
+                providerAccountId: stored.id,
+                providerId: stored.providerId,
+                kind: stored.kind,
+                label: stored.label,
+              },
+              record: { topic: "provider", id: stored.id },
+              at,
+            });
+            const account = buildProviderAccount(stored, []);
+            if (alsoWrite !== undefined) yield* alsoWrite(account);
+            return account;
+          }),
+          // Field names come from the kind's declaration, which the plugin host
+          // rejects at registration if one contains `|`, so this cannot fail.
+        ).pipe(Effect.catchTag("SecretNameError", Effect.die));
+        return created;
+      }),
+
+    /**
      * Updates an account and returns it. A field left out is not changed; an
      * empty patch is rejected, because it would change `updatedAt` and write
      * an audit entry for no change.
@@ -412,18 +552,27 @@ const make = Effect.gen(function* () {
      *   provider. An account with no label counts as having one value, so
      *   setting `null` clashes with another label-less account. A clash fails
      *   with `Conflict`.
+     * - `defaultHarnessId` must be a harness the account can run in that is
+     *   installed on a runner, as for `create`, else `Validation`.
      * - `credentials` is accepted only for a kind with a `credentials` setup
-     *   step, and only with that step's field names. The values are stored as
-     *   Secrets owned by the account and never returned. They are not checked
-     *   with the provider yet; #934 adds that check before anything is stored.
+     *   step, and only with that step's field names. A token account takes
+     *   none: its token is made by a sign-in. The new key is checked with the
+     *   provider before anything is written, and a refused key changes
+     *   nothing, not even the label in the same request. The values are
+     *   stored as Secrets owned by the account and never returned. A new key
+     *   clears the account's identity and plan label, because it may belong
+     *   to someone else (spec 06 section 11).
      *
-     * After the commit, a new credential makes the account probed again on
-     * every connected runner, because the stored snapshots were taken with the
-     * old one. A label change leaves the snapshots true, so it probes nothing.
+     * The caller probes the account again on every connected runner after a
+     * new credential, because the stored snapshots were taken with the old
+     * one. A label change leaves the snapshots true, so it probes nothing.
      */
     update: (
       input: UpdateInput,
-    ): Effect.Effect<ProviderAccount, ReadError | Validation | NotFound | Conflict> =>
+    ): Effect.Effect<
+      ProviderAccount,
+      ReadError | Validation | NotFound | Conflict | InvalidState
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("providerAccount.update");
         const { id, ...patch } = yield* Effect.mapError(
@@ -434,6 +583,16 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(
             createValidationError([{ path: [], message: "name a field to change" }]),
           );
+        }
+        // Everything that can refuse the request and everything that waits on
+        // the network happens before the transaction, which then only writes.
+        const existing = yield* readStoredOrFail(id);
+        if (patch.defaultHarnessId !== undefined) {
+          yield* requireRunnableHarness(existing, patch.defaultHarnessId);
+        }
+        if (patch.credentials !== undefined) {
+          const { provider, kind } = yield* validateCredentials(existing, patch.credentials);
+          yield* checkKey(provider, kind, patch.credentials);
         }
         const updated = yield* withTransaction(
           sql,
@@ -447,24 +606,32 @@ const make = Effect.gen(function* () {
                   providers.find((provider) => provider.id === before.providerId)?.displayName ??
                   before.providerId;
                 return yield* Effect.fail(
-                  createConflictError(
-                    patch.label === null
-                      ? `another ${name} account already has no label; give that one a label first, or give this one a label`
-                      : `another ${name} account is already labelled "${patch.label}"; choose another label`,
-                  ),
+                  createConflictError(describeLabelClash(name, patch.label)),
                 );
               }
             }
             if (patch.credentials !== undefined) {
-              yield* validateCredentials(before, patch.credentials);
               yield* Effect.forEach(
                 Object.entries(patch.credentials),
                 ([name, value]) =>
                   secrets.set(buildProviderAccountOwner(id), name, Redacted.make(value)),
                 { discard: true },
               );
+              // The new key may belong to someone else. See spec 06 section 11.
+              yield* accounts.clearIdentity(id, at);
+              // An answer to a probe sent with the old key must not be stored.
+              yield* accounts.advanceCredentialGeneration(id, at);
             }
-            yield* accounts.update(id, patch.label === undefined ? {} : { label: patch.label }, at);
+            yield* accounts.update(
+              id,
+              {
+                ...(patch.label === undefined ? {} : { label: patch.label }),
+                ...(patch.defaultHarnessId === undefined
+                  ? {}
+                  : { defaultHarnessId: patch.defaultHarnessId }),
+              },
+              at,
+            );
             yield* audit.append({
               kind: "providerAccount.updated",
               actor: yield* currentStamp,
@@ -480,9 +647,6 @@ const make = Effect.gen(function* () {
           // Field names come from the kind's declaration, which the plugin host
           // rejects at registration if one contains `|`, so this cannot fail.
         ).pipe(Effect.catchTag("SecretNameError", Effect.die));
-        // After the commit, without waiting: the response only needs the update.
-        if (patch.credentials !== undefined)
-          yield* Effect.forkDetach(probes.sweepProviderAccount(id));
         return updated;
       }),
 
@@ -546,193 +710,142 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Starts a sign-in on a runner, through the account's default harness, and
-     * returns the URL the harness printed; the user opens it in their own
-     * browser, since the runner's machine may have none. For a device login it
-     * also returns the code to type there and when that code expires.
-     *
-     * Fails with `InvalidState` when the account's kind has no sign-in step,
-     * the runner is offline, or the harness printed no URL.
+     * Reads one account with its snapshots, or fails with `NotFound`. Checks
+     * no grant: the caller has checked the grant of its own operation.
      */
-    signIn: (input: SignInInput): Effect.Effect<ProviderAccountSignInStarted, AskError> =>
+    readProviderAccount: readProviderAccountOrFail,
+
+    /**
+     * Checks that the account can be signed in on the runner and returns what
+     * the sign-in frames need: the harness it runs in (the account's default
+     * harness), what the login produces, and the account as the frame carries
+     * it, which never holds a credential. A token account's old token must not
+     * reach the login that replaces it, and a token account with no token yet
+     * or an expired one must still sign in.
+     *
+     * Fails with `NotFound` when the account or the runner does not exist, and
+     * with `InvalidState` when the account's kind has no sign-in step or the
+     * runner cannot drive the harness. Checks no grant.
+     */
+    prepareSignIn: (
+      id: Id,
+      runnerId: string,
+    ): Effect.Effect<SignInPreparation, NotFound | SqlError | Validation | InvalidState> =>
       Effect.gen(function* () {
-        yield* requireGrant("providerAccount.signIn");
-        const { id, runnerId } = yield* Effect.mapError(
-          decodeSignIn(input),
-          createDecodeValidationError,
-        );
         const account = yield* readStoredOrFail(id);
-        yield* requireSignInStep(account);
+        const { method } = yield* readSignInStep(account);
         const harnessId = account.defaultHarnessId;
         yield* validateRunnerCanDrive(runnerId, harnessId, "runnerId");
-        const harnessAccount = yield* harnessAccounts.prepare(id, harnessId);
-        const requestId = crypto.randomUUID();
-        // Expected before the runner is asked, because a device login that
-        // fails at once can report its end before this fiber reads the answer.
-        // It is forgotten when the ask fails or is interrupted, since a login
-        // whose answer is never read would otherwise stay awaited for as long
-        // as the controller runs.
-        yield* probes.expectLoginEnd(runnerId, id, harnessId, requestId);
-        const answer = yield* askRunner(
-          runnerId,
-          { _tag: "loginStart", requestId, harnessId, harnessAccount },
-          yield* ProviderAccountSignInDeadline,
-        ).pipe(Effect.onError(() => probes.forgetLoginEnd(runnerId, requestId)));
-        if (answer._tag !== "loginUrl") {
-          yield* probes.forgetLoginEnd(runnerId, requestId);
-          return yield* Effect.fail(createInvalidStateError(describeSignInFailure(answer)));
-        }
-        // Absent rather than empty: a code means the login is finished in the
-        // user's browser, not through this exchange. A login finished by
-        // pasting a code reports no end.
-        yield* probes.recordPrintedLogin(runnerId, id, harnessId, requestId, {
-          reportsEnd: answer.userCode !== undefined,
-        });
-        if (answer.userCode === undefined) return { url: answer.url };
-        if (answer.expiresInSeconds === undefined) {
-          return { url: answer.url, userCode: answer.userCode };
-        }
-        // The runner sends how long the code lasts, not when it ends, so the
-        // instant is computed on this clock and the two clocks never need to
-        // agree.
-        const now = yield* Clock.currentTimeMillis;
-        return {
-          url: answer.url,
-          userCode: answer.userCode,
-          expiresAt: new Date(now + answer.expiresInSeconds * 1000).toISOString(),
-        };
+        const harnessAccount = yield* harnessAccounts.prepareSignIn(id, harnessId);
+        return { harnessId, method, harnessAccount };
       }),
 
     /**
-     * Sends a sign-in code to the runner, and returns the account once the
-     * sign-in finishes. A rejected code fails only this call and leaves the
-     * sign-in running, so the user can paste again. The account comes back
-     * with a fresh snapshot from a new probe, because the harness has not yet
-     * been asked whose credential it holds.
+     * Records what a successful login changed, after the runner reported it.
+     * `token` is the secret the runner returned with the result.
+     *
+     * - A `sign-in` kind returns no token (the login is in the Harness Home on
+     *   the runner), and one that arrives is refused with `InvalidState`
+     *   without being stored.
+     * - A `create-token` kind must return one, else `InvalidState`. It is
+     *   stored as the account's credential Secret, the account's expiry
+     *   becomes one year from now, and its identity and plan label are
+     *   cleared, because the new token may belong to someone else (spec 06
+     *   section 11). All of it is one transaction.
+     *
+     * Every accepted sign-in advances the account's credential generation in
+     * the same transaction, so a probe sent before the sign-in is ignored when
+     * its answer arrives. In the same transaction the runner's snapshot of the
+     * account in the harness is marked as not signed in ("Checking the
+     * sign-in…"), so that runner is not placed on an `ok` taken before this
+     * sign-in while the probe that checks it runs.
+     *
+     * Appends the `providerAccount.signedIn` audit entry. Neither the token
+     * nor anything the user typed is in an error or the audit entry. Fails
+     * with `NotFound` when the account was deleted in the meantime. Checks no
+     * grant.
      */
-    submitSignInCode: (input: SignInCodeInput): Effect.Effect<ProviderAccount, AskError> =>
+    acceptSignIn: (
+      id: Id,
+      runnerId: string,
+      harnessId: string,
+      token: string | undefined,
+    ): Effect.Effect<
+      void,
+      NotFound | InvalidState | SqlError | Schema.SchemaError | Unauthenticated
+    > =>
       Effect.gen(function* () {
-        yield* requireGrant("providerAccount.submitSignInCode");
-        const { id, runnerId, code } = yield* Effect.mapError(
-          decodeSignInCode(input),
-          createDecodeValidationError,
-        );
-        const account = yield* readStoredOrFail(id);
-        yield* requireSignInStep(account);
-        const harnessId = account.defaultHarnessId;
-        yield* validateRunnerCanDrive(runnerId, harnessId, "runnerId");
-        const answer = yield* askRunner(
-          runnerId,
-          { _tag: "loginCode", requestId: crypto.randomUUID(), providerAccountId: id, code },
-          SIGN_IN_CODE_DEADLINE,
-        );
-        if (answer._tag !== "loginResult") {
-          return yield* Effect.fail(createInvalidStateError(describeSignInFailure(answer)));
-        }
-        if (!answer.ok) {
-          const refusal = answer.message ?? "that code was rejected";
-          return yield* Effect.fail(
-            createValidationError([{ path: ["code"], message: refusal }], refusal),
-          );
-        }
-        // Records who put a credential on which runner. Never the URL or the
-        // code, which are valid for this exchange only.
         const actor = yield* currentStamp;
         yield* withTransaction(
           sql,
-          Effect.flatMap(nowIso, (at) =>
-            audit.append({
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const account = yield* readStoredOrFail(id);
+            const { kind, method } = yield* readSignInStep(account);
+            if (method === "sign-in") {
+              if (token !== undefined) {
+                return yield* Effect.fail(
+                  createInvalidStateError(
+                    "that runner returned a token for a sign-in that makes none, so nothing was stored",
+                  ),
+                );
+              }
+            } else {
+              const secretName = findCredentialSecretName(kind);
+              if (secretName === undefined) {
+                return yield* Effect.die(
+                  new Error(`the account kind ${kind.id} makes a token but names no Secret for it`),
+                );
+              }
+              if (token === undefined || token === "") {
+                return yield* Effect.fail(
+                  createInvalidStateError(
+                    "the token flow finished without a token, so nothing was stored. Try again.",
+                  ),
+                );
+              }
+              yield* secrets.set(buildProviderAccountOwner(id), secretName, Redacted.make(token));
+              yield* accounts.setCredentialExpiry(id, computeTokenExpiry(at), at);
+              // The new token may belong to someone else. See spec 06 section 11.
+              yield* accounts.clearIdentity(id, at);
+            }
+            // After every accepted sign-in, whatever it stores.
+            yield* accounts.recordAcceptedSignIn(id, runnerId, harnessId, at);
+            yield* audit.append({
               kind: "providerAccount.signedIn",
               actor,
               payload: { providerAccountId: id, runnerId, harnessId },
               record: { topic: "provider", id },
               at,
-            }),
-          ),
-        );
-        const snapshot = yield* probes.probe(runnerId, id, harnessId);
-        if (Option.isNone(snapshot)) {
-          const waited = yield* ProviderAccountProbeDeadline;
-          return yield* Effect.fail(
-            createInvalidStateError(
-              `the sign-in finished, but that runner did not answer the probe within ${Duration.format(waited)}`,
-            ),
-          );
-        }
-        return yield* readProviderAccountOrFail(id);
+            });
+          }),
+          // The name comes from the plugin catalog, which refuses names the
+          // secrets store rejects.
+        ).pipe(Effect.catchTag("SecretNameError", Effect.die));
       }),
 
     /**
-     * Probes one account in one harness (left out: the account's default
-     * harness) on one runner now, and returns the snapshot. The fleet is swept
-     * hourly anyway; this is for when something changed outside Hercule and
-     * the user does not want to wait.
+     * Checks that the account can be probed in the harness on the runner and
+     * returns the harness to probe: the one given, or the account's default
+     * harness when none is given.
+     *
+     * Fails with `NotFound` when the runner or the account does not exist,
+     * with `InvalidState` when the runner is offline, and with `Validation`
+     * when no plugin registered the harness. The registry is checked before
+     * the account, so an id no plugin registered gets the list of registered
+     * ids, not a message about the account. Checks no grant.
      */
-    probe: (input: ProbeInput): Effect.Effect<CapabilitySnapshot, AskError> =>
+    requireProbeTarget: (
+      runnerId: string,
+      providerAccountId: string,
+      harnessId: string | undefined,
+    ): Effect.Effect<string, NotFound | SqlError | Validation | InvalidState> =>
       Effect.gen(function* () {
-        yield* requireGrant("runner.probe");
-        const { runnerId, providerAccountId, harnessId } = yield* Effect.mapError(
-          decodeProbe(input),
-          createDecodeValidationError,
-        );
         yield* requireOnline(yield* readRunnerOrFail(runnerId));
         const account = yield* readStoredOrFail(providerAccountId);
         const probedHarnessId = harnessId ?? account.defaultHarnessId;
-        // The registry is checked first: an id no plugin registered gets the
-        // list of registered ids, not a message about the account.
         yield* readHarnessDefinitionOrFail(probedHarnessId);
-        const snapshot = yield* probes.probe(runnerId, providerAccountId, probedHarnessId);
-        return yield* Option.match(snapshot, {
-          onNone: () =>
-            Effect.flatMap(ProviderAccountProbeDeadline, (waited) =>
-              Effect.fail(
-                createInvalidStateError(
-                  `that runner did not answer the probe within ${Duration.format(waited)}`,
-                ),
-              ),
-            ),
-          onSome: Effect.succeed,
-        });
-      }),
-
-    /**
-     * Installs a harness on a runner, and returns the runner. The runner
-     * reports its facts before it reports that the install finished, so the
-     * returned runner is up to date. Every account is then probed on that
-     * runner, because a newly installed harness has never been probed.
-     *
-     * It sends the install frame from this domain, which is the exception
-     * named at the top of this file (issue #209, absorbed by ticket #934).
-     */
-    installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, AskError> =>
-      Effect.gen(function* () {
-        yield* requireGrant("runner.installHarness");
-        const { runnerId, harnessId } = yield* Effect.mapError(
-          decodeInstall(input),
-          createDecodeValidationError,
-        );
-        // The registry is checked first: an id no plugin registered gets the
-        // list of registered ids, not a message about the runner's build.
-        yield* readHarnessDefinitionOrFail(harnessId);
-        yield* validateRunnerCanDrive(runnerId, harnessId, "harnessId");
-        const answer = yield* connections.asked(
-          runnerId,
-          { _tag: "installRequest", requestId: crypto.randomUUID(), harnessId },
-          HARNESS_INSTALL_DEADLINE,
-        );
-        if (Option.isNone(answer) || answer.value._tag !== "installResult") {
-          const waited = Duration.format(HARNESS_INSTALL_DEADLINE);
-          return yield* Effect.fail(
-            createInvalidStateError(`that runner did not finish the install within ${waited}`),
-          );
-        }
-        if (!answer.value.ok) {
-          return yield* Effect.fail(
-            createInvalidStateError(answer.value.message ?? "the install failed"),
-          );
-        }
-        yield* Effect.forkDetach(probes.sweepRunner(runnerId));
-        return yield* readRunnerOrFail(runnerId);
+        return probedHarnessId;
       }),
   };
 });
@@ -748,9 +861,8 @@ export const ProviderAccountServiceLayer: Layer.Layer<
   | SqlClient.SqlClient
   | PluginHost
   | AuditLog
-  | ProviderAccountProbes
-  | RunnerConnections
   | Secrets
   | Settings
+  | ProviderKeyCheck
   | HarnessAccounts
 > = Layer.effect(ProviderAccountService)(make);

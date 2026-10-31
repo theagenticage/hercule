@@ -15,6 +15,7 @@ import { FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@
 import {
   ensureProviderAccountReads,
   localRunnerQuery,
+  harnessesQuery,
   profilesQuery,
   providerAccountsQuery,
   providersQuery,
@@ -62,6 +63,7 @@ function Threads(): JSX.Element {
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
@@ -75,7 +77,10 @@ function Threads(): JSX.Element {
   // - the model is read from the runner the account would be placed on, in
   //   the harness the thread runs in;
   // - "nothing picked" is null.
-  const defaults = computeThreadDefaults(settings.user, accounts, runners, profiles, localId);
+  const defaults = computeThreadDefaults(settings.user, accounts, runners, profiles, localId, {
+    providers,
+    harnesses,
+  });
   const account = accounts.find((each) => each.id === defaults.providerAccountId);
   const modelField =
     account === undefined
@@ -116,6 +121,7 @@ function Threads(): JSX.Element {
                           next.defaultHarnessId,
                           runners,
                           localId,
+                          { providers, harnesses },
                         ).model;
                   save({
                     user: {

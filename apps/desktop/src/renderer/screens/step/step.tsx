@@ -3,10 +3,12 @@
  * steps, a device code to copy, a wait line, a warning and a labelled field.
  * The provider login and the New project form draw them too, both in the
  * first run's card and in their dialogs in New thread, and Settings >
- * Connections draws its forms with the labelled field. Every part is
+ * Connections draws its forms with the labelled field, and the add-account
+ * sheet draws a kind's credentials as Connections does. Every part is
  * presentational: it takes values and callbacks and reads nothing.
  */
 import { useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
+import type { CredentialField } from "@hercule/client-core";
 import { CheckIcon } from "../../icons/check";
 import { ExternalIcon } from "../../icons/external";
 import "./step.css";
@@ -329,5 +331,52 @@ export function FormField({
     <LabelledField label={label} aside={aside} hint={hint} error={error}>
       <span className={error === null ? "field" : "field is-bad"}>{children}</span>
     </LabelledField>
+  );
+}
+
+/**
+ * Renders a masked, monospace field for each of `fields`, one under the other:
+ * the field's label, `help` as its hint, and `errors[field.name]` under it
+ * when there is one. `values` holds what has been typed, by field name.
+ * Nothing is read back from the controller, so a field is never prefilled.
+ * The first field takes the focus when the form opens. With `readOnly`, the
+ * fields cannot be edited, so what was sent stays on screen while it is sent.
+ */
+export function CredentialFields({
+  fields,
+  values,
+  errors,
+  readOnly,
+  onChange,
+}: {
+  readonly fields: ReadonlyArray<CredentialField>;
+  readonly values: Readonly<Record<string, string>>;
+  readonly errors: Readonly<Record<string, string>>;
+  readonly readOnly: boolean;
+  readonly onChange: (name: string, value: string) => void;
+}): JSX.Element {
+  return (
+    <div className="credential-fields">
+      {fields.map((field, index) => (
+        <FormField
+          key={field.name}
+          label={field.label}
+          hint={field.help}
+          error={errors[field.name] ?? null}
+        >
+          <input
+            // A pasted credential is never read back, so it is never prefilled.
+            type="password"
+            className="mono"
+            value={values[field.name] ?? ""}
+            onChange={(event) => onChange(field.name, event.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+            autoFocus={index === 0}
+            readOnly={readOnly}
+          />
+        </FormField>
+      ))}
+    </div>
   );
 }

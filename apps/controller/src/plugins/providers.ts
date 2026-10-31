@@ -1,5 +1,10 @@
 import { Effect, Schema } from "effect";
-import { PluginError, ProviderDefinition, type PluginManifest } from "@hercule/plugin-host";
+import {
+  PluginError,
+  ProviderDefinition,
+  type AccountKind,
+  type PluginManifest,
+} from "@hercule/plugin-host";
 import { toPluginError } from "./errors";
 import { mintQualifiedId } from "./qualified-id";
 import type { NewContribution } from "./repository";
@@ -22,7 +27,105 @@ export type RegisteredProvider = Omit<ProviderDefinition, "id"> & {
  * `credentials` field of this name (spec 06 section 15.2), and the secret
  * migration of an old Z.ai key writes it under the same name.
  */
-export const API_KEY_SECRET_NAME = "apiKey";
+const API_KEY_SECRET_NAME = "apiKey";
+
+/** The name a minted subscription token is stored under. */
+const TOKEN_SECRET_NAME = "token";
+
+/**
+ * Returns the name of the Secret that holds an account's credential, decided
+ * by its kind:
+ *
+ * - `apiKey` for a kind with a `credentials` step (a key the user types);
+ * - `token` for a kind whose `harness-login` step has the method
+ *   `create-token` (a token the runner makes);
+ * - `undefined` for any other kind, whose login lives in the Harness Home on
+ *   each runner.
+ *
+ * Registration refuses a kind with more than one of these sources, so at most
+ * one step answers. Every place that reads or writes an account's credential
+ * asks this function, so no caller repeats either name or looks at the login
+ * method itself.
+ */
+export const findCredentialSecretName = (kind: AccountKind): string | undefined => {
+  for (const step of kind.setup) {
+    if (step.kind === "credentials") return API_KEY_SECRET_NAME;
+    if (step.kind === "harness-login" && step.method === "create-token") return TOKEN_SECRET_NAME;
+  }
+  return undefined;
+};
+
+/**
+ * Returns what is wrong with the setup steps of a kind, or `undefined` when
+ * it is fine. A Provider Account's setup runs the steps `credentials` and
+ * `harness-login` (and shows `checklist`). The core does not run an `oauth`,
+ * `device` or `pairing` step for accounts yet, so a kind that declares one is
+ * refused: accepting it would silently skip a step the plugin said the account
+ * needs.
+ */
+const findUnsupportedStepProblem = (kind: AccountKind): string | undefined => {
+  const unsupported = kind.setup.find(
+    (step) => step.kind === "oauth" || step.kind === "device" || step.kind === "pairing",
+  );
+  return unsupported === undefined
+    ? undefined
+    : `it declares the setup step ${unsupported.kind}, which the core does not run for Provider Accounts yet; use a credentials step or a harness-login step`;
+};
+
+/**
+ * Returns what is wrong with the credential sources a kind declares, or
+ * `undefined` when it is fine. A kind has at most one `credentials` step, at
+ * most one `harness-login` step, and never a `credentials` step together with
+ * a `harness-login` step that creates a token: an account stores one
+ * credential, so a second source would be ignored.
+ */
+const findCredentialSourceProblem = (kind: AccountKind): string | undefined => {
+  const credentialsSteps = kind.setup.filter((step) => step.kind === "credentials");
+  const loginSteps = kind.setup.filter((step) => step.kind === "harness-login");
+  if (credentialsSteps.length > 1) {
+    return "it has more than one credentials step; declare one credentials step with all the fields";
+  }
+  if (loginSteps.length > 1) {
+    return "it has more than one harness-login step; declare one";
+  }
+  if (credentialsSteps.length > 0 && loginSteps.some((step) => step.method === "create-token")) {
+    return "it has both a credentials step and a harness-login step with the method create-token, which are two credential sources; declare a separate account kind for each";
+  }
+  return undefined;
+};
+
+/**
+ * Returns what is wrong with a kind's `keyCheck`, or `undefined` when it is
+ * fine. A kind with a `credentials` step must declare one. The URL must be a
+ * fixed `https://` URL without placeholders, and a header value may hold the
+ * placeholder `{apiKey}` and no other braces. At least one header value must
+ * hold `{apiKey}`: a check that does not send the key would let a public
+ * endpoint accept every key. The controller sends the key in those headers, so
+ * anything else could send it somewhere it was not meant to go.
+ */
+const findKeyCheckProblem = (kind: AccountKind): string | undefined => {
+  const holdsKey = kind.setup.some((step) => step.kind === "credentials");
+  const { keyCheck } = kind;
+  if (keyCheck === undefined) {
+    return holdsKey
+      ? "it takes an API key but declares no keyCheck; a key that cannot be checked is never stored, so declare the request that checks it"
+      : undefined;
+  }
+  const url = URL.parse(keyCheck.url);
+  if (url === null || url.protocol !== "https:" || /[{}]/.test(keyCheck.url)) {
+    return `its keyCheck url ${keyCheck.url} is not a fixed https:// URL`;
+  }
+  const headers = Object.entries(keyCheck.headers);
+  for (const [name, value] of headers) {
+    if (/[{}]/.test(value.replaceAll("{apiKey}", ""))) {
+      return `its keyCheck header ${name} holds a placeholder other than {apiKey}`;
+    }
+  }
+  if (!headers.some(([, value]) => value.includes("{apiKey}"))) {
+    return "its keyCheck sends no key, so any key would pass; put {apiKey} in a header value, for example authorization: Bearer {apiKey}";
+  }
+  return undefined;
+};
 
 /** The name of the provider extension point in the catalog. */
 const PROVIDER = "provider";
@@ -39,8 +142,11 @@ const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
  * catalog row in `declared` and the in-memory entry in `live`. Fails with a
  * `PluginError` for a definition that does not decode, whose qualified id is
  * too long, that declares an account kind twice, that has an account kind whose
- * credentials step is not exactly one field named `apiKey`, or that the plugin
- * registered twice.
+ * credentials step is not exactly one field named `apiKey`, that has an account
+ * kind with two credential sources (see `findCredentialSourceProblem`), that has
+ * an `oauth`, `device` or `pairing` setup step (see `findUnsupportedStepProblem`), that has
+ * a key kind without a valid `keyCheck` (one that sends the key), one of whose account kinds does not list the provider's `defaultHarnessId`,
+ * or that the plugin registered twice.
  *
  * The harnesses an account kind lists are qualified ids and are not checked
  * against the harnesses that are loaded: their plugin may be absent or
@@ -82,6 +188,42 @@ export const registerProviderContribution = (
           );
         }
       }
+      const unsupportedStepProblem = findUnsupportedStepProblem(kind);
+      if (unsupportedStepProblem !== undefined) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the account kind ${kind.id} of the provider ${id}: ${unsupportedStepProblem}`,
+          }),
+        );
+      }
+      const credentialSourceProblem = findCredentialSourceProblem(kind);
+      if (credentialSourceProblem !== undefined) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the account kind ${kind.id} of the provider ${id}: ${credentialSourceProblem}`,
+          }),
+        );
+      }
+      const keyCheckProblem = findKeyCheckProblem(kind);
+      if (keyCheckProblem !== undefined) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the account kind ${kind.id} of the provider ${id}: ${keyCheckProblem}`,
+          }),
+        );
+      }
+    }
+    // `providerAccount.create` gives every new account the provider's default
+    // harness, whatever its kind, so each kind must allow it.
+    const kindsWithoutDefault = decoded.kinds.filter(
+      (kind) => !kind.harnesses.includes(decoded.defaultHarnessId),
+    );
+    if (kindsWithoutDefault.length > 0) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the provider ${id} has the default harness ${decoded.defaultHarnessId}, which its account kinds ${kindsWithoutDefault.map((kind) => kind.id).join(", ")} do not list; every account kind must list the default harness, because a new account of any kind starts with it`,
+        }),
+      );
     }
     if (declared.some((row) => row.extensionPoint === PROVIDER && row.id === id)) {
       return yield* Effect.fail(

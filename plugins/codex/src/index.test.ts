@@ -27,11 +27,14 @@ const captureHarnessDefinition = (): HarnessDefinition => {
 };
 
 describe("the Codex harness", () => {
-  it("runs a ChatGPT subscription signed in on the machine, with every model under its own id", () => {
+  it("runs a ChatGPT subscription and an API key from OPENAI_API_KEY, with every model under its own id", () => {
     expect(captureHarnessDefinition().runs).toEqual([
       {
         providerId: "openai/openai",
-        kinds: [{ kind: "subscription-per-machine" }],
+        kinds: [
+          { kind: "subscription-per-machine" },
+          { kind: "api-key", credentialVariable: "OPENAI_API_KEY" },
+        ],
         modelArgument: "{model}",
         models: "all",
       },

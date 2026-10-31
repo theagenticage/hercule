@@ -49,6 +49,7 @@ import {
 import {
   CONTROL_DEADLINE,
   buildClaudePromptParts,
+  claudeCode,
   makeClaudeCodeAdapter,
   type ClaudeSeam,
 } from "./claude-code";
@@ -78,6 +79,7 @@ const CONTEXT: HarnessRunnerContext = {
   binary: "/usr/local/bin/claude",
   env: { PATH: "/usr/local/bin:/usr/bin" },
   modelArgument: "{model}",
+  credentialVariables: [],
   herculeTool: HERCULE_TOOL,
   attachmentUploader: testing.NO_CONTROLLER_UPLOADER,
 };
@@ -401,6 +403,36 @@ describe("the SDK query a probe runs", () => {
     // wrong account's credential and report it as this account's.
     expect(Object.keys(env)).not.toContain("HOME");
     expect(env["PATH"]).toBe(CONTEXT.env["PATH"]);
+  });
+});
+
+describe("the runner's own sign-in variables", () => {
+  const AMBIENT = {
+    PATH: "/usr/local/bin:/usr/bin",
+    ANTHROPIC_AUTH_TOKEN: "token-of-the-runner",
+    ANTHROPIC_BASE_URL: "https://proxy.example.com",
+    CLAUDE_CODE_USE_BEDROCK: "1",
+    CLAUDE_CODE_USE_VERTEX: "1",
+  };
+  const AMBIENT_NAMES = Object.keys(AMBIENT).filter((name) => name !== "PATH");
+
+  it("never reach the harness in a probe, a session or a sign-in", async () => {
+    const context = { ...CONTEXT, env: AMBIENT };
+
+    const stub = buildStubSeam({});
+    await Effect.runPromise(makeClaudeCodeAdapter(stub.seam).probe(context));
+    const probeEnv = stub.calls[0]!.params.options["env"] as Record<string, string>;
+
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, { ...WORKING, env: AMBIENT }));
+    const sessionEnv = run.options[0]?.env ?? {};
+
+    const signIn = claudeCode.login!(context, "/usr/local/bin/claude", "sign-in")!;
+
+    for (const env of [probeEnv, sessionEnv, signIn.env]) {
+      for (const name of AMBIENT_NAMES) expect(Object.keys(env)).not.toContain(name);
+      expect(env["PATH"]).toBe(AMBIENT.PATH);
+    }
   });
 });
 

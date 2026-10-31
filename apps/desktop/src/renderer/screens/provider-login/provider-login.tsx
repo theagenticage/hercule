@@ -3,7 +3,7 @@
  * The first run's providers step lists one per account, and the draft's Sign
  * in button opens one in a dialog (spec 17, The first run, step 2).
  */
-import { useEffect, useEffectEvent, useRef, useState, type JSX } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type JSX, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -23,11 +23,10 @@ import { useMinutesLeft } from "../../app/age-clock";
 import { providerAccountsQuery } from "../../app/queries";
 import { ExternalIcon } from "../../icons/external";
 import { DeviceCodeSteps, DoneMark, FormField, MarkedRow, NumberedStep, WaitLine } from "../step";
-import { HarnessLogo } from "../thread/harness-logo";
 
 /**
- * Renders `row`, the account as its runner `runnerId` sees it: the mark of
- * its harness, its name, the harness and where it is on the runner, and the
+ * Renders `row`, the account as its runner `runnerId` sees it: `mark`, the
+ * mark of its provider, its name, the harness and where it is on the runner, and the
  * action it offers at the end:
  *
  * - "Signed in" once the account is signed in;
@@ -66,12 +65,14 @@ import { HarnessLogo } from "../thread/harness-logo";
  */
 export function ProviderLogin({
   client,
+  mark,
   row,
   runnerId,
   startOnOpen = false,
   onSignedIn,
 }: {
   readonly client: HerculeClient;
+  readonly mark: ReactNode;
   readonly row: ProviderRow;
   readonly runnerId: string;
   readonly startOnOpen?: boolean;
@@ -141,7 +142,7 @@ export function ProviderLogin({
 
   return (
     <MarkedRow
-      mark={<HarnessLogo harnessId={row.harnessId} size={18} />}
+      mark={mark}
       name={row.name}
       detail={`${row.harnessName} · ${row.location}`}
       detailMono={row.path !== null}

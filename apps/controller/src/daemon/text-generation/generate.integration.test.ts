@@ -72,17 +72,45 @@ const ALL_MODELS = buildModels("gpt-6-luna", "glm-5.3-flash", "haiku");
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
+/**
+ * Sets when each fleet account was added, in the order of `harnessIds`, so a
+ * test controls the order `automatic` walks the accounts in.
+ */
+const orderAccounts = (arranged: Arranged, harnessIds: ReadonlyArray<string>): Promise<unknown> =>
+  Effect.runPromise(
+    Effect.forEach(
+      harnessIds.entries(),
+      ([index, harnessId]) =>
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`UPDATE provider_accounts
+               SET created_at = ${`2026-10-0${String(index + 1)}T00:00:00.000Z`}
+               WHERE default_harness_id = ${harnessId}`,
+        ),
+      { discard: true },
+    ).pipe(Effect.orDie),
+  );
+
+/** The order the fleet's accounts were added in, unless a test changes it: OpenAI, Z.ai, Anthropic. */
+const DEFAULT_ORDER = ["codex/codex", "pi/pi", "claude-code/claude-code"];
+
 const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
   options: Partial<FleetOptions> = {},
 ): Promise<void> =>
-  sharedWithFleet(body, {
-    plugins: buildPlugins(),
-    facts: FACTS,
-    models: ALL_MODELS,
-    textGenerationDeadline: Duration.seconds(5),
-    ...options,
-  });
+  sharedWithFleet(
+    async (arranged) => {
+      await orderAccounts(arranged, DEFAULT_ORDER);
+      await body(arranged);
+    },
+    {
+      plugins: buildPlugins(),
+      facts: FACTS,
+      models: ALL_MODELS,
+      textGenerationDeadline: Duration.seconds(5),
+      ...options,
+    },
+  );
 
 const TITLE_SCHEMA = {
   type: "object",
@@ -436,7 +464,7 @@ describe("text generation switched off", () => {
 });
 
 describe("the model automatic chooses", () => {
-  it("prefers OpenAI, then Z.ai, then Anthropic", async () => {
+  it("takes the oldest account whose suggested model is listed, whatever its provider", async () => {
     await withFleet(async (arranged) => {
       expect((await readStatus(arranged)).model).toEqual({
         providerAccountId: findProviderAccountId(arranged, "codex/codex"),
@@ -464,6 +492,15 @@ describe("the model automatic chooses", () => {
       },
       { models: buildModels("haiku") },
     );
+    await withFleet(async (arranged) => {
+      await orderAccounts(arranged, ["claude-code/claude-code", "codex/codex", "pi/pi"]);
+
+      expect((await readStatus(arranged)).model).toEqual({
+        providerAccountId: findProviderAccountId(arranged, "claude-code/claude-code"),
+        harnessId: "claude-code/claude-code",
+        model: "haiku",
+      });
+    });
   });
 
   it("skips an account that is logged out", async () => {
@@ -595,8 +632,8 @@ describe("a model the user chose", () => {
       await Effect.runPromise(
         withTransaction(
           arranged.harness.sql,
-          arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-               WHERE provider_account_id = ${uuidFromString(pi)}`,
+          arranged.harness.sql`DELETE FROM secrets
+               WHERE owner_kind = 'provider-account' AND owner_id = ${pi}`,
         ).pipe(Effect.orDie),
       );
 
@@ -693,16 +730,19 @@ describe("which runner makes the call", () => {
     );
   });
 
-  it("skips a runner whose model list lacks the chosen model", async () => {
+  it("chooses the local runner whose own model list lacks the chosen model", async () => {
     await withFleet(
       async (arranged) => {
+        answerOk(arranged);
         const other = await arranged.enlist();
         other.wire.setTextGenerationAnswer(() => OK);
         const pi = findProviderAccountId(arranged, "pi/pi");
         expect((await setModel(arranged, { providerAccountId: pi, model: "haiku" })).status).toBe(
           200,
         );
-        // The local runner no longer lists any model for pi.
+        // The local runner lists no model for pi. The model is the account's
+        // question, so the runner is still a candidate, and the local one is
+        // preferred.
         await Effect.runPromise(
           withTransaction(
             arranged.harness.sql,
@@ -715,37 +755,11 @@ describe("which runner makes the call", () => {
         const result = await generate(arranged);
 
         expect(result).toEqual({ ok: true, value: { title: TITLE } });
-        expect(requestsOn(arranged)).toEqual([]);
         const [entry] = await arranged.harness.audit("textGeneration.completed");
-        expect(entry!.payload).toMatchObject({ runnerId: other.runnerId, model: "haiku" });
+        expect(entry!.payload).toMatchObject({ runnerId: arranged.runnerId, model: "haiku" });
       },
       { firstRunnerIsLocal: true },
     );
-  });
-
-  it("fails with unavailable, and says why in the status, when no runner lists the chosen model", async () => {
-    await withFleet(async (arranged) => {
-      answerOk(arranged);
-      const pi = findProviderAccountId(arranged, "pi/pi");
-      expect(
-        (await setModel(arranged, { providerAccountId: pi, model: "not-in-any-list" })).status,
-      ).toBe(200);
-
-      const result = await generate(arranged);
-
-      expect(result).toMatchObject({ ok: false, error: { reason: "unavailable" } });
-      expect((await readStatus(arranged)).unavailableReason).toBe(
-        result.ok ? null : result.error.message,
-      );
-      expect(requestsOn(arranged)).toEqual([]);
-      const [entry] = await arranged.harness.audit("textGeneration.failed");
-      expect(entry!.payload).toMatchObject({
-        providerAccountId: pi,
-        harnessId: "pi/pi",
-        model: "not-in-any-list",
-        runnerId: null,
-      });
-    });
   });
 
   it("uses the other runner when there is no local runner", async () => {
@@ -764,7 +778,9 @@ describe("which runner makes the call", () => {
     await withFleet(async (arranged) => {
       const other = await arranged.enlist();
       other.wire.setTextGenerationAnswer(() => OK);
-      await logOut(arranged, arranged.runnerId);
+      // A key account runs on any runner with its harness, signed in or not,
+      // so the first runner is reserved too: no runner is left to choose.
+      await reserve(arranged, arranged.runnerId);
       await reserve(arranged, other.runnerId);
 
       const result = await generate(arranged);
@@ -1024,8 +1040,9 @@ describe("an error nobody expected", () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
       // The Z.ai account holds a key, so the call reads its secret before it
-      // sends anything. With the table gone, that read fails in a way no
-      // caller can act on.
+      // sends anything. With the ciphertext column gone, that read fails in a
+      // way no caller can act on, while the check that the key is stored (which
+      // reads only the names) still passes.
       const pi = findProviderAccountId(arranged, "pi/pi");
       expect(
         (await setModel(arranged, { providerAccountId: pi, model: "glm-5.3-flash" })).status,
@@ -1033,7 +1050,7 @@ describe("an error nobody expected", () => {
       await Effect.runPromise(
         withTransaction(
           arranged.harness.sql,
-          arranged.harness.sql`ALTER TABLE secrets RENAME TO secrets_gone`,
+          arranged.harness.sql`ALTER TABLE secrets RENAME COLUMN ciphertext TO ciphertext_gone`,
         ).pipe(Effect.orDie),
       );
 

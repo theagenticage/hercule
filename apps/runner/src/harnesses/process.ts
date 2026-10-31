@@ -8,7 +8,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { AppServerSpawn } from "./codex";
-import type { LoginChild, LoginSpawn } from "./login";
+import type { LoginChild, LoginSpawn, LoginSpawnOptions } from "./login";
 import type { PiSpawn } from "./pi";
 
 export interface Ran {
@@ -166,10 +166,55 @@ const splitLines = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =
   })();
 
 /**
- * Spawns a login process. Unlike `runProcess`, a login is read from and written to while it runs.
+ * Returns a stream of the text the callbacks push, and the functions that push
+ * and end it. Chunks pushed before anyone reads are kept.
  */
-export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
-  const child = Bun.spawn([...command], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env });
+const createTextStream = (): {
+  readonly stream: AsyncIterable<string>;
+  readonly push: (text: string) => void;
+  readonly end: () => void;
+} => {
+  const chunks: Array<string> = [];
+  let wake: (() => void) | undefined;
+  let ended = false;
+  return {
+    stream: (async function* () {
+      for (;;) {
+        while (chunks.length > 0) yield chunks.shift()!;
+        if (ended) return;
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      }
+    })(),
+    push: (text) => {
+      chunks.push(text);
+      wake?.();
+    },
+    end: () => {
+      ended = true;
+      wake?.();
+    },
+  };
+};
+
+/**
+ * Spawns a login process. Unlike `runProcess`, a login is read from and written to while it runs.
+ *
+ * With `options.terminal` the process runs in a pseudo-terminal: its one
+ * output stream, which holds the escape sequences a terminal needs, is
+ * returned as `stdout`, and `stderr` is empty. Without it, the process gets
+ * plain pipes.
+ */
+export const spawnLogin: LoginSpawn = (command, env, options): LoginChild => {
+  if (options?.terminal !== undefined) return spawnLoginInTerminal(command, env, options);
+  const child = Bun.spawn([...command], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env,
+    ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
+  });
   return {
     stdout: decodeStream(child.stdout),
     stderr: decodeStream(child.stderr),
@@ -178,6 +223,53 @@ export const spawnLogin: LoginSpawn = (command, env): LoginChild => {
       // or stderr, not as the result of the write.
       void child.stdin.write(value);
       void child.stdin.flush();
+    },
+    kill: () => {
+      child.kill();
+    },
+    exited: child.exited,
+  };
+};
+
+/** How long to wait after a login process exits before ending its output. */
+const TERMINAL_DRAIN_MS = 100;
+
+const spawnLoginInTerminal = (
+  command: ReadonlyArray<string>,
+  env: Readonly<Record<string, string | undefined>>,
+  options: LoginSpawnOptions,
+): LoginChild => {
+  const output = createTextStream();
+  const decoder = new TextDecoder();
+  const child = Bun.spawn([...command], {
+    env,
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    terminal: {
+      cols: options.terminal!.cols,
+      rows: options.terminal!.rows,
+      data: (_terminal, bytes) => {
+        output.push(decoder.decode(bytes, { stream: true }));
+      },
+      // The terminal reports its end after the last chunk of output.
+      exit: () => {
+        output.end();
+      },
+    },
+  });
+  // A killed child may never report the end of its terminal. The short wait
+  // lets a terminal that does report it deliver its last output first.
+  void child.exited.then(() => {
+    setTimeout(() => {
+      output.end();
+      child.terminal?.close();
+    }, TERMINAL_DRAIN_MS);
+  });
+  const silence: AsyncIterable<string> = (async function* () {})();
+  return {
+    stdout: output.stream,
+    stderr: silence,
+    write: (value) => {
+      child.terminal?.write(value);
     },
     kill: () => {
       child.kill();
