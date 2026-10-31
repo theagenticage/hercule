@@ -4,13 +4,13 @@
  * pi 0.85.1's, and the commands and responses follow the shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { AnswerNotDelivered } from "@hercule/protocol";
-import type { OutputSchema, SessionSpec } from "@hercule/protocol";
+import type { CatalogModel, OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
@@ -288,6 +288,218 @@ describe("launching pi for a session", () => {
       message: expect.stringContaining("prepare") as unknown,
     });
     expect(run.spawns).toEqual([]);
+  });
+});
+
+describe("declaring the models pi does not list", () => {
+  const OPENROUTER = { modelArgument: "openrouter/{model}" };
+  const UNLISTED_ID = "fake-vendor/fake-model:free";
+  const UNLISTED_MODEL: CatalogModel = {
+    slug: UNLISTED_ID,
+    name: "Fake: Model",
+    imageInput: null,
+    options: [],
+    contextWindow: 65_536,
+    reasoning: true,
+  };
+  const SPEC_ON_UNLISTED: SessionSpec = {
+    ...SPEC,
+    modelSelection: { model: UNLISTED_ID, options: { thinking: "high" } },
+  };
+
+  const readModelsFile = (
+    home: string,
+  ): {
+    readonly providers: Record<
+      string,
+      { readonly baseUrl?: string; readonly models: ReadonlyArray<{ readonly id: string }> }
+    >;
+  } => JSON.parse(readFileSync(join(home, "models.json"), "utf8"));
+
+  it("writes the models into the Harness Home before pi is spawned", async () => {
+    const home = createPiHome();
+    let fileWhenSpawned: string | undefined;
+    const { seam, spawns } = buildFakePiSeam({
+      atSpawn: () => {
+        fileWhenSpawned = existsSync(join(home, "models.json"))
+          ? readFileSync(join(home, "models.json"), "utf8")
+          : undefined;
+      },
+    });
+    const adapter = makePiAdapter(seam);
+    const ctx = { ...buildContext(home), ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
+
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
+    await waitUntil("spawned a pi", () => spawns.length === 1);
+
+    expect(JSON.parse(fileWhenSpawned!)).toEqual({
+      providers: {
+        openrouter: {
+          models: [
+            {
+              id: UNLISTED_ID,
+              name: "Fake: Model",
+              contextWindow: 65_536,
+              input: ["text"],
+              reasoning: true,
+            },
+          ],
+        },
+      },
+    });
+    expect(readFlagValue(spawns[0]!.command, "--model")).toBe(`openrouter/${UNLISTED_ID}`);
+  });
+
+  it("merges into a file that is already there, and does so again for a resume", async () => {
+    const run = createDriving();
+    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
+    writeFileSync(
+      join(ctx.home, "models.json"),
+      JSON.stringify({
+        providers: {
+          openrouter: { baseUrl: "http://127.0.0.1:9", models: [{ id: "kept/model" }] },
+        },
+      }),
+    );
+    writePriorSessionFile(ctx.home, PRIOR);
+    const resume: SessionSpec = {
+      ...SPEC_ON_UNLISTED,
+      continue: { nativeSessionId: PRIOR, mode: "resume" },
+    };
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, resume, ctx));
+
+    const written = readModelsFile(ctx.home);
+    expect(written.providers.openrouter!.baseUrl).toBe("http://127.0.0.1:9");
+    expect(written.providers.openrouter!.models.map((entry) => entry.id)).toEqual([
+      "kept/model",
+      UNLISTED_ID,
+    ]);
+  });
+
+  it("does not rewrite a file that already holds the models", async () => {
+    const run = createDriving();
+    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
+    const path = join(ctx.home, "models.json");
+    const before = statSync(path).mtimeMs;
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
+
+    expect(statSync(path).mtimeMs).toBe(before);
+  });
+
+  it("writes no models file for a start that carries no models", async () => {
+    const withoutField = await startTestSession();
+    const withEmptyList = await startTestSession({}, SPEC, {}, { unlistedModels: [] });
+
+    expect(existsSync(join(withoutField.ctx.home, "models.json"))).toBe(false);
+    expect(existsSync(join(withEmptyList.ctx.home, "models.json"))).toBe(false);
+  });
+
+  it("replaces a models file that does not parse, and starts the session", async () => {
+    const run = createDriving();
+    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
+    writeFileSync(join(ctx.home, "models.json"), "{ cut off");
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
+
+    expect(readModelsFile(ctx.home).providers.openrouter!.models).toHaveLength(1);
+  });
+
+  it("fails the start, and spawns no pi, when the models file cannot be written", async () => {
+    const run = createDriving();
+    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
+    // A directory where the file should be makes the rename fail.
+    mkdirSync(join(ctx.home, "models.json"));
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx)),
+    );
+
+    expect(failed).toMatchObject({ _tag: "AdapterFailed" });
+    expect(run.spawns).toEqual([]);
+  });
+});
+
+describe("starting pi on exactly the model that was asked for", () => {
+  const wrongModel = {
+    answers: {
+      get_state: () => ({
+        success: true,
+        data: { model: { provider: "openrouter", id: "vendor/fake-model-pro" } },
+      }),
+    },
+  };
+  const OPENROUTER = { modelArgument: "openrouter/{model}" };
+  const SPEC_ON_FAKE: SessionSpec = {
+    ...SPEC,
+    modelSelection: { model: "vendor/fake-model", options: { thinking: "high" } },
+  };
+
+  it("asks pi which model it started on before it reports the session started", async () => {
+    const run = await startTestSession();
+
+    expect(listSentCommands(run.sent, "get_state")).toHaveLength(1);
+    await waitUntil(
+      "reported the session started",
+      () => filterByTag(run.seen, "session.started").length === 1,
+    );
+  });
+
+  it("fails the start, and stops pi, when pi picked a similar model instead", async () => {
+    const run = createDriving(wrongModel);
+    const ctx = { ...run.ctx, ...OPENROUTER };
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC_ON_FAKE, ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain("openrouter/vendor/fake-model-pro");
+    expect(failed.message).toContain("instead of openrouter/vendor/fake-model");
+    expect(run.spawns[0]!.kills()).toBe(1);
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+    await settle();
+    // The start failed, so the supervisor reports it. No exit or start event
+    // of the adapter may follow.
+    expect(filterByTag(run.seen, "session.started")).toEqual([]);
+    expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("fails the start when pi reports no model at all", async () => {
+    const run = createDriving({ answers: { get_state: () => ({ success: true, data: {} }) } });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed.message).toContain("started on no model");
+  });
+
+  it("fails the start when pi refuses to say which model it started on", async () => {
+    const run = createDriving({ answers: { get_state: () => buildRefusal("not now") } });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed.message).toContain("did not report which model it started on");
+    expect(failed.message).toContain("not now");
+  });
+
+  it("leaves a pi that exits at start to the report of its exit", async () => {
+    const run = createDriving({ dies: true });
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    await waitUntil(
+      "said the session ended",
+      () => filterByTag(run.seen, "session.exited").length === 1,
+    );
+    expect(filterByTag(run.seen, "session.exited")[0]?.message).toContain("could not start");
   });
 });
 
@@ -573,7 +785,13 @@ describe("sending an input to a pi session", () => {
       }),
     );
 
-    expect(run.sent.map((one) => one.type)).toEqual(["set_model", "set_thinking_level", "prompt"]);
+    // The first command is the check of the model pi started on.
+    expect(run.sent.map((one) => one.type)).toEqual([
+      "get_state",
+      "set_model",
+      "set_thinking_level",
+      "prompt",
+    ]);
     expect(listSentCommands(run.sent, "set_model")[0]).toMatchObject({
       provider: "zai",
       modelId: "glm-5.3-flash",

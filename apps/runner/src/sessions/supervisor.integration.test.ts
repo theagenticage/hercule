@@ -4974,6 +4974,24 @@ describe("the skills a start names", () => {
     expect(fake.contexts[0]?.sessionSkillsFolder).toBeUndefined();
   });
 
+  it("hands the harness the unlisted models of the start frame, and none when the frame has none", async () => {
+    const fake = createFake();
+    const { supervisor } = buildConnection(fake);
+    const unlistedModels = [{ slug: "vendor/model", name: "Model", imageInput: null, options: [] }];
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, unlistedModels });
+        yield* supervisor.start({ ...START, sessionId: OTHER_SESSION });
+      }),
+    );
+
+    expect(fake.contexts[0]?.unlistedModels).toEqual(unlistedModels);
+    expect(fake.contexts[1]?.unlistedModels).toBeUndefined();
+  });
+
   it("gives two sessions that name one revision each their own copy, and keeps one when the other exits", async () => {
     const fake = createFake();
     const stub = serve(IMPLEMENT, REVIEW);

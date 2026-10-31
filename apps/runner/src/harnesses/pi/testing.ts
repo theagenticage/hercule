@@ -225,6 +225,20 @@ const DEFAULT_ANSWERS: Answers = {
   }),
 };
 
+/**
+ * Returns pi's response to `get_state` for a pi spawned with `command`: the
+ * model it was asked for with `--model <provider>/<model id>`, as a pi that
+ * knows the model reports it.
+ */
+const answerGetState = (command: ReadonlyArray<string>): Record<string, unknown> => {
+  const requested = command[command.indexOf("--model") + 1] ?? "";
+  const slash = requested.indexOf("/");
+  return {
+    success: true,
+    data: { model: { provider: requested.slice(0, slash), id: requested.slice(slash + 1) } },
+  };
+};
+
 /** Builds pi's response to a command it rejects, with the given error message. */
 export const buildRefusal = (error: string): Record<string, unknown> => ({ success: false, error });
 
@@ -271,6 +285,8 @@ export interface FakePiBehaviour {
   ) => Ran | undefined;
   /** How `pi update --models` ends, replacing the default of a model list refreshed at once. */
   readonly refresh?: Effect.Effect<Ran>;
+  /** Called as pi is spawned, before it exists, so a test can look at the disk the way pi would. */
+  readonly atSpawn?: () => void;
   /** A pi that exits at once without responding, like a broken install. */
   readonly dies?: boolean;
   /** A pi that keeps running after its stdin closes, like one waiting on an approval. */
@@ -303,6 +319,7 @@ export const buildFakePiSeam = (
     env: Readonly<Record<string, string | undefined>>,
     cwd: string | null,
   ) => {
+    behaviour.atSpawn?.();
     const out = createLines();
     const err = createLines();
     const sentToThisPi: Array<Sent> = [];
@@ -326,7 +343,10 @@ export const buildFakePiSeam = (
       sentToThisPi.push({ type, command: frame });
       // An extension UI response is not a command, so pi never responds to it.
       if (type === "extension_ui_response") return;
-      const reply = replies[type]?.(frame);
+      const reply =
+        type === "get_state" && behaviour.answers?.["get_state"] === undefined
+          ? answerGetState(command)
+          : replies[type]?.(frame);
       if (reply === undefined) return;
       out.push(
         JSON.stringify({
@@ -437,11 +457,19 @@ export const listSentCommands = (
 
 /**
  * The fields of a session's context a test can set: its edit marks, its
- * library skills folder and its repository skills folders. None is set by
- * default.
+ * library skills folder, its repository skills folders, its model argument
+ * and its unlisted models. None is set by default, and the default model
+ * argument is Z.ai's.
  */
 type SessionContextOverrides = Partial<
-  Pick<HarnessRunnerContext, "editMarks" | "librarySkillsFolder" | "repositorySkillsFolders">
+  Pick<
+    HarnessRunnerContext,
+    | "editMarks"
+    | "librarySkillsFolder"
+    | "repositorySkillsFolders"
+    | "modelArgument"
+    | "unlistedModels"
+  >
 >;
 
 /**

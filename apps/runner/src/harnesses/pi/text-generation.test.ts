@@ -395,6 +395,66 @@ describe("launching pi for a text generation", () => {
     expect(readdirSync(home)).toEqual([]);
   });
 
+  it("declares the request's unlisted models to pi in the scratch directory, never in the Harness Home", async () => {
+    const { seam, spawns } = buildFakePiSeam();
+    const home = createPiHome();
+    const ctx = {
+      ...buildContext(home),
+      modelArgument: "openrouter/{model}",
+      unlistedModels: [
+        { slug: "fake-vendor/fake-model:free", name: "Fake: Model", imageInput: null, options: [] },
+      ],
+    };
+    const outcome = Effect.runPromise(
+      Effect.catch(
+        makePiAdapter(seam).generateText(buildTextGenerationContext(ctx), {
+          ...SPEC,
+          model: "fake-vendor/fake-model:free",
+        }),
+        (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+      ),
+    );
+    await waitUntil("launched a pi", () => spawns.length === 1);
+    const child = spawns[0]!;
+
+    expect(
+      JSON.parse(readFileSync(join(child.cwd!, "models.json"), "utf8")) as unknown,
+    ).toMatchObject({
+      providers: { openrouter: { models: [{ id: "fake-vendor/fake-model:free" }] } },
+    });
+    expect(readdirSync(home)).toEqual([]);
+
+    answerWith(child, ANSWER);
+    await outcome;
+  });
+
+  it("writes no models file when the request carries no unlisted models", async () => {
+    const { outcome, child } = await startGeneration();
+
+    expect(existsSync(join(child.cwd!, "models.json"))).toBe(false);
+
+    answerWith(child, ANSWER);
+    await outcome;
+  });
+
+  it("fails without prompting when pi picked a similar model instead of the one asked for", async () => {
+    const { outcome, child } = await startGeneration({
+      answers: {
+        get_state: () => ({
+          success: true,
+          data: { model: { provider: "zai", id: "glm-5.3-flash-pro" } },
+        }),
+      },
+    });
+
+    await expect(outcome).resolves.toMatchObject({
+      outcome: "failed",
+      message: expect.stringContaining("instead of zai/glm-5.3-flash") as unknown,
+    });
+    expect(child.sent.map((one) => one.type)).toEqual(["get_state"]);
+    expect(child.kills()).toBe(1);
+  });
+
   it("kills pi when the caller gives up", async () => {
     const { seam, spawns } = buildFakePiSeam();
     const adapter = makePiAdapter(seam);

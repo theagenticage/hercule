@@ -41,7 +41,7 @@ const REQUEST: TextGenerationRequest = {
   harnessAccount: {
     providerAccountId: "account-1",
     harnessHome: "providers/account-1",
-    modelArgument: "{model}",
+    modelArgument: "fake/{model}",
     credentialVariables: [],
   },
   spec: {
@@ -130,7 +130,7 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
       home: root,
       binary: "pi",
       env: { PATH: process.env["PATH"] ?? "" },
-      modelArgument: "{model}",
+      modelArgument: "fake/{model}",
       credentialVariables: [],
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),

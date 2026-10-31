@@ -10,7 +10,15 @@
  * - a Thread on the controller's local runner also reads the user's own
  *   prompt templates and instructions.
  */
-import { copyFileSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -107,6 +115,7 @@ import {
   type RunningTool,
 } from "./normalize";
 import { readPiHome } from "./edited-path";
+import { mergeModelsFile } from "./models-file";
 import { DEFAULT_THINKING, makePiInstall, makeProbe } from "./probe";
 import { readPiProvider } from "./provider";
 import {
@@ -327,6 +336,64 @@ const buildModelChangeFailure = (
       );
   }
 };
+
+/**
+ * How long a pi that was just spawned gets to load and answer its first
+ * command. Loading takes seconds on a slow machine, much longer than
+ * `RPC_DEADLINE`, which is meant for a pi that is already running.
+ */
+const STARTUP_DEADLINE: Duration.Duration = Duration.seconds(30);
+
+/**
+ * Checks that a pi just spawned with `--model` runs on that model, and fails
+ * with a message for the user when it runs on another one.
+ *
+ * `--model` is the only way to choose pi's first model, and pi reads it
+ * loosely. An id that pi does not list can match another model whose id or name
+ * contains it, so a request for `openrouter/vendor/x` could run on
+ * `openrouter/vendor/x-pro`. pi reports this only with a warning on its error
+ * output, which nobody reads while the session runs. `set_model`, used for a
+ * switch inside a session, matches the id exactly and has no such risk.
+ *
+ * pi also builds a model from an unknown id on top of another model's
+ * settings. That model still has the requested id, so it passes this check.
+ *
+ * Succeeds without a verdict when pi exits before it answers: the exit is
+ * reported by the watch on pi's process, with pi's own error output.
+ */
+const confirmStartedModel = (
+  rpc: PiRpc,
+  modelArgument: string,
+  model: string,
+): Effect.Effect<void, string> =>
+  Effect.gen(function* () {
+    const provider = yield* Effect.try({
+      try: () => readPiProvider(modelArgument),
+      catch: describeError,
+    });
+    const response = yield* rpc.send({ type: "get_state" }, STARTUP_DEADLINE).pipe(
+      // A pi that is gone has no model to check. Its exit is reported with its
+      // own error output by the watch on its process.
+      Effect.catch((failure) =>
+        failure._tag === "PiExited" || failure._tag === "PiUnreachable"
+          ? Effect.succeed(undefined)
+          : Effect.fail(
+              `${PI_NAME} did not report which model it started on, so nothing was run on it: ${failure.message}`,
+            ),
+      ),
+    );
+    if (response === undefined) return;
+    const started = (response["data"] as { readonly model?: Record<string, unknown> | null } | null)
+      ?.model;
+    if (started?.["provider"] === provider && started["id"] === model) return;
+    const actual =
+      started === undefined || started === null
+        ? "no model"
+        : `${String(started["provider"])}/${String(started["id"])}`;
+    return yield* Effect.fail(
+      `${PI_NAME} started on ${actual} instead of ${provider}/${model}, so nothing was run on it. ${PI_NAME} does not list ${provider}/${model} and picked a similar model. The model may have left the provider's catalog: refresh the account's models and choose another model.`,
+    );
+  });
 
 /** A session this adapter hosts, and the adapter's state for its pi processes. */
 interface Held {
@@ -1446,6 +1513,36 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
   };
 
   /**
+   * Declares `models` to pi by merging them into the `models.json` in
+   * `directory`, pi's agent directory (see `mergeModelsFile`). pi reads the
+   * file when it starts. Does nothing when there are no models, or when the
+   * file already holds them. Returns true when the file did not parse as JSON
+   * and was replaced. Throws when the file cannot be read or written.
+   *
+   * Everything here is synchronous, so two sessions of one account starting in
+   * this process cannot interleave their read and write and lose each other's
+   * models. No lock is needed.
+   */
+  const declareUnlistedModels = (
+    directory: string,
+    modelArgument: string,
+    models: HarnessRunnerContext["unlistedModels"],
+  ): boolean => {
+    if (models === undefined || models.length === 0) return false;
+    const path = join(directory, "models.json");
+    let existing: string | undefined;
+    try {
+      existing = readFileSync(path, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const merge = mergeModelsFile(existing, readPiProvider(modelArgument), models);
+    if (merge._tag === "unchanged") return false;
+    writeFileAtomically(path, merge.text);
+    return merge.replacedUnreadableFile;
+  };
+
+  /**
    * Starts one agent's pi process with `argv`, on its own copy of the
    * extension at `extensionFile`, and returns the process. Throws when the
    * copy cannot be written or pi cannot start, after deleting the copy. A
@@ -1494,18 +1591,21 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
 
   /**
    * Prepares the Harness Home for a session: creates the sessions
-   * directory and writes the session's instructions, when it has any. Throws
-   * when a write fails.
+   * directory, writes the session's instructions when it has any, and declares
+   * the models the start carried that pi does not list (for a fresh start, a
+   * resume and a fork alike). Returns true when `models.json` did not parse
+   * and was replaced. Throws when a write fails.
    */
   const prepareHome = (
     ctx: HarnessRunnerContext,
     sessionId: string,
     instructions: string | undefined,
-  ): void => {
+  ): boolean => {
     mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 });
     if (instructions !== undefined) {
       writeFileAtomically(buildSystemPromptPath(ctx.home, sessionId), instructions);
     }
+    return declareUnlistedModels(ctx.home, ctx.modelArgument, ctx.unlistedModels);
   };
 
   const buildEnv = (
@@ -1636,6 +1736,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           const extensionFile = join(ctx.cwd, "extension.ts");
           const instructionsFile = join(ctx.cwd, "instructions.txt");
           writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
+          // The scratch directory is pi's agent directory for this call, and
+          // it holds no `models.json` of the account's home. Only the models
+          // the request carries go into it.
+          declareUnlistedModels(ctx.cwd, ctx.modelArgument, ctx.unlistedModels);
           // The probe stores the model catalog it refreshed from pi.dev in the
           // home, so the call can use models newer than the installed pi. A
           // copy read while the probe writes may be cut short. pi then reports
@@ -1753,6 +1857,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
               ),
             ),
           );
+          yield* confirmStartedModel(agent.rpc, ctx.modelArgument, spec.model);
           yield* Effect.catch(agent.rpc.send({ type: "prompt", message: spec.input }), (error) =>
             // A pi that already exited is reported below, by the watch on its
             // exit.
@@ -1833,7 +1938,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
             attempt(() => rmSync(systemPromptFile, { force: true }));
           }
         };
-        yield* Effect.try({
+        const replacedModelsFile = yield* Effect.try({
           try: () => prepareHome(ctx, sessionId, instructions),
           catch: (error) => {
             deleteUnusedInstructions();
@@ -1842,6 +1947,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
             );
           },
         });
+        if (replacedModelsFile) {
+          yield* Effect.logWarning(
+            `${PI_NAME}'s models.json in ${ctx.home} did not parse, so it was replaced by the models of this session`,
+          );
+        }
         const child = yield* Effect.try({
           try: () =>
             spawnAgent(
@@ -1917,6 +2027,20 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         sessions.set(sessionId, held);
         watchChild(held, root);
         Effect.runFork(root.rpc.pump);
+        const wrongModel = yield* Effect.match(
+          confirmStartedModel(root.rpc, ctx.modelArgument, spec.modelSelection.model),
+          { onFailure: (message) => message, onSuccess: () => undefined },
+        );
+        if (wrongModel !== undefined) {
+          // pi has done nothing yet, so it is stopped without the careful
+          // shutdown of `stopSession`. `stopping` keeps the watch on its
+          // process from reporting the exit of a session that never started.
+          held.stopping = true;
+          sessions.delete(sessionId);
+          deleteUnusedInstructions();
+          yield* stopChild(child);
+          return yield* Effect.fail(buildAdapterFailed(wrongModel));
+        }
         // The native id goes on this event because the controller has no
         // other way to learn it: a session started after the runner's hello
         // is not listed again.
