@@ -18,12 +18,7 @@ import {
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import type {
-  ModelProfile,
-  ModelProfileUpdateInput,
-  ProviderAccount,
-  ResolvedModelProfileEntry,
-} from "@hercule/contract";
+import type { ModelProfile, ProviderAccount, ResolvedModelProfileEntry } from "@hercule/contract";
 import {
   ANTHROPIC_IDENTITY,
   buildModelProfile,
@@ -486,17 +481,12 @@ describe("the New rows of a Draft Thread's menu", () => {
       WITH_NEW_MODEL.id,
       WITH_NEW_MODEL.id,
     ]);
-    const [added, dismissed] = saveProfile.mock.calls.map(([{ buildChange }]) =>
-      buildChange(WITH_NEW_MODEL),
+    const [added, dismissed] = saveProfile.mock.calls.map(([change]) =>
+      "newModelEdit" in change ? change.newModelEdit : null,
     );
-    expect(added!.accounts[0]!.entries!.map(({ model }) => model)).toEqual([
-      SONNET.model,
-      OPUS.model,
-      OPUS_5_6.model,
-    ]);
-    expect(dismissed!.dismissedNewModels).toEqual([
-      { providerAccountId: CLAUDE.id, model: OPUS_5_6.model },
-    ]);
+    const edit = { providerAccountId: CLAUDE.id, model: OPUS_5_6.model };
+    expect(added).toEqual({ action: "add", ...edit });
+    expect(dismissed).toEqual({ action: "dismiss", ...edit });
   });
 
   it("keeps the buttons of a row focusable but inert while its save runs, and shows a refusal under the lane", async () => {
@@ -561,15 +551,12 @@ describe("the focus after a New row leaves the menu", () => {
    * returns for the profile the save changed, which is what the app does when
    * the controller answers.
    */
-  const renderMenuThatRedraws = (
-    before: ModelProfile,
-    after: (change: ModelProfileUpdateInput) => ModelProfile,
-  ) => {
+  const renderMenuThatRedraws = (before: ModelProfile, after: () => ModelProfile) => {
     let show: (profiles: readonly ModelProfile[]) => void = () => undefined;
     const menu = renderMenu({
       profiles: [before],
-      saveProfile: ({ buildChange }) => {
-        show([after(buildChange(before))]);
+      saveProfile: () => {
+        show([after()]);
         return Promise.resolve();
       },
     });

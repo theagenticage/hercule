@@ -41,60 +41,22 @@ export interface NewModelActions {
 }
 
 /**
- * Where the keyboard focus goes once a saved "New" row has left the list: the
- * row's lane and model, and what the user did to it.
+ * A request to move the keyboard focus once a saved "New" row has left the
+ * list.
  *
- * - After Add, the entry just added, in any harness of the account, because
- *   the save may have put it in another harness than the row's section.
- * - After "Not now", the "New" row that came after the dismissed one, or
- *   `null` when there was none.
+ * - `sourceElement` is the button that was pressed. It is in the row that
+ *   leaves the list when the save works.
+ * - `findTarget` returns the element to focus, as the list is when the row
+ *   has left, or `null` when there is none.
  */
-interface FocusAfterSave {
-  readonly laneKey: string;
-  readonly model: string;
-  readonly saved:
-    | { readonly kind: "add"; readonly providerAccountId: string }
-    | { readonly kind: "dismiss"; readonly nextModel: string | null };
+interface FocusRequest {
+  readonly sourceElement: HTMLElement;
+  readonly findTarget: () => HTMLElement | null;
 }
 
-/** Returns the value of the `data-lane` attribute of the lane of an account in a profile. */
-export const formatLaneKey = (profileId: string, providerAccountId: string): string =>
-  `${profileId}:${providerAccountId}`;
-
-/** Returns the "New" row of `model` among the rows of `lane`, or `undefined`. */
-const findNewModelRow = (lane: Element | null, model: string): HTMLElement | undefined =>
-  [...(lane?.querySelectorAll<HTMLElement>("[data-new-model]") ?? [])].find(
-    (row) => row.dataset["newModel"] === model,
-  );
-
-/**
- * Returns the element that takes the focus after a saved row left `list`, or
- * `null` when the list holds nothing to focus. In this order:
- *
- * - after Add, the row of the entry just added;
- * - after "Not now", the Add button of the next "New" row;
- * - the first entry of the same lane;
- * - the first button or field of the list.
- */
-const findFocusAfterSave = (list: HTMLElement, after: FocusAfterSave): HTMLElement | null => {
-  const lane = list.querySelector<HTMLElement>(`[data-lane="${after.laneKey}"]`);
-  const { saved } = after;
-  const target =
-    saved.kind === "add"
-      ? [...(lane?.querySelectorAll<HTMLElement>("button[data-model]") ?? [])].find(
-          (entry) =>
-            entry.dataset["accountId"] === saved.providerAccountId &&
-            entry.dataset["model"] === after.model,
-        )
-      : saved.nextModel === null
-        ? undefined
-        : findNewModelRow(lane, saved.nextModel)?.querySelector<HTMLElement>(".line-action");
-  return (
-    target ??
-    lane?.querySelector<HTMLElement>("button[data-model]") ??
-    list.querySelector<HTMLElement>("input, button:not([data-unready])")
-  );
-};
+/** Returns the first element of `container` that matches `selector`, or `null` when `container` is `null` or no longer in the page. */
+const findInside = (container: Element | null, selector: string): HTMLElement | null =>
+  container?.isConnected === true ? container.querySelector<HTMLElement>(selector) : null;
 
 /**
  * Renders the list of a model menu below its filter, as `buildModelMenu`
@@ -117,7 +79,8 @@ const findFocusAfterSave = (list: HTMLElement, after: FocusAfterSave): HTMLEleme
  * has an Add and a "Not now" button, and the lane shows under its rows why a
  * save was refused; without them it is drawn without buttons. When a save
  * works, the row leaves the list, and with it the keyboard focus the pressed
- * button had. The list then moves the focus on, once, see `findFocusAfterSave`.
+ * button had. The list then moves the focus on, once, to where the action
+ * that saved the row says it should go (see `FocusRequest`).
  *
  * - `providers` and `plugins` give a lane its Provider's mark.
  * - `onChoose` receives the one choice a row makes.
@@ -150,27 +113,25 @@ export function ModelMenuList({
   readonly highlightedAccountId?: string | null;
 }): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
-  const focusAfterSave = useRef<FocusAfterSave | null>(null);
+  const focusRequest = useRef<FocusRequest | null>(null);
   const [, redraw] = useState(0);
   // Runs after every draw while a request is waiting, because the row leaves
   // the list in a draw of its own, which can come before or after the save's
   // answer. The request ends at the first draw that settles it:
-  // - while the focus is still in the saved row, the row has not left yet, and
-  //   the request waits;
-  // - when the focus is elsewhere in a row that is still there, the user moved
+  // - while the focus is still on the pressed button, the row has not left yet,
+  //   and the request waits;
+  // - when the focus is elsewhere and the row is still there, the user moved
   //   on, and the request ends without moving the focus;
   // - when the row has left, the request ends, and the focus moves only if the
   //   browser dropped it to the page.
   useEffect(() => {
-    const after = focusAfterSave.current;
-    const list = listRef.current;
-    if (after === null || list === null) return;
-    const lane = list.querySelector(`[data-lane="${after.laneKey}"]`);
-    const savedRow = findNewModelRow(lane, after.model);
-    if (savedRow?.contains(document.activeElement) === true) return;
-    focusAfterSave.current = null;
+    const request = focusRequest.current;
+    if (request === null) return;
+    const { sourceElement, findTarget } = request;
+    if (sourceElement.isConnected && document.activeElement === sourceElement) return;
+    focusRequest.current = null;
     const lost = document.activeElement === null || document.activeElement === document.body;
-    if (savedRow === undefined && lost) findFocusAfterSave(list, after)?.focus();
+    if (!sourceElement.isConnected && lost) findTarget()?.focus();
   });
 
   const renderMark = (providerId: string): JSX.Element => (
@@ -222,22 +183,28 @@ export function ModelMenuList({
     );
   };
 
-  /** Draws the row of a model announced as new in the lane `lane` of the profile `profileId`. */
-  const renderNewModel = (
-    profileId: string,
-    lane: ModelMenuLane,
-    row: NewModelRow,
-  ): JSX.Element => {
-    const save = (
+  /** Draws the row of a model announced as new in a lane of the profile `profileId`. */
+  const renderNewModel = (profileId: string, row: NewModelRow): JSX.Element => {
+    /**
+     * Runs `run` for the row the button `source` is in. When it works, asks for
+     * the focus to go to what `findDestination` returns once the row has left,
+     * else to the first entry of its lane, else to the first control of the
+     * list. `findDestination` receives the lane's element.
+     */
+    const startSave = (
       run: (profileId: string, row: NewModelRow) => Promise<boolean>,
-      saved: FocusAfterSave["saved"],
+      source: HTMLElement,
+      findDestination: (laneElement: Element | null) => HTMLElement | null,
     ): void => {
+      const laneElement = source.closest(".pop-sec");
       void run(profileId, row).then((worked) => {
         if (!worked) return;
-        focusAfterSave.current = {
-          laneKey: formatLaneKey(profileId, lane.providerAccountId),
-          model: row.model,
-          saved,
+        focusRequest.current = {
+          sourceElement: source,
+          findTarget: () =>
+            findDestination(laneElement) ??
+            findInside(laneElement, "button[data-model]") ??
+            findInside(listRef.current, "input, button:not([data-unready])"),
         };
         redraw((count) => count + 1);
       });
@@ -250,17 +217,28 @@ export function ModelMenuList({
           newModelActions === undefined
             ? null
             : {
-                onAdd: () => {
-                  save(newModelActions.add, {
-                    kind: "add",
-                    providerAccountId: row.providerAccountId,
-                  });
+                onAdd: (source) => {
+                  startSave(
+                    newModelActions.add,
+                    source,
+                    (laneElement) =>
+                      // The entry may be in another harness than the row's section.
+                      [
+                        ...(laneElement?.querySelectorAll<HTMLElement>("button[data-model]") ?? []),
+                      ].find(
+                        (entry) =>
+                          entry.dataset["accountId"] === row.providerAccountId &&
+                          entry.dataset["model"] === row.model,
+                      ) ?? null,
+                  );
                 },
-                onDismiss: () => {
-                  save(newModelActions.dismiss, {
-                    kind: "dismiss",
-                    nextModel: lane.newModels[lane.newModels.indexOf(row) + 1]?.model ?? null,
-                  });
+                onDismiss: (source) => {
+                  const nextRow = source.closest(".line--new")?.nextElementSibling;
+                  startSave(newModelActions.dismiss, source, () =>
+                    nextRow?.classList.contains("line--new") === true
+                      ? findInside(nextRow, ".line-action")
+                      : null,
+                  );
                 },
                 busy: newModelActions.isSaving(profileId, row),
               }
@@ -284,7 +262,6 @@ export function ModelMenuList({
         return (
           <div
             key={lane.providerAccountId}
-            data-lane={formatLaneKey(profile.profileId, lane.providerAccountId)}
             className={
               lane.providerAccountId === highlightedAccountId ? "pop-sec is-lit" : "pop-sec"
             }
@@ -307,7 +284,7 @@ export function ModelMenuList({
               {renderMark(lane.providerId)}
               {lane.name}
             </div>
-            {lane.newModels.map((row) => renderNewModel(profile.profileId, lane, row))}
+            {lane.newModels.map((row) => renderNewModel(profile.profileId, row))}
             {lane.note === null ? lane.rows.map((row) => renderRow(row)) : null}
             {lane.note === null ? null : <p className="menu-note">{lane.note}</p>}
             {problem === null ? null : (

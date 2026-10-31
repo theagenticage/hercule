@@ -794,6 +794,13 @@ export {
 } from "./model-profiles/profile-lookup";
 export { countProfileEntries, formatProfileEntryKey } from "./model-profiles/profile-entries";
 export { buildModelProfileCopyName } from "./model-profiles/profile-tabs";
+export { readCachedModelProfile } from "./model-profiles/run-profile-save";
+export {
+  buildModelProfileUpdateOptions,
+  type ModelProfileSave,
+  type NewModelEdit,
+  type ModelProfilesQueryKey,
+} from "./model-profiles/profile-save";
 export { updateModelProfile } from "./model-profiles/update-profile";
 export {
   resolveThreadConfig,

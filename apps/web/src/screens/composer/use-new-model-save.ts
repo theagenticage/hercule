@@ -1,23 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  addNewModel,
-  dismissNewModel,
+  buildModelProfileUpdateOptions,
   readErrorMessage,
-  updateModelProfile,
   type HerculeClient,
+  type NewModelEdit,
   type NewModelRow,
 } from "@hercule/client-core";
-import type { ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
 import { modelProfilesQuery } from "../../app/queries";
 import type { NewModelRefusal, NewModelSaving } from "./model-list";
-
-/** What one save of a New row changes, and which row it is for. */
-interface NewModelSaveRequest {
-  readonly profileId: string;
-  readonly row: NewModelRow;
-  readonly buildChange: (profile: ModelProfile) => ModelProfileUpdateInput;
-}
 
 const isSameRow = (a: NewModelSaving, b: NewModelSaving): boolean =>
   a.profileId === b.profileId && a.providerAccountId === b.providerAccountId && a.model === b.model;
@@ -30,11 +21,9 @@ const isSameRow = (a: NewModelSaving, b: NewModelSaving): boolean =>
  * closes. A save that is running is never forgotten, so closing and reopening
  * the menu mid-save still shows the row busy and, if the save fails, why.
  *
- * Every save shares the "model-profile" mutation scope, so saves run one
- * after another. The profile a save changes is read from the cache when the
- * save's turn comes, not when the user pressed the button, so a save never
- * writes over one that ran before it. The controller's answer replaces the
- * profile in the cache at once; the `provider` live topic keeps the cache
+ * The saves are those of `buildModelProfileUpdateOptions`: one after another,
+ * each built from the newest cached profile. The controller's answer replaces
+ * the profile in the cache at once; the `provider` live topic keeps the cache
  * current after that, and the menu redraws without the row.
  *
  * The state of each save is kept here, not read from the mutation, because a
@@ -45,26 +34,15 @@ export function useNewModelSave(client: HerculeClient) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState<readonly NewModelSaving[]>([]);
   const [refusal, setRefusal] = useState<NewModelRefusal | null>(null);
-  const save = useMutation({
-    scope: { id: "model-profile" },
-    mutationFn: ({ profileId, buildChange }: NewModelSaveRequest) => {
-      const cached = queryClient
-        .getQueryData(modelProfilesQuery(client).queryKey)
-        ?.find((each) => each.id === profileId);
-      if (cached === undefined) {
-        throw new Error("This profile was deleted. Pick another profile.");
-      }
-      return updateModelProfile(client, cached, buildChange);
-    },
-    onSuccess: (saved) => {
-      queryClient.setQueryData(modelProfilesQuery(client).queryKey, (list) =>
-        list?.map((each) => (each.id === saved.id ? saved : each)),
-      );
-    },
-  });
+  const save = useMutation(
+    buildModelProfileUpdateOptions(client, queryClient, modelProfilesQuery(client).queryKey),
+  );
 
-  const run = async (request: NewModelSaveRequest): Promise<void> => {
-    const { profileId, row } = request;
+  const run = async (
+    profileId: string,
+    row: NewModelRow,
+    action: NewModelEdit["action"],
+  ): Promise<void> => {
     const key: NewModelSaving = {
       profileId,
       providerAccountId: row.providerAccountId,
@@ -75,7 +53,10 @@ export function useNewModelSave(client: HerculeClient) {
     setRefusal(null);
     setSaving((current) => [...current, key]);
     try {
-      await save.mutateAsync(request);
+      await save.mutateAsync({
+        profileId,
+        newModelEdit: { action, providerAccountId: row.providerAccountId, model: row.model },
+      });
     } catch (error) {
       setRefusal({
         ...key,
@@ -93,18 +74,10 @@ export function useNewModelSave(client: HerculeClient) {
       setRefusal(null);
     },
     add: (profileId: string, row: NewModelRow): void => {
-      void run({
-        profileId,
-        row,
-        buildChange: (profile) => addNewModel(profile, row.providerAccountId, row.model),
-      });
+      void run(profileId, row, "add");
     },
     dismiss: (profileId: string, row: NewModelRow): void => {
-      void run({
-        profileId,
-        row,
-        buildChange: (profile) => dismissNewModel(profile, row.providerAccountId, row.model),
-      });
+      void run(profileId, row, "dismiss");
     },
   };
 }

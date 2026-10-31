@@ -18,7 +18,8 @@ import { AccountCard } from "./-account-card";
 import type { CredentialFix } from "./-fix-account-dialog";
 import { LazyFixAccountDialog } from "./-lazy-fix-account-dialog";
 import { ModelsSection } from "./-models-section";
-import { useOpenModelProfile, validateProvidersSearch } from "./-open-model-profile";
+import { useOpenModelProfile } from "./-open-model-profile";
+import { validateProvidersSearch } from "./-providers-search";
 import { OpenedProviderAccountSheet } from "./-provider-account-sheet";
 
 /**
