@@ -1150,6 +1150,7 @@ export const FIXTURE_MODEL_PROFILE: ModelProfile = {
           problem: null,
         }),
       ),
+      newModels: [],
     },
   ],
   defaultEntry: { providerAccountId: ACCOUNT_ID, model: "claude-sonnet-5", harnessId: null },

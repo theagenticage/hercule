@@ -6,10 +6,11 @@
  * row makes.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   readThreadConfig,
+  type NewModelRow,
   type RecentModel,
   type SignInTarget,
   type ThreadCatalogs,
@@ -29,7 +30,7 @@ import {
   PROVIDERS,
 } from "@hercule/client-core/testing";
 import { SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
-import { ModelMenu } from "./model-menu";
+import { ModelMenu, type NewModelSaves } from "./model-menu";
 
 const MOSS = SIDEBAR_FIXTURE.runners[0]!;
 
@@ -93,6 +94,7 @@ const renderMenu = ({
   kind = "draft",
   recent = [],
   lastOpenProfileId = null,
+  newModelSaves,
 }: {
   readonly accounts?: readonly ProviderAccount[];
   readonly profiles?: readonly ModelProfile[];
@@ -100,33 +102,41 @@ const renderMenu = ({
   readonly kind?: ThreadKind;
   readonly recent?: readonly RecentModel[];
   readonly lastOpenProfileId?: string | null;
+  readonly newModelSaves?: NewModelSaves;
 } = {}) => {
-  const catalogs: ThreadCatalogs = {
+  const buildCatalogs = (modelProfiles: readonly ModelProfile[]): ThreadCatalogs => ({
     accounts,
     providers: PROVIDERS,
     harnesses: HARNESSES,
-    modelProfiles: profiles,
+    modelProfiles,
     runners: SIDEBAR_FIXTURE.runners,
     thisMacRunnerId: null,
-  };
+  });
   const onChoose = vi.fn<(choice: ThreadChoice) => void>();
   const onSignIn = vi.fn<(target: SignInTarget) => void>();
   const rememberOpenProfile = vi.fn<(profileId: string) => void>();
-  render(
+  const draw = (modelProfiles: readonly ModelProfile[]) => (
     <ModelMenu
-      catalogs={catalogs}
+      catalogs={buildCatalogs(modelProfiles)}
       plugins={[]}
       config={config}
       kind={kind}
       runnerId={null}
+      timezone="UTC"
       readRecent={() => recent}
       readLastOpenProfileId={() => lastOpenProfileId}
       rememberOpenProfile={rememberOpenProfile}
       onChoose={onChoose}
       onSignIn={onSignIn}
-    />,
+      newModelSaves={newModelSaves}
+    />
   );
-  return { onChoose, onSignIn, rememberOpenProfile };
+  const { rerender } = render(draw(profiles));
+  /** Draws the menu again with other profiles, as the app does when the controller changes them. */
+  const showProfiles = (next: readonly ModelProfile[]): void => {
+    rerender(draw(next));
+  };
+  return { onChoose, onSignIn, rememberOpenProfile, showProfiles };
 };
 
 /** Returns the words of a row, without the words a Provider's mark draws as its fallback initial. */
@@ -399,5 +409,209 @@ describe("the model menu of a thread that has started", () => {
         },
       ],
     ]);
+  });
+});
+
+/** An announced model of the Anthropic account, which arrived on 26 Oct of the year the test runs in. */
+const OPUS_5_6 = {
+  model: "claude-opus-5-6",
+  name: "Claude Opus 5.6",
+  firstSeenAt: `${String(new Date().getUTCFullYear())}-10-26T12:00:00.000Z`,
+};
+
+/** The profile "Main" whose Anthropic section announces `OPUS_5_6`. */
+const WITH_NEW_MODEL: ModelProfile = buildModelProfile([
+  buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS], { newModels: [OPUS_5_6] }),
+  buildProfileSection(OPENAI_IDENTITY, [GPT]),
+]);
+
+/** Returns the "New" row of the menu. */
+const findNewRow = (): HTMLElement => document.querySelector<HTMLElement>(".line--new")!;
+
+/** Returns the New row of `WITH_NEW_MODEL` as a pair of saves that both work at once. */
+const SAVES_AT_ONCE: NewModelSaves = {
+  add: () => Promise.resolve(),
+  dismiss: () => Promise.resolve(),
+};
+
+describe("the New rows of a Draft Thread's menu", () => {
+  it("draws the row first in its lane, with the date, and no pick on its body", async () => {
+    const user = userEvent.setup();
+    const { onChoose } = renderMenu({
+      profiles: [WITH_NEW_MODEL],
+      newModelSaves: SAVES_AT_ONCE,
+    });
+
+    expect(readSections()[0]).toEqual([
+      "Anthropic",
+      "NewClaude Opus 5.6 · arrived 26 OctAdd",
+      "Claude Sonnet 5",
+      "Claude Opus 5",
+    ]);
+    await user.click(screen.getByText("Claude Opus 5.6"));
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("draws the row without buttons when the screen gives no way to act on it", () => {
+    renderMenu({ profiles: [WITH_NEW_MODEL] });
+
+    expect(findNewRow().textContent).toBe("NewClaude Opus 5.6 · arrived 26 Oct");
+    expect(within(findNewRow()).queryAllByRole("button")).toEqual([]);
+  });
+
+  it("names the model on both buttons and hands the profile and the row to the saves", async () => {
+    const user = userEvent.setup();
+    const added = vi.fn<(profileId: string, row: NewModelRow) => Promise<void>>(() =>
+      Promise.resolve(),
+    );
+    const dismissed = vi.fn<(profileId: string, row: NewModelRow) => Promise<void>>(() =>
+      Promise.resolve(),
+    );
+    renderMenu({
+      profiles: [WITH_NEW_MODEL],
+      newModelSaves: { add: added, dismiss: dismissed },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+    const dismiss = screen.getByRole("button", { name: "Not now: Claude Opus 5.6" });
+    expect(dismiss.getAttribute("title")).toBe("Not now");
+    await user.click(dismiss);
+
+    const row: unknown = expect.objectContaining({
+      providerAccountId: CLAUDE.id,
+      model: OPUS_5_6.model,
+    });
+    expect(added.mock.calls).toEqual([[WITH_NEW_MODEL.id, row]]);
+    expect(dismissed.mock.calls).toEqual([[WITH_NEW_MODEL.id, row]]);
+  });
+
+  it("keeps the buttons of a row focusable but inert while its save runs, and shows a refusal under the lane", async () => {
+    const user = userEvent.setup();
+    const add = vi.fn<NewModelSaves["add"]>();
+    let refuse: (error: Error) => void = () => undefined;
+    add.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = reject;
+        }),
+    );
+    renderMenu({
+      profiles: [WITH_NEW_MODEL],
+      newModelSaves: { add, dismiss: () => Promise.resolve() },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+    const addButton = screen.getByRole("button", { name: "Add Claude Opus 5.6" });
+    const dismissButton = screen.getByRole("button", { name: "Not now: Claude Opus 5.6" });
+    for (const button of [addButton, dismissButton]) {
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      expect(button.hasAttribute("data-unready")).toBe(true);
+    }
+    // The pressed button keeps the focus, and pressing it again does nothing.
+    expect(document.activeElement).toBe(addButton);
+    await user.keyboard("{Enter}");
+    expect(add).toHaveBeenCalledTimes(1);
+
+    refuse(new Error("pi does not list Claude Opus 5.6."));
+
+    const lane = findNewRow().closest(".pop-sec")!;
+    await waitFor(() => {
+      expect(within(lane as HTMLElement).getByRole("alert").textContent).toBe(
+        "The change was not saved. pi does not list Claude Opus 5.6.",
+      );
+    });
+    // The row stays, with its buttons ready for another try.
+    expect(addButton.hasAttribute("aria-disabled")).toBe(false);
+    expect(document.activeElement).toBe(addButton);
+  });
+
+  it("draws no New row in the menu of a thread that has started", () => {
+    renderMenu({ profiles: [WITH_NEW_MODEL], kind: "active" });
+
+    expect(findNewRow()).toBeNull();
+  });
+});
+
+/** An announced model that follows `OPUS_5_6`. */
+const OPUS_5_7 = { ...OPUS_5_6, model: "claude-opus-5-7", name: "Claude Opus 5.7" };
+
+describe("the focus after a New row leaves the menu", () => {
+  /** Returns the profile whose Anthropic section holds `entries` and announces `newModels`. */
+  const buildProfile = (
+    entries: readonly ResolvedModelProfileEntry[],
+    newModels: readonly (typeof OPUS_5_6)[],
+  ): ModelProfile =>
+    buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, entries, { newModels }),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]);
+
+  it("moves to the row of the added entry after Add", async () => {
+    const user = userEvent.setup();
+    const opus56 = claudeEntry(OPUS_5_6.model, OPUS_5_6.name);
+    let show: (profiles: readonly ModelProfile[]) => void = () => undefined;
+    const menu = renderMenu({
+      profiles: [buildProfile([SONNET, OPUS], [OPUS_5_6])],
+      newModelSaves: {
+        add: () => {
+          show([buildProfile([SONNET, OPUS, opus56], [])]);
+          return Promise.resolve();
+        },
+        dismiss: () => Promise.resolve(),
+      },
+    });
+    show = menu.showProfiles;
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Claude Opus 5.6" }));
+    });
+  });
+
+  it("moves to the Add button of the next New row after Not now, else to the lane's first row", async () => {
+    const user = userEvent.setup();
+    let show: (profiles: readonly ModelProfile[]) => void = () => undefined;
+    const menu = renderMenu({
+      profiles: [buildProfile([SONNET, OPUS], [OPUS_5_6, OPUS_5_7])],
+      newModelSaves: {
+        add: () => Promise.resolve(),
+        dismiss: (_profileId, row) => {
+          show([buildProfile([SONNET, OPUS], row.model === OPUS_5_6.model ? [OPUS_5_7] : [])]);
+          return Promise.resolve();
+        },
+      },
+    });
+    show = menu.showProfiles;
+
+    await user.click(screen.getByRole("button", { name: "Not now: Claude Opus 5.6" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Add Claude Opus 5.7" }),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Not now: Claude Opus 5.7" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Claude Sonnet 5" }));
+    });
+  });
+
+  it("leaves the focus alone after a refusal", async () => {
+    const user = userEvent.setup();
+    renderMenu({
+      profiles: [WITH_NEW_MODEL],
+      newModelSaves: {
+        add: () => Promise.reject(new Error("Refused.")),
+        dismiss: () => Promise.resolve(),
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    await screen.findByRole("alert");
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Add Claude Opus 5.6" }),
+    );
   });
 });

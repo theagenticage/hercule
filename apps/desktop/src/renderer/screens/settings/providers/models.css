@@ -377,6 +377,40 @@
   font-size: var(--t-12);
 }
 
+/* ---------- A "New" row: a model the controller announced, under the head ---------- */
+/* The prototype's `.vh-new`. Its left padding of 30px puts the name under the
+   names of the rows below (8px of padding, the 14px grip, an 8px gap). */
+.pm-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  margin: 2px -8px;
+  padding: 0 6px 0 30px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ok-tint) 60%, transparent);
+}
+.pm-new > b {
+  font-weight: var(--w-medium);
+}
+.pm-new > small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+/* The prototype's `.pk-new`. */
+.pm-new-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--ok-tint);
+  color: var(--ok);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+
 /* ---------- The row's ⋯ menu ---------- */
 .pm-rowmenu {
   width: 250px;

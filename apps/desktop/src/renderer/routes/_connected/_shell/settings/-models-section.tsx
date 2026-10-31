@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { ModelProfile } from "@hercule/contract";
 import "../../../../screens/settings/providers/models.css";
-import { addCachedModelProfile } from "./-model-profile-cache";
+import { addCachedModelProfile } from "../../../../app/model-profile-cache";
 import { ModelProfileMenu } from "./-model-profile-menu";
 import { ModelProfileTabs } from "./-model-profile-tabs";
 import { NewModelProfileDialog } from "./-new-model-profile-dialog";

@@ -15,7 +15,7 @@ import {
   readCachedModelProfile,
   readCachedModelProfiles,
   useModelProfileUpdate,
-} from "./-model-profile-cache";
+} from "../../../../app/model-profile-cache";
 import { useOpenModelProfile } from "./-open-model-profile";
 
 /** A rename that was asked for and has not been answered, which its tab shows as the profile's name. */

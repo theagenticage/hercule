@@ -143,6 +143,7 @@ const playProfile = (
           harnessId: section.harnessId,
           resolvedHarnessId: section.harnessId ?? identity.harnessId,
           selectionPending: section.entries === undefined,
+          newModels: [],
           entries: (section.entries ?? []).map(
             (entry): ResolvedModelProfileEntry =>
               known.find((each) => isSame(each, entry)) ??

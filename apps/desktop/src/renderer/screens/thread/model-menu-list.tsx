@@ -1,10 +1,12 @@
-import { Fragment, type JSX } from "react";
+import { Fragment, useEffect, useRef, useState, type JSX } from "react";
 import {
   describeModelRow,
   findProviderPluginId,
   type ModelMenu,
+  type ModelMenuLane,
   type ModelMenuProfile,
   type ModelMenuRow,
+  type NewModelRow,
   type PluginIdentity,
   type SignInTarget,
   type ThreadCatalogs,
@@ -14,10 +16,72 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
 import { ProfileFace } from "../profile-face";
 import { ProviderMark } from "../settings/providers/provider-mark";
 import { MenuLine } from "./menu-line";
+import { NewModelLine } from "./new-model-line";
 import "./model-menu-list.css";
 
 /** The size of the Provider's mark beside a lane's name and a Recent row. */
 const MARK_SIZE = 12;
+
+/**
+ * What the list does with the "New" rows of its lanes. A list given none draws
+ * the rows without buttons, as a preview does.
+ *
+ * - `add` and `dismiss` save what the user did to a row, for the profile that
+ *   holds the lane. Each resolves with `true` when the save worked and `false`
+ *   when it was refused, and never rejects.
+ * - `isSaving` tells whether a save of the row runs.
+ * - `findRefusal` returns why the last save in the lane was refused, or `null`.
+ */
+export interface NewModelActions {
+  readonly add: (profileId: string, row: NewModelRow) => Promise<boolean>;
+  readonly dismiss: (profileId: string, row: NewModelRow) => Promise<boolean>;
+  readonly isSaving: (profileId: string, row: NewModelRow) => boolean;
+  readonly findRefusal: (profileId: string, lane: ModelMenuLane) => string | null;
+}
+
+/**
+ * Where the keyboard focus goes once a saved row has left the list: the lane
+ * and what the user did, and for a dismissal the row's place among the lane's
+ * "New" rows.
+ */
+interface FocusAfterSave {
+  readonly laneKey: string;
+  readonly saved:
+    | { readonly kind: "add"; readonly name: string }
+    | { readonly kind: "dismiss"; readonly index: number };
+}
+
+/** Returns the value of the `data-lane` attribute of a lane. */
+const formatLaneKey = (profileId: string, providerAccountId: string): string =>
+  `${profileId}:${providerAccountId}`;
+
+/**
+ * Returns the element that takes the focus after a saved row left the list, or
+ * `null` when the list holds nothing to focus. In this order:
+ *
+ * - after Add, the row of the entry just added;
+ * - after "Not now", the Add button of the row that took the dismissed row's
+ *   place;
+ * - the first row of the same lane;
+ * - the first button or field of the whole menu, which is the filter when
+ *   there is one.
+ */
+const findFocusAfterSave = (list: HTMLElement, after: FocusAfterSave): HTMLElement | null => {
+  const lane = list.querySelector<HTMLElement>(`[data-lane="${after.laneKey}"]`);
+  const { saved } = after;
+  const target =
+    saved.kind === "add"
+      ? [...(lane?.querySelectorAll<HTMLElement>("button.line") ?? [])].find(
+          (line) => line.querySelector("b")?.textContent === saved.name,
+        )
+      : lane?.querySelectorAll<HTMLElement>(".line--new .line-action")[saved.index];
+  return (
+    target ??
+    lane?.querySelector<HTMLElement>("button.line") ??
+    list.closest(".model-menu")?.querySelector<HTMLElement>("input, button:not([data-unready])") ??
+    null
+  );
+};
 
 /**
  * Renders the list of a model menu below its filter, as `buildModelMenu`
@@ -35,6 +99,13 @@ const MARK_SIZE = 12;
  * hidden. When signing in would fix it and `onSignIn` is given, the row also
  * has a Sign in link.
  *
+ * A lane starts with a row for each model the controller announced as new
+ * (see `NewModelLine`). The row is not a choice. With `newModelActions` it
+ * has an Add and a "Not now" button, and the lane shows under its rows why a
+ * save was refused; without them it is drawn without buttons. When a save
+ * works, the row leaves the list, and with it the keyboard focus the pressed
+ * button had. The list then moves the focus on, see `findFocusAfterSave`.
+ *
  * - `providers` and `plugins` give a lane its Provider's mark.
  * - `onChoose` receives the one choice a row makes.
  * - `onOpenProfile` receives the id of the profile whose head is clicked.
@@ -49,6 +120,7 @@ export function ModelMenuList({
   onChoose,
   onOpenProfile,
   onSignIn,
+  newModelActions,
   onEnterLane,
   onLeaveLane,
   highlightedAccountId = null,
@@ -59,10 +131,26 @@ export function ModelMenuList({
   readonly onChoose: (choice: ThreadChoice) => void;
   readonly onOpenProfile: (profileId: string) => void;
   readonly onSignIn?: ((target: SignInTarget) => void) | undefined;
+  readonly newModelActions?: NewModelActions | undefined;
   readonly onEnterLane?: ((providerAccountId: string) => void) | undefined;
   readonly onLeaveLane?: ((providerAccountId: string) => void) | undefined;
   readonly highlightedAccountId?: string | null;
 }): JSX.Element {
+  const listRef = useRef<HTMLDivElement>(null);
+  const focusAfterSave = useRef<FocusAfterSave | null>(null);
+  const [, redraw] = useState(0);
+  // Runs after every draw, because the row leaves the list in a draw of its
+  // own, which can come before or after the save's answer. It acts once the
+  // focus is lost, which is when the browser moves it to the page.
+  useEffect(() => {
+    const after = focusAfterSave.current;
+    const list = listRef.current;
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (after === null || list === null || !lost) return;
+    focusAfterSave.current = null;
+    findFocusAfterSave(list, after)?.focus();
+  });
+
   const renderMark = (providerId: string): JSX.Element => (
     <ProviderMark
       pluginId={findProviderPluginId(providers, { providerId })}
@@ -111,6 +199,49 @@ export function ModelMenuList({
     );
   };
 
+  /** Draws the row of a model announced as new in the lane `lane` of the profile `profileId`. */
+  const renderNewModel = (
+    profileId: string,
+    lane: ModelMenuLane,
+    row: NewModelRow,
+  ): JSX.Element => {
+    const save = (
+      run: (profileId: string, row: NewModelRow) => Promise<boolean>,
+      saved: FocusAfterSave["saved"],
+    ): void => {
+      void run(profileId, row).then((worked) => {
+        if (!worked) return;
+        focusAfterSave.current = {
+          laneKey: formatLaneKey(profileId, lane.providerAccountId),
+          saved,
+        };
+        redraw((count) => count + 1);
+      });
+    };
+    return (
+      <NewModelLine
+        key={`${row.providerAccountId}:${row.model}`}
+        row={row}
+        actions={
+          newModelActions === undefined
+            ? null
+            : {
+                onAdd: () => {
+                  save(newModelActions.add, { kind: "add", name: row.name });
+                },
+                onDismiss: () => {
+                  save(newModelActions.dismiss, {
+                    kind: "dismiss",
+                    index: lane.newModels.indexOf(row),
+                  });
+                },
+                busy: newModelActions.isSaving(profileId, row),
+              }
+        }
+      />
+    );
+  };
+
   /** Draws what an unfolded profile holds: its note, Recent, and its lanes. */
   const renderProfileBody = (profile: ModelMenuProfile): JSX.Element => (
     <>
@@ -121,40 +252,52 @@ export function ModelMenuList({
           {profile.recent.map((row) => renderRow(row, { account: row.account, mark: true }))}
         </div>
       )}
-      {profile.lanes.map((lane) => (
-        <div
-          key={lane.providerAccountId}
-          className={lane.providerAccountId === highlightedAccountId ? "pop-sec is-lit" : "pop-sec"}
-          onPointerEnter={
-            onEnterLane === undefined
-              ? undefined
-              : () => {
-                  onEnterLane(lane.providerAccountId);
-                }
-          }
-          onPointerLeave={
-            onLeaveLane === undefined
-              ? undefined
-              : () => {
-                  onLeaveLane(lane.providerAccountId);
-                }
-          }
-        >
-          <div className="q-h">
-            {renderMark(lane.providerId)}
-            {lane.name}
+      {profile.lanes.map((lane) => {
+        const problem = newModelActions?.findRefusal(profile.profileId, lane) ?? null;
+        return (
+          <div
+            key={lane.providerAccountId}
+            data-lane={formatLaneKey(profile.profileId, lane.providerAccountId)}
+            className={
+              lane.providerAccountId === highlightedAccountId ? "pop-sec is-lit" : "pop-sec"
+            }
+            onPointerEnter={
+              onEnterLane === undefined
+                ? undefined
+                : () => {
+                    onEnterLane(lane.providerAccountId);
+                  }
+            }
+            onPointerLeave={
+              onLeaveLane === undefined
+                ? undefined
+                : () => {
+                    onLeaveLane(lane.providerAccountId);
+                  }
+            }
+          >
+            <div className="q-h">
+              {renderMark(lane.providerId)}
+              {lane.name}
+            </div>
+            {lane.newModels.map((row) => renderNewModel(profile.profileId, lane, row))}
+            {lane.note === null ? lane.rows.map((row) => renderRow(row)) : null}
+            {lane.note === null ? null : <p className="menu-note">{lane.note}</p>}
+            {problem === null ? null : (
+              <p className="menu-note menu-note--fail" role="alert">
+                {problem}
+              </p>
+            )}
           </div>
-          {lane.note === null ? lane.rows.map((row) => renderRow(row)) : null}
-          {lane.note === null ? null : <p className="menu-note">{lane.note}</p>}
-        </div>
-      ))}
+        );
+      })}
     </>
   );
 
   if (menu.kind === "active") {
     return (
       <>
-        <div className="model-menu-list">
+        <div className="model-menu-list" ref={listRef}>
           {menu.empty === null ? (
             <div className="pop-sec">{menu.rows.map((row) => renderRow(row))}</div>
           ) : (
@@ -167,7 +310,7 @@ export function ModelMenuList({
   }
 
   return (
-    <div className="model-menu-list">
+    <div className="model-menu-list" ref={listRef}>
       {menu.empty !== null ? <p className="menu-note">{menu.empty}</p> : null}
       {menu.profiles.map((profile) =>
         menu.hasHeads ? (

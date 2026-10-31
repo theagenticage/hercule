@@ -1,6 +1,11 @@
 import { useMemo, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { buildModelMenu, type HerculeClient, type ThreadCatalogs } from "@hercule/client-core";
+import {
+  buildModelMenu,
+  resolveDisplayTimezone,
+  type HerculeClient,
+  type ThreadCatalogs,
+} from "@hercule/client-core";
 import type { ModelProfile } from "@hercule/contract";
 import {
   harnessesQuery,
@@ -9,6 +14,7 @@ import {
   providerAccountsQuery,
   providersQuery,
   runnersQuery,
+  settingsQuery,
 } from "../../../../app/queries";
 import { ProfilePreview } from "../../../../screens/settings/providers/profile-preview";
 
@@ -23,7 +29,9 @@ import { ProfilePreview } from "../../../../screens/settings/providers/profile-p
  * lanes to the page's sections (see `ProfilePreview`).
  *
  * Everything it reads is a shell read that the live connection keeps current,
- * so showing the preview sends no request.
+ * so showing the preview sends no request. The Providers route's loader makes
+ * sure the settings, whose time zone sets the dates on the "New" rows, are
+ * cached.
  */
 export function ModelProfilePreview({
   client,
@@ -44,6 +52,9 @@ export function ModelProfilePreview({
   const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
+  const timezone = resolveDisplayTimezone(
+    useSuspenseQuery(settingsQuery(client)).data.user.timezone,
+  );
 
   const menu = useMemo(() => {
     const catalogs: ThreadCatalogs = {
@@ -64,9 +75,11 @@ export function ModelProfilePreview({
         openedProfileId: profile.id,
         lastOpenProfileId: null,
         runnerId: null,
+        now: new Date(),
+        timezone,
       },
     );
-  }, [accounts, providers, harnesses, modelProfiles, runners, profile.id]);
+  }, [accounts, providers, harnesses, modelProfiles, runners, profile.id, timezone]);
 
   return (
     <ProfilePreview

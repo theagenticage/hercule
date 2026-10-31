@@ -87,3 +87,52 @@
 .pop-sec.is-lit {
   background: var(--hover);
 }
+
+/* Not in the book, which has no announced models. The row of a model the
+   controller announced as new. It is a plain `.line`, so its height, padding
+   and type are those of the rows around it, but not a button: it has no
+   hover, because clicking its body does nothing. Its Add link and its ×
+   are the only things on it that act. The pill is the prototype's `.pk-new`
+   (r3.css): 17px high, pill-shaped, in the success tint. The row's gap is
+   10px, which the pill's negative margin shortens to the prototype's 6px
+   before the name. */
+.pk-new {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 17px;
+  margin-right: -4px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--ok-tint);
+  color: var(--ok);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+/* The ×, 16px square so that it never makes the row taller than the 17px
+   line of text in the rows around it. */
+.line-dismiss {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -2px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+}
+.line-dismiss:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* A button whose row is being saved keeps the focus (`aria-disabled`), as the
+   repo's other busy buttons do, and takes no hover or press. */
+.line--new button[data-unready] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+/* Why a save of a New row was refused, under the lane's rows. */
+.menu-note--fail {
+  color: var(--fail-ink);
+}

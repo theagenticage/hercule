@@ -9,6 +9,7 @@ import {
   providerAccountsQuery,
   providersQuery,
   runnersQuery,
+  settingsQuery,
 } from "../../../../app/queries";
 import { PlusIcon } from "../../../../icons/plus";
 import { LazyAddProviderAccount } from "../../../../screens/settings/providers/lazy-add-provider-account";
@@ -55,7 +56,8 @@ interface FixingAccount {
  * connection keeps current: the `provider` topic for the accounts and the
  * profiles, which the shell holds, so opening the section sends no request
  * and the section holds no subscription of its own. The loader only makes sure
- * the cache holds them. Each card reads the lists it draws from, and the page
+ * the cache holds them, and the settings (the time zone of the "New" rows'
+ * dates), which it reads only when the cache holds none. Each card reads the lists it draws from, and the page
  * reads only the accounts.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/providers")({
@@ -70,6 +72,7 @@ export const Route = createFileRoute("/_connected/_shell/settings/providers")({
       queryClient.ensureQueryData(harnessesQuery(client)),
       queryClient.ensureQueryData(runnersQuery(client)),
       queryClient.ensureQueryData(pluginsQuery(client)),
+      queryClient.ensureQueryData(settingsQuery(client)),
     ]);
   },
   onEnter: () => {

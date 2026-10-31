@@ -2,9 +2,11 @@ import { useMemo, useRef, useState, type HTMLAttributes, type JSX } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   addModelProfileAccount,
+  addNewModelToProfile,
   buildModelProfileSections,
   buildProviderAccountName,
   describeProviderAccountIdentity,
+  dismissNewModel,
   findProviderPluginId,
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
@@ -12,6 +14,7 @@ import {
   moveModelProfileEntryToHarness,
   offerModelProfileEntryIn,
   readErrorMessage,
+  resolveDisplayTimezone,
   setModelProfileAccountHarness,
   setModelProfileEntryIncluded,
   takeOutModelProfileEntry,
@@ -24,6 +27,7 @@ import {
   providerAccountsQuery,
   providersQuery,
   runnersQuery,
+  settingsQuery,
 } from "../../../../app/queries";
 import { AddProfileAccount } from "../../../../screens/settings/providers/add-profile-account";
 import { ModelProfileSection } from "../../../../screens/settings/providers/model-profile-section";
@@ -32,7 +36,7 @@ import { ProviderMark } from "../../../../screens/settings/providers/provider-ma
 import { useDragReorder } from "../../../../screens/settings/providers/use-drag-reorder";
 import { useOptimisticOrder } from "../../../../screens/settings/providers/use-optimistic-order";
 import "../../../../screens/settings/providers/models.css";
-import { useModelProfileUpdate } from "./-model-profile-cache";
+import { useModelProfileUpdate } from "../../../../app/model-profile-cache";
 import { ModelProfilePreview } from "./-model-profile-preview";
 import { AccountModelPicker } from "./-models-picker";
 
@@ -53,6 +57,11 @@ import { AccountModelPicker } from "./-models-picker";
  * started in the profile they left still finishes, and writes only to that
  * profile.
  *
+ * A model the controller announces as new shows as a "New" row at the top of
+ * its section. "Add" is one save that puts the model at the end of the
+ * section, and "Not now" is one save that adds it to the profile's dismissed
+ * models. The dates in the rows are read in the user's time zone setting.
+ *
  * `flashProviderAccountId` is the account just added to the profile, whose
  * section flashes once. So does the section of an account the user joins to
  * the profile from the page itself, through "Add an account to <profile>"
@@ -68,7 +77,8 @@ import { AccountModelPicker } from "./-models-picker";
  * pointer on a lane lights the section.
  *
  * Everything it reads is a shell read that the live connection keeps
- * current, so opening the section sends no request.
+ * current, so opening the section sends no request. The settings, which
+ * hold the time zone, are cached by the Providers route's loader.
  */
 export function ModelProfileMenu({
   client,
@@ -91,21 +101,45 @@ export function ModelProfileMenu({
 
   const save = useModelProfileUpdate(client);
 
-  /** Saves one change and resolves when the save is over, whether it worked or not; a failure shows above the sections. */
-  const change = (buildChange: (profile: ModelProfile) => ModelProfileUpdateInput): Promise<void> =>
+  /**
+   * Saves one change and resolves when the save is over, never rejecting:
+   * `true` when it was saved, `false` when it failed, and a failure shows
+   * above the sections.
+   */
+  const trySave = (
+    buildChange: (profile: ModelProfile) => ModelProfileUpdateInput,
+  ): Promise<boolean> =>
     save.mutateAsync({ profileId: profile.id, buildChange }).then(
-      () => undefined,
-      () => undefined,
+      () => true,
+      () => false,
     );
+  /** Saves one change and resolves when the save is over, whether it worked or not. */
+  const change = (buildChange: (profile: ModelProfile) => ModelProfileUpdateInput): Promise<void> =>
+    trySave(buildChange).then(() => undefined);
   // What the user last asked for each model in the picker, until the save that
   // carries it is over. A second click before the first save is answered
   // reads the page as it was drawn, so it would ask for the same thing twice.
   const wanted = useRef(new Map<string, boolean>());
+  // The "New" rows say when a model arrived in the user's time zone, as the
+  // composer's menu does. "Now" is taken once, when the menu opens: it only
+  // decides whether a date shows its year, and nothing redraws on a timer.
+  const timezone = resolveDisplayTimezone(
+    useSuspenseQuery(settingsQuery(client)).data.user.timezone,
+  );
+  const [now] = useState(() => new Date());
   // Memoized by hand: the React Compiler does not cache this call, and a build
   // takes 2 to 6 ms, which the pointer entering a section would pay each time.
   const sections = useMemo(
-    () => buildModelProfileSections(profile, { accounts, providers, harnesses, runners }),
-    [profile, accounts, providers, harnesses, runners],
+    () =>
+      buildModelProfileSections(profile, {
+        accounts,
+        providers,
+        harnesses,
+        runners,
+        now,
+        timezone,
+      }),
+    [profile, accounts, providers, harnesses, runners, now, timezone],
   );
   const order = useOptimisticOrder(sections.map(({ providerAccountId }) => providerAccountId));
   const moveSection = (providerAccountId: string, toIndex: number): Promise<void> =>
@@ -256,6 +290,12 @@ export function ModelProfileMenu({
                   onTakeOut={(entry) => {
                     void change((current) => takeOutModelProfileEntry(current, entry));
                   }}
+                  onAddNewModel={({ model }) =>
+                    trySave((current) => addNewModelToProfile(current, providerAccountId, model))
+                  }
+                  onDismissNewModel={({ model }) =>
+                    trySave((current) => dismissNewModel(current, providerAccountId, model))
+                  }
                 />
               );
             })}

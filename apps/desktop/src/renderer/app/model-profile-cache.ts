@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { updateModelProfile, type HerculeClient } from "@hercule/client-core";
 import type { ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
-import { modelProfilesQuery } from "../../../../app/queries";
+import { modelProfilesQuery } from "./queries";
 
 /**
  * Returns the cached list of Model Profiles, the newest the page holds, or an
