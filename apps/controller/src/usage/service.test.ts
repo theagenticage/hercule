@@ -322,7 +322,7 @@ describe("recording readings", () => {
     ]);
   });
 
-  it("announces a reading of the same value when the stored one is more than 5 minutes older", async () => {
+  it("announces a reading of the same value when the last announcement is more than 5 minutes old", async () => {
     const { run, announced } = setup();
     let before = 0;
     const id = await run(
@@ -339,6 +339,45 @@ describe("recording readings", () => {
     expect(announced.slice(before)).toEqual([
       { _tag: "record", topic: "provider", id, kind: "updated" },
     ]);
+  });
+
+  it("announces unchanged readings of two interleaved sources at least once every 5 minutes", async () => {
+    const { run, announced } = setup();
+    const times = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], "session");
+        const announcedAt: Array<number> = [0];
+        // Two sessions report the same value, alternately, 2.5 minutes apart.
+        for (let step = 1; step <= 8; step++) {
+          yield* TestClock.adjust(150_000);
+          const before = announced.length;
+          yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(step * 2.5))], "session");
+          if (announced.length > before) announcedAt.push(step * 2.5);
+        }
+        return announcedAt;
+      }),
+    );
+    expect(times).toEqual([0, 5, 10, 15, 20]);
+  });
+
+  it("announces an unchanged reading every time when its source reports every 5 minutes", async () => {
+    const { run, announced } = setup();
+    const count = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, NOW)], "session");
+        const before = announced.length;
+        for (let step = 1; step <= 3; step++) {
+          yield* TestClock.adjust(5 * 60_000);
+          yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(step * 5))], "session");
+        }
+        return announced.length - before;
+      }),
+    );
+    expect(count).toBe(3);
   });
 
   it("ignores readings for an account that no longer exists", async () => {

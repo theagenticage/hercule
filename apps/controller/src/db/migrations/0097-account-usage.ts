@@ -15,7 +15,9 @@
  *   and the newest time at which a running session reported usage. It also
  *   holds when the readings were last cleared, because a key or token was
  *   replaced: a report from a session whose process started before then used
- *   the old credential and is dropped. It is kept apart from the readings so
+ *   the old credential and is dropped. `announced_at` is when the account was
+ *   last announced to clients because of a reading, which lets an unchanged
+ *   reading be announced again after a while. It is kept apart from the readings so
  *   that replacing a key, which deletes the readings, does not reset the
  *   15-minute limit.
  *
@@ -42,7 +44,8 @@ export default Effect.gen(function* () {
       provider_account_id BLOB PRIMARY KEY NOT NULL REFERENCES provider_accounts (id) ON DELETE CASCADE,
       read_started_at TEXT,
       reported_at TEXT,
-      cleared_at TEXT
+      cleared_at TEXT,
+      announced_at TEXT
     )
   `;
 });

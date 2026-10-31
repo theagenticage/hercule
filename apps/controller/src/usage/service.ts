@@ -37,11 +37,13 @@ const USAGE_READ_INTERVAL_MILLIS = 15 * 60 * 1000;
 const MAX_CLOCK_AHEAD_MILLIS = 5 * 60 * 1000;
 
 /**
- * How much older the stored reading may be before a reading with the same
- * value is announced anyway. A client shows when a reading was taken, so
+ * How long after the last announcement a stored reading is announced even
+ * when its value is unchanged. A client shows when a reading was taken, so
  * without this a gauge that never changes would show an ever older time. With
- * it, that time is at most this stale, and an unchanged account is announced
- * at most once per interval, however often its sessions report.
+ * it, that time is at most this stale and an account is announced at most
+ * once per interval for unchanged readings, however many sessions report. It
+ * counts from the last announcement, not from the previous reading: two
+ * sessions reporting alternately, each within the interval, still reach it.
  */
 const ANNOUNCE_UNCHANGED_AFTER_MILLIS = 5 * 60 * 1000;
 
@@ -78,7 +80,8 @@ const make = Effect.gen(function* () {
      *   are really newer.
      * - A newer reading is always stored, so the stored time is current. It
      *   is announced only when its value (ignoring time and source) differs
-     *   from the stored one, or the stored one is more than 5 minutes older.
+     *   from the stored one, or the account was last announced at least 5
+     *   minutes ago by the controller's clock.
      * - For the source `session`, the time of the account's newest session
      *   report is raised to the newest `takenAt` kept, but not beyond now.
      * - `options.credentialSince` is for a report from a running session: the
@@ -129,7 +132,7 @@ const make = Effect.gen(function* () {
           }
           const readings = keepNewestOfEach(plausible);
           let stored = false;
-          let announceable = false;
+          let valueChanged = false;
           for (const reading of readings) {
             const write = yield* repository.upsertReadingIfNewer(
               providerAccountId,
@@ -138,11 +141,7 @@ const make = Effect.gen(function* () {
             );
             if (!write.stored) continue;
             stored = true;
-            announceable ||=
-              write.valueChanged ||
-              write.previousTakenAt === null ||
-              Date.parse(reading.takenAt) - Date.parse(write.previousTakenAt) >
-                ANNOUNCE_UNCHANGED_AFTER_MILLIS;
+            valueChanged ||= write.valueChanged;
           }
           if (source === "session" && readings.length > 0) {
             const newest = readings.reduce(
@@ -151,7 +150,12 @@ const make = Effect.gen(function* () {
             );
             yield* repository.raiseReportedAt(providerAccountId, newest < now ? newest : now);
           }
-          if (announceable) {
+          const announcedAt = stored ? yield* repository.readAnnouncedAt(providerAccountId) : null;
+          const refreshDue =
+            announcedAt === null ||
+            nowMillis - Date.parse(announcedAt) >= ANNOUNCE_UNCHANGED_AFTER_MILLIS;
+          if (stored && (valueChanged || refreshDue)) {
+            yield* repository.markAnnounced(providerAccountId, now);
             yield* announce({
               _tag: "record",
               topic: "provider",

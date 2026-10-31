@@ -26,13 +26,10 @@ const identifyReading = (reading: UsageReading): ReadingIdentity =>
  * - `stored`: the reading replaced the stored one, or was the first.
  * - `valueChanged`: the stored reading, ignoring its time and source, differs
  *   from the new one, or there was none.
- * - `previousTakenAt`: the `takenAt` of the reading that was stored before, or
- *   null when there was none.
  */
 export interface ReadingWrite {
   readonly stored: boolean;
   readonly valueChanged: boolean;
-  readonly previousTakenAt: string | null;
 }
 
 interface ReadingRow {
@@ -91,8 +88,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const identity = identifyReading(reading);
         const value = yield* encodeReading(reading);
-        const previous = (yield* sql<{ readonly taken_at: string; readonly value: string }>`
-          SELECT taken_at, value FROM account_usage_readings
+        const previous = (yield* sql<{ readonly value: string }>`
+          SELECT value FROM account_usage_readings
           WHERE provider_account_id = ${uuidFromString(providerAccountId)} AND reading = ${identity}
         `)[0];
         const rows = yield* sql<{ readonly changed: number }>`
@@ -109,7 +106,6 @@ const make = Effect.gen(function* () {
           stored: rows.length > 0,
           valueChanged:
             previous === undefined || withoutTakenAt(previous.value) !== withoutTakenAt(value),
-          previousTakenAt: previous?.taken_at ?? null,
         };
       }),
 
@@ -173,6 +169,27 @@ const make = Effect.gen(function* () {
           ON CONFLICT (provider_account_id) DO UPDATE SET cleared_at = excluded.cleared_at
         `;
       }),
+
+    /**
+     * Returns when the account was last announced because of a reading, or
+     * null when it never was.
+     */
+    readAnnouncedAt: (providerAccountId: string): Effect.Effect<string | null, SqlError> =>
+      Effect.map(
+        sql<{ readonly announced_at: string | null }>`
+          SELECT announced_at FROM account_usage_reads
+          WHERE provider_account_id = ${uuidFromString(providerAccountId)}
+        `,
+        (rows) => rows[0]?.announced_at ?? null,
+      ),
+
+    /** Stores `at` as the time the account was last announced because of a reading. Must run in a transaction. */
+    markAnnounced: (providerAccountId: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO account_usage_reads (provider_account_id, announced_at)
+        SELECT id, ${at} FROM provider_accounts WHERE id = ${uuidFromString(providerAccountId)}
+        ON CONFLICT (provider_account_id) DO UPDATE SET announced_at = excluded.announced_at
+      `),
 
     /** Returns when the account's readings were last cleared, or null when they never were. */
     readClearedAt: (providerAccountId: string): Effect.Effect<string | null, SqlError> =>
