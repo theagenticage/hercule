@@ -41,15 +41,20 @@ interface Row {
  * in the profile already (a faint check, and the row cannot be picked),
  * picked (a filled check) or can be picked (a plus). A row is one button, and
  * `aria-pressed` tells a screen reader which models are held or picked.
+ *
+ * While `frozen`, pressing the row does nothing and it looks it. It stays a
+ * focusable button, so a focus on it is not lost.
  */
 function ModelBrowserRow({
   model,
   state,
+  frozen,
   profileName,
   onToggle,
 }: {
   readonly model: ModelCatalogItem;
   readonly state: ModelRowState;
+  readonly frozen: boolean;
   readonly profileName: string;
   readonly onToggle: (model: ModelCatalogItem) => void;
 }): JSX.Element {
@@ -57,13 +62,18 @@ function ModelBrowserRow({
   return (
     <button
       type="button"
-      className={joinClassNames("mb-row", state === "picked" && "is-picked", held && "is-held")}
+      className={joinClassNames(
+        "mb-row",
+        state === "picked" && "is-picked",
+        held && "is-held",
+        frozen && "is-frozen",
+      )}
       data-key={model.slug}
       aria-pressed={state !== "open"}
-      aria-disabled={held ? true : undefined}
+      aria-disabled={held || frozen ? true : undefined}
       title={held ? `Already in ${profileName}` : undefined}
       onClick={() => {
-        if (!held) onToggle(model);
+        if (!held && !frozen) onToggle(model);
       }}
     >
       <span className="mb-name">
@@ -93,6 +103,7 @@ function ModelBrowserRow({
  * loses its place when the row scrolls out of view.
  *
  * `held` holds the slugs the profile has, and `picked` the slugs in the tray.
+ * While `frozen`, no row can be pressed (the picks are being saved).
  * The list scrolls back to the top whenever `models` is a new array, so a new
  * search or filter shows its first matches. The caller therefore keeps the
  * same array until the query or the catalog changes.
@@ -101,6 +112,7 @@ export function ModelBrowserList({
   models,
   held,
   picked,
+  frozen,
   profileName,
   whenEmpty,
   onToggle,
@@ -108,6 +120,7 @@ export function ModelBrowserList({
   readonly models: readonly ModelCatalogItem[];
   readonly held: ReadonlySet<string>;
   readonly picked: ReadonlySet<string>;
+  readonly frozen: boolean;
   readonly profileName: string;
   readonly whenEmpty: ReactNode;
   readonly onToggle: (model: ModelCatalogItem) => void;
@@ -155,6 +168,7 @@ export function ModelBrowserList({
                 state={
                   held.has(line.item.key) ? "held" : picked.has(line.item.key) ? "picked" : "open"
                 }
+                frozen={frozen}
                 profileName={profileName}
                 onToggle={onToggle}
               />

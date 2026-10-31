@@ -31,7 +31,9 @@ import "./model-browser.css";
  * why) and `ready` once `models`, the matches of `query`, are known. `held`
  * holds the slugs the profile has already, which cannot be picked.
  * `onQueryChange` is called with the whole new query. While `saving`, the
- * dialog does not close, and the Add button keeps focus. `saveError` is the
+ * dialog does not close, the Add button keeps focus, and the picks cannot
+ * change: the rows and the chips ignore presses, because the save has already
+ * taken the picks it was given. `saveError` is the
  * controller's refusal, shown above the foot.
  *
  * `dialogRef` is the dialog element, which the caller closes after a save;
@@ -173,6 +175,7 @@ export function ModelBrowserDialog({
           models={models}
           held={held}
           picked={picked}
+          frozen={saving}
           profileName={profileName}
           whenEmpty={whenEmpty}
           onToggle={onTogglePick}
@@ -197,8 +200,9 @@ export function ModelBrowserDialog({
                 <button
                   type="button"
                   aria-label={`Do not add ${model.name}`}
+                  aria-disabled={saving ? true : undefined}
                   onClick={() => {
-                    onTogglePick(model);
+                    if (!saving) onTogglePick(model);
                   }}
                 >
                   <CloseIcon size={9} />

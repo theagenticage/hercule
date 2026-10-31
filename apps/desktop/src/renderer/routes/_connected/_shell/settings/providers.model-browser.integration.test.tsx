@@ -318,6 +318,57 @@ describe("The model browser", () => {
     update.answer({ body: { ...MAIN, revision: 5 } });
   });
 
+  it("lets the picks change only when no save runs: a held save saves exactly what was picked at the press", async () => {
+    const update = holdAnswer();
+    const calls = await openProviders({ updateAnswer: update.handler });
+    const dialog = await openBrowser();
+    await userEvent.click(getRow(dialog, "Model 1 Beta"));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add 1 to Main" }));
+    const tray = within(dialog).getByRole("list", { name: "Models to add" });
+    await waitFor(() => {
+      expect(getRow(dialog, "Model 2 Gamma").getAttribute("aria-disabled")).toBe("true");
+    });
+
+    // A new pick and a removal are both ignored, from the row and from the tray.
+    await userEvent.click(getRow(dialog, "Model 2 Gamma"));
+    await userEvent.click(getRow(dialog, "Model 1 Beta"));
+    await userEvent.click(within(tray).getByRole("button", { name: "Do not add Model 1 Beta" }));
+    expect(getRow(dialog, "Model 2 Gamma").getAttribute("aria-pressed")).toBe("false");
+    expect(getRow(dialog, "Model 1 Beta").getAttribute("aria-pressed")).toBe("true");
+    expect(within(tray).getAllByRole("listitem")).toHaveLength(1);
+
+    update.answer({ body: { ...MAIN, revision: 5 } });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Browse OpenAI models" })).toBeNull();
+    });
+    const updates = listUpdates(calls);
+    expect(updates).toHaveLength(1);
+    const section = updates[0]!.accounts.find(
+      ({ providerAccountId }) => providerAccountId === OPENAI_IDENTITY.id,
+    )!;
+    expect(section.entries!.map(({ model }) => model)).toEqual(["gpt-6", "model-1"]);
+  });
+
+  it("lets the picks change again after the save is refused", async () => {
+    const update = holdAnswer();
+    await openProviders({ updateAnswer: update.handler });
+    const dialog = await openBrowser();
+    await userEvent.click(getRow(dialog, "Model 1 Beta"));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add 1 to Main" }));
+    await waitFor(() => {
+      expect(getRow(dialog, "Model 2 Gamma").getAttribute("aria-disabled")).toBe("true");
+    });
+
+    update.answer({ status: 400, body: buildErrorBody("validation", "OpenAI cannot run it.") });
+    await within(dialog).findByRole("alert");
+    await userEvent.click(getRow(dialog, "Model 2 Gamma"));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Do not add Model 1 Beta" }));
+
+    expect(getRow(dialog, "Model 2 Gamma").getAttribute("aria-pressed")).toBe("true");
+    expect(getRow(dialog, "Model 1 Beta").getAttribute("aria-pressed")).toBe("false");
+    expect(within(dialog).getByRole("button", { name: "Add 1 to Main" })).toBeTruthy();
+  });
+
   it("drops the catalog on close and reads it again on reopening, and a read that answers after the close changes nothing", async () => {
     // Every read waits for the test to answer it.
     const pending: ((answer: Answer) => void)[] = [];
