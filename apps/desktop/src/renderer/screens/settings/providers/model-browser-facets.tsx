@@ -2,7 +2,6 @@ import { useId, type JSX, type ReactNode } from "react";
 import {
   MODEL_CONTEXT_CHOICES,
   MODEL_PRICE_CHOICES,
-  NO_MODEL_FACETS,
   hasActiveFacets,
   type ModelBrowserChoice,
   type ModelFacets,
@@ -101,16 +100,20 @@ function FacetChoices({
  * "Can" (tools, images, reasoning), "Context" and "Price", and "Clear
  * filters" once anything is chosen.
  *
- * Every change calls `onChange` with the new facets.
+ * Every change calls `onChange` with the new facets, except "Clear filters",
+ * which calls `onClear`. It is a separate callback because the button
+ * unmounts itself, so the caller must decide where the focus goes.
  */
 export function ModelBrowserFacets({
   makers,
   facets,
   onChange,
+  onClear,
 }: {
   readonly makers: readonly ModelMaker[];
   readonly facets: ModelFacets;
   readonly onChange: (facets: ModelFacets) => void;
+  readonly onClear: () => void;
 }): JSX.Element {
   return (
     <div className="mb-side">
@@ -170,13 +173,7 @@ export function ModelBrowserFacets({
         <small className="mb-note">per million input tokens</small>
       </Facet>
       {hasActiveFacets(facets) ? (
-        <button
-          type="button"
-          className="link mb-clear"
-          onClick={() => {
-            onChange(NO_MODEL_FACETS);
-          }}
-        >
+        <button type="button" className="link mb-clear" onClick={onClear}>
           Clear filters
         </button>
       ) : null}

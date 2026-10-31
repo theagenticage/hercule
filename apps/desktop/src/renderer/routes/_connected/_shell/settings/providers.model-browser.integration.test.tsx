@@ -225,10 +225,14 @@ describe("The model browser", () => {
     expect(countReads(calls)).toBe(1);
     expect(document.activeElement).toBe(within(dialog).getByLabelText("Search models"));
     expect(readCount(dialog)).toBe("60 models");
-    // Newest first, and the model the profile has shows pressed and cannot be picked.
+    // Newest first. The model the profile has is no toggle: it cannot be picked, and says why.
     expect(listRows(dialog).slice(0, 3)).toEqual(["GPT-6", "Model 1 Beta", "Model 2 Gamma"]);
-    expect(getRow(dialog, "GPT-6").getAttribute("aria-pressed")).toBe("true");
-    expect(getRow(dialog, "GPT-6").getAttribute("aria-disabled")).toBe("true");
+    const held = getRow(dialog, "GPT-6");
+    expect(held.hasAttribute("aria-pressed")).toBe(false);
+    expect(held.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById(held.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Already in Main",
+    );
     expect(getRow(dialog, "Model 1 Beta").getAttribute("aria-pressed")).toBe("false");
 
     await userEvent.type(within(dialog).getByLabelText("Search models"), "beta");
@@ -254,7 +258,8 @@ describe("The model browser", () => {
     const calls = await openProviders();
     const dialog = await openBrowser();
     const add = within(dialog).getByRole("button", { name: "Add" });
-    expect(add.hasAttribute("disabled")).toBe(true);
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(add);
 
     await userEvent.click(getRow(dialog, "Model 1 Beta"));
     await userEvent.click(getRow(dialog, "Model 2 Gamma"));
@@ -369,6 +374,35 @@ describe("The model browser", () => {
     expect(within(dialog).getByRole("button", { name: "Add 1 to Main" })).toBeTruthy();
   });
 
+  it("moves the focus to the next chip when a chip is taken out, else the previous one, else Add", async () => {
+    await openProviders();
+    const dialog = await openBrowser();
+    for (const name of ["Model 1 Beta", "Model 2 Gamma", "Model 3 Alpha"]) {
+      await userEvent.click(getRow(dialog, name));
+    }
+    const tray = within(dialog).getByRole("list", { name: "Models to add" });
+    const takeOut = (name: string): HTMLElement =>
+      within(tray).getByRole("button", { name: `Do not add ${name}` });
+
+    await userEvent.click(takeOut("Model 2 Gamma"));
+    expect(document.activeElement).toBe(takeOut("Model 3 Alpha"));
+    await userEvent.click(takeOut("Model 3 Alpha"));
+    expect(document.activeElement).toBe(takeOut("Model 1 Beta"));
+    await userEvent.click(takeOut("Model 1 Beta"));
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Add" }));
+  });
+
+  it("moves the focus to the search field when Clear filters goes away", async () => {
+    await openProviders();
+    const dialog = await openBrowser();
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Use tools" }));
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Clear filters" }));
+
+    expect(within(dialog).queryByRole("button", { name: "Clear filters" })).toBeNull();
+    expect(document.activeElement).toBe(within(dialog).getByLabelText("Search models"));
+  });
+
   it("drops the catalog on close and reads it again on reopening, and a read that answers after the close changes nothing", async () => {
     // Every read waits for the test to answer it.
     const pending: ((answer: Answer) => void)[] = [];
@@ -477,5 +511,12 @@ describe("The model browser", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Browse Anthropic models" });
     expect(await within(dialog).findByRole("button", { name: /^opus-4-8/ })).toBeTruthy();
+
+    // The button that opened it is in a closed popover, so the focus goes to "Add a model".
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Browse Anthropic models" })).toBeNull();
+    });
+    expect(document.activeElement).toBe(button);
   });
 });

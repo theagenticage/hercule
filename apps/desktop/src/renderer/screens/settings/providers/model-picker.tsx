@@ -1,4 +1,4 @@
-import { useId, useState, type JSX, type ReactNode } from "react";
+import { useId, useState, type JSX, type ReactNode, type RefObject } from "react";
 import type { ModelCatalogItem } from "@hercule/contract";
 import { PlusIcon } from "../../../icons/plus";
 import { SearchIcon } from "../../../icons/search";
@@ -47,14 +47,18 @@ export function BrowseModelsButton({
  * `name` is the account's name, which tells this button from the other
  * sections'. The popover's foot holds "Browse all <n>" when `browseAll` is
  * given: it closes the popover and calls `onBrowse`, which opens the model
- * browser.
+ * browser. `triggerRef` is the "Add a model" button: the browser's opener is
+ * inside the popover, which is closed by then, so the caller returns the
+ * focus to this button when the browser closes.
  */
 export function AddModelPopover({
   name,
+  triggerRef,
   browseAll,
   children,
 }: {
   readonly name: string;
+  readonly triggerRef: RefObject<HTMLButtonElement | null>;
   readonly browseAll?: { readonly modelCount: number; readonly onBrowse: () => void } | undefined;
   readonly children: ReactNode;
 }): JSX.Element {
@@ -63,6 +67,7 @@ export function AddModelPopover({
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         className="pm-add"
         popoverTarget={menuId}

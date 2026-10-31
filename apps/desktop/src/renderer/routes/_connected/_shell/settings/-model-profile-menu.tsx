@@ -110,6 +110,9 @@ export function ModelProfileMenu({
   // The account whose model browser is open, if any. One browser is open at a
   // time, whichever section's button opened it.
   const [browsingProviderAccountId, setBrowsingProviderAccountId] = useState<string | null>(null);
+  // Where the focus goes when the browser closes, when the dialog's own return
+  // of focus would land on a button that is gone from the page.
+  const returnFocusTo = useRef<HTMLElement | null>(null);
 
   /**
    * Saves one change and resolves when the save is over, never rejecting:
@@ -260,7 +263,8 @@ export function ModelProfileMenu({
                         accounts.find(({ id }) => id === providerAccountId)?.modelCount ?? 0
                       }
                       held={held}
-                      onBrowse={() => {
+                      onBrowse={(opener) => {
+                        returnFocusTo.current = opener;
                         setBrowsingProviderAccountId(providerAccountId);
                       }}
                       onToggle={(model) => {
@@ -342,6 +346,8 @@ export function ModelProfileMenu({
             held={heldBySection.get(browsingSection.providerAccountId) ?? new Set<string>()}
             addEntries={addModelProfileEntries}
             onClose={() => {
+              returnFocusTo.current?.focus();
+              returnFocusTo.current = null;
               setBrowsingProviderAccountId(null);
             }}
           />

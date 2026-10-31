@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -39,8 +40,10 @@ interface Row {
  * Renders one model: its name over its maker and id, its context window and
  * its price per million tokens, and a mark at the end that says whether it is
  * in the profile already (a faint check, and the row cannot be picked),
- * picked (a filled check) or can be picked (a plus). A row is one button, and
- * `aria-pressed` tells a screen reader which models are held or picked.
+ * picked (a filled check) or can be picked (a plus). A row is one button. A
+ * screen reader hears `aria-pressed` for a model that can be picked or is
+ * picked. A held model is not a toggle: it has no `aria-pressed`, it is
+ * `aria-disabled`, and its description says "Already in <profile>".
  *
  * While `frozen`, pressing the row does nothing and it looks it. It stays a
  * focusable button, so a focus on it is not lost.
@@ -59,6 +62,7 @@ function ModelBrowserRow({
   readonly onToggle: (model: ModelCatalogItem) => void;
 }): JSX.Element {
   const held = state === "held";
+  const heldNoteId = useId();
   return (
     <button
       type="button"
@@ -69,8 +73,9 @@ function ModelBrowserRow({
         frozen && "is-frozen",
       )}
       data-key={model.slug}
-      aria-pressed={state !== "open"}
+      aria-pressed={held ? undefined : state === "picked"}
       aria-disabled={held || frozen ? true : undefined}
+      aria-describedby={held ? heldNoteId : undefined}
       title={held ? `Already in ${profileName}` : undefined}
       onClick={() => {
         if (!held && !frozen) onToggle(model);
@@ -85,6 +90,11 @@ function ModelBrowserRow({
       <span className="mb-act" aria-hidden="true">
         {state === "open" ? <PlusIcon size={13} /> : <CheckIcon size={13} />}
       </span>
+      {held ? (
+        <span id={heldNoteId} hidden>
+          {`Already in ${profileName}`}
+        </span>
+      ) : null}
     </button>
   );
 }

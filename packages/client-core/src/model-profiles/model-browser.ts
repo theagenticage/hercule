@@ -6,6 +6,9 @@
  * The catalog's details (maker, context, price, abilities) are for showing and
  * filtering only. A model whose detail is unknown is never guessed: it does not
  * pass a filter on that detail, and it sorts after the models that have it.
+ * The one exception is "newest": a model without a release date is placed by
+ * the date Hercule first saw it in the catalog, which is a real date, and not
+ * after the models that have a release date.
  *
  * Cost: `indexModelCatalog` runs once per catalog and sorts it four times.
  * `browseModels` is then one linear pass over the models in the chosen order,
@@ -108,20 +111,26 @@ interface IndexedModel {
   readonly model: ModelCatalogItem;
   /** The lowercased text the search looks in. */
   readonly searchText: string;
-  /** When the model came out, in milliseconds: `releasedAt`, else `firstSeenAt`. */
+  /**
+   * When the model came out, in milliseconds: `releasedAt`, else `firstSeenAt`
+   * (when Hercule first saw the model in the catalog).
+   */
   readonly releasedMs: number;
 }
 
+/** The key under which an index keeps its models in each order. Not exported, so only this file reads them. */
+const IN_ORDER = Symbol("inOrder");
+
 /**
  * A catalog prepared for the browser. Build it with `indexModelCatalog` and
- * read the models through `browseModels`; the fields besides `makers` and
- * `modelCount` are for `browseModels` only.
+ * read the models through `browseModels`. Besides `makers` and `modelCount`,
+ * it holds the models in a form only `browseModels` can read.
  */
 export interface ModelBrowserIndex {
   /** Every maker in the catalog, the one with the most models first. */
   readonly makers: readonly ModelMaker[];
   readonly modelCount: number;
-  readonly inOrder: Readonly<Record<ModelSort, readonly IndexedModel[]>>;
+  readonly [IN_ORDER]: Readonly<Record<ModelSort, readonly IndexedModel[]>>;
 }
 
 /** Compares names the way the user's locale orders them. */
@@ -161,7 +170,7 @@ const listMakers = (models: readonly ModelCatalogItem[]): ModelMaker[] => {
 
 /**
  * Prepares a catalog for `browseModels`: builds each model's search text and
- * release time once, sorts the models in each of the four orders (ties are
+ * release time once (`releasedAt`, else the date the model was first seen), sorts the models in each of the four orders (ties are
  * broken by name, then slug) and counts the makers. Build it once per catalog
  * read, not per keystroke.
  *
@@ -183,7 +192,7 @@ export const indexModelCatalog = (models: readonly ModelCatalogItem[]): ModelBro
   return {
     makers: listMakers(models),
     modelCount: models.length,
-    inOrder: {
+    [IN_ORDER]: {
       newest: sortedBy("newest"),
       price: sortedBy("price"),
       context: sortedBy("context"),
@@ -221,7 +230,7 @@ export const browseModels = (
   const makers = facets.makers.length > 0 ? new Set(facets.makers) : null;
   const { minContextWindow, maxInputPrice } = facets;
   const matches: ModelCatalogItem[] = [];
-  for (const { model, searchText } of index.inOrder[sort]) {
+  for (const { model, searchText } of index[IN_ORDER][sort]) {
     if (
       words.every((word) => searchText.includes(word)) &&
       (makers === null || (model.maker !== undefined && makers.has(model.maker))) &&

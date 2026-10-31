@@ -1,6 +1,7 @@
 import { useEffect, useRef, type JSX, type ReactNode, type RefObject } from "react";
 import {
   MODEL_SORT_CHOICES,
+  NO_MODEL_FACETS,
   type ModelBrowserQuery,
   type ModelMaker,
   type ModelSort,
@@ -35,6 +36,11 @@ import "./model-browser.css";
  * change: the rows and the chips ignore presses, because the save has already
  * taken the picks it was given. `saveError` is the
  * controller's refusal, shown above the foot.
+ *
+ * Focus never falls to the page when a control goes away. Taking a chip out
+ * of the tray moves it to the next chip, else the previous one, else the Add
+ * button; "Clear filters" moves it to the search field. The Add button with
+ * nothing to add is `aria-disabled` and not `disabled` for this reason.
  *
  * `dialogRef` is the dialog element, which the caller closes after a save;
  * `onClose` is called whenever the dialog closes. The search field takes the
@@ -86,6 +92,7 @@ export function ModelBrowserDialog({
   readonly onClose: () => void;
 }): JSX.Element {
   const searchRef = useRef<HTMLInputElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
   // A modal dialog focuses its first control, the sort or the close button,
   // when it opens. This effect runs after the one in GlassDialog that opens
   // the dialog, because that one is a child's.
@@ -170,6 +177,11 @@ export function ModelBrowserDialog({
           onChange={(facets) => {
             onQueryChange({ ...query, facets });
           }}
+          onClear={() => {
+            // The "Clear filters" button goes away with the filters.
+            searchRef.current?.focus();
+            onQueryChange({ ...query, facets: NO_MODEL_FACETS });
+          }}
         />
         <ModelBrowserList
           models={models}
@@ -201,8 +213,13 @@ export function ModelBrowserDialog({
                   type="button"
                   aria-label={`Do not add ${model.name}`}
                   aria-disabled={saving ? true : undefined}
-                  onClick={() => {
-                    if (!saving) onTogglePick(model);
+                  onClick={(event) => {
+                    if (saving) return;
+                    // The chip is about to go away, and the focus with it.
+                    const chip = event.currentTarget.closest("li");
+                    const neighbour = chip?.nextElementSibling ?? chip?.previousElementSibling;
+                    (neighbour?.querySelector("button") ?? addRef.current)?.focus();
+                    onTogglePick(model);
                   }}
                 >
                   <CloseIcon size={9} />
@@ -215,13 +232,14 @@ export function ModelBrowserDialog({
           Cancel
         </button>
         <button
+          ref={addRef}
           type="button"
           className="btn btn--accent"
-          disabled={picks.length === 0}
-          aria-disabled={saving ? true : undefined}
+          aria-disabled={saving || picks.length === 0 ? true : undefined}
+          data-unready={picks.length === 0 ? "" : undefined}
           aria-busy={saving ? true : undefined}
           onClick={() => {
-            if (!saving) onSave();
+            if (!saving && picks.length > 0) onSave();
           }}
         >
           {saving

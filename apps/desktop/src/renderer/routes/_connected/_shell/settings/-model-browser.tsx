@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type JSX } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMemo, useRef, useState, type JSX } from "react";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import {
   NO_MODEL_FACETS,
   browseModels,
@@ -9,67 +15,41 @@ import {
   type ModelBrowserIndex,
   type ModelBrowserQuery,
 } from "@hercule/client-core";
-import type { ModelCatalogItem, ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
+import type {
+  ModelCatalog,
+  ModelCatalogItem,
+  ModelProfile,
+  ModelProfileUpdateInput,
+} from "@hercule/contract";
 import { useModelProfileUpdate } from "../../../../app/model-profile-cache";
 import { pluginsQuery, providerAccountsQuery } from "../../../../app/queries";
+import { accountCatalogQuery } from "./-account-catalog-query";
 import { ModelBrowserDialog } from "../../../../screens/settings/providers/model-browser";
 import { ProviderMark } from "../../../../screens/settings/providers/provider-mark";
-
-/** What the browser holds of the account's catalog: its index, and why the last read failed. */
-interface CatalogRead {
-  readonly index: ModelBrowserIndex | null;
-  readonly failure: string | null;
-}
-
-const NO_CATALOG_READ: CatalogRead = { index: null, failure: null };
 
 const START_QUERY: ModelBrowserQuery = { search: "", facets: NO_MODEL_FACETS, sort: "newest" };
 
 /**
- * Reads the account's whole Model Catalog with `providerAccount.readCatalog`
- * and indexes it for the browser, once per read. The catalog is held in this
- * hook's state, not in the query cache, and is gone when the component that
- * calls it unmounts. A read that answers after that is ignored.
- *
- * It reads again when `catalogReadAt` changes, which is how a Refresh that
- * finished shows up. While the new read runs, the models of the last read stay.
- * When a read fails, `failure` says why and the models of the last good read
- * stay.
+ * Indexes a catalog for the browser. The same function every time, so the
+ * query runs it once per answer, not once per render.
  */
-function useAccountCatalog(
-  client: HerculeClient,
-  providerAccountId: string,
-  catalogReadAt: string | null,
-): CatalogRead {
-  const [read, setRead] = useState(NO_CATALOG_READ);
-  useEffect(() => {
-    let wanted = true;
-    client.providerAccount.readCatalog({ params: { id: providerAccountId } }).then(
-      (catalog) => {
-        if (wanted) setRead({ index: indexModelCatalog(catalog.models), failure: null });
-      },
-      (error: unknown) => {
-        if (wanted) setRead((last) => ({ index: last.index, failure: readErrorMessage(error) }));
-      },
-    );
-    return () => {
-      wanted = false;
-    };
-  }, [client, providerAccountId, catalogReadAt]);
-  return read;
-}
+const indexCatalog = (catalog: ModelCatalog): ModelBrowserIndex =>
+  indexModelCatalog(catalog.models);
 
 /**
  * Renders the model browser for one account of the open profile and owns
  * what it needs: the catalog read, the search, filters and sort, the tray of
  * picked models, and the save.
  *
- * - Opening it reads the account's whole catalog once (`useAccountCatalog`).
- *   Each keystroke and each facet filters the catalog in this page, with no
- *   request, and closing the dialog drops the catalog.
+ * - Opening it reads the account's whole catalog once, as the picker does
+ *   (`accountCatalogQuery`), and indexes it once per read. Each keystroke and
+ *   each facet filters the catalog in this page, with no request. The query
+ *   is removed when the dialog closes, and a read that answers after that, or
+ *   after a newer one, is never shown.
  * - Refresh calls `providerAccount.refresh`. The catalog is read again when
- *   the account's `catalogReadAt` changes, and the reason the last read
- *   failed (`catalogError`) shows under the head.
+ *   the account's `catalogReadAt` changes, and the models of the last read
+ *   stay while it runs. The reason the last refresh failed (`catalogError`)
+ *   shows under the head. When a read itself fails, the list says why.
  * - A model is picked or put back by pressing its row, or its chip in the
  *   tray. "Add <n> to <profile>" saves the picks as one `modelProfile.update`
  *   at the end of the account's section (`addModelProfileEntries`) and closes
@@ -113,7 +93,11 @@ export function ModelBrowser({
     ({ id }) => id === providerAccountId,
   );
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-  const catalog = useAccountCatalog(client, providerAccountId, account?.catalogReadAt ?? null);
+  const catalog = useQuery({
+    ...accountCatalogQuery(client, providerAccountId, account?.catalogReadAt ?? null),
+    select: indexCatalog,
+    placeholderData: keepPreviousData,
+  });
   const queryClient = useQueryClient();
   // The picker has the same mutation (`-models-picker.tsx`). A hook that both
   // import would be a chunk of its own, which the Providers page loads and the
@@ -133,16 +117,14 @@ export function ModelBrowser({
 
   // The same array until the query or the catalog changes, so the table scrolls to the top only then.
   const models = useMemo(
-    () => (catalog.index === null ? [] : browseModels(catalog.index, query)),
-    [catalog.index, query],
+    () => (catalog.data === undefined ? [] : browseModels(catalog.data, query)),
+    [catalog.data, query],
   );
   // A model the profile gained since it was picked is not added twice.
   const toAdd = picks.filter(({ slug }) => !held.has(slug));
-  // Before the first read answers, its failure stands in the list. Later ones show under the head.
-  const readFailure = catalog.index === null ? null : catalog.failure;
   const readError = refresh.isError
     ? readErrorMessage(refresh.error)
-    : (readFailure ?? account?.catalogError ?? null);
+    : (account?.catalogError ?? null);
 
   return (
     <ModelBrowserDialog
@@ -150,12 +132,12 @@ export function ModelBrowser({
       accountName={accountName}
       mark={<ProviderMark pluginId={pluginId} plugins={plugins} size={16} />}
       profileName={profileName}
-      status={catalog.index !== null ? "ready" : catalog.failure === null ? "loading" : "failed"}
-      failure={catalog.failure}
+      status={catalog.isError ? "failed" : catalog.isPending ? "loading" : "ready"}
+      failure={catalog.isError ? readErrorMessage(catalog.error) : null}
       readAt={account?.catalogReadAt ?? null}
       readError={readError}
       refreshing={refresh.isPending}
-      makers={catalog.index?.makers ?? []}
+      makers={catalog.data?.makers ?? []}
       query={query}
       models={models}
       held={held}
