@@ -1874,7 +1874,7 @@ describe("announcing new models", () => {
               {
                 path: ["dismissedNewModels"],
                 message:
-                  "This profile has dismissed 1025 new models, the most it keeps (1024). Add some of them to the profile, or take them out of the dismissed list with `hercule model-profile update`.",
+                  "This profile has dismissed 1025 new models, the most it keeps (1024). Take some out of its dismissed list with `hercule model-profile update`.",
               },
             ],
           },

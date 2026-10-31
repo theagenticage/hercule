@@ -340,7 +340,7 @@ export const buildProfileBody = (
     issues.push(
       buildIssue(
         ["dismissedNewModels"],
-        `This profile has dismissed ${String(dismissedNewModels.length)} new models, the most it keeps (${String(MAX_DISMISSED_NEW_MODELS)}). Add some of them to the profile, or take them out of the dismissed list with \`hercule model-profile update\`.`,
+        `This profile has dismissed ${String(dismissedNewModels.length)} new models, the most it keeps (${String(MAX_DISMISSED_NEW_MODELS)}). Take some out of its dismissed list with \`hercule model-profile update\`.`,
       ),
     );
   }
