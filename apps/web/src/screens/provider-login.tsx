@@ -311,9 +311,10 @@ const parseSiteHost = (url: string | undefined): string => {
  * So this component does not know which provider it serves.
  *
  * The value is sent with `providerAccount.update` and is never read back: the
- * drawer can replace the stored value, never show it. The caller is notified
- * after saving, because the screen keeps showing the credential as missing
- * until the machine has been asked about it again.
+ * drawer can replace the stored value, never show it. The controller probes
+ * the account on the connected runners after it stores a new credential and
+ * announces the new snapshots on the `provider` live topic, so this component
+ * only reads the accounts again.
  */
 export function ProviderKeyEntry({
   client,
@@ -321,14 +322,12 @@ export function ProviderKeyEntry({
   field,
   variant = "quiet",
   className,
-  onSaved,
 }: {
   readonly className?: string;
   readonly client: HerculeClient;
   readonly providerAccountId: string;
   readonly field: CredentialFieldOffer;
   readonly variant?: ButtonVariant;
-  readonly onSaved: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const valueField = useId();
@@ -352,10 +351,7 @@ export function ProviderKeyEntry({
       }),
     onSuccess: () => {
       close();
-      // Refresh the accounts before notifying the caller: the value is stored,
-      // so the row should show it even if the machine cannot be reached.
       void queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
-      onSaved();
     },
   });
 

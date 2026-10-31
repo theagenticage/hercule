@@ -24,7 +24,7 @@
  *    with Intake open on 200 signals (see step 5).
  *    Spec 17 §What Settings costs asks for Settings' memory and idle to be
  *    read with a section open; each section in `SETTINGS_SECTIONS` adds one
- *    launch, Intake and Connections among them. Spec 17 §What the Hercule face costs and §What Intake costs ask
+ *    launch, Intake, Connections and Providers among them. Spec 17 §What the Hercule face costs and §What Intake costs ask
  *    the same of the face and of Intake.
  *    Before each of them the fixture restarts the controller with every idle
  *    thread's creation and last activity, and every open signal's creation,
@@ -152,6 +152,15 @@
  * measure Skills:
  *
  *        pnpm --filter @hercule/desktop perf -- --skills-only
+ *
+ * Spec 17 §The Providers page's budgets asks for the section's paint time
+ * and its idle with Providers open. The full run measures the Providers
+ * launch with the other sections. Pass `--providers-only` to run only that,
+ * on 40 threads: Settings › Profile open, to compare with, then Settings ›
+ * Providers open on five accounts. The Providers launch also prints how long
+ * the cards took to draw after the click on the section's row:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --providers-only
  *
  * The first thread screen's JavaScript is not measured here: `pnpm
  * build:desktop` checks it, and prints it as "the first screen", because the
@@ -343,10 +352,11 @@ const LONG_THREAD_ROWS = 500;
  * The sections of Settings that get a measured launch each, with the section
  * open, by the name that the section's row in the Settings list and its
  * header title show. Only the Connections launch has Connections in the
- * controller: one of each health the table draws (see `prepareLaunch` in
- * `perf-fixture.ts`).
+ * controller: one of each health the table draws. Only the Providers launch
+ * has five Provider Accounts, with identities and plans (see `prepareLaunch`
+ * in `perf-fixture.ts`).
  */
-const SETTINGS_SECTIONS = ["Profile", "Assistants", "Intake", "Connections"] as const;
+const SETTINGS_SECTIONS = ["Profile", "Assistants", "Intake", "Connections", "Providers"] as const;
 
 /**
  * A section of Settings a launch can open. Skills is not in
@@ -446,6 +456,12 @@ interface PlainLaunch {
   readonly firesHidden: number | null;
   /** What 20 live nudges cost, or null when `idle` makes none. */
   readonly nudges: NudgeCost | null;
+  /**
+   * How long Settings › Providers took to put its cards on screen, in
+   * milliseconds from the click on its row, or null when the launch did not
+   * open it.
+   */
+  readonly providersPaintMs: number | null;
 }
 
 /**
@@ -499,8 +515,9 @@ async function measurePlainLaunch(
     const sleepUntil = (msAfterOpen: number) =>
       sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
 
+    let providersPaintMs: number | null = null;
     if (settingsSection !== null) {
-      await openSettingsSection(
+      providersPaintMs = await openSettingsSection(
         inspectorUrl,
         pageSocketUrl,
         settingsSection,
@@ -612,6 +629,7 @@ async function measurePlainLaunch(
       firesVisible: fires?.visible ?? null,
       firesHidden: fires?.hidden ?? null,
       nudges,
+      providersPaintMs,
     };
   } finally {
     await stopPlainApp(app);
@@ -690,13 +708,17 @@ async function showOrchestrationFace(
  *
  * One connection to the page serves every check, and it is closed before
  * the function returns, so nothing stays attached while memory is read.
+ *
+ * For Providers it also returns how long the section took to draw its first
+ * card, in milliseconds from the click on its row until the frame after the
+ * card was added. For any other section it returns null.
  */
 async function openSettingsSection(
   inspectorUrl: string,
   pageSocketUrl: string,
   section: SettingsSection,
   deadline: number,
-): Promise<void> {
+): Promise<number | null> {
   const page = await connectInspector(pageSocketUrl);
   try {
     const waitInPage = buildPageWaiter(page, deadline);
@@ -706,6 +728,20 @@ async function openSettingsSection(
       `performance.getEntriesByName("first-screen").length > 0 && document.querySelector("main") !== null`,
       "the app did not show the shell before memory was read",
     );
+    if (section === "Providers") {
+      // Watching starts before the click, so the first card cannot be missed.
+      await page.evaluate("Runtime.evaluate", {
+        expression: `globalThis.firstCardPainted = new Promise((resolve) => {
+          const observer = new MutationObserver(() => {
+            if (document.querySelector(".pa-card") === null) return;
+            observer.disconnect();
+            requestAnimationFrame(() => resolve(performance.now()));
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+        })`,
+        returnByValue: true,
+      });
+    }
     await evaluateInMain(
       inspectorUrl,
       `require("electron").BrowserWindow.getAllWindows()[0].webContents.send("menu.command", "openSettings")`,
@@ -715,8 +751,10 @@ async function openSettingsSection(
         const row = [...document.querySelectorAll("main a")].find(
           (link) => link.textContent.trim() === ${sectionName},
         );
-        row?.click();
-        return row !== undefined;
+        if (row === undefined) return false;
+        globalThis.rowClickedAt = performance.now();
+        row.click();
+        return true;
       })()`,
       `Settings did not open with a row for ${section} before memory was read`,
     );
@@ -724,6 +762,14 @@ async function openSettingsSection(
       `[...document.querySelectorAll("main h1")].some((heading) => heading.textContent.trim() === ${sectionName})`,
       `Settings › ${section} did not render before memory was read`,
     );
+    if (section !== "Providers") return null;
+    const painted = await page.evaluate("Runtime.evaluate", {
+      expression: `globalThis.firstCardPainted.then((at) => at - globalThis.rowClickedAt)`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (typeof painted !== "number") throw new Error("Settings › Providers drew no card");
+    return painted;
   } finally {
     page.close();
   }
@@ -1164,6 +1210,16 @@ function reportLaunch(measured: MeasuredLaunch): void {
             launch.firstScreenMs <= BUDGET.transcriptPaintMs,
           ] satisfies [string, string, string, boolean],
         ]),
+    ...(measured.providersPaintMs === null
+      ? []
+      : [
+          [
+            "Opening Settings › Providers",
+            `the cards on screen within ${BUDGET.providersPaintMs} ms of the click on the row (the reads are the shell's, so none is waited for)`,
+            `${measured.providersPaintMs.toFixed(0)} ms`,
+            measured.providersPaintMs <= BUDGET.providersPaintMs,
+          ] satisfies [string, string, string, boolean],
+        ]),
     [
       "Processes",
       `${BUDGET.processes}: browser, GPU, network utility, renderer`,
@@ -1389,6 +1445,13 @@ const KEYSTROKES_ONLY = process.argv.includes("--keystrokes-only");
 const SKILLS_ONLY = process.argv.includes("--skills-only");
 
 /**
+ * Whether the run measures only Settings › Providers and Settings › Profile
+ * (see `measureProviders`), on 40 threads, and skips every other launch and
+ * the workflow list.
+ */
+const PROVIDERS_ONLY = process.argv.includes("--providers-only");
+
+/**
  * Writes the events of Intake, and measures Everything in a plain launch that
  * opens Intake again. The fixture gives the events their titles and arrival
  * times in `prepareLaunch`.
@@ -1515,7 +1578,11 @@ async function measureLaunch(
   }: LaunchOptions = {},
 ): Promise<void> {
   if (!isPrepared) {
-    await fixture.prepareLaunch({ twoMinuteRow, connections: settingsSection === "Connections" });
+    await fixture.prepareLaunch({
+      twoMinuteRow,
+      connections: settingsSection === "Connections",
+      providerAccounts: settingsSection === "Providers",
+    });
     if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
     if (opensIntake) await openIntakeOnce(userDataDir);
     await warmUpApp(userDataDir);
@@ -1573,6 +1640,18 @@ async function measureSkills(fixture: ThreadFixture, userDataDir: string): Promi
       skillName: names[0]!,
     },
   );
+}
+
+/**
+ * Measures two launches on 40 threads: Settings › Profile open, to compare
+ * with, and Settings › Providers open on the fixture's five accounts.
+ */
+async function measureProviders(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  for (const section of ["Profile", "Providers"] as const) {
+    await measureLaunch(fixture, userDataDir, `40 threads, Settings › ${section} open`, 40, false, {
+      settingsSection: section,
+    });
+  }
 }
 
 /**
@@ -1649,6 +1728,10 @@ const launches = await runWithThreadFixture(async (fixture) => {
     }
     if (SKILLS_ONLY) {
       await measureSkills(fixture, userDataDir);
+      return null;
+    }
+    if (PROVIDERS_ONLY) {
+      await measureProviders(fixture, userDataDir);
       return null;
     }
     if (SIDEBAR_ONLY) {

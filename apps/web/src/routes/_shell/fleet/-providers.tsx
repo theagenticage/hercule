@@ -86,12 +86,6 @@ export function Providers({
             // A sign-in ends with the controller probing the machine, so the
             // new snapshot is already stored and only needs reading.
             onSignedIn={reread}
-            // A saved credential is not probed by itself: the stored snapshot does
-            // not know about the new credential yet, so the machine is probed
-            // again rather than the page refetching the same stale snapshot.
-            onCredentialSaved={() => {
-              probe.mutate(row.id);
-            }}
           />
         ))}
       </div>
@@ -115,7 +109,6 @@ function Row({
   onProbe,
   onInstall,
   onSignedIn,
-  onCredentialSaved,
 }: {
   readonly row: ProviderRow;
   readonly client: HerculeClient;
@@ -127,7 +120,6 @@ function Row({
   readonly onProbe: () => void;
   readonly onInstall: () => void;
   readonly onSignedIn: () => void;
-  readonly onCredentialSaved: () => void;
 }): JSX.Element {
   return (
     // Grouped so a screen reader reads one provider's facts and actions as
@@ -176,7 +168,6 @@ function Row({
             client={client}
             providerAccountId={row.id}
             field={field}
-            onSaved={onCredentialSaved}
           />
         ))}
         {row.probe ? (

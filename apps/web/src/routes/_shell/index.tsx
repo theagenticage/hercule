@@ -143,7 +143,6 @@ function Sessions(): JSX.Element {
                   providerAccountId={row.id}
                   field={field}
                   variant="primary"
-                  onSaved={probeOfferedAccount}
                 />
               ));
         })}

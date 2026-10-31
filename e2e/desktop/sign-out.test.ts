@@ -46,7 +46,9 @@ describe("Sign Out", () => {
     await chooseMenuItem(app, "Hercule", "Sign Out");
 
     // The sign-in screen shows once the controller has answered the logout.
-    await page.getByRole("button", { name: "Sign in" }).waitFor();
+    // Its password field marks it: the new-thread screen has a "Sign in"
+    // button too when its draft cannot start, and it is on screen before.
+    await page.getByLabel("Password", { exact: true }).waitFor();
     await expect.poll(() => readSettings(userDataDir)).not.toHaveProperty("token");
     expect(await readControllerWithToken(controller.url, token)).toBe(401);
     await expect.poll(() => isSignOutEnabled(app)).toBe(false);

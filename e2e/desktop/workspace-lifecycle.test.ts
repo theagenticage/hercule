@@ -55,7 +55,7 @@ const scope = Effect.runSync(Scope.make());
 const workspaces = Effect.runSync(makeWorkspaces({ storageDir: options.home, gitEnv: options.gitEnv }).pipe(Scope.provide(scope)));
 process.once("SIGTERM", async () => { await Effect.runPromise(Scope.close(scope, Exit.void)); process.exit(0); });
 const machine = {
-  providersDir: join(options.home, "providers"), scratchDir: join(options.home, "scratch"),
+  storageDir: options.home, scratchDir: join(options.home, "scratch"),
   attachmentsDir: join(options.home, "attachments"),
   editMarksDir: join(options.home, "edit-marks"), fileClock: openFileClock(join(options.home, "edit-marks", "clock")),
   attachments: makeAttachmentCache({ controllerUrl: options.url, credential: options.credential }),
@@ -87,7 +87,7 @@ const input = (session, frame) => {
 const handle = async (frame) => {
   switch (frame._tag) {
     case "ping": return send({ _tag: "pong" });
-    case "probeRequest": return send({ _tag: "probeReport", requestId: frame.requestId, instanceId: frame.instanceId,
+    case "probeRequest": return send({ _tag: "probeReport", requestId: frame.requestId, providerAccountId: frame.harnessAccount.providerAccountId,
       result: { harnessVersion: "fixture", auth: { status: "ok" }, models: [{ slug: "fixture", name: "Fixture", imageInput: { maxBytes: null }, isDefault: true, options: [] }] } });
     case "workspaceProvision": {
       const report = await Effect.runPromise(workspaces.provision(frame));
@@ -99,7 +99,7 @@ const handle = async (frame) => {
     case "workspaceDetach": return send(await Effect.runPromise(workspaces.detach(frame)));
     case "sessionStart": {
       const resolved = await Effect.runPromise(resolveSessionContext(frame, machine, "fixture"));
-      const session = { id: frame.sessionId, instanceId: frame.spec.instanceId, workspaceId: frame.spec.workspaceId, seq: 0, turn: null };
+      const session = { id: frame.sessionId, providerAccountId: frame.spec.providerAccountId, workspaceId: frame.spec.workspaceId, seq: 0, turn: null };
       sessions.set(session.id, session);
       reportEvent(session, { _tag: "session.started", harnessRefs: { nativeSessionId: session.id } });
       await observe(session);
@@ -134,7 +134,7 @@ const dial = () => new Promise((done, fail) => {
   next.onmessage = ({ data }) => {
     const frame = JSON.parse(String(data));
     if (frame._tag === "controllerHello") {
-      send({ _tag: "sessionsReport", sessions: [...sessions.values()].map((session) => ({ sessionId: session.id, nativeSessionId: session.id, instanceId: session.instanceId })) });
+      send({ _tag: "sessionsReport", sessions: [...sessions.values()].map((session) => ({ sessionId: session.id, nativeSessionId: session.id, providerAccountId: session.providerAccountId })) });
       done();
     } else handle(frame).catch((error) => log({ kind: "fatal", message: String(error) }));
   };
@@ -369,8 +369,8 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     await fleet.call("PATCH", `/runners/${runnerId}`, { name });
     await expect
       .poll(async () =>
-        (await client.provider.query())
-          .find((instance) => instance.harnessId === "claude-code/claude-code")
+        (await client.providerAccount.query())
+          .find((account) => account.defaultHarnessId === "claude-code/claude-code")
           ?.snapshots.some(
             (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",
           ),
@@ -523,8 +523,8 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
   expect(readFileSync(join(remoteSource, ".git/config"))).toEqual(remoteConfig);
   expect(runGit(remoteSource, "rev-parse", "HEAD")).toBe(remoteCommit);
   expect(hashUserFiles(source)).toBe(sourceHash);
-  const instanceId = (await client.provider.query()).find(
-    (instance) => instance.harnessId === "claude-code/claude-code",
+  const providerAccountId = (await client.providerAccount.query()).find(
+    (account) => account.defaultHarnessId === "claude-code/claude-code",
   )!.id;
   const spawnThread = (startingRevision: StartingRevision, runnerId = local.runnerId) =>
     client.session.spawn({
@@ -532,7 +532,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
         prompt: "Inspect the fixture without editing files",
         projectId: project.id,
         runnerId,
-        instanceId,
+        providerAccountId,
         workspace: {
           kind: "ephemeral",
           checkouts: [{ resourceId: resource.id, startingRevision }],
@@ -684,7 +684,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
       prompt: "Share existing working files",
       projectId: project.id,
       runnerId: local.runnerId,
-      instanceId,
+      providerAccountId,
       workspace: { kind: "existing", workspaceId: attached.id },
     },
   });

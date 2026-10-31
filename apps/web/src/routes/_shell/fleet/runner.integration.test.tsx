@@ -976,9 +976,6 @@ describe("Runner > an account that needs a key", () => {
           held = [buildPiAccount(true)];
           return { body: held[0] };
         },
-        // The key is on the controller but the stored snapshot is older, so
-        // the machine is probed again.
-        [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({ body: PI_SNAPSHOT }),
       },
     });
 
@@ -1011,12 +1008,6 @@ describe("Runner > an account that needs a key", () => {
     // The key never goes through the generic secrets API.
     expect(api.calls.filter((call) => call.path.startsWith("/api/v1/secrets"))).toEqual([]);
 
-    const listProbeCalls = () => api.calls.filter((call) => call.path.endsWith("/probe"));
-    await waitFor(() => {
-      expect(listProbeCalls()).toHaveLength(1);
-    });
-    expect(listProbeCalls()[0]?.body).toEqual({ providerAccountId: PI_ID });
-
     // The dialog closes, and the row now shows the account signed in and
     // offers to replace the key.
     await waitFor(() => {
@@ -1029,6 +1020,9 @@ describe("Runner > an account that needs a key", () => {
     });
     // The value itself never comes back to the page.
     expect(readPageText()).not.toContain(KEY_VALUE);
+    // The controller probes the account after it stores a key, so the page
+    // asks the runner for nothing.
+    expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 
   it("offers to replace a key on an account that is signed in", async () => {

@@ -29,15 +29,7 @@ import {
 } from "./harness";
 
 /** The rows of the Settings list whose sections are not built yet. */
-const INERT_ROWS = [
-  "Threads",
-  "Providers",
-  "Machines",
-  "Identities",
-  "Secrets",
-  "Bounds",
-  "Plugins",
-];
+const INERT_ROWS = ["Threads", "Machines", "Identities", "Secrets", "Bounds", "Plugins"];
 
 /** Returns the Settings button in the sidebar's foot. */
 function findSettingsButton(page: Page) {

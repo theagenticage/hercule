@@ -55,6 +55,11 @@ import {
   startSetUpController,
 } from "../../../scripts/controller-process.ts";
 import { replaceConnections, type ConnectionFixture } from "./connection-fixtures.ts";
+import {
+  resetProviderAccounts,
+  writeProviderAccounts,
+  type ProviderAccountFixture,
+} from "./provider-account-fixtures.ts";
 import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
 import { callApi, connectFleet, type Fleet } from "./fleet.ts";
 import { pollUntil } from "./poll.ts";
@@ -194,6 +199,45 @@ const FIXTURE_CONNECTIONS: ReadonlyArray<ConnectionFixture> = [
   },
 ];
 
+/**
+ * The accounts the launch with Settings › Providers open has, besides the
+ * three a fresh controller creates: five in all. The three get an identity
+ * and a plan, and two more are added with a label, so the cards draw both
+ * a name with a label and a name without one.
+ */
+const FIXTURE_PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccountFixture> = [
+  {
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    identity: "rogier@example.com",
+    planLabel: "Max",
+    defaultHarnessId: "claude-code/claude-code",
+  },
+  {
+    providerId: "openai/openai",
+    kind: "subscription-per-machine",
+    identity: "rogier@example.com",
+    planLabel: "Pro",
+    defaultHarnessId: "codex/codex",
+  },
+  {
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    label: "Work",
+    identity: "rogier@acme.test",
+    planLabel: "Team",
+    defaultHarnessId: "claude-code/claude-code",
+  },
+  {
+    providerId: "openai/openai",
+    kind: "subscription-per-machine",
+    label: "Work",
+    identity: "rogier@acme.test",
+    planLabel: "Team",
+    defaultHarnessId: "codex/codex",
+  },
+];
+
 /** What the user asks in each turn `growTranscript` plays. */
 const LONG_THREAD_QUESTION = "The checkout test fails again. Can you find out why?";
 
@@ -281,7 +325,10 @@ export interface ThreadFixture {
    * `backdateOpenSignals`). With `spreadRuns`, the runs of one workflow are
    * spread over a span of time too (see `spreadRuns`). With `connections`,
    * the controller holds the fixture's Connections for the launch, and
-   * without it none (see `FIXTURE_CONNECTIONS`). With `signalsAboutThreads`,
+   * without it none (see `FIXTURE_CONNECTIONS`). With `providerAccounts`,
+   * the controller holds the fixture's Provider Accounts for the launch, and
+   * without it only the three a fresh controller creates, with no identity
+   * (see `FIXTURE_PROVIDER_ACCOUNTS`). With `signalsAboutThreads`,
    * that many of the oldest open signals become signals of a plugin's event,
    * each about a thread (see `makeSignalsAboutThreads`). Fails when a thread
    * is not in its expected state afterwards.
@@ -290,6 +337,7 @@ export interface ThreadFixture {
     readonly twoMinuteRow: boolean;
     readonly spreadRuns?: RunSpread;
     readonly connections?: boolean;
+    readonly providerAccounts?: boolean;
     readonly signalsAboutThreads?: number;
   }) => Promise<void>;
   /**
@@ -577,11 +625,13 @@ export async function runWithThreadFixture<T>(
         twoMinuteRow,
         spreadRuns: spread,
         connections = false,
+        providerAccounts = false,
         signalsAboutThreads = 0,
       }: {
         readonly twoMinuteRow: boolean;
         readonly spreadRuns?: RunSpread;
         readonly connections?: boolean;
+        readonly providerAccounts?: boolean;
         readonly signalsAboutThreads?: number;
       }) => {
         // A Request is answered before the restart and opened again after it,
@@ -633,6 +683,10 @@ export async function runWithThreadFixture<T>(
         // were built: a GitHub Connection adds a segment to Settings › Intake,
         // and one that needs sign-in puts a dot on the Settings row.
         replaceConnections(home, connections ? FIXTURE_CONNECTIONS : []);
+        // Only the launch with Settings › Providers open has the accounts of
+        // the fixture, so every other launch measures what it measured before.
+        resetProviderAccounts(home);
+        if (providerAccounts) writeProviderAccounts(home, FIXTURE_PROVIDER_ACCOUNTS);
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {

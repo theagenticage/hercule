@@ -10,7 +10,11 @@
  *
  * - a ping with a pong;
  * - a probe with a logged-in report that offers two models, each with a
- *   reasoning effort and a fast mode;
+ *   reasoning effort and a fast mode, or, after `setSignedIn(false)`, with a
+ *   report that the harness has no login;
+ * - a login start with the URL of a sign-in page where the user pastes a
+ *   code back, so a sign-in dialog opens without a vendor's login running.
+ *   A pasted code is never answered: nothing signs in;
  * - a workspace provision with `ready`, and a dispose with `deleted`;
  * - a session start with `session.started`, and then the input the start
  *   carries as it answers any other input;
@@ -141,6 +145,16 @@ const PROBE_RESULT: ProbeResult = {
     },
   ],
 };
+
+/** The report of a probe after `setSignedIn(false)`: the harness holds no login and lists no models. */
+const SIGNED_OUT_PROBE_RESULT: ProbeResult = {
+  harnessVersion: "1.0.0",
+  auth: { status: "unauthenticated" },
+  models: [],
+};
+
+/** The sign-in page a login start reports. Nothing serves it, and no test opens it. */
+const SIGN_IN_URL = "https://sign-in.scripted-runner.invalid/authorize";
 
 const APPROVAL_DECISIONS = ["allow", "allow_always", "deny", "cancel"] as const;
 
@@ -406,6 +420,13 @@ export interface ScriptedRunner {
    * lists no repository skills and translates no Skill Reference.
    */
   readonly setSkills: (skills: ScriptedSkills) => void;
+  /**
+   * Chooses what the runner's later probes report: a login in every account's
+   * harness (the default), or none. A probe that already ran keeps its
+   * report, so the caller asks the controller to probe again to see the
+   * change.
+   */
+  readonly setSignedIn: (signedIn: boolean) => void;
 }
 
 /** The skills a scripted runner knows about; see `ScriptedRunner.setSkills`. */
@@ -457,6 +478,7 @@ export async function enlistScriptedRunner(
   const sessions = new Map<string, HostedSession>();
   const workspaces = new Map<string, WorkspaceReport>();
   let skills: ScriptedSkills = { repository: [], names: [] };
+  let signedIn = true;
   let socket: WebSocket;
   /** The code and reason of the last close, so a send on a closed connection can say why. */
   let lastClose: string | undefined;
@@ -1127,8 +1149,10 @@ export async function enlistScriptedRunner(
           _tag: "probeReport",
           requestId: frame.requestId,
           providerAccountId: frame.harnessAccount.providerAccountId,
-          result: PROBE_RESULT,
+          result: signedIn ? PROBE_RESULT : SIGNED_OUT_PROBE_RESULT,
         });
+      case "loginStart":
+        return send({ _tag: "loginUrl", requestId: frame.requestId, url: SIGN_IN_URL });
       case "workspaceProvision": {
         const report: WorkspaceReport = {
           _tag: "workspaceReport",
@@ -1365,6 +1389,9 @@ export async function enlistScriptedRunner(
     readSessionToken: (sessionId) => findSession(sessionId).token,
     setSkills: (next) => {
       skills = next;
+    },
+    setSignedIn: (next) => {
+      signedIn = next;
     },
     goOffline: async () => {
       if (socket.readyState === WebSocket.OPEN) send({ _tag: "goodbye" });

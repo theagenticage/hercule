@@ -324,7 +324,6 @@ describe("Sessions > an account that needs a key", () => {
           held = [buildPiAccount(PI_SIGNED_IN)];
           return { body: held[0] };
         },
-        [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({ body: PI_SIGNED_IN }),
       },
     });
 
@@ -337,7 +336,8 @@ describe("Sessions > an account that needs a key", () => {
     await user.type(field, KEY_VALUE);
     await user.click(within(form).getByRole("button", { name: /save/i }));
 
-    // The key is saved, the runner is probed, and the screen updates without a reload.
+    // The key is saved and the screen updates without a reload. The controller
+    // probes the account itself, so the page never asks the runner to.
     await waitFor(() => {
       expect(readPageText()).toContain("Z.ai is ready.");
     });
@@ -346,5 +346,6 @@ describe("Sessions > an account that needs a key", () => {
     expect(wrote[0]?.path).toBe(`/api/v1/provider-accounts/${PI_ID}`);
     expect(wrote[0]?.body).toEqual({ credentials: { apiKey: KEY_VALUE } });
     expect(readPageText()).not.toContain(KEY_VALUE);
+    expect(api.calls.filter((call) => call.path.endsWith("/probe"))).toEqual([]);
   });
 });

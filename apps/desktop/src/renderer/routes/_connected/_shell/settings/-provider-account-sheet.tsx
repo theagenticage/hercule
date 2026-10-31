@@ -157,7 +157,7 @@ export function ProviderAccountSheet({
           <AccountNameField
             draft={draft}
             placeholder="Work, Personal, Team…"
-            hint={`Shown after the vendor, as in ${buildProviderAccountName(providers, { providerId: account.providerId, label: "Work" })}. It tells your accounts apart in menus.`}
+            hint={`Shown after the provider, as in ${buildProviderAccountName(providers, { providerId: account.providerId, label: "Work" })}. It tells your accounts apart in menus.`}
             error={label.error}
           />
         </AccountSheetSection>
