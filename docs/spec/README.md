@@ -15,7 +15,7 @@ Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, w
 | [03-controller-and-runners.md](./03-controller-and-runners.md) | controller/runner split, runner protocol, join, placement, runner states, execution substrate (workspaces, checkouts, teardown), promotion |
 | [04-state-store.md](./04-state-store.md) | the SQLite store, repositories, event log and session streams, queues and cursors, retention, signal rows, event search, backups, migrations |
 | [05-plugins.md](./05-plugins.md) | the plugin model: manifest, register/activate, extension points, host API and plugin capabilities, plugin state, lifecycle |
-| [06-providers.md](./06-providers.md) | provider definitions and adapters, session spec, capability snapshots, the normalized event taxonomy, access modes, structured output, per-provider build notes |
+| [06-providers.md](./06-providers.md) | harness definitions and adapters, providers and Provider Accounts, Model Catalogs, Model Profiles, Account Usage, Harness Homes, session spec, capability snapshots, the normalized event taxonomy, access modes, structured output, per-harness build notes *(amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406))* |
 | [07-workflows.md](./07-workflows.md) | workflow definitions, triggers, steps, routing and cycles, CEL, runs and re-runs, the agent-to-graph contract, built-in actions |
 | [08-events-and-connections.md](./08-events-and-connections.md) | the event pipeline and envelope, event sources, subscriptions, Connections and their setup flows |
 | [09-tasks.md](./09-tasks.md) | the Task model: fields, status axis, labels, provenance, search |

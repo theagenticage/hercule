@@ -2,6 +2,8 @@
 
 A provider wraps one interactive coding harness (Claude Code via the Agent SDK, Codex via `codex app-server`, pi via its RPC mode) behind two surfaces: a **ProviderDefinition** on the controller (static self-description, registered by the provider plugin) and a **ProviderAdapter** on the runner (execution: ~~probe plus five session methods, one normalized event stream~~ the probe, install and login, six session methods with one normalized event stream, and a one-shot `generateText` for text generation, section 14 *(amended 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282))*). The controller authors a `SessionSpec` that names ids, never paths; the runner resolves it and drives the adapter; the adapter normalizes vendor traffic into one event vocabulary at the runner, with a tagged raw passthrough. Degradation is declared, never silent: per-mode and per-feature support are pure facts on the definition, and the controller substitutes an unsupported access mode by a hardcoded, strictly downward fallback before the session starts. Rationale lives in [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md).
 
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **Harnesses and providers are separate concepts** ([ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)). What this document called a provider is now a **Harness**: the agent program, described by a `HarnessDefinition` and driven by a `HarnessAdapter`. **Provider** now means the company that serves models and bills for them (Anthropic, OpenAI, OpenRouter, Z.ai, OpenCode, MiniMax), described by a `ProviderDefinition`. A **Provider Account** is one account at one provider, and it replaces the provider instance. Sections 15 to 19 hold the new model, and every section it changes carries an amendment. Text the remodel does not change still says "provider" for the harness and "provider instance" for the Provider Account a harness runs for, until the rename ticket renames the code and the documents together.
+
 ## 1. Shape
 
 | Surface | Where | Registered by | Owns |
@@ -9,9 +11,17 @@ A provider wraps one interactive coding harness (Claude Code via the Agent SDK, 
 | ProviderDefinition | controller | provider plugin, into the `provider` extension point ([./05-plugins.md](./05-plugins.md)) | identity, config schema, declared capabilities |
 | ProviderAdapter | runner | built-in runner code in v1, written plugin-shaped (one narrow interface per provider, no cross-provider leakage); lifted into the plugin post-v1 | probing, session execution, event normalization, text generation (section 14, *added 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282)*) |
 
-A **provider instance** is a definition plus decoded config (t3-code's driver/instance split). The instance id, not the provider id, is the routing key everywhere: snapshots, session specs, placement. `supportsMultipleInstances` providers get multi-account by config-dir isolation (one login per instance).
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* The table becomes three surfaces:
 
-**Default instances exist from first run** (resolved 2026-09-01, [Web app details](https://github.com/theagenticage/hercule/issues/45)): the controller creates one provider instance per shipped provider plugin (Claude Code, Codex, pi) with default config - subscription auth, no overrides - named after the provider, so the first-session onboarding ([./14-web-app.md](./14-web-app.md) §Onboarding) can offer "Log in to Claude Code" without the user ever meeting the instance concept; a second instance appears only when they want a second account.
+| Surface | Where | Registered by | Owns |
+|---|---|---|---|
+| `HarnessDefinition` | controller | a harness plugin (`plugins/claude-code`, `plugins/codex`, `plugins/pi`), into the `harness` extension point ([./05-plugins.md](./05-plugins.md)) | identity, declared capabilities, and the providers and account kinds the harness runs (section 2) |
+| `HarnessAdapter` | runner | built-in runner code, as the `ProviderAdapter` was | probing, sign-in, session execution, event normalization, text generation, and turning an account and a model into the harness's own arguments (section 10.4) |
+| `ProviderDefinition` | controller | a provider plugin, one per provider (`plugins/anthropic`, `plugins/openai`, `plugins/zai`, `plugins/openrouter`, `plugins/opencode`, `plugins/minimax`), into the `provider` extension point | identity, account kinds and their setup steps, the harnesses each kind may run in, where its Model Catalogs come from, usage and expiry reads, the default selection, and the suggested text generation model (section 15) |
+
+~~A **provider instance** is a definition plus decoded config (t3-code's driver/instance split). The instance id, not the provider id, is the routing key everywhere: snapshots, session specs, placement. `supportsMultipleInstances` providers get multi-account by config-dir isolation (one login per instance).~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A **Provider Account** (section 15) is a provider, an account kind, and the credential or the sign-ins that kind needs. The routing key everywhere is the pair (Provider Account, harness): capability snapshots, session specs, placement and Harness Homes. One account may run in several harnesses, and each pair has its own Harness Home on each runner (section 9.1).
+
+~~**Default instances exist from first run** (resolved 2026-09-01, [Web app details](https://github.com/theagenticage/hercule/issues/45)): the controller creates one provider instance per shipped provider plugin (Claude Code, Codex, pi) with default config - subscription auth, no overrides - named after the provider, so the first-session onboarding ([./14-web-app.md](./14-web-app.md) §Onboarding) can offer "Log in to Claude Code" without the user ever meeting the instance concept; a second instance appears only when they want a second account.~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **No account exists until the user adds one.** The controller creates none at boot. The desktop app's first run adds the first account ([./17-desktop-app.md](./17-desktop-app.md)). Instances created before [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md) become accounts once (section 19).
 
 The runner never sees Hercule domain state and the controller never sees runner paths ([./03-controller-and-runners.md](./03-controller-and-runners.md), ADR 0002). Provider-native session state (transcripts, thread rollouts, session trees) lives on the runner's disk; the controller's normalized per-session stream ([./04-state-store.md](./04-state-store.md)) is the observable record.
 
@@ -66,11 +76,64 @@ Declared values for the three v1 providers:
 
 pi's `auto` is unsupported because `auto` means a harness-side reviewer judges routine actions; parking (section 8.2) fixes pi's approval mechanics but gives it no reviewer.
 
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **The definition splits in two.** The interface above becomes the `HarnessDefinition`, and the facts about a provider move to a new `ProviderDefinition`:
+
+```ts
+interface HarnessDefinition {
+  id: string                          // qualified (ADR 0034): "claude-code/claude-code", "codex/codex", "pi/pi"
+  displayName: string
+  binaryName: string                  // the executable on a runner's PATH, as Runner Facts name it
+  declared: DeclaredCapabilities      // unchanged, table above
+  runs: HarnessProviderSupport[]      // the providers and account kinds this harness can run (section 15.4)
+}
+
+interface HarnessProviderSupport {
+  providerId: string                  // "anthropic/anthropic"
+  kinds: HarnessKindSupport[]         // the account kinds it can run for that provider
+  modelArgument: string               // how the harness names one of the provider's models: "{model}", "zai/{model}"
+  models: "all" | "own-list"          // which of the account's models it can run (section 15.4)
+}
+
+interface HarnessKindSupport {
+  kind: string                        // the account kind id
+  credentialVariable?: string         // the environment variable the credential goes in: "CLAUDE_CODE_OAUTH_TOKEN";
+                                      // absent for a per-machine kind, whose login is in the Harness Home
+}
+
+interface ProviderDefinition {
+  id: string                          // qualified: "anthropic/anthropic", "openai/openai", "zai/zai", ...
+  displayName: string
+  kinds: AccountKind[]
+  catalogSource: { kind: "harness-probe"; harnessId: string } | { kind: "provider-api" }   // section 16
+  defaultSelection: "current-models" | "none"                                             // section 17.3
+  suggestedTextGenerationModel?: string                                                   // moved here from the harness (section 14.2)
+}
+
+interface AccountKind {
+  id: string                          // "api-key", "subscription-token", "subscription-per-machine", ...
+  title: string                       // what the add-account flow shows
+  description: string
+  setup: SetupStep[]                  // section 15.2
+  harnesses: string[]                 // the harnesses the provider allows this kind to run in
+}
+```
+
+- A harness no longer has `supportsMultipleInstances`, `configSchema` or `defaultConfig`. What an instance's config held is now an account's kind and credential (section 15). `suggestedTextGenerationModel` moves to the provider, because it names one of the provider's models.
+- A provider whose catalog source is `provider-api` also contributes the code that reads a catalog, usage and expiry with an account's credential, run on the controller (sections 16 and 18). That code is functions, so it is not part of the stored definition, just as a Connection type's `validate` is not ([./08-events-and-connections.md](./08-events-and-connections.md)).
+- A provider plugin never names a harness's flags or variables. A harness declares what it runs (`runs`): for each provider, how it names a model, and for each kind, the variable the credential goes in. Its adapter applies those declarations (section 10.4); anything beyond them, such as pi's `models.json`, is adapter code. The provider names harnesses only to say which ones its terms allow (`AccountKind.harnesses`) and which one lists its models (`catalogSource`).
+
 ### 2.1 Instance config
 
-`configSchema` covers, per instance, **logical settings only**: extra environment for the spawned process (API keys, `ANTHROPIC_BASE_URL`-style routing, `CLAUDE_CODE_USE_BEDROCK=1`), model defaults, and provider-specific options. It never holds paths. The runner derives both paths itself: the provider home is `<storage dir>/providers/<instanceId>/` under the runner's material state ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)), and the binary is the runner-installed harness ([15 §12](./15-packaging-and-operations.md)); both reach the adapter on `ProviderRunnerContext` (section 4). Per-runner path overrides ("use my own `claude`") are post-v1. This resolves ticket 12's "binary path, config dir" wording against the no-runner-paths rule (ADR 0005): those two were the runner's to resolve all along (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)). ~~The one path-shaped fact that does exist lives per instance × runner, not in instance config: `userMaterialDir` (§9.1 User Material), an opaque runner-scoped string stored beside the capability snapshot.~~ *(Amended 2026-10-04, [#75](https://github.com/theagenticage/hercule/issues/75).)* User Material stores no path either: the runner reads it from each harness's default install locations on its own machine (§9.1 User Material).
+~~`configSchema` covers, per instance, **logical settings only**: extra environment for the spawned process (API keys, `ANTHROPIC_BASE_URL`-style routing, `CLAUDE_CODE_USE_BEDROCK=1`), model defaults, and provider-specific options. It never holds paths. The runner derives both paths itself: the provider home is `<storage dir>/providers/<instanceId>/` under the runner's material state ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)), and the binary is the runner-installed harness ([15 §12](./15-packaging-and-operations.md)); both reach the adapter on `ProviderRunnerContext` (section 4). Per-runner path overrides ("use my own `claude`") are post-v1. This resolves ticket 12's "binary path, config dir" wording against the no-runner-paths rule (ADR 0005): those two were the runner's to resolve all along (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)).~~ ~~The one path-shaped fact that does exist lives per instance × runner, not in instance config: `userMaterialDir` (§9.1 User Material), an opaque runner-scoped string stored beside the capability snapshot.~~ ~~*(Amended 2026-10-04, [#75](https://github.com/theagenticage/hercule/issues/75).)* User Material stores no path either: the runner reads it from each harness's default install locations on its own machine (§9.1 User Material).~~
 
-Instance config is validated against `configSchema` and stored on the controller; the runner receives the instance's config with each probe and session request. Secret-valued entries are `provider-instance`-owned rows in the secrets table ([./13-security.md](./13-security.md)): the controller decrypts them and sends them inline with each probe or session request over the runner WebSocket; they are held in memory for the operation and never land on runner disk (the same posture as git credentials, 13 §9). They are never logged and never returned by the API.
+~~Instance config is validated against `configSchema` and stored on the controller; the runner receives the instance's config with each probe and session request. Secret-valued entries are `provider-instance`-owned rows in the secrets table ([./13-security.md](./13-security.md)): the controller decrypts them and sends them inline with each probe or session request over the runner WebSocket; they are held in memory for the operation and never land on runner disk (the same posture as git credentials, 13 §9). They are never logged and never returned by the API.~~
+
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **Instance config is gone.** Its two jobs moved:
+
+- **The credential** belongs to a Provider Account and is set through its account kind's setup steps (section 15.2). A key or token is a `provider-account`-owned row in the secrets table, named `apiKey` or `token` ([./13-security.md](./13-security.md)). The controller decrypts it and sends it inline with each frame that runs a harness for the account. The runner holds it in memory for the operation and never writes it to disk, as it did with instance secrets. It is never logged and never returned by the API.
+- **The environment** a harness needs for an account is declared by its Harness Definition, per provider and kind (the variable the credential goes in, and how a model is named), and the harness adapter applies it (section 10.4). Base-URL routing, Bedrock and Vertex are not offered (Post-v1).
+
+Paths stay out of every record. The binary is the runner-installed harness, as before, and the home is the Harness Home whose folder the controller resolves (section 9.1). User Material stores no path either.
 
 ## 3. Capability snapshots
 
@@ -100,12 +163,27 @@ interface OptionDescriptor {                  // field names beyond kind/choices
 }
 ```
 
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **A snapshot is per account, per harness, per runner.** `instanceId` becomes `providerAccountId` and `harnessId`. `declared` is no longer copied, because it belongs to the harness and is read from its definition. A snapshot is what one runner found out about one Provider Account in one harness:
+
+- whether the account is signed in there, and as whom (`auth`);
+- the harness version;
+- the models the harness lists for that account.
+
+Those models are the harness's own view. They give each model's options in that harness, and they decide whether the harness can run a model (section 15.4). The models a user picks from come from the account's Model Catalog (section 16), which is built from a snapshot only when the provider's catalog source is a harness probe. Whether a harness is installed on a runner, and its version, are also in the runner's Runner Facts ([./03-controller-and-runners.md](./03-controller-and-runners.md)), read per harness and not per account.
+
 ### 3.1 Scope and cadence
 
 - **Scope is instance x runner.** Harness binaries live on runners with potentially different versions, so catalogs, auth and capabilities differ per runner. The controller stores one snapshot per (instance, runner) in its DB. Harness version skew across the fleet is a surfaced fact, not an error (the hook for later fleet-managed harness updates).
 - **The composer resolves the snapshot against the placement target.** Switching the target runner in the composer triggers an on-demand probe of that runner; the cached snapshot is shown meanwhile.
 - **Cadence** (copied from t3-code): a background interval, demand-gated (probe only while something is watching), on instance config change, and on placement change.
 - The probe runs on the runner through `ProviderAdapter.probe(config)`; the runner reports the `ProbeResult` as a runner fact over the runner protocol ([./03-controller-and-runners.md](./03-controller-and-runners.md)); the controller stamps `instanceId`, `runnerId`, `probedAt` and copies `declared` from the definition to form the snapshot.
+
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* The remodel changes all four bullets above:
+
+- **Scope is (Provider Account, harness, runner).** A runner is probed for an account in a harness when the harness is installed there and the account's kind may run in that harness (section 15.4).
+- **The composer no longer reads snapshots.** It reads Model Profiles, whose entries say whether they can run now (section 17.6).
+- **Cadence.** The background interval, a sign-in, a new credential and a placement change still trigger a probe. A catalog read, which may be a probe, runs every 4 hours and on Refresh (section 16.3). When a runner's Runner Facts show that a harness appeared or disappeared, the runner is probed again at once for every account that harness can run.
+- The controller stamps `providerAccountId`, `harnessId`, `runnerId` and `probedAt` on the runner's `ProbeResult`.
 
 ### 3.2 Probing is side-effect-free
 
@@ -119,9 +197,13 @@ Discovery never creates, resumes, or mutates a provider conversation, and never 
 
 `auth.status` is `unauthenticated` when the harness reports no usable login, `error` when the probe itself failed (binary missing, protocol error), `ok` otherwise. A provider instance with `auth.status !== "ok"` on a runner is filtered out of placement for that runner ([./03-controller-and-runners.md](./03-controller-and-runners.md)).
 
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A probe runs in the pair's Harness Home and with the account's credential. For a key or token account, the controller sends the credential with the probe frame and the harness reads it from its environment (section 10.4). pi's probe checks the account's own provider (`pi auth check --provider zai`, `openrouter`, ...), no longer only `zai`. A Provider Account whose `auth.status` is not `ok` for a harness on a runner is filtered out of placement there. A key or token account is `ok` on every runner where the harness is installed, until the provider refuses the credential (section 15.6).
+
 *(Corrected 2026-09-07, [#64](https://github.com/theagenticage/hercule/issues/64), against the real SDK 0.3.263 and CLI 2.1.263.)* The Claude row above described a probe that cannot work. The init message carries **no** identity; a prompt that never yields produces no init message at all; and a prompt that does yield makes a real `/v1/messages` call at the same instant as the init message, so a probe with one would bill the user's account for opening a Fleet page. `hooks: {}` does not disable hooks and `mcpServers: {}` does not strip MCP; what does the isolating is `settingSources: []` and `strictMcpConfig: true`. Even under `persistSession: false` the CLI writes `.claude.json`, `backups/` and `sessions/` into its config directory, which is why that directory is the instance's own and never the user's `~/.claude`. `HOME` is never overridden.
 
 ### 3.3 Catalog policy
+
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **Catalogs are per account now** (section 16). The policy below still decides what each harness lists in its probe. A probe's list becomes the account's Model Catalog when the provider's catalog source is that harness. pi's list is read for the account's provider. A Model Profile holds catalog models only, so the custom-model bullet below no longer applies: a model the catalog does not list cannot be picked, and Refresh is the way to a model that is newer than the stored catalog.
 
 Probe-first, curated overlay where introspection falls short:
 
@@ -232,13 +314,13 @@ Amended 2026-09-01 ([Prototype: the app shell and navigation](https://github.com
 
 *(Amended 2026-09-08, [#66](https://github.com/theagenticage/hercule/issues/66).)* `sendInput` answers `SendResult { turnId, delivery }` rather than nothing, and `interrupt(sessionId)` is a method of its own; both are built on the Claude adapter, which calls the live `query()`'s `interrupt()`. The adapter emits the `user_message` item itself, out of the text it was given and the delivery it computed, instead of building it from the harness's echo of the user turn: `steered` is set from `SendResult` and never inferred (section 6.3), and the echo is the one place that fact is missing. `TurnInput.modelSelection` reaches Claude as `setModel(model)` on the live query before the input is pushed, and a `setModel` the harness refuses fails the input rather than delivering it under the old model.
 
-The session environment rides `ctx.env` (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)). The adapter builds the spawned process environment as: ~~the runner's base env, then the instance config env, then `ctx.env`~~ *(amended 2026-10-03, [#310](https://github.com/theagenticage/hercule/issues/310))* the session's `ctx.env`, never the raw runner env, plus the adapter's own isolation variables (section 9.1) - Hercule-owned keys always win, so instance config can never override `HERCULE_SESSION` or the git credential material. The runner does the layering, not the adapter: a session's `ctx.env` already holds the runner's environment with git's and Hercule's own variables removed (section 9.3), then the instance config env, then the variables the runner sets for the session.
+The session environment rides `ctx.env` (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)). The adapter builds the spawned process environment as: ~~the runner's base env, then the instance config env, then `ctx.env`~~ *(amended 2026-10-03, [#310](https://github.com/theagenticage/hercule/issues/310))* the session's `ctx.env`, never the raw runner env, plus the adapter's own isolation variables (section 9.1) - Hercule-owned keys always win, so ~~instance config~~ an account's credential variables *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* can never override `HERCULE_SESSION` or the git credential material. The runner does the layering, not the adapter: a session's `ctx.env` already holds the runner's environment with git's and Hercule's own variables removed (section 9.3), then ~~the instance config env~~ the account's credential in the variables its Harness Definition names (section 2), then the variables the runner sets for the session.
 
 *(Amended 2026-10-26, [#770](https://github.com/theagenticage/hercule/issues/770).)* `respondToQuestion` can fail with `AnswerNotDelivered { message }`. It fails when the answer did not reach the agent, when the adapter cannot tell whether it did, and when the adapter holds no such question (never opened here, already answered, an approval, or its agent was stopped). The message is written for the user and shown as it is. `modelSelection` is the session's current model, as every input carries it: Codex uses it when the answer starts a turn, Claude and pi ignore it. The runner's supervisor turns the outcome into one `SessionRespondToQuestionResult` per answer (section 6.5).
 
 *(Amended 2026-10-28, [#896](https://github.com/theagenticage/hercule/issues/896).)* **`startSession` and `sendInput` fail with a tagged `AdapterError`, never a bare string.** `AdapterError` is a union of tagged errors in `@hercule/protocol`, each with one field, `message`. The tag says what failed, so the controller reacts to the tag and never reads the words. Any failure that has no tag of its own is `AdapterFailed`. `respondToQuestion` keeps its own `AnswerNotDelivered` (above), which is not in the union because it only answers a question. The error rides `SessionInputResult { requestId, ok: false, error }` ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2), which also answers a start's input (section 4.2).
 
-- **The runner owns the words.** The `message` is written for the user and shown as written, cut to the protocol's message length. Adapters say what failed. The supervisor then adds how to fix it for the two setup tags, because only it knows the runner id, the provider id and the instance id. `HarnessNotInstalled` gets "Install it with: `hercule runner install-harness <runnerId> --provider <providerId>`". `HarnessLoginMissing` gets "Log in with: `hercule provider login <instanceId> --runner <runnerId>`".
+- **The runner owns the words.** The `message` is written for the user and shown as written, cut to the protocol's message length. Adapters say what failed. The supervisor then adds how to fix it for the two setup tags, because only it knows the runner id, the provider id and the instance id. `HarnessNotInstalled` gets "Install it with: `hercule runner install-harness <runnerId> --provider <providerId>`". `HarnessLoginMissing` gets ~~"Log in with: `hercule provider login <instanceId> --runner <runnerId>`"~~ "Sign in with: `hercule provider-account sign-in <id> --runner <runnerId>`" *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*.
 - **The runner owns the thread's failure row.** For every refused input and every failed start except `SteerRefused` and `SessionAlreadyRunning`, the runner appends `runtime.error` with `class` set to the tag and the message (section 6). The tag is PascalCase and sits beside the vendor classes, which are snake_case or the harness's own words. Nothing reads `class` to decide behaviour: it only labels the row. The controller never writes `runtime.error`.
 - **The runner owns the process.** A failed start ends the session as before (`session.exited`, reason `crash`). A `HarnessProtocolError` from `sendInput` does not end the session: the input fails, the thread gets the `runtime.error`, and the harness keeps running. Stopping it would be wrong because the controller gives up on an input after 10 seconds and puts it back to waiting, while Codex may take 30 seconds to answer; a crash exit would then resume a conversation and run the requeued input twice. Ending a session on a mid-session protocol error waits for a follow-up that settles an input whose delivery is unknown. *(Amended 2026-10-28, [#896](https://github.com/theagenticage/hercule/issues/896).)*
 - **The controller owns the input.** Two outcomes. *Back to waiting*: the row is `queued` again with the message as its `reason`, by the rules of section 5. *Failed*: the row is cancelled with the message as its `reason`, and an agent step's prompt fails its step. Only the one input that hit the error fails. Every other waiting input follows the exit rules of section 5, so a conversation's other messages still survive the exit. An input fails, and is not put back, when the harness may have taken it or when trying again cannot work: sending it again after a resume could run it twice, or the setup would fail the same way.
@@ -826,6 +908,16 @@ Sandboxing is enforced by Codex (Seatbelt on macOS, bubblewrap on Linux; WSL1 un
 
 ### 9.1 Per-instance isolated provider homes
 
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **One home per account per harness: the Harness Home.** Each (Provider Account, harness) pair has its own isolated home on every runner, and every session runs inside its pair's home. Everything this section says about an instance's home holds for a Harness Home.
+
+- **The folder is derived.** It is `<storage dir>/providers/homes/<providerAccountId>/<harnessId>/` *(Amended 2026-10-31, [#406](https://github.com/theagenticage/hercule/issues/406).)*, with the qualified harness id as two folder levels (`claude-code/claude-code`). So two harnesses never share a folder, and they must not: Claude Code and pi both write a `settings.json` at the top of their home.
+- **A migrated account keeps its old folder for its old harness.** An account made from a provider instance (section 19) carries `legacyHomeFolder`, the instance's folder name, and `legacyHomeHarnessId`, the harness that instance ran. For that harness, its home stays `<storage dir>/providers/<legacyHomeFolder>/`, so its sign-ins, its transcripts and its resume keep working. The folders never move, because moving one is unsafe:
+  - Codex stores the absolute path of every thread's rollout file in its SQLite state and never corrects it, so resume fails after a move.
+  - On macOS, Claude Code names its Keychain login after a hash of the config folder's path (section 10.1), so a moved folder loses its login.
+- **A second harness on a migrated account gets a derived home.** Derived homes live under `providers/homes/`, and a legacy home is `providers/<instanceId>/`. An instance id is a UUID and never `homes`, so a derived home never sits inside a legacy one, even though a migrated account keeps the instance's id. Every other folder under `providers/` is a legacy home.
+- **One function resolves a home.** `resolveHarnessHome(account, harnessId)` on the controller returns the legacy folder when the account has one and the harness is its legacy harness, and the derived folder otherwise. It is the only code that reads `legacyHomeFolder`.
+- **The controller sends the folder.** Every frame that runs a harness for an account carries it as `harnessHome`, a path relative to the runner's storage directory (`providers/homes/<providerAccountId>/<harnessId>` or `providers/<legacyHomeFolder>`): session start, resume and fork, probe, sign-in, and text generation ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). The runner joins it to its storage directory and never derives a home from an id itself.
+
 Every provider instance has its own isolated provider home (one instance = one login = one home; never per session), and every session runs inside its instance's home, so user-global instructions, skills, packages and memory never leak into Hercule sessions (constraint from the [memory-interface prototype](https://github.com/theagenticage/hercule/issues/31): Codex picked up `~/.codex/AGENTS.md` and pi discovered `~/.claude/skills` until isolated). The handed knobs are the config-dir variables, `--setting-sources project`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`; the rest of the table are spec additions supported by the research:
 
 Isolation is the default for every session kind. **Threads are the one exception**: they see the user's own material, ~~linked live~~ live *(amended 2026-10-04, [#75](https://github.com/theagenticage/hercule/issues/75): only a Thread on the controller's local runner, and only Claude Code takes it by link)* - the User Material rules below (resolved 2026-09-02, [User knowledge in Hercule sessions](https://github.com/theagenticage/hercule/issues/52), [ADR 0032](../adr/0032-threads-link-the-users-own-material.md)). Assistant sessions stay isolated (the user's material distorted them, #31) and workflow agent steps stay isolated for reproducibility: a step must behave identically on every runner, and if an Agent needs knowledge, that is the post-v1 Hercule-owned-knowledge work, not a link. **Amended 2026-10-01 ([#307](https://github.com/theagenticage/hercule/issues/307)):** isolation is not complete for sessions with a workspace. Claude Code and pi read instruction files in the workspace and in every directory above it, so an assistant session or workflow agent step with a workspace also reads `~/CLAUDE.md`, `~/.claude/CLAUDE.md` and `~/AGENTS.md` when they exist on that runner. A step can therefore behave differently on runners whose home directories differ. Accepted; the provider table below gives the details. ~~**Amended 2026-10-04 ([#75](https://github.com/theagenticage/hercule/issues/75)):** there is one more known gap. When a workspace root is not a git checkout, Claude's project walk can also reach the skills in `~/.claude`, so an assistant session or workflow agent step can load them. Accepted for now and tracked in [#369](https://github.com/theagenticage/hercule/issues/369).~~ *(Amended 2026-10-19, [#768](https://github.com/theagenticage/hercule/issues/768), closing [#369](https://github.com/theagenticage/hercule/issues/369).)* Fixed. A session that runs in the workspace root, which is when the workspace has no checkout or several, gets a root boundary at every start and resume: an empty file named `.git` in the root, unless the root already has a `.git` of any kind (section 9.4, "The root boundary"). Claude's search for skills, commands and agents stops at a folder with a `.git` entry, so it no longer climbs to `~/.claude`. The instruction files of the amendment above are still read. Codex and pi never had the gap: Codex runs with a neutral `HOME`, and pi runs with `--no-skills`. A real Codex and a real pi both start in a root with the boundary file and do not load the user's skill.
@@ -836,7 +928,7 @@ Isolation is the default for every session kind. **Threads are the one exception
 | Codex | `CODEX_HOME` per instance; the app-server process is started with it. **Amended 2026-09-02 (#52):** `CODEX_HOME` alone does not isolate skills - Codex discovers them HOME-relative (`~/.agents/skills`, plus cwd/repo `.agents/skills`), and no global disable flag is documented. Isolated Codex sessions (everything but a Thread with User Material) therefore run with `HOME` overridden to a neutral directory under the instance home *(amended 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312): once [#734](https://github.com/theagenticage/hercule/issues/734) builds section 9.4, a Thread does too, so every Codex session runs with the neutral `HOME`)*; auth is `CODEX_HOME`-relative (`auth.json`) so login survives. **Verify at build time:** nothing else Codex needs is HOME-relative. *(Amended 2026-10-18, [#734](https://github.com/theagenticage/hercule/issues/734).)* #734 built it: every Codex session, a Thread included, runs with the neutral `HOME`, and the real-`HOME` branch is gone from the code. Nothing else Codex needs is HOME-relative, as verified on codex 0.163.0: across app-server starts, model turns and a resume, the neutral `HOME` stayed empty, and everything Codex wrote (`auth.json`, its databases, `sessions/`, shell snapshots) went under `CODEX_HOME`. The `HOME`-relative paths left in the binary are `~/.codex` (used only when `CODEX_HOME` is unset, which never happens here), `~/.aws/` (AWS model providers only), `$HOME/.cache/codex-runtimes/` (a cache it recreates) and the user's shell setup file (`.zshrc`, `.bashrc`), which the shell snapshot runs. The neutral `HOME` is for Codex itself; a Thread's commands get the real `HOME` back. For a Thread with User Material, the adapter adds `-c shell_environment_policy.set.HOME=<the runner's HOME>`. That setting changes only the environment of the commands Codex runs, not the environment of Codex. So a Thread's commands run under the real `HOME`, as under the user's own Codex and as a Claude Thread's commands do. They get git with `~/.gitconfig`, the files it includes by a `~/` path and its `includeIf gitdir:~/` sections; `gh`'s login, which `gh` reads from the macOS Keychain; ssh with `~/.ssh`; and `~/.zshenv`, which zsh reads for every command. They do not get what `~/.zprofile` and `~/.zshrc` set up: Codex runs those once, to build its shell snapshot, and it builds the snapshot under its own `HOME`, the neutral one. `PATH` still comes from the runner's environment. Every other Codex session's commands keep the neutral `HOME`. The session's credential helper (13 §9) still wins over any helper in the user's git config: the runner's `GIT_CONFIG_*` variables start with an empty `credential.helper`, which clears every helper set before it. Verified on codex 0.163.0: setting `set` changes only `HOME` in a command's environment, and every other variable, including ones named like keys or tokens, is the same with or without it; a path with spaces, quotes and a backslash parses under `--strict-config`; and `skills/list` still omits a skill in the real `HOME`'s `.agents/skills`. Decided by Rogier on 2026-10-18. |
 | pi | `PI_CODING_AGENT_DIR` per instance; launched with `--no-extensions --no-skills --no-prompt-templates --no-themes --no-approve` so nothing in the agent dir or the project's `.pi/` loads (arbitrary TS, supply-chain surface); the Hercule extension alone is passed explicitly with `-e`, which loads even under `--no-extensions`. **Amended 2026-10-01 ([#307](https://github.com/theagenticage/hercule/issues/307)):** sessions with a workspace keep context-file discovery on; only workspace-less sessions add `--no-context-files`. Checked against pi 0.85.1: discovery reads `AGENTS.md` / `CLAUDE.md` from the instance agent dir and from the cwd and every directory above it, so a file in `~` reaches every session with a workspace. Accepted as is, like Claude. *(Amended 2026-10-19, [#768](https://github.com/theagenticage/hercule/issues/768).)* A session with a workspace also passes `--skill <folder>/skills` for the skills in its checkouts (section 9.4). `--no-skills` stays, so nothing in the agent dir or in `~/.agents/skills` loads. |
 
-The instance's config dir is also where the vendor login lives, which is why the home is per instance on every provider.
+~~The instance's config dir is also where the vendor login lives, which is why the home is per instance on every provider.~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A per-machine account's vendor login lives in its Harness Home on that runner, which is one reason the home is per account. A key or token account keeps no login there: the controller sends the credential with each frame (section 2.1).
 
 *(Added 2026-10-14, [#687](https://github.com/theagenticage/hercule/issues/687).)* **No Claude session messages another Claude session outside Hercule.** Claude Code can list the user's other Claude sessions, on the machine and in the cloud, and send them messages and files. Nothing in Hercule would record such a message or show it, so every session, a Thread included, runs with all of it turned off, whatever its access mode:
 
@@ -943,7 +1035,7 @@ The runner injects, per session: `HERCULE_API_URL`, `HERCULE_TOKEN` (the session
 - **Nothing in a session needs them.** The CLI authenticates with `HERCULE_API_URL` and `HERCULE_TOKEN`, and the git credential helper reads only variables the runner sets.
 - **Every child of the runner loses them.** A repository's setup command and a workspace action step start from the same environment as a session.
 - **The default Home.** Without `HERCULE_HOME`, a `hercule` command falls back to `~/.hercule`. When the session's controller runs on a scratch Home, for example while an agent tests Threads or an end-to-end run is live, that default is the user's live Home. So `HERCULE_SESSION=1` gets a second effect: the commands [15 §5](./15-packaging-and-operations.md) lists refuse the default Home and ask for `--home` or `HERCULE_HOME`.
-- **Instance config still applies.** Instance config `env` (section 2.1) is applied after the removal, so a `HERCULE_*` variable the user sets there still reaches the session. The variables this section lists are set after instance config, so it cannot replace them.
+- ~~**Instance config still applies.** Instance config `env` (section 2.1) is applied after the removal, so a `HERCULE_*` variable the user sets there still reaches the session. The variables this section lists are set after instance config, so it cannot replace them.~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **The account's credential applies after the removal.** It goes in the variables its Harness Definition names (section 2). The variables this section lists are set after it, so it cannot replace them. Instance config, and its `env`, are gone (section 2.1).
 - **Not sessions.** Probes, logins and installs still run with the runner's own environment (section 10.1).
 
 **Amended 2026-09-15 ([#68](https://github.com/theagenticage/hercule/issues/68)),** replacing "Claude skill file under the session's project settings, Codex `AGENTS.md` section": nothing is materialized per session any more.
@@ -1179,10 +1271,12 @@ These rules hold for the desktop composer ([#743](https://github.com/theagentica
 - **Process**: each session is one Claude Code CLI subprocess, about 1 GiB RAM as a starting point, memory growing over long sessions; no built-in timeout, no per-subagent deadline. The runner's supervisor owns deadlines and recycling; `maxConcurrentSessions` derives from RAM (~1 session per 2 GiB, [./03-controller-and-runners.md](./03-controller-and-runners.md)). Subagent caps via `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` / `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and `maxBudgetUsd`. *(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* Hercule sets none of them in v1, so the harness defaults hold (section 13.7).
 - **Binary**: `pathToClaudeCodeExecutable` points at the runner-installed `claude` (`ctx.binary`; the SDK spawns it without a shell). The SDK's bundled per-platform CLI packages are excluded from the Hercule build; the installed CLI is floor-pinned to the SDK's own version - SDK 0.3.N pairs with CLI 2.1.N, and newer CLI with older SDK is the supported direction ([ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md), [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12).
 - **Probe** *(2026-09-07, [#64](https://github.com/theagenticage/hercule/issues/64))*: `query({ prompt: <an input stream that closes at once>, options: { pathToClaudeCodeExecutable: ctx.binary, settingSources: [], strictMcpConfig: true, persistSession: false, env } })`, then `accountInfo()` and `supportedModels()`, then close, under a 15 s deadline. `env` is the runner's own with `CLAUDE_CONFIG_DIR` set to the instance home and `DISABLE_AUTOUPDATER=1`; `HOME` is untouched. Zero API calls; about 460 ms against a warm CLI.
-- **Login** *(2026-09-07, [#64](https://github.com/theagenticage/hercule/issues/64))*: `claude auth login` with stdin piped, `CLAUDE_CONFIG_DIR` set to the instance home and `BROWSER` set to a command that exits non-zero. The failing browser launch is what makes the CLI print the paste-a-code authorize URL; a launch that succeeds switches it to a `localhost` callback no remote browser can reach. The runner holds one login child per instance, relays the first `https://` URL it prints, writes the pasted code and a newline to its stdin, and kills a child left idle for ten minutes. `claude setup-token` needs a PTY and is not usable; `claude auth status --json` is the cheapest auth check.
-- **Auth**: delegation only. The CLI holds its own login in the instance's `CLAUDE_CONFIG_DIR` (Linux: `.credentials.json` in that dir; macOS: a Keychain item keyed per config dir - `Claude Code-credentials-<hash of dir>` - so instance logins never collide with each other or with the user's personal login; when the Keychain rejects the write, e.g. locked over SSH, the CLI falls back to `.credentials.json` in the config dir. `HOME` is never overridden). Hercule never reads, extracts, or refreshes vendor tokens. API-key / Bedrock / Vertex routes are instance env (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK=1`, ...), not separate code paths. The read-only probe reads `AccountInfo` (email, subscription type, `apiProvider`) over the control protocol; the init message carries none of it (see the Probe note above).
+- **Login** *(2026-09-07, [#64](https://github.com/theagenticage/hercule/issues/64))*: `claude auth login` with stdin piped, `CLAUDE_CONFIG_DIR` set to the instance home and `BROWSER` set to a command that exits non-zero. The failing browser launch is what makes the CLI print the paste-a-code authorize URL; a launch that succeeds switches it to a `localhost` callback no remote browser can reach. The runner holds one login child per instance, relays the first `https://` URL it prints, writes the pasted code and a newline to its stdin, and kills a child left idle for ten minutes. ~~`claude setup-token` needs a PTY and is not usable;~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* `claude auth status --json` is the cheapest auth check. *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* The `subscription-token` account kind (section 15.2) runs `claude setup-token` the same way, on the runner the user picks, in a scratch folder that is deleted afterwards ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 3.3), and with `BROWSER` failing as above. The runner relays the URL, writes the pasted code to the CLI, and reads the token the CLI prints at the end. The runner sends the token to the controller in the sign-in result and keeps no copy.
 
-**Risk:** Claude subscription auth. Research #2 (`research/claude-agent-sdk.md`) read Anthropic's Agent SDK policy as forbidding it ("Claude.ai subscription login is not permitted ... Hercule must design around API-key billing"); tickets 22 and 23 and the charting decision accept the t3-code posture (the user's own tool driving the user's own login through the unmodified vendor CLI; the prohibition targets products offering claude.ai login to other users). The decision stands; the risk that Anthropic reads it the other way is on record. API-key / Bedrock / Vertex remain first-class on the same instance config.
+**Verify at build time:** whether `claude setup-token` runs without a terminal, as `claude auth login` does. An earlier note said it needs one; if so, the runner starts it in a pseudo-terminal. Also how the token appears in its output.
+- **Auth**: delegation only. The CLI holds its own login in the instance's `CLAUDE_CONFIG_DIR` (Linux: `.credentials.json` in that dir; macOS: a Keychain item keyed per config dir - `Claude Code-credentials-<hash of dir>` - so instance logins never collide with each other or with the user's personal login; when the Keychain rejects the write, e.g. locked over SSH, the CLI falls back to `.credentials.json` in the config dir. `HOME` is never overridden). Hercule never reads, extracts, or refreshes vendor tokens. ~~API-key / Bedrock / Vertex routes are instance env (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK=1`, ...), not separate code paths.~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* An API key is an account kind, not instance env. The read-only probe reads `AccountInfo` (email, subscription type, `apiProvider`) over the control protocol; the init message carries none of it (see the Probe note above). *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* An Anthropic `api-key` account runs with `ANTHROPIC_API_KEY`, and a `subscription-token` account with `CLAUDE_CODE_OAUTH_TOKEN`, both set from the frame's secrets (section 10.4). Hercule still never reads, extracts or refreshes a per-machine login. Bedrock and Vertex are not offered in v1.
+
+**Risk:** Claude subscription auth. Research #2 (`research/claude-agent-sdk.md`) read Anthropic's Agent SDK policy as forbidding it ("Claude.ai subscription login is not permitted ... Hercule must design around API-key billing"); tickets 22 and 23 and the charting decision accept the t3-code posture (the user's own tool driving the user's own login through the unmodified vendor CLI; the prohibition targets products offering claude.ai login to other users). The decision stands; the risk that Anthropic reads it the other way is on record. ~~API-key / Bedrock / Vertex remain first-class on the same instance config.~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* An API key is offered as the Anthropic `api-key` account kind; Bedrock and Vertex are not offered in v1. *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* The reading now covers the long-lived token too. Hercule runs `claude setup-token` for the user, holds the token on the controller, and hands it to the unmodified Claude Code on the user's own runners. Hercule never calls Anthropic itself with a subscription credential, so it reads Claude usage only through Claude Code (section 18). The terms text and this reading are in [./13-security.md](./13-security.md) and [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md).
 - **Resume / fork**: `resume: <id>` (+ `forkSession: true`); transcripts under `$CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/`; same-runner only (the alpha `sessionStore` mirror is not used in v1). `persistSession: false` for probes.
 - **hercule-as-a-tool** *(2026-09-15, [#68](https://github.com/theagenticage/hercule/issues/68))*: `plugins: [{ type: "local", path: <runner storage>/claude-plugin }]` on every session. `settingSources: []` above still holds and the plugin loads independently of it: a plugin named by path is not discovered through a setting source. Verified live against CLI 2.1.272 - a session with no setting source at all read the plugin's `SKILL.md` and answered with a marker only that file carried.
 - **Sharp edges**: the SDK's eight per-platform packages bundle a 196 MB CLI and are excluded from the build; single-shot `query()` throws after yielding an error result (wrap iteration); `env` replaces the subprocess env; MCP tools need explicit allow rules (`acceptEdits` does not auto-approve them); `AskUserQuestion` and `ExitPlanMode` are intercepted in `canUseTool` and mapped to `question` / `plan`.
@@ -1209,7 +1303,7 @@ These rules hold for the desktop composer ([#743](https://github.com/theagentica
 - **Process ownership**: ~~topology unpinned; suggested one app-server process per instance per runner (section 4.1).~~ Pinned below. Single-writer per thread; the server unloads idle unsubscribed threads after 30 minutes and emits `thread/closed` (maps to `session.exited`, resumable).
 - **Process ownership, pinned** *(2026-09-14, [#73](https://github.com/theagenticage/hercule/issues/73))*: ~~one app-server host per provider instance on a runner, reference-counted over the sessions using it and shut down with its last one.~~ *(Amended 2026-09-30, recording what [#68](https://github.com/theagenticage/hercule/issues/68) built.)* One app-server per session, not per instance, killed when the session ends. The session token is in the environment the app-server was started with, and every shell command it runs inherits that environment. A shared host would run a second session's work under the first session's token, grants and actor stamp, and would stop working for both once the first token was revoked (section 9.3). So the auth refresh and the model catalog are per process too. A probe runs on a host of its own. A device-code login is an exception to the host's request/response rhythm: its completion is confirmed by a later probe rather than awaited, because Bun's HTTP server cuts an idle request at 10 seconds and the user needs longer than that in the browser. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* That later probe is no longer left to the user. When the login's child exits, or its code's 15 minutes run out, the runner sends `LoginEnded`, and the controller probes the instance on that runner at once and announces `provider` / `updated` ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). `provider.login` answers a device-code login with `expiresAt` beside `userCode`. A client finishes the login by itself once a snapshot for that runner, probed after the login started, has `auth.status` `ok`, and shows the code as expired once `expiresAt` has passed. The web app has no "Done" button any more. A failed login is not told apart from one still waiting: a newer snapshot that is not `ok` may come from any probe, so the client waits until the login is done or the code expires.
 - **Errors**: `-32001` overload -> retry with exponential backoff and jitter; mid-turn `error` notifications with `codexErrorInfo` feed `runtime.error { class }`.
-- **Auth**: ChatGPT OAuth or API key via `account/*`; credentials in `$CODEX_HOME/auth.json` (file store default); tokens auto-refresh. `cli_auth_credentials_store` stays `file` on runners.
+- **Auth**: ChatGPT OAuth or API key via `account/*`; credentials in `$CODEX_HOME/auth.json` (file store default); tokens auto-refresh. `cli_auth_credentials_store` stays `file` on runners. *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A `subscription-per-machine` account's ChatGPT login stays in `$CODEX_HOME/auth.json` in its Harness Home. An OpenAI `api-key` account's key comes from the frame's secrets and is never written to disk (section 10.4). **Verify at build time:** how the pinned Codex takes an API key from its environment without `codex login --with-api-key`, which writes `auth.json`. A custom `model_providers` entry with `env_key` is the fallback the research found (`research/fleet-sign-in.md`). The probe's `account/read` gives the signed-in email and plan, which the identity check reads (section 11).
 - **Stability**: no cross-version protocol guarantee. Pin the CLI release, generate types with `codex app-server generate-ts` for that release, regenerate and re-verify on every upgrade.
 - **Images** *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* Verified against `codex` 0.160.1. Each image is an input item `{ type: "localImage", path }` pointing at the cached file, on `turn/start` and on `turn/steer`. Codex shrinks large images itself, so the adapter declares no per-image limit. A bad image does not fail the turn: Codex puts placeholder text in its place. A switch to a text-only model with images in history works: Codex swaps the images for placeholder text.
 
@@ -1219,19 +1313,60 @@ These rules hold for the desktop composer ([#743](https://github.com/theagentica
 - **The Hercule extension file**: one TypeScript file materialized into the instance home at session start and loaded with `-e` (explicit paths load even under `--no-extensions`; jiti and typebox ship inside pi's binary, so the extension's imports resolve). It carries the two seams RPC lacks: the awaited `tool_call` hook for approvals (section 8.2: parks on `ctx.ui`, bridged as `extension_ui_request` / `extension_ui_response`) and the `submit_result` structured-output tool (`pi.registerTool`, ~~`terminate: true`~~; section 7). *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* `terminate: true` is returned by the tool's execute result, not declared on the registration. *(Amended 2026-10-07, [#438](https://github.com/theagenticage/hercule/issues/438).)* The same file also carries the `subagent` tool. Each subagent's pi loads a copy of its own instead of this one (section 13.6 pi). ~~one TypeScript file materialized into the instance home at session start~~ *(Amended 2026-10-07, [#438](https://github.com/theagenticage/hercule/issues/438), review.)* Every agent loads a copy of its own, the session's own agent included: `extension-<sessionId>.ts` or `extension-<subagentId>.ts` in the instance home, written before its pi starts and deleted after its pi exits. The file also registers `bash` in place of pi's built-in one: the same tool, built with pi's own `createBashToolDefinition`, whose every command first opens the agent's copy as file descriptor 9 (the path is in `HERCULE_AGENT_FILE`). That open file is how the runner finds what the agent's bash calls left running (section 13.6 pi, Stopping). pi applies `--exclude-tools` to this tool as to its own, so a session without the shell still has no `bash`.
 - **Surface**: `prompt` / `steer` / `follow_up` / `abort`; events `agent_start` .. `agent_settled`, `turn_*`, `message_*` deltas, `tool_execution_*`, compaction and retry events; `set_model`, `set_thinking_level`, `set_auto_compaction`; `get_session_stats` (tokens, cost, context usage). Sessions are tree-structured JSONL files under the instance dir; resume via `--session <id>`, fork via `--fork <id>` or in-process `fork {entryId}`.
 - **Absent by design**: ~~subagents,~~ plan mode, MCP (verify). Declared, not emulated. *(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* pi has no subagents of its own, but Hercule's pi extension gives a session a subagent tool, so a pi session has subagents like the other two (section 13.6). *(Amended 2026-10-07, [#438](https://github.com/theagenticage/hercule/issues/438).)* pi itself still has none: the subagents are Hercule's extension's `subagent` tool, and each running child is a `pi --mode rpc` process of its own that the runner spawns at the extension's request. So a session runs one pi process plus one per running subagent.
-- **Auth**: multi-provider. The pinned v1 path is API-key auth - z.ai coding plan: provider `zai` (or `zai-coding-cn`), the key a `provider-instance` secret injected as `ZAI_API_KEY`. OAuth logins exist but are TUI-only (`/login`, no headless command); the fleet UI shows the copy-paste command as the fallback ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12). `auth.json` in the instance dir holds raw vendor tokens (plain file on every OS); Hercule never touches it. Probe: `pi auth check --provider <id> --json`.
+- **Auth**: multi-provider. ~~The pinned v1 path is API-key auth - z.ai coding plan: provider `zai` (or `zai-coding-cn`), the key a `provider-instance` secret injected as `ZAI_API_KEY`. OAuth logins exist but are TUI-only (`/login`, no headless command); the fleet UI shows the copy-paste command as the fallback ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12).~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* pi runs every key account its definition lists, each with its own pi provider and key variable (section 10.4). pi's own OAuth logins (`/login`) are not offered. An Anthropic subscription may not run in pi, and a ChatGPT subscription in pi waits for the Hercule-held ChatGPT sign-in (Post-v1). `auth.json` in the instance dir holds raw vendor tokens (plain file on every OS); Hercule never touches it. Probe: `pi auth check --provider <id> --json`.
 - **Stability**: pre-1.0 (0.84.x), repeated RPC breaking changes, no protocol version on the wire (0.84.0 changed `message_update` to deltas, 0.43.0 renamed `branch` to `fork`, 0.32.0 split the queue commands). The tested-max version policy ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12) matters most here; gate on `pi --version`, and regression-test the awaited `tool_call` park and `terminate` handling on every bump.
 - **Images** *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465).)* Each image is `{ type: "image", data, mimeType }` in the `images` array of `prompt` and `steer`, with `data` in base64. The adapter sends no input as `follow_up`. pi's own cap is 4.5 MB of base64 per image, about 3.375 MB raw. pi checks nothing on `steer` or on a prompt sent while the agent runs, and forwards the raw bytes, so the adapter declares `imageInput: { maxBytes: 3.375 MiB }` and the controller refuses a larger image before the input is accepted (section 4). On a prompt sent while the agent is idle, pi silently resizes an image to at most 2000 px on its longest side; that is accepted. A switch to a text-only model with images in history works: on each request pi swaps each image for "(image omitted: model does not support images)".
 
 **Verify at build time:** the Hercule extension file against the pinned pi version (`tool_call` hook and `registerTool` API churn), and the strict LF JSONL framing.
 
+### 10.4 How each harness runs an account
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A harness adapter turns a Provider Account and a model id from the account's Model Catalog into the harness's own arguments and environment. The Credential and Model argument columns below are what each Harness Definition declares in `runs` (section 2); the adapter applies them. The model id is always the provider's own (section 16). The credential comes from the frame's secrets and is set only in the harness process's environment.
+
+| Harness | Provider and account kind | Credential | Model argument | Models it can run |
+|---|---|---|---|---|
+| Claude Code | Anthropic `subscription-per-machine` | the login in the Harness Home | the model id | all |
+| Claude Code | Anthropic `subscription-token` | `CLAUDE_CODE_OAUTH_TOKEN` | the model id | all |
+| Claude Code | Anthropic `api-key` | `ANTHROPIC_API_KEY` | the model id | all |
+| Codex | OpenAI `subscription-per-machine` | the login in the Harness Home | the model id | all |
+| Codex | OpenAI `api-key` | the key (section 10.2) | the model id | all |
+| pi | Anthropic `api-key` | `ANTHROPIC_API_KEY` | `anthropic/<id>` | pi's own `anthropic` list |
+| pi | OpenAI `api-key` | `OPENAI_API_KEY` | `openai/<id>` | pi's own `openai` list |
+| pi | Z.ai `api-key` | `ZAI_API_KEY` | `zai/<id>` | pi's own `zai` list |
+| pi | OpenRouter `api-key` | `OPENROUTER_API_KEY` | `openrouter/<id>` | all, through `models.json` (below) |
+| pi | OpenCode `go-key` | `OPENCODE_API_KEY` | `opencode-go/<id>` | pi's own `opencode-go` list |
+| pi | OpenCode `zen-key` | `OPENCODE_API_KEY` | `opencode/<id>` | pi's own `opencode` list |
+| pi | MiniMax `pay-as-you-go-key`, `plan-key` | `MINIMAX_API_KEY` | `minimax/<id>` | pi's own `minimax` list |
+
+- **"pi's own list"** is the models in pi's snapshot for that account (section 3). A model that is not in it shows pi struck through in the model's menu, "pi doesn't know this model" (section 15.4).
+- **pi's `models.json`.** Over RPC, pi refuses a model id it does not know ("Model not found"). The CLI's fallback for unknown ids cannot be reached from RPC. So for an OpenRouter account, the controller sends, with the start, resume and fork frames, the details of every catalog model that pi's snapshot for the account lacks: id, name, context window, output limit, image input and reasoning. The adapter writes them as `models.json` entries into the Harness Home before pi starts, so switching to any of them inside the session works too. Missing details take pi's defaults: 128,000 context and 16,384 output. **Verify at build time:** that pi reads `models.json` only when it starts, so a file rewritten for one session does not change another session that is already running.
+- **Options** come from the harness that runs the entry (section 16.4).
+- A harness process gets only its own account's credential, never another account's.
+- **Verify at build time:** the pi provider ids and key variables in this table against the pinned pi. They come from pi's source at 1.4.0 (`research/model-catalogs.md`, `research/usage-sources.md`).
+
 ## 11. Provider install portability and per-runner login
 
 Installs are one command per provider (all three are self-contained binaries: Claude Code and Codex native, pi Bun-compiled) and are installed at runner join with a floor-pinned version policy ([ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md), [./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12); credentials are not distributed. Per-runner login is the durable model: refresh-token rotation with reuse detection (documented for Codex, structurally identical in pi, undocumented for Claude) makes two live copies of one credential log each other out. Hercule therefore drives each provider's own headless login on the runner as a post-join step from the fleet UI ([./03-controller-and-runners.md](./03-controller-and-runners.md) §3.3), relaying the device code or login URL to the user's browser. The per-provider login flows are listed in [./15-packaging-and-operations.md](./15-packaging-and-operations.md) section 12. Copying a credential file remains a bootstrap shortcut owned by exactly one runner afterwards. All three vendors permit the user's own account on the user's own machines; prohibitions target sharing with other people. Credential posture: [./13-security.md](./13-security.md). Findings: `research/provider-portability.md` (branch `research/provider-portability`).
 
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **An account signs in one of three ways** ([ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)). The sentence above that credentials are not distributed now holds for per-machine sign-ins only.
+
+- **A key** (`api-key` and the other key kinds) is held by the controller and sent with each frame. The account works on every runner where its harness is installed, and no runner signs in.
+- **A subscription token** (`subscription-token`) is made once, by Hercule running `claude setup-token` on a runner (section 10.1). The controller holds it like a key, so the account works on every runner that has Claude Code. It lasts one year from the moment it was made, which Hercule knows exactly (section 18.3). It is static and has no refresh token, so two runners cannot log each other out.
+- **A per-machine sign-in** (`subscription-per-machine`) is the model above: the harness's own headless login on each runner, through `providerAccount.signIn` and `providerAccount.submitSignInCode` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). The account works only on runners where it is signed in. A runner that goes offline during a sign-in ends the attempt with a message.
+
+**One account is one person.** A per-machine sign-in reports who signed in: Claude Code's `accountInfo()` and Codex's `account/read` give the email and the plan.
+
+- The first sign-in sets the account's `identity` and `planLabel`.
+- A sign-in on another runner as someone else is refused. `submitSignInCode` answers with a message that names who the account belongs to ("This account is rogier@work.com"), and the snapshot for that runner says the same, so placement never uses it.
+- The login the CLI wrote stays in that runner's Harness Home until the user signs in there again, as the right person.
+
+So an account's usage always belongs to one person (section 18).
+
 ## 12. Cost and usage
 
 v1 records, per session, every `session.usage.updated` snapshot and, per turn, `usage` and `costUsd` on `turn.completed` when the harness reports them: Claude `total_cost_usd`, pi `usage.cost.total`; Codex reports token usage but no cost (subscription plans), so `costUsd` is absent there. There is **no rate-table pricing in v1**: Hercule never multiplies tokens by a price list, and unpriced usage stays unpriced. `costUsd` is the slot a later cost dashboard reads; t3-code's transcript-scanning usage subsystem is the reference for that later work. *(Amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355).)* The Session and Subagent records carry Token Usage and `costUsd` (section 6.6), and those records are what a later cost dashboard reads, never the usage events.
+
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* This section is about what a session used. What a Provider Account has used of its limits or its credit is Account Usage (section 18).
 
 ## 13. Subagents
 
@@ -1366,6 +1501,14 @@ The meaning is section 6.6's. Per harness:
 
 *(Added 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* A **text generation** is one model call: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn. It is not a Session: it has no Session row, takes no session slot, and emits no events. Work that needs tools stays an agent step. The reasons are in [ADR 0041](../adr/0041-text-generation-is-one-model-call-on-a-runner.md).
 
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A text generation runs for a (Provider Account, harness) pair, with a model from the account's Model Catalog. In this section:
+
+- "instance" means that pair;
+- "the instance's models" means the account's Model Catalog;
+- "logged in on a runner" means that the account works on that runner in that harness (section 15.5).
+
+The runner gets the pair's `harnessHome` and the account's credential, as a session does (section 9.1).
+
 ### 14.1 Who calls it
 
 - **The controller's `TextGeneration` service** is the one entry point. Its `generate` method takes a caller, a purpose, the instructions, the input and an output schema ~~in Effect Schema, and returns the decoded value~~ *(Amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* as JSON Schema in the strict subset of section 7, and returns a value that matches the schema, checked by the controller, or a `TextGenerationError`. Thread titles derive the JSON Schema from an Effect Schema, and decode the value with it.
@@ -1376,8 +1519,8 @@ The meaning is section 6.6's. Per harness:
 
 The controller setting `textGeneration.model` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2) picks the provider instance and model every text generation runs on. It has three values:
 
-- **`automatic`**, the default, and what an unset key reads as. The controller walks a fixed order of providers, Codex, then pi, then Claude Code, and picks the first one whose `suggestedTextGenerationModel` (section 2) is in the model catalog of an instance that is logged in on a runner that could take the call (section 14.3). Today the suggestions are Codex `gpt-6-luna`, pi `glm-5.3-flash`, and the Haiku model the Claude Code definition names. A provider with no suggestion is skipped. With no match, text generation is off and every call fails as `unavailable`. The order is a controller constant, not a setting.
-- **`{ instanceId, model }`**, a model the user chose. `model` is the name the instance's model list gives it, at most 512 characters. Every call runs there. A call that cannot run there fails; it never falls back to another instance or provider.
+- **`automatic`**, the default, and what an unset key reads as. ~~The controller walks a fixed order of providers, Codex, then pi, then Claude Code, and picks the first one whose `suggestedTextGenerationModel` (section 2) is in the model catalog of an instance that is logged in on a runner that could take the call (section 14.3). Today the suggestions are Codex `gpt-6-luna`, pi `glm-5.3-flash`, and the Haiku model the Claude Code definition names. A provider with no suggestion is skipped. With no match, text generation is off and every call fails as `unavailable`. The order is a controller constant, not a setting.~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* The controller walks the Provider Accounts in the order they were added. It picks the first one whose provider names a `suggestedTextGenerationModel` (section 2) that is in the account's Model Catalog, and that can run now, in the account's default harness, on a runner that could take the call (section 14.3). An account that cannot run anywhere now is skipped. The suggestions are OpenAI `gpt-6-luna`, Z.ai `glm-5.3-flash` and Anthropic's `haiku` alias; the other providers name none. With no match, text generation is off and every call fails as `unavailable`. There is no setting for the order: a user who wants another account picks a model.
+- ~~**`{ instanceId, model }`**, a model the user chose. `model` is the name the instance's model list gives it, at most 512 characters. Every call runs there. A call that cannot run there fails; it never falls back to another instance or provider.~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **`{ providerAccountId, harnessId?, model }`**, a model the user chose. `model` is the id the account's Model Catalog gives it, at most 512 characters. Every call runs there, in `harnessId` or else in the account's default harness. A call that cannot run there fails; it never falls back to another account or harness.
 - **`off`.** Every call fails at once as `unavailable`. Nothing is recorded and the last failure (section 14.5) is not changed, because nothing was tried.
 
 The adapter runs the model at its provider's cheapest reasoning setting: lowest effort, or thinking off. The controller sends no model options.
@@ -1470,6 +1613,311 @@ Thread titles are the first use. The title rules are in [./02-domain-model.md](.
   - **Title and role are accepted on their own.** A valid role is stored even when the title is empty after cleaning, and the other way round. `needsRefinement` is stored only together with a generated title, so a role-only answer leaves it null.
 - **On failure:** the cut-short title stays. The failure shows in the setting's status and in the record, never as an error in the Thread.
 
+## 15. Providers and Provider Accounts
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A **Provider** is the company that serves models and bills for them. A **Provider Account** is one account at one provider: "Anthropic · Work", or "OpenRouter". Accounts are separate from harnesses, so one account can run in several harnesses and every harness can run several providers. The reasons are in [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md).
+
+### 15.1 The shipped providers
+
+| Provider | Account kinds | May run in | Catalog source | Default selection |
+|---|---|---|---|---|
+| Anthropic (`anthropic/anthropic`) | `subscription-per-machine` and `subscription-token`, a Claude subscription; `api-key` | the subscription kinds: Claude Code only, by Anthropic's terms ([./13-security.md](./13-security.md)); `api-key`: Claude Code, pi | Claude Code's probe | current models |
+| OpenAI (`openai/openai`) | `subscription-per-machine`, a ChatGPT subscription signed in to Codex; `api-key` | the subscription: Codex; `api-key`: Codex, pi | Codex's probe | current models |
+| Z.ai (`zai/zai`) | `api-key` | pi | pi's probe | current models |
+| OpenRouter (`openrouter/openrouter`) | `api-key` | pi | the provider's API | none |
+| OpenCode (`opencode/opencode`) | `go-key` (OpenCode Go), `zen-key` (OpenCode Zen) | pi | pi's probe | current models |
+| MiniMax (`minimax/minimax`) | `pay-as-you-go-key` and `plan-key`, two keys that are not interchangeable | pi | pi's probe | current models |
+
+"May run in" is what the provider allows. Section 15.4 says when an account can actually run in a harness.
+
+### 15.2 Account kinds and their setup
+
+An account kind declares its setup as steps from the fixed set a Connection type uses ([./08-events-and-connections.md](./08-events-and-connections.md)): `credentials`, `oauth`, `device` and `checklist`. Providers add one step of their own, `harness-login`. The core draws every step, so a provider ships no UI, and a provider that later adds a kind with OAuth changes no screen. The steps run on the same core OAuth2 client and the same secret handling as Connections.
+
+- **Key kinds** have one `credentials` step with one secret field, `apiKey`.
+- **`subscription-per-machine`** has one `harness-login` step: the harness's own headless login, on a runner the user picks (section 11). Other runners are signed in later, from the account.
+- **`subscription-token`** has one `harness-login` step too. Hercule runs `claude setup-token` on a runner that has Claude Code, the user opens the URL and pastes the code back, and the controller stores the token as the account's `token` (section 10.1). Pasting a token made elsewhere is not offered, so Hercule always knows when the token was made.
+
+~~A key is not checked when it is entered. The account's first catalog read checks it: a key the provider refuses makes the account `failed`, with the provider's own words (section 15.6).~~ *(Amended 2026-10-31, [#406](https://github.com/theagenticage/hercule/issues/406).)* **A key is checked when it is entered.** Before anything is stored, the controller runs the Provider's key check: one cheap read of the provider's own API, made with the key.
+
+- Anthropic: `GET https://api.anthropic.com/v1/models`.
+- OpenAI: `GET https://api.openai.com/v1/models`.
+- OpenRouter: `GET https://openrouter.ai/api/v1/key`, which also returns the key's limit and `expires_at`.
+- Z.ai, OpenCode and MiniMax: the provider's own models or account endpoint.
+
+A key the provider refuses fails `providerAccount.create`, or the `update` that replaces it, with `validation` carrying the provider's own words, and nothing is stored. When the provider cannot be reached, the call fails with `invalid_state`, saying which provider could not be reached and to try again: a key that could not be checked is never stored. Calling a provider with an API key is what the key is for; only a subscription credential is never sent to a vendor by Hercule itself (section 18.2).
+
+**Verify at build time:** the key-check endpoint for Z.ai, OpenCode (Go and Zen) and MiniMax (both kinds).
+
+### 15.3 Names
+
+An account is its provider plus an optional `label`, and it reads "Anthropic", or "Anthropic · Work".
+
+- The add-account flow asks for a label only when the user already has an account at that provider: "Give this one a name, so you can tell them apart."
+- Labels are unique per provider, and no label counts as one value, so two accounts of one provider never read the same.
+- Under the name, a client shows who is signed in and the plan (`identity`, `planLabel`), when the account has them.
+
+### 15.4 Which harness runs what
+
+- **An account can run in a harness** when all three hold:
+  - its kind lists the harness (the provider allows it);
+  - the harness's `runs` lists the provider and the kind (the harness supports it);
+  - the harness is installed on at least one runner.
+
+  Otherwise a client shows the harness struck through, with the first reason that fails, such as "Anthropic allows a Claude subscription only in Claude Code" or "Codex is not installed on any machine".
+- **A harness can run one of the account's models** when its `runs` entry says `all`, or says `own-list` and the harness's snapshot for the account lists the model (section 10.4). Otherwise the model's menu shows the harness struck through: "pi doesn't know this model".
+- **The account's default harness** is `defaultHarnessId`. A new account starts on the vendor's own harness, Claude Code for Anthropic and Codex for OpenAI, and on pi for every other provider. The user may change it to any harness the account can run in. A Model Profile can override it per account and per model (section 17.2).
+
+### 15.5 Where an account works
+
+A runner can run a (Provider Account, harness) pair when:
+
+- the harness is installed there and is not below its minimum version ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §12); and
+- the account works there. A key or token account works on every such runner. A per-machine account works where its snapshot says `auth.status` `ok`, signed in as the account's identity (section 11).
+
+Placement looks at nothing else about the model. If the harness on the chosen runner does not know the session's model, the session fails to start with the harness's own error. Version skew between runners is not designed for, because the user controls upgrades, and harness version warnings already exist ([ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md)).
+
+### 15.6 Status
+
+`status` says whether the account can be used now, and `statusMessage` says why not, in words the user can act on:
+
+- `ready`: the account can run on at least one connected runner.
+- `not-signed-in`: a per-machine account that no connected runner is signed in to as its identity.
+- `failed`: the provider refused the credential (a 401), from a catalog read, a usage read or the harness. `statusMessage` carries the provider's words. A network error or a timeout is not a failure: the account keeps its status, and the read records its error (section 16.2).
+- `no-runner`: nothing above fails, but no connected runner can run the account in any harness it may run in.
+
+`failed` is stored when a read is refused, and cleared by the next read that succeeds or by a new credential. The other values are worked out on every read and stored nowhere.
+
+Replacing a key or a token affects the frames sent afterwards. A running session keeps the credential it started with. The new credential clears a stored `failed` and the expiry warnings about the old credential (section 18.3).
+
+### 15.7 Deleting an account
+
+`providerAccount.delete` is refused while any of these uses the account, and the error lists them and says to change them first:
+
+- an Agent or an assistant;
+- the `textGeneration.model` setting;
+- the thread default (`thread.providerAccountId`);
+- a session on it that is queued, starting, idle or busy.
+
+Model Profiles do not block it. The account leaves every profile that holds it, and the client's confirm dialog names those profiles. A profile whose default entry belonged to the account follows section 17.4. Past sessions keep `providerAccountId`, and continuing one fails with "The account this thread ran on was deleted." The account's secrets are deleted with it. Its Harness Homes stay on the runners, as a deleted instance's home did, and nothing reads them again.
+
+## 16. Model Catalogs
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A **Model Catalog** is the list of models one Provider Account may use, as its provider reports it for that account. Every account has its own. A ChatGPT Business account may list a model that a Plus account does not, and an OpenRouter key lists what the key's settings allow.
+
+### 16.1 Sources
+
+| Provider | Where the catalog comes from |
+|---|---|
+| Anthropic, every kind | Claude Code's probe (`supportedModels()`) on a runner, with the account's credential |
+| OpenAI, every kind | Codex's probe (`model/list`) on a runner |
+| OpenRouter | `GET /api/v1/models/user` with the key, called by the controller |
+| Z.ai, OpenCode, MiniMax | pi's probe (`get_available_models`) for the account's provider, on a runner |
+
+- A harness probe runs on a runner where the account works in that harness, the controller's local runner first. It is always the harness the provider names, whatever harness the user later runs a model in, and it only passes on what the vendor says this account may use.
+- With no such runner, the read fails with a sentence the user can act on, such as "Install Codex on a machine to list this account's models" or "Sign in on a machine first".
+- No third-party catalog is read (no models.dev).
+- Model ids are the provider's own, and no model is matched across accounts: GLM 5.3 from Z.ai and GLM 5.3 from OpenRouter are two models in two catalogs.
+- pi's list depends on pi fetching its model registry. [#908](https://github.com/theagenticage/hercule/issues/908) (pi runs with `--offline`, so newer models never reach Hercule) has to be fixed before pi-sourced catalogs can be trusted to be current.
+
+### 16.2 What is stored
+
+The controller stores each account's catalog: its models, `readAt`, and the error of the last read that failed, if any. An item is the `ModelDescriptor` of section 3, plus:
+
+- `firstSeenAt`: when the model first appeared in this account's catalog (section 17.5);
+- when the source gives them: `maker`, `contextWindow`, `inputPrice` and `outputPrice` in US dollars per million tokens (0 for a free model), `releasedAt`, `tools` and `reasoning`.
+
+OpenRouter gives all of these details, and a harness probe gives what its list carries. The details are for showing and filtering only; nothing decides on them.
+
+- **The latest successful read wins,** from whichever runner made it.
+- **A failed read keeps the last good list,** with its time and the error. It never removes models.
+- **`modelCount`** on the account is the stored catalog's size, so a client can say "Browse 466 models" without reading the list.
+- Only the model picker and the model browser read a catalog (`providerAccount.readCatalog`). The composer never does (section 17.6).
+
+### 16.3 When it is read
+
+A catalog is read when the account is added, after a sign-in or a new credential, every 4 hours, and on Refresh (`providerAccount.refresh`). A refresh also reads the account's usage (section 18) and its expiry, where the provider reports one.
+
+### 16.4 Options belong to the harness
+
+A model's options, such as reasoning effort or thinking level, come from the harness that runs the entry, from that harness's snapshot for the account: Codex's efforts for a GPT model in Codex, and pi's thinking levels for the same model in pi. The catalog's own options are the source harness's, and they apply only when the entry runs in that harness. A model that pi runs through `models.json` gets pi's default options.
+
+## 17. Model Profiles
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A **Model Profile** is a named model menu, picked from the user's Provider Accounts. The composer shows one profile at a time. An account may sit in any number of profiles, and each profile picks its own models from it.
+
+### 17.1 What a profile holds
+
+```ts
+interface ModelProfile {
+  id: string
+  name: string                          // unique among profiles
+  revision: number                      // section 17.7
+  accounts: ModelProfileAccount[]       // in menu order
+  defaultEntry: ModelProfileEntry | null
+  dismissedNewModels: { providerAccountId: string; model: string }[]   // section 17.5
+}
+
+interface ModelProfileAccount {
+  providerAccountId: string
+  harnessId: string | null              // null: the account's default harness
+  entries: ModelProfileEntry[]          // in menu order
+}
+
+interface ModelProfileEntry {            // one row of the menu
+  providerAccountId: string             // always the account of the section it is in
+  model: string                         // a model id from the account's Model Catalog
+  harnessId: string | null              // null: the section's harness
+}
+```
+
+- The same model may appear twice in one section with different harnesses: "GPT-6.1 Sol" and "GPT-6.1 Sol · pi".
+- The same (account, model, harness) appears at most once.
+- A profile may be empty. A client then shows the teaching state.
+
+### 17.2 Which harness an entry runs in
+
+An entry runs in its own `harnessId`, else its section's `harnessId`, else the account's `defaultHarnessId`. These are the three levels a client offers:
+
+1. the account's default harness, in the account's own settings;
+2. per profile and per account, "Same as the account" until changed;
+3. per entry, moving the model to another harness, or offering it in a second harness as well, which adds a second entry.
+
+Each level may name only a harness the account can run in, and an entry's harness must be able to run its model (section 15.4); a write that breaks this is refused. A harness that later stops qualifying, for example because it was uninstalled everywhere, makes the entry unable to run, with the reason (section 17.6).
+
+### 17.3 The default selection
+
+When an account joins a profile, its section starts with its provider's **default selection**. An account joins a profile in the first run, when it is added to a profile, and when it is put in one from its card.
+
+- `current-models`: the models the source harness lists that are not marked legacy (`isLegacy`), in the harness's order. For example, Claude Code lists Opus 5.5, Sonnet 5.5 and Haiku 5.5 as current.
+- `none`: nothing. The section offers the model browser instead.
+
+When an account has no catalog yet, its selection is applied when its first read succeeds. When the account is the profile's first, the profile's default entry becomes the provider's default model, the catalog item marked `isDefault`, if it is in the selection. After that, a profile's lists never change by themselves.
+
+### 17.4 The default entry
+
+- `defaultEntry` is one of the profile's entries, or null when the profile is empty.
+- Taking out the default entry makes the first remaining entry the default.
+- A default entry that cannot run now stays the default. A new thread still starts on it, greyed with the reason, and nothing picks another entry silently.
+
+### 17.5 New models
+
+A model is **new** to a profile when all of these hold:
+
+- it is in its account's default selection;
+- its `firstSeenAt` is later than the account's first catalog read;
+- the profile holds the account but not the model;
+- the profile has not dismissed it.
+
+The check runs whenever a catalog read stores a change, so at most every 4 hours. The composer and the Providers page show a new model at the top of its account's section: "New · Opus 5.6 · released 26 Oct [Add] [Not now]". Add puts it in the profile. Not now adds it to `dismissedNewModels`. Taking a model out of a profile also dismisses it, so it is not announced again. A provider whose default selection is `none`, such as OpenRouter, never announces a model.
+
+### 17.6 What clients read
+
+`modelProfile.query` returns each profile with every entry resolved: the model's name from the catalog, the harness it runs in, and whether it can run now, with the reason when it cannot. The reasons are: the account failed, the account is not signed in on any connected runner, the harness is installed nowhere or cannot run the model, and the model left the account's catalog. The composer draws from this alone; [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) owns the shape.
+
+Any change that alters a resolved entry is announced on the live topic `provider`: a sign-in, a failed account, a runner connecting or going away, a catalog change. So the composer updates without Settings being open.
+
+### 17.7 Writing a profile
+
+`modelProfile.update` replaces the whole profile: its name, the accounts in order, the harness per account, the entries in order, the default entry and the dismissed models. It carries the `revision` it was read at. One exception: an account that is new to the profile and is sent without entries gets its Default Selection (section 17.3); an empty list of entries means none.
+
+- A write with an older revision is refused with a conflict. The client reads the profile again and applies the user's one change again.
+- In the same transaction, the controller checks that every account exists and appears once, that every entry's account is its section's account, that no (account, model, harness) appears twice, that every harness named is one the account can run in, and that the default entry is one of the entries.
+- An entry is not checked against the catalog, so an entry whose model left the catalog stays, unable to run, with its reason.
+- Every write raises `revision` by one.
+
+### 17.8 Creating and deleting profiles
+
+- `modelProfile.create` takes a name and, optionally, a profile to copy. Without one, the profile starts empty.
+- The last profile cannot be deleted.
+- Deleting a profile that projects use is allowed. Those projects fall back to the thread default, and the client's confirm dialog names them.
+
+### 17.9 A project's profile, and how a new thread starts
+
+**Contradicts [GLOSSARY.md](../../GLOSSARY.md) Project** ("no behaviour, no defaults"). Rogier decided the exception on 2026-10-30, and the GLOSSARY entry is amended. A project may name one Model Profile (`modelProfileId`).
+
+A new thread starts on the first of:
+
+1. the entry the caller names;
+2. in a project with a profile, that profile's default entry;
+3. the user's thread default (Settings › Threads).
+
+The controller applies this rule when a spawn names no model. A client may preselect, in its draft, the user's most recent entry within the profile, kept by the client per device; that preselection is then the entry the caller names. The rule decides only the start: changing a project's profile later changes no existing thread. An Agent keeps its own entry, and a project never overrides it.
+
+### 17.10 A thread keeps its account and harness
+
+A session's `providerAccountId` and `harnessId` are fixed when it starts. Within them, the model may change as the harness's `modelSwitch` allows (section 2). In a running thread, the composer offers only the entries with the same account and harness, as one flat list, and says "Other models start a new thread." Changing account inside a session would be a capability the harness declares, never one that is probed. No harness declares it in v1.
+
+## 18. Account Usage and expiry
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **Account Usage** is what a Provider Account has used of its limits or its credit. One controller domain, `usage`, owns it. Every place that shows usage reads it there, through `providerAccount.query` and `providerAccount.read` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)): the account cards, the composer, warnings and notifications. A session's Token Usage (section 6.6) stays with the session.
+
+### 18.1 What it holds
+
+Per account, Account Usage holds readings. A reading is either a **window**, with its name (such as five-hour or weekly), the share used (0 to 100), its reset time and whether it is hit, or a **credit**, with what remains and the limit if there is one. Each reading keeps the time it was taken and where it came from.
+
+- Readings are ordered by the time they were taken, not the time they arrived, so an older reading never replaces a newer one of the same window.
+- A window that is hit says so, with its reset time. [#625](https://github.com/theagenticage/hercule/issues/625), which makes a step wait for a limit to reset instead of failing, reads this. It is its own ticket.
+- The runner passes each rate-limit report a harness makes during a session to the controller as a reading ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). Section 6.7 still decides what the transcript shows.
+
+### 18.2 Sources
+
+| Account | Source |
+|---|---|
+| Anthropic `subscription-per-machine` | Claude Code's `rate_limit_event`s from running sessions, and the Agent SDK's usage read on a runner, which needs no turn and spends nothing |
+| Anthropic `subscription-token` | `rate_limit_event`s from running sessions only. The token lacks the `user:profile` scope, so the SDK's usage read returns nothing |
+| OpenAI `subscription-per-machine` | Codex's `account/rateLimits/read` in a probe, and `account/rateLimits/updated` from running sessions |
+| OpenRouter | `GET /api/v1/key`: the limit, the usage and `expires_at` |
+| OpenCode `go-key` | `GET https://opencode.ai/zen/go/v1/usage` with the key: the five-hour, weekly and monthly windows |
+| Z.ai | its quota endpoint, `api.z.ai/api/monitor/usage/quota/limit` |
+| MiniMax `plan-key` | `GET https://www.minimax.io/v1/token_plan/remains` |
+| Anthropic and OpenAI `api-key`, OpenCode `zen-key`, MiniMax `pay-as-you-go-key` | none; the account shows no gauge |
+
+- **Subscriptions are read only through the vendor's harness.** Hercule never calls a vendor itself with a subscription credential ([./13-security.md](./13-security.md), [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)). The controller reads keys with the provider's own endpoint.
+- **Nothing is estimated.** With no reading there is no gauge.
+- **How often.** Running sessions report for free, so they come first. An active read happens at most every 15 minutes per account, and is skipped when a session reported within that window. A subscription read starts a short harness process on a runner, which is why it is not more frequent.
+
+**Verify at build time:** whether `rate_limit_event`s carry the windows when Claude Code runs on a long-lived token; whether any other way to read a long-lived token's usage, or who it belongs to, exists inside Anthropic's terms (the usage ticket researches this first); and whether Z.ai's quota endpoint takes the key with `Bearer` or bare. Sources: `research/usage-sources.md` on `research/usage-sources`.
+
+### 18.3 Expiry and warnings
+
+- A `subscription-token` account expires one year after Hercule ran the token flow (`expiresAt`).
+- An OpenRouter account expires at the key's `expires_at`, when the key has one.
+- Other accounts have no expiry. A per-machine sign-in shows as failed on a runner once a session or a probe cannot sign in there.
+
+The account card and the account's composer entries show the expiry from 30 days before it. One notification is sent at 14 days (`core.account-expiring`), and one when an account becomes `failed` (`core.account-failed`) ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) section 7.2). A new credential clears both, so they fire again for the new one.
+
+## 19. Migrating provider instances
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* One migration turns every provider instance into a Provider Account. The result is exactly what adding the account fresh would produce. The migration rewrites rows, so the upgrade test gets a fixture for it (AGENTS.md).
+
+**Every instance becomes one account, with the same id.** None is dropped, and none is duplicated per runner. The controller cannot prove an instance unused: a snapshot keeps only the latest sign-in report, and a runner that is offline may hold a login. An account the user does not want is one delete away.
+
+| Instance's harness | Account's provider | Kind | Default harness |
+|---|---|---|---|
+| Claude Code | Anthropic | `subscription-per-machine` | Claude Code |
+| Codex | OpenAI | `subscription-per-machine` | Codex |
+| pi | Z.ai | `api-key` | pi |
+
+Claude Code and Codex instances have no secret fields, so every one of them is a per-machine sign-in. A pi instance has `zaiApiKey`.
+
+- **Names** follow section 15.3. An instance still named after its harness ("Claude Code", "Codex", "pi") was made by the controller and gets no label. A name the user typed becomes the label, as typed. For example, instances "Claude Code", "work" (Claude Code), "Codex", "work" (Codex) and "pi" become Anthropic, Anthropic · work, OpenAI, OpenAI · work and Z.ai. If two migrated accounts of one provider would end up with the same label, or both with none, the one created later takes its instance's name as its label, and " 2" is added if that still clashes.
+- **Identity** comes from the latest snapshots. When every runner that reports one for the instance names the same person, that person becomes the account's `identity`, with the plan as `planLabel`. Otherwise the account starts with none, and the next sign-in sets it (section 11).
+- **The secret is encrypted again.** A secret is encrypted with its owner kind, owner id and name as associated data ([./13-security.md](./13-security.md)). So moving pi's `zaiApiKey` to the Z.ai account's `apiKey`, owned by kind `provider-account`, means decrypting it and encrypting it again with the Master Key, inside the migration's transaction. If any value fails to decrypt, the migration fails and the controller does not start; the backup taken before migrations is untouched ([./15-packaging-and-operations.md](./15-packaging-and-operations.md)).
+- **Homes stay where they are.** Each account's `legacyHomeFolder` is the instance id, and its `legacyHomeHarnessId` is the instance's harness (section 9.1).
+- **References are rewritten** to `providerAccountId` plus `harnessId`: sessions (the column, and `instanceId` inside the `session.spec` JSON), Agents, assistants, the `thread.*` settings and `textGeneration.model`. Capability snapshots are keyed again by account, harness and runner.
+- **The controller stops creating instances at boot.**
+- **The first Model Profile** is made by the migration that adds Model Profiles, which is a later step than the accounts migration. It makes one profile, "Main", that holds every account in the order the accounts were added, each with its provider's default selection (section 17.3).
+
+**The upgrade-test fixture** (`e2e/upgrade.test.ts`) is made with the previous edge build and holds:
+
+- one instance of each harness, the pi one with a real encrypted Z.ai key;
+- a session, and an exited session with a native id;
+- an Agent, and an assistant with a conversation;
+- an explicit `textGeneration.model` choice, and the thread default.
+
+After the upgrade, the test checks that they read as accounts with the names of section 15.3, that the Z.ai key reaches a runner decrypted, and that the exited session resumes in its original home with its native id.
+
 ## Post-v1
 
 - Runner-side provider execution lifted into the provider plugin (v1: built-in, plugin-shaped).
@@ -1480,7 +1928,15 @@ Thread titles are the first use. The title rules are in [./02-domain-model.md](.
 - Additional stream kinds (`reasoning_summary_text`, tool-argument streaming) and item kinds (review mode, image generation) as open-enum additions.
 - Hercule-level OS sandboxing as a probed runner capability (ADR 0003).
 - ACP-based adapters (Cursor and similar) need an extension-method seam beyond `sessionUpdate` mapping.
-- **Reusing the user's existing local login, and moving logins between runners** - strongly wanted (noted 2026-09-01 by [Web app details](https://github.com/theagenticage/hercule/issues/45)): adopting the `claude` / `codex` / `pi` login already on the user's laptop instead of a fresh paste-a-code per instance, `claude setup-token` (one year, no rotation to race) as the Claude path, and Hercule shuffling tokens so a new runner needs no login at all; together with the instance-level "use my own binary and my own login" opt-in that skips home isolation (section 2.1 lists the binary half). The blocker to reopen is the refresh-token rotation fact from ticket #23; `setup-token` is why it may be solvable for Claude specifically.
+- **Reusing the user's existing local login, and moving logins between runners** - strongly wanted (noted 2026-09-01 by [Web app details](https://github.com/theagenticage/hercule/issues/45)): adopting the `claude` / `codex` / `pi` login already on the user's laptop instead of a fresh paste-a-code per instance, `claude setup-token` (one year, no rotation to race) as the Claude path, and Hercule shuffling tokens so a new runner needs no login at all; together with the instance-level "use my own binary and my own login" opt-in that skips home isolation (section 2.1 lists the binary half). The blocker to reopen is the refresh-token rotation fact from ticket #23; `setup-token` is why it may be solvable for Claude specifically. *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* `claude setup-token` is taken up (sections 11 and 15.2). Reusing a login already on the user's laptop, and the opt-out of home isolation, stay later.
+- *(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* From the provider remodel ([ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)):
+  - the Hercule-held ChatGPT sign-in for Codex and pi, with the controller as the only refresher (`research/fleet-sign-in.md`);
+  - the OpenCode harness;
+  - Claude Code against another vendor's Anthropic-compatible endpoint (MiniMax, Z.ai), Bedrock, Vertex, local models and custom base URLs;
+  - changing account inside a running session, as a declared harness capability (pi could, between key accounts);
+  - matching one model across accounts;
+  - deleting an account's Harness Homes on the runners;
+  - Model Profile entries for models outside the catalog.
 
 ## Sources
 
@@ -1505,7 +1961,8 @@ Tickets:
 - [Subagents: see and steer every subagent of a session (#345)](https://github.com/theagenticage/hercule/issues/345): section 13, decided by [#350](https://github.com/theagenticage/hercule/issues/350), [#351](https://github.com/theagenticage/hercule/issues/351), [#352](https://github.com/theagenticage/hercule/issues/352), [#353](https://github.com/theagenticage/hercule/issues/353), [#377](https://github.com/theagenticage/hercule/issues/377) and written by [#355](https://github.com/theagenticage/hercule/issues/355)
 - [Text generation: one small model call, run on a runner, with Thread titles as the first use (#282)](https://github.com/theagenticage/hercule/issues/282): section 14
 - [Workflow step for a cheap classify/extract text generation: pick a shape (#286)](https://github.com/theagenticage/hercule/issues/286): section 14
+- [Harness × model source: the provider model (#404)](https://github.com/theagenticage/hercule/issues/404), [The Providers page on the desktop (#405)](https://github.com/theagenticage/hercule/issues/405) and [Write the provider remodel into the specs, CONTEXT.md and an ADR, and its build tickets (#406)](https://github.com/theagenticage/hercule/issues/406): sections 15 to 19 and every amendment dated 2026-10-30
 
-ADRs: [0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md), [0031](../adr/0031-the-backend-is-written-on-effect.md), [0038](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md), [0041](../adr/0041-text-generation-is-one-model-call-on-a-runner.md), [0044](../adr/0044-a-text-generation-step-is-a-third-step-kind.md).
+ADRs: [0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0003](../adr/0003-sessions-run-as-bare-processes.md), [0018](../adr/0018-hercule-ships-as-one-self-contained-binary.md), [0031](../adr/0031-the-backend-is-written-on-effect.md), [0038](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md), [0041](../adr/0041-text-generation-is-one-model-call-on-a-runner.md), [0044](../adr/0044-a-text-generation-step-is-a-third-step-kind.md), [0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md).
 
-Research: `research/claude-agent-sdk.md` (branch `research/claude-agent-sdk`), `research/codex-app-server.md` (branch `research/codex-app-server`), `research/pi-sdk.md` (branch `research/pi-sdk`), `research/pi-approval-parking.md` (branch `research/pi-approval-parking`), `research/event-taxonomy-matrix.md` (branch `research/event-taxonomy-matrix`), `research/structured-output.md` (branch `research/structured-output`), `research/t3code.md` (branch `research/t3code`), `research/provider-portability.md` (branch `research/provider-portability`), `research/bun-compile.md` (branch `research/bun-compile`), `docs/research/subagents-claude-code.md` (branch `research/subagents-claude-code`), `docs/research/subagents-codex.md` (branch `research/subagents-codex`), `docs/research/subagents-pi.md` (branch `research/subagents-pi`).
+Research: `research/claude-agent-sdk.md` (branch `research/claude-agent-sdk`), `research/codex-app-server.md` (branch `research/codex-app-server`), `research/pi-sdk.md` (branch `research/pi-sdk`), `research/pi-approval-parking.md` (branch `research/pi-approval-parking`), `research/event-taxonomy-matrix.md` (branch `research/event-taxonomy-matrix`), `research/structured-output.md` (branch `research/structured-output`), `research/t3code.md` (branch `research/t3code`), `research/provider-portability.md` (branch `research/provider-portability`), `research/bun-compile.md` (branch `research/bun-compile`), `docs/research/subagents-claude-code.md` (branch `research/subagents-claude-code`), `docs/research/subagents-codex.md` (branch `research/subagents-codex`), `docs/research/subagents-pi.md` (branch `research/subagents-pi`). Provider remodel: `research/desktop-settings-providers.md` (branch `research/desktop-settings-providers`), `research/fleet-sign-in.md` (branch `research/fleet-sign-in`), `research/model-catalogs.md` (branch `research/model-catalogs`), `research/usage-sources.md` (branch `research/usage-sources`); the Providers page prototype, `docs/design/providers-directions/` (branch `prototype/desktop-settings-providers`).

@@ -33,7 +33,7 @@ A fully-qualified canonical identifier for a thing outside Hercule (`github:issu
 _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
-One run of a provider-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace.
+One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace.
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
@@ -88,7 +88,7 @@ The tokens an agent's model calls have used over a session's whole life. It only
 _Avoid_: context usage, context fill (how full the model's window is right now, which drops on compaction), cost (money, not tokens)
 
 **Request**:
-A provider-held question that one agent of a session - its own agent or one of its subagents - is parked on until an answer arrives, except an **Async question**, which the agent does not wait on. A session can have several open at once, each from its own asker and each answered on its own, in any order; they are surfaced on the card docked on the thread's composer. A request is one of two different things. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respondToApprovalRequest` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. Every approval a session waits on also raises a decision Notification whose Bound Actions are those same answers, so it can be answered from the notification center too. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by `session.respondToQuestion` with answers, each either one or more of the offered options or a custom string the user types. A question takes no decision: to turn it down, the user stops the asking agent's turn. Only the rendering is alike.
+A harness-held question that one agent of a session - its own agent or one of its subagents - is parked on until an answer arrives, except an **Async question**, which the agent does not wait on. A session can have several open at once, each from its own asker and each answered on its own, in any order; they are surfaced on the card docked on the thread's composer. A request is one of two different things. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respondToApprovalRequest` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. Every approval a session waits on also raises a decision Notification whose Bound Actions are those same answers, so it can be answered from the notification center too. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by `session.respondToQuestion` with answers, each either one or more of the offered options or a custom string the user types. A question takes no decision: to turn it down, the user stops the asking agent's turn. Only the rendering is alike.
 _Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Async question**:
@@ -96,7 +96,7 @@ A question Request (`async: true`) that the asking agent does not wait on. The a
 _Avoid_: non-blocking question, background question (a question in a background session or subagent is an ordinary question)
 
 **Steering**:
-Delivering user input into a session's running turn, folding it into that turn instead of opening a new one. A guarantee every session gives: where the provider cannot steer natively, the running turn is interrupted and the input is sent as the next turn. An owner's message to a busy assistant is steered without being asked, and so is one session's message to another session, unless it names itself or says `steer: false`.
+Delivering user input into a session's running turn, folding it into that turn instead of opening a new one. A guarantee every session gives: where the harness cannot steer natively, the running turn is interrupted and the input is sent as the next turn. An owner's message to a busy assistant is steered without being asked, and so is one session's message to another session, unless it names itself or says `steer: false`.
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
@@ -106,7 +106,7 @@ User input held by the controller for delivery when the session's running turn c
 - a session's first input cannot be cancelled before the session starts: stop the session instead.
 
 A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`. An input with the source `discussion` is a Discussion Input, which the controller writes to tell a session about Discussions. It is written already claimed for its send, so it never waits in the queue.
-_Avoid_: follow-up (provider-native term), pending message
+_Avoid_: follow-up (harness-native term), pending message
 
 **Draft Thread**:
 A thread the user is still composing: it does not exist on the controller yet, and its config and first message are held by the client until the first submission starts it.
@@ -121,7 +121,7 @@ A mark the user puts on a Thread they have finished with (`session.markDone`), r
 _Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), archived (nothing is hidden or frozen; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
 
 **Thread Config**:
-What a thread runs with: provider instance, model and its options, access mode, runner, permission profile, workspace, checkout and branch. Set by the draft at start.
+What a thread runs with: Provider Account, harness, model and its options, access mode, runner, permission profile, workspace, checkout and branch. Set by the draft at start.
 _Avoid_: settings (reserved for the settings store), spec (reserved for the session spec), setup
 
 **Message Draft**:
@@ -139,7 +139,7 @@ _Avoid_: file, upload (the act, not the thing), blob, tool image or screenshot a
 ### Actors
 
 **Agent**:
-A named, reusable configuration and identity for work: prompt, provider instance, permission profile and session defaults. Supplies values to a session at spawn; the session never reads through it afterwards. Owned by the controller, not by any repo.
+A named, reusable configuration and identity for work: prompt, Provider Account and model (and optionally a harness), permission profile and session defaults. Supplies values to a session at spawn; the session never reads through it afterwards. Owned by the controller, not by any repo.
 _Avoid_: persona, worker (as a noun)
 
 **Assistant**:
@@ -186,7 +186,7 @@ _Avoid_: registration, route (bare)
 
 **Conversation**:
 One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, or the assistant's one conversation on the web channel. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. The lineage is derived, not stored: it is the sessions that carry the conversation's id, and the current session is the newest of them. Its messages are conversation input, never events.
-_Avoid_: chat, thread (reserved for provider-native objects)
+_Avoid_: chat, thread (reserved for harness-native objects)
 
 **Conversation Message**:
 One line of a conversation, stored in order with its sender's role and label: what the owner said, the assistant's reply, or a notice. A reply or a notice links to the session that wrote it, and a reply names the turn that wrote it and the assistant text it holds. The owner's words reach the assistant only as a conversation message, so the conversation is the record of what was said; channels add third-party and bot lines. Input to an assistant, never an event.
@@ -194,10 +194,10 @@ _Avoid_: chat message, event, input (bare; a Queued Input is the session-side de
 
 **Notice**:
 A conversation message the system writes in one of three forms: "<name> was interrupted: <reason>" when the session exits while a turn runs, or when a turn fails or is stopped while the session lives; "<name> can't be reached: <why>" when a message cannot be delivered and waits, because no session could take it or the crash-loop guard holds that session; and "There was a problem delivering your message to <name>: <reason>" when a message is given up on for good, because its session cannot be resumed or the runner failed it in a way that sending it again would not mend. No other event writes one. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
-_Avoid_: notification (Hercule's central message to its user), error message, alert, runtime notice (a provider adapter's neutral report, a **Runtime Notice**)
+_Avoid_: notification (Hercule's central message to its user), error message, alert, runtime notice (a harness adapter's neutral report, a **Runtime Notice**)
 
 **Runtime Notice**:
-Neutral information a provider adapter reports about a session that is neither a problem nor a failure, such as "Conversation was cleared" or "Recalled 3 memories". It is the `runtime.notice` event. A client draws it as a plain note in the thread, where it happened, and it never opens a turn or ends one. Not a Notice, which is a conversation message the system writes, and not a warning, which tells the user something went wrong or may.
+Neutral information a harness adapter reports about a session that is neither a problem nor a failure, such as "Conversation was cleared" or "Recalled 3 memories". It is the `runtime.notice` event. A client draws it as a plain note in the thread, where it happened, and it never opens a turn or ends one. Not a Notice, which is a conversation message the system writes, and not a warning, which tells the user something went wrong or may.
 _Avoid_: notice (bare; a **Notice** is a conversation message), warning, alert
 
 **Idle Unload**:
@@ -206,7 +206,7 @@ _Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:
 Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
-_Avoid_: reset, compaction (reserved for provider-native context handling)
+_Avoid_: reset, compaction (reserved for harness-native context handling)
 
 **Memory**:
 An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants. Two tiers: a single **core** note (always present in every session; what the assistant knows about the user, as opposed to the persona the user wrote for it) and named **topic** notes (each with a one-line gist, listed by name and gist, opened on demand). A note written while the assistant could see third-party messages carries a provenance mark the user can review.
@@ -227,7 +227,7 @@ _Avoid_: timer, alarm
 ### Organization
 
 **Project**:
-A grouping of related work and its materials, purely a way to organise information inside Hercule: no behaviour, no defaults. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
+A grouping of related work and its materials, a way to organise information inside Hercule: no behaviour, and one default only, the Model Profile a new thread in it opens on ([ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)). May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
 _Avoid_: workspace (as a grouping term)
 
 **Resource**:
@@ -336,7 +336,7 @@ A fact about a runner used for placement: a probed toolchain or a user-applied l
 _Avoid_: bare "capability" where the kind isn't obvious
 
 **Runner Facts**:
-The probed facts a runner self-reports about itself: OS and architecture, RAM, toolchains, and which provider CLIs are on PATH. Reported at hello, refreshed hourly with a report only on change, and refreshed unconditionally on demand via `runner.refreshFacts`.
+The probed facts a runner self-reports about itself: OS and architecture, RAM, toolchains, and which harnesses are on PATH. Reported at hello, refreshed hourly with a report only on change, and refreshed unconditionally on demand via `runner.refreshFacts`.
 _Avoid_: re-probe
 
 **Promotion**:
@@ -357,27 +357,60 @@ _Avoid_: install dir, config dir
 The one unit per machine that the OS supervisor keeps running: a launchd LaunchAgent on macOS, a systemd user unit on Linux. It runs `hercule serve` on the controller's machine and `hercule runner` on a runner-only machine, with the machine's Hercule Home. `hercule service` installs and manages it; `hercule runner join` installs it for a runner. The controller's local runner is the controller's child process and has no Service Unit of its own.
 _Avoid_: daemon (that is a runner process), LaunchAgent or systemd unit as the general term, service file, supervisor (that is launchd or systemd)
 
+**Harness**:
+An agent program Hercule runs for a Session or a Text Generation: Claude Code, Codex, pi. Installed on runners; one harness can run the models of several Providers, and one Provider's models can run in several harnesses.
+_Avoid_: provider (its name before [ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md); spec text and code written before then still use it until the rename lands), CLI, agent (that is a configuration)
+
+**Harness Definition**:
+A harness's static self-description: identity, declared capabilities, and which Providers and Account Kinds it can run, and how. What a harness plugin registers; distinct from the running adapter.
+_Avoid_: provider definition (the old name)
+
+**Harness Adapter**:
+The runner-side code that drives one harness for a Session, and once, non-interactively, for a Text Generation, and reports what happens as normalized events.
+_Avoid_: provider adapter (the old name)
+
 **Provider**:
-An adapter wrapping a coding harness (Claude Code, Codex, pi). It drives the harness interactively for a Session, and once, non-interactively, for a Text Generation. Only this; integrations like GitHub are event sources, not providers.
-_Avoid_: harness (for the adapter itself), integration
+The company that serves models and bills for them: Anthropic, OpenAI, OpenRouter, Z.ai, OpenCode, MiniMax. A provider plugin declares its Account Kinds, how to read an account's Model Catalog and Account Usage, which harnesses each kind may run in, and its Default Selection. Integrations like GitHub are event sources, not providers.
+_Avoid_: vendor, model source, backend; provider for a harness (the meaning before [ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md))
 
-**Provider Definition**:
-A provider's static self-description: identity, config schema, declared capabilities, and the model it suggests for Text Generation. What a provider plugin registers; distinct from the running adapter.
+**Account Kind**:
+One way to hold an account at a Provider: an API key, a subscription signed in on each machine, or a subscription token Hercule holds for every machine. A provider declares its kinds and the setup steps each takes.
+_Avoid_: sign-in method (wording for the user only), auth type, plan
 
-**Provider Instance**:
-One account of a provider: a row carrying the config that provider runs under, with its own isolated provider home on every runner and its own vendor login. The instance id, never the provider id, is what placement, snapshots and the composer route on, because one provider can hold several accounts. The controller opens one per registered provider at boot.
-_Avoid_: provider account, provider config (for the row), profile
+**Provider Account**:
+One account at one Provider, of one Account Kind, named after its provider with an optional label: "Anthropic", "Anthropic · Work". It pays for the models; a Session, an Agent and the Text Generation Model name one, with a model and optionally a harness. One account is one person at the provider, on every machine it is signed in on.
+_Avoid_: account (bare; reserved for a future Hercule user concept), provider instance (the retired concept it replaces), connection (an external account for events and actions), wallet, model source
+
+**Harness Home**:
+The folder one harness runs in for one Provider Account on one runner: its login, its settings and its own session files. Kept apart per account and per harness, and never moved once used.
+_Avoid_: provider home (the old name), config dir
+
+**Model Catalog**:
+The models one Provider Account may use, as last read for it, each with the date it was first seen.
+_Avoid_: catalog (bare; that is the plugin catalog), model list
+
+**Default Selection**:
+The models a Provider Account brings into a Model Profile when it joins one: the provider's current models as its catalog source lists them, or none for a provider with hundreds. A model that newly enters it is announced as new.
+_Avoid_: featured models, recommended models
+
+**Model Profile**:
+A named menu of models for the composer, picked from the Provider Accounts: accounts in order, their models in order, the harness each runs in, and a default entry. An account may sit in several profiles, and a Project may name one.
+_Avoid_: profile (bare; Permission Profile and Settings › Profile exist), wallet, model set, preset
+
+**Account Usage**:
+What a Provider Account has used of its limits or credit, as last reported for it: usage windows with their reset times, or a credit balance, each with the time it was read. Never an estimate.
+_Avoid_: quota, rate limit (one reason a window fills), token usage (a session's tokens)
 
 **Secret Field**:
-A config field a provider definition marks secret: its value is never part of the instance's config but a Secret owned by the provider instance, entered through a masked input, hidden on every read, and decrypted only as a frame to a runner is built. Spelled `secret()` and `secretFields` in the plugin host, `ProviderSecretField`/`secretFields` in the contract, and `InstanceSecrets` in the protocol, which is the one place the values themselves travel.
+A credential an Account Kind asks for at setup, such as an API key: a Secret owned by the Provider Account, entered through a masked input, hidden on every read, and decrypted only as a frame to a runner is built.
 _Avoid_: API key field, pi key, credential field
 
 **Access Mode**:
-The session-level permission axis a provider adapter enforces: approval-required, auto-accept-edits, auto, or full-access. A fixed vocabulary; per-provider support is declared, and a mode a provider lacks is substituted before the session starts by a hardcoded fallback chain that only ever moves to a less permissive mode, never silently.
+The session-level permission axis a harness adapter enforces: approval-required, auto-accept-edits, auto, or full-access. A fixed vocabulary; per-harness support is declared, and a mode a harness lacks is substituted before the session starts by a hardcoded fallback chain that only ever moves to a less permissive mode, never silently.
 _Avoid_: permission mode (vendor term), runtime mode
 
 **Capability Snapshot**:
-The merged declared-plus-probed facts about a provider instance on a specific runner: auth state, harness version, model catalog. What UI affordances derive from; never obtained by creating or mutating a provider conversation.
+What one runner found out about one Provider Account in one harness: whether it is signed in and as whom, and the models it lists. Never obtained by creating or mutating a harness conversation.
 _Avoid_: provider status
 
 **Text Generation**:
@@ -385,7 +418,7 @@ One model call made on a runner: instructions, one input and an output schema go
 _Avoid_: completion, LLM call, one-shot session, prompt (for the whole call), text gen
 
 **Text Generation Model**:
-The provider instance and model every Text Generation runs on, set by one controller setting: Automatic (the first provider in a fixed order whose suggested model a logged-in instance offers), one model the user chose, or Off. A chosen model never falls back to another.
+The Provider Account and model, and optionally the harness, every Text Generation runs on, set by one controller setting: Automatic (the first account, in the order accounts were added, that can run now and whose provider suggests a small model), one model the user chose, or Off. A chosen model never falls back to another.
 _Avoid_: utility model, small model, cheap model, title model
 
 **Purpose**:
@@ -402,11 +435,11 @@ _Avoid_: subscription (reserved for the domain concept)
 ### Extension
 
 **Plugin**:
-A self-contained unit of functionality that extends Hercule by requesting plugin capabilities and registering contributions. The structuring principle of v1: channels, event sources, providers, and workflow actions are all built as plugins.
+A self-contained unit of functionality that extends Hercule by requesting plugin capabilities and registering contributions. The structuring principle of v1: channels, event sources, harnesses, providers, and workflow actions are all built as plugins.
 _Avoid_: extension, addon, integration
 
 **Extension Point**:
-A typed slot plugins contribute into. The v1 set is fixed: provider, channel, event source, workflow action. Plugins cannot define new extension points.
+A typed slot plugins contribute into. The v1 set is fixed: harness, provider, channel, event source, workflow action. Plugins cannot define new extension points.
 _Avoid_: hook
 
 **Contribution**:
@@ -599,7 +632,7 @@ _Avoid_: delegation, dispatch; "handoff" for a Migration
 
 **Tracking**:
 The section at the foot of To do that lists the Tasks the user handed off from Intake, until they mark one done or cancel it. A view over Tasks, not a record, and never called a Task on screen. Each row is in one state, worked out on read, highest first: Needs you (a Request, or an open signal that names the Task), Failed, Working, Finished (the agent is done and the user has not ticked it off) or Stopped. The rows that wait on the user count toward To do.
-_Avoid_: follow-up (the provider's word for queued input), out with agents, handed off; "Back" for a finished row (that is a snooze that ran out)
+_Avoid_: follow-up (the harness's word for queued input), out with agents, handed off; "Back" for a finished row (that is a snooze that ran out)
 
 **Handling**:
 What came of an event in Intake, or what is still to come: raised a signal, ended one, caught by an Ignore Rule, evidence for triage's signals, on a Task, known work, pending triage, or no action. Worked out when read, never stored. Shown to the user as "What came of it".
