@@ -18,7 +18,6 @@ import {
 import type { ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
 import {
   harnessesQuery,
-  modelProfilesQuery,
   pluginsQuery,
   providerAccountsQuery,
   providersQuery,
@@ -30,7 +29,7 @@ import { ProviderMark } from "../../../../screens/settings/providers/provider-ma
 import { useDragReorder } from "../../../../screens/settings/providers/use-drag-reorder";
 import { useOptimisticOrder } from "../../../../screens/settings/providers/use-optimistic-order";
 import "../../../../screens/settings/providers/models.css";
-import { replaceCachedModelProfile } from "./-model-profile-cache";
+import { readCachedModelProfile, replaceCachedModelProfile } from "./-model-profile-cache";
 import { ModelProfilePreview } from "./-model-profile-preview";
 import { AccountModelPicker } from "./-models-picker";
 
@@ -90,12 +89,7 @@ export function ModelProfileMenu({
       readonly profileId: string;
       readonly buildChange: (profile: ModelProfile) => ModelProfileUpdateInput;
     }) => {
-      // The newest profile the page holds, not the one the user acted on: a
-      // save that ran before this one has changed its revision.
-      const newest = queryClient
-        .getQueryData(modelProfilesQuery(client).queryKey)
-        ?.find(({ id }) => id === profileId);
-      if (newest === undefined) throw new Error("The profile is gone.");
+      const newest = readCachedModelProfile(queryClient, client, profileId);
       return updateModelProfile(client, newest, buildChange);
     },
     onSuccess: (saved) => {

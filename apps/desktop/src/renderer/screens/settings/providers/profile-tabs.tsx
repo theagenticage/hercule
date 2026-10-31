@@ -6,7 +6,7 @@ import { EditorIcon } from "../../../icons/editor";
 import { PlusIcon } from "../../../icons/plus";
 import { usePopoverMenu } from "../../use-popover-menu";
 import "../../thread/menus.css";
-import { ProfileFace } from "./profile-face";
+import { ProfileFace } from "../../profile-face";
 import "./profile-tabs.css";
 
 /** One Model Profile as its tab shows it. */

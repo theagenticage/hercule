@@ -78,7 +78,10 @@ const toggleModelMenu = (newState: "open" | "closed"): void => {
 const readHeads = (): readonly (readonly [string, string | null])[] =>
   [...document.querySelectorAll<HTMLElement>("button[aria-expanded]")]
     .filter((head) => head.closest("[popover]") !== null)
-    .map((head) => [head.firstElementChild!.textContent, head.getAttribute("aria-expanded")]);
+    .map((head) => [
+      head.querySelector(".ac-name")!.textContent,
+      head.getAttribute("aria-expanded"),
+    ]);
 
 describe("the composer's model menu", () => {
   it("opens with a head per profile and reads nothing, and a clicked head leaves the model alone", async () => {

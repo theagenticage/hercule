@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { ComposeIcon } from "../../../icons/compose";
 import { ChevronRightIcon } from "../../../icons/chevron-right";
+import { ProfileFace } from "../../profile-face";
 import "../../thread/menus.css";
 import "../../thread/model-menu-list.css";
 import "./profile-preview.css";
@@ -36,6 +37,7 @@ export function EmptyProfilePreview({
         <div className="ac">
           <div className="ac-head">
             <div className="q-h" aria-expanded="true">
+              <ProfileFace name={profileName} size="sm" />
               <span className="ac-name">{profileName}</span>
               <span className="ac-count">0</span>
               <ChevronRightIcon size={12} />

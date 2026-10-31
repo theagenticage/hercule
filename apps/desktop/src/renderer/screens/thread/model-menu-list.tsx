@@ -11,6 +11,7 @@ import {
   type ThreadChoice,
 } from "@hercule/client-core";
 import { ChevronRightIcon } from "../../icons/chevron-right";
+import { ProfileFace } from "../profile-face";
 import { ProviderMark } from "../settings/providers/provider-mark";
 import { MenuLine } from "./menu-line";
 import "./model-menu-list.css";
@@ -24,8 +25,9 @@ const MARK_SIZE = 12;
  * any other screen that shows a built menu draw it the same way.
  *
  * - A menu of a Draft Thread shows its Model Profiles as an accordion: a head
- *   per profile when `menu.hasHeads`, with the unfolded profile's Recent
- *   entries, one lane per Provider Account and its entries under it.
+ *   per profile (its face, name, entry count and a chevron) when
+ *   `menu.hasHeads`, with the unfolded profile's Recent entries, one lane per
+ *   Provider Account and its entries under it, indented below the head.
  * - A menu of a thread that has started shows one flat list and the note that
  *   other models start a new thread.
  *
@@ -179,6 +181,7 @@ export function ModelMenuList({
                   onOpenProfile(profile.profileId);
                 }}
               >
+                <ProfileFace name={profile.name} size="sm" />
                 <span className="ac-name">{profile.name}</span>
                 <span className="ac-count">{profile.entryCount}</span>
                 <ChevronRightIcon size={12} />

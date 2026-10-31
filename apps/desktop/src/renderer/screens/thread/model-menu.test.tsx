@@ -261,8 +261,10 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
   it("has a head per profile, with the profile that holds the current entry unfolded", () => {
     renderMenu({ profiles: [MAIN, WORK] });
 
+    // Each head reads as the profile's initial on its face, its name, and its
+    // number of entries.
     const heads = readHeads();
-    expect(heads.map((head) => head.textContent)).toEqual(["Main3", "Work2"]);
+    expect(heads.map((head) => head.textContent)).toEqual(["MMain3", "WWork2"]);
     expect(heads.map((head) => head.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
     // Only the unfolded profile's lanes are drawn.
     expect(screen.queryByText("Claude Haiku 5")).toBeNull();
@@ -339,8 +341,8 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
     expect(
       readHeads().map((head) => [head.textContent, head.getAttribute("aria-expanded")]),
     ).toEqual([
-      ["Work2", "true"],
-      ["Big8", "true"],
+      ["WWork2", "true"],
+      ["BBig8", "true"],
     ]);
     await user.clear(screen.getByRole("textbox", { name: "Filter models" }));
     await user.type(screen.getByRole("textbox", { name: "Filter models" }), "zzz");
@@ -360,7 +362,7 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
 
     // The first head, the unfolded profile's two entries and the Sign in on
     // the third, then the second head.
-    expect(stops).toEqual(["Main3", "Claude Sonnet 5", "Claude Opus 5", "Sign in", "Work2"]);
+    expect(stops).toEqual(["MMain3", "Claude Sonnet 5", "Claude Opus 5", "Sign in", "WWork2"]);
     await user.keyboard("{Enter}");
     expect(document.activeElement?.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Claude Haiku 5")).toBeTruthy();

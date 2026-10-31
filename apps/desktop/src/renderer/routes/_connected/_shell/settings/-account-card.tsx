@@ -18,13 +18,12 @@ import {
 import type { ProviderAccount } from "@hercule/contract";
 import {
   harnessesQuery,
-  modelProfilesQuery,
   pluginsQuery,
   providersQuery,
   runnersQuery,
 } from "../../../../app/queries";
 import { ProviderAccountCard, ProviderMark } from "../../../../screens/settings/providers";
-import { replaceCachedModelProfile } from "./-model-profile-cache";
+import { readCachedModelProfile, replaceCachedModelProfile } from "./-model-profile-cache";
 import { useOpenModelProfile } from "./-open-model-profile";
 
 /**
@@ -67,10 +66,7 @@ export function AccountCard({
   const addToProfile = useMutation({
     scope: { id: "model-profile" },
     mutationFn: (profileId: string) => {
-      const newest = queryClient
-        .getQueryData(modelProfilesQuery(client).queryKey)
-        ?.find((each) => each.id === profileId);
-      if (newest === undefined) throw new Error("The profile is gone.");
+      const newest = readCachedModelProfile(queryClient, client, profileId);
       return updateModelProfile(client, newest, (current) =>
         addModelProfileAccount(current, account.id),
       );

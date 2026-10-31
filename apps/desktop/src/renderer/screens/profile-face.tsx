@@ -3,9 +3,10 @@ import "./profile-face.css";
 
 /**
  * Renders the face of a Model Profile: the first letter of its name on a
- * quiet disc, in the UI face. The profile tabs, and later the account cards,
- * draw a profile this way. `size` is `md` (22px), `sm` (18px, in a tab) or
- * `xs` (16px, overlapping others in a row). It is hidden from assistive
+ * quiet disc, in the UI face. The profile tabs, the account cards and the
+ * heads of the composer's model menu draw a profile this way. `size` is `md`
+ * (22px), `sm` (18px, in a tab or a menu head) or `xs` (16px, overlapping
+ * others in a row). It is hidden from assistive
  * technology, because the name always stands beside it.
  */
 export function ProfileFace({

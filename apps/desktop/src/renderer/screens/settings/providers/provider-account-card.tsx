@@ -10,7 +10,7 @@ import { FleetIcon } from "../../../icons/fleet";
 import { PlusIcon } from "../../../icons/plus";
 import { AccountStateLine } from "./account-state-line";
 import { IdentityLine } from "./identity-line";
-import { ProfileFace } from "./profile-face";
+import { ProfileFace } from "../../profile-face";
 import { UsageGauge } from "./usage-gauge";
 import "./providers.css";
 

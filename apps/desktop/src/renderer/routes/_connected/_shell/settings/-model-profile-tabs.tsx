@@ -9,10 +9,13 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import type { ModelProfile } from "@hercule/contract";
-import { modelProfilesQuery } from "../../../../app/queries";
 import { ProfileTabs } from "../../../../screens/settings/providers/profile-tabs";
 import { DeleteModelProfileDialog } from "./-delete-model-profile-dialog";
-import { addCachedModelProfile, replaceCachedModelProfile } from "./-model-profile-cache";
+import {
+  addCachedModelProfile,
+  readCachedModelProfile,
+  replaceCachedModelProfile,
+} from "./-model-profile-cache";
 import { useOpenModelProfile } from "./-open-model-profile";
 
 /**
@@ -43,10 +46,7 @@ export function ModelProfileTabs({
   const rename = useMutation({
     scope: { id: "model-profile" },
     mutationFn: ({ id, name }: { readonly id: string; readonly name: string }) => {
-      const newest = queryClient
-        .getQueryData(modelProfilesQuery(client).queryKey)
-        ?.find((each) => each.id === id);
-      if (newest === undefined) throw new Error("The profile is gone.");
+      const newest = readCachedModelProfile(queryClient, client, id);
       return updateModelProfile(client, newest, (current) => renameModelProfile(current, name));
     },
     onSuccess: (saved) => {
