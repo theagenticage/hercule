@@ -4,7 +4,8 @@
  * two or more, the profile the URL names, creating a profile from nothing and
  * as a copy, renaming in the tab, Duplicate, Delete naming the projects that
  * use the profile, the refusal to delete the last profile, and the add-account
- * sheet's Done joining the open profile.
+ * sheet's Done joining the open profile, and the account cards' faces and
+ * "Use in <profile>".
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -98,9 +99,6 @@ const playProfiles = (initial: ModelProfile[], initialProjects: Project[] = []) 
       const input = call.body as { name: string; expectedRevision: number };
       if (stored.some((each) => each.id !== id && each.name === input.name)) {
         return { status: 400, body: buildErrorBody("validation", "A profile called that exists.") };
-      }
-      if (input.name.trim() === "") {
-        return { status: 400, body: buildErrorBody("validation", "Name must not be blank.") };
       }
       const current = stored.find((each) => each.id === id)!;
       const saved = { ...current, name: input.name, revision: current.revision + 1 };
@@ -388,15 +386,16 @@ describe("Settings > Providers > Models, profiles", () => {
       expect(listTabNames()).toEqual(["Main", "Work"]);
     });
 
-    it("refuses a blank name with a message and keeps the field", async () => {
-      const { read } = await openModels({ profiles: [MAIN, WORK] });
+    it("refuses a blank name in plain words without asking the controller, and keeps the field", async () => {
+      const { calls, read } = await openModels({ profiles: [MAIN, WORK] });
 
       await chooseTabMenuItem("Main", "Rename");
       await userEvent.clear(screen.getByRole("textbox"));
       await userEvent.keyboard("{Enter}");
 
-      expect((await screen.findByRole("alert")).textContent).not.toBe("");
+      expect((await screen.findByRole("alert")).textContent).toBe("A profile needs a name.");
       expect(screen.getByRole("textbox")).toBeTruthy();
+      expect(getCalls(calls, "PATCH", `/api/v1/model-profiles/${MAIN_ID}`)).toEqual([]);
       expect(read()[0]!.name).toBe("Main");
     });
   });
@@ -512,6 +511,131 @@ describe("Settings > Providers > Models, profiles", () => {
       expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeTruthy();
       expect(getCalls(calls, "DELETE", `/api/v1/model-profiles/${MAIN_ID}`)).toHaveLength(1);
       fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    });
+  });
+
+  describe("the account cards", () => {
+    /** Returns the card of the account called `name`. */
+    const getCard = (name: string): HTMLElement =>
+      document.querySelector<HTMLElement>(`button[title="Open ${name}"]`)!.closest(".pa-card")!;
+
+    /** "Shared": Work holds OpenAI and Anthropic, so Anthropic is in both profiles. */
+    const SHARED: ModelProfile = buildModelProfile(
+      [
+        buildProfileSection(OPENAI_IDENTITY, [
+          buildProfileEntry(OPENAI_IDENTITY, "gpt-6", { name: "GPT-6" }),
+        ]),
+        buildProfileSection(ANTHROPIC_IDENTITY, [
+          buildProfileEntry(ANTHROPIC_IDENTITY, "opus-5-5", { name: "Opus 5.5" }),
+        ]),
+      ],
+      { id: WORK_ID, name: "Work", revision: 5, createdAt: "2026-09-06T09:00:00.000Z" },
+    );
+
+    /** Plays `modelProfile.update` as the controller does: the account is added as a section filled with its Default Selection. */
+    const playUpdate = (
+      profile: ModelProfile,
+      identity: ProviderAccountIdentity,
+    ): Record<string, Handler> => ({
+      [`PATCH /api/v1/model-profiles/${profile.id}`]: () => ({
+        body: {
+          ...profile,
+          revision: profile.revision + 1,
+          accounts: [
+            ...profile.accounts,
+            buildProfileSection(identity, [
+              buildProfileEntry(identity, "gpt-6", { name: "GPT-6" }),
+            ]),
+          ],
+        },
+      }),
+    });
+
+    it("lists the faces of the profiles that hold an account, in the profiles' order", async () => {
+      await openModels({ profiles: [MAIN, SHARED] });
+
+      const anthropic = within(getCard("Anthropic")).getByRole("img", {
+        name: "Used in Main, Work",
+      });
+      expect(anthropic.textContent).toBe("MW");
+      const openai = within(getCard("OpenAI")).getByRole("img", { name: "Used in Work" });
+      expect(openai.textContent).toBe("W");
+    });
+
+    it("says an account is in the open profile, and dims the ones it is not in", async () => {
+      await openModels({ profiles: [MAIN, WORK] });
+
+      const anthropic = getCard("Anthropic");
+      expect(anthropic.classList.contains("is-member")).toBe(true);
+      expect(within(anthropic).getByText("In Main")).toBeTruthy();
+      expect(within(anthropic).queryByRole("button", { name: /^Use/ })).toBeNull();
+      const openai = getCard("OpenAI");
+      expect(openai.classList.contains("is-out")).toBe(true);
+      expect(within(openai).getByRole("button", { name: "Use in Main" })).toBeTruthy();
+    });
+
+    it("follows the open tab", async () => {
+      await openModels({ profiles: [MAIN, WORK] });
+
+      await userEvent.click(getTabs()[1]!);
+
+      expect(await within(getCard("OpenAI")).findByText("In Work")).toBeTruthy();
+      expect(
+        within(getCard("Anthropic")).getByRole("button", { name: "Use in Work" }),
+      ).toBeTruthy();
+    });
+
+    it("adds the account to the open profile only, sending no entries, and does not open its sheet", async () => {
+      const { calls } = await openModels({
+        profiles: [MAIN, WORK],
+        handlers: playUpdate(MAIN, OPENAI_IDENTITY),
+      });
+
+      await userEvent.click(within(getCard("OpenAI")).getByRole("button", { name: "Use in Main" }));
+
+      expect(await within(getCard("OpenAI")).findByText("In Main")).toBeTruthy();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(getCalls(calls, "PATCH", `/api/v1/model-profiles/${WORK_ID}`)).toHaveLength(0);
+      const [update] = getCalls(calls, "PATCH", `/api/v1/model-profiles/${MAIN_ID}`);
+      expect(update!.body).toMatchObject({
+        accounts: [
+          { providerAccountId: ANTHROPIC_IDENTITY.id },
+          { providerAccountId: OPENAI_IDENTITY.id, harnessId: null },
+        ],
+      });
+      const sent = (update!.body as { accounts: Array<{ entries?: unknown }> }).accounts[1]!;
+      expect(sent.entries).toBeUndefined();
+      // The Models section shows the new section from the answer.
+      expect(await screen.findByRole("region", { name: "OpenAI" })).toBeTruthy();
+    });
+
+    it("shows the controller's message when it refuses, and offers the button again", async () => {
+      await openModels({
+        profiles: [MAIN, WORK],
+        handlers: {
+          [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: () => ({
+            status: 400,
+            body: buildErrorBody("validation", "OpenAI has no models yet."),
+          }),
+        },
+      });
+
+      await userEvent.click(within(getCard("OpenAI")).getByRole("button", { name: "Use in Main" }));
+
+      const alert = await within(getCard("OpenAI")).findByRole("alert");
+      expect(alert.textContent).toBe("OpenAI was not added to Main. OpenAI has no models yet.");
+      expect(within(getCard("OpenAI")).getByRole("button", { name: "Use in Main" })).toBeTruthy();
+    });
+
+    it("draws no faces with one profile, and says only the account left out is not in the menu", async () => {
+      await openModels({ profiles: [MAIN] });
+
+      const anthropic = getCard("Anthropic");
+      expect(anthropic.querySelector(".pa-card-profiles")).toBeNull();
+      const openai = getCard("OpenAI");
+      expect(openai.querySelector(".pa-card-faces")).toBeNull();
+      expect(within(openai).getByText("Not in the menu")).toBeTruthy();
+      expect(within(openai).getByRole("button", { name: "Use" })).toBeTruthy();
     });
   });
 

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
+import { ChevronRightIcon } from "../../../icons/chevron-right";
 import { CloseIcon } from "../../../icons/close";
 import { CopyIcon } from "../../../icons/copy";
 import { EditorIcon } from "../../../icons/editor";
 import { PlusIcon } from "../../../icons/plus";
-import { ChevronDownIcon } from "../../../office/ui/office-icons";
 import { usePopoverMenu } from "../../use-popover-menu";
 import "../../thread/menus.css";
 import { ProfileFace } from "./profile-face";
@@ -44,7 +44,7 @@ function ProfileTabMenu({
         aria-label={label}
         title={label}
       >
-        <ChevronDownIcon size={11} />
+        <ChevronRightIcon size={11} />
       </button>
       <div
         {...menuProps}

@@ -26,8 +26,8 @@ import { useOpenModelProfile } from "./-open-model-profile";
  * running (the "model-profile" mutation scope), and a rename is built from the
  * newest copy of the profile the page holds, so neither writes over a change
  * the user made just before. A rename the controller refuses shows its message
- * above the tabs, in the tab being edited; a failed Duplicate shows above the
- * tabs.
+ * above the tabs, in the tab being edited; a blank name is refused without
+ * asking the controller; a failed Duplicate shows above the tabs.
  */
 export function ModelProfileTabs({
   client,
@@ -89,10 +89,14 @@ export function ModelProfileTabs({
         }}
         onNew={onNew}
         onRename={(id, name) =>
-          rename.mutateAsync({ id, name }).then(
-            () => null,
-            (error: unknown) => readErrorMessage(error),
-          )
+          // A blank name is refused here in plain words: the schema's own
+          // message for it is about string lengths.
+          name.trim() === ""
+            ? Promise.resolve("A profile needs a name.")
+            : rename.mutateAsync({ id, name }).then(
+                () => null,
+                (error: unknown) => readErrorMessage(error),
+              )
         }
         onDuplicate={(id) => {
           const source = profiles.find((each) => each.id === id);

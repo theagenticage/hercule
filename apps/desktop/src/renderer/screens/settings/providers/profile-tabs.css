@@ -69,7 +69,8 @@
   color: var(--faint);
 }
 
-/* The open tab's ⌄ button, drawn over the tab's right padding. */
+/* The open tab's ⌄ button, drawn over the tab's right padding. The icon is the
+   app's right chevron, turned to point down. */
 .pm-tabmore {
   display: grid;
   place-items: center;
@@ -78,6 +79,9 @@
   margin: 0 4px 0 -8px;
   border-radius: 6px;
   color: var(--faint);
+}
+.pm-tabmore > .ic {
+  transform: rotate(90deg);
 }
 .pm-tabmore:hover,
 .pm-tabmore:focus-visible {
