@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from "react";
+import { useRef, useState, type HTMLAttributes, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   addModelProfileAccount,
@@ -31,6 +31,7 @@ import { useDragReorder } from "../../../../screens/settings/providers/use-drag-
 import { useOptimisticOrder } from "../../../../screens/settings/providers/use-optimistic-order";
 import "../../../../screens/settings/providers/models.css";
 import { replaceCachedModelProfile } from "./-model-profile-cache";
+import { ModelProfilePreview } from "./-model-profile-preview";
 import { AccountModelPicker } from "./-models-picker";
 
 /**
@@ -54,6 +55,11 @@ import { AccountModelPicker } from "./-models-picker";
  * a tile of the empty profile; both join it with its provider's Default
  * Selection. `onAddAccount` opens the add-account sheet, which joins the new
  * account to this profile when it is done.
+ *
+ * Beside the sections, or under them in a narrow body, the preview shows the
+ * composer's menu with this profile unfolded (`ModelProfilePreview`). The
+ * pointer on a section lights the same lane in the preview, and the pointer on
+ * a lane lights the section.
  *
  * Everything it reads is a shell read that the live connection keeps current,
  * so opening the section sends no request.
@@ -132,6 +138,28 @@ export function ModelProfileMenu({
       identity: describeProviderAccountIdentity(providers, account),
     }));
 
+  // The account whose section or lane the pointer is on, which lights both.
+  const [litProviderAccountId, setLitProviderAccountId] = useState<string | null>(null);
+  const leave = (providerAccountId: string): void => {
+    setLitProviderAccountId((lit) => (lit === providerAccountId ? null : lit));
+  };
+
+  /** Returns the props of an account's section: the drop target, and the pointer that lights its lane in the preview. */
+  const buildSectionProps = (providerAccountId: string): HTMLAttributes<HTMLElement> => {
+    const lit: Record<string, string> =
+      providerAccountId === litProviderAccountId ? { "data-lit": "true" } : {};
+    return {
+      ...sectionDrag.getTargetProps(providerAccountId),
+      ...lit,
+      onPointerEnter: () => {
+        setLitProviderAccountId(providerAccountId);
+      },
+      onPointerLeave: () => {
+        leave(providerAccountId);
+      },
+    };
+  };
+
   const byId = new Map(sections.map((section) => [section.providerAccountId, section]));
   return (
     <>
@@ -149,74 +177,83 @@ export function ModelProfileMenu({
           onNewAccount={onAddAccount}
         />
       ) : (
-        <div className="pm-list">
-          {order.keys.flatMap((providerAccountId) => {
-            const section = byId.get(providerAccountId);
-            if (section === undefined) return [];
-            const held = new Set(section.sectionHarnessModels);
-            return (
-              <ModelProfileSection
-                key={providerAccountId}
-                section={section}
-                mark={<ProviderMark pluginId={section.pluginId} plugins={plugins} size={13} />}
-                profileName={profile.name}
-                isNew={
-                  providerAccountId === flashProviderAccountId ||
-                  providerAccountId === joinedProviderAccountId
-                }
-                drag={{
-                  headProps: sectionDrag.getSourceProps(providerAccountId),
-                  sectionProps: sectionDrag.getTargetProps(providerAccountId),
-                  dropSide:
-                    sectionDrag.dropMark?.key === providerAccountId
-                      ? sectionDrag.dropMark.side
-                      : null,
-                  onMoveBy: (offset) => {
-                    void moveSection(
-                      providerAccountId,
-                      order.keys.indexOf(providerAccountId) + offset,
-                    );
-                  },
-                }}
-                addModel={
-                  <AccountModelPicker
-                    client={client}
-                    providerAccountId={providerAccountId}
-                    name={section.name}
-                    held={held}
-                    onToggle={(model) => {
-                      // The change is "hold it" or "do not hold it", decided
-                      // here from what the user saw, so a retry on a newer
-                      // profile does the same and never flips it back.
-                      const key = `${providerAccountId}:${model}`;
-                      const included = !(wanted.current.get(key) ?? held.has(model));
-                      wanted.current.set(key, included);
-                      void change((current) =>
-                        setModelProfileEntryIncluded(current, providerAccountId, model, included),
-                      ).then(() => {
-                        if (wanted.current.get(key) === included) wanted.current.delete(key);
-                      });
-                    }}
-                  />
-                }
-                onMoveEntry={(entry, toIndex) =>
-                  change((current) => moveModelProfileEntry(current, entry, toIndex))
-                }
-                onMakeDefault={(entry) => {
-                  void change((current) => makeDefaultModelProfileEntry(current, entry));
-                }}
-                onTakeOut={(entry) => {
-                  void change((current) => takeOutModelProfileEntry(current, entry));
-                }}
-              />
-            );
-          })}
-          <AddProfileAccount
-            profileName={profile.name}
-            choices={choices}
-            plugins={plugins}
-            onJoin={joinAccount}
-            onNewAccount={onAddAccount}
+        <div className="pm-build">
+          <div className="pm-list">
+            {order.keys.flatMap((providerAccountId) => {
+              const section = byId.get(providerAccountId);
+              if (section === undefined) return [];
+              const held = new Set(section.sectionHarnessModels);
+              return (
+                <ModelProfileSection
+                  key={providerAccountId}
+                  section={section}
+                  mark={<ProviderMark pluginId={section.pluginId} plugins={plugins} size={13} />}
+                  profileName={profile.name}
+                  isNew={
+                    providerAccountId === flashProviderAccountId ||
+                    providerAccountId === joinedProviderAccountId
+                  }
+                  drag={{
+                    headProps: sectionDrag.getSourceProps(providerAccountId),
+                    sectionProps: buildSectionProps(providerAccountId),
+                    dropSide:
+                      sectionDrag.dropMark?.key === providerAccountId
+                        ? sectionDrag.dropMark.side
+                        : null,
+                    onMoveBy: (offset) => {
+                      void moveSection(
+                        providerAccountId,
+                        order.keys.indexOf(providerAccountId) + offset,
+                      );
+                    },
+                  }}
+                  addModel={
+                    <AccountModelPicker
+                      client={client}
+                      providerAccountId={providerAccountId}
+                      name={section.name}
+                      held={held}
+                      onToggle={(model) => {
+                        // The change is "hold it" or "do not hold it", decided
+                        // here from what the user saw, so a retry on a newer
+                        // profile does the same and never flips it back.
+                        const key = `${providerAccountId}:${model}`;
+                        const included = !(wanted.current.get(key) ?? held.has(model));
+                        wanted.current.set(key, included);
+                        void change((current) =>
+                          setModelProfileEntryIncluded(current, providerAccountId, model, included),
+                        ).then(() => {
+                          if (wanted.current.get(key) === included) wanted.current.delete(key);
+                        });
+                      }}
+                    />
+                  }
+                  onMoveEntry={(entry, toIndex) =>
+                    change((current) => moveModelProfileEntry(current, entry, toIndex))
+                  }
+                  onMakeDefault={(entry) => {
+                    void change((current) => makeDefaultModelProfileEntry(current, entry));
+                  }}
+                  onTakeOut={(entry) => {
+                    void change((current) => takeOutModelProfileEntry(current, entry));
+                  }}
+                />
+              );
+            })}
+            <AddProfileAccount
+              profileName={profile.name}
+              choices={choices}
+              plugins={plugins}
+              onJoin={joinAccount}
+              onNewAccount={onAddAccount}
+            />
+          </div>
+          <ModelProfilePreview
+            client={client}
+            profile={profile}
+            highlightedAccountId={litProviderAccountId}
+            onEnterLane={setLitProviderAccountId}
+            onLeaveLane={leave}
           />
         </div>
       )}

@@ -1,9 +1,7 @@
 /* Settings > Providers > Models, from the prototype `prototype/desktop-
    settings-providers`, variant I (docs/design/providers-directions/r3.css,
    the `.vh-*`, `.vi-*` and `.pk-*` rules). Its measurements decide; the rules
-   below carry them. Class names start with `pm-`. The prototype draws the
-   sections beside a preview of the composer, which a later slice builds, so
-   the sections take the column's whole width here. */
+   below carry them. Class names start with `pm-`. */
 
 .provider-models > h2 {
   margin: 0;
@@ -32,16 +30,41 @@
 .pm-link:hover {
   color: var(--ink);
 }
-/* With one profile there is no tab row, so a rule of its own sits above the
-   first account's section. */
-.pm-list {
+/* The sections and the preview of the composer's menu. The preview is under
+   the sections, and beside them while the body is at least 1,100px wide. The
+   body has 40px of padding on each side, and a container query reads the
+   content box, so the query is for 1,020px. */
+.pm-build {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  /* With one profile there is no tab row, so a rule of its own sits above the
+     first account's section. */
   margin-top: 12px;
   border-top: 1px solid var(--divider);
 }
 /* With tabs, the tab row's bottom edge is that rule. */
-.has-tabs > .pm-list {
+.has-tabs > .pm-build {
   margin-top: 0;
   border-top: 0;
+}
+.pm-build > .pm-preview {
+  padding: 8px 0;
+}
+@container (width >= 1020px) {
+  .pm-build {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 28px;
+    align-items: start;
+  }
+  .pm-build > .pm-preview {
+    position: sticky;
+    top: 0;
+    padding: 14px 0 8px;
+  }
+}
+.pm-list {
+  min-width: 0;
 }
 
 /* ---------- One account's section: a head you can drag, then its models ---------- */
@@ -53,6 +76,11 @@
 .pm-sec:first-child {
   padding-top: 8px;
   border-top: 0;
+}
+/* The pointer is on this section, or on its lane in the preview. */
+.pm-sec[data-lit] {
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ink) 3%, transparent);
 }
 /* A section whose account was just added to the profile flashes once. A
    keyframe may change only opacity and transform, so the tint is a layer over

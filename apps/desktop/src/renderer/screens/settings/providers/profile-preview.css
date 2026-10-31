@@ -47,3 +47,26 @@
   margin-top: 18px;
   background: color-mix(in oklab, var(--ink) 5%, transparent);
 }
+
+/* The real preview: the composer's menu beside the sections, or under them.
+   The menu is 300px wide in both places, as the prototype's rail is. */
+.pm-preview {
+  display: grid;
+  gap: 8px;
+  width: 300px;
+}
+.pm-prev-h > small {
+  overflow: hidden;
+  max-width: 150px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The list scrolls inside the preview, as it does in the composer, but the
+   preview takes more of the page than the composer's 60% of the window. */
+.pm-preview-menu .model-menu {
+  max-height: 520px;
+}
