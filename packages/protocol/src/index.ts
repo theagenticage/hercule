@@ -184,7 +184,9 @@ export {
  * - Version 19 added `SessionStart.unlistedModels`, the catalog models a
  *   harness's own list lacks. A runner on 18 would drop the key and start a pi
  *   session that cannot run the model the user chose, with no error, so the
- *   two refuse each other at hello.
+ *   two refuse each other at hello. It also raised the most models a probe
+ *   result may list from 256 to 1024 (`MAX_PROBE_MODELS`), because pi ships 366
+ *   OpenRouter models. A controller on 18 cannot decode more than 256 models.
  */
 export const PROTOCOL_VERSION = 19;
 

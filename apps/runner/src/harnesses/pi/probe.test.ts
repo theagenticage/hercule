@@ -7,6 +7,8 @@
  * prints the bare version, and `pi auth check --provider zai --json` prints a
  * status object and exits with code 1 when no key is configured.
  */
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber, Logger } from "effect";
 import { TestClock } from "effect/testing";
@@ -212,6 +214,95 @@ describe("the pi adapter's probe", () => {
       "max",
     ]);
     expect(findModelOption(probed.models, "glm-4.7", "thinking")).toBeUndefined();
+  });
+
+  describe("listing the models in a scratch agent directory", () => {
+    /** What the scratch agent directory held when pi was spawned. */
+    interface SeenAtSpawn {
+      readonly directory: string | undefined;
+      readonly files: ReadonlyArray<string>;
+      readonly store: string | undefined;
+    }
+
+    const probeWithHome = async (prepareHome: (home: string) => void) => {
+      const home = createPiHome();
+      prepareHome(home);
+      let seen: SeenAtSpawn = { directory: undefined, files: [], store: undefined };
+      const { seam, spawns, runs } = buildFakePiSeam({
+        atSpawn: (env) => {
+          const directory = env["PI_CODING_AGENT_DIR"];
+          seen = {
+            directory,
+            files: directory === undefined ? [] : readdirSync(directory).sort(),
+            store:
+              directory !== undefined && existsSync(join(directory, "models-store.json"))
+                ? readFileSync(join(directory, "models-store.json"), "utf8")
+                : undefined,
+          };
+        },
+      });
+      const probed = await Effect.runPromise(
+        makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+      );
+      return { home, seen, probed, spawns, runs };
+    };
+
+    it("lists from a copy of the home's model store and never from its models.json", async () => {
+      const store = '{"models":["a-model-newer-than-pi"]}';
+      const { home, seen, probed } = await probeWithHome((prepared) => {
+        writeFileSync(join(prepared, "models-store.json"), store);
+        writeFileSync(
+          join(prepared, "models.json"),
+          JSON.stringify({ providers: { zai: { models: [{ id: "declared-by-hercule" }] } } }),
+        );
+      });
+
+      expect(seen.directory).not.toBe(home);
+      expect(seen.files).toEqual(["models-store.json"]);
+      expect(seen.store).toBe(store);
+      expect(probed.models.length).toBeGreaterThan(0);
+    });
+
+    it("deletes the scratch directory when the probe is over, and leaves the home as it was", async () => {
+      const { home, seen } = await probeWithHome((prepared) => {
+        writeFileSync(join(prepared, "models.json"), "{}");
+      });
+
+      expect(existsSync(seen.directory!)).toBe(false);
+      expect(readdirSync(home)).toEqual(["models.json"]);
+    });
+
+    it("lists from an empty scratch directory when the home was never refreshed", async () => {
+      const { seen } = await probeWithHome(() => undefined);
+
+      expect(seen.files).toEqual([]);
+    });
+
+    it("keeps the refresh and the key check in the home", async () => {
+      const { home, runs } = await probeWithHome(() => undefined);
+
+      const inHome = runs.map((run) => run.env["PI_CODING_AGENT_DIR"]);
+      expect(inHome.length).toBeGreaterThan(0);
+      for (const directory of inHome) expect(directory).toBe(home);
+    });
+
+    it("reports every model pi lists, as pi 0.85.1 lists 366 for OpenRouter", async () => {
+      const models = Array.from({ length: 366 }, (_, index) => ({
+        id: `vendor/model-${String(index)}`,
+        name: `Model ${String(index)}`,
+        provider: "zai",
+        input: ["text"],
+      }));
+      const { seam } = buildFakePiSeam({
+        answers: { get_available_models: () => ({ success: true, data: { models } }) },
+      });
+
+      const probed = await Effect.runPromise(
+        makePiAdapter(seam).probe(buildContext(createPiHome()), { readUsage: false }),
+      );
+
+      expect(probed.models).toHaveLength(366);
+    });
   });
 
   describe("refreshing the model list", () => {

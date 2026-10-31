@@ -10,15 +10,7 @@
  * - a Thread on the controller's local runner also reads the user's own
  *   prompt templates and instructions.
  */
-import {
-  copyFileSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -115,7 +107,8 @@ import {
   type RunningTool,
 } from "./normalize";
 import { readPiHome } from "./edited-path";
-import { mergeModelsFile } from "./models-file";
+import { replaceProviderModels } from "./models-file";
+import { copyModelStore } from "./model-store";
 import { DEFAULT_THINKING, makePiInstall, makeProbe } from "./probe";
 import { readPiProvider } from "./provider";
 import {
@@ -1513,10 +1506,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
   };
 
   /**
-   * Declares `models` to pi by merging them into the `models.json` in
-   * `directory`, pi's agent directory (see `mergeModelsFile`). pi reads the
-   * file when it starts. Does nothing when there are no models, or when the
-   * file already holds them. Returns true when the file did not parse as JSON
+   * Declares `models` to pi by setting them as the provider's models in the
+   * `models.json` in `directory`, pi's agent directory (see
+   * `replaceProviderModels`). pi reads the file when it starts. Does nothing
+   * when there are no models, or when the file already holds exactly them. Returns true when the file did not parse as JSON
    * and was replaced. Throws when the file cannot be read or written.
    *
    * Everything here is synchronous, so two sessions of one account starting in
@@ -1536,10 +1529,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    const merge = mergeModelsFile(existing, readPiProvider(modelArgument), models);
-    if (merge._tag === "unchanged") return false;
-    writeFileAtomically(path, merge.text);
-    return merge.replacedUnreadableFile;
+    const update = replaceProviderModels(existing, readPiProvider(modelArgument), models);
+    if (update._tag === "unchanged") return false;
+    writeFileAtomically(path, update.text);
+    return update.replacedUnreadableFile;
   };
 
   /**
@@ -1741,16 +1734,8 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           // the request carries go into it.
           declareUnlistedModels(ctx.cwd, ctx.modelArgument, ctx.unlistedModels);
           // The probe stores the model catalog it refreshed from pi.dev in the
-          // home, so the call can use models newer than the installed pi. A
-          // copy read while the probe writes may be cut short. pi then reports
-          // the model as unknown for this one call, which fails it rather than
-          // picking another model. A home that was never probed has no catalog,
-          // and pi then uses its bundled one.
-          try {
-            copyFileSync(join(ctx.home, "models-store.json"), join(ctx.cwd, "models-store.json"));
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          }
+          // home, so the call can use models newer than the installed pi.
+          copyModelStore(ctx.home, ctx.cwd);
           const released = Promise.withResolvers<void>();
           const child = spawnAgent(
             [

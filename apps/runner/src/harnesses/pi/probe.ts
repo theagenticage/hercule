@@ -10,6 +10,9 @@
  * needs a pi that has loaded its providers, so it is read from a child process
  * with no session, which is killed as soon as it has responded.
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -20,6 +23,7 @@ import { makeInstall } from "../install";
 import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Ran, Run } from "../process";
 import { truncateFact } from "../text";
+import { copyModelStore } from "./model-store";
 import { makeRpc, type PiSpawn } from "./rpc";
 
 /** The thinking level a session uses when the user picked none. */
@@ -241,41 +245,66 @@ const refreshModelStore = (
 };
 
 /**
+ * Deletes a probe's scratch agent directory. A few retries cover a pi that has
+ * just been killed and is still closing a file in it.
+ */
+const removeScratchDirectory = (scratch: string): void =>
+  rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
+
+/**
  * Reads the model catalog from a separate pi process that saves nothing and
  * makes no network calls, so it returns the list pi has stored. Fails with an
  * error message when pi cannot be started or does not respond. The process is
  * killed as soon as it has responded: left running, it would keep the user's
  * key in its environment long after anyone looked at the Fleet page.
+ *
+ * pi runs in a scratch agent directory that holds only a copy of the Harness
+ * Home's `models-store.json`, and the directory is deleted afterwards. So the
+ * list is pi's own: its bundled models plus its refreshed list. It never
+ * includes the models a session declared in the home's `models.json`. If it
+ * did, the controller would stop sending a declared model as unlisted, and
+ * would never again update that model's details in the file. The key comes
+ * from the environment, not from the agent directory.
  */
 const fetchCatalog = (
   spawn: PiSpawn,
   binary: string,
+  home: string,
   env: Readonly<Record<string, string | undefined>>,
   provider: string,
 ): Effect.Effect<ReadonlyArray<ModelDescriptor>, string> =>
   Effect.acquireUseRelease(
     Effect.try({
-      try: () =>
-        spawn(
-          [
-            binary,
-            "--mode",
-            "rpc",
-            "--no-session",
-            "--offline",
-            "--no-context-files",
-            "--no-extensions",
-            "--no-skills",
-            "--no-prompt-templates",
-            "--no-themes",
-          ],
-          env,
-          // A probe belongs to no session, so it has no working directory.
-          null,
-        ),
+      try: () => {
+        const scratch = mkdtempSync(join(tmpdir(), "hercule-pi-probe-"));
+        try {
+          copyModelStore(home, scratch);
+          const child = spawn(
+            [
+              binary,
+              "--mode",
+              "rpc",
+              "--no-session",
+              "--offline",
+              "--no-context-files",
+              "--no-extensions",
+              "--no-skills",
+              "--no-prompt-templates",
+              "--no-themes",
+            ],
+            { ...env, PI_CODING_AGENT_DIR: scratch },
+            // A probe belongs to no session, so it has no working directory.
+            null,
+          );
+          return { child, scratch };
+        } catch (error) {
+          removeScratchDirectory(scratch);
+          throw error;
+        }
+      },
       catch: (error) => (error instanceof Error ? error.message : String(error)),
     }),
-    (child) => {
+    ({ child }) => {
       const rpc = makeRpc(child, () => undefined);
       Effect.runFork(rpc.pump);
       return rpc.send({ type: "get_available_models" }).pipe(
@@ -288,7 +317,11 @@ const fetchCatalog = (
         }),
       );
     },
-    (child) => Effect.sync(() => child.kill()),
+    ({ child, scratch }) =>
+      Effect.sync(() => {
+        child.kill();
+        removeScratchDirectory(scratch);
+      }),
   );
 
 /**
@@ -316,7 +349,7 @@ export const makeProbe =
       // has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [], usage: null };
       yield* refreshModelStore(run, binary, home, env, credentialVariable);
-      return yield* Effect.match(fetchCatalog(spawn, binary, env, provider), {
+      return yield* Effect.match(fetchCatalog(spawn, binary, home, env, provider), {
         onFailure: (message) => buildFailedProbe(harnessVersion, message),
         onSuccess: (models) => ({ harnessVersion, auth, models, usage: null }),
       });

@@ -285,8 +285,11 @@ export interface FakePiBehaviour {
   ) => Ran | undefined;
   /** How `pi update --models` ends, replacing the default of a model list refreshed at once. */
   readonly refresh?: Effect.Effect<Ran>;
-  /** Called as pi is spawned, before it exists, so a test can look at the disk the way pi would. */
-  readonly atSpawn?: () => void;
+  /**
+   * Called as pi is spawned, before it exists, with the environment pi gets,
+   * so a test can look at the disk the way pi would.
+   */
+  readonly atSpawn?: (env: Readonly<Record<string, string | undefined>>) => void;
   /** A pi that exits at once without responding, like a broken install. */
   readonly dies?: boolean;
   /** A pi that keeps running after its stdin closes, like one waiting on an approval. */
@@ -319,7 +322,7 @@ export const buildFakePiSeam = (
     env: Readonly<Record<string, string | undefined>>,
     cwd: string | null,
   ) => {
-    behaviour.atSpawn?.();
+    behaviour.atSpawn?.(env);
     const out = createLines();
     const err = createLines();
     const sentToThisPi: Array<Sent> = [];

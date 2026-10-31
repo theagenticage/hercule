@@ -21,19 +21,24 @@ export const MAX_FACT_ITEMS = 64;
  * The most models one probe may report, which is the size of the Model Catalog
  * of one Provider Account. It is higher than `MAX_FACT_ITEMS` because a
  * provider can list far more than 64 models: pi lists 68 for OpenCode Zen, and
- * OpenRouter lists hundreds. A probe that cut the list at 64 would give the
- * user an incomplete catalog.
+ * pi 0.85.1 ships 366 OpenRouter models. A probe that cut the list short would
+ * give the user an incomplete catalog, and (for pi) would make the controller
+ * treat the models it missed as unlisted. A probe lists only the models of the
+ * account's own provider, so 1024 is room to grow, and it matches
+ * `MAX_CATALOG_MODELS`, the most a Model Catalog holds.
  *
  * The cap is sized on the descriptors the adapters build, because the field
  * limits alone do not bound a descriptor (its options hold up to 64 choices of
  * two 512-character facts each). A real descriptor has a slug and a name of
- * under 100 bytes and at most a few options with a handful of short choices,
- * about 1 KiB as JSON. 256 of them are 256 KiB, an eighth of `MAX_FRAME_BYTES`
- * (2 MiB), which leaves room for a descriptor of up to 8 KiB (2 MiB / 256)
- * before the frame is too large. The runner logs how many models it dropped
- * when a list is longer than this.
+ * under 100 bytes and at most one thinking option with a handful of short
+ * choices. The 366 OpenRouter descriptors of pi 0.85.1 measure 73 KB in total
+ * (about 200 bytes each, 420 at most). Even at a conservative 1 KiB each, 1024
+ * descriptors are 1 MiB, half of `MAX_FRAME_BYTES` (2 MiB), which leaves room
+ * for a descriptor of up to 2 KiB (2 MiB / 1024) before the frame is too
+ * large. The runner logs how many models it dropped when a list is longer than
+ * this.
  */
-export const MAX_PROBE_MODELS = 256;
+export const MAX_PROBE_MODELS = 1024;
 
 /**
  * The longest piece of free text a harness may put in an event. A `Fact` is too

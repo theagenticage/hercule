@@ -12,8 +12,8 @@
  */
 import type { CatalogModel } from "@hercule/protocol";
 
-/** What merging models into the file asks the caller to do. */
-export type ModelsFileMerge =
+/** What setting the models of a provider asks the caller to do. */
+export type ModelsFileUpdate =
   | { readonly _tag: "unchanged" }
   | {
       readonly _tag: "write";
@@ -46,27 +46,32 @@ const buildEntry = (model: CatalogModel): JsonObject => ({
 });
 
 /**
- * Merges `models` into the text of a `models.json`, under the models of
- * `provider`, and returns what to write.
+ * Sets the models of `provider` in the text of a `models.json` to exactly
+ * `models`, and returns what to write.
  *
- * - An entry whose id is in `models` is replaced by a fresh entry in the same
- *   place. A model listed twice takes its last details.
- * - A model with no entry yet is added at the end.
- * - Every other entry, every other key of the provider (such as `baseUrl`) and
- *   every other provider stay as they are.
+ * - The provider's `models` array is replaced as a whole. Hercule owns that
+ *   array in its Harness Home. An entry kept from an earlier start would
+ *   override pi's own definition of a model that pi ships (its thinking
+ *   levels, compatibility settings and cost), and pi's own list is what the
+ *   controller compares the catalog with, so every model it sends is one pi
+ *   lacks. A model listed twice takes its last details.
+ * - Every other key of the file, every other key of the provider (such as
+ *   `baseUrl`) and every other provider stay as they are.
  *
  * `existingText` is the file's current text, or undefined when there is no
- * file. Returns `unchanged` when `models` is empty or the merged content equals
+ * file. Returns `unchanged` when `models` is empty or the new content equals
  * the existing content, so the caller does not rewrite a file for nothing.
- * Text that does not parse as a JSON object is replaced by a file holding only
- * `models`: pi would ignore such a file anyway, and `replacedUnreadableFile`
- * lets the caller say so.
+ * An empty list does not clear the array: the controller sends no models for a
+ * harness that lists everything itself, and a start that carries none must
+ * leave the file alone. Text that does not parse as a JSON object is replaced
+ * by a file holding only `models`: pi would ignore such a file anyway, and
+ * `replacedUnreadableFile` lets the caller say so.
  */
-export const mergeModelsFile = (
+export const replaceProviderModels = (
   existingText: string | undefined,
   provider: string,
   models: ReadonlyArray<CatalogModel>,
-): ModelsFileMerge => {
+): ModelsFileUpdate => {
   if (models.length === 0) return { _tag: "unchanged" };
 
   let existing: JsonObject = {};
@@ -81,25 +86,13 @@ export const mergeModelsFile = (
     }
   }
 
-  const fresh = new Map(models.map((model) => [model.slug, buildEntry(model)]));
+  const entries = new Map(models.map((model) => [model.slug, buildEntry(model)]));
   const providers = isJsonObject(existing["providers"]) ? existing["providers"] : {};
   const current = isJsonObject(providers[provider]) ? providers[provider] : {};
-  const entries: ReadonlyArray<unknown> = Array.isArray(current["models"]) ? current["models"] : [];
-
-  const replaced = new Set<string>();
-  const merged = entries.map((entry) => {
-    const id = isJsonObject(entry) ? entry["id"] : undefined;
-    if (typeof id !== "string") return entry;
-    const replacement = fresh.get(id);
-    if (replacement === undefined) return entry;
-    replaced.add(id);
-    return replacement;
-  });
-  for (const [id, entry] of fresh) if (!replaced.has(id)) merged.push(entry);
 
   const result: JsonObject = {
     ...existing,
-    providers: { ...providers, [provider]: { ...current, models: merged } },
+    providers: { ...providers, [provider]: { ...current, models: [...entries.values()] } },
   };
   // Compared as parsed content, not as text, so a file formatted by hand is
   // not rewritten when nothing in it changes.

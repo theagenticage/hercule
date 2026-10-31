@@ -9,10 +9,13 @@
  *
  * Skips without `pi` on PATH, like the other integration tests here.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type { CatalogModel, HarnessEvent, SessionSpec } from "@hercule/protocol";
-import { pi } from "./adapter";
+import { makePiAdapter, pi } from "./adapter";
+import { killProcessesHolding, runProcess, spawnPi } from "../process";
 import { buildContext, cleanupHomes, filterByTag, SPEC, waitUntil } from "./testing";
 import { createScratchHome } from "../testing";
 import {
@@ -112,6 +115,35 @@ describe.skipIf(binary === undefined)("a real pi on OpenRouter models it does no
       expect(listRequestedModels(upstream)).toEqual([FIRST_ID, SECOND_ID]);
 
       await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
+    },
+    BUDGET_MS,
+  );
+
+  it(
+    "does not list a model a session declared in the home, so the controller keeps sending it",
+    async () => {
+      const { ctx } = buildOpenRouterContext([buildUnlistedModel(FIRST_ID)]);
+      const sessionId = crypto.randomUUID();
+      await Effect.runPromise(pi.startSession(sessionId, buildSpec(FIRST_ID), ctx));
+      await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
+      expect(readFileSync(join(ctx.home, "models.json"), "utf8")).toContain(FIRST_ID);
+
+      // The model list refresh would call pi.dev, so the probe's stand-in for it
+      // does nothing. Everything else is the real pi.
+      const probing = makePiAdapter({
+        spawn: spawnPi,
+        run: (command, env) =>
+          command[1] === "update"
+            ? Effect.succeed({ code: 0, stdout: "", stderr: "" })
+            : runProcess(command, env),
+        killProcessesHolding,
+      });
+      const probed = await Effect.runPromise(probing.probe(ctx, { readUsage: false }));
+
+      expect(probed.auth.status).toBe("ok");
+      // pi's own OpenRouter models: more than a probe result used to hold.
+      expect(probed.models.length).toBeGreaterThan(256);
+      expect(probed.models.map((model) => model.slug)).not.toContain(FIRST_ID);
     },
     BUDGET_MS,
   );

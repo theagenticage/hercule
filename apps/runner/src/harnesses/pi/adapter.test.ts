@@ -356,7 +356,7 @@ describe("declaring the models pi does not list", () => {
     expect(readFlagValue(spawns[0]!.command, "--model")).toBe(`openrouter/${UNLISTED_ID}`);
   });
 
-  it("merges into a file that is already there, and does so again for a resume", async () => {
+  it("sets the provider's models in a file that is already there, keeping its other keys, and does so again for a resume", async () => {
     const run = createDriving();
     const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
     writeFileSync(
@@ -377,10 +377,8 @@ describe("declaring the models pi does not list", () => {
 
     const written = readModelsFile(ctx.home);
     expect(written.providers.openrouter!.baseUrl).toBe("http://127.0.0.1:9");
-    expect(written.providers.openrouter!.models.map((entry) => entry.id)).toEqual([
-      "kept/model",
-      UNLISTED_ID,
-    ]);
+    // The entry of an earlier start is gone: only what the start carried stays.
+    expect(written.providers.openrouter!.models.map((entry) => entry.id)).toEqual([UNLISTED_ID]);
   });
 
   it("does not rewrite a file that already holds the models", async () => {
