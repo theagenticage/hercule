@@ -25,6 +25,7 @@ export {
 } from "./repository";
 export { seedProviderAccounts } from "./seed";
 export {
+  describeAccount,
   ProviderAccountService,
   ProviderAccountServiceLayer,
   ProviderAccountSignInDeadline,

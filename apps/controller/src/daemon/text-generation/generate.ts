@@ -21,7 +21,7 @@ import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { TextGenerationFailureReason } from "@hercule/contract";
+import { InvalidState, NotFound, type TextGenerationFailureReason } from "@hercule/contract";
 import {
   lintOutputSchema,
   MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER,
@@ -36,7 +36,8 @@ import { AuditLog } from "../../events";
 import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
-import { readInstanceSecrets, Secrets } from "../../secrets";
+import { prepareHarnessAccount } from "../../provider-accounts";
+import { Secrets } from "../../secrets";
 import {
   explainTextGenerationUnavailable,
   LastTextGenerationFailure,
@@ -90,12 +91,12 @@ const NOT_SENT =
 const UNEXPECTED_FAILURE =
   "the text generation stopped on an unexpected error; the controller log has the details";
 
-/** A target that names the instance and model a call runs on. */
+/** A target that names the account, harness and model a call runs on. */
 type ResolvedTarget = Extract<TextGenerationTarget, { readonly _tag: "resolved" }>;
 
 /**
  * What a call that queued for a slot ends with when, once it holds the slot,
- * the setting no longer resolves to the instance and model it queued for:
+ * the setting no longer resolves to the account, harness and model it queued for:
  * text generation was turned off, or another model was chosen. Nothing is
  * sent, and `generate` looks again with the setting as it is now.
  */
@@ -209,8 +210,9 @@ const make = Effect.gen(function* () {
   const models = yield* TextGenerationModels;
   const lastFailure = yield* LastTextGenerationFailure;
   const connections = yield* RunnerConnections;
-  const secrets = yield* Secrets;
-  const host = yield* PluginHost;
+  // What `prepareHarnessAccount` reads, captured here so the call needs
+  // nothing from its caller.
+  const frameServices = yield* Effect.context<SqlClient.SqlClient | PluginHost | Secrets>();
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
   const localRunnerId = yield* LocalRunnerId;
@@ -283,7 +285,8 @@ const make = Effect.gen(function* () {
             payload: {
               purpose: `${readCallerId(call.caller)}/${call.purpose}`,
               caller: call.caller,
-              instanceId: target._tag === "resolved" ? target.instance.id : null,
+              providerAccountId: target._tag === "resolved" ? target.providerAccountId : null,
+              harnessId: target._tag === "resolved" ? target.harnessId : null,
               model: target._tag === "resolved" ? target.model : null,
               runnerId: attempt.runnerId,
               durationMs,
@@ -337,16 +340,18 @@ const make = Effect.gen(function* () {
     interruptibleWait: InterruptibleWait,
   ): Effect.Effect<Attempt | typeof TARGET_CHANGED> =>
     Effect.gen(function* () {
-      const { instance, model } = target;
+      const { providerAccountId, harnessId, model } = target;
       const started = yield* Clock.currentTimeMillis;
-      const decrypted = yield* Effect.result(
-        readInstanceSecrets(secrets, yield* host.harnesses(), instance.id, instance.harnessId),
+      const prepared = yield* Effect.result(
+        Effect.provideContext(prepareHarnessAccount(providerAccountId, harnessId), frameServices),
       );
-      if (decrypted._tag === "Failure") {
-        const error = decrypted.failure;
-        // A decryption failure names the secret, which is what the user must fix.
-        return error._tag === "SecretDecryptError"
-          ? buildFailedAttempt("failed", error.message, runnerId)
+      if (prepared._tag === "Failure") {
+        const error = prepared.failure;
+        // The account was deleted since it was resolved, the pair cannot run,
+        // or its key could not be decrypted. The error's message says which
+        // and what to do.
+        return error instanceof NotFound || error instanceof InvalidState
+          ? buildFailedAttempt("failed", error.error.message, runnerId)
           : yield* Effect.die(error);
       }
       // Completed with the holder's whole exit, not only its answer, so a
@@ -389,7 +394,8 @@ const make = Effect.gen(function* () {
                       const current = yield* Effect.orDie(models.resolve());
                       if (
                         current._tag !== "resolved" ||
-                        current.instance.id !== instance.id ||
+                        current.providerAccountId !== providerAccountId ||
+                        current.harnessId !== harnessId ||
                         current.model !== model
                       ) {
                         return TARGET_CHANGED;
@@ -400,10 +406,8 @@ const make = Effect.gen(function* () {
                         {
                           _tag: "textGenerationRequest",
                           requestId: crypto.randomUUID(),
-                          instanceId: instance.id,
-                          harnessId: instance.harnessId,
-                          config: instance.config,
-                          secrets: decrypted.success,
+                          harnessId,
+                          harnessAccount: prepared.success,
                           spec: {
                             model,
                             instructions: call.instructions,

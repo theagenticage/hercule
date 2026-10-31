@@ -27,8 +27,9 @@ import { ConnectionTypes } from "../../connections";
 import { withTransaction } from "../../db";
 import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
+import { prepareHarnessAccount } from "../../provider-accounts";
 import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
-import { readInstanceSecrets, Secrets } from "../../secrets";
+import { Secrets } from "../../secrets";
 import { SessionService, type StartRequest } from "../../sessions";
 import { githubAccounts } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
@@ -144,9 +145,11 @@ const make = Effect.gen(function* () {
               return yield* sessions.claimStarts(runnerId, room, {
                 readGithubAccount: accounts.readGithubAccount,
                 readGitIdentity: accounts.readGitIdentity,
-                readSecrets: (instanceId, harnessId) =>
-                  Effect.flatMap(host.harnesses(), (registered) =>
-                    readInstanceSecrets(secrets, registered, instanceId, harnessId),
+                prepareHarnessAccount: (providerAccountId, harnessId) =>
+                  prepareHarnessAccount(providerAccountId, harnessId).pipe(
+                    Effect.provideService(SqlClient.SqlClient, sql),
+                    Effect.provideService(PluginHost, host),
+                    Effect.provideService(Secrets, secrets),
                   ),
                 buildCoordination: (sessionId) =>
                   Effect.provideService(

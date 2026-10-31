@@ -197,8 +197,8 @@ export function ProviderLogin({
             <>
               <DeviceCode code={deviceLogin.userCode} />
               <p className="text-fine text-muted">
-                If the code does not work, sign in on the machine itself: forward its login port with{" "}
-                <code className="font-mono text-ink">ssh -L 1455:localhost:1455</code> and run{" "}
+                If the code does not work, sign in on the machine itself: forward its login port
+                with <code className="font-mono text-ink">ssh -L 1455:localhost:1455</code> and run{" "}
                 <code className="font-mono text-ink">codex login</code> over that connection, or
                 copy an authorized <code className="font-mono text-ink">auth.json</code> into the
                 account&apos;s <code className="font-mono text-ink">$CODEX_HOME</code>.

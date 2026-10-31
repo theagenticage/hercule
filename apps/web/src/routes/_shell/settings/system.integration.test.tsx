@@ -28,29 +28,16 @@ const RUNNER_ID = "01a06d02-beff-7037-9f5b-042822015952";
 
 const CODEX: ProviderAccount = {
   id: "01a06d02-1000-7000-8000-000000000001",
-  harnessId: "codex/codex",
-  name: "Codex",
-  config: {},
-  displayName: "Codex",
-  binaryName: "codex",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
+  providerId: "openai/openai",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: "rogier@example.com",
+  planLabel: "Plus",
+  defaultHarnessId: "codex/codex",
   snapshots: [
     {
       runnerId: RUNNER_ID,
+      harnessId: "codex/codex",
       probedAt: "2026-09-05T09:14:00.000Z",
       harnessVersion: "1.0.0",
       versionVerdict: "ok",
@@ -66,7 +53,7 @@ const CODEX: ProviderAccount = {
 };
 
 const AUTOMATIC_PICK: ControllerInfo["textGeneration"] = {
-  model: { providerAccountId: CODEX.id, model: "gpt-6-luna" },
+  model: { providerAccountId: CODEX.id, harnessId: "codex/codex", model: "gpt-6-luna" },
   lastFailure: null,
   unavailableReason: null,
 };
@@ -193,12 +180,12 @@ describe("Settings > System: text generation", () => {
     const field = await findModelField();
 
     expect([...field.options].map((option) => option.textContent)).toEqual([
-      "Automatic - currently Codex · GPT-6 Luna",
-      "Codex · GPT-6 Luna",
-      "Codex · GPT-6",
+      "Automatic - currently OpenAI · GPT-6 Luna",
+      "OpenAI · GPT-6 Luna",
+      "OpenAI · GPT-6",
       "Off",
     ]);
-    expect(field.selectedOptions[0]?.textContent).toBe("Automatic - currently Codex · GPT-6 Luna");
+    expect(field.selectedOptions[0]?.textContent).toBe("Automatic - currently OpenAI · GPT-6 Luna");
   });
 
   it("shows Automatic with no model when none is available", async () => {
@@ -219,11 +206,11 @@ describe("Settings > System: text generation", () => {
     );
   });
 
-  it("writes the chosen instance and model to textGeneration.model", async () => {
+  it("writes the chosen account and model to textGeneration.model", async () => {
     const user = userEvent.setup();
     const { api } = await openApp();
 
-    await user.selectOptions(await findModelField(), "Codex · GPT-6");
+    await user.selectOptions(await findModelField(), "OpenAI · GPT-6");
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
@@ -251,7 +238,7 @@ describe("Settings > System: text generation", () => {
     await openApp({
       stored: { providerAccountId: CODEX.id, model: "gpt-6" },
       textGeneration: {
-        model: { providerAccountId: CODEX.id, model: "gpt-6" },
+        model: { providerAccountId: CODEX.id, harnessId: "codex/codex", model: "gpt-6" },
         lastFailure: null,
         unavailableReason: null,
       },
@@ -259,7 +246,7 @@ describe("Settings > System: text generation", () => {
 
     const field = await findModelField();
 
-    expect(field.selectedOptions[0]?.textContent).toBe("Codex · GPT-6");
+    expect(field.selectedOptions[0]?.textContent).toBe("OpenAI · GPT-6");
   });
 
   it("reads the model that was picked from the controller again after a save", async () => {

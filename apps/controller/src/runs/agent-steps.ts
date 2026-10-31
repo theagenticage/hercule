@@ -28,7 +28,7 @@ import { buildRunActor, CurrentActor } from "../actor";
 import { agentRepository } from "../agents";
 import { afterCommit, nowIso, withTransaction } from "../db";
 import { renderInputTemplate } from "../expressions";
-import { isLoggedIn, providerRepository } from "../providers";
+import { isLoggedIn, providerAccountRepository } from "../provider-accounts";
 import type { PlacementCandidate } from "../runners";
 import type { StoredSession } from "../sessions";
 import { RunExecutor } from "./executor";
@@ -159,12 +159,13 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
     const runs = yield* runRepository;
     const executor = yield* RunExecutor;
     const agents = yield* agentRepository;
-    const providers = yield* providerRepository;
+    const providerAccounts = yield* providerAccountRepository;
     const workspaceSteps = yield* WorkspaceSteps;
 
     /**
      * Returns the Agent's name and the ids of the runners that can host it:
-     * those signed in to the Agent's provider instance. Returns `undefined`
+     * those signed in to the Agent's provider account in the Agent's harness (the
+     * account's default when the Agent names none). Returns `undefined`
      * when the Agent no longer exists. Placing the step's session refuses a
      * deleted Agent, with a message that says so.
      */
@@ -179,14 +180,20 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
         if (Option.isNone(agent)) return undefined;
         // The controller wrote every snapshot row itself, so one that does
         // not decode is a bug.
+        const account = yield* providerAccounts.one(agent.value.providerAccountId);
+        const harnessId = agent.value.harnessId ?? Option.getOrUndefined(account)?.defaultHarnessId;
         const snapshots = yield* Effect.catchTag(
-          providers.listSnapshots(agent.value.instanceId),
+          providerAccounts.listSnapshots(agent.value.providerAccountId),
           "SchemaError",
           Effect.die,
         );
         return {
           agentName: agent.value.name,
-          runnerIds: new Set(snapshots.filter(isLoggedIn).map((snapshot) => snapshot.runnerId)),
+          runnerIds: new Set(
+            snapshots
+              .filter((snapshot) => snapshot.harnessId === harnessId && isLoggedIn(snapshot))
+              .map((snapshot) => snapshot.runnerId),
+          ),
         };
       });
 
@@ -282,14 +289,14 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
 
       /**
        * Returns the runners among `candidates` that can host every agent
-       * step of `plan`: those signed in to the provider instance of each
-       * Agent the steps name. A plan with no agent step keeps every
+       * step of `plan`: those signed in to the provider account of each
+       * Agent the steps name, in the Agent's harness. A plan with no agent step keeps every
        * candidate. Returns `noHost`, with a message for the user, when
        * `candidates` is not empty and none of them can: the message names
        * the Agents that no candidate can host, or every Agent of the plan
        * when each one has a host but no candidate hosts them all.
        *
-       * A runner signed in to an instance stays a host while it is offline,
+       * A runner signed in to an account stays a host while it is offline,
        * so a run whose host is offline waits for it rather than failing.
        */
       filterAgentHosts: (

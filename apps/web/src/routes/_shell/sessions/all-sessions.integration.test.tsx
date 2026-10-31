@@ -23,32 +23,16 @@ const getScreenCreateThreadLink = (): HTMLElement =>
 const ZONE = "Europe/Amsterdam";
 const NOW = new Date("2026-09-08T12:00:00.000Z");
 
-const DECLARED = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-} as const;
-
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
 const buildClaudeCodeAccount = () => ({
   id: CLAUDE_ID,
-  harnessId: "claude-code/claude-code",
-  name: "Claude Code",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  secretFields: [],
-  declared: DECLARED,
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: "claude-code/claude-code",
   snapshots: [],
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
@@ -85,6 +69,7 @@ const BASE_SESSION: Session = {
   runId: null,
   stepId: null,
   providerAccountId: CLAUDE_ID,
+  harnessId: "claude-code/claude-code",
   runnerId: MOSS.id,
   workspaceId: null,
   projectId: null,
@@ -347,7 +332,7 @@ describe("All sessions", () => {
     expect(readPageText(findLane("Idle"))).not.toContain(idleWaiting.title);
   });
 
-  it("shows one row per session, with its title and provider display name", async () => {
+  it("shows one row per session, with its title and account name", async () => {
     await openApp(THREE_STATUSES);
 
     // The sidebar's threads face, also shown on /sessions, lists every
@@ -358,8 +343,8 @@ describe("All sessions", () => {
         expect(onScreen.length).toBeGreaterThanOrEqual(1);
       });
     }
-    // "Claude Code" is the provider display name for every session's providerAccountId.
-    expect(screen.getAllByText("Claude Code").length).toBeGreaterThanOrEqual(THREE_STATUSES.length);
+    // "Anthropic" is the account name for every session's providerAccountId.
+    expect(screen.getAllByText("Anthropic").length).toBeGreaterThanOrEqual(THREE_STATUSES.length);
   });
 
   it("shows the sessions that answer a conversation in the Assistants lane and in no other", async () => {

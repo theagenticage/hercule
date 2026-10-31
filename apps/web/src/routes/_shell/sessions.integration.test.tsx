@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ProviderSecretField, Runner } from "@hercule/contract";
+import type { ProviderAccount, Runner } from "@hercule/contract";
 import {
   buildErrorBody,
   readPageText,
@@ -49,59 +49,49 @@ const BARE: Runner = {
   facts: { ...MOSS.facts!, harnesses: [{ name: "claude", present: false }] },
 };
 
-const DECLARED = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-} as const;
-
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
-const buildSnapshot = (auth: Readonly<Record<string, string>>) => ({
+const buildSnapshot = (
+  auth: ProviderAccount["snapshots"][number]["auth"],
+  harnessId = "claude-code/claude-code",
+): ProviderAccount["snapshots"][number] => ({
   runnerId: MOSS.id,
+  harnessId,
   probedAt: "2026-09-05T09:14:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
   auth,
-  models: [{ slug: "default", name: "Default", options: [] }],
+  models: [{ slug: "default", name: "Default", imageInput: null, options: [] }],
 });
 
-const buildClaudeCodeAccount = (snapshots: ReadonlyArray<ReturnType<typeof buildSnapshot>>) => ({
+const buildClaudeCodeAccount = (
+  snapshots: ReadonlyArray<ProviderAccount["snapshots"][number]>,
+): ProviderAccount => ({
   id: CLAUDE_ID,
-  harnessId: "claude-code/claude-code",
-  name: "Claude Code",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: DECLARED,
-  secretFields: [] as ReadonlyArray<ProviderSecretField>,
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: "claude-code/claude-code",
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-const LOGGED_IN = buildSnapshot({
+const SIGNED_IN = buildSnapshot({
   status: "ok",
   identity: "rogier@example.com",
   planLabel: "Claude Max",
 });
 
-const NOT_LOGGED_IN = buildSnapshot({ status: "unauthenticated" });
+const NOT_SIGNED_IN = buildSnapshot({ status: "unauthenticated" });
 
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 
 const buildController = (
   runners: ReadonlyArray<Runner>,
-  instances: ReadonlyArray<ReturnType<typeof buildClaudeCodeAccount>>,
+  accounts: ReadonlyArray<ProviderAccount>,
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
@@ -122,17 +112,17 @@ const buildController = (
     },
   },
   "GET /api/v1/runners": { body: { items: runners } },
-  "GET /api/v1/provider-accounts": { body: instances },
+  "GET /api/v1/provider-accounts": { body: accounts },
   ...extra,
 });
 
 const openApp = async (options: {
   readonly runners: ReadonlyArray<Runner>;
-  readonly instances: ReadonlyArray<ReturnType<typeof buildClaudeCodeAccount>>;
+  readonly accounts: ReadonlyArray<ProviderAccount>;
   readonly local?: string | null;
   readonly extra?: Readonly<Record<string, Handler>>;
 }) => {
-  const api = stubApi(buildController(options.runners, options.instances, options.extra));
+  const api = stubApi(buildController(options.runners, options.accounts, options.extra));
   const app = await renderApp({
     path: "/",
     api: api.fetch,
@@ -158,7 +148,7 @@ const getNewThreadControl = (): HTMLElement => {
 
 describe("Sessions", () => {
   it("says a thread needs a runner when none is detected on this machine", async () => {
-    await openApp({ runners: [], instances: [buildClaudeCodeAccount([])], local: null });
+    await openApp({ runners: [], accounts: [buildClaudeCodeAccount([])], local: null });
 
     await waitFor(() => {
       expect(readPageText()).toContain("No runner has been detected on this machine.");
@@ -167,7 +157,7 @@ describe("Sessions", () => {
   });
 
   it("sends the user to Fleet when the machine has no harness on it", async () => {
-    await openApp({ runners: [BARE], instances: [buildClaudeCodeAccount([])], local: BARE.id });
+    await openApp({ runners: [BARE], accounts: [buildClaudeCodeAccount([])], local: BARE.id });
 
     await waitFor(() => {
       expect(readPageText()).toContain("No coding harness was found on this machine.");
@@ -179,24 +169,24 @@ describe("Sessions", () => {
     );
   });
 
-  it("offers a login for an installed harness that is not logged in", async () => {
+  it("offers a sign-in for an installed harness whose account is not signed in", async () => {
     await openApp({
       runners: [MOSS],
-      instances: [buildClaudeCodeAccount([NOT_LOGGED_IN])],
+      accounts: [buildClaudeCodeAccount([NOT_SIGNED_IN])],
       local: MOSS.id,
     });
 
     await waitFor(() => {
       expect(readPageText()).toContain("Claude Code was found on this machine.");
     });
-    expect(screen.getByRole("button", { name: /log in/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /sign in/i })).toBeDefined();
     expect(getNewThreadControl().hasAttribute("disabled")).toBe(true);
   });
 
   it("tells a user setting up providers that background tasks use a text generation model, and links to where to change it", async () => {
     await openApp({
       runners: [MOSS],
-      instances: [buildClaudeCodeAccount([NOT_LOGGED_IN])],
+      accounts: [buildClaudeCodeAccount([NOT_SIGNED_IN])],
       local: MOSS.id,
     });
 
@@ -208,27 +198,27 @@ describe("Sessions", () => {
     );
   });
 
-  it("is ready once the harness on this machine is logged in", async () => {
+  it("is ready once the account on this machine is signed in", async () => {
     await openApp({
       runners: [MOSS],
-      instances: [buildClaudeCodeAccount([LOGGED_IN])],
+      accounts: [buildClaudeCodeAccount([SIGNED_IN])],
       local: MOSS.id,
     });
 
     await waitFor(() => {
-      expect(readPageText()).toContain("Claude Code is ready.");
+      expect(readPageText()).toContain("Anthropic is ready.");
     });
     // Ready means a thread can now be started from here: the control is a
     // link to the composer, not a disabled button.
     expect(getNewThreadControl().getAttribute("href")).toBe("/threads/new");
   });
 
-  it("logs in from this screen, on the runner on the browser's machine", async () => {
+  it("signs in from this screen, on the runner on the browser's machine", async () => {
     const user = userEvent.setup();
-    let held = [buildClaudeCodeAccount([NOT_LOGGED_IN])];
+    let held = [buildClaudeCodeAccount([NOT_SIGNED_IN])];
     const { api } = await openApp({
       runners: [MOSS],
-      instances: held,
+      accounts: held,
       local: MOSS.id,
       extra: {
         "GET /api/v1/provider-accounts": () => ({ body: held }),
@@ -237,22 +227,22 @@ describe("Sessions", () => {
           if ((call.body as { code: string }).code !== "the-whole-code") {
             return { status: 400, body: buildErrorBody("validation", "Invalid code.") };
           }
-          held = [buildClaudeCodeAccount([LOGGED_IN])];
-          return { body: LOGGED_IN };
+          held = [buildClaudeCodeAccount([SIGNED_IN])];
+          return { body: held[0] };
         },
-        // Every finished login is followed by a probe, so this screen shows
-        // the machine's current login state.
-        [`POST /api/v1/runners/${MOSS.id}/probe`]: () => ({ body: LOGGED_IN }),
+        // Every finished sign-in is followed by a probe, so this screen shows
+        // the machine's current state.
+        [`POST /api/v1/runners/${MOSS.id}/probe`]: () => ({ body: SIGNED_IN }),
       },
     });
 
-    await user.click(await screen.findByRole("button", { name: /log in/i }));
+    await user.click(await screen.findByRole("button", { name: /sign in/i }));
 
     await waitFor(() => {
       expect(readPageText()).toContain(AUTHORIZE_URL);
     });
-    // The login runs on this machine's runner, whatever other runners the fleet has.
-    expect(api.calls.filter((call) => call.path.endsWith("/login"))[0]?.body).toEqual({
+    // The sign-in runs on this machine's runner, whatever other runners the fleet has.
+    expect(api.calls.filter((call) => call.path.endsWith("/sign-in"))[0]?.body).toEqual({
       runnerId: MOSS.id,
     });
 
@@ -261,19 +251,21 @@ describe("Sessions", () => {
 
     // Finishing the login updates the screen without a reload.
     await waitFor(() => {
-      expect(readPageText()).toContain("Claude Code is ready.");
+      expect(readPageText()).toContain("Anthropic is ready.");
     });
   });
 
-  it("shows the error when the probe after a login fails", async () => {
+  it("shows the error when the probe after a sign-in fails", async () => {
     const user = userEvent.setup();
     await openApp({
       runners: [MOSS],
-      instances: [buildClaudeCodeAccount([NOT_LOGGED_IN])],
+      accounts: [buildClaudeCodeAccount([NOT_SIGNED_IN])],
       local: MOSS.id,
       extra: {
         [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: { body: { url: AUTHORIZE_URL } },
-        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in-code`]: { body: LOGGED_IN },
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in-code`]: {
+          body: buildClaudeCodeAccount([SIGNED_IN]),
+        },
         [`POST /api/v1/runners/${MOSS.id}/probe`]: {
           status: 500,
           body: buildErrorBody("internal", "moss stopped answering"),
@@ -281,7 +273,7 @@ describe("Sessions", () => {
       },
     });
 
-    await user.click(await screen.findByRole("button", { name: /log in/i }));
+    await user.click(await screen.findByRole("button", { name: /sign in/i }));
     await user.type(await screen.findByLabelText("Code", { exact: true }), "the-whole-code");
     await user.click(screen.getByRole("button", { name: /submit/i }));
 
@@ -290,14 +282,13 @@ describe("Sessions", () => {
 });
 
 /**
- * A provider that authenticates with a key rather than a vendor's browser
+ * An account that authenticates with a key rather than a vendor's browser
  * login. The screen offers the same action Fleet does, because both use the
  * same data: a harness that is installed but cannot run yet.
  */
-describe("Sessions > a harness that needs a key", () => {
+describe("Sessions > an account that needs a key", () => {
   const PI_ID = "01a06d02-1000-7000-8000-000000000003";
-  const KEY_TITLE = "Z.ai API key";
-  const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
+  const KEY_TITLE = "API key";
   const KEY_VALUE = "a-paid-credential-nobody-else-holds";
 
   const WITH_PI: Runner = {
@@ -309,53 +300,37 @@ describe("Sessions > a harness that needs a key", () => {
     },
   };
 
-  const PI_SNAPSHOT = buildSnapshot({ status: "unauthenticated" });
-
-  const buildPiAccount = (set: boolean) => ({
-    ...buildClaudeCodeAccount([PI_SNAPSHOT]),
+  const buildPiAccount = (snapshot: ProviderAccount["snapshots"][number]): ProviderAccount => ({
+    ...buildClaudeCodeAccount([snapshot]),
     id: PI_ID,
-    harnessId: "pi/pi",
-    name: "pi",
-    displayName: "pi",
-    binaryName: "pi",
-    secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
+    providerId: "zai/zai",
+    kind: "api-key",
+    defaultHarnessId: "pi/pi",
   });
+
+  const PI_NOT_SIGNED_IN = buildSnapshot({ status: "unauthenticated" }, "pi/pi");
+  const PI_SIGNED_IN = buildSnapshot({ status: "ok", backend: "api_key" }, "pi/pi");
 
   it("asks for the key on this screen, and shows ready once it is saved", async () => {
     const user = userEvent.setup();
-    let held = [buildPiAccount(false)];
+    let held = [buildPiAccount(PI_NOT_SIGNED_IN)];
     const { api } = await openApp({
       runners: [WITH_PI],
-      instances: held,
+      accounts: held,
       local: WITH_PI.id,
       extra: {
         "GET /api/v1/provider-accounts": () => ({ body: held }),
-        [`PUT /api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`]: () => {
-          held = [
-            {
-              ...buildPiAccount(true),
-              snapshots: [buildSnapshot({ status: "ok", backend: "api_key" })],
-            },
-          ];
-          return {
-            body: {
-              ownerKind: "provider-instance",
-              ownerId: PI_ID,
-              name: "zaiApiKey",
-              createdAt: "2026-09-19T09:00:00.000Z",
-            },
-          };
+        [`PATCH /api/v1/provider-accounts/${PI_ID}`]: () => {
+          held = [buildPiAccount(PI_SIGNED_IN)];
+          return { body: held[0] };
         },
-        [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({
-          body: buildSnapshot({ status: "ok", backend: "api_key" }),
-        }),
+        [`POST /api/v1/runners/${WITH_PI.id}/probe`]: () => ({ body: PI_SIGNED_IN }),
       },
     });
 
     await user.click(await screen.findByRole("button", { name: new RegExp(KEY_TITLE, "i") }));
 
     const form = await screen.findByRole("dialog", { name: KEY_TITLE });
-    expect(form.textContent ?? "").toContain(KEY_DESCRIPTION);
     const field = within(form).getByLabelText<HTMLInputElement>(KEY_TITLE, { exact: true });
     expect(field.type).toBe("password");
 
@@ -364,12 +339,12 @@ describe("Sessions > a harness that needs a key", () => {
 
     // The key is saved, the runner is probed, and the screen updates without a reload.
     await waitFor(() => {
-      expect(readPageText()).toContain("pi is ready.");
+      expect(readPageText()).toContain("Z.ai is ready.");
     });
-    const wrote = api.calls.filter((call) => call.method === "PUT");
+    const wrote = api.calls.filter((call) => call.method === "PATCH");
     expect(wrote).toHaveLength(1);
-    expect(wrote[0]?.path).toBe(`/api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`);
-    expect(wrote[0]?.body).toEqual({ value: KEY_VALUE });
+    expect(wrote[0]?.path).toBe(`/api/v1/provider-accounts/${PI_ID}`);
+    expect(wrote[0]?.body).toEqual({ credentials: { apiKey: KEY_VALUE } });
     expect(readPageText()).not.toContain(KEY_VALUE);
   });
 });

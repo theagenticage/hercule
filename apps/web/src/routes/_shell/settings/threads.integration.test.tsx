@@ -30,26 +30,12 @@ const RUNNER_OTHER: Runner = {
   name: "cove",
 };
 
-const DECLARED = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-} as const;
-
 const buildSnapshot = (
   runnerId: string,
   models: ReadonlyArray<{ readonly slug: string; readonly name: string }>,
 ) => ({
   runnerId,
+  harnessId: "claude-code/claude-code",
   probedAt: "2026-09-05T09:14:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok" as const,
@@ -57,55 +43,40 @@ const buildSnapshot = (
   models: models.map((model) => ({ ...model, imageInput: { maxBytes: null }, options: [] })),
 });
 
-const buildProviderAccount = (
+const buildAccount = (
   id: string,
-  displayName: string,
+  label: string | null,
   snapshots: ProviderAccount["snapshots"],
 ): ProviderAccount => ({
   id,
-  harnessId: "claude-code/claude-code",
-  secretFields: [],
-  name: displayName,
-  config: {},
-  displayName,
-  binaryName: "claude",
-  declared: DECLARED,
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: "claude-code/claude-code",
   snapshots,
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-/** An instance logged in on the local runner, with two models. */
-const ACCOUNT_LOCAL = buildProviderAccount(
-  "01a06d02-1000-7000-8000-000000000001",
-  "Claude Code",
-  [
-    buildSnapshot(RUNNER_LOCAL.id, [
-      { slug: "claude-sonnet-5", name: "Sonnet 5" },
-      { slug: "claude-opus-5", name: "Opus 5" },
-    ]),
-  ],
-);
+/** An account signed in on the local runner, with two models. */
+const ACCOUNT_LOCAL = buildAccount("01a06d02-1000-7000-8000-000000000001", null, [
+  buildSnapshot(RUNNER_LOCAL.id, [
+    { slug: "claude-sonnet-5", name: "Sonnet 5" },
+    { slug: "claude-opus-5", name: "Opus 5" },
+  ]),
+]);
 
-/** An instance never probed on the local runner, with one snapshot from another runner. */
-const ACCOUNT_ELSEWHERE = buildProviderAccount(
-  "01a06d02-1000-7000-8000-000000000002",
-  "Claude Code (work)",
-  [buildSnapshot(RUNNER_OTHER.id, [{ slug: "claude-haiku-5", name: "Haiku 5" }])],
-);
+/** An account never probed on the local runner, with one snapshot from another runner. */
+const ACCOUNT_ELSEWHERE = buildAccount("01a06d02-1000-7000-8000-000000000002", "work", [
+  buildSnapshot(RUNNER_OTHER.id, [{ slug: "claude-haiku-5", name: "Haiku 5" }]),
+]);
 
-/** An instance never probed on any runner. */
-const ACCOUNT_UNPROBED = buildProviderAccount(
-  "01a06d02-1000-7000-8000-000000000003",
-  "Claude Code (new)",
-  [],
-);
+/** An account never probed on any runner. */
+const ACCOUNT_UNPROBED = buildAccount("01a06d02-1000-7000-8000-000000000003", "new", []);
 
-const ACCOUNTS: readonly ProviderAccount[] = [
-  ACCOUNT_LOCAL,
-  ACCOUNT_ELSEWHERE,
-  ACCOUNT_UNPROBED,
-];
+const ACCOUNTS: readonly ProviderAccount[] = [ACCOUNT_LOCAL, ACCOUNT_ELSEWHERE, ACCOUNT_UNPROBED];
 
 const PROFILE_UNRESTRICTED: Profile = {
   id: "01a06d02-3000-7000-8000-000000000001",
@@ -173,41 +144,46 @@ const listWrites = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "PATCH");
 
 describe("Settings > Threads defaults", () => {
-  it("offers the provider instances by display name, and writes thread.providerAccountId and thread.model together on pick", async () => {
+  it("offers the accounts by name, and writes thread.providerAccountId, thread.harnessId and thread.model together on pick", async () => {
     const user = userEvent.setup();
     const { api } = await openApp();
 
-    const field = await screen.findByLabelText<HTMLSelectElement>("Provider instance");
+    const field = await screen.findByLabelText<HTMLSelectElement>("Account");
     const offered = [...field.options].map((option) => option.textContent);
-    for (const each of ACCOUNTS) expect(offered).toContain(each.displayName);
+    expect(offered).toEqual(["Anthropic", "Anthropic · work", "Anthropic · new"]);
 
-    await user.selectOptions(field, ACCOUNT_ELSEWHERE.displayName);
+    await user.selectOptions(field, "Anthropic · work");
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
-    // One patch, not two, so switching instances never leaves a model the new
-    // instance does not offer. The instance's only snapshot has one model,
-    // "Haiku 5", with no `isDefault`, so that model is the fallback default.
+    // One patch, not two, so switching accounts never leaves a model the new
+    // account does not offer, or a harness that belonged to the old one. The
+    // account's only snapshot has one model, "Haiku 5", with no `isDefault`,
+    // so that model is the fallback default.
     expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.providerAccountId": ACCOUNT_ELSEWHERE.id, "thread.model": "claude-haiku-5" },
+      user: {
+        "thread.providerAccountId": ACCOUNT_ELSEWHERE.id,
+        "thread.harnessId": null,
+        "thread.model": "claude-haiku-5",
+      },
     });
   });
 
-  it("writes only thread.providerAccountId when the newly picked instance has no snapshot to default from", async () => {
+  it("writes no model when the newly picked account has no snapshot to default from", async () => {
     const user = userEvent.setup();
     const { api } = await openApp();
 
-    const field = await screen.findByLabelText<HTMLSelectElement>("Provider instance");
-    await user.selectOptions(field, ACCOUNT_UNPROBED.displayName);
+    const field = await screen.findByLabelText<HTMLSelectElement>("Account");
+    await user.selectOptions(field, "Anthropic · new");
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
     expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.providerAccountId": ACCOUNT_UNPROBED.id },
+      user: { "thread.providerAccountId": ACCOUNT_UNPROBED.id, "thread.harnessId": null },
     });
   });
 
-  it("offers the picked instance's models from the local runner's snapshot, and writes thread.model on pick", async () => {
+  it("offers the picked account's models from the local runner's snapshot, and writes thread.model on pick", async () => {
     const user = userEvent.setup();
     const { api } = await openApp();
 
@@ -223,7 +199,7 @@ describe("Settings > Threads defaults", () => {
     expect(listWrites(api)[0]?.body).toEqual({ user: { "thread.model": "claude-opus-5" } });
   });
 
-  it("falls back to the instance's first snapshot when none is the local runner's", async () => {
+  it("falls back to the account's first snapshot when none is the local runner's", async () => {
     await openApp({
       "thread.providerAccountId": ACCOUNT_ELSEWHERE.id,
       "thread.model": "claude-haiku-5",
@@ -236,10 +212,13 @@ describe("Settings > Threads defaults", () => {
     expect(offered).toContain("Haiku 5");
   });
 
-  it("dims the model field when the picked instance has no snapshot at all", async () => {
-    await openApp({ "thread.providerAccountId": ACCOUNT_UNPROBED.id, "thread.model": "claude-sonnet-5" });
+  it("dims the model field when the picked account has no snapshot at all", async () => {
+    await openApp({
+      "thread.providerAccountId": ACCOUNT_UNPROBED.id,
+      "thread.model": "claude-sonnet-5",
+    });
 
-    expect(await screen.findByText("log in on a runner first")).toBeDefined();
+    expect(await screen.findByText("sign in on a runner first")).toBeDefined();
     expect(screen.queryByLabelText("Model")).toBeNull();
   });
 
@@ -301,7 +280,7 @@ describe("Settings > Threads defaults", () => {
   it("places the four thread fields above the existing Sidebar rows control", async () => {
     await openApp();
 
-    const instanceField = await screen.findByLabelText("Provider instance");
+    const accountField = await screen.findByLabelText("Account");
     const modelField = screen.getByLabelText("Model");
     const accessGroup = screen.getByRole("radiogroup", { name: /access mode/i });
     const profileField = screen.getByLabelText("Profile");
@@ -310,7 +289,7 @@ describe("Settings > Threads defaults", () => {
     const isBefore = (a: Element, b: Element): boolean =>
       (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
-    for (const field of [instanceField, modelField, accessGroup, profileField]) {
+    for (const field of [accountField, modelField, accessGroup, profileField]) {
       expect(isBefore(field, sidebarRows)).toBe(true);
     }
   });
@@ -394,7 +373,7 @@ describe("Settings > Threads: the GitHub account", () => {
       detectLocalRunner: () => Promise.resolve(RUNNER_LOCAL.id),
     });
 
-    await screen.findByLabelText("Provider instance");
+    await screen.findByLabelText("Account");
     expect(screen.queryByRole("combobox", { name: /github/i })).toBeNull();
     expect(screen.queryByText(GITHUB.label)).toBeNull();
   });

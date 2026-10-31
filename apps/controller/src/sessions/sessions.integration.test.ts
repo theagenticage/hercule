@@ -65,7 +65,7 @@ import {
 } from "../http/testing";
 import { Live } from "../daemon";
 import { UUID_PATTERN, withTransaction } from "../db";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition } from "../plugins/testing";
 import { importTestSkill } from "../skills/testing";
 import { sessionRepository } from "./repository";
 import {
@@ -78,6 +78,8 @@ import {
   reportEvent,
   reportTurnCompleted,
   reportTurnStarted,
+  buildFleetPlugin,
+  findProviderAccountId,
   spawnSession,
   spawnSessionOrFail,
   spawnThreadWithGrants,
@@ -97,12 +99,12 @@ import {
   waitForConversationSessions,
 } from "../conversations/testing";
 
-/** A harness that supports everything natively: the instance a plain spawn uses. */
-const FULL = buildHarnessDefinition("full", { token: "t" });
+/** A harness that supports everything natively: the harness a plain spawn uses. */
+const FULL = buildHarnessDefinition("full");
 
 /** The harness for the access-mode fallback tests: it supports up to `auto-accept-edits`. */
 const LIMITED: HarnessDefinition = {
-  ...buildHarnessDefinition("limited", { token: "t" }),
+  ...buildHarnessDefinition("limited"),
   declared: {
     ...buildHarnessDefinition("limited").declared,
     steering: "unsupported",
@@ -120,7 +122,7 @@ const LIMITED: HarnessDefinition = {
  * unsupported, so the fallback has no lower mode to substitute.
  */
 const BARE: HarnessDefinition = {
-  ...buildHarnessDefinition("bare", { token: "t" }),
+  ...buildHarnessDefinition("bare"),
   declared: {
     ...buildHarnessDefinition("bare").declared,
     accessModes: {
@@ -133,7 +135,7 @@ const BARE: HarnessDefinition = {
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "harnesses", definitions: [FULL, LIMITED, BARE] }).plugin,
+  buildFleetPlugin("harnesses", [FULL, LIMITED, BARE]),
 ];
 
 const FACTS: RunnerFacts = {
@@ -245,12 +247,6 @@ const withFleet = (
     inputDeadline: INPUT_DEADLINE,
     ...options,
   });
-
-const findInstanceId = (arranged: Arranged, harnessId: string): string => {
-  const found = arranged.instances.find((instance) => instance.harnessId === harnessId);
-  expect(found, harnessId).toBeDefined();
-  return found!.id;
-};
 
 const readSession = async (arranged: Arranged, id: string): Promise<Session> => {
   const response = await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token);
@@ -530,7 +526,7 @@ const endSession = async (arranged: Arranged, session: Session, seq: number): Pr
       {
         sessionId: session.id,
         nativeSessionId: "native-1",
-        instanceId: findInstanceId(arranged, "harnesses/full"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
       },
     ],
   });
@@ -563,7 +559,7 @@ describe("session.spawn", () => {
 
       expect(session.status).toBe("starting");
       expect(session.runnerId).toBe(arranged.runnerId);
-      expect(session.instanceId).toBe(findInstanceId(arranged, "harnesses/full"));
+      expect(session.providerAccountId).toBe(findProviderAccountId(arranged, "harnesses/full"));
       expect(session.requestedAccessMode).toBe("approval-required");
       expect(session.accessMode).toBe("approval-required");
       expect(session.nativeSessionId).toBeNull();
@@ -573,9 +569,9 @@ describe("session.spawn", () => {
       expect(start.sessionId).toBe(session.id);
       expect(start.harnessId).toBe("harnesses/full");
       expect(start.spec).toEqual({
-        instanceId: session.instanceId,
+        providerAccountId: session.providerAccountId,
         workspaceId: null,
-        // The instance's default model, since neither the settings nor the
+        // The account's default model, since neither the settings nor the
         // call named one.
         modelSelection: { model: "clever", options: {} },
         accessMode: "approval-required",
@@ -605,7 +601,7 @@ describe("session.spawn", () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "harnesses/limited"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/limited"),
         accessMode: "auto",
       });
 
@@ -621,7 +617,7 @@ describe("session.spawn", () => {
     await withFleet(async (arranged) => {
       const response = await spawnSession(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "harnesses/bare"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/bare"),
         accessMode: "auto",
       });
 
@@ -796,7 +792,7 @@ describe("session.spawn with an explicit runner or profile", () => {
     });
   });
 
-  it("rejects a named runner that is online but not logged in to the instance, and says why", async () => {
+  it("rejects a named runner that is online but not signed in to the account, and says why", async () => {
     await withFleet(async (arranged) => {
       await Effect.runPromise(
         Effect.orDie(
@@ -811,12 +807,12 @@ describe("session.spawn with an explicit runner or profile", () => {
 
       const response = await spawnSession(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "harnesses/full"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
         runnerId: arranged.runnerId,
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
-      expect(await response.text()).toContain("logged in");
+      expect(await response.text()).toContain("signed in");
       const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
       const page = (await listing.json()) as { items: ReadonlyArray<Session> };
       expect(page.items).toEqual([]);
@@ -904,7 +900,7 @@ describe("the `userMaterial` flag on a start frame", () => {
           {
             name: "assessor",
             systemPrompt: "You assess tasks.",
-            instanceId: findInstanceId(arranged, "harnesses/full"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
             permissionProfileId: worker.id,
           },
           arranged.token,
@@ -987,7 +983,7 @@ const spawnAgentSession = async (arranged: Arranged): Promise<Session> => {
     {
       name: "assessor",
       systemPrompt: "You assess tasks.",
-      instanceId: findInstanceId(arranged, "harnesses/full"),
+      providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
       permissionProfileId: worker.id,
     },
     arranged.token,
@@ -1336,11 +1332,11 @@ describe("what a runner reports", () => {
   it("stores the native id from a sessions report, for a session already running", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
-      const instanceId = findInstanceId(arranged, "harnesses/full");
+      const providerAccountId = findProviderAccountId(arranged, "harnesses/full");
 
       arranged.wire.send({
         _tag: "sessionsReport",
-        sessions: [{ sessionId: session.id, nativeSessionId: "reported-1", instanceId }],
+        sessions: [{ sessionId: session.id, nativeSessionId: "reported-1", providerAccountId }],
       });
 
       const bound = await waitForSession(
@@ -1361,7 +1357,7 @@ describe("what a runner reports", () => {
           {
             sessionId: session.id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "harnesses/full"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           },
         ],
       });
@@ -1485,7 +1481,7 @@ describe("session.input, queued by default", () => {
 
 /**
  * The model options one input sends: validated against the session's own
- * instance, merged over the options the row already has, and all dropped when
+ * account in its harness, merged over the options the row already has, and all dropped when
  * the input changes the model, because the options belong to the model.
  */
 describe("session.input: the model options a submission carries", () => {
@@ -1728,7 +1724,7 @@ describe("input.steer", () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "harnesses/limited"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/limited"),
       });
       const events = buildTranscript(session.id);
       await waitForStartFrames(arranged, session.id, 1);
@@ -1983,7 +1979,7 @@ describe("session.input from a session", () => {
       const sender = await spawnThreadWithGrants(arranged, "messenger", ["session.steer"]);
       const target = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "harnesses/limited"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/limited"),
       });
       const events = buildTranscript(target.id);
       await waitForStartFrames(arranged, target.id, 1);
@@ -2033,7 +2029,7 @@ describe("the sender an input frame names", () => {
         {
           name: "helper",
           systemPrompt: "You help.",
-          instanceId: findInstanceId(arranged, "harnesses/full"),
+          providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           permissionProfileId: (await createProfile(arranged, "narrow", ["session.read"])).id,
         },
         arranged.token,
@@ -2136,7 +2132,7 @@ describe("a session's inputs", () => {
   const withInputs = async (arranged: Arranged): Promise<Session> => {
     const session = await spawnSessionOrFail(arranged, {
       prompt: "hello",
-      instanceId: findInstanceId(arranged, "harnesses/limited"),
+      providerAccountId: findProviderAccountId(arranged, "harnesses/limited"),
     });
     const events = buildTranscript(session.id);
     await waitForStartFrames(arranged, session.id, 1);
@@ -3040,7 +3036,7 @@ describe("session.continue", () => {
       expect(child).toMatchObject({
         status: "starting",
         runnerId: parent.runnerId,
-        instanceId: parent.instanceId,
+        providerAccountId: parent.providerAccountId,
         permissionProfileId: parent.permissionProfileId,
         accessMode: parent.accessMode,
         requestedAccessMode: parent.requestedAccessMode,
@@ -3088,7 +3084,7 @@ describe("session.continue", () => {
         {
           name: "assessor",
           systemPrompt: "You assess tasks.",
-          instanceId: findInstanceId(arranged, "harnesses/full"),
+          providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           permissionProfileId: worker!.id,
           disallowedTools: ["edit", "shell"],
         },
@@ -3214,7 +3210,7 @@ describe("session.continue", () => {
     });
   });
 
-  it("rejects a parent whose runner is not logged in to its provider instance", async () => {
+  it("rejects a parent whose runner is not signed in to its provider account", async () => {
     await withFleet(async (arranged) => {
       const parent = await startAndEndSession(arranged, "hello");
       await Effect.runPromise(
@@ -3231,7 +3227,7 @@ describe("session.continue", () => {
       const response = await continueSession(arranged, parent.id, { mode: "fork", prompt: "no" });
 
       expect(response.status, await response.clone().text()).toBe(409);
-      expect(await response.text()).toContain("logged in");
+      expect(await response.text()).toContain("signed in");
       expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
     });
   });
@@ -3771,7 +3767,7 @@ describe("a start that carries the session's first input", () => {
             {
               sessionId: session!.id,
               nativeSessionId: "native-1",
-              instanceId: session!.instanceId,
+              providerAccountId: session!.providerAccountId,
             },
           ],
         });
@@ -4420,7 +4416,7 @@ const reportHeldSessions = (
     sessions: sessionIds.map((sessionId) => ({
       sessionId,
       nativeSessionId: `native-${sessionId}`,
-      instanceId: findInstanceId(arranged, "harnesses/full"),
+      providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
     })),
   });
 
@@ -4775,8 +4771,8 @@ describe("session.input into an exited session", () => {
       },
     ],
     [
-      "is not logged in to its instance",
-      "logged in",
+      "is not signed in to its account",
+      "signed in",
       async (arranged: Arranged): Promise<void> => {
         await Effect.runPromise(
           Effect.orDie(
@@ -6726,7 +6722,7 @@ describe("session.markDone and session.reopen", () => {
       {
         name: "assessor",
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "harnesses/full"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
         permissionProfileId: worker.id,
       },
       arranged.token,

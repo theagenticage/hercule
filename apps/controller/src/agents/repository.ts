@@ -37,14 +37,18 @@ export type AgentKind = "agent" | "assistant";
 export interface StoredAgent {
   readonly id: string;
   readonly kind: AgentKind;
-  /**
-   * The harness behind its instance, used to work out what that harness will
-   * not enforce; `null` once the instance is gone.
-   */
-  readonly harnessId: string | null;
   readonly name: string;
   readonly systemPrompt: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  /** The harness its sessions run in. `null` runs them in the account's default harness. */
+  readonly harnessId: string | null;
+  /**
+   * The harness its sessions run in once `null` is resolved: `harnessId`, or
+   * else the account's default harness. It is read with the row, to work out
+   * what that harness will not enforce. `null` only when the account is gone.
+   * It is never written.
+   */
+  readonly effectiveHarnessId: string | null;
   readonly permissionProfileId: string;
   readonly accessMode: AccessMode;
   readonly model: ModelSelection | null;
@@ -56,13 +60,12 @@ export interface StoredAgent {
 /**
  * The fields of a new agent row. Derived from the stored agent so the two
  * cannot drift apart: the repository generates the id and sets both
- * timestamps, and the harness is known because the instance was just read.
+ * timestamps, and the effective harness is read back after the insert.
  */
 export interface NewAgent extends Omit<
   StoredAgent,
-  "id" | "harnessId" | "createdAt" | "updatedAt"
+  "id" | "effectiveHarnessId" | "createdAt" | "updatedAt"
 > {
-  readonly harnessId: string;
   /** The time the row is created, used as both its `createdAt` and its `updatedAt`. */
   readonly at: string;
 }
@@ -70,11 +73,11 @@ export interface NewAgent extends Omit<
 /**
  * The columns an edit may set. An absent column is left as it was. Derived from
  * the stored agent for the same reason: a column added there becomes a column
- * an edit may set, unless it is the id, the kind, the harness or a timestamp.
+ * an edit may set, unless it is the id, the kind, the effective harness or a timestamp.
  * The kind is fixed at insert: a plain agent never becomes an assistant.
  */
 export type AgentEdit = Partial<
-  Omit<StoredAgent, "id" | "kind" | "harnessId" | "createdAt" | "updatedAt">
+  Omit<StoredAgent, "id" | "kind" | "effectiveHarnessId" | "createdAt" | "updatedAt">
 >;
 
 export interface AgentPageRequest {
@@ -90,10 +93,11 @@ export interface AgentPageRequest {
 interface AgentRow {
   readonly id: Uint8Array;
   readonly kind: string;
-  readonly harness_id: string | null;
   readonly name: string;
   readonly system_prompt: string;
-  readonly instance_id: Uint8Array;
+  readonly provider_account_id: Uint8Array;
+  readonly harness_id: string | null;
+  readonly effective_harness_id: string | null;
   readonly permission_profile_id: Uint8Array;
   readonly access_mode: string;
   readonly model_selection: string | null;
@@ -103,19 +107,21 @@ interface AgentRow {
 }
 
 const COLUMNS =
-  "id, kind, name, system_prompt, instance_id, permission_profile_id, access_mode, " +
-  "model_selection, disallowed_tools, created_at, updated_at, " +
-  // The harness behind the instance, which determines whether the agent's
-  // disallowed tools are enforced.
-  "(SELECT provider_id FROM provider_instances WHERE id = agents.instance_id) AS harness_id";
+  "id, kind, name, system_prompt, provider_account_id, harness_id, permission_profile_id, " +
+  "access_mode, model_selection, disallowed_tools, created_at, updated_at, " +
+  // The harness the agent runs in, which determines whether its disallowed
+  // tools are enforced.
+  "coalesce(harness_id, (SELECT default_harness_id FROM provider_accounts " +
+  "WHERE provider_accounts.id = agents.provider_account_id)) AS effective_harness_id";
 
 const toAgent = (row: AgentRow): StoredAgent => ({
   id: uuidToString(row.id),
   kind: row.kind as AgentKind,
-  harnessId: row.harness_id,
   name: row.name,
   systemPrompt: row.system_prompt,
-  instanceId: uuidToString(row.instance_id),
+  providerAccountId: uuidToString(row.provider_account_id),
+  harnessId: row.harness_id,
+  effectiveHarnessId: row.effective_harness_id,
   permissionProfileId: uuidToString(row.permission_profile_id),
   accessMode: row.access_mode as AccessMode,
   model: row.model_selection === null ? null : (JSON.parse(row.model_selection) as ModelSelection),
@@ -170,29 +176,19 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
-          INSERT INTO agents (id, kind, name, system_prompt, instance_id, permission_profile_id,
-                              access_mode, model_selection, disallowed_tools,
-                              created_at, updated_at)
+          INSERT INTO agents (id, kind, name, system_prompt, provider_account_id, harness_id,
+                              permission_profile_id, access_mode, model_selection,
+                              disallowed_tools, created_at, updated_at)
           VALUES (${id}, ${agent.kind}, ${agent.name}, ${agent.systemPrompt},
-                  ${uuidFromString(agent.instanceId)},
+                  ${uuidFromString(agent.providerAccountId)}, ${agent.harnessId},
                   ${uuidFromString(agent.permissionProfileId)}, ${agent.accessMode},
                   ${agent.model === null ? null : JSON.stringify(agent.model)},
                   ${JSON.stringify(agent.disallowedTools)}, ${agent.at}, ${agent.at})
         `;
-        return {
-          id: uuidToString(id),
-          kind: agent.kind,
-          harnessId: agent.harnessId,
-          name: agent.name,
-          systemPrompt: agent.systemPrompt,
-          instanceId: agent.instanceId,
-          permissionProfileId: agent.permissionProfileId,
-          accessMode: agent.accessMode,
-          model: agent.model,
-          disallowedTools: agent.disallowedTools,
-          createdAt: agent.at,
-          updatedAt: agent.at,
-        };
+        const rows = yield* sql<AgentRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM agents WHERE id = ${id}
+        `;
+        return toAgent(rows[0] as AgentRow);
       }),
 
     /** Applies an edit. Only the columns the edit names are written. */
@@ -201,9 +197,10 @@ const make = Effect.gen(function* () {
       if (edit.name !== undefined) assignments.push(sql`name = ${edit.name}`);
       if (edit.systemPrompt !== undefined)
         assignments.push(sql`system_prompt = ${edit.systemPrompt}`);
-      if (edit.instanceId !== undefined) {
-        assignments.push(sql`instance_id = ${uuidFromString(edit.instanceId)}`);
+      if (edit.providerAccountId !== undefined) {
+        assignments.push(sql`provider_account_id = ${uuidFromString(edit.providerAccountId)}`);
       }
+      if (edit.harnessId !== undefined) assignments.push(sql`harness_id = ${edit.harnessId}`);
       if (edit.permissionProfileId !== undefined) {
         assignments.push(sql`permission_profile_id = ${uuidFromString(edit.permissionProfileId)}`);
       }

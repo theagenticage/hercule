@@ -14,6 +14,7 @@
 import { expect } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   type AdapterError,
   AGENT_STEPS_CAPABILITY,
@@ -49,11 +50,14 @@ import type {
   Input,
   Notification,
   Profile,
+  ProviderAccount,
   Runner,
   Session,
   SessionSpawnInput,
 } from "@hercule/contract";
-import { WORKSPACE_ACTION_IDS } from "../plugins";
+import { nowIso, withTransaction } from "../db";
+import { PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
+import { providerAccountRepository } from "../provider-accounts";
 import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import {
   completeSetup,
@@ -303,7 +307,7 @@ const dial = (
         writeMessage({
           _tag: "probeReport",
           requestId: request.requestId,
-          instanceId: request.instanceId,
+          providerAccountId: request.harnessAccount.providerAccountId,
           result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models },
         });
       }
@@ -345,28 +349,105 @@ const dial = (
     setTimeout(() => reject(new Error("the controller never upgraded the connection")), 3000);
   });
 
-export interface ProviderInstance {
-  readonly id: string;
-  readonly harnessId: string;
-  readonly snapshots: ReadonlyArray<unknown>;
-}
-
-/** Waits until every provider instance has been probed on this runner, and returns the instances. */
-const waitForEveryInstanceProbed = async (
+/** Waits until every Provider Account has been probed on this runner, and returns the accounts. */
+const waitForEveryAccountProbed = async (
   base: string,
   token: string,
-): Promise<ReadonlyArray<ProviderInstance>> =>
-  waitUntil("probed every instance", async () => {
-    const response = await get(base, "/api/v1/providers", token);
-    const instances = (await response.json()) as ReadonlyArray<ProviderInstance>;
-    return instances.every((instance) => instance.snapshots.length === 1) ? instances : undefined;
+): Promise<ReadonlyArray<ProviderAccount>> =>
+  waitUntil("probed every account", async () => {
+    const response = await get(base, "/api/v1/provider-accounts", token);
+    const accounts = (await response.json()) as ReadonlyArray<ProviderAccount>;
+    return accounts.every((account) => account.snapshots.length === 1) ? accounts : undefined;
   });
+
+/**
+ * Builds the plugin a fleet test registers its harnesses with. Each harness
+ * gets a provider of its own, with one account kind (`subscription`, signed in
+ * on each machine) that only that harness runs, so `withFleet` can give every
+ * harness one account that runs in it, as a real controller has an account
+ * for each harness a user can sign in to. A harness that already lists what it
+ * runs keeps its own `runs`.
+ */
+export const buildFleetPlugin = (
+  pluginId: string,
+  definitions: ReadonlyArray<HarnessDefinition>,
+): Plugin =>
+  createPluginFixture({
+    id: pluginId,
+    capabilities: ["harnesses", "providers"],
+    definitions: definitions.map((definition) => ({
+      ...definition,
+      runs:
+        definition.runs.length > 0
+          ? definition.runs
+          : [
+              {
+                providerId: `${pluginId}/${definition.id}`,
+                kinds: [{ kind: FLEET_ACCOUNT_KIND }],
+                modelArgument: "{model}",
+                models: "all",
+              },
+            ],
+    })),
+    providers: definitions.map((definition) => ({
+      id: definition.id,
+      displayName: `Provider ${definition.id}`,
+      kinds: [
+        {
+          id: FLEET_ACCOUNT_KIND,
+          title: "Subscription",
+          description: "A plan signed in on each machine.",
+          setup: [{ kind: "harness-login" }],
+          harnesses: [`${pluginId}/${definition.id}`],
+        },
+      ],
+    })),
+  }).plugin;
+
+/** The account kind of the providers `buildFleetPlugin` registers. */
+const FLEET_ACCOUNT_KIND = "subscription";
+
+/**
+ * Gives every registered harness one Provider Account that runs in it (as its
+ * default harness), unless one exists already. The fresh-install seed and the
+ * test controller's own seed may have made some.
+ */
+const arrangeAccountPerHarness = async (harness: ServerHarness): Promise<void> => {
+  const exit = await harness.runWithLiveSessions(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const host = yield* PluginHost;
+      const accounts = yield* providerAccountRepository;
+      const existing = yield* accounts.list();
+      const providers = yield* host.providers();
+      for (const registered of yield* host.harnesses()) {
+        if (existing.some((account) => account.defaultHarnessId === registered.id)) continue;
+        const support = registered.runs[0];
+        const kind = support?.kinds[0]?.kind;
+        const provider = providers.find((candidate) => candidate.id === support?.providerId);
+        if (provider === undefined || kind === undefined) continue;
+        yield* withTransaction(
+          sql,
+          accounts.insert({
+            providerId: provider.id,
+            kind,
+            label: null,
+            defaultHarnessId: registered.id,
+            at: yield* nowIso,
+          }),
+        );
+      }
+    }),
+  );
+  expect(exit._tag, "arranging an account per harness").toBe("Success");
+};
 
 export interface Arranged {
   readonly harness: ServerHarness;
   readonly token: string;
   readonly wire: Wire;
-  readonly instances: ReadonlyArray<ProviderInstance>;
+  /** One Provider Account per registered harness, with the harness as its default. */
+  readonly accounts: ReadonlyArray<ProviderAccount>;
   readonly runnerId: string;
   /** The credential the runner got when it joined, which it presents on the socket and on HTTP. */
   readonly credential: string;
@@ -420,8 +501,8 @@ export type FleetOptions = Omit<ServerOptions, "plugins" | "readLocalRunnerId"> 
 };
 
 /**
- * Runs `body` against a controller with one joined, connected, logged-in
- * runner.
+ * Runs `body` against a controller with one joined, connected, signed-in
+ * runner and one Provider Account per registered harness.
  *
  * The fleet's own options are taken out and the rest are passed to the
  * controller unchanged, so a caller can use a new server option without this
@@ -445,6 +526,9 @@ export const withFleet = (
     // Set before the runner connects, so every dispatch to it sees it as the
     // local runner.
     if (firstRunnerIsLocal === true) localRunnerId = answer.runnerId;
+    // Before the runner connects, because a runner is probed for the accounts
+    // that exist when it connects.
+    await arrangeAccountPerHarness(harness);
     const wire = await dial(harness.base, answer.credential, facts, models, capabilities);
     // A real runner reports its sessions right after its hello (none, on a
     // fresh connection). Most tests want dispatch working from their first
@@ -466,7 +550,7 @@ export const withFleet = (
       wires.push(again);
       return again;
     };
-    const instances = await waitForEveryInstanceProbed(harness.base, token);
+    const accounts = await waitForEveryAccountProbed(harness.base, token);
     let machines = 1;
     const enlist = async (
       options: { readonly capabilities?: ReadonlyArray<string> } = {},
@@ -487,12 +571,12 @@ export const withFleet = (
       its.send({ _tag: "sessionsReport", sessions: [] });
       wires.push(its);
       machines += 1;
-      // There is one snapshot per runner per instance, so a session can be
+      // There is one snapshot per runner per account, so a session can be
       // placed on the new runner only once its own probes are in.
       await waitUntil("probed the machine it just enlisted", async () => {
-        const response = await get(harness.base, "/api/v1/providers", token);
-        const all = (await response.json()) as ReadonlyArray<ProviderInstance>;
-        return all.every((instance) => instance.snapshots.length >= machines) ? all : undefined;
+        const response = await get(harness.base, "/api/v1/provider-accounts", token);
+        const all = (await response.json()) as ReadonlyArray<ProviderAccount>;
+        return all.every((account) => account.snapshots.length >= machines) ? all : undefined;
       });
       return { runnerId: enlisted.runnerId, wire: its };
     };
@@ -501,7 +585,7 @@ export const withFleet = (
         harness,
         token,
         wire,
-        instances,
+        accounts,
         runnerId: answer.runnerId,
         credential: answer.credential,
         reconnect,
@@ -513,9 +597,9 @@ export const withFleet = (
   }, options);
 };
 
-/** Returns the id of the provider instance created for a harness, by the harness id. */
-export const findInstanceId = (arranged: Arranged, harnessId: string): string => {
-  const found = arranged.instances.find((instance) => instance.harnessId === harnessId);
+/** Returns the id of the Provider Account whose default harness is `harnessId` (qualified, such as `harnesses/full`). */
+export const findProviderAccountId = (arranged: Arranged, harnessId: string): string => {
+  const found = arranged.accounts.find((account) => account.defaultHarnessId === harnessId);
   expect(found, harnessId).toBeDefined();
   return found!.id;
 };
@@ -590,7 +674,7 @@ export const spawnSessionOrFail = async (arranged: Arranged, body: unknown): Pro
  * runner, the profile lookup and the start frame are set up in one place.
  */
 
-const AGENT_HARNESS = buildHarnessDefinition("full", { token: "t" });
+const AGENT_HARNESS = buildHarnessDefinition("full");
 
 const AGENT_FACTS = {
   os: "darwin",
@@ -626,10 +710,9 @@ export const withAgentFleet = (
 ): Promise<void> =>
   withFleet(body, {
     plugins: [
-      createPluginFixture({
-        id: "harnesses",
-        definitions: [{ ...AGENT_HARNESS, declared: { ...AGENT_HARNESS.declared, steering } }],
-      }).plugin,
+      buildFleetPlugin("harnesses", [
+        { ...AGENT_HARNESS, declared: { ...AGENT_HARNESS.declared, steering } },
+      ]),
       ...plugins,
     ],
     facts: AGENT_FACTS,

@@ -42,7 +42,7 @@ import {
 } from "../conversations/testing";
 import {
   at,
-  findInstanceId,
+  findProviderAccountId,
   listFrames,
   readApprovalNotifications,
   readSession,
@@ -917,7 +917,7 @@ describe("Token Usage across a resume", () => {
           {
             sessionId: id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "harnesses/full"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           },
         ],
       });
@@ -1052,7 +1052,7 @@ describe("incomplete token accounting across controller persistence and public p
           {
             sessionId: id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "harnesses/full"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           },
         ],
       });

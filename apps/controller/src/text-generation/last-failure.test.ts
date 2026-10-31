@@ -51,7 +51,7 @@ describe("the last text generation failure", () => {
           message: "slow",
           at: "2026-10-11T10:00:00.000Z",
         });
-        return yield* failure.read('{"instanceId":"x","model":"y"}');
+        return yield* failure.read('{"providerAccountId":"x","model":"y"}');
       }),
     );
 

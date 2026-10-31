@@ -67,27 +67,12 @@ import {
 
 /**
  * Fixtures for the composer tests:
- * - A provider instance, a runner and a profile with `SESSION`'s ids,
+ * - A Provider Account, a runner and a profile with `SESSION`'s ids,
  *   which the started thread's read-only fields and model menu read.
- * - A second instance, runner and profile, which exist only to prove that
+ * - A second account, runner and profile, which exist only to prove that
  *   they never show up in a started thread's read-only fields or its
- *   other-instance groups.
+ *   other-account groups.
  */
-const DECLARED: ProviderAccount["declared"] = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-};
-
 const buildAccountSnapshot = (
   runnerId: string,
   identity: string,
@@ -95,6 +80,7 @@ const buildAccountSnapshot = (
   models: ProviderAccount["snapshots"][number]["models"],
 ): ProviderAccount["snapshots"][number] => ({
   runnerId,
+  harnessId: "claude-code/claude-code",
   probedAt: "2026-09-08T09:50:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
@@ -104,13 +90,12 @@ const buildAccountSnapshot = (
 
 const ACCOUNT_STARTED: ProviderAccount = {
   id: SESSION.providerAccountId,
-  harnessId: "claude-code/claude-code",
-  secretFields: [],
-  name: "personal",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: DECLARED,
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: "personal",
+  identity: "rogier@example.com",
+  planLabel: "Claude Max",
+  defaultHarnessId: "claude-code/claude-code",
   snapshots: [
     buildAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       {
@@ -145,7 +130,7 @@ const EFFORT: ModelOption = {
   default: "medium",
 };
 
-/** The session's instance, with `effort` offered on both of its models. */
+/** The session's account, with `effort` offered on both of its models. */
 const ACCOUNT_OPTIONS: ProviderAccount = {
   ...ACCOUNT_STARTED,
   snapshots: [
@@ -170,7 +155,9 @@ const ACCOUNT_OPTIONS: ProviderAccount = {
 const ACCOUNT_OTHER: ProviderAccount = {
   ...ACCOUNT_STARTED,
   id: "01a06d02-1000-7000-8000-000000000099",
-  name: "work",
+  label: "work",
+  identity: "work@example.com",
+  planLabel: "Claude Pro",
   snapshots: [
     buildAccountSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
       {
@@ -223,7 +210,7 @@ const PROFILE_OTHER: Profile = {
 /**
  * Builds the stubbed controller routes for the app and for the thread of
  * `fixture`, with no subagents, the transcript `rows`, and the composer's
- * instances, runners and profiles. `extra` is added over them.
+ * accounts, runners and profiles. `extra` is added over them.
  */
 const buildThreadRoutes = (
   fixture: Session,
@@ -2329,14 +2316,14 @@ describe("Thread: composer read-only fields and model switch", () => {
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
 
     expect(readPageText()).toContain("account fixed");
-    // The current instance's other model can still be picked, unlike the
-    // other instance's group.
+    // The current account's other model can still be picked, unlike the
+    // other account's group.
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
   });
 
   // Picking a model does not patch the session. The pick is draft state that
   // is sent with the next submission.
-  it("shows the picked model in the pill without sending anything when a model of the same instance is chosen", async () => {
+  it("shows the picked model in the pill without sending anything when a model of the same account is chosen", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
@@ -4537,6 +4524,7 @@ const ADA: Assistant = {
   name: "Ada",
   systemPrompt: "You are a helpful assistant.",
   providerAccountId: SESSION.providerAccountId,
+  harnessId: null,
   permissionProfileId: SESSION.permissionProfileId,
   accessMode: "approval-required",
   model: null,

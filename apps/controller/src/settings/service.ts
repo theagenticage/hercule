@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import type * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
@@ -30,6 +31,7 @@ import { requireUserActor, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { PluginHost } from "../plugins";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 import { validateTimezone } from "./timezone";
 
@@ -46,13 +48,14 @@ const NOT_GITHUB = "that connection is not a GitHub connection";
 
 const TEXT_GENERATION_MODEL = "textGeneration.model";
 
-const NO_SUCH_INSTANCE = "that provider instance does not exist";
+const NO_SUCH_ACCOUNT = "that provider account does not exist";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const settings = yield* Settings;
   const connections = yield* connectionRepository;
   const audit = yield* AuditLog;
+  const host = yield* PluginHost;
   // A wake needs no payload, and one unread change already says that the
   // setting changed, so the PubSub keeps only the latest.
   const textGenerationModelWrites = yield* PubSub.sliding<void>(1);
@@ -80,22 +83,48 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Checks that `textGeneration.model`, when the patch chooses an instance, names
-   * an existing provider instance. Fails with a validation error otherwise,
-   * because a text generation set to a missing instance could never run.
+   * Checks that `textGeneration.model`, when the patch chooses a model, names
+   * an existing Provider Account, and a harness this build carries (the
+   * account's default harness when the choice names none). Fails with a
+   * validation error otherwise, because a text generation set to a missing
+   * account or harness could never run.
+   *
+   * It does not check that the account may run in the harness. That rule
+   * lives in the provider-accounts domain, which settings cannot import. A
+   * choice that fails it is reported when a text generation runs, as the
+   * reason text generation is unavailable.
    */
-  const validateTextGenerationInstance = (
+  const validateTextGenerationAccount = (
     patch: SettingsPatch,
-  ): Effect.Effect<void, Validation | SqlError> =>
+  ): Effect.Effect<void, Validation | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
       if (chosen === undefined || typeof chosen === "string") return;
-      if (!(yield* settings.hasProviderInstance(chosen.instanceId))) {
+      const defaultHarnessId = yield* settings.readProviderAccountDefaultHarness(
+        chosen.providerAccountId,
+      );
+      if (Option.isNone(defaultHarnessId)) {
         return yield* Effect.fail(
           createValidationError([
             {
-              path: ["controller", TEXT_GENERATION_MODEL, "instanceId"],
-              message: NO_SUCH_INSTANCE,
+              path: ["controller", TEXT_GENERATION_MODEL, "providerAccountId"],
+              message: NO_SUCH_ACCOUNT,
+            },
+          ]),
+        );
+      }
+      const harnessId = chosen.harnessId ?? defaultHarnessId.value;
+      const carried = (yield* host.harnesses()).some((definition) => definition.id === harnessId);
+      if (!carried) {
+        return yield* Effect.fail(
+          createValidationError([
+            {
+              path: [
+                "controller",
+                TEXT_GENERATION_MODEL,
+                chosen.harnessId === undefined ? "providerAccountId" : "harnessId",
+              ],
+              message: `this build carries no ${harnessId} harness`,
             },
           ]),
         );
@@ -171,7 +200,7 @@ const make = Effect.gen(function* () {
       patch: SettingsPatch,
     ): Effect.Effect<
       SettingsState,
-      Unauthenticated | Forbidden | Validation | SettingError | SqlError
+      Unauthenticated | Forbidden | Validation | SettingError | SqlError | Schema.SchemaError
     > =>
       Effect.gen(function* () {
         const actor = yield* requireUserActor("settings.update");
@@ -190,10 +219,10 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             // Check inside the transaction that writes: a connection or provider
-            // instance deleted between the check and the write would leave the
+            // account deleted between the check and the write would leave the
             // setting pointing at nothing.
             yield* validateGithubConnection(patch);
-            yield* validateTextGenerationInstance(patch);
+            yield* validateTextGenerationAccount(patch);
             const written = [
               ...(patch.controller === undefined
                 ? []
@@ -228,5 +257,5 @@ export class SettingsOperations extends Context.Service<
 export const SettingsOperationsLayer: Layer.Layer<
   SettingsOperations,
   never,
-  SqlClient.SqlClient | Settings | AuditLog
+  SqlClient.SqlClient | Settings | AuditLog | PluginHost
 > = Layer.effect(SettingsOperations)(make);

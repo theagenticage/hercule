@@ -188,7 +188,9 @@ export function ThreadsFace({
             {/* The last line's bottom padding matches a thread row's, so the
                 Assistants header below sits as far from this text as it would
                 from the last row of a thread group. */}
-            <p className={cn("px-2.5 pt-1 text-fine text-faint", needsSignIn ? "pb-1" : "pb-[7px]")}>
+            <p
+              className={cn("px-2.5 pt-1 text-fine text-faint", needsSignIn ? "pb-1" : "pb-[7px]")}
+            >
               No threads yet
             </p>
             {needsSignIn ? (

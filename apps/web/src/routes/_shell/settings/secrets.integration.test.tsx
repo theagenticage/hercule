@@ -322,7 +322,7 @@ describe("Settings > Secrets > setting a secret", () => {
     const kinds = [...screen.getByLabelText<HTMLSelectElement>("Owner kind").options].map(
       (option) => option.value,
     );
-    expect(kinds).toEqual(["plugin", "runner", "provider-instance"]);
+    expect(kinds).toEqual(["plugin", "runner"]);
   });
 });
 

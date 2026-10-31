@@ -347,10 +347,12 @@ it("reports a text generation request as not sent when the runner is not connect
   const request: TextGenerationRequest = {
     _tag: "textGenerationRequest",
     requestId: "text-generation-request",
-    instanceId: "instance",
     harnessId: "codex/codex",
-    config: {},
-    secrets: {},
+    harnessAccount: {
+      providerAccountId: "0199e0e7-0000-7000-8000-0000000000a1",
+      harnessHome: "providers/0199e0e7-0000-7000-8000-0000000000a1",
+      modelArgument: "{model}",
+    },
     spec: {
       model: "model",
       instructions: "Name the thread.",

@@ -54,15 +54,15 @@ import {
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
 import { memoryRepository, renderSessionMemory } from "../../memory";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
-import { deriveCatalogJsonSchema, type PluginHost } from "../../plugins";
+import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
+import { PromotionState } from "../../promotion";
 import {
   isLoggedIn,
   NO_PLACEMENT,
-  providerRepository,
-  resolvedInstance,
+  providerAccountRepository,
+  resolveAccountHarness,
   type StoredSnapshot,
-} from "../../providers";
-import { PromotionState } from "../../promotion";
+} from "../../provider-accounts";
 import { resourceRepository } from "../../resources";
 import {
   DRAINING,
@@ -179,10 +179,10 @@ const NOT_ITS_ACCESS_MODE =
   "send accessMode at or below the agent's, or leave it out";
 
 /**
- * Fails with a validation error when a spawn from an Agent sets `instanceId`
- * or `permissionProfileId`. Those two fields always come from the Agent: if a
- * call could override them, it would open a session the Agent never
- * described.
+ * Fails with a validation error when a spawn from an Agent sets
+ * `providerAccountId`, `harnessId` or `permissionProfileId`. Those fields
+ * always come from the Agent: if a call could override them, it would open a
+ * session the Agent never described.
  *
  * Every other per-spawn field may override the Agent's value, so no other
  * field is rejected for having a value. The access mode is an
@@ -190,7 +190,7 @@ const NOT_ITS_ACCESS_MODE =
  * the field, and `mayRunOn` below checks that.
  */
 const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, Validation> => {
-  for (const field of ["instanceId", "permissionProfileId"] as const) {
+  for (const field of ["providerAccountId", "harnessId", "permissionProfileId"] as const) {
     if (spawn[field] !== undefined) {
       return Effect.fail(
         createValidationError([
@@ -273,7 +273,12 @@ const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
  * A field is undefined when the source has no value for it.
  */
 interface ThreadDefaults {
-  readonly instanceId: string | undefined;
+  readonly providerAccountId: string | undefined;
+  /**
+   * The harness to run in. It applies only to a session on
+   * `providerAccountId`: a harness belongs to its account.
+   */
+  readonly harnessId: string | undefined;
   readonly model: string | undefined;
   /** The options that belong to `model`. */
   readonly options: ModelSelection["options"] | undefined;
@@ -325,6 +330,8 @@ interface Placing {
   /** The workflow run's agent step the session runs, or undefined for any other session. */
   readonly step: WorkspaceStepKey | undefined;
   readonly runnerId: string;
+  /** The qualified id of the harness the session runs in, resolved before the session is written. */
+  readonly harnessId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
   /** The spec the runner receives. Its workspace id is filled in while placing. */
@@ -362,8 +369,8 @@ const make = Effect.gen(function* () {
   const recordComposer = yield* sessionRecordComposer;
   const workspaces = yield* WorkspaceService;
   const resources = yield* resourceRepository;
-  const instances = yield* providerRepository;
-  const resolved = yield* resolvedInstance;
+  const providerAccounts = yield* providerAccountRepository;
+  const host = yield* PluginHost;
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
   const profiles = yield* PermissionProfiles;
@@ -374,6 +381,13 @@ const make = Effect.gen(function* () {
   const { dispatch } = yield* Dispatch;
   const textGeneration = yield* TextGeneration;
   const forkAfterCommit = yield* makeForkAfterCommit;
+
+  /** Resolves an account and a harness (`resolveAccountHarness`) in this layer's context. */
+  const resolveAccountHarnessHere = (providerAccountId: string, harnessId: string | undefined) =>
+    resolveAccountHarness(providerAccountId, harnessId).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+      Effect.provideService(PluginHost, host),
+    );
 
   /**
    * Starts writing a title and a role for a new Thread on a background fiber,
@@ -411,8 +425,9 @@ const make = Effect.gen(function* () {
 
   /**
    * Chooses the runner for a session when the caller did not name one: the
-   * first placeable runner whose capability snapshot shows this instance is
-   * logged in. Fails with an invalid state error when there is none.
+   * first placeable runner whose capability snapshot shows this account is
+   * signed in, in the session's harness. Fails with an invalid state error
+   * when there is none.
    */
   const choosePlacement = (
     snapshots: ReadonlyArray<StoredSnapshot>,
@@ -428,8 +443,8 @@ const make = Effect.gen(function* () {
 
   /**
    * Returns the snapshot of the runner the caller named. Fails when the runner
-   * does not exist, is draining or retired, or has no logged-in snapshot for
-   * this instance.
+   * does not exist, is draining or retired, or has no signed-in snapshot for
+   * this account in the harness.
    *
    * A named runner is used even when it is reserved, full, or not connected
    * right now. It is checked on its own, the way `continue` checks the runner
@@ -460,22 +475,28 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Resolves the runner, the access mode and the model a new session on
-   * `instanceId` starts with, in this order:
+   * Resolves the harness, the runner, the access mode and the model a new
+   * session on `providerAccountId` starts with, in this order:
    *
+   * 0. the harness: the one requested, or else the account's default. The
+   *    session stores it, so it runs in the same harness for good;
    * 1. the runner: the one named, or else the first placeable runner;
    * 2. the access mode: the nearest one at or below the requested mode that
    *    the harness supports;
    * 3. the model: the one requested, or else the runner's default model for
-   *    the instance, with the requested options checked against it.
+   *    the account in that harness, with the requested options checked
+   *    against it.
    *
-   * Returns the runner id, the access mode and the model selection. Fails
-   * with `InvalidState` when no runner can take the session, the harness
-   * supports no such access mode, or the runner reported no models, and with
-   * `Validation` for an unknown instance, runner or option.
+   * Returns the harness id, the runner id, the access mode and the model
+   * selection. Fails with `InvalidState` when no runner can take the session,
+   * the harness supports no such access mode, or the runner reported no
+   * models, and with `Validation` for an unknown account, harness, runner or
+   * option.
    */
   const resolveStartSettings = (request: {
-    readonly instanceId: string;
+    readonly providerAccountId: string;
+    /** The harness to run in, or undefined for the account's default. */
+    readonly harnessId: string | undefined;
     /** The runner the session must run on, or undefined to let placement choose. */
     readonly runnerId: string | undefined;
     readonly requestedAccessMode: AccessMode;
@@ -484,6 +505,7 @@ const make = Effect.gen(function* () {
     readonly options: ModelSelection["options"];
   }): Effect.Effect<
     {
+      readonly harnessId: string;
       readonly runnerId: string;
       readonly accessMode: AccessMode;
       readonly modelSelection: ModelSelection;
@@ -491,7 +513,10 @@ const make = Effect.gen(function* () {
     InvalidState | Validation | SqlError | Schema.SchemaError
   > =>
     Effect.gen(function* () {
-      const { definition, snapshots } = yield* resolved(request.instanceId);
+      const { harnessId, definition, snapshots } = yield* resolveAccountHarnessHere(
+        request.providerAccountId,
+        request.harnessId,
+      );
       const hosting = yield* request.runnerId === undefined
         ? choosePlacement(snapshots)
         : chooseExplicitRunner(request.runnerId, snapshots);
@@ -510,7 +535,7 @@ const make = Effect.gen(function* () {
         request.model ?? (hosting.models.find((one) => one.isDefault) ?? hosting.models[0])?.slug;
       if (model === undefined) {
         return yield* Effect.fail(
-          createInvalidStateError("that runner reported no models for this provider instance"),
+          createInvalidStateError("that runner reported no models for this account"),
         );
       }
       // Options are validated against the model, wherever they came from. An
@@ -518,6 +543,7 @@ const make = Effect.gen(function* () {
       // came from the Agent, rather than silently dropped.
       yield* validateOptions(hosting.models, model, request.options);
       return {
+        harnessId,
         runnerId: hosting.runnerId,
         accessMode,
         modelSelection: { model, options: request.options },
@@ -652,7 +678,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const values = yield* settings.allForUser(userId);
       return {
-        instanceId: values["thread.instanceId"],
+        providerAccountId: values["thread.providerAccountId"],
+        harnessId: values["thread.harnessId"] ?? undefined,
         model: values["thread.model"],
         options: undefined,
         accessMode: values["thread.accessMode"],
@@ -666,9 +693,11 @@ const make = Effect.gen(function* () {
    * Returns the values a Thread a session starts takes for the fields the
    * call leaves out, copied from the calling session's row:
    *
-   * - The model and options are copied only when the Thread runs on the
-   *   caller's instance (the call names no instance, or the caller's),
-   *   because a model belongs to its instance and options to their model.
+   * - The account and the harness are the caller's. The model and options are
+   *   copied only when the Thread runs on the caller's account and in the
+   *   caller's harness (the call names neither, or names the caller's),
+   *   because a model belongs to its account in its harness and options to
+   *   their model.
    * - The Agent-only fields of the row (system prompt, disallowed tools,
    *   output schema) are never copied: a Thread has no Agent.
    * - When the call names no project, the caller's project is copied only
@@ -685,11 +714,15 @@ const make = Effect.gen(function* () {
     call: SessionSpawnInput,
   ): Effect.Effect<ThreadDefaults, SqlError> =>
     Effect.gen(function* () {
-      const sameInstance = call.instanceId === undefined || call.instanceId === caller.instanceId;
+      const sameAccount =
+        call.providerAccountId === undefined || call.providerAccountId === caller.providerAccountId;
+      const sameHarness = call.harnessId === undefined || call.harnessId === caller.harnessId;
+      const sameModelSource = sameAccount && sameHarness;
       return {
-        instanceId: caller.instanceId,
-        model: sameInstance ? caller.modelSelection.model : undefined,
-        options: sameInstance ? caller.modelSelection.options : undefined,
+        providerAccountId: caller.providerAccountId,
+        harnessId: caller.harnessId,
+        model: sameModelSource ? caller.modelSelection.model : undefined,
+        options: sameModelSource ? caller.modelSelection.options : undefined,
         accessMode: caller.requestedAccessMode,
         permissionProfileId: caller.permissionProfileId,
         projectId:
@@ -703,21 +736,32 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the first provider instance that is logged in on some runner. A
-   * Thread uses it when the user has not set `thread.instanceId`. Fails with
-   * an invalid state error when no instance is logged in.
+   * Returns the id of the oldest Provider Account that is signed in on some
+   * runner, in its default harness. A Thread uses it when the user has not
+   * set `thread.providerAccountId`. Fails with an invalid state error when no
+   * account is signed in anywhere.
    */
-  const pickLoggedInInstance = (): Effect.Effect<
+  const pickSignedInAccount = (): Effect.Effect<
     string,
     InvalidState | SqlError | Schema.SchemaError
   > =>
     Effect.gen(function* () {
-      for (const snapshot of yield* instances.snapshots()) {
-        if (isLoggedIn(snapshot)) return snapshot.instanceId;
+      const snapshots = yield* providerAccounts.snapshots();
+      for (const account of yield* providerAccounts.list()) {
+        if (
+          snapshots.some(
+            (snapshot) =>
+              snapshot.providerAccountId === account.id &&
+              snapshot.harnessId === account.defaultHarnessId &&
+              isLoggedIn(snapshot),
+          )
+        ) {
+          return account.id;
+        }
       }
       return yield* Effect.fail(
         createInvalidStateError(
-          "no provider instance is logged in on any runner; log in on a runner first",
+          "no provider account is signed in on any runner; sign in to an account on a runner first",
         ),
       );
     });
@@ -790,6 +834,7 @@ const make = Effect.gen(function* () {
             conversationId: open.conversationId,
             step: open.step,
             runnerId: open.runnerId,
+            harnessId: open.harnessId,
             requestedAccessMode: open.requestedAccessMode,
             parentSessionId: open.parentSessionId,
             spec: { ...open.spec, workspaceId: opened.workspaceId },
@@ -968,8 +1013,9 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
-          instanceId: agent.instanceId,
+        const { harnessId, runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
+          providerAccountId: agent.providerAccountId,
+          harnessId: agent.harnessId ?? undefined,
           runnerId: undefined,
           requestedAccessMode: agent.accessMode,
           model: agent.model?.model,
@@ -980,7 +1026,7 @@ const make = Effect.gen(function* () {
         const memoryIndex = yield* memory.list(agent.id);
 
         const spec = {
-          instanceId: agent.instanceId,
+          providerAccountId: agent.providerAccountId,
           workspaceId: null,
           modelSelection,
           accessMode,
@@ -1000,6 +1046,7 @@ const make = Effect.gen(function* () {
           conversationId: request.conversationId,
           step: undefined,
           runnerId,
+          harnessId,
           requestedAccessMode: agent.accessMode,
           parentSessionId: undefined,
           spec,
@@ -1013,7 +1060,8 @@ const make = Effect.gen(function* () {
           fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
           checkoutBranch: undefined,
           payload: {
-            instanceId: agent.instanceId,
+            providerAccountId: agent.providerAccountId,
+            harnessId,
             runnerId,
             requestedAccessMode: agent.accessMode,
             accessMode,
@@ -1037,8 +1085,8 @@ const make = Effect.gen(function* () {
      *
      * Each setting is the step's value if the step sets one, otherwise the
      * Agent's: the model with its options, and the access mode. The Agent
-     * gives the instance, the permission profile, the system prompt and the
-     * disallowed tools. The step's output schema goes on the spec, and so
+     * gives the account, the harness, the permission profile, the system
+     * prompt and the disallowed tools. The step's output schema goes on the spec, and so
      * does an idle unload of a few seconds, so the session frees its runner
      * slot soon after each of its turns ends (`buildStepSessionTimeouts`).
      *
@@ -1046,7 +1094,7 @@ const make = Effect.gen(function* () {
      * gave the run this step by saving the workflow. The current actor must
      * be the step's run. Fails with `NotFound` or `InvalidState` when the
      * Agent no longer exists or cannot be run, and with `InvalidState` or
-     * `Validation` when the run's runner cannot host the Agent's instance or
+     * `Validation` when the run's runner cannot host the Agent's account or
      * its settings.
      */
     placeStepSession: (request: {
@@ -1083,8 +1131,9 @@ const make = Effect.gen(function* () {
         // A model and its options are one selection, as for a spawn: the
         // Agent's options apply only when the Agent's model is used.
         const agentSelection = request.model === undefined ? agent.model : undefined;
-        const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
-          instanceId: agent.instanceId,
+        const { harnessId, runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
+          providerAccountId: agent.providerAccountId,
+          harnessId: agent.harnessId ?? undefined,
           runnerId: request.runnerId,
           requestedAccessMode,
           model: request.model ?? agentSelection?.model,
@@ -1093,7 +1142,7 @@ const make = Effect.gen(function* () {
         const outputSchema = yield* validateOutputSchema(request.outputSchema);
 
         const spec = {
-          instanceId: agent.instanceId,
+          providerAccountId: agent.providerAccountId,
           // The session joins the run's workspace: `writeSession` opens no
           // workspace of its own when it is given none, and keeps this one.
           workspaceId: request.workspaceId,
@@ -1111,6 +1160,7 @@ const make = Effect.gen(function* () {
           conversationId: undefined,
           step: request.step,
           runnerId,
+          harnessId,
           requestedAccessMode,
           parentSessionId: undefined,
           spec,
@@ -1124,7 +1174,8 @@ const make = Effect.gen(function* () {
           fallbackGithubConnectionId: undefined,
           checkoutBranch: request.checkoutBranch,
           payload: {
-            instanceId: agent.instanceId,
+            providerAccountId: agent.providerAccountId,
+            harnessId,
             runnerId,
             requestedAccessMode,
             accessMode,
@@ -1147,7 +1198,14 @@ const make = Effect.gen(function* () {
      *    (`readUserThreadDefaults`, `copyCallerThreadDefaults`): the user's
      *    `thread.*` settings when the user starts it, the calling session's
      *    own values when a session does;
-     * 3. the instance's default.
+     * 3. the account's default (for the harness), or for the account the
+     *    oldest account that is signed in on some runner.
+     *
+     * The harness has its own order: the call's, else the Agent's, else the
+     * Thread default's when the session runs on that default's account (the
+     * user's `thread.harnessId`, or the calling session's own harness for a
+     * session's spawn), else the account's default harness. A session stores
+     * the concrete harness it was placed in.
      *
      * There is one order only, so there is one answer to "what does this
      * session run under". The model and its options are resolved together, as
@@ -1261,11 +1319,20 @@ const make = Effect.gen(function* () {
               : undefined;
           // An override applies to this session only and is not written back to
           // the settings.
-          const instanceId =
-            decoded.instanceId ??
-            agent?.instanceId ??
-            threadDefaults?.instanceId ??
-            (yield* pickLoggedInInstance());
+          const providerAccountId =
+            decoded.providerAccountId ??
+            agent?.providerAccountId ??
+            threadDefaults?.providerAccountId ??
+            (yield* pickSignedInAccount());
+          // A harness default belongs to its account, so it applies only when
+          // the session runs on that account. `undefined` means the account's
+          // default harness.
+          const requestedHarnessId =
+            decoded.harnessId ??
+            agent?.harnessId ??
+            (providerAccountId === threadDefaults?.providerAccountId
+              ? threadDefaults?.harnessId
+              : undefined);
           const requestedAccessMode =
             decoded.accessMode ??
             agent?.accessMode ??
@@ -1280,8 +1347,9 @@ const make = Effect.gen(function* () {
             decoded.model === undefined
               ? (agent?.model?.options ?? threadDefaults?.options)
               : undefined;
-          const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
-            instanceId,
+          const { harnessId, runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
+            providerAccountId,
+            harnessId: requestedHarnessId,
             runnerId: pinnedTo ?? decoded.runnerId ?? caller?.runnerId,
             requestedAccessMode,
             model: decoded.model ?? agent?.model?.model ?? threadDefaults?.model,
@@ -1304,7 +1372,7 @@ const make = Effect.gen(function* () {
             (yield* readThreadProfileId());
 
           const spec = {
-            instanceId,
+            providerAccountId,
             workspaceId: null,
             modelSelection,
             accessMode,
@@ -1322,6 +1390,7 @@ const make = Effect.gen(function* () {
             conversationId: undefined,
             step: undefined,
             runnerId,
+            harnessId,
             requestedAccessMode,
             parentSessionId: undefined,
             spec,
@@ -1335,7 +1404,8 @@ const make = Effect.gen(function* () {
             fallbackGithubConnectionId: threadDefaults?.githubConnectionId,
             checkoutBranch: undefined,
             payload: {
-              instanceId,
+              providerAccountId,
+              harnessId,
               runnerId,
               requestedAccessMode,
               accessMode,
@@ -1351,7 +1421,7 @@ const make = Effect.gen(function* () {
     /**
      * Opens a new session that continues from the harness-native session an
      * exited parent left behind. Returns the new session. It runs on the same
-     * runner and instance as the parent, because that is where the native
+     * runner, account and harness as the parent, because that is where the native
      * state is (spec 06 section 4.1). Resuming the parent itself is done by
      * `session.input`.
      *
@@ -1402,10 +1472,12 @@ const make = Effect.gen(function* () {
           if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
           }
-          // Called only for its failures: it fails when the instance is gone, or
-          // its harness is no longer registered.
-          yield* resolved(parent.instanceId);
           const nativeSessionId = yield* resumableNativeSession(parent);
+          // Called only for its failures: it fails when the account can no
+          // longer run in the harness, or this build no longer carries it. It
+          // comes after the resume check, which refuses a deleted account
+          // with its own message.
+          yield* resolveAccountHarnessHere(parent.providerAccountId, parent.harnessId);
 
           return {
             permissionProfileId: parent.permissionProfileId,
@@ -1415,6 +1487,8 @@ const make = Effect.gen(function* () {
             conversationId: undefined,
             step: undefined,
             runnerId: parent.runnerId,
+            // The fork stays in its parent's harness, where the native state is.
+            harnessId: parent.harnessId,
             requestedAccessMode: parent.requestedAccessMode,
             parentSessionId: parent.id,
             // A fork continues under the parent's spec, in the parent's

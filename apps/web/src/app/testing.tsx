@@ -50,7 +50,7 @@ const HOUSEKEEPING: Readonly<Record<string, Handler>> = {
   // The providers and harnesses are what the plugins register, so they do not
   // vary with the account a test sets up. The accounts do: a test that needs
   // them stubs `GET /api/v1/provider-accounts` itself.
-  "GET /api/v1/provider-accounts": { body: PROVIDERS },
+  "GET /api/v1/providers": { body: PROVIDERS },
   "GET /api/v1/harnesses": { body: HARNESSES },
 };
 

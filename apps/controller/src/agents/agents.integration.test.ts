@@ -5,7 +5,7 @@
  *
  * A machine is needed for two of the assertions:
  *
- * - `unenforced` is read from the instance's harness definition.
+ * - `unenforced` is read from the agent's harness definition.
  * - A delete must be rejected while a session spawned from the agent still
  *   runs.
  */
@@ -17,8 +17,10 @@ import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import type { Agent as AgentRecord, Assistant, Session } from "@hercule/contract";
 import { withTransaction } from "../db";
 import { del, get, post, readErrorBody, send } from "../http/testing";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition } from "../plugins/testing";
 import {
+  buildFleetPlugin,
+  findProviderAccountId,
   spawnThreadUnder,
   at,
   readProfileNamed,
@@ -33,14 +35,14 @@ import {
 } from "../sessions/testing";
 
 /** A harness that enforces a tool restriction natively, as Claude Code does. */
-const CLAUDE: HarnessDefinition = buildHarnessDefinition("claude", { token: "t" });
+const CLAUDE: HarnessDefinition = buildHarnessDefinition("claude");
 
 /** A harness that enforces a tool restriction natively, as pi does. */
-const PI: HarnessDefinition = buildHarnessDefinition("pi", { token: "t" });
+const PI: HarnessDefinition = buildHarnessDefinition("pi");
 
 /** A harness that stores a tool restriction but enforces none, as Codex does. */
 const CODEX: HarnessDefinition = {
-  ...buildHarnessDefinition("codex", { token: "t" }),
+  ...buildHarnessDefinition("codex"),
   declared: {
     ...buildHarnessDefinition("codex").declared,
     disallowedTools: "unsupported",
@@ -48,7 +50,7 @@ const CODEX: HarnessDefinition = {
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "harnesses", definitions: [CLAUDE, CODEX, PI] }).plugin,
+  buildFleetPlugin("harnesses", [CLAUDE, CODEX, PI]),
 ];
 
 const FACTS: RunnerFacts = {
@@ -78,12 +80,6 @@ const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =
 
 /** A well-formed id that matches no record. */
 const NOBODY = "0199e0e7-9999-7000-8000-000000000000";
-
-const findInstanceId = (arranged: Arranged, harnessId: string): string => {
-  const found = arranged.instances.find((instance) => instance.harnessId === harnessId);
-  expect(found, harnessId).toBeDefined();
-  return found!.id;
-};
 
 /** An error response: its code, the grant it names, and its full text. */
 interface Refusal {
@@ -123,16 +119,16 @@ const updateAgent = (
   send("PATCH", arranged.harness.base, `/api/v1/agents/${id}`, { body: fields, token });
 
 /** Creates an agent with the four required fields, as every case here does. */
-const createAgentForInstance = async (
+const createAgentOnAccount = async (
   arranged: Arranged,
-  instanceId: string,
+  providerAccountId: string,
   fields: Record<string, unknown> = {},
 ): Promise<AgentRecord> => {
   const profile = await readProfileNamed(arranged, "unrestricted");
   const response = await createAgent(arranged, {
     name: `agent-${crypto.randomUUID()}`,
     systemPrompt: "You assess tasks.",
-    instanceId,
+    providerAccountId,
     permissionProfileId: profile.id,
     ...fields,
   });
@@ -211,16 +207,18 @@ const driveSessionToExited = async (
 describe("the agent over its five operations", () => {
   it("is created with the defaults for a background agent, reads and lists the same way, accepts an update, and is gone after a delete", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "harnesses/claude");
+      const providerAccountId = findProviderAccountId(arranged, "harnesses/claude");
       const profile = await readProfileNamed(arranged, "unrestricted");
 
-      const created = await createAgentForInstance(arranged, instanceId);
+      const created = await createAgentOnAccount(arranged, providerAccountId);
 
       expect(created.id).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
       );
       expect(created.systemPrompt).toBe("You assess tasks.");
-      expect(created.instanceId).toBe(instanceId);
+      expect(created.providerAccountId).toBe(providerAccountId);
+      // No harness named: its sessions run in the account's default harness.
+      expect(created.harnessId).toBeNull();
       expect(created.permissionProfileId).toBe(profile.id);
       expect(created.accessMode).toBe("full-access");
       expect(created.model).toBeNull();
@@ -267,9 +265,9 @@ describe("the agent over its five operations", () => {
 
   it.each([
     {
-      what: "an instance that does not exist",
-      fields: { instanceId: NOBODY },
-      names: "instanceId",
+      what: "an account that does not exist",
+      fields: { providerAccountId: NOBODY },
+      names: "providerAccountId",
     },
     {
       what: "a profile that does not exist",
@@ -292,7 +290,7 @@ describe("the agent over its five operations", () => {
       const response = await createAgent(arranged, {
         name: "assessor",
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "harnesses/claude"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/claude"),
         permissionProfileId: profile.id,
         ...fields,
       });
@@ -305,9 +303,9 @@ describe("the agent over its five operations", () => {
 
   it.each([
     {
-      what: "an instance that does not exist",
-      fields: { instanceId: NOBODY },
-      names: "instanceId",
+      what: "an account that does not exist",
+      fields: { providerAccountId: NOBODY },
+      names: "providerAccountId",
     },
     {
       what: "a profile that does not exist",
@@ -326,9 +324,9 @@ describe("the agent over its five operations", () => {
     },
   ])("rejects an update with $what, and names the field", async ({ fields, names }) => {
     await withFleet(async (arranged) => {
-      const agent = await createAgentForInstance(
+      const agent = await createAgentOnAccount(
         arranged,
-        findInstanceId(arranged, "harnesses/claude"),
+        findProviderAccountId(arranged, "harnesses/claude"),
       );
 
       const refused = await parseRefusal(await updateAgent(arranged, agent.id, fields));
@@ -339,8 +337,8 @@ describe("the agent over its five operations", () => {
 
   it("rejects every call by an actor whose profile lacks the grant, and names the grant", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "harnesses/claude");
-      const agent = await createAgentForInstance(arranged, instanceId);
+      const providerAccountId = findProviderAccountId(arranged, "harnesses/claude");
+      const agent = await createAgentOnAccount(arranged, providerAccountId);
       const profile = await readProfileNamed(arranged, "unrestricted");
       const { token } = await spawnThreadUnder(
         arranged,
@@ -357,7 +355,7 @@ describe("the agent over its five operations", () => {
             {
               name: "sneaky",
               systemPrompt: "x",
-              instanceId,
+              providerAccountId,
               permissionProfileId: profile.id,
             },
             token,
@@ -388,28 +386,117 @@ describe("the agent over its five operations", () => {
   });
 });
 
+describe("the harness an agent runs in", () => {
+  it("stores a harness the account can run, and puts the agent back on the default with null", async () => {
+    await withFleet(async (arranged) => {
+      const providerAccountId = findProviderAccountId(arranged, "harnesses/claude");
+      const created = await createAgentOnAccount(arranged, providerAccountId, {
+        harnessId: "harnesses/claude",
+      });
+      expect(created.harnessId).toBe("harnesses/claude");
+
+      const reset = await updateAgent(arranged, created.id, { harnessId: null });
+      expect(reset.status, await reset.clone().text()).toBe(200);
+      expect(((await reset.json()) as AgentRecord).harnessId).toBeNull();
+    });
+  });
+
+  it("reports unenforced for the account's default harness when the agent names none", async () => {
+    await withFleet(async (arranged) => {
+      const created = await createAgentOnAccount(
+        arranged,
+        findProviderAccountId(arranged, "harnesses/codex"),
+        { disallowedTools: ["edit"] },
+      );
+
+      expect(created.harnessId).toBeNull();
+      expect(created.unenforced).toEqual(["disallowedTools"]);
+    });
+  });
+
+  it("rejects a create that names a harness the account cannot run, and names harnessId", async () => {
+    await withFleet(async (arranged) => {
+      const profile = await readProfileNamed(arranged, "unrestricted");
+      const refused = await parseRefusal(
+        await createAgent(arranged, {
+          name: "assessor",
+          systemPrompt: "You assess tasks.",
+          providerAccountId: findProviderAccountId(arranged, "harnesses/claude"),
+          harnessId: "harnesses/codex",
+          permissionProfileId: profile.id,
+        }),
+      );
+
+      expect(refused.code).toBe("validation");
+      expect(refused.text).toContain("harnessId");
+    });
+  });
+
+  it("rejects moving an agent to an account that cannot run its harness, and keeps the agent as it was", async () => {
+    await withFleet(async (arranged) => {
+      const agent = await createAgentOnAccount(
+        arranged,
+        findProviderAccountId(arranged, "harnesses/claude"),
+        { harnessId: "harnesses/claude" },
+      );
+
+      const refused = await parseRefusal(
+        await updateAgent(arranged, agent.id, {
+          providerAccountId: findProviderAccountId(arranged, "harnesses/codex"),
+        }),
+      );
+
+      expect(refused.code).toBe("validation");
+      expect(refused.text).toContain("harnessId");
+      expect(await readAgent(arranged, agent.id)).toEqual(agent);
+    });
+  });
+
+  it("moves an agent to another account when it names that account's harness too", async () => {
+    await withFleet(async (arranged) => {
+      const agent = await createAgentOnAccount(
+        arranged,
+        findProviderAccountId(arranged, "harnesses/claude"),
+        { harnessId: "harnesses/claude" },
+      );
+      const codexAccountId = findProviderAccountId(arranged, "harnesses/codex");
+
+      const response = await updateAgent(arranged, agent.id, {
+        providerAccountId: codexAccountId,
+        harnessId: "harnesses/codex",
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({
+        providerAccountId: codexAccountId,
+        harnessId: "harnesses/codex",
+      });
+    });
+  });
+});
+
 describe("what a harness declares it will not enforce", () => {
   it.each([
     {
-      what: "a Codex instance with a restriction",
+      what: "a Codex agent with a restriction",
       harness: "harnesses/codex",
       tools: ["edit"],
       unenforced: ["disallowedTools"],
     },
     {
-      what: "a Codex instance with no restriction",
+      what: "a Codex agent with no restriction",
       harness: "harnesses/codex",
       tools: [],
       unenforced: [],
     },
     {
-      what: "a Claude Code instance with a restriction",
+      what: "a Claude Code agent with a restriction",
       harness: "harnesses/claude",
       tools: ["edit"],
       unenforced: [],
     },
     {
-      what: "a pi instance with a restriction",
+      what: "a pi agent with a restriction",
       harness: "harnesses/pi",
       tools: ["edit"],
       unenforced: [],
@@ -418,7 +505,7 @@ describe("what a harness declares it will not enforce", () => {
     "reports unenforced for $what, at create and at read",
     async ({ harness, tools, unenforced }) => {
       await withFleet(async (arranged) => {
-        const created = await createAgentForInstance(arranged, findInstanceId(arranged, harness), {
+        const created = await createAgentOnAccount(arranged, findProviderAccountId(arranged, harness), {
           disallowedTools: tools,
         });
 
@@ -434,9 +521,9 @@ describe("deleting an agent a session still points at", () => {
     "is rejected while a session is %s, and names the session",
     async (status) => {
       await withFleet(async (arranged) => {
-        const agent = await createAgentForInstance(
+        const agent = await createAgentOnAccount(
           arranged,
-          findInstanceId(arranged, "harnesses/claude"),
+          findProviderAccountId(arranged, "harnesses/claude"),
         );
         // The runner leaves a starting session's start unanswered, so the
         // session cannot move on to `busy`.
@@ -459,9 +546,9 @@ describe("deleting an agent a session still points at", () => {
 
   it("succeeds once every session it spawned has exited, and those sessions keep its id", async () => {
     await withFleet(async (arranged) => {
-      const agent = await createAgentForInstance(
+      const agent = await createAgentOnAccount(
         arranged,
-        findInstanceId(arranged, "harnesses/claude"),
+        findProviderAccountId(arranged, "harnesses/claude"),
       );
       const session = await spawnSessionFor(arranged, agent.id);
       await driveSessionToBusy(arranged, session);
@@ -488,9 +575,9 @@ describe("deleting an agent a session still points at", () => {
 describe("listing sessions by what spawned them", () => {
   it("returns one agent's sessions by its id, and only the threads for a thread listing", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "harnesses/claude");
-      const mine = await createAgentForInstance(arranged, instanceId);
-      const other = await createAgentForInstance(arranged, instanceId);
+      const providerAccountId = findProviderAccountId(arranged, "harnesses/claude");
+      const mine = await createAgentOnAccount(arranged, providerAccountId);
+      const other = await createAgentOnAccount(arranged, providerAccountId);
       const ours = await spawnSessionFor(arranged, mine.id);
       const theirs = await spawnSessionFor(arranged, other.id);
       const thread = await spawnSessionOrFail(arranged, { prompt: "by hand" });
@@ -509,9 +596,9 @@ describe("listing sessions by what spawned them", () => {
 
   it("rejects a listing that names an agent and also asks for the kind thread", async () => {
     await withFleet(async (arranged) => {
-      const agent = await createAgentForInstance(
+      const agent = await createAgentOnAccount(
         arranged,
-        findInstanceId(arranged, "harnesses/claude"),
+        findProviderAccountId(arranged, "harnesses/claude"),
       );
 
       const response = await get(
@@ -532,9 +619,9 @@ describe("the permission profile an agent spawns under", () => {
   it("rejects deleting a profile that an agent names, and names the agent", async () => {
     await withFleet(async (arranged) => {
       const profile = await createProfile(arranged, "assessors", ["session.read"]);
-      const agent = await createAgentForInstance(
+      const agent = await createAgentOnAccount(
         arranged,
-        findInstanceId(arranged, "harnesses/claude"),
+        findProviderAccountId(arranged, "harnesses/claude"),
         {
           name: "the-assessor",
           permissionProfileId: profile.id,
@@ -569,9 +656,9 @@ describe("the permission profile an agent spawns under", () => {
   it("rejects a spawn from an agent whose profile was deleted", async () => {
     await withFleet(async (arranged) => {
       const profile = await createProfile(arranged, "doomed", ["session.read"]);
-      const agent = await createAgentForInstance(
+      const agent = await createAgentOnAccount(
         arranged,
-        findInstanceId(arranged, "harnesses/claude"),
+        findProviderAccountId(arranged, "harnesses/claude"),
         {
           permissionProfileId: profile.id,
         },
@@ -621,9 +708,9 @@ describe("an assistant seen through the agent operations", () => {
   it("lists a plain agent and no assistant", async () => {
     await withFleet(async (arranged) => {
       await createAssistant(arranged);
-      const plain = await createAgentForInstance(
+      const plain = await createAgentOnAccount(
         arranged,
-        findInstanceId(arranged, "harnesses/claude"),
+        findProviderAccountId(arranged, "harnesses/claude"),
       );
 
       expect((await listAgents(arranged)).map((agent) => agent.id)).toEqual([plain.id]);
@@ -639,7 +726,7 @@ describe("an assistant seen through the agent operations", () => {
         id: assistant.id,
         name: assistant.name,
         systemPrompt: assistant.systemPrompt,
-        instanceId: assistant.instanceId,
+        providerAccountId: assistant.providerAccountId,
         permissionProfileId: assistant.permissionProfileId,
         accessMode: assistant.accessMode,
         disallowedTools: assistant.disallowedTools,
@@ -663,7 +750,7 @@ describe("an assistant seen through the agent operations", () => {
       // The refusal comes before the fields are checked, so an edit that
       // would also be invalid still points at the assistant operations.
       const invalid = await readErrorBody(
-        await updateAgent(arranged, assistant.id, { instanceId: NOBODY }),
+        await updateAgent(arranged, assistant.id, { providerAccountId: NOBODY }),
       );
       expect(invalid.code, invalid.text).toBe("invalid_state");
       expect(invalid.message).toBe(ASSISTANT_REFUSAL);
@@ -721,10 +808,10 @@ describe("a profile that holds a grant only the user gives", () => {
 
   it("refuses a session that puts an Agent or an assistant on it, and changes nothing", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "harnesses/claude");
+      const providerAccountId = findProviderAccountId(arranged, "harnesses/claude");
       const assistantProfile = await readProfileNamed(arranged, "assistant");
       const worker = await readProfileNamed(arranged, "worker");
-      const agent = await createAgentForInstance(arranged, instanceId);
+      const agent = await createAgentOnAccount(arranged, providerAccountId);
       const assistantResponse = await createAssistantAs(
         arranged,
         { name: "Ada", permissionProfileId: worker.id },
@@ -745,7 +832,7 @@ describe("a profile that holds a grant only the user gives", () => {
             {
               name: "borrower",
               systemPrompt: "x",
-              instanceId,
+              providerAccountId,
               permissionProfileId: assistantProfile.id,
             },
             token,
@@ -795,14 +882,14 @@ describe("a profile that holds a grant only the user gives", () => {
 
   it("lets a session name a profile without them, and lets the user name any profile", async () => {
     await withFleet(async (arranged) => {
-      const instanceId = findInstanceId(arranged, "harnesses/claude");
+      const providerAccountId = findProviderAccountId(arranged, "harnesses/claude");
       const assistantProfile = await readProfileNamed(arranged, "assistant");
       const worker = await readProfileNamed(arranged, "worker");
       const { token } = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "unrestricted"),
       );
-      const fields = { name: "assessor", systemPrompt: "x", instanceId };
+      const fields = { name: "assessor", systemPrompt: "x", providerAccountId };
 
       const calls: ReadonlyArray<readonly [string, () => Promise<Response>]> = [
         [

@@ -141,7 +141,7 @@ const describeSignInFailure = (answer: LoginAnswer): string =>
  * Names an account the way a user reads it: its provider, then its label if it
  * has one ("Anthropic · work").
  */
-const describeAccount = (
+export const describeAccount = (
   account: StoredProviderAccount,
   providers: ReadonlyArray<RegisteredProvider>,
 ): string => {

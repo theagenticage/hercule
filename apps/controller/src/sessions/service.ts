@@ -31,6 +31,7 @@ import {
   type Delivery,
   type FilesEdited,
   type GitIdentity,
+  type HarnessAccount,
   SubagentId,
   type ModelSelection,
   type HarnessEvent,
@@ -107,7 +108,6 @@ import {
   permissionRequestRepository,
   SessionTokens,
 } from "../permissions";
-import type { SecretDecryptError } from "../secrets";
 import type { SendOutcome } from "../runners";
 import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
 import { permissionRequestSubscriptions } from "../subscriptions";
@@ -259,6 +259,11 @@ export interface CreateRequest {
    */
   readonly step: WorkspaceStepKey | undefined;
   readonly runnerId: string;
+  /**
+   * The qualified id of the harness the session runs in. The caller resolves
+   * it when it places the session, and the session keeps it for good.
+   */
+  readonly harnessId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
   /** The spec sent to the runner. The row's stored fields are taken from it. */
@@ -326,15 +331,17 @@ export interface StartNeeds {
     connectionId: string,
   ) => Effect.Effect<GitIdentity | undefined, SqlError>;
   /**
-   * Returns the provider instance's credentials, decrypted for this frame and
-   * stored nowhere. Fails when they cannot be decrypted, which skips the
-   * session: a session started without its key would report that it is not
-   * logged in.
+   * Returns what the runner needs to run the harness for the account: its
+   * home, model argument and credential, the credential decrypted for this
+   * frame and stored nowhere (`prepareHarnessAccount`). Fails when the account
+   * is gone or the pair cannot run, or when the key cannot be decrypted. That
+   * skips the session: a session started without its key would report that it
+   * is not signed in.
    */
-  readonly readSecrets: (
-    instanceId: string,
+  readonly prepareHarnessAccount: (
+    providerAccountId: string,
     harnessId: string,
-  ) => Effect.Effect<Record<string, string>, SqlError | SecretDecryptError>;
+  ) => Effect.Effect<HarnessAccount, NotFound | InvalidState | SqlError>;
   /**
    * Builds the session's coordination paragraph (spec 19 section 7.1), or
    * returns `undefined` when the session gets none.
@@ -1959,7 +1966,8 @@ const make = Effect.gen(function* () {
         yield* provideSql(
           refuseUnacceptedAttachments({
             runnerId: open.runnerId,
-            instanceId: open.spec.instanceId,
+            providerAccountId: open.spec.providerAccountId,
+            harnessId: open.harnessId,
             model: open.spec.modelSelection.model,
             attachments: references,
           }),
@@ -1972,7 +1980,8 @@ const make = Effect.gen(function* () {
           agentId: open.agentId,
           conversationId: open.conversationId,
           step: open.step,
-          instanceId: open.spec.instanceId,
+          providerAccountId: open.spec.providerAccountId,
+          harnessId: open.harnessId,
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
           projectId: open.projectId,
@@ -2065,7 +2074,7 @@ const make = Effect.gen(function* () {
         const decidedSkills = new Map<string | null, ReadonlyArray<SessionLibrarySkill>>();
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
-        const keyless: Array<string> = [];
+        const unpreparable: Array<string> = [];
         const inputless: Array<string> = [];
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
@@ -2086,16 +2095,19 @@ const make = Effect.gen(function* () {
               skipped.push(row.id);
               continue;
             }
-            // Read per row, before the row leaves the queue: a credential that
-            // fails to decrypt is one session's problem, and failing here
-            // would roll back every other session claimed in this batch. It is
-            // read now rather than stored, like the account's token: the frame
-            // is the only place it is written down.
-            const secrets = yield* Effect.option(
-              needs.readSecrets(spec.value.instanceId, row.harnessId),
+            // Read per row, before the row leaves the queue: an account that
+            // cannot be prepared (it is gone, or its key fails to decrypt) is
+            // one session's problem, and failing here would roll back every
+            // other session claimed in this batch. The key is read now rather
+            // than stored, like the GitHub account's token: the frame is the
+            // only place it is written down. Start, resume and fork all
+            // queue the session and come through here, so each of them sends
+            // the same home.
+            const harnessAccount = yield* Effect.option(
+              needs.prepareHarnessAccount(row.providerAccountId, row.harnessId),
             );
-            if (Option.isNone(secrets)) {
-              keyless.push(row.id);
+            if (Option.isNone(harnessAccount)) {
+              unpreparable.push(row.id);
               continue;
             }
             // A start always carries an input. Every path that queues a
@@ -2121,7 +2133,8 @@ const make = Effect.gen(function* () {
             if (
               yield* holdInputWithRefusedAttachments(waiting.value, {
                 runnerId,
-                instanceId: spec.value.instanceId,
+                providerAccountId: row.providerAccountId,
+                harnessId: row.harnessId,
                 model: row.modelSelection.model,
               })
             )
@@ -2187,8 +2200,7 @@ const make = Effect.gen(function* () {
                 // not.
                 input: buildTurnInput(row, input),
                 harnessId: row.harnessId,
-                config: row.config as Schema.Json,
-                secrets: secrets.value,
+                harnessAccount: harnessAccount.value,
                 spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
                 token,
                 ...(connectionId === null ? {} : { githubConnectionId: connectionId }),
@@ -2226,11 +2238,12 @@ const make = Effect.gen(function* () {
             skipped,
           );
         }
-        if (keyless.length > 0) {
+        if (unpreparable.length > 0) {
           yield* Effect.logError(
-            "skipped queued sessions whose provider instance's stored credential could not be " +
-              "decrypted; they stay queued",
-            keyless,
+            "skipped queued sessions whose provider account could not be prepared for their " +
+              "harness, because the account is gone, the pair cannot run, or the stored key " +
+              "could not be decrypted; they stay queued",
+            unpreparable,
           );
         }
         // Logged once per session, not on every pass, because such a row
@@ -2634,7 +2647,8 @@ const make = Effect.gen(function* () {
           yield* provideSql(
             refuseUnacceptedAttachments({
               runnerId: session.runnerId,
-              instanceId: session.instanceId,
+              providerAccountId: session.providerAccountId,
+              harnessId: session.harnessId,
               model: taking.modelSelection.model,
               attachments: references,
             }),
@@ -2873,7 +2887,8 @@ const make = Effect.gen(function* () {
             const session = Option.getOrThrow(yield* sessions.one(sessionId));
             const held = yield* holdInputWithRefusedAttachments(waiting.value, {
               runnerId: session.runnerId,
-              instanceId: session.instanceId,
+              providerAccountId: session.providerAccountId,
+              harnessId: session.harnessId,
               model: session.modelSelection.model,
             });
             if (held) return Option.none();
@@ -3100,7 +3115,7 @@ const make = Effect.gen(function* () {
               sessions.bind(
                 binding.sessionId,
                 runnerId,
-                binding.instanceId,
+                binding.providerAccountId,
                 binding.nativeSessionId,
               ),
             { discard: true },
@@ -3235,7 +3250,7 @@ const make = Effect.gen(function* () {
         // session that reads `idle` already has its harness-native id.
         const native = findNativeId(event);
         if (native !== undefined) {
-          yield* sessions.bind(id, runnerId, session.instanceId, native);
+          yield* sessions.bind(id, runnerId, session.providerAccountId, native);
         }
         // Before the Requests, so a Request a subagent opens can name it by
         // the description this same event may have filled in.
@@ -3308,7 +3323,8 @@ const make = Effect.gen(function* () {
               Option.isSome(next) &&
               !(yield* holdInputWithRefusedAttachments(next.value, {
                 runnerId: session.runnerId,
-                instanceId: session.instanceId,
+                providerAccountId: session.providerAccountId,
+                harnessId: session.harnessId,
                 model: session.modelSelection.model,
               }))
             ) {
@@ -3434,7 +3450,8 @@ const make = Effect.gen(function* () {
             yield* provideSql(
               refuseUnacceptedAttachments({
                 runnerId: session.runnerId,
-                instanceId: session.instanceId,
+                providerAccountId: session.providerAccountId,
+                harnessId: session.harnessId,
                 model: session.modelSelection.model,
                 attachments: references,
               }),

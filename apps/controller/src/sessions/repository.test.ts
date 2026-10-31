@@ -57,7 +57,8 @@ const insertSession = (
       agentId: origin.agentId,
       conversationId: origin.conversationId,
       step,
-      instanceId: mintId(),
+      providerAccountId: mintId(),
+      harnessId: "harnesses/full",
       runnerId: mintId(),
       requestedAccessMode: "approval-required",
       accessMode: "approval-required",
@@ -897,7 +898,7 @@ const insertResumableSession = Effect.gen(function* () {
     VALUES (${runner}, ${uuidToString(runner)}, 'online', 'active', 0, '[]', 'a hash', ${at}, ${at})
   `;
   const sessionId = mintId();
-  const instanceId = mintId();
+  const providerAccountId = mintId();
   yield* sessions.insert({
     id: sessionId,
     title: "a session",
@@ -906,7 +907,8 @@ const insertResumableSession = Effect.gen(function* () {
     agentId: undefined,
     conversationId: undefined,
     step: undefined,
-    instanceId,
+    providerAccountId,
+    harnessId: "harnesses/full",
     runnerId: uuidToString(runner),
     requestedAccessMode: "approval-required",
     accessMode: "approval-required",
@@ -920,7 +922,7 @@ const insertResumableSession = Effect.gen(function* () {
     createdBy: "user",
     at,
   });
-  yield* sessions.bind(sessionId, uuidToString(runner), instanceId, "native-1");
+  yield* sessions.bind(sessionId, uuidToString(runner), providerAccountId, "native-1");
   yield* sessions.moved(sessionId, "exited", at);
   return sessionId;
 });

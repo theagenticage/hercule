@@ -122,7 +122,7 @@ export const connectProofRunner = async (
         write({
           _tag: "probeReport",
           requestId: frame.requestId,
-          instanceId: frame.instanceId,
+          providerAccountId: frame.harnessAccount.providerAccountId,
           result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models: MODELS },
         });
         break;

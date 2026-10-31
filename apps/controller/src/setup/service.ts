@@ -93,7 +93,7 @@ const make = Effect.gen(function* () {
      * returns a bearer token, so the caller is logged in when this returns.
      * The transport gate verifies the setup token before this runs. Fails
      * with `InvalidState` when setup is already complete, or when there is no
-     * provider instance for the assistant to run on, and with `Validation`
+     * Provider Account for the assistant to run on, and with `Validation`
      * when the timezone is not an IANA zone name. Every failure writes
      * nothing, so setup can be tried again.
      */

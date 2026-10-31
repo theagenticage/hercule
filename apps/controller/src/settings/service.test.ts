@@ -10,8 +10,7 @@ import {
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, withTransaction } from "../db";
-import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
+import { buildPluginStack } from "../plugins/testing";
 import { readEventsOfKind } from "../events/testing";
 import { Settings, SettingsLayer } from "./repository";
 import { SettingsOperations, SettingsOperationsLayer } from "./service";
@@ -19,8 +18,8 @@ import { SettingsOperations, SettingsOperationsLayer } from "./service";
 type Deps = SettingsOperations | Settings | SqlClient.SqlClient;
 
 const layer = SettingsOperationsLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(SettingsLayer, AuditLogLayer)),
-  Layer.provideMerge(TestDatabase),
+  Layer.provideMerge(SettingsLayer),
+  Layer.provideMerge(buildPluginStack()),
 );
 
 const USER_ID = "0199e0e7-0000-7000-8000-000000000000";
@@ -525,16 +524,27 @@ describe("the workspace expiry windows", () => {
 });
 
 describe("the text generation model", () => {
-  const readFirstInstanceId = async (base: string, token: string): Promise<string> => {
-    const response = await get(base, "/api/v1/providers", token);
-    const instances = (await response.json()) as ReadonlyArray<{ readonly id: string }>;
-    return instances[0]!.id;
+  const readFirstAccount = async (
+    base: string,
+    token: string,
+  ): Promise<{ readonly id: string; readonly defaultHarnessId: string }> => {
+    const response = await get(base, "/api/v1/provider-accounts", token);
+    const accounts = (await response.json()) as ReadonlyArray<{
+      readonly id: string;
+      readonly defaultHarnessId: string;
+    }>;
+    return accounts[0]!;
   };
 
-  it("accepts off, automatic and an existing provider instance with a model", async () => {
+  it("accepts off, automatic and an existing provider account with a model, in a harness or not", async () => {
     await withSettings(async (base, token) => {
-      const instanceId = await readFirstInstanceId(base, token);
-      for (const model of ["off", "automatic", { instanceId, model: "fast" }]) {
+      const account = await readFirstAccount(base, token);
+      for (const model of [
+        "off",
+        "automatic",
+        { providerAccountId: account.id, model: "fast" },
+        { providerAccountId: account.id, harnessId: account.defaultHarnessId, model: "fast" },
+      ]) {
         const response = await patchSettings(base, token, {
           controller: { "textGeneration.model": model },
         });
@@ -544,14 +554,14 @@ describe("the text generation model", () => {
     });
   });
 
-  it("rejects an instance that does not exist, and keeps the stored value", async () => {
+  it("rejects an account that does not exist, and keeps the stored value", async () => {
     await withSettings(async (base, token) => {
       await patchSettings(base, token, { controller: { "textGeneration.model": "off" } });
 
       const response = await patchSettings(base, token, {
         controller: {
           "textGeneration.model": {
-            instanceId: "0199e0e7-0000-7000-8000-0000000000aa",
+            providerAccountId: "0199e0e7-0000-7000-8000-0000000000aa",
             model: "fast",
           },
         },
@@ -562,7 +572,27 @@ describe("the text generation model", () => {
     });
   });
 
-  it("rejects a model with no instance, and an unknown word", async () => {
+  it("rejects a harness this build does not carry, and keeps the stored value", async () => {
+    await withSettings(async (base, token) => {
+      const account = await readFirstAccount(base, token);
+      await patchSettings(base, token, { controller: { "textGeneration.model": "off" } });
+
+      const response = await patchSettings(base, token, {
+        controller: {
+          "textGeneration.model": {
+            providerAccountId: account.id,
+            harnessId: "nowhere/nowhere",
+            model: "fast",
+          },
+        },
+      });
+
+      expect(await readErrorCode(response)).toBe("validation");
+      expect((await readSettings(base, token)).controller["textGeneration.model"]).toBe("off");
+    });
+  });
+
+  it("rejects a model with no account, and an unknown word", async () => {
     await withSettings(async (base, token) => {
       for (const model of [{ model: "fast" }, "sometimes"]) {
         const response = await patchSettings(base, token, {
@@ -596,11 +626,11 @@ describe("the text generation model changes", () => {
           );
         yield* write({ controller: { "textGeneration.model": "off" } });
         yield* write({ controller: { "retention.events": 30 } });
-        // An instance that does not exist is refused, and the write rolls back.
+        // An account that does not exist is refused, and the write rolls back.
         yield* write({
           controller: {
             "textGeneration.model": {
-              instanceId: "0199e0e7-0002-7000-8000-000000000000",
+              providerAccountId: "0199e0e7-0002-7000-8000-000000000000",
               model: "small",
             },
           },

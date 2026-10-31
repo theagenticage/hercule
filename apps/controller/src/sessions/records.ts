@@ -26,7 +26,7 @@ import * as Effect from "effect/Effect";
 import * as Struct from "effect/Struct";
 import type { Session, SessionRequest } from "@hercule/contract";
 import { PluginHost } from "../plugins";
-import { listUnenforcedFields } from "../providers";
+import { listUnenforcedFields } from "../harnesses";
 import type { StoredSession } from "./repository";
 import { buildUsageFields } from "./usage";
 import { isResumeHeld } from "./resume-hold";
@@ -53,7 +53,6 @@ export const sessionRecordComposer: Effect.Effect<
 
   return Effect.map(host.harnesses(), (definitions) => (stored: StoredSession): Session => ({
     ...Struct.omit(stored, [
-      "harnessId",
       "disallowedTools",
       "crashGuardArmed",
       "inputWaiting",

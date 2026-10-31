@@ -21,6 +21,7 @@ const HERCULE: Assistant = {
   name: "Hercule",
   systemPrompt: "You are a helpful assistant.",
   providerAccountId: "01a06d02-1000-7000-8000-000000000001",
+  harnessId: null,
   permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
   accessMode: "full-access",
   model: null,

@@ -29,6 +29,7 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
+import { HARNESSES } from "@hercule/client-core/testing";
 import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
   buildErrorBody,
@@ -56,21 +57,6 @@ const RUNNER: Runner = {
   lastSeenAt: "2026-09-05T09:14:00.000Z",
 };
 
-const DECLARED: ProviderAccount["declared"] = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-};
-
 const EFFORT: ModelOption = {
   id: "effort",
   label: "Reasoning effort",
@@ -90,6 +76,7 @@ const THINKING: ModelOption = {
   default: true,
 };
 
+/** Builds a signed-in snapshot in Claude Code; `buildProviderAccount` restamps it with the account's own harness. */
 const buildSnapshot = (
   runnerId: string,
   identity: string,
@@ -97,6 +84,7 @@ const buildSnapshot = (
   models: ProviderAccount["snapshots"][number]["models"],
 ): ProviderAccount["snapshots"][number] => ({
   runnerId,
+  harnessId: "claude-code/claude-code",
   probedAt: "2026-09-05T09:10:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
@@ -104,30 +92,50 @@ const buildSnapshot = (
   models,
 });
 
+/** What makes an account belong to a provider: its provider, kind and default harness. */
+interface AccountProvider {
+  readonly providerId: string;
+  readonly kind: string;
+  readonly harnessId: string;
+}
+
+const ANTHROPIC: AccountProvider = {
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  harnessId: "claude-code/claude-code",
+};
+
+const OPENAI: AccountProvider = {
+  providerId: "openai/openai",
+  kind: "subscription-per-machine",
+  harnessId: "codex/codex",
+};
+
+const ZAI: AccountProvider = { providerId: "zai/zai", kind: "api-key", harnessId: "pi/pi" };
+
 const buildProviderAccount = (
   id: string,
-  name: string,
-  displayName: string,
+  label: string | null,
+  provider: AccountProvider,
   snapshots: ProviderAccount["snapshots"],
 ): ProviderAccount => ({
   id,
-  harnessId: "claude-code/claude-code",
-  secretFields: [],
-  name,
-  config: {},
-  displayName,
-  binaryName: "claude",
-  declared: DECLARED,
-  snapshots,
+  providerId: provider.providerId,
+  kind: provider.kind,
+  label,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: provider.harnessId,
+  snapshots: snapshots.map((snapshot) => ({ ...snapshot, harnessId: provider.harnessId })),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-/** Logged in on the one runner, two models, the default one carrying options. */
+/** Signed in on the one runner, two models, the default one carrying options. */
 const ACCOUNT_A = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000001",
   "personal",
-  "Claude Code",
+  ANTHROPIC,
   [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
       {
@@ -142,34 +150,30 @@ const ACCOUNT_A = buildProviderAccount(
   ],
 );
 
-/** A second account of the same harness, one model, no options. */
-const ACCOUNT_B = buildProviderAccount(
-  "01a06d02-1000-7000-8000-000000000002",
-  "work",
-  "Claude Code",
-  [
-    buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
-      {
-        slug: "claude-haiku-5",
-        name: "Claude Haiku 5",
-        imageInput: { maxBytes: null },
-        isDefault: true,
-        options: [],
-      },
-    ]),
-  ],
-);
+/** A second account of the same provider, one model, no options. */
+const ACCOUNT_B = buildProviderAccount("01a06d02-1000-7000-8000-000000000002", "work", ANTHROPIC, [
+  buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
+    {
+      slug: "claude-haiku-5",
+      name: "Claude Haiku 5",
+      imageInput: { maxBytes: null },
+      isDefault: true,
+      options: [],
+    },
+  ]),
+]);
 
 /**
- * The real first-run state: the instance exists, because the controller
- * creates one provider instance per shipped harness on first run. Nothing has
- * logged in on the one runner yet, so there is no snapshot at all - `buildRunnerMenu`'s only row dims "not logged in" and its
- * `defaultRunnerId` is null.
+ * The real first-run state: the account exists, because the controller
+ * creates one Provider Account per shipped provider on first run. Nothing is
+ * signed in on the one runner yet, so there is no snapshot at all -
+ * `buildRunnerMenu`'s only row dims "not signed in" and its `defaultRunnerId`
+ * is null.
  */
 const ACCOUNT_FRESH = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000003",
-  "Claude Code",
-  "Claude Code",
+  null,
+  ANTHROPIC,
   [],
 );
 
@@ -203,6 +207,7 @@ const NEW_SESSION: Session = {
   runId: null,
   stepId: null,
   providerAccountId: ACCOUNT_A.id,
+  harnessId: "claude-code/claude-code",
   runnerId: RUNNER.id,
   workspaceId: null,
   projectId: null,
@@ -221,7 +226,7 @@ const NEW_SESSION: Session = {
 };
 
 const buildController = (
-  instances: readonly ProviderAccount[],
+  accounts: readonly ProviderAccount[],
   user: Record<string, unknown> = {},
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -232,7 +237,7 @@ const buildController = (
       user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE, ...user },
     },
   },
-  "GET /api/v1/provider-accounts": { body: instances },
+  "GET /api/v1/provider-accounts": { body: accounts },
   "GET /api/v1/runners": { body: { items: [RUNNER] } },
   "GET /api/v1/profiles": { body: { items: [PROFILE_UNRESTRICTED, PROFILE_WORKER] } },
   // After a send, the app navigates to the new thread. These stubs
@@ -245,12 +250,12 @@ const buildController = (
 });
 
 const openApp = async (
-  instances: readonly ProviderAccount[] = [ACCOUNT_A, ACCOUNT_B],
+  accounts: readonly ProviderAccount[] = [ACCOUNT_A, ACCOUNT_B],
   user: Record<string, unknown> = {},
   extra: Readonly<Record<string, Handler>> = {},
   storage: Readonly<Record<string, string>> = {},
 ) => {
-  const api = stubApi(buildController(instances, user, extra));
+  const api = stubApi(buildController(accounts, user, extra));
   const app = await renderApp({
     path: "/threads/new",
     api: api.fetch,
@@ -299,17 +304,17 @@ describe("Composer: draft defaults", () => {
       "thread.profileId": PROFILE_WORKER.id,
     });
 
-    // There are two accounts of one harness, so the pill includes the
+    // There are two accounts of one provider, so the pill includes the
     // account name. claude-haiku-5 has no options, so no options selector
     // appears next to the pill.
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "work Claude Haiku 5" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Anthropic · work Claude Haiku 5" })).toBeDefined();
     });
     expect(screen.getByRole("button", { name: "Auto" })).toBeDefined();
   });
 });
 
-describe("Composer: a fresh install, nothing logged in on the one runner yet", () => {
+describe("Composer: a fresh install, nothing signed in on the one runner yet", () => {
   it("shows only the pill parts it has, with no dangling separator, when there is no model to offer", async () => {
     await openApp([ACCOUNT_FRESH]);
 
@@ -324,25 +329,25 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
 
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: `machine ${RUNNER.name} · not logged in` }),
+        screen.getByRole("button", { name: `machine ${RUNNER.name} · not signed in` }),
       ).toBeDefined();
     });
     expect(screen.queryByRole("button", { name: "Runner" })).toBeNull();
   });
 
-  it("explains why the draft cannot start, and offers no Log in on a machine where the instance was never found", async () => {
+  it("explains why the draft cannot start, and offers no Sign in on a machine where the account was never found", async () => {
     await openApp([ACCOUNT_FRESH]);
 
-    // This instance was never probed on the only runner, so there is nothing
-    // to log in to there. The screen shows only the reason.
+    // This account was never probed on the only runner, so there is nothing
+    // to sign in to there. The screen shows only the reason.
     await waitFor(() => {
-      expect(readPageText()).toContain(`Can't start yet. Claude Code is not on ${RUNNER.name}.`);
+      expect(readPageText()).toContain(`Can't start yet. Anthropic is not on ${RUNNER.name}.`);
     });
-    expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
   });
 
   it("keeps send disabled and shows the reason, instead of spawning with empty ids", async () => {
-    // Nothing is logged in, so `buildRunnerMenu` offers no selectable row, and
+    // Nothing is signed in, so `buildRunnerMenu` offers no selectable row, and
     // the draft's runner, model and profile stay null. Sending would post ids
     // that the contract's `Id` schema rejects, and the error would be about
     // fields the user never touched.
@@ -355,13 +360,13 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     await waitFor(() => {
       expect(send.disabled).toBe(true);
     });
-    expect(readPageText()).toContain(`Claude Code is not on ${RUNNER.name}`);
+    expect(readPageText()).toContain(`Anthropic is not on ${RUNNER.name}`);
     expect(
       api.calls.some((call) => call.method === "POST" && call.path === "/api/v1/sessions"),
     ).toBe(false);
   });
 
-  it("keeps send disabled with the reason when no provider instance exists at all", async () => {
+  it("keeps send disabled with the reason when no account exists at all", async () => {
     const user = userEvent.setup();
     await openApp([]);
 
@@ -371,7 +376,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     await waitFor(() => {
       expect(send.disabled).toBe(true);
     });
-    expect(readPageText()).toContain("No provider instance is set up");
+    expect(readPageText()).toContain("No account is set up");
   });
 });
 
@@ -440,7 +445,7 @@ describe("Composer: selector popovers", () => {
     // looking for one element with the exact string.
     const dialog = readPageText(await screen.findByRole("dialog"));
     // The row shows the machine, its state and how many session slots are
-    // used, with a description below. The model menu shows who is logged in,
+    // used, with a description below. The model menu shows who is signed in,
     // not this menu.
     expect(dialog).toContain("moss online 0/4");
     expect(dialog).toContain("this machine · default");
@@ -449,7 +454,7 @@ describe("Composer: selector popovers", () => {
 });
 
 describe("Composer: model menu", () => {
-  it("expands the current instance, collapses the others and offers no free-text entry", async () => {
+  it("expands the current account, collapses the others and offers no free-text entry", async () => {
     const user = userEvent.setup();
     await openApp();
 
@@ -460,11 +465,11 @@ describe("Composer: model menu", () => {
     expect(readPageText()).toContain("work@example.com");
     expect(readPageText()).toContain("Claude Pro");
 
-    // The current instance (A) is expanded, with both its models listed.
+    // The current account (A) is expanded, with both its models listed.
     expect(within(menu).getByRole("button", { name: /claude sonnet 5/i })).toBeDefined();
     expect(within(menu).getByRole("button", { name: /claude opus 5/i })).toBeDefined();
 
-    // The other instance (B) is collapsed to one row that counts its models.
+    // The other account (B) is collapsed to one row that counts its models.
     expect(readPageText()).toContain("1 model ›");
 
     expect(screen.queryByText(/custom model/i)).toBeNull();
@@ -491,17 +496,17 @@ describe("Composer: model menu", () => {
     expect(screen.getByRole("radio", { name: "off" })).toBeDefined();
   });
 
-  it("switches the pill's instance when a model of another instance is chosen", async () => {
+  it("switches the pill's account when a model of another account is chosen", async () => {
     const user = userEvent.setup();
     await openApp();
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
-    // Instance B is collapsed to a one-row summary. Clicking that row switches
-    // the pill to instance B's default model.
+    // Account B is collapsed to a one-row summary. Clicking that row switches
+    // the pill to account B's default model.
     await user.click(screen.getByRole("button", { name: /work.*1 model\b/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "work Claude Haiku 5" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Anthropic · work Claude Haiku 5" })).toBeDefined();
     });
   });
 
@@ -600,11 +605,11 @@ describe("Composer: sending", () => {
   it("keeps the picked machine when another model of the same account is picked after it", async () => {
     const user = userEvent.setup();
     const cove: Runner = { ...RUNNER, id: "01a06d02-beff-7037-9f5b-042822015953", name: "cove" };
-    // The second account, with two models, logged in on both machines.
+    // The second account, with two models, signed in on both machines.
     const work = buildProviderAccount(
       ACCOUNT_B.id,
       "work",
-      "Claude Code",
+      ANTHROPIC,
       [RUNNER.id, cove.id].map((runnerId) =>
         buildSnapshot(runnerId, "work@example.com", "Claude Pro", [
           {
@@ -712,7 +717,7 @@ describe("Composer: sending", () => {
       {
         "POST /api/v1/sessions": {
           status: 409,
-          body: buildErrorBody("invalid_state", "moss is not logged in to Claude Code"),
+          body: buildErrorBody("invalid_state", "moss is not signed in to Anthropic"),
         },
       },
     );
@@ -721,7 +726,7 @@ describe("Composer: sending", () => {
     await user.click(screen.getByRole("button", { name: /send/i }));
 
     expect((await screen.findByRole("alert")).textContent).toBe(
-      "moss is not logged in to Claude Code",
+      "moss is not signed in to Anthropic",
     );
     expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("Fix the login bug");
     expect(
@@ -757,9 +762,10 @@ describe("Routing: /threads/new is the static route", () => {
  *   are scoped to it, because the page outside also holds the trigger.
  */
 
-/** Builds a snapshot of an instance that is installed on the runner with nobody logged in. */
+/** Builds a snapshot of an account on a runner where the harness is installed with nobody signed in. */
 const buildUnauthenticatedSnapshot = (runnerId: string): ProviderAccount["snapshots"][number] => ({
   runnerId,
+  harnessId: "claude-code/claude-code",
   probedAt: "2026-09-05T09:10:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
@@ -767,14 +773,11 @@ const buildUnauthenticatedSnapshot = (runnerId: string): ProviderAccount["snapsh
   models: [],
 });
 
-const LOGGED_OUT = buildProviderAccount(
-  "01a06d02-1000-7000-8000-000000000004",
-  "Claude Code",
-  "Claude Code",
-  [buildUnauthenticatedSnapshot(RUNNER.id)],
-);
+const LOGGED_OUT = buildProviderAccount("01a06d02-1000-7000-8000-000000000004", null, ANTHROPIC, [
+  buildUnauthenticatedSnapshot(RUNNER.id),
+]);
 
-/** The same instance after the login in the test below has finished. */
+/** The same account after the sign-in in the test below has finished. */
 const LOGGED_IN: ProviderAccount = {
   ...LOGGED_OUT,
   snapshots: [
@@ -792,8 +795,8 @@ const LOGGED_IN: ProviderAccount = {
 
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=1";
 
-describe("Composer: a login updates the open draft", () => {
-  it("blocks the draft with the login message, then uses the new model list and spawns with it", async () => {
+describe("Composer: a sign-in updates the open draft", () => {
+  it("blocks the draft with the sign-in message, then uses the new model list and spawns with it", async () => {
     const user = userEvent.setup();
     let held: readonly ProviderAccount[] = [LOGGED_OUT];
     const { api } = await openApp(
@@ -801,33 +804,33 @@ describe("Composer: a login updates the open draft", () => {
       {},
       {
         "GET /api/v1/provider-accounts": () => ({ body: held }),
-        [`POST /api/v1/provider-accounts/${LOGGED_OUT.id}/sign-in`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/provider-accounts/${LOGGED_OUT.id}/sign-in`]: {
+          body: { url: AUTHORIZE_URL },
+        },
         [`POST /api/v1/provider-accounts/${LOGGED_OUT.id}/sign-in-code`]: () => {
           held = [LOGGED_IN];
-          return { body: LOGGED_IN.snapshots[0] };
+          return { body: LOGGED_IN };
         },
         "POST /api/v1/sessions": { body: NEW_SESSION },
       },
     );
 
-    // Nothing is logged in, so there is no model to show. The blocking
-    // message names the harness and the machine, and what is missing.
+    // Nothing is signed in, so there is no model to show. The blocking
+    // message names the account and the machine, and what is missing.
     await waitFor(() => {
-      expect(readPageText()).toContain(
-        "Can't start yet. Claude Code is on moss but not logged in.",
-      );
+      expect(readPageText()).toContain("Can't start yet. Anthropic is not signed in on moss.");
     });
     expect(screen.queryByRole("button", { name: /claude sonnet 5/i })).toBeNull();
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
     expect(screen.getByRole<HTMLButtonElement>("button", { name: /send/i }).disabled).toBe(true);
 
-    // The Log in button is next to the blocking message, and the login runs
+    // The Sign in button is next to the blocking message, and the sign-in runs
     // on the draft's runner.
-    await user.click(screen.getByRole("button", { name: "Log in" }));
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => {
       expect(readPageText()).toContain(AUTHORIZE_URL);
     });
-    expect(api.calls.find((call) => call.path.endsWith("/login"))?.body).toEqual({
+    expect(api.calls.find((call) => call.path.endsWith("/sign-in"))?.body).toEqual({
       runnerId: RUNNER.id,
     });
 
@@ -874,34 +877,24 @@ const buildModel = (slug: string, name: string, extra: Record<string, unknown> =
 });
 
 /** With `MANY_B`: nine models across two accounts, one over the filter threshold. */
-const MANY_A = buildProviderAccount(
-  "01a06d02-1000-7000-8000-000000000011",
-  "personal",
-  "Claude Code",
-  [
-    buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
-      buildModel("claude-sonnet-5", "Claude Sonnet 5", { isDefault: true }),
-      buildModel("claude-opus-5", "Claude Opus 5"),
-      buildModel("claude-haiku-5", "Claude Haiku 5"),
-      buildModel("claude-sonnet-4", "Claude Sonnet 4"),
-      buildModel("claude-haiku-4", "Claude Haiku 4"),
-    ]),
-  ],
-);
+const MANY_A = buildProviderAccount("01a06d02-1000-7000-8000-000000000011", "personal", ANTHROPIC, [
+  buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
+    buildModel("claude-sonnet-5", "Claude Sonnet 5", { isDefault: true }),
+    buildModel("claude-opus-5", "Claude Opus 5"),
+    buildModel("claude-haiku-5", "Claude Haiku 5"),
+    buildModel("claude-sonnet-4", "Claude Sonnet 4"),
+    buildModel("claude-haiku-4", "Claude Haiku 4"),
+  ]),
+]);
 
-const MANY_B = buildProviderAccount(
-  "01a06d02-1000-7000-8000-000000000012",
-  "work",
-  "Claude Code",
-  [
-    buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
-      buildModel("claude-opus-4", "Claude Opus 4", { isDefault: true }),
-      buildModel("claude-sonnet-3", "Claude Sonnet 3"),
-      buildModel("claude-haiku-3", "Claude Haiku 3"),
-      buildModel("claude-sonnet-2", "Claude Sonnet 2"),
-    ]),
-  ],
-);
+const MANY_B = buildProviderAccount("01a06d02-1000-7000-8000-000000000012", "work", ANTHROPIC, [
+  buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
+    buildModel("claude-opus-4", "Claude Opus 4", { isDefault: true }),
+    buildModel("claude-sonnet-3", "Claude Sonnet 3"),
+    buildModel("claude-haiku-3", "Claude Haiku 3"),
+    buildModel("claude-sonnet-2", "Claude Sonnet 2"),
+  ]),
+]);
 
 /** With `MANY_A`: eight models in total, which is not over the filter threshold. */
 const EIGHT_B: ProviderAccount = {
@@ -915,11 +908,11 @@ const EIGHT_B: ProviderAccount = {
   ],
 };
 
-/** An instance with one legacy model, which the menu hides under "older models". */
+/** An account with one legacy model, which the menu hides under "older models". */
 const WITH_LEGACY = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000013",
   "personal",
-  "Claude Code",
+  ANTHROPIC,
   [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
       buildModel("claude-sonnet-5", "Claude Sonnet 5", { isDefault: true }),
@@ -929,25 +922,20 @@ const WITH_LEGACY = buildProviderAccount(
   ],
 );
 
-/** A second harness with one account, so its rows never show an account name. */
-const CODEX: ProviderAccount = {
-  ...buildProviderAccount("01a06d02-1000-7000-8000-000000000014", "openai", "Codex", [
-    buildSnapshot(RUNNER.id, "rogier@openai.test", "Plus", [
-      buildModel("gpt-5-codex", "GPT-5 Codex", { isDefault: true }),
-    ]),
+/** A second provider with one account, so its rows never show an account name. */
+const CODEX = buildProviderAccount("01a06d02-1000-7000-8000-000000000014", null, OPENAI, [
+  buildSnapshot(RUNNER.id, "rogier@openai.test", "Plus", [
+    buildModel("gpt-5-codex", "GPT-5 Codex", { isDefault: true }),
   ]),
-  harnessId: "codex/codex",
-  binaryName: "codex",
-};
+]);
 
-/** Another harness's account, which nobody has logged in to on this machine. */
-const OTHER_LOGGED_OUT: ProviderAccount = {
-  ...buildProviderAccount("01a06d02-1000-7000-8000-000000000015", "openai", "Codex", [
-    buildUnauthenticatedSnapshot(RUNNER.id),
-  ]),
-  harnessId: "codex/codex",
-  binaryName: "codex",
-};
+/** Another provider's account, which nobody has signed in to on this machine. */
+const OTHER_LOGGED_OUT = buildProviderAccount(
+  "01a06d02-1000-7000-8000-000000000015",
+  null,
+  OPENAI,
+  [buildUnauthenticatedSnapshot(RUNNER.id)],
+);
 
 const RECENT_KEY = "hercule.recentModels";
 
@@ -996,7 +984,7 @@ describe("Composer: model menu shapes", () => {
     expect(within(menu).queryByPlaceholderText("Filter models…")).toBeNull();
   });
 
-  it("(b) lists the recent pairs newest first, and shows the account only when the harness has two", async () => {
+  it("(b) lists the recent pairs newest first, and shows the account only when the provider has two", async () => {
     const user = userEvent.setup();
     await openApp(
       [ACCOUNT_A, ACCOUNT_B, CODEX],
@@ -1016,10 +1004,10 @@ describe("Composer: model menu shapes", () => {
     expect(lane.indexOf("Recent")).toBeLessThan(lane.indexOf("GPT-5 Codex"));
     expect(lane.indexOf("GPT-5 Codex")).toBeLessThan(lane.indexOf("Claude Opus 5"));
 
-    // Claude Code has two accounts here, so its recent row shows the account.
-    // The row of the harness with one account shows none.
+    // Anthropic has two accounts here, so its recent row shows the account.
+    // The row of the provider with one account shows none.
     const recentOpus = within(menu).getAllByRole("button", { name: /claude opus 5/i })[0];
-    expect(readPageText(recentOpus ?? null)).toContain("personal");
+    expect(readPageText(recentOpus ?? null)).toContain("Anthropic · personal");
     expect(readPageText(within(menu).getByRole("button", { name: /gpt-5 codex/i }))).not.toContain(
       "openai",
     );
@@ -1039,52 +1027,54 @@ describe("Composer: model menu shapes", () => {
     expect(await within(menu).findByRole("button", { name: /claude sonnet 4/i })).toBeDefined();
   });
 
-  it("(d) shows an unauthenticated account as one dimmed row with its own Log in", async () => {
+  it("(d) shows an unauthenticated account as one dimmed row with its own Sign in", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
       [ACCOUNT_A, OTHER_LOGGED_OUT],
       {},
       {
-        [`POST /api/v1/provider-accounts/${OTHER_LOGGED_OUT.id}/sign-in`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/provider-accounts/${OTHER_LOGGED_OUT.id}/sign-in`]: {
+          body: { url: AUTHORIZE_URL },
+        },
       },
     );
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
-    expect(readPageText(menu)).toContain("not logged in");
+    expect(readPageText(menu)).toContain("not signed in");
     // The account is one row, not a lane of models, because it has no models
     // to pick.
     expect(within(menu).queryByRole("button", { name: /claude haiku 5/i })).toBeNull();
 
-    await user.click(within(menu).getByRole("button", { name: "Log in" }));
+    await user.click(within(menu).getByRole("button", { name: "Sign in" }));
 
     await waitFor(() => {
       expect(readPageText()).toContain(AUTHORIZE_URL);
     });
-    // The row logs in to its own account, not the currently selected one, on
+    // The row signs in to its own account, not the currently selected one, on
     // the machine where the credential will be stored.
-    expect(screen.getByText("Log in to Codex on moss")).toBeDefined();
-    expect(api.calls.find((call) => call.path.endsWith("/login"))?.body).toEqual({
+    expect(screen.getByText("Sign in to OpenAI on moss")).toBeDefined();
+    expect(api.calls.find((call) => call.path.endsWith("/sign-in"))?.body).toEqual({
       runnerId: RUNNER.id,
     });
   });
 
-  it("(e) labels the current lane with the account name when the harness has two", async () => {
+  it("(e) labels the current lane with the full account name when the provider has two", async () => {
     const user = userEvent.setup();
     await openApp([ACCOUNT_A, ACCOUNT_B]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
-    expect(readPageText(menu)).toContain("personal");
+    expect(readPageText(menu)).toContain("Anthropic · personal");
   });
 
-  it("(e) labels the current lane with the harness's name when it has one", async () => {
+  it("(e) labels the current lane with the provider's name when the account has no label", async () => {
     const user = userEvent.setup();
-    await openApp([ACCOUNT_A]);
+    await openApp([{ ...ACCOUNT_A, label: null }]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
-    expect(readPageText(menu)).toContain("Claude Code");
+    expect(readPageText(menu)).toContain("Anthropic");
     expect(readPageText(menu)).not.toContain("personal");
   });
 });
@@ -1123,7 +1113,7 @@ describe("Composer: the Recent lane is written only after a successful spawn", (
       {
         "POST /api/v1/sessions": {
           status: 409,
-          body: buildErrorBody("invalid_state", "moss is not logged in to Claude Code"),
+          body: buildErrorBody("invalid_state", "moss is not signed in to Anthropic"),
         },
       },
       buildRecentStorage([]),
@@ -1148,11 +1138,11 @@ const FAST_MODE: ModelOption = {
   default: false,
 };
 
-/** An instance with one model, which has a select descriptor and a boolean one. */
+/** An account with one model, which has a select descriptor and a boolean one. */
 const WITH_OPTIONS = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000016",
   "personal",
-  "Claude Code",
+  ANTHROPIC,
   [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
       {
@@ -1193,21 +1183,34 @@ describe("Composer: the model options selector's label", () => {
 });
 
 /**
- * An instance where `auto` is not native, so it runs as the nearest native
- * mode below it. It has a display name different from `ACCOUNT_A`'s, so a
- * row that shows "Claude Code Work" must be reading this instance's
- * `displayName`.
+ * An account whose harness does not support `auto`, so `auto` runs as the
+ * nearest supported mode below it. The account is labelled "Work", so its name
+ * is "Anthropic · Work", yet the fallback note must name the harness "Claude
+ * Code": it reads the harness definition, not the account.
  */
-const NO_AUTO: ProviderAccount = {
-  ...ACCOUNT_A,
-  displayName: "Claude Code Work",
-  declared: { ...DECLARED, accessModes: { ...DECLARED.accessModes, auto: "unsupported" } },
+const NO_AUTO: ProviderAccount = { ...ACCOUNT_A, label: "Work" };
+
+/** The harness list with Claude Code declaring no native `auto`. */
+const HARNESSES_WITHOUT_AUTO: Readonly<Record<string, Handler>> = {
+  "GET /api/v1/harnesses": {
+    body: HARNESSES.map((harness) =>
+      harness.id === "claude-code/claude-code"
+        ? {
+            ...harness,
+            declared: {
+              ...harness.declared,
+              accessModes: { ...harness.declared.accessModes, auto: "unsupported" },
+            },
+          }
+        : harness,
+    ),
+  },
 };
 
 describe("Composer: the access mode menu", () => {
   it("lists four modes with no header, and shows the fallback of a mode that is not native", async () => {
     const user = userEvent.setup();
-    await openApp([NO_AUTO]);
+    await openApp([NO_AUTO], {}, HARNESSES_WITHOUT_AUTO);
 
     await user.click(screen.getByRole("button", { name: /approval required/i }));
     const menu = await screen.findByRole("dialog");
@@ -1223,7 +1226,7 @@ describe("Composer: the access mode menu", () => {
 
     // The unsupported mode keeps its row and can still be picked. The row
     // shows which mode it will actually run as.
-    expect(readPageText(menu)).toContain("runs as Auto-accept edits on Claude Code Work");
+    expect(readPageText(menu)).toContain("runs as Auto-accept edits on Claude Code");
     await user.click(within(menu).getByText("Auto", { exact: true }));
     await user.keyboard("{Escape}");
 
@@ -1234,13 +1237,13 @@ describe("Composer: the access mode menu", () => {
   });
 
   /**
-   * The fallback annotation names the provider instance that caused the
+   * The fallback annotation names the harness that caused the
    * fallback, as in "runs as Auto-accept edits on pi". It is shown in the
    * attention color below the mode's meaning, which every row keeps.
    */
-  it("shows each mode's meaning and names the provider in the fallback annotation, in the attention color", async () => {
+  it("shows each mode's meaning and names the harness in the fallback annotation, in the attention color", async () => {
     const user = userEvent.setup();
-    await openApp([NO_AUTO]);
+    await openApp([NO_AUTO], {}, HARNESSES_WITHOUT_AUTO);
 
     await user.click(screen.getByRole("button", { name: /approval required/i }));
     const menu = await screen.findByRole("dialog");
@@ -1257,9 +1260,9 @@ describe("Composer: the access mode menu", () => {
       expect(readPageText(menu)).toContain(meaning);
     }
 
-    const annotation = within(menu).getByText("runs as Auto-accept edits on Claude Code Work");
+    const annotation = within(menu).getByText("runs as Auto-accept edits on Claude Code");
     expect(annotation.className).toContain("text-attn");
-    // The annotation names the provider, not a vague "this provider".
+    // The annotation names the harness, not a vague "this provider".
     expect(readPageText(menu)).not.toContain("on this provider");
   });
 });
@@ -2073,7 +2076,7 @@ describe("Composer: the machine selector follows the workspace", () => {
     );
     // "not cloned" only means a wait, not a blocker, so the row stays a
     // button. The test checks moss, not cove: in this fixture cove is dimmed
-    // for another reason (no provider instance was ever probed there), and a
+    // for another reason (no account was ever probed there), and a
     // dimmed row is never clickable.
     expect(within(menu).getByRole("button", { name: /moss/ })).toBeDefined();
   });
@@ -2300,16 +2303,11 @@ describe("The New project dialog", () => {
 });
 
 /** A model that takes no images, as pi reports a text-only model. */
-const ACCOUNT_TEXT_ONLY = buildProviderAccount(
-  "01a06d02-1000-7000-8000-000000000004",
-  "pi/pi",
-  "pi",
-  [
-    buildSnapshot(RUNNER.id, "rogier@example.com", "Pi", [
-      { slug: "glm-5.3", name: "GLM 5.3", imageInput: null, isDefault: true, options: [] },
-    ]),
-  ],
-);
+const ACCOUNT_TEXT_ONLY = buildProviderAccount("01a06d02-1000-7000-8000-000000000004", null, ZAI, [
+  buildSnapshot(RUNNER.id, "rogier@example.com", "Pi", [
+    { slug: "glm-5.3", name: "GLM 5.3", imageInput: null, isDefault: true, options: [] },
+  ]),
+]);
 
 const buildImage = (name: string, type = "image/png"): File =>
   new File([`bytes of ${name}`], name, { type });
