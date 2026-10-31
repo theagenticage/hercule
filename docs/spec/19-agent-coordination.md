@@ -220,7 +220,7 @@ An **Edit Overlap** is two unfinished sessions having edited the same file of on
 
 ### 4.1 Observing an edit
 
-Every provider reports an edit as an item of kind `file_change` ([./06-providers.md](./06-providers.md) section 6.3). Each adapter puts the edited paths in its own `detail`, as the harness wrote them: absolute, or relative to the session's working directory. Edit Overlaps need them in one form.
+Every harness reports an edit as an item of kind `file_change` ([./06-providers.md](./06-providers.md) section 6.3). Each adapter puts the edited paths in its own `detail`, as the harness wrote them: absolute, or relative to the session's working directory. Edit Overlaps need them in one form.
 
 **The adapters** write the paths of a `file_change` item in one place: `detail.path` for one file, `detail.paths` for several, as the Codex adapter already does.
 
@@ -394,7 +394,7 @@ After the commit of the transaction that changed a Discussion, or after the repo
 
   Without the rule, each reply to a session's Post opened another turn, and a session in many Discussions spent most of its turns, and its tokens, on them instead of its task. The cost is that two sessions trade about one Post each per turn of work; the Discussions seen so far needed no more: each side posts its plan once. A session that is steered into a busy turn by an entry is not affected: that turn began with another input.
 - **Entry by Edit Overlap.** After the commit that made a session a participant through an Edit Overlap, the controller drafts a Discussion Input for it, and steers it when the draft holds an entry ([./06-providers.md](./06-providers.md) section 5):
-  - on a `busy` session, into the running turn. A provider that cannot steer natively has its turn interrupted, stamped `system`, and the turn's end tells the session;
+  - on a `busy` session, into the running turn. A harness that cannot steer natively has its turn interrupted, stamped `system`, and the turn's end tells the session;
   - on an `idle` session, it opens a turn, except on an agent step's session: an idle step session is between steps, and a turn opened there would belong to no step, so the entry waits for a turn's end and the next step prompt goes first;
   - on a `queued` or `starting` session, nothing is sent: the start carries the session's first input, and the entry is told when that first turn ends.
 
@@ -501,7 +501,7 @@ Then one line per repository checked out, which gives the id the commands above 
 - **Titles are data.** Each title is cut to 60 characters. Quotes, backticks, `;` and control characters are removed from it before it is written between quotes.
 - **At most 5 lines with Wiki facts.** A workspace with more repositories gets one more line, which lists the rest by name and full id only: `Also checked out: <repository> (--resource <id>), <repository> (--resource <id>).` A workspace holds at most 32 checkouts, so the line is bounded.
 - The lines never list every page, never hold a summary or a body, and never list Discussions.
-- **Built at every start.** A resumed session sees the Wiki as it is then. When the lines change between two starts, the provider cannot reuse its cached prompt for that resume; the lines are small, and that cost is accepted.
+- **Built at every start.** A resumed session sees the Wiki as it is then. When the lines change between two starts, the harness cannot reuse its cached prompt for that resume; the lines are small, and that cost is accepted.
 - A test checks that every command the parts and the lines name exists in the CLI tree, as the skill's test does.
 
 ### 7.2 The skill section

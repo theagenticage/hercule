@@ -6,7 +6,7 @@ An Assistant is an Agent with persistent Memory and Channel Bindings, oriented t
 
 An Assistant is a specialization of Agent, not a separate concept ([../../GLOSSARY.md](../../GLOSSARY.md)). It is:
 
-- an Agent (controller-owned identity: prompt, provider, permission profile - see [./02-domain-model.md](./02-domain-model.md)),
+- an Agent (controller-owned identity: prompt, Provider Account, model and optionally harness, permission profile - see [./02-domain-model.md](./02-domain-model.md)),
 - plus zero or more Channel Bindings (section 3),
 - plus one Memory (section 6),
 - plus one Heartbeat (section 8.2) and zero or more Reminders (section 8.3).
@@ -66,7 +66,7 @@ Rules:
 - A conversation holds exactly one live session at a time (the current incarnation); predecessors remain readable as ordinary session history. *(Amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92).)* The conversation stores neither its current session nor its lineage. Its lineage is the sessions whose `conversationId` is the conversation's id, oldest first, and its current session is the newest of them. A session started after its predecessor ended therefore takes over with nothing to update.
 - **Input goes through the conversation** *(amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*. The owner's messages reach an assistant only through `conversation.send`, which only the user may call. On a conversation's session, `session.input` is refused `invalid_state` naming `conversation.send`, and `session.continue` is refused `invalid_state` because a fork would start a second lineage: to branch off, spawn a Thread with `session.spawn` and give it the context it needs. `session.spawn` naming an assistant's agent is refused the same way, because an assistant's sessions belong to its conversation. Steering, interrupting and stopping the running session work as on any session. *(Amended 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92).)* A queued owner message cannot be changed or withdrawn: on a conversation's session, `input.update` and `input.cancel` are refused `invalid_state`. The conversation already shows the message as sent, so a rewritten text would reach the assistant as words the owner never wrote there, and a cancelled one would leave the owner with no answer and no notice. To correct or withdraw a message, the owner sends a follow-up with `conversation.send`. `input.steer` stays allowed, because it delivers the message unchanged; the web app's session view offers neither Steer nor Cancel on such a session's queued messages, since the owner talks to the assistant in the conversation. *(Amended 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92).)* **The conversation is the source of truth.** Every owner message is stored first and then given to the conversation's newest session `s`, by what `s` is doing:
 
-  - `s` is working (`busy`): the message is steered into the running turn. Steering is a session guarantee ([./06-providers.md](./06-providers.md) section 5), so this holds on every provider;
+  - `s` is working (`busy`): the message is steered into the running turn. Steering is a session guarantee ([./06-providers.md](./06-providers.md) section 5), so this holds on every harness;
   - `s` is `idle`: the message opens a turn;
   - `s` has exited and is resumable: `s` is resumed in place with the message waiting, whatever the reason it exited;
   - otherwise (no session, or one that cannot be resumed): a new session starts with the message as its prompt.
@@ -162,7 +162,7 @@ A conversation is backed by generational sessions: a lineage of ordinary Session
 - Assistant sessions are ordinary Sessions with the assistant as their agent, no Task, and no Workspace (`workspaceId: null` in the SessionSpec, [./06-providers.md](./06-providers.md)). They are literally workspace-less: nothing is materialized on runner disk for them beyond the empty scratch cwd every workspace-less session gets ([./06-providers.md](./06-providers.md) section 9.1).
 - The session carries a Session Token with the assistant's permission profile ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)); the assistant acts through the `hercule` CLI.
 - An assistant session runs inside ~~its provider instance's isolated provider home (one instance = one login = one home)~~ the Harness Home of its account and harness (one per account, harness and runner) *(amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406))*, so user-global instructions, skills and packages never leak in ([./06-providers.md](./06-providers.md)).
-- **Provider-native auto-compaction is disabled for assistant sessions.** Rotation is the only memory event. The adapter reports context usage (`session.usage.updated`, [./06-providers.md](./06-providers.md)) so the controller can rotate at Hercule's own threshold. Per-provider switches (Claude `DISABLE_COMPACT` / `--autocompact`, pi `compaction.enabled=false`, Codex `model_auto_compact_token_limit`) are listed in [./06-providers.md](./06-providers.md).
+- **Harness-native auto-compaction is disabled for assistant sessions.** Rotation is the only memory event. The adapter reports context usage (`session.usage.updated`, [./06-providers.md](./06-providers.md)) so the controller can rotate at Hercule's own threshold. Per-harness switches (Claude `DISABLE_COMPACT` / `--autocompact`, pi `compaction.enabled=false`, Codex `model_auto_compact_token_limit`) are listed in [./06-providers.md](./06-providers.md).
 - Session-held Subscriptions are delivered as queued input on a turn boundary (rendered text plus structured payload), never as steering by default ([./08-events-and-connections.md](./08-events-and-connections.md)).
 
 **Lazy liveness (hard rule).** A conversation's current session is a row first and a process second:
@@ -236,7 +236,7 @@ This section is the normative owner of the memory tiers and caps; other document
 
 - **The gist is a field, not a header.** A topic document is `{ name, gist, body }`: `write <name> --gist "<one line>"` sets the gist (optional; unchanged when omitted; empty allowed; refused with `validation` on `core`, which has no gist, rather than ignored *(amended 2026-10-11, [#93](https://github.com/theagenticage/hercule/issues/93))*), `append` never touches it, and the body is pure content with no header convention. The web app edits the gist as a field. This replaces the earlier `# name` / `> gist` two-line header, and with it the whole class of "malformed body" rejections - which matter because every rejection is a chance for the model to rewrite and drop content (section 6.4). The prototype behind ADR 0020 tested the header form; moving the gist to a flag changes nothing the model has to reason about.
 - Topic names are free-form. The index is generated from the rows (name, size, gist); it is not a document the assistant maintains.
-- Caps are in characters, provider-agnostic, and count the body only.
+- Caps are in characters, harness-agnostic, and count the body only.
 
 ### 6.3 Injection
 

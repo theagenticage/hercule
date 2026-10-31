@@ -359,7 +359,7 @@ _Avoid_: daemon (that is a runner process), LaunchAgent or systemd unit as the g
 
 **Harness**:
 An agent program Hercule runs for a Session or a Text Generation: Claude Code, Codex, pi. Installed on runners; one harness can run the models of several Providers, and one Provider's models can run in several harnesses.
-_Avoid_: provider (its name before [ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md); spec text and code written before then still use it until the rename lands), CLI, agent (that is a configuration)
+_Avoid_: provider (its name before [ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)), CLI, agent (that is a configuration)
 
 **Harness Definition**:
 A harness's static self-description: identity, declared capabilities, and which Providers and Account Kinds it can run, and how. What a harness plugin registers; distinct from the running adapter.

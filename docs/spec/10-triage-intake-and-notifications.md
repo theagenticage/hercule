@@ -149,7 +149,7 @@ Ruled out as core bounds, on the record:
 | Candidate | Why not |
 |---|---|
 | Global concurrent-run cap | Redundant: per-runner `maxConcurrentSessions` already queues excess at placement ([./03-controller-and-runners.md](./03-controller-and-runners.md)). |
-| Spend caps | Unenforceable: subscription-auth providers report no reliable per-run cost. V1 displays cost, never gates on it. |
+| Spend caps | Unenforceable: subscription-auth harnesses report no reliable per-run cost. V1 displays cost, never gates on it. |
 | Quiet hours | Pausing a workflow covers it. |
 | Action allowlists / approval gates | Live with access modes ([./06-providers.md](./06-providers.md)) and permission profiles ([./13-security.md](./13-security.md)), not with triage. |
 
