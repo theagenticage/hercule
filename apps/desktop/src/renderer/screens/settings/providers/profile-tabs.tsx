@@ -18,17 +18,6 @@ export interface ProfileTab {
 }
 
 /**
- * One rename of a profile's name. `token` tells this edit from every earlier
- * and later one, even on the same profile; `error` is the controller's
- * refusal of the last save, shown while the edit is open.
- */
-interface RenameEdit {
-  readonly token: number;
-  readonly id: string;
-  readonly error: string | null;
-}
-
-/**
  * Renders the open tab's ⌄ button and the menu it opens: Rename, Duplicate and
  * Delete…. Each item closes the menu and calls its callback.
  */
@@ -105,47 +94,43 @@ function ProfileTabMenu({
 
 /**
  * Renders the open tab while its name is being edited: a text field in the
- * tab. Enter and leaving the field save the name through `onSave`, which
- * resolves to whether the name was saved; the field stays when it was not, so
- * the user can correct it. Esc, or a name that did not change, calls
- * `onStop` without saving.
- *
- * The field is read-only while its save runs, so the name the user sees is
- * the name being saved: a letter typed then would be lost when the field
- * closes.
+ * tab. Enter and leaving the field end the edit. A name that is blank calls
+ * `onBlank` and keeps the field, so the user can correct it. A name that did
+ * not change calls `onStop`, and so does Esc. Any other name calls `onSave`.
+ * The field never waits for a save: whoever receives the name saves it.
  */
 function RenamingTab({
   tab,
   onSave,
+  onBlank,
   onStop,
 }: {
   readonly tab: ProfileTab;
-  readonly onSave: (name: string) => Promise<boolean>;
+  readonly onSave: (name: string) => void;
+  readonly onBlank: () => void;
   readonly onStop: () => void;
 }): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(tab.name);
-  const [saving, setSaving] = useState(false);
-  // True once Esc or a save has decided the outcome, so the blur that follows
-  // as the field goes away does not decide it again.
-  const settled = useRef(false);
+  // True once the edit has ended, so the blur that follows as the field goes
+  // away does not end it a second time.
+  const ended = useRef(false);
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
-  const commit = async (): Promise<void> => {
-    if (settled.current) return;
-    if (value === tab.name) {
-      settled.current = true;
-      onStop();
-      return;
-    }
-    settled.current = true;
-    setSaving(true);
-    const saved = await onSave(value);
-    setSaving(false);
-    if (saved) onStop();
-    else settled.current = false;
+  const end = (finish: () => void): void => {
+    ended.current = true;
+    finish();
+  };
+  const commit = (): void => {
+    if (ended.current) return;
+    if (value === tab.name) end(onStop);
+    else if (value.trim() === "") onBlank();
+    else
+      end(() => {
+        onSave(value);
+      });
   };
   return (
     <span className="pm-tab pm-tab--edit" role="tab" aria-selected="true">
@@ -156,23 +141,20 @@ function RenamingTab({
         aria-label={`Name of ${tab.name}`}
         size={Math.max(8, value.length + 2)}
         value={value}
-        readOnly={saving}
-        aria-busy={saving}
         spellCheck={false}
         autoComplete="off"
         onChange={(event) => {
           setValue(event.target.value);
         }}
-        onBlur={() => void commit()}
+        onBlur={commit}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            void commit();
+            commit();
           } else if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
-            settled.current = true;
-            onStop();
+            if (!ended.current) end(onStop);
           }
         }}
       />
@@ -189,17 +171,11 @@ function RenamingTab({
  * Only the selected tab is in the tab order. ←/→ select the previous or next
  * tab, and Home and End the first and the last.
  *
- * Rename edits the name in the tab itself. `onRename` saves the new name and
- * resolves to the controller's message when it refuses it, such as a blank
- * name or one another profile has, or to `null` when it saved. The message
- * shows above the tabs while the name is being edited.
- *
- * Each Rename starts a new edit, and the answer to a save only reaches the
- * edit that sent it. Opening another tab ends the edit, so an answer that
- * arrives later cannot close or put an error on the edit of another tab the
- * user has started since. A refusal that arrives after the edit ended is
- * handed to `onRenameRefusedLater` with the name the profile still has, so the
- * page can tell the user the profile was not renamed.
+ * Rename edits the name in the tab itself. A valid name closes the editor at
+ * once and goes to `onRename`, which saves it; the caller shows the new name
+ * in `tabs` while the save runs, and the stored name again if it is refused.
+ * A blank name is refused here, in the editor, with "A profile needs a name.",
+ * and `onRename` is not called.
  */
 export function ProfileTabs({
   tabs,
@@ -207,7 +183,6 @@ export function ProfileTabs({
   onOpen,
   onNew,
   onRename,
-  onRenameRefusedLater,
   onDuplicate,
   onDelete,
 }: {
@@ -215,26 +190,21 @@ export function ProfileTabs({
   readonly openId: string;
   readonly onOpen: (id: string) => void;
   readonly onNew: () => void;
-  readonly onRename: (id: string, name: string) => Promise<string | null>;
-  readonly onRenameRefusedLater: (profileName: string, message: string) => void;
+  readonly onRename: (id: string, name: string) => void;
   readonly onDuplicate: (id: string) => void;
   readonly onDelete: (id: string) => void;
 }): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
-  const [edit, setEdit] = useState<RenameEdit | null>(null);
-  const nextEditToken = useRef(0);
-  // The token of the edit that is open now, or `null`. Read when a save
-  // answers, to tell an answer for the open edit from one for an edit that
-  // ended.
-  const openEditToken = useRef<number | null>(null);
-  /** Changes the edit `token` with `change`, unless that edit has ended or another has begun. */
-  const changeEdit = (token: number, change: (current: RenameEdit) => RenameEdit | null): void => {
-    setEdit((current) => (current?.token === token ? change(current) : current));
-  };
+  // The profile whose name is being edited, and whether the editor holds a blank name.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [blankName, setBlankName] = useState(false);
 
+  const stopRenaming = (): void => {
+    setRenamingId(null);
+    setBlankName(false);
+  };
   const openTab = (id: string): void => {
-    openEditToken.current = null;
-    setEdit(null);
+    stopRenaming();
     onOpen(id);
   };
 
@@ -261,34 +231,28 @@ export function ProfileTabs({
 
   return (
     <>
-      {edit?.error == null ? null : (
+      {blankName ? (
         <p className="pm-err" role="alert">
-          {edit.error}
+          A profile needs a name.
         </p>
-      )}
+      ) : null}
       <div className="pm-tabs">
         <div ref={listRef} className="pm-tablist" role="tablist" aria-label="Profiles">
           {tabs.map((tab) => {
             const isOpen = tab.id === openId;
-            if (isOpen && edit?.id === tab.id) {
-              const { token } = edit;
+            if (isOpen && renamingId === tab.id) {
               return (
                 <RenamingTab
                   key={tab.id}
                   tab={tab}
-                  onSave={async (name) => {
-                    const message = await onRename(tab.id, name);
-                    if (message !== null && openEditToken.current !== token) {
-                      onRenameRefusedLater(tab.name, message);
-                    } else {
-                      changeEdit(token, (current) => ({ ...current, error: message }));
-                    }
-                    return message === null;
+                  onSave={(name) => {
+                    stopRenaming();
+                    onRename(tab.id, name);
                   }}
-                  onStop={() => {
-                    if (openEditToken.current === token) openEditToken.current = null;
-                    changeEdit(token, () => null);
+                  onBlank={() => {
+                    setBlankName(true);
                   }}
+                  onStop={stopRenaming}
                 />
               );
             }
@@ -314,9 +278,7 @@ export function ProfileTabs({
                   <ProfileTabMenu
                     name={tab.name}
                     onRename={() => {
-                      const token = nextEditToken.current++;
-                      openEditToken.current = token;
-                      setEdit({ token, id: tab.id, error: null });
+                      setRenamingId(tab.id);
                     }}
                     onDuplicate={() => {
                       onDuplicate(tab.id);

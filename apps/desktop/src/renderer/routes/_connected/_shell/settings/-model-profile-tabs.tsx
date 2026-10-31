@@ -1,11 +1,10 @@
-import { useState, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   buildModelProfileCopyName,
   countProfileEntries,
   readErrorMessage,
   renameModelProfile,
-  updateModelProfile,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { ModelProfile } from "@hercule/contract";
@@ -15,9 +14,16 @@ import {
   addCachedModelProfile,
   readCachedModelProfile,
   readCachedModelProfiles,
-  replaceCachedModelProfile,
+  useModelProfileUpdate,
 } from "./-model-profile-cache";
 import { useOpenModelProfile } from "./-open-model-profile";
+
+/** A rename that was asked for and has not been answered, which its tab shows as the profile's name. */
+interface PendingRename {
+  readonly key: number;
+  readonly profileId: string;
+  readonly name: string;
+}
 
 /**
  * Renders the Models section's profile tabs and what their ⌄ menu opens:
@@ -30,11 +36,13 @@ import { useOpenModelProfile } from "./-open-model-profile";
  * running (the "model-profile" mutation scope), and each is built from the
  * newest copy of the profiles the page holds when its turn comes, so neither
  * writes over a change the user made just before, and two quick Duplicates
- * name their copies "Main copy" and "Main copy 2". A rename the controller refuses shows its message
- * above the tabs, in the tab being edited, or, when the user has opened
- * another tab since, as "<name> was not renamed: <message>" above the tabs
- * until the next tab is opened; a blank name is refused without
- * asking the controller; a failed Duplicate shows above the tabs.
+ * name their copies "Main copy" and "Main copy 2".
+ *
+ * A rename does not hold the editor: the tab shows the new name from the
+ * moment the user confirms it until the save is over. A rename the controller
+ * refuses shows "<name> was not renamed: <message>" above the tabs, with the
+ * tab showing the stored name again, until the next tab is opened or the next
+ * rename starts. A failed Duplicate shows above the tabs.
  */
 export function ModelProfileTabs({
   client,
@@ -46,19 +54,25 @@ export function ModelProfileTabs({
   const queryClient = useQueryClient();
   const { profile, profiles, openProfile } = useOpenModelProfile(client);
   const [deleting, setDeleting] = useState<ModelProfile | null>(null);
-  // A rename the controller refused after the user had left its tab.
-  const [leftRenameError, setLeftRenameError] = useState<string | null>(null);
+  const update = useModelProfileUpdate(client);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [pendingRenames, setPendingRenames] = useState<readonly PendingRename[]>([]);
+  const nextRenameKey = useRef(0);
 
-  const rename = useMutation({
-    scope: { id: "model-profile" },
-    mutationFn: ({ id, name }: { readonly id: string; readonly name: string }) => {
-      const newest = readCachedModelProfile(queryClient, client, id);
-      return updateModelProfile(client, newest, (current) => renameModelProfile(current, name));
-    },
-    onSuccess: (saved) => {
-      replaceCachedModelProfile(queryClient, client, saved);
-    },
-  });
+  const rename = (profileId: string, name: string, storedName: string): void => {
+    const key = nextRenameKey.current++;
+    setRenameError(null);
+    setPendingRenames((pending) => [...pending, { key, profileId, name }]);
+    update
+      .mutateAsync({ profileId, buildChange: (current) => renameModelProfile(current, name) })
+      .catch((error: unknown) => {
+        setRenameError(`${storedName} was not renamed: ${readErrorMessage(error)}`);
+      })
+      .finally(() => {
+        setPendingRenames((pending) => pending.filter((each) => each.key !== key));
+      });
+  };
+
   const duplicate = useMutation({
     scope: { id: "model-profile" },
     // The source and the copy's name are read when the save starts, not when
@@ -90,36 +104,27 @@ export function ModelProfileTabs({
           {`Could not duplicate ${profile.name}. ${readErrorMessage(duplicate.error)}`}
         </p>
       ) : null}
-      {leftRenameError === null ? null : (
+      {renameError === null ? null : (
         <p className="pm-err" role="alert">
-          {leftRenameError}
+          {renameError}
         </p>
       )}
       <ProfileTabs
         tabs={profiles.map((each) => ({
           id: each.id,
-          name: each.name,
+          name:
+            pendingRenames.findLast((pending) => pending.profileId === each.id)?.name ?? each.name,
           count: countProfileEntries(each),
         }))}
         openId={profile.id}
         onOpen={(id) => {
           duplicate.reset();
-          setLeftRenameError(null);
+          setRenameError(null);
           openProfile(id);
         }}
         onNew={onNew}
-        onRename={(id, name) =>
-          // A blank name is refused here in plain words: the schema's own
-          // message for it is about string lengths.
-          name.trim() === ""
-            ? Promise.resolve("A profile needs a name.")
-            : rename.mutateAsync({ id, name }).then(
-                () => null,
-                (error: unknown) => readErrorMessage(error),
-              )
-        }
-        onRenameRefusedLater={(profileName, message) => {
-          setLeftRenameError(`${profileName} was not renamed: ${message}`);
+        onRename={(id, name) => {
+          rename(id, name, profiles.find((each) => each.id === id)?.name ?? name);
         }}
         onDuplicate={(id) => {
           duplicate.mutate(id);

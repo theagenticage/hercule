@@ -384,6 +384,22 @@ describe("Settings > Providers > Models, profiles", () => {
       expect(read()[0]!.name).toBe("Daily");
     });
 
+    it("saves the name when the user leaves the field", async () => {
+      const { calls } = await openModels({ profiles: [MAIN, WORK] });
+
+      await chooseTabMenuItem("Main", "Rename");
+      const field = screen.getByRole("textbox", { name: "Name of Main" });
+      await userEvent.clear(field);
+      await userEvent.type(field, "Daily");
+      await userEvent.tab();
+
+      await waitFor(() => {
+        expect(listTabNames()).toEqual(["Daily", "Work"]);
+      });
+      expect(screen.queryByRole("textbox")).toBeNull();
+      expect(getCalls(calls, "PATCH", `/api/v1/model-profiles/${MAIN_ID}`)).toHaveLength(1);
+    });
+
     it("drops the edit on Esc and sends nothing", async () => {
       const { calls } = await openModels({ profiles: [MAIN, WORK] });
 
@@ -395,53 +411,58 @@ describe("Settings > Providers > Models, profiles", () => {
       expect(calls.filter((call) => call.method === "PATCH")).toHaveLength(0);
     });
 
-    it("shows the controller's message for a taken name and keeps the field", async () => {
-      await openModels({ profiles: [MAIN, WORK] });
-
-      await chooseTabMenuItem("Main", "Rename");
-      const field = screen.getByRole("textbox");
-      await userEvent.clear(field);
-      await userEvent.type(field, "Work{Enter}");
-
-      expect((await screen.findByRole("alert")).textContent).toBe("A profile called that exists.");
-      expect(screen.getByRole<HTMLInputElement>("textbox").value).toBe("Work");
-
-      await userEvent.keyboard("{Escape}");
-
-      expect(screen.queryByRole("alert")).toBeNull();
-      expect(listTabNames()).toEqual(["Main", "Work"]);
-    });
-
-    it("keeps the field read-only while its save runs, so a letter typed then is not lost", async () => {
+    it("closes the editor at once, shows the new name while the save runs, and the stored name again when the controller refuses it", async () => {
       const save = holdAnswer();
       await openModels({
         profiles: [MAIN, WORK],
         handlers: { [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: save.handler },
       });
       await chooseTabMenuItem("Main", "Rename");
-      const field = screen.getByRole<HTMLInputElement>("textbox", { name: "Name of Main" });
+      const field = screen.getByRole("textbox", { name: "Name of Main" });
       await userEvent.clear(field);
-      await userEvent.type(field, "Daily{Enter}");
-      await waitFor(() => {
-        expect(field.readOnly).toBe(true);
-      });
+      await userEvent.type(field, "Work{Enter}");
 
-      await userEvent.type(field, "xyz");
+      expect(screen.queryByRole("textbox")).toBeNull();
+      expect(listTabNames()).toEqual(["Work", "Work"]);
+      expect(getTabs()[0]!.getAttribute("aria-selected")).toBe("true");
 
-      expect(field.value).toBe("Daily");
       save.answer({
         status: 400,
         body: buildErrorBody("validation", "A profile called that exists."),
       });
-      expect((await screen.findByRole("alert")).textContent).toBe("A profile called that exists.");
-      expect(field.readOnly).toBe(false);
-      await userEvent.type(field, "xyz");
-      expect(field.value).toBe("Dailyxyz");
+
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "Main was not renamed: A profile called that exists.",
+      );
+      expect(listTabNames()).toEqual(["Main", "Work"]);
     });
 
-    it("keeps the rename the user has started on another tab when an earlier save answers", async () => {
+    it("names the profile in the refusal when the user has opened another tab meanwhile", async () => {
       const save = holdAnswer();
       await openModels({
+        profiles: [MAIN, WORK],
+        handlers: { [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: save.handler },
+      });
+      await chooseTabMenuItem("Main", "Rename");
+      const field = screen.getByRole("textbox", { name: "Name of Main" });
+      await userEvent.clear(field);
+      await userEvent.type(field, "Work{Enter}");
+      await userEvent.click(screen.getByRole("tab", { name: /^Work/, selected: false }));
+
+      save.answer({
+        status: 400,
+        body: buildErrorBody("validation", "A profile called that exists."),
+      });
+
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "Main was not renamed: A profile called that exists.",
+      );
+      expect(listTabNames()).toEqual(["Main", "Work"]);
+    });
+
+    it("renames another profile while the first rename's save is pending, and both end correct", async () => {
+      const save = holdAnswer();
+      const { calls, read } = await openModels({
         profiles: [MAIN, WORK],
         handlers: { [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: save.handler },
       });
@@ -453,44 +474,20 @@ describe("Settings > Providers > Models, profiles", () => {
       await chooseTabMenuItem("Work", "Rename");
       const other = screen.getByRole("textbox", { name: "Name of Work" });
       await userEvent.clear(other);
-      await userEvent.type(other, "Jobs");
+      await userEvent.type(other, "Jobs{Enter}");
+
+      expect(listTabNames()).toEqual(["Daily", "Jobs"]);
 
       save.answer({ body: { ...MAIN, name: "Daily", revision: MAIN.revision + 1 } });
 
       await waitFor(() => {
-        expect(screen.getByRole("tab", { name: /^Daily/ })).toBeTruthy();
+        expect(getCalls(calls, "PATCH", `/api/v1/model-profiles/${WORK_ID}`)).toHaveLength(1);
       });
-      expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Name of Work" }).value).toBe(
-        "Jobs",
-      );
-    });
-
-    it("names the profile when its rename is refused after the user left it, and leaves the other rename alone", async () => {
-      const save = holdAnswer();
-      await openModels({
-        profiles: [MAIN, WORK],
-        handlers: { [`PATCH /api/v1/model-profiles/${MAIN_ID}`]: save.handler },
+      await waitFor(() => {
+        expect(read().map(({ name }) => name)).toEqual(["Main", "Jobs"]);
       });
-      await chooseTabMenuItem("Main", "Rename");
-      const field = screen.getByRole("textbox", { name: "Name of Main" });
-      await userEvent.clear(field);
-      await userEvent.type(field, "Work{Enter}");
-      await userEvent.click(screen.getByRole("tab", { name: /^Work/, selected: false }));
-      await chooseTabMenuItem("Work", "Rename");
-      await userEvent.type(screen.getByRole("textbox", { name: "Name of Work" }), "s");
-
-      save.answer({
-        status: 400,
-        body: buildErrorBody("validation", "A profile called that exists."),
-      });
-
-      expect((await screen.findByRole("alert")).textContent).toBe(
-        "Main was not renamed: A profile called that exists.",
-      );
-      expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Name of Work" }).value).toBe(
-        "Works",
-      );
-      expect(screen.getByRole("tab", { name: /^Main/ })).toBeTruthy();
+      expect(listTabNames()).toEqual(["Daily", "Jobs"]);
+      expect(screen.queryByRole("alert")).toBeNull();
     });
 
     it("refuses a blank name in plain words without asking the controller, and keeps the field", async () => {
