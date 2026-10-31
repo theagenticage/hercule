@@ -85,39 +85,33 @@ describe("findHarnessProblem", () => {
   });
 });
 
+// The messages for a missing key, a missing token and an expired token are
+// tested through the services that report them (account-runners.test.ts and
+// harness-account.test.ts). The instant of expiry is only reachable here.
 describe("findCredentialProblem", () => {
-  const now = Date.parse("2026-10-31T00:00:00.000Z");
+  it("counts the instant of expiry as expired", () => {
+    const now = Date.parse("2026-10-31T00:00:00.000Z");
+    const [provider] = providers;
+    const kind = provider!.kinds.find((one) => one.id === "subscription-token")!;
 
-  it("is null for a stored key and for a token that has not expired", () => {
-    expect(findCredentialProblem(account("api-key"), providers, true, now)).toBeNull();
-    expect(
-      findCredentialProblem(
-        account("subscription-token", "2026-10-31T00:00:01.000Z"),
-        providers,
-        true,
-        now,
-      ),
-    ).toBeNull();
-  });
-
-  it("asks for a key or for a token, according to what the kind holds", () => {
-    expect(findCredentialProblem(account("api-key"), providers, false, now)).toBe(
-      "OpenAI · work has no key. Add one in Settings › Providers.",
-    );
-    expect(findCredentialProblem(account("subscription-token"), providers, false, now)).toBe(
-      "OpenAI · work has no token. Make one in Settings › Providers.",
-    );
-  });
-
-  it("names the date of an expired token, and counts the instant of expiry as expired", () => {
     expect(
       findCredentialProblem(
         account("subscription-token", "2026-10-31T00:00:00.000Z"),
-        providers,
+        provider!,
+        kind,
         true,
         now,
       ),
     ).toBe("OpenAI · work's token expired on 2026-10-31. Make a new one in Settings › Providers.");
+    expect(
+      findCredentialProblem(
+        account("subscription-token", "2026-10-31T00:00:01.000Z"),
+        provider!,
+        kind,
+        true,
+        now,
+      ),
+    ).toBeNull();
   });
 });
 

@@ -16,7 +16,6 @@ import {
   asksForAccountLabel,
   buildProviderAccountCreateInput,
   buildProviderAccountName,
-  createsAccountAfterStep,
   isAddAccountStepFilled,
   isNotFound,
   listSignInRunnerOptions,
@@ -26,7 +25,6 @@ import {
   readConfigIssues,
   readErrorMessage,
   type AddAccountDraft,
-  type AddAccountStep,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { ProviderAccount, ProviderAccountCreateInput } from "@hercule/contract";
@@ -51,25 +49,6 @@ type Stage =
   | { readonly at: "provider" }
   | { readonly at: "kind" }
   | { readonly at: "step"; readonly index: number };
-
-/** A step the flow draws as a screen of its own, with its place in the plan. */
-interface Screen {
-  readonly step: Exclude<AddAccountStep, { kind: "checklist" | "create" }>;
-  /** Whether the button of this screen creates the account. */
-  readonly createsAccount: boolean;
-}
-
-/**
- * Lists the steps of `steps` that have a screen. A `checklist` step has none:
- * its text is the lead of the credentials screen. `create` has none either:
- * the button of the step before it creates the account.
- */
-const listScreens = (steps: ReadonlyArray<AddAccountStep>): ReadonlyArray<Screen> =>
-  steps.flatMap((step, index): Screen[] =>
-    step.kind === "checklist" || step.kind === "create"
-      ? []
-      : [{ step, createsAccount: createsAccountAfterStep(steps, index) }],
-  );
 
 /**
  * Renders the add-account sheet and everything behind its buttons.
@@ -188,7 +167,6 @@ export function AddProviderAccount({
       provider,
     );
   const steps = kind === null ? [] : planAddAccountSteps(kind, asksLabel);
-  const screens = listScreens(steps);
   const created = accounts.find(({ id }) => id === createdId);
 
   // Editing a field clears the last create's failure so the form can be sent
@@ -235,7 +213,7 @@ export function AddProviderAccount({
   const harness = harnesses.find(
     ({ id }) => id === (created?.defaultHarnessId ?? provider?.defaultHarnessId),
   );
-  const signInStep = screens.find(({ step }) => step.kind === "sign-in")?.step;
+  const signInStep = steps.find((step) => step.kind === "sign-in");
   const signInChoice =
     harness === undefined || signInStep?.kind !== "sign-in"
       ? null
@@ -275,10 +253,9 @@ export function AddProviderAccount({
       proceed();
     }
   };
-  const checklist = steps.flatMap((step) => (step.kind === "checklist" ? [step.markdown] : []));
 
-  const screenIndex = stage.at === "step" ? stage.index : 0;
-  const screen = stage.at === "step" ? screens[screenIndex] : undefined;
+  const stepIndex = stage.at === "step" ? stage.index : 0;
+  const step = stage.at === "step" ? steps[stepIndex] : undefined;
 
   // A refused key shows under its field. Any other failure of the create has
   // no field to sit under, so it shows in the sheet. That includes a refused
@@ -286,7 +263,7 @@ export function AddProviderAccount({
   // step, where the key field is not drawn.
   const createIssues = readConfigIssues(
     create.error,
-    screen?.step.kind === "credentials" ? screen.step.fields : [],
+    step?.kind === "credentials" ? step.fields : [],
     "credentials",
   );
 
@@ -308,7 +285,7 @@ export function AddProviderAccount({
       })),
       onPick: pickProvider,
     };
-  } else if (stage.at === "kind" || screen === undefined) {
+  } else if (stage.at === "kind" || step === undefined) {
     body = {
       kind: "account-kind",
       kinds: provider.kinds.map(({ id, title, description }) => ({ id, title, description })),
@@ -321,8 +298,7 @@ export function AddProviderAccount({
       busy: false,
       onPress: () => goTo({ at: "step", index: 0 }),
     };
-  } else if (screen.step.kind === "sign-in") {
-    const { step } = screen;
+  } else if (step.kind === "sign-in") {
     body = {
       kind: "sign-in",
       method: step.method,
@@ -351,13 +327,11 @@ export function AddProviderAccount({
           }
         : { label: "Done", disabled: false, busy: false, onPress: onClose };
   } else {
-    const { step, createsAccount } = screen;
-    const isLast = createsAccount && screens[screenIndex + 1] === undefined;
     body =
       step.kind === "credentials"
         ? {
             kind: "credentials",
-            lead: checklist.length === 0 ? null : checklist.join("\n\n"),
+            lead: step.instructions,
             fields: step.fields,
             values: draft.credentials,
             errors: createIssues.perField,
@@ -376,13 +350,13 @@ export function AddProviderAccount({
             onChange: (label) => changeDraft({ label }),
           };
     primary = {
-      label: create.isPending ? creatingLabel : isLast ? "Done" : "Continue",
+      label: create.isPending ? creatingLabel : step.submit === "create" ? "Done" : "Continue",
       disabled: !isAddAccountStepFilled(step, draft),
       busy: create.isPending,
       onPress: () => {
-        if (!createsAccount) goTo({ at: "step", index: screenIndex + 1 });
-        else if (isLast) createAccount(onClose);
-        else createAccount(() => goTo({ at: "step", index: screenIndex + 1 }));
+        const showNext = (): void => goTo({ at: "step", index: stepIndex + 1 });
+        if (step.submit === "next") showNext();
+        else createAccount(step.submit === "create" ? onClose : showNext);
       },
     };
   }

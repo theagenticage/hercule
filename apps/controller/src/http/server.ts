@@ -98,9 +98,9 @@ import {
   Arrival,
   Inbound,
   Pipeline,
-  ProbeDriver,
   forwardTargetChanges,
   PromotionFleetRouteLayer,
+  ProviderAccountProbing,
   Provisioning,
   checkSchedulerInterval,
   recordDeparturesAfterThaws,
@@ -437,12 +437,12 @@ export const serve = (bundle: WebBundle | undefined) =>
     // reported once it has been gone for the grace, like any other.
     yield* Effect.forkScoped(sweepUnreachableRunners);
     // Forked before the listener binds, and the arrivals stream replays the
-    // rest, so no runner's hello is missed. The probe driver also runs on a
+    // rest, so no runner's hello is missed. Probing also runs on a
     // timer, because logins expire and harnesses are upgraded outside Hercule.
-    yield* Effect.forkScoped(Effect.flatMap(ProbeDriver, (driver) => driver.driving));
+    yield* Effect.forkScoped(Effect.flatMap(ProviderAccountProbing, (probing) => probing.driving));
     // A runner that connects is sent the work owed to it: its pending
     // provisioning and its running workspace steps. Forked before the
-    // listener binds, like the probe driver, so no arrival is missed.
+    // listener binds, like the probing, so no arrival is missed.
     yield* Effect.forkScoped(Effect.flatMap(Arrival, (arrival) => arrival.driving));
     // A stored provider snapshot or a write of the text generation setting
     // wakes the text generations waiting for a runner.

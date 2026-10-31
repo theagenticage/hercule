@@ -18,7 +18,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
-import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
   createDecodeValidationError,
   createInvalidStateError,
@@ -36,7 +35,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { CurrentActor, requireGrant } from "../../actor";
+import { requireGrant } from "../../actor";
 import { AssistantService } from "../../assistants";
 import type { GrantsError } from "../../permissions";
 import {
@@ -44,8 +43,11 @@ import {
   type CreateInput,
   type UpdateInput,
 } from "../../provider-accounts";
-import { RunnerConnections, type Answer } from "../../runners";
-import { ProviderAccountProbeDeadline, ProviderAccountProbing } from "./probing";
+import {
+  describeSignInFailure,
+  ProviderAccountProbeDeadline,
+  ProviderAccountProbing,
+} from "./probing";
 
 /**
  * The user is waiting in a dialog. Most of the time goes to a cold CLI
@@ -93,55 +95,10 @@ type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
 type AskError = ReadError | Validation | NotFound | InvalidState;
 
-type LoginAnswer = LoginUrl | LoginFailed | LoginResult;
-
-const isLoginAnswer = (answer: Answer): answer is LoginAnswer =>
-  answer._tag === "loginUrl" || answer._tag === "loginFailed" || answer._tag === "loginResult";
-
-const describeSignInFailure = (answer: LoginAnswer): string =>
-  answer._tag === "loginFailed" ? answer.message : "the sign-in did not return a URL";
-
 const make = Effect.gen(function* () {
   const accounts = yield* ProviderAccountService;
   const probing = yield* ProviderAccountProbing;
-  const connections = yield* RunnerConnections;
   const assistants = yield* AssistantService;
-
-  /**
-   * Sends a login frame and returns the runner's answer. Fails with
-   * `InvalidState` when the runner does not answer before the deadline.
-   */
-  const askRunner = (
-    runnerId: string,
-    request: LoginStart | LoginCode,
-    deadline: Duration.Duration,
-  ): Effect.Effect<LoginAnswer, InvalidState> =>
-    Effect.gen(function* () {
-      const answer = yield* connections.asked(runnerId, request, deadline);
-      const login = Option.filter(answer, isLoginAnswer);
-      return yield* Option.match(login, {
-        // Disconnected, gone or silent all mean the same to the user: the
-        // runner did not answer.
-        onNone: () =>
-          Effect.fail(
-            createInvalidStateError(
-              `that runner did not answer the sign-in within ${Duration.format(deadline)}`,
-            ),
-          ),
-        onSome: Effect.succeed,
-      });
-    });
-
-  /**
-   * Makes the account ready for use after its first successful sign-in:
-   * creates the default assistant on it when no assistant exists (see
-   * `AssistantService.createDefaultIfNone`). Both ways a sign-in ends call
-   * it once a probe has found the account signed in: the pasted code of
-   * `submitSignInCode` and the device login the runner reports as ended.
-   * Fails when the current actor may not create assistants.
-   */
-  const completeFirstSignIn = (providerAccountId: string) =>
-    assistants.createDefaultIfNone(providerAccountId);
 
   return {
     /**
@@ -209,51 +166,31 @@ const make = Effect.gen(function* () {
      */
     signIn: (input: SignInInput): Effect.Effect<ProviderAccountSignInStarted, AskError> =>
       Effect.gen(function* () {
-        const actor = yield* requireGrant("providerAccount.signIn");
+        yield* requireGrant("providerAccount.signIn");
         const { id, runnerId } = yield* Effect.mapError(
           decodeSignIn(input),
           createDecodeValidationError,
         );
         const { harnessId, method, harnessAccount } = yield* accounts.prepareSignIn(id, runnerId);
-        const requestId = crypto.randomUUID();
-        // Expected before the runner is asked, because a device login that
-        // fails at once can report its end before this fiber reads the answer.
-        // It is forgotten when the ask fails or is interrupted, since a login
-        // whose answer is never read would otherwise stay awaited for as long
-        // as the controller runs. The runner's report of the end has no
-        // caller, so the actor that started the login is kept for the
-        // assistant a first sign-in creates.
-        yield* probing.expectLoginEnd(
+        const answer = yield* probing.startLogin(
           runnerId,
           id,
-          harnessId,
-          requestId,
-          completeFirstSignIn(id).pipe(
-            Effect.provideService(CurrentActor, actor),
-            // Nobody waits for the report, so the log is where a failure goes.
-            Effect.catchCause((cause) =>
-              Effect.logError(
-                "Creating the default assistant after a device sign-in failed",
-                cause,
+          { harnessId, harnessAccount, method },
+          yield* ProviderAccountSignInDeadline,
+          // The first sign-in makes the account ready for use. Nobody waits
+          // for the runner's report of the login's end, so the log is where a
+          // failure goes.
+          assistants
+            .createDefaultIfNone(id)
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logError(
+                  "Creating the default assistant after a device sign-in failed",
+                  cause,
+                ),
               ),
             ),
-          ),
         );
-        const answer = yield* askRunner(
-          runnerId,
-          { _tag: "loginStart", requestId, harnessId, harnessAccount, method },
-          yield* ProviderAccountSignInDeadline,
-        ).pipe(Effect.onError(() => probing.forgetLoginEnd(runnerId, requestId)));
-        if (answer._tag !== "loginUrl") {
-          yield* probing.forgetLoginEnd(runnerId, requestId);
-          return yield* Effect.fail(createInvalidStateError(describeSignInFailure(answer)));
-        }
-        // Absent rather than empty: a code means the login is finished in the
-        // user's browser, not through this exchange. A login finished by
-        // pasting a code reports no end.
-        yield* probing.recordPrintedLogin(runnerId, id, harnessId, requestId, {
-          reportsEnd: answer.userCode !== undefined,
-        });
         if (answer.userCode === undefined) return { url: answer.url };
         if (answer.expiresInSeconds === undefined) {
           return { url: answer.url, userCode: answer.userCode };
@@ -298,7 +235,7 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const { harnessId } = yield* accounts.prepareSignIn(id, runnerId);
-        const answer = yield* askRunner(
+        const answer = yield* probing.submitLoginCode(
           runnerId,
           { _tag: "loginCode", requestId: crypto.randomUUID(), providerAccountId: id, code },
           SIGN_IN_CODE_DEADLINE,
@@ -330,7 +267,7 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        yield* completeFirstSignIn(id);
+        yield* assistants.createDefaultIfNone(id);
         return yield* accounts.readProviderAccount(id);
       }),
 
@@ -381,5 +318,5 @@ export class ProviderAccountRunnerOperations extends Context.Service<
 export const ProviderAccountRunnerOperationsLayer: Layer.Layer<
   ProviderAccountRunnerOperations,
   never,
-  ProviderAccountService | ProviderAccountProbing | RunnerConnections | AssistantService
+  ProviderAccountService | ProviderAccountProbing | AssistantService
 > = Layer.effect(ProviderAccountRunnerOperations)(make);

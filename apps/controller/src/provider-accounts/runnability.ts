@@ -15,22 +15,33 @@
  *   has a signed-in snapshot of the same person on that runner
  *   (`isIdentityCompatible`).
  */
+import type { AccountKind } from "@hercule/plugin-host";
 import type { RunnerFacts } from "@hercule/protocol";
 import { computeVersionVerdict, findVersionFloor } from "../harnesses";
 import type { RegisteredHarness, RegisteredProvider } from "../plugins";
 import type { StoredProviderAccount } from "./repository";
 
 /**
- * Names an account the way a user reads it: its provider, then its label if it
- * has one ("Anthropic · work").
+ * Names an account the way a user reads it, from its provider's name and its
+ * label if it has one ("Anthropic · work").
+ */
+export const nameProviderAccount = (providerName: string, label: string | null): string =>
+  `${providerName}${label === null ? "" : ` · ${label}`}`;
+
+/**
+ * Names an account the way a user reads it, looking its provider up in
+ * `providers` and falling back to the provider id when this build has no such
+ * provider. Use `nameProviderAccount` when the provider is already at hand.
  */
 export const describeProviderAccount = (
   account: Pick<StoredProviderAccount, "providerId" | "label">,
   providers: ReadonlyArray<RegisteredProvider>,
-): string => {
-  const name = providers.find((provider) => provider.id === account.providerId)?.displayName;
-  return `${name ?? account.providerId}${account.label === null ? "" : ` · ${account.label}`}`;
-};
+): string =>
+  nameProviderAccount(
+    providers.find((provider) => provider.id === account.providerId)?.displayName ??
+      account.providerId,
+    account.label,
+  );
 
 /**
  * Whether a harness can run on one runner:
@@ -79,38 +90,34 @@ export const findHarnessProblem = (
 };
 
 /**
- * Returns whether the account's credential is a token that a sign-in makes
- * (its kind has a `harness-login` step), as opposed to a key the user types
+ * Returns whether the credential of accounts of this kind is a token that a
+ * sign-in makes (the kind has a `harness-login` step), as opposed to a key the user types
  * in. Messages use it to say which to do.
  */
-export const holdsMadeToken = (
-  account: Pick<StoredProviderAccount, "providerId" | "kind">,
-  providers: ReadonlyArray<RegisteredProvider>,
-): boolean =>
-  providers
-    .find((provider) => provider.id === account.providerId)
-    ?.kinds.find((kind) => kind.id === account.kind)
-    ?.setup.some((step) => step.kind === "harness-login") === true;
+export const holdsMadeToken = (kind: AccountKind): boolean =>
+  kind.setup.some((step) => step.kind === "harness-login");
 
 /**
  * Returns why the account's key or token cannot be used, in words a user can
  * act on, or `null` when it can: the secret is stored and, for a token, has
  * not expired. Call it only for an account whose kind holds a credential.
  *
- * `secretStored` says whether the account's credential secret exists.
+ * `provider` and `kind` are the account's, as `decideProviderAccountHarness`
+ * returns them. `secretStored` says whether the account's credential secret exists.
  * `nowMillis` is the current time, so every caller judges expiry against the
  * same kind of clock reading.
  */
 export const findCredentialProblem = (
-  account: Pick<StoredProviderAccount, "providerId" | "kind" | "label" | "credentialExpiresAt">,
-  providers: ReadonlyArray<RegisteredProvider>,
+  account: Pick<StoredProviderAccount, "label" | "credentialExpiresAt">,
+  provider: RegisteredProvider,
+  kind: AccountKind,
   secretStored: boolean,
   nowMillis: number,
 ): string | null => {
-  const name = describeProviderAccount(account, providers);
+  const name = nameProviderAccount(provider.displayName, account.label);
   if (!secretStored) {
     // A token is made by a sign-in, a key is typed in; the message says which to do.
-    return holdsMadeToken(account, providers)
+    return holdsMadeToken(kind)
       ? `${name} has no token. Make one in Settings › Providers.`
       : `${name} has no key. Add one in Settings › Providers.`;
   }

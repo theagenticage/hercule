@@ -11,11 +11,16 @@
  * (account, harness) pairs those are (`ProviderAccountProbes`); this service
  * sends the probes.
  *
- * It also tracks the device logins this controller started, so that a
- * runner's report that one ended is accepted only for a login the controller
- * is waiting for. That state lives in memory, so there must be one instance
- * per process: the boot builds it once and the sign-in operations and the
- * inbound driver share it.
+ * It also starts the logins on runners and tracks the device logins this
+ * controller started, so that a runner's report that one ended is accepted
+ * only for a login the controller is waiting for. That state lives in memory,
+ * so there must be one instance per process: the boot builds it once and the
+ * sign-in operations and the inbound driver share it.
+ *
+ * `driving` keeps the snapshots fresh for the life of the controller: it
+ * probes every account on a runner when it connects, and sweeps the whole
+ * fleet on a timer, because a login can expire and a harness can be upgraded
+ * outside Hercule, which makes a snapshot older than the interval unreliable.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -24,20 +29,23 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import type { SqlError } from "effect/sql/SqlError";
+import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
   createInvalidStateError,
   NotFound,
   type CapabilitySnapshot,
   type InvalidState,
 } from "@hercule/contract";
+import { CurrentActor } from "../../actor";
 import {
   HarnessAccounts,
   ProviderAccountProbes,
   type ProbeOutcome,
   type ProbePair,
 } from "../../provider-accounts";
-import { RunnerConnections } from "../../runners";
+import { RunnerConnections, type Answer } from "../../runners";
 
 /**
  * The runner's own 15s probe timeout plus the round trip, so the runner's
@@ -49,6 +57,14 @@ const PROBE_DEADLINE: Duration.Duration = Duration.seconds(20);
 export const ProviderAccountProbeDeadline = Context.Reference<Duration.Duration>(
   "hercule/controller/daemon/ProviderAccountProbeDeadline",
   { defaultValue: (): Duration.Duration => PROBE_DEADLINE },
+);
+
+const PROBE_INTERVAL: Duration.Duration = Duration.hours(1);
+
+/** Lets tests set an interval short enough to wait for. */
+export const ProviderAccountProbeInterval = Context.Reference<Duration.Duration>(
+  "hercule/controller/daemon/ProviderAccountProbeInterval",
+  { defaultValue: (): Duration.Duration => PROBE_INTERVAL },
 );
 
 type StoreError = SqlError | Schema.SchemaError | InvalidState;
@@ -92,6 +108,19 @@ const MAX_CONCURRENT_PROBES_PER_RUNNER = 2;
 
 const accountChangedDuringSignIn = (): InvalidState =>
   createInvalidStateError("The account changed while this sign-in was checked. Sign in again.");
+
+/** What a runner answers to a `loginStart` or a `loginCode`. */
+export type LoginAnswer = LoginUrl | LoginFailed | LoginResult;
+
+const isLoginAnswer = (answer: Answer): answer is LoginAnswer =>
+  answer._tag === "loginUrl" || answer._tag === "loginFailed" || answer._tag === "loginResult";
+
+/** Returns the message for a sign-in whose answer was not what the exchange needed. */
+export const describeSignInFailure = (answer: LoginAnswer): string =>
+  answer._tag === "loginFailed" ? answer.message : "the sign-in did not return a URL";
+
+/** What a sign-in asks a runner to start: the `loginStart` frame without its request id. */
+export type LoginStartRequest = Omit<LoginStart, "_tag" | "requestId">;
 
 /** A login whose end the controller waits for the runner to report. */
 interface AwaitedLogin {
@@ -214,6 +243,33 @@ const make = Effect.gen(function* () {
       { concurrency: "unbounded", discard: true },
     );
 
+  /**
+   * Sends a login frame and returns the runner's answer. Fails with
+   * `InvalidState` when the runner does not answer before the deadline.
+   * Private on purpose: a login may only start through `startLogin`, which
+   * registers the login before it asks.
+   */
+  const askLogin = (
+    runnerId: string,
+    request: LoginStart | LoginCode,
+    deadline: Duration.Duration,
+  ): Effect.Effect<LoginAnswer, InvalidState> =>
+    Effect.gen(function* () {
+      const answer = yield* connections.asked(runnerId, request, deadline);
+      const login = Option.filter(answer, isLoginAnswer);
+      return yield* Option.match(login, {
+        // Disconnected, gone or silent all mean the same to the user: the
+        // runner did not answer.
+        onNone: () =>
+          Effect.fail(
+            createInvalidStateError(
+              `that runner did not answer the sign-in within ${Duration.format(deadline)}`,
+            ),
+          ),
+        onSome: Effect.succeed,
+      });
+    });
+
   // The logins whose end this controller waits to hear about, keyed by runner
   // and the request id of the login's `loginStart`. A runner reports the end
   // of a login, so without this map a runner could make the controller probe
@@ -284,86 +340,123 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * Starts a login on a runner and returns the URL it printed, with the code
+   * to type there for a device login. Registers the login so its end, if the
+   * runner reports one, is accepted (see `probeAfterLoginEnd`), and removes
+   * the registration again when the runner refuses the login, does not answer,
+   * or the caller stops waiting.
+   *
+   * `onSignedIn` runs once the probe after the login's end finds the account
+   * signed in. The runner's report of the end has no caller, so it runs as the
+   * actor current when this is called. It must handle its own failures.
+   *
+   * Fails with `InvalidState` when the runner does not answer before the
+   * deadline or answers with anything but a URL.
+   */
+  const startLogin = (
+    runnerId: string,
+    providerAccountId: string,
+    request: LoginStartRequest,
+    deadline: Duration.Duration,
+    onSignedIn: Effect.Effect<void>,
+  ): Effect.Effect<LoginUrl, InvalidState> =>
+    Effect.gen(function* () {
+      const actor = yield* CurrentActor;
+      const requestId = crypto.randomUUID();
+      const loginKey = buildLoginKey(runnerId, requestId);
+      // Registered before the runner is asked, because a device login that
+      // fails at once can report its end before this fiber reads the answer.
+      awaitedLoginEnds.set(loginKey, {
+        runnerId,
+        providerAccountId,
+        harnessId: request.harnessId,
+        printed: false,
+        onSignedIn: Effect.provideService(onSignedIn, CurrentActor, actor),
+      });
+      // Forgotten when the ask fails or is interrupted, since a login whose
+      // answer is never read would otherwise stay awaited for as long as the
+      // controller runs.
+      const answer = yield* askLogin(
+        runnerId,
+        { _tag: "loginStart", requestId, ...request },
+        deadline,
+      ).pipe(Effect.onError(() => Effect.sync(() => awaitedLoginEnds.delete(loginKey))));
+      if (answer._tag !== "loginUrl") {
+        awaitedLoginEnds.delete(loginKey);
+        return yield* Effect.fail(createInvalidStateError(describeSignInFailure(answer)));
+      }
+      // The runner stopped every earlier login on this runner for this account
+      // and harness to start this one, so the ends of those that had printed
+      // their URL are no longer awaited. An earlier login still waiting for
+      // its URL is left alone: its own answer, a failure, removes it.
+      for (const [key, login] of awaitedLoginEnds) {
+        if (
+          login.printed &&
+          login.runnerId === runnerId &&
+          login.providerAccountId === providerAccountId &&
+          login.harnessId === request.harnessId
+        ) {
+          awaitedLoginEnds.delete(key);
+        }
+      }
+      const login = awaitedLoginEnds.get(loginKey);
+      // Absent when the runner reported the end before this answer was read.
+      // Its end stays awaited only for a device login, which has a user code;
+      // a login finished by pasting a code reports no end.
+      if (login !== undefined) {
+        if (answer.userCode !== undefined) login.printed = true;
+        else awaitedLoginEnds.delete(loginKey);
+      }
+      return answer;
+    });
+
+  /** Probes every account and harness the runner could run. Logs a failure instead of returning it. */
+  const sweepRunner = (runnerId: string): Effect.Effect<void> =>
+    logSweepFailure(Effect.flatMap(probes.listPairsOnRunner(runnerId), probePairs));
+
+  /** Probes every account on every connected runner. Logs a failure instead of returning it. */
+  const sweepFleet = (): Effect.Effect<void> =>
+    logSweepFailure(Effect.flatMap(probes.listPairsOnFleet(), probePairs));
+
+  /** Runs forever. Sweeps each runner that connects, and the whole fleet every interval. */
+  const driving: Effect.Effect<void> = Effect.all(
+    [
+      // Forked, because a runner that answers slowly must not hold up the
+      // next runner's sweep.
+      Stream.runForEach(connections.arrivals, (runnerId) =>
+        Effect.forkChild(sweepRunner(runnerId)),
+      ),
+      Effect.gen(function* () {
+        const interval = yield* ProviderAccountProbeInterval;
+        while (true) {
+          yield* Effect.sleep(interval);
+          yield* sweepFleet();
+        }
+      }),
+    ],
+    { concurrency: "unbounded", discard: true },
+  );
+
   return {
     probe,
 
     probeToCheckSignIn,
 
     /**
-     * Records that the login sent as the `loginStart` with this request id is
-     * starting on this runner for this account in this harness, so that its
-     * end, if the runner reports one, is accepted. Call it before the runner
-     * is asked to start the login: the runner may report the end before the
-     * caller has read the answer.
-     *
-     * `onSignedIn` runs when the probe after the login's end finds the account
-     * signed in. The caller builds it to run as the actor who started the
-     * login, and it must handle its own failures.
+     * Sends the code the user pasted to the runner that holds the login and
+     * returns the runner's answer. Fails with `InvalidState` when the runner
+     * does not answer before the deadline.
      */
-    expectLoginEnd: (
+    submitLoginCode: (
       runnerId: string,
-      providerAccountId: string,
-      harnessId: string,
-      requestId: string,
-      onSignedIn: Effect.Effect<void>,
-    ): Effect.Effect<void> =>
-      Effect.sync(() => {
-        awaitedLoginEnds.set(buildLoginKey(runnerId, requestId), {
-          runnerId,
-          providerAccountId,
-          harnessId,
-          printed: false,
-          onSignedIn,
-        });
-      }),
+      request: LoginCode,
+      deadline: Duration.Duration,
+    ): Effect.Effect<LoginAnswer, InvalidState> => askLogin(runnerId, request, deadline),
 
-    /**
-     * Stops waiting for the end of the login sent as the `loginStart` with
-     * this request id. Call it when the runner refused the login or the
-     * caller stopped waiting for the answer: the login either did not start
-     * or its URL never reached the user.
-     */
-    forgetLoginEnd: (runnerId: string, requestId: string): Effect.Effect<void> =>
-      Effect.sync(() => {
-        awaitedLoginEnds.delete(buildLoginKey(runnerId, requestId));
-      }),
+    startLogin,
 
-    /**
-     * Records that the login sent as the `loginStart` with this request id
-     * printed its URL. The runner stopped every earlier login on this runner
-     * for this account and harness to start this one, so the ends of those that had
-     * printed their URL are no longer awaited. An earlier login still waiting
-     * for its URL is left alone: its own answer, a failure, removes it.
-     *
-     * This login's end stays awaited only when `reportsEnd` is true, which is
-     * the case for a device login: a login finished by pasting a code reports
-     * no end.
-     */
-    recordPrintedLogin: (
-      runnerId: string,
-      providerAccountId: string,
-      harnessId: string,
-      requestId: string,
-      { reportsEnd }: { readonly reportsEnd: boolean },
-    ): Effect.Effect<void> =>
-      Effect.sync(() => {
-        for (const [key, login] of awaitedLoginEnds) {
-          if (
-            login.printed &&
-            login.runnerId === runnerId &&
-            login.providerAccountId === providerAccountId &&
-            login.harnessId === harnessId
-          ) {
-            awaitedLoginEnds.delete(key);
-          }
-        }
-        const key = buildLoginKey(runnerId, requestId);
-        const login = awaitedLoginEnds.get(key);
-        // Absent when the runner reported the end before this answer was read.
-        if (login === undefined) return;
-        if (reportsEnd) login.printed = true;
-        else awaitedLoginEnds.delete(key);
-      }),
+    driving,
 
     /**
      * Probes the login's account, in the login's harness, on the runner after the runner reported
@@ -431,13 +524,9 @@ const make = Effect.gen(function* () {
         );
       }),
 
-    /** Probes every account and harness the runner could run. Logs a failure instead of returning it. */
-    sweepRunner: (runnerId: string): Effect.Effect<void> =>
-      logSweepFailure(Effect.flatMap(probes.listPairsOnRunner(runnerId), probePairs)),
+    sweepRunner,
 
-    /** Probes every account on every connected runner. Logs a failure instead of returning it. */
-    sweepFleet: (): Effect.Effect<void> =>
-      logSweepFailure(Effect.flatMap(probes.listPairsOnFleet(), probePairs)),
+    sweepFleet,
 
     /**
      * Probes one account in every harness it can run in, on every connected

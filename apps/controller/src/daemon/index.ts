@@ -103,8 +103,6 @@ export {
 } from "./permissions";
 export { thawExpiredFreezes } from "./promotion";
 export {
-  ProbeDriver,
-  ProbeDriverLayer,
   ProviderAccountProbeDeadline,
   ProviderAccountProbeInterval,
   ProviderAccountProbing,

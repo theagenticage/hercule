@@ -1,14 +1,13 @@
 /**
  * Tests the decisions of the add-account sheet: which questions it asks, in
- * which order, the payload it sends and the machines a sign-in can run on.
+ * which order, what each button does, the payload it sends and the machines a
+ * sign-in can run on.
  */
 import { describe, expect, it } from "vitest";
 import type { AccountKind, Provider } from "@hercule/contract";
 import {
-  ADD_ACCOUNT_LABEL_PROMPT,
   asksForAccountLabel,
   buildProviderAccountCreateInput,
-  createsAccountAfterStep,
   isAddAccountStepFilled,
   listSignInRunnerOptions,
   offersKindChoice,
@@ -22,6 +21,9 @@ import {
   WITH_CLAUDE,
   buildProviderAccount,
 } from "./providers.testing";
+
+// `expect.any` is typed `any`; this names the one use of it as a string.
+const ANY_TEXT = expect.any(String) as string;
 
 const KEY_KIND: AccountKind = {
   id: "api-key",
@@ -69,54 +71,52 @@ describe("asksForAccountLabel", () => {
 });
 
 describe("planAddAccountSteps", () => {
-  it("ends a key kind in create, after the key and the label", () => {
+  const KEY_FIELDS = [{ name: "apiKey", label: "API key" }];
+
+  it("creates a key kind's account at its last step, after the key and the label", () => {
     expect(planAddAccountSteps(KEY_KIND, true)).toEqual([
-      { kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] },
-      { kind: "label", prompt: ADD_ACCOUNT_LABEL_PROMPT },
-      { kind: "create" },
+      { kind: "credentials", fields: KEY_FIELDS, instructions: null, submit: "next" },
+      { kind: "label", prompt: ANY_TEXT, submit: "create" },
+    ]);
+    expect(planAddAccountSteps(KEY_KIND, false)).toEqual([
+      { kind: "credentials", fields: KEY_FIELDS, instructions: null, submit: "create" },
     ]);
   });
 
-  it("asks a harness-login kind for its label before it creates the account, and signs in after", () => {
+  it("asks a harness-login kind for its label, creates the account there, and signs in after", () => {
     expect(planAddAccountSteps(SIGN_IN_KIND, true)).toEqual([
-      { kind: "label", prompt: ADD_ACCOUNT_LABEL_PROMPT },
-      { kind: "create" },
+      { kind: "label", prompt: ANY_TEXT, submit: "create-and-sign-in" },
       { kind: "sign-in", method: "sign-in" },
     ]);
+  });
+
+  it("leaves the sign-in step to create the account of a harness-login kind without a label", () => {
     expect(planAddAccountSteps(TOKEN_KIND, false)).toEqual([
-      { kind: "create" },
       { kind: "sign-in", method: "create-token" },
     ]);
   });
 
-  it("keeps the kind's instructions first, in the order it declares its steps", () => {
+  it("puts the kind's instructions on its credentials step, in the order it declares them", () => {
     const kind = {
-      setup: [{ kind: "checklist", markdown: "Find the key under Settings." }, ...KEY_KIND.setup],
+      setup: [
+        { kind: "checklist", markdown: "Find the key under Settings." },
+        ...KEY_KIND.setup,
+        { kind: "checklist", markdown: "Paste it here." },
+      ],
     } satisfies Pick<AccountKind, "setup">;
 
-    expect(planAddAccountSteps(kind, false).map((step) => step.kind)).toEqual([
-      "checklist",
-      "credentials",
-      "create",
+    expect(planAddAccountSteps(kind, false)).toEqual([
+      {
+        kind: "credentials",
+        fields: KEY_FIELDS,
+        instructions: "Find the key under Settings.\n\nPaste it here.",
+        submit: "create",
+      },
     ]);
   });
 
   it("leaves out a step the sheet cannot draw", () => {
-    expect(planAddAccountSteps({ setup: [{ kind: "oauth" }] }, false)).toEqual([
-      { kind: "create" },
-    ]);
-  });
-});
-
-describe("createsAccountAfterStep", () => {
-  it("is true for the step just before create", () => {
-    const steps = planAddAccountSteps(SIGN_IN_KIND, true);
-
-    expect(steps.map((_, index) => createsAccountAfterStep(steps, index))).toEqual([
-      true,
-      false,
-      false,
-    ]);
+    expect(planAddAccountSteps({ setup: [{ kind: "oauth" }] }, false)).toEqual([]);
   });
 });
 
@@ -139,10 +139,6 @@ describe("isAddAccountStepFilled", () => {
   it("needs a label when the label step is asked", () => {
     expect(isAddAccountStepFilled(label, { label: " ", credentials: {} })).toBe(false);
     expect(isAddAccountStepFilled(label, { label: "Work", credentials: {} })).toBe(true);
-  });
-
-  it("asks nothing for create and sign-in", () => {
-    expect(isAddAccountStepFilled({ kind: "create" }, { label: "", credentials: {} })).toBe(true);
   });
 });
 

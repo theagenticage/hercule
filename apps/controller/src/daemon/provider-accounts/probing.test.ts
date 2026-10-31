@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber, Layer, Logger, Option, Redacted, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { ControllerToRunner, ProbeResult, RunnerToController } from "@hercule/protocol";
+import { InvalidState } from "@hercule/contract";
+import { CurrentActor, type Actor } from "../../actor";
 import { uuidFromString, withTransaction } from "../../db";
 import { PluginHost } from "../../plugins";
 import type { Plugin } from "@hercule/plugin-host";
@@ -17,6 +19,7 @@ import {
   createPluginFixture,
 } from "../../plugins/testing";
 import {
+  HarnessAccounts,
   HarnessAccountsLayer,
   ProviderAccountProbes,
   ProviderAccountProbesLayer,
@@ -43,6 +46,10 @@ interface Sent {
   readonly request: ControllerToRunner;
 }
 
+/** Counts the probe requests among the frames sent, which the login frames of a test are not part of. */
+const probeRequestsIn = (sent: ReadonlyArray<Sent>): number =>
+  sent.filter((one) => one.request._tag === "probeRequest").length;
+
 /** Runs before a probe is answered, so a test can change the world while a runner is "thinking". */
 const beforeAnswer: { current: Effect.Effect<void> } = { current: Effect.void };
 
@@ -54,14 +61,29 @@ const probeResult: { current: (index: number) => Effect.Effect<ProbeResult> } = 
   current: () => Effect.succeed(SIGNED_IN),
 };
 
+/** Decides what the runner answers to a `loginStart`. The default prints a URL and a device code. */
+const loginStartAnswer: {
+  current: (requestId: string) => RunnerToController;
+} = {
+  current: (requestId) => ({
+    _tag: "loginUrl",
+    requestId,
+    url: "https://example.test/login",
+    userCode: "ABCD-1234",
+  }),
+};
+
 /** A connection that records every frame and answers each probe as `probeResult` says. */
 const buildFakeConnections = (sent: Array<Sent>): RunnerConnections["Service"] =>
   ({
     arrivals: Stream.empty,
     asked: (runnerId: string, request: ControllerToRunner) => {
       sent.push({ runnerId, request });
+      if (request._tag === "loginStart") {
+        return Effect.succeed(Option.some(loginStartAnswer.current(request.requestId)));
+      }
       if (request._tag !== "probeRequest") return Effect.succeed(Option.none());
-      const index = sent.filter((one) => one.request._tag === "probeRequest").length - 1;
+      const index = probeRequestsIn(sent) - 1;
       return Effect.gen(function* () {
         yield* beforeAnswer.current;
         const answer: RunnerToController = {
@@ -142,6 +164,7 @@ const run = <A, E>(
   body: Effect.Effect<
     A,
     E,
+    | HarnessAccounts
     | ProviderAccountProbing
     | ProviderAccountProbes
     | ProviderAccountRunners
@@ -194,6 +217,43 @@ const addKeyAccount = (label: string | null = null) =>
     const account = yield* addAccount({ kind: KEY_KIND, label });
     yield* storeKey(account.id);
     return account;
+  });
+
+/** A user actor with a name of its own, so a test can tell which one a login ran as. */
+const userNamed = (userId: string): Actor => ({
+  _tag: "user",
+  userId,
+  credential: { kind: "login", id: userId, tokenHash: "x" },
+});
+
+/**
+ * Starts a device login on the runner as the current actor, through
+ * `startLogin`, and returns the request id the controller gave it, which is
+ * what the runner reports when the login ends.
+ */
+const startDeviceLogin = (
+  sent: Array<Sent>,
+  runnerId: string,
+  providerAccountId: string,
+  onSignedIn: Effect.Effect<void> = Effect.void,
+) =>
+  Effect.gen(function* () {
+    const probes = yield* ProviderAccountProbing;
+    const harnessAccounts = yield* HarnessAccounts;
+    yield* probes.startLogin(
+      runnerId,
+      providerAccountId,
+      {
+        harnessId: ALPHA_HARNESS_ID,
+        harnessAccount: yield* harnessAccounts.prepareSignIn(providerAccountId, ALPHA_HARNESS_ID),
+        method: "sign-in",
+      },
+      Duration.seconds(5),
+      onSignedIn,
+    );
+    const frame = sent.findLast((one) => one.request._tag === "loginStart")?.request;
+    if (frame?._tag !== "loginStart") throw new Error("no loginStart was sent");
+    return frame.requestId;
   });
 
 const snapshotsOf = (accountId: string) =>
@@ -260,7 +320,7 @@ describe("a probe", () => {
     );
 
     expect(failure).toMatchObject({ error: { code: "invalid_state" } });
-    expect(sent).toEqual([]);
+    expect(probeRequestsIn(sent)).toBe(0);
   });
 
   it("fails NotFound for an account that does not exist", async () => {
@@ -468,7 +528,7 @@ describe("a sweep", () => {
       }),
     );
 
-    expect(sent).toEqual([]);
+    expect(probeRequestsIn(sent)).toBe(0);
   });
 
   it("sends nothing to a runner whose facts show no adapter for the harness, or no binary", async () => {
@@ -651,19 +711,18 @@ describe("an account deleted while a probe was in flight", () => {
   it("is logged at info, not error, when the probe after a sign-in ended finds it gone", async () => {
     const logged: Array<Logged> = [];
 
+    const sent: Array<Sent> = [];
+
     await run(
-      [],
+      sent,
       Effect.gen(function* () {
         const probes = yield* ProviderAccountProbing;
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
-        yield* probes.expectLoginEnd(runner, account.id, ALPHA_HARNESS_ID, "login-1", Effect.void);
-        yield* probes.recordPrintedLogin(runner, account.id, ALPHA_HARNESS_ID, "login-1", {
-          reportsEnd: true,
-        });
+        const loginId = yield* startDeviceLogin(sent, runner, account.id);
         yield* deleteWhenAnswering(account.id);
         // Fails with nothing: the end of a login is reported by a runner, and nobody awaits this call.
-        yield* probes.probeAfterLoginEnd(runner, "login-1");
+        yield* probes.probeAfterLoginEnd(runner, loginId);
       }),
       logged,
     );
@@ -676,6 +735,12 @@ describe("an account deleted while a probe was in flight", () => {
 describe("the probe after a sign-in ended", () => {
   afterEach(() => {
     beforeAnswer.current = Effect.void;
+    loginStartAnswer.current = (requestId) => ({
+      _tag: "loginUrl",
+      requestId,
+      url: "https://example.test/login",
+      userCode: "ABCD-1234",
+    });
   });
 
   it("probes the account in the login's harness on the login's runner, once", async () => {
@@ -687,21 +752,19 @@ describe("the probe after a sign-in ended", () => {
         const probes = yield* ProviderAccountProbing;
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
-        yield* probes.expectLoginEnd(runner, account.id, ALPHA_HARNESS_ID, "login-1", Effect.void);
-        yield* probes.recordPrintedLogin(runner, account.id, ALPHA_HARNESS_ID, "login-1", {
-          reportsEnd: true,
-        });
+        const loginId = yield* startDeviceLogin(sent, runner, account.id);
 
-        yield* probes.probeAfterLoginEnd(runner, "login-1");
+        yield* probes.probeAfterLoginEnd(runner, loginId);
         // The same end reported twice is ignored the second time.
-        yield* probes.probeAfterLoginEnd(runner, "login-1");
+        yield* probes.probeAfterLoginEnd(runner, loginId);
 
         return { account, runner, stored: yield* snapshotsOf(account.id) };
       }),
     );
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({
+    const probeRequests = sent.filter((one) => one.request._tag === "probeRequest");
+    expect(probeRequests).toHaveLength(1);
+    expect(probeRequests[0]).toMatchObject({
       runnerId: outcome.runner,
       request: { _tag: "probeRequest", harnessId: ALPHA_HARNESS_ID },
     });
@@ -713,7 +776,7 @@ describe("the probe after a sign-in ended", () => {
     const signedInAs: Array<string> = [];
     const answerFirstProbe = Effect.runSync(Deferred.make<void>());
     beforeAnswer.current = Effect.suspend(() =>
-      sent.length === 1 ? Deferred.await(answerFirstProbe) : Effect.void,
+      probeRequestsIn(sent) === 1 ? Deferred.await(answerFirstProbe) : Effect.void,
     );
 
     await run(
@@ -722,33 +785,31 @@ describe("the probe after a sign-in ended", () => {
         const probes = yield* ProviderAccountProbing;
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
-        // A newer printed login ends the older one's wait, so login-2 starts
-        // only after login-1 ended and its probe is running.
-        const startLogin = (requestId: string, actor: string) =>
-          Effect.gen(function* () {
-            yield* probes.expectLoginEnd(
-              runner,
-              account.id,
-              ALPHA_HARNESS_ID,
-              requestId,
-              Effect.sync(() => void signedInAs.push(actor)),
-            );
-            yield* probes.recordPrintedLogin(runner, account.id, ALPHA_HARNESS_ID, requestId, {
-              reportsEnd: true,
-            });
-          });
+        // A newer printed login ends the older one's wait, so the second login
+        // starts only after the first ended and its probe is running.
+        const startLoginAs = (userId: string) =>
+          startDeviceLogin(
+            sent,
+            runner,
+            account.id,
+            Effect.flatMap(CurrentActor, (actor) =>
+              Effect.sync(() => void signedInAs.push(actor._tag === "user" ? actor.userId : "")),
+            ),
+          ).pipe(Effect.provideService(CurrentActor, userNamed(userId)));
 
-        yield* startLogin("login-1", "user-a");
-        const first = yield* Effect.forkChild(probes.probeAfterLoginEnd(runner, "login-1"));
-        while (sent.length === 0) yield* Effect.sleep(Duration.millis(1));
-        yield* startLogin("login-2", "user-b");
-        yield* probes.probeAfterLoginEnd(runner, "login-2");
+        const firstLogin = yield* startLoginAs("user-a");
+        const first = yield* Effect.forkChild(probes.probeAfterLoginEnd(runner, firstLogin));
+        while (!sent.some((one) => one.request._tag === "probeRequest")) {
+          yield* Effect.sleep(Duration.millis(1));
+        }
+        const secondLogin = yield* startLoginAs("user-b");
+        yield* probes.probeAfterLoginEnd(runner, secondLogin);
         yield* Deferred.succeed(answerFirstProbe, undefined);
         yield* Fiber.join(first);
       }),
     );
 
-    expect(sent.filter((one) => one.request._tag === "probeRequest")).toHaveLength(2);
+    expect(probeRequestsIn(sent)).toBe(2);
     expect(signedInAs).toEqual(["user-b"]);
   });
 
@@ -764,7 +825,7 @@ describe("the probe after a sign-in ended", () => {
       }),
     );
 
-    expect(sent).toEqual([]);
+    expect(probeRequestsIn(sent)).toBe(0);
   });
 
   it("ignores an end reported by another runner than the one the login ran on", async () => {
@@ -777,14 +838,60 @@ describe("the probe after a sign-in ended", () => {
         const account = yield* addAccount({ kind: MACHINE_KIND });
         const runner = yield* addRunner("laptop");
         const other = yield* addRunner("desktop");
-        yield* probes.expectLoginEnd(runner, account.id, ALPHA_HARNESS_ID, "login-1", Effect.void);
-        yield* probes.recordPrintedLogin(runner, account.id, ALPHA_HARNESS_ID, "login-1", {
-          reportsEnd: true,
-        });
-        yield* probes.probeAfterLoginEnd(other, "login-1");
+        const loginId = yield* startDeviceLogin(sent, runner, account.id);
+        yield* probes.probeAfterLoginEnd(other, loginId);
       }),
     );
 
-    expect(sent).toEqual([]);
+    expect(probeRequestsIn(sent)).toBe(0);
+  });
+
+  it("ignores the end of a login the runner refused to start", async () => {
+    const sent: Array<Sent> = [];
+    loginStartAnswer.current = (requestId) => ({
+      _tag: "loginFailed",
+      requestId,
+      message: "no login in progress",
+    });
+
+    await run(
+      sent,
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbing;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        const failure = yield* Effect.flip(startDeviceLogin(sent, runner, account.id));
+        expect(failure).toBeInstanceOf(InvalidState);
+        const loginId = sent.findLast((one) => one.request._tag === "loginStart")?.request;
+        yield* probes.probeAfterLoginEnd(
+          runner,
+          loginId?._tag === "loginStart" ? loginId.requestId : "",
+        );
+      }),
+    );
+
+    expect(probeRequestsIn(sent)).toBe(0);
+  });
+
+  it("ignores the end of a login finished by pasting a code, which reports none", async () => {
+    const sent: Array<Sent> = [];
+    loginStartAnswer.current = (requestId) => ({
+      _tag: "loginUrl",
+      requestId,
+      url: "https://example.test/login",
+    });
+
+    await run(
+      sent,
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbing;
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const runner = yield* addRunner("laptop");
+        const loginId = yield* startDeviceLogin(sent, runner, account.id);
+        yield* probes.probeAfterLoginEnd(runner, loginId);
+      }),
+    );
+
+    expect(probeRequestsIn(sent)).toBe(0);
   });
 });

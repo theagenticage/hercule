@@ -1,3 +1,4 @@
+import type { AccountKind } from "@hercule/plugin-host";
 import type { RegisteredHarness } from "./harnesses";
 import { findCredentialSecretName, type RegisteredProvider } from "./providers";
 
@@ -27,9 +28,15 @@ interface HarnessSupport {
   readonly credentialSecretName: string | undefined;
 }
 
-/** The harness a Provider Account runs in, and how that harness runs it. */
+/**
+ * The harness a Provider Account runs in, and how that harness runs it. It
+ * carries the account's provider and account kind the decision looked up, so a
+ * caller that needs them does not look them up again.
+ */
 interface HarnessChoice {
   readonly _tag: "chosen";
+  readonly provider: RegisteredProvider;
+  readonly kind: AccountKind;
   readonly harness: RegisteredHarness;
   readonly support: HarnessSupport;
 }
@@ -49,7 +56,8 @@ interface HarnessRefusal {
 /**
  * Decides which harness a Provider Account runs in and whether it can. The
  * harness is `harnessId` when given, else `account.defaultHarnessId`. Returns
- * the harness and how it runs the account, or a refusal. Returns a refusal
+ * the harness, how it runs the account, and the provider and account kind
+ * the account has, or a refusal. Returns a refusal
  * for the first of these that holds, in this order (spec 06 section 15.4):
  *
  * - this build has no such provider, or no such account kind of it, so
@@ -114,6 +122,8 @@ export const decideProviderAccountHarness = (
   }
   return {
     _tag: "chosen",
+    provider,
+    kind,
     harness,
     support: {
       modelArgument: support.modelArgument,

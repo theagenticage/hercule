@@ -1,7 +1,7 @@
 /**
  * What the add-account sheet decides (spec 17, Settings > Providers; spec 06
- * section 15.3): whether it asks for a kind and for a label, the order of the
- * steps a kind needs, the payload `providerAccount.create` takes, and the
+ * section 15.3): whether it asks for a kind and for a label, the steps a kind
+ * needs, in order, and what each step's button does, the payload `providerAccount.create` takes, and the
  * machines a sign-in can run on. The sheet draws these and decides nothing.
  */
 import type {
@@ -19,9 +19,6 @@ import {
 } from "./provider-account-machines";
 import type { HarnessLoginMethod } from "./provider-accounts";
 import { describeHarnessOnRunner } from "./provider-rows";
-
-/** The question the label step asks, because an account is named only to tell it from another one at the same provider. */
-export const ADD_ACCOUNT_LABEL_PROMPT = "Give this one a name, so you can tell them apart.";
 
 /**
  * Checks whether the user picks one of several kinds of account at `provider`,
@@ -41,70 +38,78 @@ export const asksForAccountLabel = (
 ): boolean => accounts.some((account) => account.providerId === provider.id);
 
 /**
- * One step of the add-account sheet, after the provider and the kind are
- * chosen:
+ * What the primary button of a step does:
  *
- * - `checklist`: the kind's own instructions, shown as written;
- * - `credentials`: a masked field for each of `fields`;
+ * - `next`: shows the next step;
+ * - `create`: creates the account and finishes, because the account works
+ *   once it exists (a key kind);
+ * - `create-and-sign-in`: creates the account and shows the sign-in step,
+ *   which needs the account to exist.
+ */
+type AddAccountSubmit = "next" | "create" | "create-and-sign-in";
+
+/**
+ * One step of the add-account sheet, after the provider and the kind are
+ * chosen. Each step is one screen:
+ *
+ * - `credentials`: a masked field for each of `fields`, under the kind's own
+ *   `instructions` (`null` when it has none);
  * - `label`: the label, asking `prompt`;
- * - `create`: the moment `providerAccount.create` runs. It has no screen: the
- *   button of the step before it creates the account;
- * - `sign-in`: the harness login on a machine the user picks. It needs the
- *   account, so it comes after `create`.
+ * - `sign-in`: the harness login on a machine the user picks. Its button
+ *   creates the account first when it does not exist yet.
  */
 export type AddAccountStep =
-  | { readonly kind: "checklist"; readonly markdown: string }
-  | { readonly kind: "credentials"; readonly fields: ReadonlyArray<CredentialField> }
-  | { readonly kind: "label"; readonly prompt: string }
-  | { readonly kind: "create" }
+  | {
+      readonly kind: "credentials";
+      readonly fields: ReadonlyArray<CredentialField>;
+      readonly instructions: string | null;
+      readonly submit: AddAccountSubmit;
+    }
+  | { readonly kind: "label"; readonly prompt: string; readonly submit: AddAccountSubmit }
   | { readonly kind: "sign-in"; readonly method: HarnessLoginMethod };
 
 /**
- * Returns the steps of adding an account of `kind`, in order. The kind's own
- * steps come in the order it declares them, then the label when `asksLabel`,
- * then `create`, then the `sign-in` steps, which need the account to exist. So
- * a key kind ends in `create` (the sheet's Done), and a harness-login kind
- * asks for its label before the sign-in, because `providerAccount.create`
- * needs the label and the sign-in needs the account.
+ * Returns the steps of adding an account of `kind`, in order: its credentials
+ * steps, then the label when `asksLabel`, then its sign-in steps. A harness-login
+ * kind asks for its label before the sign-in, because `providerAccount.create`
+ * needs the label and the sign-in needs the account. The `submit` of the last
+ * step before the sign-in (or the last step, without one) creates the account.
  *
- * A step this sheet cannot draw (`oauth`, `device` and the like) is left out:
- * no shipped provider declares one.
+ * The kind's checklist steps are not steps of their own: their text, joined
+ * in the order the kind declares it, is the `instructions` of each
+ * credentials step. A step this sheet cannot draw (`oauth`, `device` and the
+ * like) is left out: no shipped provider declares one.
  */
 export const planAddAccountSteps = (
   kind: Pick<AccountKind, "setup">,
   asksLabel: boolean,
 ): ReadonlyArray<AddAccountStep> => {
-  const declared = kind.setup.flatMap((step): AddAccountStep[] => {
-    switch (step.kind) {
-      case "checklist":
-        return [{ kind: "checklist", markdown: step.markdown }];
-      case "credentials":
-        return [{ kind: "credentials", fields: step.fields }];
-      case "harness-login":
-        return [{ kind: "sign-in", method: step.method }];
-      default:
-        return [];
-    }
-  });
-  const label: AddAccountStep[] = asksLabel
-    ? [{ kind: "label", prompt: ADD_ACCOUNT_LABEL_PROMPT }]
-    : [];
+  const instructions =
+    kind.setup.flatMap((step) => (step.kind === "checklist" ? [step.markdown] : [])).join("\n\n") ||
+    null;
+  const questions = kind.setup.flatMap((step): Exclude<AddAccountStep, { kind: "sign-in" }>[] =>
+    step.kind === "credentials"
+      ? [{ kind: "credentials", fields: step.fields, instructions, submit: "next" }]
+      : [],
+  );
+  if (asksLabel) {
+    questions.push({
+      kind: "label",
+      prompt: "Give this one a name, so you can tell them apart.",
+      submit: "next",
+    });
+  }
+  const signIns = kind.setup.flatMap((step): AddAccountStep[] =>
+    step.kind === "harness-login" ? [{ kind: "sign-in", method: step.method }] : [],
+  );
+  const lastSubmit: AddAccountSubmit = signIns.length === 0 ? "create" : "create-and-sign-in";
   return [
-    ...declared.filter((step) => step.kind !== "sign-in"),
-    ...label,
-    { kind: "create" },
-    ...declared.filter((step) => step.kind === "sign-in"),
+    ...questions.map((step, index) =>
+      index === questions.length - 1 ? { ...step, submit: lastSubmit } : step,
+    ),
+    ...signIns,
   ];
 };
-
-/**
- * Checks whether the step after the one at `index` is `create`, so the
- * button of the step at `index` creates the account before it moves on.
- */
-export const createsAccountAfterStep = (
-  steps: ReadonlyArray<AddAccountStep>,
-  index: number,
-): boolean => steps[index + 1]?.kind === "create";
 
 /** What the user has typed into the sheet. */
 export interface AddAccountDraft {
@@ -116,8 +121,8 @@ export interface AddAccountDraft {
 /**
  * Checks that the user has filled in what `step` asks for: every field of a
  * `credentials` step, and a label for a `label` step (it is asked only when
- * the account needs a name). Other steps ask for nothing. Text of nothing
- * but spaces counts as empty.
+ * the account needs a name). A `sign-in` step asks for nothing. Text of
+ * nothing but spaces counts as empty.
  */
 export const isAddAccountStepFilled = (step: AddAccountStep, draft: AddAccountDraft): boolean => {
   if (step.kind === "label") return draft.label.trim() !== "";

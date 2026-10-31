@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Redacted } from "effect";
+import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
-import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { HarnessAccounts } from "./harness-account";
-import { providerAccountRepository } from "./repository";
 import {
   addAccount,
   ALPHA_HARNESS_ID,
@@ -13,6 +11,8 @@ import {
   KEY_KIND,
   MACHINE_KIND,
   runWithAccounts,
+  setTokenExpiry,
+  storeCredential,
   TOKEN_KIND,
 } from "./testing";
 
@@ -23,22 +23,12 @@ const prepareHarnessAccount = (providerAccountId: string, harnessId: string) =>
 
 const MISSING = "0199e0e7-9999-7000-8000-000000000000";
 
-const storeKey = (accountId: string, value: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const secrets = yield* Secrets;
-    yield* withTransaction(
-      sql,
-      secrets.set(buildProviderAccountOwner(accountId), "apiKey", Redacted.make(value)),
-    );
-  });
-
 describe("HarnessAccounts.prepare", () => {
   it("sends the derived home, the model argument and the decrypted key for a key account", async () => {
     const account = await runWithAccounts(
       Effect.gen(function* () {
         const added = yield* addAccount({ kind: KEY_KIND });
-        yield* storeKey(added.id, "sk-secret");
+        yield* storeCredential(added.id, "apiKey", "sk-secret");
         return { id: added.id, prepared: yield* prepareHarnessAccount(added.id, ALPHA_HARNESS_ID) };
       }),
     );
@@ -72,7 +62,7 @@ describe("HarnessAccounts.prepare", () => {
     const prepared = await runWithAccounts(
       Effect.gen(function* () {
         const added = yield* addAccount({ kind: MACHINE_KIND });
-        yield* storeKey(added.id, "sk-stray");
+        yield* storeCredential(added.id, "apiKey", "sk-stray");
         return yield* prepareHarnessAccount(added.id, ALPHA_HARNESS_ID);
       }),
     );
@@ -167,7 +157,7 @@ describe("HarnessAccounts.prepare", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const added = yield* addAccount({ kind: KEY_KIND });
-        yield* storeKey(added.id, "sk-secret");
+        yield* storeCredential(added.id, "apiKey", "sk-secret");
         yield* withTransaction(
           sql,
           sql`UPDATE secrets SET ciphertext = randomblob(length(ciphertext))`,
@@ -194,17 +184,9 @@ describe("HarnessAccounts.prepare for a token account", () => {
   /** Adds a token account with a stored token that expires at `expiresAt`. */
   const addTokenAccount = (expiresAt: string) =>
     Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const secrets = yield* Secrets;
-      const accounts = yield* providerAccountRepository;
       const added = yield* addAccount({ kind: TOKEN_KIND });
-      yield* withTransaction(
-        sql,
-        Effect.gen(function* () {
-          yield* secrets.set(buildProviderAccountOwner(added.id), "token", Redacted.make("tok-1"));
-          yield* accounts.setCredentialExpiry(added.id, expiresAt, "2026-10-31T00:00:00.000Z");
-        }),
-      );
+      yield* storeCredential(added.id, "token", "tok-1");
+      yield* setTokenExpiry(added.id, expiresAt);
       return added.id;
     });
 
@@ -254,12 +236,8 @@ describe("HarnessAccounts.prepare for a token that does not decrypt", () => {
     const failure = await runWithAccounts(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const secrets = yield* Secrets;
         const added = yield* addAccount({ kind: TOKEN_KIND });
-        yield* withTransaction(
-          sql,
-          secrets.set(buildProviderAccountOwner(added.id), "token", Redacted.make("tok-1")),
-        );
+        yield* storeCredential(added.id, "token", "tok-1");
         yield* withTransaction(
           sql,
           sql`UPDATE secrets SET ciphertext = randomblob(length(ciphertext))`,
@@ -282,23 +260,11 @@ describe("HarnessAccounts.prepareSignIn", () => {
   it("sends no credential for a token account that has none or whose token expired, and never the old token", async () => {
     const outcome = await runWithAccounts(
       Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const secrets = yield* Secrets;
-        const accounts = yield* providerAccountRepository;
         const harnessAccounts = yield* HarnessAccounts;
         const added = yield* addAccount({ kind: TOKEN_KIND });
         const withoutToken = yield* harnessAccounts.prepareSignIn(added.id, ALPHA_HARNESS_ID);
-        yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            yield* secrets.set(buildProviderAccountOwner(added.id), "token", Redacted.make("old"));
-            yield* accounts.setCredentialExpiry(
-              added.id,
-              "2020-01-01T00:00:00.000Z",
-              "2026-10-31T00:00:00.000Z",
-            );
-          }),
-        );
+        yield* storeCredential(added.id, "token", "old");
+        yield* setTokenExpiry(added.id, "2020-01-01T00:00:00.000Z");
         const withExpiredToken = yield* harnessAccounts.prepareSignIn(added.id, ALPHA_HARNESS_ID);
         return { withoutToken, withExpiredToken };
       }),
@@ -315,7 +281,7 @@ describe("HarnessAccounts.prepareSignIn", () => {
       Effect.gen(function* () {
         const harnessAccounts = yield* HarnessAccounts;
         const added = yield* addAccount({ kind: KEY_KIND });
-        yield* storeKey(added.id, "sk-secret");
+        yield* storeCredential(added.id, "apiKey", "sk-secret");
         return {
           frame: yield* harnessAccounts.prepareSignIn(added.id, ALPHA_HARNESS_ID),
           refused: yield* Effect.flip(harnessAccounts.prepareSignIn(added.id, BETA_HARNESS_ID)),

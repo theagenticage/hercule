@@ -809,13 +809,8 @@ const make = Effect.gen(function* () {
               // The new token may belong to someone else. See spec 06 section 11.
               yield* accounts.clearIdentity(id, at);
             }
-            // After every accepted sign-in, whatever it stores: a probe sent
-            // before it saw the account signed out, and its answer must not
-            // replace what the next probe finds. The runner's own snapshot
-            // stops counting as signed in in the same transaction, because it
-            // was taken before this sign-in and may describe another person.
-            yield* accounts.advanceCredentialGeneration(id, at);
-            yield* accounts.markSnapshotSignInPending(id, harnessId, runnerId);
+            // After every accepted sign-in, whatever it stores.
+            yield* accounts.recordAcceptedSignIn(id, runnerId, harnessId, at);
             yield* audit.append({
               kind: "providerAccount.signedIn",
               actor,

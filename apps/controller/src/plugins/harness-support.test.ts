@@ -54,9 +54,11 @@ const HARNESSES = [ALPHA, BETA, GAMMA];
 const ACCOUNT = { providerId: "vendor/vendor", kind: "api-key", defaultHarnessId: "alpha/alpha" };
 
 describe("decideProviderAccountHarness", () => {
-  it("chooses the account's default harness when none is named, with how it runs the account", () => {
+  it("chooses the account's default harness when none is named, with its provider, kind and how it runs the account", () => {
     expect(decideProviderAccountHarness(PROVIDERS, HARNESSES, ACCOUNT)).toEqual({
       _tag: "chosen",
+      provider: PROVIDER,
+      kind: PROVIDER.kinds[0],
       harness: ALPHA,
       support: {
         modelArgument: "vendor/{model}",

@@ -128,7 +128,7 @@ const make = Effect.gen(function* () {
             noRunnerMessage: `${accountName} cannot run in ${harnessId}: ${choice.reason}`,
           };
         }
-        const { harness, support } = choice;
+        const { harness, support, provider, kind } = choice;
         const subject = `${accountName} in ${harness.displayName}`;
         const none = (noRunnerMessage: string): AccountRunners => ({
           runnerIds: [],
@@ -143,7 +143,8 @@ const make = Effect.gen(function* () {
           const held = storedSecrets.get(account.id) ?? [];
           const problem = findCredentialProblem(
             account,
-            providers,
+            provider,
+            kind,
             held.some((ref) => ref.name === secretName),
             nowMillis,
           );

@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
-import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { findModels, ProviderAccountRunners } from "./account-runners";
 import { providerAccountRepository, type StoredSnapshot } from "./repository";
 import {
@@ -15,29 +13,13 @@ import {
   MACHINE_KIND,
   runWithAccounts,
   SIGNED_IN,
+  setTokenExpiry,
+  storeCredential,
   TOKEN_KIND,
 } from "./testing";
 
 const LATER = "2999-01-01T00:00:00.000Z";
 const EARLIER = "2000-01-01T00:00:00.000Z";
-
-/** Stores a credential for the account under the Secret name its kind uses. */
-const storeSecret = (accountId: string, name: "apiKey" | "token") =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const secrets = yield* Secrets;
-    yield* withTransaction(
-      sql,
-      secrets.set(buildProviderAccountOwner(accountId), name, Redacted.make("a-secret")),
-    );
-  });
-
-const setExpiry = (accountId: string, expiresAt: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const accounts = yield* providerAccountRepository;
-    yield* withTransaction(sql, accounts.setCredentialExpiry(accountId, expiresAt, expiresAt));
-  });
 
 const listRunners = (accountId: string) =>
   Effect.flatMap(ProviderAccountRunners, (runners) => runners.list(accountId, ALPHA_HARNESS_ID));
@@ -48,7 +30,7 @@ describe("ProviderAccountRunners.list", () => {
       const { available, withHarness } = await runWithAccounts(
         Effect.gen(function* () {
           const account = yield* addAccount({ kind: KEY_KIND });
-          yield* storeSecret(account.id, "apiKey");
+          yield* storeCredential(account.id, "apiKey");
           const first = yield* addRunner("first");
           const second = yield* addRunner("second");
           yield* addRunner("bare", { binaryPresent: false });
@@ -82,7 +64,7 @@ describe("ProviderAccountRunners.list", () => {
       const available = await runWithAccounts(
         Effect.gen(function* () {
           const account = yield* addAccount({ kind: KEY_KIND });
-          yield* storeSecret(account.id, "apiKey");
+          yield* storeCredential(account.id, "apiKey");
           yield* addRunner("bare", { binaryPresent: false });
           return yield* listRunners(account.id);
         }),
@@ -98,8 +80,8 @@ describe("ProviderAccountRunners.list", () => {
       const { available, runner } = await runWithAccounts(
         Effect.gen(function* () {
           const account = yield* addAccount({ kind: TOKEN_KIND });
-          yield* storeSecret(account.id, "token");
-          yield* setExpiry(account.id, LATER);
+          yield* storeCredential(account.id, "token");
+          yield* setTokenExpiry(account.id, LATER);
           const runner = yield* addRunner("laptop");
           return { available: yield* listRunners(account.id), runner };
         }),
@@ -112,8 +94,8 @@ describe("ProviderAccountRunners.list", () => {
       const available = await runWithAccounts(
         Effect.gen(function* () {
           const account = yield* addAccount({ kind: TOKEN_KIND });
-          yield* storeSecret(account.id, "token");
-          yield* setExpiry(account.id, EARLIER);
+          yield* storeCredential(account.id, "token");
+          yield* setTokenExpiry(account.id, EARLIER);
           yield* addRunner("laptop");
           return yield* listRunners(account.id);
         }),

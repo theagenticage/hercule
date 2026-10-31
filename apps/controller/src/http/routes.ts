@@ -71,7 +71,6 @@ import {
   FactsRefreshLayer,
   HarnessInstall,
   HarnessInstallLayer,
-  ProbeDriverLayer,
   ProviderAccountRunnerOperations,
   ProviderAccountRunnerOperationsLayer,
   SessionSkills,
@@ -952,8 +951,6 @@ const operationServices = Layer.mergeAll(
   // A runner that connects is sent the workspace steps still running on it,
   // and wakes the runs waiting for a runner.
   ArrivalLayer.pipe(Layer.provide(RunDomainLayer)),
-  // The probe driver sweeps a runner that connects, and the fleet on a timer.
-  ProbeDriverLayer,
   HarnessInstallLayer,
   FactsRefreshLayer,
   RunnerJoinLayer,

@@ -4,9 +4,9 @@
  * started, and the operations that talk to a runner to sign an account in or
  * probe it.
  */
-export { ProbeDriver, ProbeDriverLayer, ProviderAccountProbeInterval } from "./probe-driver";
 export {
   ProviderAccountProbeDeadline,
+  ProviderAccountProbeInterval,
   ProviderAccountProbing,
   ProviderAccountProbingLayer,
 } from "./probing";

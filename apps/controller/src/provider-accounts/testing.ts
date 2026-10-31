@@ -9,7 +9,7 @@
  * - functions that insert the rows other domains own (agents, sessions,
  *   settings), which the delete check reads.
  */
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Redacted } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
@@ -27,6 +27,7 @@ import {
   createPluginFixture,
 } from "../plugins/testing";
 import { RunnerConnections, RunnerConnectionsLayer, runnerRepository } from "../runners";
+import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { SettingsLayer } from "../settings";
 import { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
 import { ProviderAccountRunners, ProviderAccountRunnersLayer } from "./account-runners";
@@ -210,6 +211,39 @@ export const addAccount = (
         defaultHarnessId: account.defaultHarnessId ?? ALPHA_HARNESS_ID,
         at: yield* nowIso,
       }),
+    );
+  });
+
+/**
+ * Stores the account's credential under the Secret name its kind uses:
+ * `apiKey` for a key kind, `token` for a token kind. Needs `Secrets`, which
+ * `runWithAccounts` provides.
+ */
+export const storeCredential = (
+  accountId: string,
+  name: "apiKey" | "token",
+  value = "a-secret",
+): Effect.Effect<void, unknown, SqlClient.SqlClient | Secrets> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const secrets = yield* Secrets;
+    yield* withTransaction(
+      sql,
+      secrets.set(buildProviderAccountOwner(accountId), name, Redacted.make(value)),
+    );
+  });
+
+/** Sets the time at which the account's token expires. */
+export const setTokenExpiry = (
+  accountId: string,
+  expiresAt: string,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    yield* withTransaction(
+      sql,
+      accounts.setCredentialExpiry(accountId, expiresAt, "2026-10-31T00:00:00.000Z"),
     );
   });
 

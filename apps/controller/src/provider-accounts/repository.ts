@@ -163,7 +163,42 @@ const toSnapshot = (row: SnapshotRow): Effect.Effect<StoredSnapshot, Schema.Sche
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  /**
+   * Adds one to the account's credential generation. Call it in the
+   * transaction that stores a new credential, so a probe sent before it is
+   * recognised as stale. A sign-in uses `recordAcceptedSignIn`. Does nothing
+   * when the account does not exist.
+   */
+  const advanceCredentialGeneration = (id: string, at: string): Effect.Effect<void, SqlError> =>
+    Effect.asVoid(sql`
+      UPDATE provider_accounts
+      SET credential_generation = credential_generation + 1, updated_at = ${at}
+      WHERE id = ${uuidFromString(id)}
+    `);
+
+  /**
+   * Marks the runner's snapshot of the account in the harness as not signed
+   * in, with the message "Checking the sign-in…", and leaves its time
+   * unchanged. Placement uses only snapshots that are signed in, so the
+   * runner is not placed on until a probe stores a newer snapshot. Does
+   * nothing when there is no such snapshot.
+   */
+  const markSnapshotSignInPending = (
+    providerAccountId: string,
+    harnessId: string,
+    runnerId: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.asVoid(sql`
+      UPDATE capability_snapshots
+      SET auth_status = 'unauthenticated', auth_message = ${SIGN_IN_PENDING_MESSAGE}
+      WHERE provider_account_id = ${uuidFromString(providerAccountId)}
+        AND harness_id = ${harnessId}
+        AND runner_id = ${uuidFromString(runnerId)}
+    `);
+
   return {
+    advanceCredentialGeneration,
+
     /** Returns every account, oldest first and then by id, so two listings match. */
     list: (): Effect.Effect<ReadonlyArray<StoredProviderAccount>, SqlError> =>
       Effect.map(
@@ -278,37 +313,27 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Adds one to the account's credential generation. Call it in the
-     * transaction that stores a new credential or accepts a sign-in, so a
-     * probe sent before it is recognised as stale. Does nothing when the
-     * account does not exist.
+     * Records that a sign-in on a runner was accepted, whatever it stored: it
+     * advances the account's credential generation, so a probe sent before the
+     * sign-in is stale when its answer arrives, and marks the runner's
+     * snapshot of the account in the harness as not signed in with the message
+     * "Checking the sign-in…" (keeping its time), because that snapshot was
+     * taken before the sign-in and may describe another person. Placement
+     * uses only signed-in snapshots, so the runner is not placed on until a
+     * probe stores a newer one. Call it in the transaction that accepts the
+     * sign-in, so both changes land together. Does nothing when the account
+     * or the snapshot does not exist.
      */
-    advanceCredentialGeneration: (id: string, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE provider_accounts
-        SET credential_generation = credential_generation + 1, updated_at = ${at}
-        WHERE id = ${uuidFromString(id)}
-      `),
-
-    /**
-     * Marks the runner's snapshot of the account in the harness as not signed
-     * in, with the message "Checking the sign-in…", and leaves its time
-     * unchanged. Placement uses only snapshots that are signed in, so the
-     * runner is not placed on until a probe stores a newer snapshot. Does
-     * nothing when there is no such snapshot.
-     */
-    markSnapshotSignInPending: (
+    recordAcceptedSignIn: (
       providerAccountId: string,
-      harnessId: string,
       runnerId: string,
+      harnessId: string,
+      at: string,
     ): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE capability_snapshots
-        SET auth_status = 'unauthenticated', auth_message = ${SIGN_IN_PENDING_MESSAGE}
-        WHERE provider_account_id = ${uuidFromString(providerAccountId)}
-          AND harness_id = ${harnessId}
-          AND runner_id = ${uuidFromString(runnerId)}
-      `),
+      Effect.gen(function* () {
+        yield* advanceCredentialGeneration(providerAccountId, at);
+        yield* markSnapshotSignInPending(providerAccountId, harnessId, runnerId);
+      }),
 
     /** Deletes the account. Its snapshots are deleted with it, by the foreign key. */
     delete: (id: string): Effect.Effect<void, SqlError> =>

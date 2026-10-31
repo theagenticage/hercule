@@ -144,12 +144,14 @@ const make = Effect.gen(function* () {
         const runnable = harnesses.filter((harness) => {
           const choice = decideProviderAccountHarness(providers, harnesses, account, harness.id);
           if (choice._tag === "refused") return false;
-          const { credentialSecretName } = choice.support;
+          const { provider, kind, support } = choice;
+          const { credentialSecretName } = support;
           return (
             credentialSecretName === undefined ||
             findCredentialProblem(
               account,
-              providers,
+              provider,
+              kind,
               stored.has(credentialSecretName),
               nowMillis,
             ) === null
@@ -211,10 +213,9 @@ const make = Effect.gen(function* () {
       promotion.whenServingOr(
         withTransaction(
           sql,
-          Effect.gen(function* () {
-            yield* accounts.advanceCredentialGeneration(providerAccountId, yield* nowIso);
-            yield* accounts.markSnapshotSignInPending(providerAccountId, harnessId, runnerId);
-          }),
+          Effect.flatMap(nowIso, (at) =>
+            accounts.recordAcceptedSignIn(providerAccountId, runnerId, harnessId, at),
+          ),
         ),
         () => Effect.void,
       ),

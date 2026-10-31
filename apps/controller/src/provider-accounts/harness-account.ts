@@ -23,7 +23,7 @@ import { decideProviderAccountHarness, listCredentialVariables, PluginHost } fro
 import { buildProviderAccountOwner, type SecretDecryptError, Secrets } from "../secrets";
 import { resolveHarnessHome } from "./harness-home";
 import { providerAccountRepository } from "./repository";
-import { describeProviderAccount, findCredentialProblem, holdsMadeToken } from "./runnability";
+import { findCredentialProblem, holdsMadeToken, nameProviderAccount } from "./runnability";
 
 const make = Effect.gen(function* () {
   const accounts = yield* providerAccountRepository;
@@ -75,7 +75,7 @@ const make = Effect.gen(function* () {
       if (choice._tag === "refused") {
         return yield* Effect.fail(createInvalidStateError(choice.reason));
       }
-      const { harness, support } = choice;
+      const { harness, support, provider, kind } = choice;
       const frame = {
         providerAccountId,
         harnessHome: resolveHarnessHome(account, harnessId),
@@ -90,14 +90,13 @@ const make = Effect.gen(function* () {
       ) {
         return frame;
       }
-      const providers = yield* host.providers();
       const stored = yield* readCredential(providerAccountId, credentialSecretName).pipe(
         Effect.catchTag("SecretDecryptError", () =>
           Effect.fail(
             createInvalidStateError(
               // A token account takes no key by update: its token is made by a sign-in.
-              holdsMadeToken(account, providers)
-                ? `the token stored for ${describeProviderAccount(account, providers)} could not be decrypted; make a new one in Settings › Providers`
+              holdsMadeToken(kind)
+                ? `the token stored for ${nameProviderAccount(provider.displayName, account.label)} could not be decrypted; make a new one in Settings › Providers`
                 : "the key stored for that provider account could not be decrypted; enter it again " +
                     `with \`hercule provider-account update ${providerAccountId} --credentials-stdin\``,
             ),
@@ -106,7 +105,8 @@ const make = Effect.gen(function* () {
       );
       const problem = findCredentialProblem(
         account,
-        providers,
+        provider,
+        kind,
         Option.isSome(stored),
         yield* Clock.currentTimeMillis,
       );
