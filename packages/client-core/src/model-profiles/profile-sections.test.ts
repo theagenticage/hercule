@@ -34,6 +34,7 @@ const CATALOGS = {
   harnesses: HARNESSES,
   runners: [WITH_CLAUDE],
 };
+const DATES = { now: new Date("2026-10-31T12:00:00Z"), timezone: "UTC" };
 
 describe("buildModelProfileSections", () => {
   it("returns one section per account in the profile's order, named and marked as its account", () => {
@@ -42,7 +43,7 @@ describe("buildModelProfileSections", () => {
       buildProfileSection(ANTHROPIC_IDENTITY, "pending"),
     ]);
 
-    const sections = buildModelProfileSections(profile, CATALOGS);
+    const sections = buildModelProfileSections(profile, CATALOGS, DATES);
 
     expect(
       sections.map(({ name, pluginId, selectionPending }) => [name, pluginId, selectionPending]),
@@ -51,6 +52,36 @@ describe("buildModelProfileSections", () => {
       ["Anthropic", "anthropic", true],
     ]);
     expect(sections[0]!.rows.map(({ name }) => name)).toEqual(["gpt-6"]);
+  });
+
+  it("carries the models announced as new above the rows, with when they arrived", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [buildProfileEntry(ANTHROPIC_IDENTITY, "sonnet")], {
+        newModels: [
+          { model: "opus-5.6", name: "Opus 5.6", firstSeenAt: "2026-10-26T08:00:00.000Z" },
+          { model: "haiku-5", name: "Haiku 5", firstSeenAt: "2025-03-02T08:00:00.000Z" },
+        ],
+      }),
+      buildProfileSection(OPENAI_IDENTITY, "pending"),
+    ]);
+
+    const [anthropic, openai] = buildModelProfileSections(profile, CATALOGS, DATES);
+
+    expect(anthropic!.newModels).toEqual([
+      {
+        providerAccountId: ANTHROPIC_IDENTITY.id,
+        model: "opus-5.6",
+        name: "Opus 5.6",
+        arrivalText: "arrived 26 Oct",
+      },
+      {
+        providerAccountId: ANTHROPIC_IDENTITY.id,
+        model: "haiku-5",
+        name: "Haiku 5",
+        arrivalText: "arrived 2 Mar 2025",
+      },
+    ]);
+    expect(openai!.newModels).toEqual([]);
   });
 
   it("marks the default entry, and only the one that matches the stored harness too", () => {
@@ -70,7 +101,7 @@ describe("buildModelProfileSections", () => {
       },
     );
 
-    const [section] = buildModelProfileSections(profile, CATALOGS);
+    const [section] = buildModelProfileSections(profile, CATALOGS, DATES);
 
     expect(section!.rows.map(({ isDefault }) => isDefault)).toEqual([false, true]);
   });
@@ -86,7 +117,7 @@ describe("buildModelProfileSections", () => {
       ]),
     ]);
 
-    const [section] = buildModelProfileSections(profile, CATALOGS);
+    const [section] = buildModelProfileSections(profile, CATALOGS, DATES);
 
     expect(section!.rows.map(({ otherHarnessName }) => otherHarnessName)).toEqual([null, "pi"]);
   });
@@ -105,7 +136,7 @@ describe("buildModelProfileSections", () => {
       ),
     ]);
 
-    const [section] = buildModelProfileSections(profile, CATALOGS);
+    const [section] = buildModelProfileSections(profile, CATALOGS, DATES);
 
     expect(section!.rows.map(({ otherHarnessName }) => otherHarnessName)).toEqual([
       null,
@@ -124,7 +155,7 @@ describe("buildModelProfileSections", () => {
       ]),
     ]);
 
-    const [section] = buildModelProfileSections(profile, CATALOGS);
+    const [section] = buildModelProfileSections(profile, CATALOGS, DATES);
 
     expect(section!.sectionHarnessModels).toEqual(["sonnet"]);
   });
@@ -138,7 +169,7 @@ describe("buildModelProfileSections", () => {
       ]),
     ]);
 
-    const [section] = buildModelProfileSections(profile, CATALOGS);
+    const [section] = buildModelProfileSections(profile, CATALOGS, DATES);
 
     expect(section!.sectionHarnessModels).toEqual(["sonnet"]);
   });
@@ -156,7 +187,7 @@ describe("buildModelProfileSections", () => {
       ]),
     ]);
 
-    const [section] = buildModelProfileSections(profile, CATALOGS);
+    const [section] = buildModelProfileSections(profile, CATALOGS, DATES);
 
     expect(section!.rows.map(({ problem }) => problem)).toEqual([
       "Anthropic no longer lists gone.",
@@ -171,10 +202,14 @@ describe("buildModelProfileSections", () => {
       buildProfileSection(ZAI_IDENTITY, []),
     ]);
 
-    const sections = buildModelProfileSections(profile, {
-      ...CATALOGS,
-      accounts: [ACCOUNTS[0]!],
-    });
+    const sections = buildModelProfileSections(
+      profile,
+      {
+        ...CATALOGS,
+        accounts: [ACCOUNTS[0]!],
+      },
+      DATES,
+    );
 
     expect(sections.map(({ providerAccountId }) => providerAccountId)).toEqual([
       ANTHROPIC_IDENTITY.id,
@@ -214,13 +249,17 @@ const readSection = (
   catalogs: Partial<Parameters<typeof buildModelProfileSections>[1]> = {},
   identity = KEY,
 ) =>
-  buildModelProfileSections(buildModelProfile([buildProfileSection(identity, entries, fields)]), {
-    accounts: [buildProviderAccount(identity, [piModels("opus")])],
-    providers: PROVIDERS_WITH_ANTHROPIC_API_KEY,
-    harnesses: HARNESSES_WITH_ANTHROPIC_API_KEY,
-    runners: [WITH_CLAUDE_AND_PI],
-    ...catalogs,
-  })[0]!;
+  buildModelProfileSections(
+    buildModelProfile([buildProfileSection(identity, entries, fields)]),
+    {
+      accounts: [buildProviderAccount(identity, [piModels("opus")])],
+      providers: PROVIDERS_WITH_ANTHROPIC_API_KEY,
+      harnesses: HARNESSES_WITH_ANTHROPIC_API_KEY,
+      runners: [WITH_CLAUDE_AND_PI],
+      ...catalogs,
+    },
+    DATES,
+  )[0]!;
 
 describe("the section's harness pill", () => {
   it("makes 'Same as the account' with the account's harness the current choice while the section follows it", () => {
@@ -253,6 +292,7 @@ describe("the section's harness pill", () => {
         buildModelProfileSections(
           buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]),
           CATALOGS,
+          DATES,
         )[0]!,
       isFixed: true,
     },
@@ -275,6 +315,7 @@ describe("the section's harness pill", () => {
     const { harness } = buildModelProfileSections(
       buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]),
       CATALOGS,
+      DATES,
     )[0]!;
 
     expect(harness.choices.find(({ harnessId }) => harnessId === PI)).toMatchObject({
@@ -469,6 +510,7 @@ describe("a row's harness choices", () => {
         buildProfileSection(ANTHROPIC_IDENTITY, [buildProfileEntry(ANTHROPIC_IDENTITY, "opus")]),
       ]),
       CATALOGS,
+      DATES,
     );
 
     expect(section!.rows[0]).toMatchObject({ runsIn: [], alsoOfferIn: [] });

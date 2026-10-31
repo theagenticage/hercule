@@ -22,7 +22,7 @@ import {
   runnersQuery,
 } from "../../../../app/queries";
 import { ProviderAccountCard, ProviderMark } from "../../../../screens/settings/providers";
-import { useModelProfileUpdate } from "./-model-profile-cache";
+import { useModelProfileUpdate } from "../../../../app/model-profile-cache";
 import { useOpenModelProfile } from "./-open-model-profile";
 
 /**

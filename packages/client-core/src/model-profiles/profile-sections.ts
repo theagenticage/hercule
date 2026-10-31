@@ -14,6 +14,7 @@ import type {
 } from "@hercule/contract";
 import { buildProviderAccountName, findProviderPluginId } from "../provider-accounts";
 import { isMachineProblemReason } from "./entry-problem";
+import { buildNewModelRows, type NewModelDates, type NewModelRow } from "./new-model-rows";
 import {
   buildSectionHarnessChoices,
   type ModelProfileHarnessChoice,
@@ -63,6 +64,8 @@ export interface ModelSection {
   /** The harness pill in the section's head. */
   readonly harness: SectionHarness;
   readonly rows: readonly ModelSectionRow[];
+  /** The models announced as new in this section, drawn above the rows. */
+  readonly newModels: readonly NewModelRow[];
   /**
    * The slugs of the entries that run in the section's harness, whether they
    * follow it (a stored `harnessId` of `null`) or name it outright. The
@@ -77,7 +80,8 @@ export interface ModelSection {
  * Returns the sections of `profile` in its order. A section whose account is
  * not in `accounts` is left out: the controller removes an account from every
  * profile when it deletes it, so such a section only shows between the two
- * reads that follow a delete.
+ * reads that follow a delete. `dates` decides how each "New" row says when
+ * its model arrived.
  */
 export const buildModelProfileSections = (
   profile: ModelProfile,
@@ -87,6 +91,7 @@ export const buildModelProfileSections = (
     readonly harnesses: readonly Harness[];
     readonly runners: readonly Runner[];
   },
+  dates: NewModelDates,
 ): readonly ModelSection[] => {
   const { defaultEntry } = profile;
   return profile.accounts.flatMap((section) => {
@@ -100,6 +105,7 @@ export const buildModelProfileSections = (
         pluginId: findProviderPluginId(catalogs.providers, account),
         selectionPending: section.selectionPending,
         harness,
+        newModels: buildNewModelRows(section, dates),
         sectionHarnessModels: section.entries
           .filter((entry) => entry.resolvedHarnessId === section.resolvedHarnessId)
           .map((entry) => entry.model),

@@ -1,8 +1,9 @@
 import type { JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildOptionsLabel,
+  resolveDisplayTimezone,
   type ModelPill,
   type RecentModel,
   type SignInTarget,
@@ -12,7 +13,8 @@ import {
   type ThreadKind,
 } from "@hercule/client-core";
 import type { ModelOption } from "@hercule/contract";
-import { pluginsQuery } from "../../app/queries";
+import { useModelProfileUpdate } from "../../app/model-profile-cache";
+import { pluginsQuery, settingsQuery } from "../../app/queries";
 import { readLastOpenProfileId, rememberOpenProfile } from "../../app/recent-models";
 import { SlidersIcon } from "../../icons/sliders";
 import { ComposerMenu } from "./composer-menu";
@@ -86,9 +88,17 @@ export function OptionsPick({
  * to open the menu.
  *
  * The menu reads nothing from the controller when it opens: the profiles, the
- * accounts and the plugins are the shell's reads, already in the cache. It
- * reads the profile open last from this device's storage, and stores the one
- * the user opens.
+ * accounts and the plugins are the shell's reads, already in the cache. So are
+ * the settings that give the time zone, which only a Draft Thread's menu uses,
+ * because only it announces new models: the new-thread route's loader caches
+ * them, and a thread that has started never reads them. The menu reads the
+ * profile open last from this device's storage, and stores the one the user
+ * opens.
+ *
+ * Add and "Not now" on a "New" row save the profile through
+ * `useModelProfileUpdate`, the way the Providers page does. They neither pick
+ * the model nor close the menu: the `provider` live topic and the answer of
+ * the save redraw the lane.
  */
 export function ModelPick({
   pill,
@@ -113,6 +123,8 @@ export function ModelPick({
 }): JSX.Element {
   const { client, url } = useRouteContext({ from: "/_connected" }).controller;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
+  const settings = useQuery({ ...settingsQuery(client), enabled: kind === "draft" }).data;
+  const saveProfile = useModelProfileUpdate(client);
   return (
     <ComposerMenu
       label="Model"
@@ -136,6 +148,7 @@ export function ModelPick({
           config={config}
           kind={kind}
           runnerId={runnerId}
+          timezone={resolveDisplayTimezone(settings?.user.timezone)}
           readRecent={readRecent}
           readLastOpenProfileId={() => readLastOpenProfileId(url)}
           rememberOpenProfile={(profileId) => {
@@ -153,6 +166,7 @@ export function ModelPick({
                   onSignIn(target);
                 }
           }
+          saveProfile={saveProfile.mutateAsync}
         />
       )}
     </ComposerMenu>

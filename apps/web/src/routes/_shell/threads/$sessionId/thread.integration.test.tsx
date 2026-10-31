@@ -2346,6 +2346,33 @@ describe("Thread: composer read-only fields and model switch", () => {
     expect(readPageText(menu)).toContain("Other models start a new thread.");
   });
 
+  it("offers a running thread no New row, because only a draft's profile announces models", async () => {
+    const user = userEvent.setup();
+    const main = buildMainProfile([ACCOUNT_STARTED, ACCOUNT_OTHER]);
+    const announcing = {
+      ...main,
+      accounts: main.accounts.map((section) => ({
+        ...section,
+        newModels: [
+          {
+            model: "claude-opus-5-6",
+            name: "Claude Opus 5.6",
+            firstSeenAt: "2026-10-26T10:00:00.000Z",
+          },
+        ],
+      })),
+    };
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      "GET /api/v1/model-profiles": { body: [announcing] },
+    });
+
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    const menu = await screen.findByRole("dialog");
+
+    expect(within(menu).queryByText("Claude Opus 5.6")).toBeNull();
+    expect(within(menu).queryByRole("button", { name: /^add /i })).toBeNull();
+  });
+
   // Picking a model does not patch the session. The pick is draft state that
   // is sent with the next submission.
   it("shows the picked model in the pill without sending anything when a model of the same account is chosen", async () => {

@@ -107,9 +107,11 @@ describe("Settings > Providers > Models", () => {
       .click();
     await expect.poll(rowNames).toEqual(["Scripted"]);
     await expect.poll(() => readProfileModels(arranged)).toEqual(["scripted"]);
-    // Taking a model out also dismisses it, so the profile does not announce it as new.
+    // The model was in the account's first catalog read, so it is never announced as new, and
+    // taking it out stores no dismissal.
     const [main] = await client.modelProfile.query();
-    expect(main?.dismissedNewModels.map(({ model }) => model)).toEqual(["scripted-large"]);
+    expect(main?.accounts.flatMap(({ newModels }) => newModels)).toEqual([]);
+    expect(main?.dismissedNewModels).toEqual([]);
     expect(main?.defaultEntry?.model).toBe("scripted");
 
     // The new thread's menu shows the trimmed menu.

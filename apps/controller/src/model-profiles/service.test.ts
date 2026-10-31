@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { Clock, Effect, Option } from "effect";
 import {
   MAX_DISMISSED_NEW_MODELS,
+  MAX_DISMISSED_NEW_MODELS_SENT,
   MAX_MODEL_PROFILE_ACCOUNTS,
   MAX_MODEL_PROFILES,
   MAX_MODEL_PROFILE_SECTION_ENTRIES,
@@ -23,15 +24,23 @@ import { readEventsOfKind } from "../events/testing";
 import { ModelProfileMembership, ProviderAccountService } from "../provider-accounts";
 import { ProjectService } from "../projects";
 import {
+  ACME_PROVIDER_ID,
   addAccount,
   addRunner,
   addSnapshot,
   ALPHA_HARNESS_ID,
   BETA_HARNESS_ID,
+  buildAccountPlugins,
+  buildMeteredPlugin,
   KEY_KIND,
   MACHINE_KIND,
+  METERED,
+  METERED_KEY_KIND,
+  METERED_PROVIDER_ID,
   storeCredential,
 } from "../provider-accounts/testing";
+import type { Plugin } from "@hercule/plugin-host";
+import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 import { buildModel, runWithProfiles, storeCatalog } from "./testing";
 import { modelProfileRepository } from "./repository";
 import { ModelProfileService } from "./service";
@@ -109,7 +118,7 @@ describe("modelProfile.update", () => {
             },
           ],
           defaultEntry: entry(accountId, "second"),
-          dismissedNewModels: [{ providerAccountId: accountId, model: "old" }],
+          dismissedNewModels: [{ providerAccountId: accountId, model: "future" }],
         });
         const reread = yield* readMain;
         return {
@@ -126,7 +135,7 @@ describe("modelProfile.update", () => {
       name: "Daily",
       revision: 2,
       defaultEntry: entry(outcome.accountId, "second"),
-      dismissedNewModels: [{ providerAccountId: outcome.accountId, model: "old" }],
+      dismissedNewModels: [{ providerAccountId: outcome.accountId, model: "future" }],
     });
     expect(outcome.written.accounts[0]?.entries.map((one) => one.model)).toEqual([
       "second",
@@ -238,9 +247,9 @@ describe("modelProfile.update", () => {
       expect(failure).toMatchObject({ error: { code: "validation" } });
     });
 
-    it("refuses more dismissed models than the limit", async () => {
+    it("refuses more dismissed models than a request may carry", async () => {
       const failure = await refusedFor((accountId) => ({
-        dismissedNewModels: tooMany(MAX_DISMISSED_NEW_MODELS + 1).map((_, index) => ({
+        dismissedNewModels: tooMany(MAX_DISMISSED_NEW_MODELS_SENT + 1).map((_, index) => ({
           providerAccountId: accountId,
           model: `model-${String(index)}`,
         })),
@@ -1288,7 +1297,7 @@ describe("modelProfile.create", () => {
             { providerAccountId: pendingId, harnessId: null },
           ],
           defaultEntry: entry(accountId, "second"),
-          dismissedNewModels: [{ providerAccountId: accountId, model: "old" }],
+          dismissedNewModels: [{ providerAccountId: accountId, model: "future" }],
         });
         const copy = yield* createProfile("Copy", source.id);
         const changedCopy = yield* update(copy, { defaultEntry: entry(accountId, "current") });
@@ -1504,5 +1513,396 @@ describe("modelProfile.delete", () => {
         changes: { modelProfileId: { old: outcome.doomed.id, new: null } },
       },
     });
+  });
+});
+
+describe("announcing new models", () => {
+  const FIRST_READ = "2026-10-31T09:00:00.000Z";
+  const SECOND_READ = "2026-10-31T13:00:00.000Z";
+  const THIRD_READ = "2026-10-31T17:00:00.000Z";
+
+  /** The new models of the first section of every profile, by profile name. */
+  const readNewModels = Effect.gen(function* () {
+    const profiles = yield* ModelProfileService;
+    return Object.fromEntries(
+      (yield* profiles.query()).map((profile) => [
+        profile.name,
+        profile.accounts[0]?.newModels.map((one) => one.model),
+      ]),
+    );
+  });
+
+  /**
+   * Gives Main a section of the account that holds `models`, and makes the
+   * profile "Review" a copy of it. The account's first catalog read is
+   * `FIRST_READ`, with `models`.
+   */
+  const holdInTwoProfiles = (
+    accountId: string,
+    models: ReadonlyArray<string> = ["current", "second"],
+  ) =>
+    Effect.gen(function* () {
+      const main = yield* update(yield* readMain, {
+        accounts: [
+          {
+            providerAccountId: accountId,
+            harnessId: null,
+            entries: models.map((model) => entry(accountId, model)),
+          },
+        ],
+        defaultEntry: models[0] === undefined ? null : entry(accountId, models[0]),
+      });
+      yield* createProfile("Review", main.id);
+    });
+
+  /** Reads the profile with the name. */
+  const readNamed = (name: string) =>
+    Effect.gen(function* () {
+      const profiles = yield* ModelProfileService;
+      return (yield* profiles.query()).find((profile) => profile.name === name)!;
+    });
+
+  const FRESH = buildModel("fresh");
+
+  /** The fixture plugins, with `beta/beta` also running Acme key accounts, so one model can be held in two harnesses. */
+  const pluginsWhereBetaRunsAcme = (): ReadonlyArray<Plugin> => [
+    ...buildAccountPlugins().slice(0, 2),
+    createPluginFixture({
+      id: "beta",
+      definitions: [
+        buildHarnessDefinition("beta", [
+          {
+            providerId: ACME_PROVIDER_ID,
+            kinds: [
+              { kind: KEY_KIND, modelArgument: "acme/{model}", credentialVariable: "ACME_API_KEY" },
+            ],
+            models: "all",
+          },
+        ]),
+      ],
+    }).plugin,
+  ];
+
+  it("announces a model that arrived after the first read once in every profile that holds the account", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        yield* holdInTwoProfiles(accountId);
+        const before = yield* readNewModels;
+        yield* storeCatalog(accountId, [CURRENT, SECOND, OLD, FRESH], SECOND_READ);
+        const profiles = yield* ModelProfileService;
+        return { before, after: yield* profiles.query() };
+      }),
+    );
+
+    expect(outcome.before).toEqual({ Main: [], Review: [] });
+    expect(outcome.after.map((profile) => profile.name)).toEqual(["Main", "Review"]);
+    for (const profile of outcome.after) {
+      expect(profile.accounts[0]?.newModels).toEqual([
+        { model: "fresh", name: "Model fresh", firstSeenAt: SECOND_READ },
+      ]);
+    }
+  });
+
+  it("never announces the models of the first read, nor a model that arrived legacy", async () => {
+    const after = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        // Main holds only "current": "second" is in the Default Selection of the first read, and not held.
+        yield* holdInTwoProfiles(accountId, ["current"]);
+        yield* storeCatalog(
+          accountId,
+          [CURRENT, SECOND, OLD, buildModel("fresh-legacy", { isLegacy: true })],
+          SECOND_READ,
+        );
+        return yield* readNewModels;
+      }),
+    );
+
+    expect(after).toEqual({ Main: [], Review: [] });
+  });
+
+  it("announces a model that arrived legacy once it stops being legacy", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        yield* holdInTwoProfiles(accountId);
+        yield* storeCatalog(
+          accountId,
+          [CURRENT, SECOND, buildModel("promoted", { isLegacy: true })],
+          SECOND_READ,
+        );
+        const whileLegacy = yield* readNewModels;
+        yield* storeCatalog(accountId, [CURRENT, SECOND, buildModel("promoted")], THIRD_READ);
+        const profiles = yield* ModelProfileService;
+        return { whileLegacy, after: (yield* profiles.query())[0]! };
+      }),
+    );
+
+    expect(outcome.whileLegacy).toEqual({ Main: [], Review: [] });
+    // It is announced with the time it first appeared, not the time it was promoted.
+    expect(outcome.after.accounts[0]?.newModels).toEqual([
+      { model: "promoted", name: "Model promoted", firstSeenAt: SECOND_READ },
+    ]);
+  });
+
+  it("announces the models of the first read that lists any, when an earlier successful read listed none", async () => {
+    const after = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work", []);
+        yield* holdInTwoProfiles(accountId, []);
+        yield* storeCatalog(accountId, [CURRENT, SECOND], SECOND_READ);
+        return yield* readNewModels;
+      }),
+    );
+
+    expect(after).toEqual({ Main: ["current", "second"], Review: ["current", "second"] });
+  });
+
+  it("lists the new models in the order of the Default Selection", async () => {
+    const after = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        yield* holdInTwoProfiles(accountId);
+        yield* storeCatalog(
+          accountId,
+          [buildModel("zeta"), CURRENT, SECOND, buildModel("alpha")],
+          SECOND_READ,
+        );
+        return yield* readNewModels;
+      }),
+    );
+
+    expect(after).toEqual({ Main: ["zeta", "alpha"], Review: ["zeta", "alpha"] });
+  });
+
+  it("stops announcing in the profile that adds the model, in any harness, and only there", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        yield* holdInTwoProfiles(accountId);
+        yield* storeCatalog(accountId, [CURRENT, SECOND, OLD, FRESH], SECOND_READ);
+        const main = yield* readNamed("Main");
+        const added = yield* update(main, {
+          accounts: [
+            {
+              providerAccountId: accountId,
+              harnessId: null,
+              entries: [
+                entry(accountId, "current"),
+                entry(accountId, "second"),
+                // Held in another harness than the one the section runs in.
+                entry(accountId, "fresh", BETA_HARNESS_ID),
+              ],
+            },
+          ],
+        });
+        return { added, reread: yield* readNewModels };
+      }),
+      pluginsWhereBetaRunsAcme(),
+    );
+
+    expect(outcome.added.accounts[0]?.newModels).toEqual([]);
+    expect(outcome.reread).toEqual({ Main: [], Review: ["fresh"] });
+  });
+
+  it("stops announcing in the profile that declines the model, only there, and still after the next read", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        yield* holdInTwoProfiles(accountId);
+        yield* storeCatalog(accountId, [CURRENT, SECOND, OLD, FRESH], SECOND_READ);
+        const declined = yield* update(yield* readNamed("Main"), {
+          dismissedNewModels: [{ providerAccountId: accountId, model: "fresh" }],
+        });
+        const afterDismissal = yield* readNewModels;
+        // The next refresh finds the same models.
+        yield* storeCatalog(accountId, [CURRENT, SECOND, OLD, FRESH], THIRD_READ);
+        return { declined, afterDismissal, afterRefresh: yield* readNewModels };
+      }),
+    );
+
+    expect(outcome.declined.accounts[0]?.newModels).toEqual([]);
+    expect(outcome.afterDismissal).toEqual({ Main: [], Review: ["fresh"] });
+    expect(outcome.afterRefresh).toEqual({ Main: [], Review: ["fresh"] });
+  });
+
+  it("announces nothing for a section that waits for the account's first catalog read", async () => {
+    const after = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = (yield* addAccount({ kind: KEY_KIND, label: "work" })).id;
+        yield* update(yield* readMain, {
+          accounts: [{ providerAccountId: accountId, harnessId: null }],
+        });
+        // The stored read does not fill the section, as the daemon's read does.
+        yield* storeCatalog(accountId, [CURRENT, SECOND], FIRST_READ);
+        yield* storeCatalog(accountId, [CURRENT, SECOND, FRESH], SECOND_READ);
+        return (yield* readMain).accounts[0];
+      }),
+    );
+
+    expect(after).toMatchObject({ selectionPending: true, entries: [], newModels: [] });
+  });
+
+  it("announces nothing for a provider whose Default Selection is none", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const acme = yield* addReadyKeyAccount("work");
+        const metered = yield* addAccount({
+          providerId: METERED_PROVIDER_ID,
+          kind: METERED_KEY_KIND,
+        });
+        yield* storeCatalog(metered.id, [CURRENT], FIRST_READ);
+        yield* update(yield* readMain, {
+          accounts: [
+            {
+              providerAccountId: acme,
+              harnessId: null,
+              entries: [entry(acme, "current"), entry(acme, "second")],
+            },
+            { providerAccountId: metered.id, harnessId: null, entries: [] },
+          ],
+          defaultEntry: entry(acme, "current"),
+        });
+        yield* storeCatalog(acme, [CURRENT, SECOND, FRESH], SECOND_READ);
+        yield* storeCatalog(metered.id, [CURRENT, FRESH], SECOND_READ);
+        return (yield* readMain).accounts.map((section) =>
+          section.newModels.map((one) => one.model),
+        );
+      }),
+      [...buildAccountPlugins(), buildMeteredPlugin({ ...METERED, defaultSelection: "none" })],
+    );
+
+    // The account of a provider with a Default Selection announces; the other one does not.
+    expect(outcome).toEqual([["fresh"], []]);
+  });
+
+  it("waits to announce a model the section's harness is known not to list, and announces it once the harness lists it", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        const runner = yield* addRunner("laptop");
+        const probeListing = (...models: ReadonlyArray<ReturnType<typeof buildModel>>) =>
+          addSnapshot(accountId, ALPHA_HARNESS_ID, runner, {
+            harnessVersion: "1.2.3",
+            usage: null,
+            auth: { status: "ok" },
+            models,
+          });
+        yield* probeListing(CURRENT, SECOND);
+        yield* holdInTwoProfiles(accountId);
+        yield* storeCatalog(accountId, [CURRENT, SECOND, FRESH], SECOND_READ);
+        const whileUnlisted = yield* readNewModels;
+        yield* probeListing(CURRENT, SECOND, FRESH);
+        return { whileUnlisted, whenListed: yield* readNewModels };
+      }),
+    );
+
+    expect(outcome.whileUnlisted).toEqual({ Main: [], Review: [] });
+    expect(outcome.whenListed).toEqual({ Main: ["fresh"], Review: ["fresh"] });
+  });
+
+  it("stores only the dismissals that can still matter", async () => {
+    const written = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        yield* holdInTwoProfiles(accountId);
+        yield* storeCatalog(accountId, [CURRENT, SECOND, OLD, FRESH], SECOND_READ);
+        const dismiss = (model: string) => ({ providerAccountId: accountId, model });
+        return yield* update(yield* readMain, {
+          dismissedNewModels: [
+            // In the first read, so it was never new.
+            dismiss("second"),
+            dismiss("old"),
+            // Arrived after the first read.
+            dismiss("fresh"),
+            // Not in the catalog yet, so it may still arrive.
+            dismiss("future"),
+          ],
+        });
+      }),
+    );
+
+    expect(written.dismissedNewModels.map((one) => one.model)).toEqual(["fresh", "future"]);
+  });
+
+  describe("the bound on stored dismissals", () => {
+    const dismissals = (accountId: string, prefix: string, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        providerAccountId: accountId,
+        model: `${prefix}-${String(index)}`,
+      }));
+
+    it("counts what is stored, so a request may carry dismissals that are dropped on top of a full list", async () => {
+      const written = await runWithProfiles(
+        Effect.gen(function* () {
+          const accountId = yield* addReadyKeyAccount("work");
+          return yield* update(yield* readMain, {
+            accounts: [{ providerAccountId: accountId, harnessId: null, entries: [] }],
+            defaultEntry: null,
+            dismissedNewModels: [
+              // The 1025th is a model of the first read, which could never be announced.
+              ...dismissals(accountId, "future", MAX_DISMISSED_NEW_MODELS),
+              { providerAccountId: accountId, model: "second" },
+            ],
+          });
+        }),
+      );
+
+      expect(written.dismissedNewModels).toHaveLength(MAX_DISMISSED_NEW_MODELS);
+    });
+
+    it("refuses a list that keeps more than the bound, saying what to do", async () => {
+      const failure = await runWithProfiles(
+        Effect.gen(function* () {
+          const accountId = yield* addReadyKeyAccount("work");
+          return yield* Effect.flip(
+            update(yield* readMain, {
+              accounts: [{ providerAccountId: accountId, harnessId: null, entries: [] }],
+              defaultEntry: null,
+              dismissedNewModels: dismissals(accountId, "future", MAX_DISMISSED_NEW_MODELS + 1),
+            }),
+          );
+        }),
+      );
+
+      expect(failure).toMatchObject({
+        error: {
+          code: "validation",
+          details: {
+            issues: [
+              {
+                path: ["dismissedNewModels"],
+                message:
+                  "This profile has dismissed 1025 new models, the most it keeps (1024). Take some out of its dismissed list with `hercule model-profile update`.",
+              },
+            ],
+          },
+        },
+      });
+    });
+  });
+
+  it("stores no dismissal for a provider whose Default Selection is none", async () => {
+    const written = await runWithProfiles(
+      Effect.gen(function* () {
+        const metered = yield* addAccount({
+          providerId: METERED_PROVIDER_ID,
+          kind: METERED_KEY_KIND,
+        });
+        yield* storeCatalog(metered.id, [CURRENT], FIRST_READ);
+        yield* storeCatalog(metered.id, [CURRENT, FRESH], SECOND_READ);
+        return yield* update(yield* readMain, {
+          accounts: [{ providerAccountId: metered.id, harnessId: null, entries: [] }],
+          dismissedNewModels: [
+            { providerAccountId: metered.id, model: "fresh" },
+            { providerAccountId: metered.id, model: "future" },
+          ],
+        });
+      }),
+      [...buildAccountPlugins(), buildMeteredPlugin({ ...METERED, defaultSelection: "none" })],
+    );
+
+    expect(written.dismissedNewModels).toEqual([]);
   });
 });

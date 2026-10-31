@@ -7,7 +7,8 @@
  * - A **draft** shows every profile as one head of an accordion, in the
  *   profiles' order, with exactly one unfolded. The unfolded profile shows
  *   Recent, then one lane per Provider Account in the profile's order, each
- *   with its entries in order. With one profile there are no heads.
+ *   with its "New" rows (models the controller announced) and then its
+ *   entries in order. With one profile there are no heads.
  * - A **running thread** keeps its account and harness, so it shows one flat
  *   list of the models it can switch to.
  *
@@ -28,6 +29,11 @@ import type {
   Runner,
 } from "@hercule/contract";
 import { matchesModelSearch } from "../model-profiles/catalog-search";
+import {
+  buildNewModelRows,
+  type NewModelDates,
+  type NewModelRow,
+} from "../model-profiles/new-model-rows";
 import { findProjectModelProfile } from "../model-profiles/profile-lookup";
 import {
   describeEntryProblem,
@@ -119,6 +125,12 @@ export interface ModelMenuLane {
   readonly providerId: string;
   /** The account's name, such as `Anthropic · work`. */
   readonly name: string;
+  /**
+   * The models announced as new in this account's section, drawn at the top
+   * of the lane. Empty on a running thread's menu and in
+   * `buildProfileLanes`, which do not announce.
+   */
+  readonly newModels: readonly NewModelRow[];
   readonly rows: readonly ModelMenuRow[];
   /** What to show in place of rows while the account's models are still being read, else `null`. */
   readonly note: string | null;
@@ -180,7 +192,7 @@ export type ModelMenuCurrent = Pick<
   "providerAccountId" | "harnessId" | "model" | "runnerId" | "projectId"
 >;
 
-export interface ModelMenuView {
+export interface ModelMenuView extends NewModelDates {
   readonly kind: ThreadKind;
   /** The text typed in the filter field; empty means no filter. */
   readonly filter: string;
@@ -324,11 +336,17 @@ const buildRow = (
   };
 };
 
-/** Builds the lanes of `profile` from its `placed` entries, the filter applied. */
+/**
+ * Builds the lanes of `profile` from its `placed` entries, the filter applied.
+ * With `dates`, each lane carries its section's "New" rows, and a lane with
+ * new rows stays even when it has no entries. With `null` no lane announces a
+ * model.
+ */
 const buildLanes = (
   context: MenuContext,
   profile: ModelProfile,
   placed: readonly PlacedEntry[],
+  dates: NewModelDates | null,
 ): readonly ModelMenuLane[] => {
   const { catalogs, filter } = context;
   return profile.accounts.flatMap((section): readonly ModelMenuLane[] => {
@@ -338,15 +356,19 @@ const buildLanes = (
       .filter((each) => each.section === section)
       .map((each) => buildRow(context, profile, each))
       .filter((row) => matchesFilter(row, filter));
+    const newModels = (dates === null ? [] : buildNewModelRows(section, dates)).filter((row) =>
+      matchesFilter({ name: row.name, model: row.model }, filter),
+    );
     // A section with nothing to pick has no lane, and neither does a lane
     // that waits for its models while the user is filtering.
     const waiting = section.selectionPending && filter === "";
-    if (rows.length === 0 && !waiting) return [];
+    if (rows.length === 0 && newModels.length === 0 && !waiting) return [];
     return [
       {
         providerAccountId: account.id,
         providerId: account.providerId,
         name: buildProviderAccountName(catalogs.providers, account),
+        newModels,
         rows,
         note: waiting ? READING_MODELS_NOTE : null,
       },
@@ -358,7 +380,8 @@ const buildLanes = (
  * Returns the lanes of `profile` with every entry it holds, as a draft with no
  * filter and no bound runner shows them. Settings > Threads lists its model
  * field from these, so it offers the same rows, with the same problems, as the
- * composer's menu.
+ * composer's menu. The lanes announce no new models, because that field
+ * lists only what the profile holds.
  */
 export const buildProfileLanes = (
   catalogs: ThreadCatalogs,
@@ -368,6 +391,7 @@ export const buildProfileLanes = (
     { catalogs, runner: undefined, filter: "", currentKey: null },
     profile,
     listPlacedEntries(profile, catalogs.accounts),
+    null,
   );
 
 /** What an unfolded profile shows. */
@@ -381,6 +405,7 @@ const buildProfileBody = (
   context: MenuContext,
   profile: ModelProfile,
   recent: readonly RecentModel[],
+  dates: NewModelDates,
 ): ProfileBody => {
   const { catalogs, filter } = context;
   const placed = listPlacedEntries(profile, catalogs.accounts);
@@ -407,7 +432,10 @@ const buildProfileBody = (
     .filter((row) => matchesFilter(row, filter))
     .slice(0, RECENT_LIMIT);
 
-  return { recent: recentRows, lanes: buildLanes(context, profile, placed) };
+  return {
+    recent: recentRows,
+    lanes: buildLanes(context, profile, placed, dates),
+  };
 };
 
 /** Returns what a running thread's list says in place of an empty list. */
@@ -537,7 +565,7 @@ const buildDraftMenu = (
     if (filter === "" && profile !== unfolded) {
       return [{ ...head, unfolded: false, recent: [], lanes: [], empty: null }];
     }
-    const { recent, lanes } = buildProfileBody(context, profile, view.recent);
+    const { recent, lanes } = buildProfileBody(context, profile, view.recent, view);
     const hasRows = recent.length > 0 || lanes.length > 0;
     if (filter !== "" && !hasRows) return [];
     return [{ ...head, unfolded: true, recent, lanes, empty: hasRows ? null : EMPTY_PROFILE_NOTE }];

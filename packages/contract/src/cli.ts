@@ -2647,13 +2647,13 @@ export const CLI = {
 
   "modelProfile.query": {
     command: "model-profile list",
-    help: "Lists the Model Profiles in the order they were created. A Model Profile is the menu of models a thread offers: one section per Provider Account, each with its entries in order and a default entry. Each entry shows the model's name, the harness it runs in, and whether it can run now, with the reason when it cannot. Use `hercule model-profile read` for one profile, and its revision for `hercule model-profile update`.",
+    help: "Lists the Model Profiles in the order they were created. A Model Profile is the menu of models a thread offers: one section per Provider Account, each with its entries in order and a default entry. Each entry shows the model's name, the harness it runs in, and whether it can run now, with the reason when it cannot. A section also lists its `newModels`: models that joined the account's default model selection after the account's first catalog read, which the profile holds in no harness and has not dismissed. Use `hercule model-profile read` for one profile, and its revision for `hercule model-profile update`.",
     examples: [{ args: [] }],
     fields: {},
   },
   "modelProfile.read": {
     command: "model-profile read",
-    help: "Reads one Model Profile in full. It has the revision, the sections with their entries, the default entry and the models dismissed as new. A section with `selectionPending` true is waiting for its account's first catalog read and has no entries yet.",
+    help: "Reads one Model Profile in full. It has the revision, the sections with their entries and their `newModels` (models announced as new, with the date each first appeared), the default entry and the models dismissed as new. A section with `selectionPending` true is waiting for its account's first catalog read and has no entries yet.",
     examples: [{ args: ["01a2b3c4"] }],
     fields: {
       id: {
@@ -2735,7 +2735,7 @@ export const CLI = {
     errors: {
       conflict: "the profile is at another revision than --expected-revision; read it again",
       validation:
-        "another profile has the name, an account does not exist or appears twice, an entry sits under another account's section or appears twice, a harness is one the account cannot run in, a new entry's model is not in the list its harness gave for the account, the default entry is not one of the entries, or a list is over its limit (64 accounts, 256 entries in a section, 1024 dismissed models)",
+        "another profile has the name, an account does not exist or appears twice, an entry sits under another account's section or appears twice, a harness is one the account cannot run in, a new entry's model is not in the list its harness gave for the account, the default entry is not one of the entries, or a list is over its limit (64 accounts, 256 entries in a section, 2048 dismissed models sent, or more than 1024 left after the ones that can never matter are dropped)",
     },
   },
 

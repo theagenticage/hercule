@@ -142,6 +142,7 @@ const playProfile = (initial: ModelProfile): Record<string, Handler> => {
             harnessId: section.harnessId,
             resolvedHarnessId: sectionHarnessId,
             selectionPending: false,
+            newModels: [],
             entries: (section.entries ?? []).map(
               (entry: ModelProfileEntry): ResolvedModelProfileEntry =>
                 buildProfileEntry(identity, entry.model, {

@@ -22,7 +22,7 @@ const moveKey = (keys: readonly string[], from: number, to: number): string[] =>
  *   while a save runs, else the saved one;
  * - `move(key, toIndex, save)`, which moves `key` to position `toIndex` (0 is
  *   the top), draws the new order at once, and calls `save` with the same
- *   move. Once every save that is running has finished, the drawn order goes
+ *   move; what `save` resolves with is ignored. Once every save that is running has finished, the drawn order goes
  *   back to the saved one, which by then holds the move, or does not when the
  *   save failed. A move to where the key already is does nothing, and a key
  *   the list does not hold is ignored.
@@ -36,7 +36,11 @@ export function useOptimisticOrder(savedKeys: readonly string[]) {
     made.every((key) => savedKeys.includes(key));
   const keys = sameSet ? made : savedKeys;
 
-  const move = async (key: string, toIndex: number, save: () => Promise<void>): Promise<void> => {
+  const move = async (
+    key: string,
+    toIndex: number,
+    save: () => Promise<unknown>,
+  ): Promise<void> => {
     const from = keys.indexOf(key);
     if (from === -1 || from === Math.max(0, Math.min(toIndex, keys.length - 1))) return;
     setMade(moveKey(keys, from, toIndex));

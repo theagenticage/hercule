@@ -12,7 +12,7 @@ import {
 import type { ModelProfile } from "@hercule/contract";
 import { projectsQuery } from "../../../../app/queries";
 import { ConfirmDialog } from "../../../../screens/confirm-dialog";
-import { removeCachedModelProfile } from "./-model-profile-cache";
+import { removeCachedModelProfile } from "../../../../app/model-profile-cache";
 
 /**
  * Renders the dialog that asks before the Model Profile `profile` is deleted

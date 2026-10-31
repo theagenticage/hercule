@@ -497,15 +497,34 @@ const OPENAI_API = identityOf("01a06d02-8000-7000-8000-000000000a09");
 export const PROVIDER_MODEL_PROFILES: ReadonlyArray<ModelProfile> = [
   buildModelProfile(
     [
-      buildProfileSection(ANTHROPIC, [
-        buildProfileEntry(ANTHROPIC, "opus-5-5", { name: "Opus 5.5" }),
-        buildProfileEntry(ANTHROPIC, "fable-5-1", { name: "Fable 5.1" }),
-        buildProfileEntry(ANTHROPIC, "sonnet-5-5", { name: "Sonnet 5.5" }),
-        buildProfileEntry(ANTHROPIC, "haiku-5-5", { name: "Haiku 5.5" }),
-      ]),
-      buildProfileSection(ANTHROPIC_WORK, [
-        buildProfileEntry(ANTHROPIC_WORK, "opus-4-8", { name: "Opus 4.8" }),
-      ]),
+      buildProfileSection(
+        ANTHROPIC,
+        [
+          buildProfileEntry(ANTHROPIC, "opus-5-5", { name: "Opus 5.5" }),
+          buildProfileEntry(ANTHROPIC, "fable-5-1", { name: "Fable 5.1" }),
+          buildProfileEntry(ANTHROPIC, "sonnet-5-5", { name: "Sonnet 5.5" }),
+          buildProfileEntry(ANTHROPIC, "haiku-5-5", { name: "Haiku 5.5" }),
+        ],
+        {
+          newModels: [
+            { model: "opus-5-6", name: "Opus 5.6", firstSeenAt: "2026-10-26T08:00:00.000Z" },
+            { model: "haiku-5-6", name: "Haiku 5.6", firstSeenAt: "2025-12-02T08:00:00.000Z" },
+          ],
+        },
+      ),
+      buildProfileSection(
+        ANTHROPIC_WORK,
+        [buildProfileEntry(ANTHROPIC_WORK, "opus-4-8", { name: "Opus 4.8" })],
+        {
+          newModels: [
+            {
+              model: "opus-5-6-long",
+              name: "Claude Opus 5.6 with an extended context window",
+              firstSeenAt: "2026-10-28T08:00:00.000Z",
+            },
+          ],
+        },
+      ),
       buildProfileSection(OPENAI, [
         buildProfileEntry(OPENAI, "gpt-6-1-sol", { name: "GPT-6.1 Sol" }),
         buildProfileEntry(OPENAI, "gpt-6-luna", { name: "GPT-6 Luna" }),

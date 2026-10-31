@@ -252,6 +252,7 @@ export {
   EntryProblem,
   EntryProblemReason,
   MAX_DISMISSED_NEW_MODELS,
+  MAX_DISMISSED_NEW_MODELS_SENT,
   MAX_MODEL_PROFILE_ACCOUNTS,
   MAX_MODEL_PROFILE_NAME_LENGTH,
   MAX_MODEL_PROFILE_SECTION_ENTRIES,
@@ -262,6 +263,7 @@ export {
   ModelProfileEntry,
   ModelProfileCreateInput,
   ModelProfileUpdateInput,
+  NewModel,
   ResolvedModelProfileEntry,
 } from "./groups/model-profile";
 export {

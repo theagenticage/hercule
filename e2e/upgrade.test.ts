@@ -76,6 +76,14 @@
  * opens, the first catalog reads fill the sections of the accounts the
  * stand-ins can sign in.
  *
+ * Migration 102 adds `model_catalogs.first_read_at`, the time of an account's
+ * first successful catalog read, which decides which models are announced as
+ * new. When the edge database has the catalog table but not the column, the
+ * fixture writes the catalog of two accounts into it: one with a first-seen
+ * ledger whose models came in two reads, and one with an empty ledger. After
+ * the upgrade the first reads are the earliest ledger time and the last read,
+ * and the catalog still reads.
+ *
  * It is not a matrix of session states or harness behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -230,6 +238,14 @@ const MODEL_PROFILE_MIGRATION = 100;
 
 /** The name of the profile that migration creates. */
 const MAIN_MODEL_PROFILE = "Main";
+
+/** The migration that adds `model_catalogs.first_read_at` and fills it for the catalogs that were read. */
+const CATALOG_FIRST_READ_MIGRATION = 102;
+
+/** The times of the seeded catalog reads, which the migration turns into a first read time. */
+const SEEDED_CATALOG_FIRST_READ = "2026-10-01T08:00:00.000Z";
+const SEEDED_CATALOG_SECOND_READ = "2026-10-01T12:00:00.000Z";
+const SEEDED_CATALOG_LAST_READ = "2026-10-02T12:00:00.000Z";
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -421,6 +437,7 @@ interface ListedAccount {
 
 /** A Model Profile as `hercule model-profile list` prints it. Only the parts the upgrade check reads. */
 interface ListedModelProfile {
+  readonly id: string;
   readonly name: string;
   readonly revision: number;
   readonly accounts: ReadonlyArray<{
@@ -428,7 +445,12 @@ interface ListedModelProfile {
     readonly harnessId: string | null;
     readonly resolvedHarnessId: string;
     readonly selectionPending: boolean;
-    readonly entries: ReadonlyArray<unknown>;
+    readonly entries: ReadonlyArray<{ readonly model: string; readonly harnessId: string | null }>;
+    readonly newModels: ReadonlyArray<{
+      readonly model: string;
+      readonly name: string;
+      readonly firstSeenAt: string;
+    }>;
   }>;
   readonly defaultEntry: unknown;
   readonly dismissedNewModels: ReadonlyArray<unknown>;
@@ -1309,6 +1331,65 @@ function persistLegacySpawnBound(home: string, workflowId: string): boolean {
   }
 }
 
+/**
+ * Writes the Model Catalog of two accounts into the database the edge binary
+ * created, when that database has the catalog table but not yet the column
+ * for the first read. Returns whether it wrote.
+ *
+ * - `withLedger` gets a catalog whose models a and b came in the first read
+ *   and c in a later one, last read at `SEEDED_CATALOG_LAST_READ`.
+ * - `withoutLedger` gets a catalog that was read and lists no model.
+ *
+ * The rows go straight into the database because only a catalog read writes
+ * one, and a read needs a signed-in harness, which CI does not have. A
+ * database without the table has no catalog to migrate, and one with the
+ * column is skipped because the fixture would not be in the old shape.
+ */
+function persistCatalogReads(
+  home: string,
+  accounts: { readonly withLedger: string; readonly withoutLedger: string },
+): boolean {
+  const version = readMigrationVersion(home);
+  if (version < MODEL_PROFILE_MIGRATION || version >= CATALOG_FIRST_READ_MIGRATION) return false;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const insert = database.query(
+      `INSERT INTO model_catalogs
+         (provider_account_id, models, first_seen, read_at, error, models_stamp, attempt_stamp)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)
+       ON CONFLICT (provider_account_id) DO UPDATE SET
+         models = excluded.models, first_seen = excluded.first_seen, read_at = excluded.read_at,
+         error = NULL, models_stamp = excluded.models_stamp,
+         attempt_stamp = excluded.attempt_stamp`,
+    );
+    const model = (slug: string) =>
+      ({ slug, name: slug.toUpperCase(), imageInput: null, options: [] }) as const;
+    insert.run(
+      uuidBlob(accounts.withLedger),
+      JSON.stringify([model("a"), model("b"), model("c")]),
+      JSON.stringify({
+        a: SEEDED_CATALOG_FIRST_READ,
+        b: SEEDED_CATALOG_FIRST_READ,
+        c: SEEDED_CATALOG_SECOND_READ,
+      }),
+      SEEDED_CATALOG_LAST_READ,
+      SEEDED_CATALOG_LAST_READ,
+      SEEDED_CATALOG_LAST_READ,
+    );
+    insert.run(
+      uuidBlob(accounts.withoutLedger),
+      "[]",
+      "{}",
+      SEEDED_CATALOG_LAST_READ,
+      SEEDED_CATALOG_LAST_READ,
+      SEEDED_CATALOG_LAST_READ,
+    );
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
 /** Lists the start triggers of the workflow `workflowId`, keyed by trigger id. */
 async function readTriggers(
   options: { readonly home: string; readonly binary: string },
@@ -1720,6 +1801,13 @@ describe("upgrading from the previous edge release", () => {
       const inputsSeeded = persistSessionInputs(home, sessionId);
       const seededTriggerEffects = persistTriggerEffects(home, boundedWorkflow.id);
       const legacyBoundSeeded = persistLegacySpawnBound(home, legacyBoundWorkflow.id);
+      // The OpenAI account's Codex stand-in never answers, so a failed read
+      // is all that can touch its catalog. The Z.ai account's catalog is read
+      // again, which keeps the first read.
+      const catalogReadsSeeded = persistCatalogReads(home, {
+        withLedger: codexAccount.id,
+        withoutLedger: piAccount.id,
+      });
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -2279,8 +2367,112 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      if (catalogReadsSeeded) {
+        // The backfilled first read drives the announcements. The profile
+        // takes in model a of the seeded OpenAI catalog and nothing else.
+        // Model b came with the first read, so it is not new. Model c came
+        // with the second read, after the first read the migration worked
+        // out, so it is. A first read that was backfilled wrongly (later, or
+        // missing) would hide c. The section is written with entries because
+        // the account's Codex stand-in never answers, so its first read never
+        // fills a waiting section.
+        const takeInModelA = async (attempt: number): Promise<ListedModelProfile> => {
+          const [main] = readListedItems<ListedModelProfile>(
+            await runCli(["model-profile", "list", "--json"], upgraded),
+          );
+          if (main === undefined) throw new Error("the upgraded controller lists no profile");
+          const storedEntry = { providerAccountId: codexAccount.id, model: "a", harnessId: null };
+          // The other sections are sent as they are, a waiting one without entries.
+          const sections = [
+            ...main.accounts
+              .filter((section) => section.providerAccountId !== codexAccount.id)
+              .map((section) => ({
+                providerAccountId: section.providerAccountId,
+                harnessId: section.harnessId,
+                ...(section.selectionPending
+                  ? {}
+                  : {
+                      entries: section.entries.map((one) => ({
+                        providerAccountId: section.providerAccountId,
+                        model: one.model,
+                        harnessId: one.harnessId,
+                      })),
+                    }),
+              })),
+            { providerAccountId: codexAccount.id, harnessId: null, entries: [storedEntry] },
+          ];
+          const updated = await runCli(
+            [
+              "model-profile",
+              "update",
+              main.id,
+              "--expected-revision",
+              String(main.revision),
+              "--name",
+              main.name,
+              "--default-entry",
+              JSON.stringify(storedEntry),
+              "--json",
+            ],
+            {
+              ...upgraded,
+              stdin: [JSON.stringify(sections), JSON.stringify(main.dismissedNewModels)].join("\n"),
+            },
+          );
+          // A first catalog read may change the profile between the list and
+          // the update, which makes the update conflict: read it again.
+          if (updated.code !== 0 && attempt < 5) return takeInModelA(attempt + 1);
+          expect(updated.code, `${updated.stdout}\n${updated.stderr}`).toBe(0);
+          return expectJson<ListedModelProfile>(updated);
+        };
+        const taken = await takeInModelA(1);
+        const codexSection = taken.accounts.find(
+          (section) => section.providerAccountId === codexAccount.id,
+        );
+        expect(codexSection?.newModels).toEqual([
+          { model: "c", name: "C", firstSeenAt: SEEDED_CATALOG_SECOND_READ },
+        ]);
+
+        // The catalog the migration left still reads, with every model's
+        // first-seen time from the old ledger.
+        const catalog = expectJson<{
+          models: ReadonlyArray<{ slug: string; firstSeenAt: string }>;
+          readAt: string;
+        }>(await runCli(["provider-account", "read-catalog", codexAccount.id, "--json"], upgraded));
+        expect(catalog.models.map((one) => [one.slug, one.firstSeenAt])).toEqual([
+          ["a", SEEDED_CATALOG_FIRST_READ],
+          ["b", SEEDED_CATALOG_FIRST_READ],
+          ["c", SEEDED_CATALOG_SECOND_READ],
+        ]);
+        expect(catalog.readAt).toBe(SEEDED_CATALOG_LAST_READ);
+      } else {
+        console.log(
+          `Skipping the catalog first read fixture: the edge database has no catalog table, or already ran migration ${String(CATALOG_FIRST_READ_MIGRATION)}.`,
+        );
+      }
+
       expect(await controller.stop()).toBe(0);
       controller = undefined;
+      if (catalogReadsSeeded) {
+        // The first read is the earliest time of the ledger, or the last
+        // read when the ledger is empty. The upgraded controller's later
+        // reads leave it alone.
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          const readFirstReadAt = (accountId: string) =>
+            reader
+              .query("SELECT first_read_at FROM model_catalogs WHERE provider_account_id = ?")
+              .get(uuidBlob(accountId));
+          expect(readFirstReadAt(codexAccount.id)).toEqual({
+            first_read_at: SEEDED_CATALOG_FIRST_READ,
+          });
+          expect(readFirstReadAt(piAccount.id)).toEqual({
+            first_read_at: SEEDED_CATALOG_LAST_READ,
+          });
+        } finally {
+          reader.close();
+        }
+      }
       if (signalSeeded) {
         const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
         try {

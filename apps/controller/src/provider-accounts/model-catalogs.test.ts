@@ -11,7 +11,8 @@ import type { ModelDescriptor, ProbeResult } from "@hercule/protocol";
 import { withTransaction } from "../db";
 import { ModelProfileService } from "../model-profiles";
 import { runWithProfiles } from "../model-profiles/testing";
-import { ModelCatalogs, computeDefaultSelection } from "./model-catalogs";
+import { ModelCatalogs, computeArrivedModels, computeDefaultSelection } from "./model-catalogs";
+import { modelCatalogRepository } from "./model-catalog-repository";
 import { ProviderAccountProbes } from "./probes";
 import { providerAccountRepository } from "./repository";
 import { ProviderAccountService } from "./service";
@@ -107,6 +108,20 @@ const addKeyAccount = (label: string | null = null) =>
     yield* storeCredential(account.id, "apiKey");
     return account;
   });
+
+describe("computeArrivedModels", () => {
+  // The rules of what arrives are tested through the Model Profile service,
+  // which announces it. This is the one case a profile cannot reach: a
+  // catalog that was never read has no models and no first read.
+  it("returns nothing before the first successful read", () => {
+    expect(
+      computeArrivedModels(
+        { defaultSelection: "current-models" },
+        { models: [], firstReadAt: null },
+      ),
+    ).toEqual([]);
+  });
+});
 
 describe("computeDefaultSelection", () => {
   const models = [
@@ -448,6 +463,8 @@ describe("reading the stored catalogs", () => {
       catalogError: null,
     });
     expect(outcome.catalog.models).toHaveLength(2);
+    // The first read time is for the controller only, not part of the public catalog.
+    expect(outcome.catalog).not.toHaveProperty("firstReadAt");
     expect(outcome.record).toMatchObject({
       modelCount: 2,
       catalogReadAt: outcome.catalog.readAt,
@@ -463,6 +480,62 @@ describe("reading the stored catalogs", () => {
     );
 
     expect(failure).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("the first read of a catalog", () => {
+  it("is the first successful read, even when it lists no model, and a later read does not move it", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        const firstReadAt = () =>
+          Effect.map(catalogs.listCatalogs(), (all) => all[0]?.firstReadAt ?? null);
+        yield* recordRead(runner, account.id, signedOut(), 1);
+        const afterFailure = yield* firstReadAt();
+        yield* recordRead(runner, account.id, signedInWith(), 2);
+        const afterEmptyRead = yield* firstReadAt();
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(runner, account.id, signedInWith(model("a")), 3);
+        const afterLaterRead = yield* firstReadAt();
+        return {
+          afterFailure,
+          afterEmptyRead,
+          afterLaterRead,
+          arrived: computeArrivedModels(
+            { defaultSelection: "current-models" },
+            (yield* catalogs.listCatalogs())[0]!,
+          ),
+        };
+      }),
+    );
+
+    expect(outcome.afterFailure).toBeNull();
+    expect(outcome.afterEmptyRead).not.toBeNull();
+    expect(outcome.afterLaterRead).toBe(outcome.afterEmptyRead);
+    // The model of the second read arrived after the first (empty) read.
+    expect(outcome.arrived.map((one) => one.model)).toEqual(["a"]);
+  });
+
+  it("dates a model that first appears after a backwards clock step after the first read", async () => {
+    const arrived = await runWithAccounts(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* modelCatalogRepository;
+        const catalogs = yield* ModelCatalogs;
+        const account = yield* addKeyAccount();
+        const record = (models: ReadonlyArray<ModelDescriptor>, readAt: string, stamp: string) =>
+          withTransaction(sql, repository.recordSuccess(account.id, models, readAt, stamp));
+        yield* record([model("a")], "2026-10-31T09:00:00.000Z", sentAt(1));
+        // The second read ends before the first one, as when the clock was set back.
+        yield* record([model("a"), model("b")], "2026-10-31T08:00:00.000Z", sentAt(2));
+        const catalog = (yield* catalogs.listCatalogs())[0]!;
+        return computeArrivedModels({ defaultSelection: "current-models" }, catalog);
+      }),
+    );
+
+    expect(arrived).toEqual([{ model: "b", name: "b", firstSeenAt: "2026-10-31T09:00:00.001Z" }]);
   });
 });
 

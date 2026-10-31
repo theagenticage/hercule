@@ -9,6 +9,7 @@ import {
   providerAccountsQuery,
   providersQuery,
   runnersQuery,
+  settingsQuery,
 } from "../../../../app/queries";
 import { PlusIcon } from "../../../../icons/plus";
 import { LazyAddProviderAccount } from "../../../../screens/settings/providers/lazy-add-provider-account";
@@ -17,7 +18,8 @@ import { AccountCard } from "./-account-card";
 import type { CredentialFix } from "./-fix-account-dialog";
 import { LazyFixAccountDialog } from "./-lazy-fix-account-dialog";
 import { ModelsSection } from "./-models-section";
-import { useOpenModelProfile, validateProvidersSearch } from "./-open-model-profile";
+import { useOpenModelProfile } from "./-open-model-profile";
+import { validateProvidersSearch } from "./-providers-search";
 import { OpenedProviderAccountSheet } from "./-provider-account-sheet";
 
 /**
@@ -54,9 +56,15 @@ interface FixingAccount {
  * the harnesses, the runners and the plugins, is a shell read that the live
  * connection keeps current: the `provider` topic for the accounts and the
  * profiles, which the shell holds, so opening the section sends no request
- * and the section holds no subscription of its own. The loader only makes sure
- * the cache holds them. Each card reads the lists it draws from, and the page
- * reads only the accounts.
+ * and the section holds no subscription of its own. The loader only makes
+ * sure the cache holds them.
+ *
+ * The loader also makes sure the cache holds the settings, whose time zone
+ * sets the dates on the "New" rows. It reads them only when the cache holds
+ * none.
+ *
+ * Each card reads the lists it draws from, and the page reads only the
+ * accounts.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/providers")({
   staticData: { title: "Providers" },
@@ -70,6 +78,7 @@ export const Route = createFileRoute("/_connected/_shell/settings/providers")({
       queryClient.ensureQueryData(harnessesQuery(client)),
       queryClient.ensureQueryData(runnersQuery(client)),
       queryClient.ensureQueryData(pluginsQuery(client)),
+      queryClient.ensureQueryData(settingsQuery(client)),
     ]);
   },
   onEnter: () => {

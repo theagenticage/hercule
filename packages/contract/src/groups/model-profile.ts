@@ -48,8 +48,17 @@ export const MAX_MODEL_PROFILE_ACCOUNTS = 64;
 /** The most entries one section of a `modelProfile.update` may send. */
 export const MAX_MODEL_PROFILE_SECTION_ENTRIES = 256;
 
-/** The most dismissed models one `modelProfile.update` may send. */
+/** The most dismissed models a profile stores. `modelProfile.update` is refused `validation` when it would store more. */
 export const MAX_DISMISSED_NEW_MODELS = 1024;
+
+/**
+ * The most dismissed models one `modelProfile.update` may send. It is twice
+ * the stored bound, because the controller drops the dismissals that can never
+ * matter (`MAX_DISMISSED_NEW_MODELS` bounds what is left). Without the room, a
+ * profile that stores 1024 could not take out one more model, although the
+ * write would store no more than 1024.
+ */
+export const MAX_DISMISSED_NEW_MODELS_SENT = 2 * MAX_DISMISSED_NEW_MODELS;
 
 /**
  * A qualified harness id a client writes into a profile. It is at most as long
@@ -144,6 +153,23 @@ export const ResolvedModelProfileEntry = Schema.Struct({
 export type ResolvedModelProfileEntry = Schema.Schema.Type<typeof ResolvedModelProfileEntry>;
 
 /**
+ * A model that joined its account's Default Selection after the account's
+ * first Model Catalog read, and that the profile has neither taken in nor
+ * dismissed. A client offers it as "New" with Add and Not now.
+ *
+ * `firstSeenAt` is when the controller first saw the model in the account's
+ * catalog, which is when it arrived.
+ */
+export const NewModel = Schema.Struct({
+  model: ModelSlug,
+  /** The model's name in the account's Model Catalog. */
+  name: Schema.String,
+  firstSeenAt: Timestamp,
+});
+
+export type NewModel = Schema.Schema.Type<typeof NewModel>;
+
+/**
  * One account's section of a profile, as a client reads it.
  *
  * `harnessId` is the harness the section's entries run in unless an entry
@@ -166,6 +192,14 @@ export const ResolvedModelProfileAccount = Schema.Struct({
    */
   selectionPending: Schema.Boolean,
   entries: Schema.Array(ResolvedModelProfileEntry),
+  /**
+   * The models to announce as new in this section, in the order of the
+   * account's Default Selection. A model is listed while the section holds no
+   * entry of it (in any harness) and the profile has not dismissed it. Empty
+   * while `selectionPending`, and for a provider whose Default Selection is
+   * empty.
+   */
+  newModels: Schema.Array(NewModel),
 });
 
 export type ResolvedModelProfileAccount = Schema.Schema.Type<typeof ResolvedModelProfileAccount>;
@@ -227,14 +261,16 @@ export type ModelProfileAccountInput = Schema.Schema.Type<typeof ModelProfileAcc
  *
  * The lists are bounded: at most `MAX_MODEL_PROFILE_ACCOUNTS` sections, at
  * most `MAX_MODEL_PROFILE_SECTION_ENTRIES` entries in a section, and at most
- * `MAX_DISMISSED_NEW_MODELS` dismissed models.
+ * `MAX_DISMISSED_NEW_MODELS_SENT` dismissed models. The stored dismissals are
+ * bounded by `MAX_DISMISSED_NEW_MODELS`, checked after the controller drops
+ * the ones that can never matter.
  */
 export const ModelProfileUpdateInput = Schema.Struct({
   expectedRevision: Schema.Int,
   name: ModelProfileName,
   accounts: atMost(ModelProfileAccountInput, MAX_MODEL_PROFILE_ACCOUNTS),
   defaultEntry: Schema.NullOr(ModelProfileEntry),
-  dismissedNewModels: atMost(DismissedNewModel, MAX_DISMISSED_NEW_MODELS),
+  dismissedNewModels: atMost(DismissedNewModel, MAX_DISMISSED_NEW_MODELS_SENT),
 });
 
 export type ModelProfileUpdateInput = Schema.Schema.Type<typeof ModelProfileUpdateInput>;

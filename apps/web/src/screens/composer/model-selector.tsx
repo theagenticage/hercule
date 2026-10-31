@@ -1,7 +1,13 @@
 import type { JSX, ReactNode } from "react";
-import type { SignInTarget, ModelMenu, ModelPill, ThreadChoice } from "@hercule/client-core";
+import type {
+  ModelMenu,
+  ModelPill,
+  NewModelRow,
+  SignInTarget,
+  ThreadChoice,
+} from "@hercule/client-core";
 import { PillLabel } from "./controls";
-import { ModelList } from "./model-list";
+import { ModelList, type NewModelRefusal, type NewModelSaving } from "./model-list";
 import { SelectorShell } from "./selector-shell";
 
 /**
@@ -15,6 +21,10 @@ export function ModelSelector({
   filter,
   onFilter,
   onOpenProfile,
+  onAddNewModel,
+  onDismissNewModel,
+  savingNewModels,
+  newModelRefusal,
   pill,
   disabled,
   open,
@@ -29,6 +39,12 @@ export function ModelSelector({
   readonly onFilter: (filter: string) => void;
   /** Unfolds the profile whose head the user clicked, which folds the one that was open. */
   readonly onOpenProfile: (profileId: string) => void;
+  /** Adds a New row's model to the profile whose lane holds the row. The menu stays open. */
+  readonly onAddNewModel: (profileId: string, row: NewModelRow) => void;
+  /** Hides a New row's model in the profile whose lane holds the row. The menu stays open. */
+  readonly onDismissNewModel: (profileId: string, row: NewModelRow) => void;
+  readonly savingNewModels: readonly NewModelSaving[];
+  readonly newModelRefusal: NewModelRefusal | null;
   readonly pill: ModelPill;
   readonly disabled: boolean;
   readonly open: boolean;
@@ -70,6 +86,10 @@ export function ModelSelector({
             renderProviderMark={renderProviderMark}
             onChoose={forwardThreadChoice}
             onOpenProfile={onOpenProfile}
+            onAddNewModel={onAddNewModel}
+            onDismissNewModel={onDismissNewModel}
+            savingNewModels={savingNewModels}
+            newModelRefusal={newModelRefusal}
             signInSlot={signInSlot}
           />
         </>

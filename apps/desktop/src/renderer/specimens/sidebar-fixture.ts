@@ -338,6 +338,7 @@ export const buildSpecimenProfileSection = (
   resolvedHarnessId: models[0]!.harnessId,
   selectionPending: false,
   entries: models.map(buildSpecimenProfileEntry),
+  newModels: [],
 });
 
 /** The user's one Model Profile, "Main": the accounts' models, the Claude model of the threads first. */

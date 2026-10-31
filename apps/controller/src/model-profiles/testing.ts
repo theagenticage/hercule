@@ -10,6 +10,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import type { ModelDescriptor } from "@hercule/protocol";
 import { withTransaction } from "../db";
 import { NotifierLayer } from "../notifications";
+import type { Plugin } from "@hercule/plugin-host";
 import { PluginHost } from "../plugins";
 import { asUser, buildPluginStack } from "../plugins/testing";
 import {
@@ -64,12 +65,16 @@ export type ProfileServices =
 /**
  * Runs an effect as the user on a fresh database, after the fixture plugins
  * have been booted. The database starts with the profile "Main", which the
- * migration made.
+ * migration made. A test that needs other providers passes `plugins` in place
+ * of the fixture plugins.
  */
-export const runWithProfiles = <A, E>(body: Effect.Effect<A, E, ProfileServices>): Promise<A> =>
+export const runWithProfiles = <A, E>(
+  body: Effect.Effect<A, E, ProfileServices>,
+  plugins: ReadonlyArray<Plugin> = buildAccountPlugins(),
+): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(buildAccountPlugins()));
+      yield* Effect.flatMap(PluginHost, (host) => host.boot(plugins));
       return yield* body;
     }).pipe(Effect.provide(buildStack(buildFakeProviderApi().client)), asUser) as Effect.Effect<
       A,

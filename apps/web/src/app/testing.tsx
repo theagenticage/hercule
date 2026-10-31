@@ -269,6 +269,7 @@ export const buildMainProfile = (accounts: readonly ProviderAccount[]): ModelPro
         resolvedHarnessId: account.defaultHarnessId,
         selectionPending: true,
         entries: [],
+        newModels: [],
       };
     }
     const runnable = account.readiness.some((row) => row.state === "ready");
@@ -290,6 +291,7 @@ export const buildMainProfile = (accounts: readonly ProviderAccount[]): ModelPro
       resolvedHarnessId: account.defaultHarnessId,
       selectionPending: false,
       entries,
+      newModels: [],
     };
   });
   const defaultAccount = accounts.find((account) =>

@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   buildModelProfileCopyName,
   countProfileEntries,
+  readCachedModelProfile,
   readErrorMessage,
   renameModelProfile,
   type HerculeClient,
@@ -10,12 +11,12 @@ import {
 import type { ModelProfile } from "@hercule/contract";
 import { ProfileTabs } from "../../../../screens/settings/providers/profile-tabs";
 import { DeleteModelProfileDialog } from "./-delete-model-profile-dialog";
+import { useModelProfileUpdate } from "../../../../app/model-profile-cache";
 import {
   addCachedModelProfile,
-  readCachedModelProfile,
   readCachedModelProfiles,
-  useModelProfileUpdate,
-} from "./-model-profile-cache";
+} from "../../../../app/model-profile-cache";
+import { modelProfilesQuery } from "../../../../app/queries";
 import { useOpenModelProfile } from "./-open-model-profile";
 
 /** A rename that was asked for and has not been answered, which its tab shows as the profile's name. */
@@ -79,7 +80,11 @@ export function ModelProfileTabs({
     // the user clicked: an earlier Duplicate or rename ahead in the line has
     // changed the list by then.
     mutationFn: (sourceId: string) => {
-      const source = readCachedModelProfile(queryClient, client, sourceId);
+      const source = readCachedModelProfile(
+        queryClient,
+        modelProfilesQuery(client).queryKey,
+        sourceId,
+      );
       return client.modelProfile.create({
         payload: {
           name: buildModelProfileCopyName(

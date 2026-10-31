@@ -766,6 +766,8 @@ export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
   addModelProfileAccount,
   addModelProfileEntries,
+  addNewModel,
+  dismissNewModel,
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
@@ -781,6 +783,7 @@ export {
   type ModelSection,
   type ModelSectionRow,
 } from "./model-profiles/profile-sections";
+export type { NewModelRow } from "./model-profiles/new-model-rows";
 export type { ModelProfileHarnessChoice, SectionHarness } from "./model-profiles/profile-harnesses";
 export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
 export {
@@ -791,6 +794,13 @@ export {
 } from "./model-profiles/profile-lookup";
 export { countProfileEntries, formatProfileEntryKey } from "./model-profiles/profile-entries";
 export { buildModelProfileCopyName } from "./model-profiles/profile-tabs";
+export { readCachedModelProfile } from "./model-profiles/run-profile-save";
+export {
+  buildModelProfileUpdateOptions,
+  type ModelProfileSave,
+  type NewModelEdit,
+  type ModelProfilesQueryKey,
+} from "./model-profiles/profile-save";
 export { updateModelProfile } from "./model-profiles/update-profile";
 export {
   resolveThreadConfig,

@@ -2,7 +2,9 @@
  * Tests the composer's model menu opened from the pill, against the stubbed
  * controller: that opening it and unfolding a profile make no request, that a
  * clicked head leaves the draft's model alone and is remembered for the next
- * time the menu opens, and that the menu starts afresh when it closes.
+ * time the menu opens, and that the menu starts afresh when it closes. Also
+ * the "New" rows: Add and "Not now" each send one `modelProfile.update`, leave
+ * the menu open, and a refusal shows under the row's lane.
  *
  * jsdom has no popover API, so the test sends the `toggle` event the browser
  * sends when the popover opens or closes.
@@ -10,8 +12,9 @@
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ModelProfile } from "@hercule/contract";
+import type { ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
 import {
+  buildErrorBody,
   buildSidebarHandlers,
   buildThreadHandlers,
   CONTROLLER_URL,
@@ -22,6 +25,8 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   THREAD_FIXTURES,
+  type Call,
+  type Handler,
 } from "../../app/testing";
 import { readLastOpenProfileId } from "../../app/recent-models";
 
@@ -36,14 +41,18 @@ const WORK: ModelProfile = {
  * Opens the app on a new thread, with two Model Profiles, and returns the
  * requests sent so far once the message field shows.
  */
-const openDraft = async () => {
+const openDraft = async (
+  modelProfiles: readonly ModelProfile[] = [FIXTURE_MODEL_PROFILE, WORK],
+  handlers: Readonly<Record<string, Handler>> = {},
+) => {
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
       accounts: [FIXTURE_ACCOUNT],
-      modelProfiles: [FIXTURE_MODEL_PROFILE, WORK],
+      modelProfiles,
     }),
     ...buildThreadHandlers(THREAD_FIXTURES.finished),
+    ...handlers,
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
   await renderApp(fake, { path: "/" });
@@ -122,5 +131,114 @@ describe("the composer's model menu", () => {
       ["Main", "false"],
       ["Work", "true"],
     ]);
+  });
+});
+
+/** The profile "Main" whose one section announces "Claude Opus 5.6", which arrived on 26 Oct of this year. */
+const WITH_NEW_MODEL: ModelProfile = {
+  ...FIXTURE_MODEL_PROFILE,
+  accounts: FIXTURE_MODEL_PROFILE.accounts.map((section) => ({
+    ...section,
+    newModels: [
+      {
+        model: "claude-opus-5-6",
+        name: "Claude Opus 5.6",
+        firstSeenAt: `${String(new Date().getUTCFullYear())}-10-26T12:00:00.000Z`,
+      },
+    ],
+  })),
+};
+const MAIN_PATH = `/api/v1/model-profiles/${FIXTURE_MODEL_PROFILE.id}`;
+
+/** Returns the `modelProfile.update` requests among `calls`. */
+const readUpdates = (calls: readonly Call[]): readonly Call[] =>
+  calls.filter((call) => call.method === "PATCH" && call.path === MAIN_PATH);
+
+describe("the New rows of the composer's model menu", () => {
+  it("draws the row first in its lane with its date, and Add saves one entry and leaves the menu open", async () => {
+    let stored = WITH_NEW_MODEL;
+    const calls = await openDraft([WITH_NEW_MODEL], {
+      [`PATCH ${MAIN_PATH}`]: (call) => {
+        const input = call.body as ModelProfileUpdateInput;
+        stored = {
+          ...stored,
+          revision: stored.revision + 1,
+          accounts: stored.accounts.map((section) => ({ ...section, newModels: [] })),
+        };
+        expect(input.expectedRevision).toBe(WITH_NEW_MODEL.revision);
+        return { body: stored };
+      },
+    });
+    toggleModelMenu("open");
+
+    const lane = document.querySelector<HTMLElement>(".line--new")!.closest(".pop-sec")!;
+    expect(lane.children[1]!.textContent).toBe("NewClaude Opus 5.6 · arrived 26 OctAdd");
+    expect(lane.children[2]!.textContent).toContain("Claude Sonnet 5");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Claude Opus 5.6", hidden: true }));
+
+    await waitFor(() => {
+      expect(document.querySelector(".line--new")).toBeNull();
+    });
+    const updates = readUpdates(calls);
+    expect(updates).toHaveLength(1);
+    const sent = updates[0]!.body as ModelProfileUpdateInput;
+    expect(sent.accounts[0]!.entries!.filter((entry) => entry.model === "claude-opus-5-6")).toEqual(
+      [{ providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5-6", harnessId: null }],
+    );
+    expect(sent.dismissedNewModels).toEqual([]);
+    // The menu is still open and the draft's model is the one it had.
+    expect(readHeads()).toEqual([]);
+    expect(document.querySelector("[popover][aria-label='Model'] .model-menu-list")).not.toBeNull();
+    expect(document.querySelector(".pick--pill")!.textContent).toContain("Claude Sonnet 5");
+  });
+
+  it("dismisses a row with one update that lists the model as dismissed", async () => {
+    const calls = await openDraft([WITH_NEW_MODEL], {
+      [`PATCH ${MAIN_PATH}`]: (call) => {
+        const input = call.body as ModelProfileUpdateInput;
+        return {
+          body: {
+            ...WITH_NEW_MODEL,
+            revision: WITH_NEW_MODEL.revision + 1,
+            dismissedNewModels: input.dismissedNewModels,
+            accounts: WITH_NEW_MODEL.accounts.map((section) => ({ ...section, newModels: [] })),
+          },
+        };
+      },
+    });
+    toggleModelMenu("open");
+
+    fireEvent.click(screen.getByRole("button", { name: "Not now: Claude Opus 5.6", hidden: true }));
+
+    await waitFor(() => {
+      expect(document.querySelector(".line--new")).toBeNull();
+    });
+    const updates = readUpdates(calls);
+    expect(updates).toHaveLength(1);
+    expect((updates[0]!.body as ModelProfileUpdateInput).dismissedNewModels).toEqual([
+      { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5-6" },
+    ]);
+  });
+
+  it("shows a refusal under the lane and keeps the row", async () => {
+    const calls = await openDraft([WITH_NEW_MODEL], {
+      [`PATCH ${MAIN_PATH}`]: {
+        status: 400,
+        body: buildErrorBody("validation", "claude-code does not list Claude Opus 5.6."),
+      },
+    });
+    toggleModelMenu("open");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Claude Opus 5.6", hidden: true }));
+
+    const alert = await screen.findByRole("alert", { hidden: true });
+    expect(alert.textContent).toBe(
+      "The change was not saved. claude-code does not list Claude Opus 5.6.",
+    );
+    expect(alert.closest(".pop-sec")).toBe(
+      document.querySelector(".line--new")!.closest(".pop-sec"),
+    );
+    expect(readUpdates(calls)).toHaveLength(1);
   });
 });

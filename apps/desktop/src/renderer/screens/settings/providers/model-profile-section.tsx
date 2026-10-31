@@ -12,12 +12,14 @@ import {
   type ModelProfileHarnessChoice,
   type ModelSection,
   type ModelSectionRow,
+  type NewModelRow,
 } from "@hercule/client-core";
 import type { ResolvedModelProfileEntry } from "@hercule/contract";
 import { GripIcon } from "../../../icons/grip";
 import { HarnessPill } from "./harness-pill";
 import { joinClassNames } from "./join-class-names";
 import { ModelRow } from "./model-row";
+import { SectionNewModel } from "./section-new-model";
 import { useDragReorder } from "./use-drag-reorder";
 import { useOptimisticOrder } from "./use-optimistic-order";
 import "./models.css";
@@ -41,7 +43,8 @@ const readAltArrowOffset = (event: KeyboardEvent): -1 | 1 | null => {
 
 /**
  * Renders one account's section of a Model Profile: its head, with the
- * provider's `mark`, the account's name and the harness pill, then its entries in order, then
+ * provider's `mark`, the account's name and the harness pill, then a "New"
+ * row for each model in `section.newModels`, then its entries in order, then
  * `addModel` (the "Add a model" button and its picker) at the foot.
  *
  * - The head drags the section, and Alt+Up and Alt+Down move it, through
@@ -53,6 +56,12 @@ const readAltArrowOffset = (event: KeyboardEvent): -1 | 1 | null => {
  *   focus stays on the moved row, though the browser drops the focus of an
  *   element that its list moves. So it does after "Runs in" moves a row to
  *   another harness, which replaces the row: its key holds its harness.
+ * - A "New" row is not an entry: it is not dragged or moved, and the order
+ *   above does not hold it. Its "Add" and "Not now" are saved by
+ *   `onAddNewModel` and `onDismissNewModel`. When the row goes, the focus
+ *   moves on if it was on the row's button: after "Add", to the new entry's
+ *   row; after "Not now", to the next "New" row's "Add", else to the section's
+ *   first entry, else to the head.
  * - A section that waits for its account's first Model Catalog read says so
  *   and offers no "Add a model", because the read will fill the section.
  * - A section with no entry says so.
@@ -73,6 +82,8 @@ export function ModelProfileSection({
   onMoveToHarness,
   onAlsoOfferIn,
   onTakeOut,
+  onAddNewModel,
+  onDismissNewModel,
 }: {
   readonly section: ModelSection;
   readonly mark: ReactNode;
@@ -80,7 +91,7 @@ export function ModelProfileSection({
   readonly isNew: boolean;
   readonly drag: SectionDrag;
   readonly addModel: ReactNode;
-  readonly onMoveEntry: (entry: ResolvedModelProfileEntry, toIndex: number) => Promise<void>;
+  readonly onMoveEntry: (entry: ResolvedModelProfileEntry, toIndex: number) => Promise<boolean>;
   /** Sets the harness the account's models run in; `null` follows the account's default. */
   readonly onSetHarness: (harnessId: string | null) => void;
   /** Opens the account's sheet, where its default harness is set, with the account's id and name. */
@@ -91,6 +102,10 @@ export function ModelProfileSection({
   /** Saves the second entry of the model, which runs in `harnessId`. */
   readonly onAlsoOfferIn: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
   readonly onTakeOut: (entry: ResolvedModelProfileEntry) => void;
+  /** Saves the model's entry at the end of the section. Resolves, never rejects, with whether it was saved. */
+  readonly onAddNewModel: (row: NewModelRow) => Promise<boolean>;
+  /** Saves that the profile does not want the model announced. Resolves, never rejects, with whether it was saved. */
+  readonly onDismissNewModel: (row: NewModelRow) => Promise<boolean>;
 }): JSX.Element {
   const rowsByKey = new Map<string, ModelSectionRow>(section.rows.map((row) => [row.key, row]));
   const order = useOptimisticOrder(section.rows.map(({ key }) => key));
@@ -103,32 +118,72 @@ export function ModelProfileSection({
     // `onMoveEntry` never rejects: a failed save shows above the sections.
     void saveMove(key, toIndex);
   });
-  const rowElements = useRef(new Map<string, HTMLLIElement>());
-  // The row to focus once the controller's order arrives and the list moves
-  // or replaces it.
-  const refocus = useRef<{ readonly key: string; readonly order: string } | null>(null);
+  // The rows' elements by the row's key, with the model each draws.
+  const rowElements = useRef(
+    new Map<string, { readonly model: string; readonly element: HTMLLIElement }>(),
+  );
+  const headElement = useRef<HTMLDivElement>(null);
+  // The "Add" buttons of the "New" rows, by the model's slug.
+  const addButtons = useRef(new Map<string, HTMLButtonElement>());
+  // Where to put the focus once the controller's answer changes the section's
+  // rows (a row moves or is replaced, or a "New" row goes). `seen` is
+  // `layoutText` as it was when the user acted, to tell the answer from a draw
+  // that changed nothing. `newModel` is set when the request comes from a "New"
+  // row: it waits until that model's row is gone, because the answer to an
+  // earlier save can change the layout while that row is still there.
+  const refocus = useRef<{
+    readonly find: () => HTMLElement | null | undefined;
+    readonly seen: string;
+    readonly newModel?: string;
+  } | null>(null);
   const orderText = order.keys.join("\n");
+  const layoutText = [orderText, ...section.newModels.map(({ model }) => model)].join("\n");
+  const focusAfterChange = (find: () => HTMLElement | null | undefined): void => {
+    refocus.current = { find, seen: layoutText };
+  };
+  /** Returns the element of the first row that draws `model`, in whatever harness it runs. */
+  const findRowOfModel = (model: string): HTMLLIElement | undefined =>
+    [...rowElements.current.values()].find((row) => row.model === model)?.element;
+  /**
+   * Like `focusAfterChange` for the "New" row of `newModel`, whose change
+   * `save` makes. When the save fails, the request is dropped, so a later
+   * change cannot take the focus.
+   */
+  const focusAfterNewModelSave = async (
+    newModel: string,
+    find: () => HTMLElement | null | undefined,
+    save: () => Promise<boolean>,
+  ): Promise<void> => {
+    const request = { find, seen: layoutText, newModel };
+    refocus.current = request;
+    if (!(await save()) && refocus.current === request) refocus.current = null;
+  };
 
   useLayoutEffect(() => {
     const pending = refocus.current;
-    if (pending === null || pending.order === orderText) return;
-    const element = rowElements.current.get(pending.key);
-    if (element === undefined) return;
+    if (pending === null || pending.seen === layoutText) return;
+    if (section.newModels.some(({ model }) => model === pending.newModel)) return;
+    const element = pending.find();
+    if (element === undefined || element === null) return;
     refocus.current = null;
     // The user may have moved on while the save ran: take the focus back only
-    // when the move dropped it, or left it in one of the section's rows.
+    // when it fell to the page. After a move of a row, the focus may also be
+    // in one of the section's rows, because the browser drops the focus of a
+    // row that moves, and the row it is in may be the moved one. A "New" row's
+    // save moves no row, so a row that has the focus got it from the user.
     const { activeElement } = document;
     const dropped =
       activeElement === null ||
       activeElement === document.body ||
-      [...rowElements.current.values()].some((row) => row.contains(activeElement));
+      (pending.newModel === undefined &&
+        [...rowElements.current.values()].some(({ element: row }) => row.contains(activeElement)));
     if (dropped) element.focus({ preventScroll: true });
-  }, [orderText]);
+  }, [layoutText, section.newModels]);
 
   const moveBy = (key: string, offset: -1 | 1): void => {
     const to = order.keys.indexOf(key) + offset;
     if (to < 0 || to >= order.keys.length) return;
-    refocus.current = { key, order: orderText };
+    focusAfterChange(() => rowElements.current.get(key)?.element);
     void saveMove(key, to);
   };
 
@@ -139,26 +194,51 @@ export function ModelProfileSection({
    * key, and the effect leaves the focus alone when the user has moved on.
    */
   const moveToHarness = (row: ModelSectionRow, choice: ModelProfileHarnessChoice): void => {
-    refocus.current = {
-      key: formatProfileEntryKey({
-        providerAccountId: row.entry.providerAccountId,
-        harnessId: choice.resolvedHarnessId,
-        model: row.entry.model,
-      }),
-      order: orderText,
-    };
+    const key = formatProfileEntryKey({
+      providerAccountId: row.entry.providerAccountId,
+      harnessId: choice.resolvedHarnessId,
+      model: row.entry.model,
+    });
+    focusAfterChange(() => rowElements.current.get(key)?.element);
     onMoveToHarness(row.entry, choice.harnessId);
   };
 
+  /**
+   * Saves the model's entry and focuses its row once the "New" row is gone.
+   * The row is found by its model, not by a key made before the save: a retry
+   * after a conflict, or another writer, can have put the entry in another
+   * harness than the section's.
+   */
+  const saveNewModelAddition = (row: NewModelRow): Promise<void> =>
+    focusAfterNewModelSave(
+      row.model,
+      () => findRowOfModel(row.model),
+      () => onAddNewModel(row),
+    );
+
+  /** Saves the dismissal and focuses what takes the row's place, as the component's docstring says. */
+  const saveNewModelDismissal = (row: NewModelRow): Promise<void> => {
+    const nextModel = section.newModels[section.newModels.indexOf(row) + 1]?.model;
+    const firstRowKey = order.keys[0];
+    return focusAfterNewModelSave(
+      row.model,
+      () =>
+        (nextModel === undefined ? undefined : addButtons.current.get(nextModel)) ??
+        (firstRowKey === undefined ? undefined : rowElements.current.get(firstRowKey)?.element) ??
+        headElement.current,
+      () => onDismissNewModel(row),
+    );
+  };
+
   const rows = order.keys.flatMap((key) => rowsByKey.get(key) ?? []);
-  const buildRowProps = (key: string): ComponentProps<"li"> => {
+  const buildRowProps = ({ key, entry }: ModelSectionRow): ComponentProps<"li"> => {
     const dropSide = rowDrag.dropMark?.key === key ? rowDrag.dropMark.side : null;
     return {
       ...rowDrag.getSourceProps(key),
       ...rowDrag.getTargetProps(key),
       ref: (element) => {
         if (element === null) rowElements.current.delete(key);
-        else rowElements.current.set(key, element);
+        else rowElements.current.set(key, { model: entry.model, element });
       },
       tabIndex: 0,
       "aria-keyshortcuts": "Alt+ArrowUp Alt+ArrowDown",
@@ -189,6 +269,7 @@ export function ModelProfileSection({
     >
       <div
         {...drag.headProps}
+        ref={headElement}
         className="pm-head"
         tabIndex={0}
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
@@ -217,6 +298,18 @@ export function ModelProfileSection({
           }}
         />
       </div>
+      {section.newModels.map((row) => (
+        <SectionNewModel
+          key={row.model}
+          row={row}
+          addButtonRef={(element) => {
+            if (element === null) addButtons.current.delete(row.model);
+            else addButtons.current.set(row.model, element);
+          }}
+          onAdd={() => saveNewModelAddition(row)}
+          onDismiss={() => saveNewModelDismissal(row)}
+        />
+      ))}
       {rows.length === 0 ? null : (
         <ul className="pm-rows">
           {rows.map((row) => (
@@ -224,7 +317,7 @@ export function ModelProfileSection({
               key={row.key}
               row={row}
               profileName={profileName}
-              rowProps={buildRowProps(row.key)}
+              rowProps={buildRowProps(row)}
               onMakeDefault={() => {
                 onMakeDefault(row.entry);
               }}

@@ -239,6 +239,7 @@ describe("Settings > Providers, Add an account", () => {
                 resolvedHarnessId: created.defaultHarnessId,
                 selectionPending: true,
                 entries: [],
+                newModels: [],
               },
             ],
           },

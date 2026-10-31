@@ -25,6 +25,7 @@ import {
   createNotFoundError,
   type ModelCatalog,
   type ModelCatalogItem,
+  type NewModel,
   type NotFound,
 } from "@hercule/contract";
 import type { ModelDescriptor, ProbeResult } from "@hercule/protocol";
@@ -71,6 +72,40 @@ export const computeDefaultSelection = (
     models: current.map((model) => model.slug),
     defaultModel: current.find((model) => model.isDefault === true)?.slug ?? null,
   };
+};
+
+/**
+ * An account's Model Catalog with the time of its first successful read, which
+ * the controller needs and the public catalog does not carry.
+ */
+export interface CatalogWithFirstRead extends ModelCatalog {
+  /** When the account's first successful read ended; `null` before it. */
+  readonly firstReadAt: string | null;
+}
+
+/**
+ * Computes the models that arrived in an account's Default Selection after
+ * its first successful catalog read, in the order of the catalog. Returns none
+ * while the account has never been read, and none for a provider whose Default
+ * Selection is `none`.
+ *
+ * A model arrived when it is in the Default Selection now and was first seen
+ * later than the first read. So a model of the first read never arrived, and a
+ * model first seen after it but marked legacy has not arrived yet. If that
+ * model later stops being legacy, it arrives then, because its first-seen time
+ * is still after the first read. Only the models the catalog lists now can be
+ * in the Default Selection, so a model that left the catalog is not returned.
+ */
+export const computeArrivedModels = (
+  provider: Pick<RegisteredProvider, "defaultSelection">,
+  catalog: Pick<CatalogWithFirstRead, "models" | "firstReadAt">,
+): ReadonlyArray<NewModel> => {
+  if (catalog.firstReadAt === null) return [];
+  const firstReadMillis = Date.parse(catalog.firstReadAt);
+  const selected = new Set(computeDefaultSelection(provider, catalog.models).models);
+  return catalog.models
+    .filter((model) => selected.has(model.slug) && Date.parse(model.firstSeenAt) > firstReadMillis)
+    .map((model) => ({ model: model.slug, name: model.name, firstSeenAt: model.firstSeenAt }));
 };
 
 /**
@@ -200,13 +235,21 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns the catalog of every account, in the order the accounts were
-     * added. An account that was never read has an empty catalog with no read
-     * time. Dies when a stored row is corrupt.
+     * added, each with the time of its first successful read. An account that
+     * was never read has an empty catalog with no read time. Dies when a
+     * stored row is corrupt.
      */
-    listCatalogs: (): Effect.Effect<ReadonlyArray<ModelCatalog>, SqlError> =>
+    listCatalogs: (): Effect.Effect<ReadonlyArray<CatalogWithFirstRead>, SqlError> =>
       catalogs.listCatalogs().pipe(
         Effect.catchTag("SchemaError", Effect.die),
-        Effect.flatMap((all) => Effect.forEach(all, toModelCatalog)),
+        Effect.flatMap((all) =>
+          Effect.forEach(all, (stored) =>
+            Effect.map(toModelCatalog(stored), (catalog) => ({
+              ...catalog,
+              firstReadAt: stored.firstReadAt,
+            })),
+          ),
+        ),
       ),
 
     /**
