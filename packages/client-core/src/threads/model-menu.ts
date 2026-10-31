@@ -324,6 +324,52 @@ const buildRow = (
   };
 };
 
+/** Builds the lanes of `profile` from its `placed` entries, the filter applied. */
+const buildLanes = (
+  context: MenuContext,
+  profile: ModelProfile,
+  placed: readonly PlacedEntry[],
+): readonly ModelMenuLane[] => {
+  const { catalogs, filter } = context;
+  return profile.accounts.flatMap((section): readonly ModelMenuLane[] => {
+    const account = catalogs.accounts.find((each) => each.id === section.providerAccountId);
+    if (account === undefined) return [];
+    const rows = placed
+      .filter((each) => each.section === section)
+      .map((each) => buildRow(context, profile, each))
+      .filter((row) => matchesFilter(row, filter));
+    // A section with nothing to pick has no lane, and neither does a lane
+    // that waits for its models while the user is filtering.
+    const waiting = section.selectionPending && filter === "";
+    if (rows.length === 0 && !waiting) return [];
+    return [
+      {
+        providerAccountId: account.id,
+        providerId: account.providerId,
+        name: buildProviderAccountName(catalogs.providers, account),
+        rows,
+        note: waiting ? READING_MODELS_NOTE : null,
+      },
+    ];
+  });
+};
+
+/**
+ * Returns the lanes of `profile` with every entry it holds, as a draft with no
+ * filter and no bound runner shows them. Settings > Threads lists its model
+ * field from these, so it offers the same rows, with the same problems, as the
+ * composer's menu.
+ */
+export const buildProfileLanes = (
+  catalogs: ThreadCatalogs,
+  profile: ModelProfile,
+): readonly ModelMenuLane[] =>
+  buildLanes(
+    { catalogs, runner: undefined, filter: "", currentKey: null },
+    profile,
+    listPlacedEntries(profile, catalogs.accounts),
+  );
+
 /** What an unfolded profile shows. */
 interface ProfileBody {
   readonly recent: readonly ModelMenuRecentRow[];
@@ -361,29 +407,7 @@ const buildProfileBody = (
     .filter((row) => matchesFilter(row, filter))
     .slice(0, RECENT_LIMIT);
 
-  const lanes = profile.accounts.flatMap((section): readonly ModelMenuLane[] => {
-    const account = catalogs.accounts.find((each) => each.id === section.providerAccountId);
-    if (account === undefined) return [];
-    const rows = placed
-      .filter((each) => each.section === section)
-      .map((each) => buildRow(context, profile, each))
-      .filter((row) => matchesFilter(row, filter));
-    // A section with nothing to pick has no lane, and neither does a lane
-    // that waits for its models while the user is filtering.
-    const waiting = section.selectionPending && filter === "";
-    if (rows.length === 0 && !waiting) return [];
-    return [
-      {
-        providerAccountId: account.id,
-        providerId: account.providerId,
-        name: buildProviderAccountName(catalogs.providers, account),
-        rows,
-        note: waiting ? READING_MODELS_NOTE : null,
-      },
-    ];
-  });
-
-  return { recent: recentRows, lanes };
+  return { recent: recentRows, lanes: buildLanes(context, profile, placed) };
 };
 
 /** Returns what a running thread's list says in place of an empty list. */

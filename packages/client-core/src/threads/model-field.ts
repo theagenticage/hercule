@@ -13,7 +13,7 @@ import type { ProviderAccount } from "@hercule/contract";
 import { formatProfileEntryKey, type ProfileEntryKey } from "../model-profiles/profile-entries";
 import { buildProviderAccountName, resolveThreadHarnessId } from "../provider-accounts";
 import type { ThreadCatalogs } from "./config";
-import { buildModelMenu } from "./model-menu";
+import { buildProfileLanes } from "./model-menu";
 import type { ThreadDefaults } from "./thread-defaults";
 
 /** One entry the field offers. */
@@ -71,24 +71,7 @@ export const buildThreadModelField = (
   const seenKeys = new Set<string>();
   const groups: ThreadModelFieldGroup[] = [];
   for (const modelProfile of catalogs.modelProfiles) {
-    // Unfolding one profile at a time gives its rows without the filter.
-    const menu = buildModelMenu(
-      catalogs,
-      { ...current, runnerId: null },
-      {
-        kind: "draft",
-        filter: "",
-        recent: [],
-        runnerId: null,
-        openedProfileId: modelProfile.id,
-        lastOpenProfileId: null,
-      },
-    );
-    const profile =
-      menu.kind === "draft"
-        ? menu.profiles.find((each) => each.profileId === modelProfile.id)
-        : undefined;
-    const options = (profile?.lanes ?? []).flatMap((lane) =>
+    const options = buildProfileLanes(catalogs, modelProfile).flatMap((lane) =>
       lane.rows.flatMap((row): readonly ThreadModelFieldOption[] => {
         const key = formatProfileEntryKey({
           providerAccountId: row.providerAccountId,
