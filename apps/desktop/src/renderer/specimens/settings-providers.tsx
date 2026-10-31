@@ -17,7 +17,9 @@
  * `?profiles=2` adds a second Model Profile, "Work", so the tabs show;
  * `?tabmenu` opens the open tab's ⌄ menu, `?rename` edits the open tab's name,
  * `?newprofile` opens the New profile dialog, and `?deleteprofile` the
- * delete confirmation of the open profile.
+ * delete confirmation of the open profile. `?empty` empties the open profile,
+ * so the page teaches; `?addmenu` opens the menu of "Add an account to
+ * <profile>".
  */
 import { mountProvidersSettingsSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
@@ -104,22 +106,28 @@ async function openAddAccountSheet(step: string): Promise<void> {
 }
 
 const query = new URLSearchParams(location.search);
-const [main] = PROVIDER_MODEL_PROFILES;
+const [fixtureMain] = PROVIDER_MODEL_PROFILES;
+const main =
+  fixtureMain !== undefined && query.has("empty")
+    ? { ...fixtureMain, accounts: [], defaultEntry: null }
+    : fixtureMain;
 await mountProvidersSettingsSpecimen(
-  query.get("profiles") === "2" && main !== undefined
+  query.get("profiles") === "2" && main !== undefined && fixtureMain !== undefined
     ? {
         ...PROVIDERS_SIDEBAR_RECORDS,
         modelProfiles: [
           main,
           {
-            ...main,
+            ...fixtureMain,
             id: "01a06d02-8000-7000-8000-000000000b02",
             name: "Work",
-            accounts: main.accounts.slice(1, 2),
+            accounts: fixtureMain.accounts.slice(1, 2),
           },
         ],
       }
-    : PROVIDERS_SIDEBAR_RECORDS,
+    : main !== undefined && query.has("empty")
+      ? { ...PROVIDERS_SIDEBAR_RECORDS, modelProfiles: [main] }
+      : PROVIDERS_SIDEBAR_RECORDS,
   PROVIDERS_SETTINGS_RECORDS,
 );
 const sheet = new URLSearchParams(location.search).get("sheet");
@@ -173,6 +181,14 @@ const openTabMenu = async (item?: string): Promise<void> => {
 if (query.has("tabmenu")) await openTabMenu();
 if (query.has("rename")) await openTabMenu("Rename");
 if (query.has("deleteprofile")) await openTabMenu("Delete…");
+if (query.has("addmenu")) {
+  (
+    await waitFor(
+      () => document.querySelector<HTMLElement>(".pm-addacct"),
+      "the Add an account row",
+    )
+  ).click();
+}
 if (query.has("newprofile")) {
   (await waitFor(() => document.querySelector<HTMLElement>(".pm-tab--new"), "New profile")).click();
   await waitFor(() => document.querySelector("dialog.new-profile-dialog[open]"), "the dialog");

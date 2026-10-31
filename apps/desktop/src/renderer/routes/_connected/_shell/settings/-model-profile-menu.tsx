@@ -1,7 +1,11 @@
-import { useRef, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
+  addModelProfileAccount,
   buildModelProfileSections,
+  buildProviderAccountName,
+  describeProviderAccountIdentity,
+  findProviderPluginId,
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
@@ -19,7 +23,9 @@ import {
   providerAccountsQuery,
   providersQuery,
 } from "../../../../app/queries";
+import { AddProfileAccount } from "../../../../screens/settings/providers/add-profile-account";
 import { ModelProfileSection } from "../../../../screens/settings/providers/model-profile-section";
+import { ProfileTeaching } from "../../../../screens/settings/providers/profile-teaching";
 import { ProviderMark } from "../../../../screens/settings/providers/provider-mark";
 import { useDragReorder } from "../../../../screens/settings/providers/use-drag-reorder";
 import { useOptimisticOrder } from "../../../../screens/settings/providers/use-optimistic-order";
@@ -43,7 +49,11 @@ import { AccountModelPicker } from "./-models-picker";
  * profile they left still finishes, and writes only to that profile.
  *
  * `flashProviderAccountId` is the account just added to the profile, whose
- * section flashes once.
+ * section flashes once. So does the section of an account the user joins to
+ * the profile from the page itself, through "Add an account to <profile>" or
+ * a tile of the empty profile; both join it with its provider's Default
+ * Selection. `onAddAccount` opens the add-account sheet, which joins the new
+ * account to this profile when it is done.
  *
  * Everything it reads is a shell read that the live connection keeps current,
  * so opening the section sends no request.
@@ -52,10 +62,12 @@ export function ModelProfileMenu({
   client,
   profile,
   flashProviderAccountId,
+  onAddAccount,
 }: {
   readonly client: HerculeClient;
   readonly profile: ModelProfile;
   readonly flashProviderAccountId: string | null;
+  readonly onAddAccount: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
@@ -105,6 +117,21 @@ export function ModelProfileMenu({
     void moveSection(providerAccountId, toIndex);
   });
 
+  // The account the user last joined to the profile from this page, whose section flashes once.
+  const [joinedProviderAccountId, setJoinedProviderAccountId] = useState<string | null>(null);
+  const joinAccount = (providerAccountId: string): void => {
+    setJoinedProviderAccountId(providerAccountId);
+    void change((current) => addModelProfileAccount(current, providerAccountId));
+  };
+  const choices = accounts
+    .filter(({ id }) => !profile.accounts.some(({ providerAccountId }) => providerAccountId === id))
+    .map((account) => ({
+      providerAccountId: account.id,
+      name: buildProviderAccountName(providers, account),
+      pluginId: findProviderPluginId(providers, account),
+      identity: describeProviderAccountIdentity(providers, account),
+    }));
+
   const byId = new Map(sections.map((section) => [section.providerAccountId, section]));
   return (
     <>
@@ -114,7 +141,13 @@ export function ModelProfileMenu({
         </p>
       ) : null}
       {sections.length === 0 ? (
-        <p className="pm-none">{`${profile.name} has no accounts yet. Add one to give the composer models.`}</p>
+        <ProfileTeaching
+          profileName={profile.name}
+          choices={choices}
+          plugins={plugins}
+          onJoin={joinAccount}
+          onNewAccount={onAddAccount}
+        />
       ) : (
         <div className="pm-list">
           {order.keys.flatMap((providerAccountId) => {
@@ -127,7 +160,10 @@ export function ModelProfileMenu({
                 section={section}
                 mark={<ProviderMark pluginId={section.pluginId} plugins={plugins} size={13} />}
                 profileName={profile.name}
-                isNew={providerAccountId === flashProviderAccountId}
+                isNew={
+                  providerAccountId === flashProviderAccountId ||
+                  providerAccountId === joinedProviderAccountId
+                }
                 drag={{
                   headProps: sectionDrag.getSourceProps(providerAccountId),
                   sectionProps: sectionDrag.getTargetProps(providerAccountId),
@@ -175,6 +211,13 @@ export function ModelProfileMenu({
               />
             );
           })}
+          <AddProfileAccount
+            profileName={profile.name}
+            choices={choices}
+            plugins={plugins}
+            onJoin={joinAccount}
+            onNewAccount={onAddAccount}
+          />
         </div>
       )}
     </>

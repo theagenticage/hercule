@@ -131,7 +131,13 @@ function Providers(): JSX.Element {
               ))}
             </div>
           </section>
-          <ModelsSection client={client} flashProviderAccountId={addedProviderAccountId} />
+          <ModelsSection
+            client={client}
+            flashProviderAccountId={addedProviderAccountId}
+            onAddAccount={() => {
+              setAdding(true);
+            }}
+          />
         </>
       )}
       {adding && (

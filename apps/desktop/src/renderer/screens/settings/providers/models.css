@@ -43,11 +43,6 @@
   margin-top: 0;
   border-top: 0;
 }
-.pm-none {
-  margin: 12px 0 0;
-  color: var(--faint);
-  font-size: var(--t-12);
-}
 
 /* ---------- One account's section: a head you can drag, then its models ---------- */
 .pm-sec {
@@ -283,4 +278,75 @@
 .pm-done {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ---------- "Add an account to <profile>", after the last section ---------- */
+.pm-addwrap {
+  position: relative;
+  margin-top: 8px;
+}
+.pm-addacct {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  height: 40px;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  outline: 1px dashed color-mix(in oklab, var(--faint) 55%, transparent);
+  outline-offset: -1px;
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.pm-addacct:hover,
+.pm-addacct[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+.pm-addacct:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+/* The menu opens under the row, from its left edge, and above it when there
+   is no room below. */
+.pm-addmenu {
+  width: 380px;
+  margin-top: 6px;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-block;
+}
+.pm-addmenu .pm-addchoice {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  height: auto;
+  min-height: 40px;
+  padding: 4px 8px;
+  border-radius: var(--r-md);
+}
+.pm-addchoice-text {
+  display: grid;
+  min-width: 0;
+}
+.pm-addchoice-text > b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pm-addchoice-identity {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pm-addmenu-foot {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--divider);
+}
+.pm-addmenu > .menu-note {
+  margin: 0;
 }
