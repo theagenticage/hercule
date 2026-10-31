@@ -196,10 +196,10 @@ function RenamingTab({
  *
  * Each Rename starts a new edit, and the answer to a save only reaches the
  * edit that sent it. Opening another tab ends the edit, so an answer that
- * arrives later changes nothing on screen: it cannot close or put an error on
- * the edit of another tab the user has started since. A refusal that arrives
- * after the user left the tab is therefore not shown; the tab keeps the name
- * it had.
+ * arrives later cannot close or put an error on the edit of another tab the
+ * user has started since. A refusal that arrives after the edit ended is
+ * handed to `onRenameRefusedLater` with the name the profile still has, so the
+ * page can tell the user the profile was not renamed.
  */
 export function ProfileTabs({
   tabs,
@@ -207,6 +207,7 @@ export function ProfileTabs({
   onOpen,
   onNew,
   onRename,
+  onRenameRefusedLater,
   onDuplicate,
   onDelete,
 }: {
@@ -215,18 +216,24 @@ export function ProfileTabs({
   readonly onOpen: (id: string) => void;
   readonly onNew: () => void;
   readonly onRename: (id: string, name: string) => Promise<string | null>;
+  readonly onRenameRefusedLater: (profileName: string, message: string) => void;
   readonly onDuplicate: (id: string) => void;
   readonly onDelete: (id: string) => void;
 }): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
   const [edit, setEdit] = useState<RenameEdit | null>(null);
   const nextEditToken = useRef(0);
+  // The token of the edit that is open now, or `null`. Read when a save
+  // answers, to tell an answer for the open edit from one for an edit that
+  // ended.
+  const openEditToken = useRef<number | null>(null);
   /** Changes the edit `token` with `change`, unless that edit has ended or another has begun. */
   const changeEdit = (token: number, change: (current: RenameEdit) => RenameEdit | null): void => {
     setEdit((current) => (current?.token === token ? change(current) : current));
   };
 
   const openTab = (id: string): void => {
+    openEditToken.current = null;
     setEdit(null);
     onOpen(id);
   };
@@ -271,10 +278,15 @@ export function ProfileTabs({
                   tab={tab}
                   onSave={async (name) => {
                     const message = await onRename(tab.id, name);
-                    changeEdit(token, (current) => ({ ...current, error: message }));
+                    if (message !== null && openEditToken.current !== token) {
+                      onRenameRefusedLater(tab.name, message);
+                    } else {
+                      changeEdit(token, (current) => ({ ...current, error: message }));
+                    }
                     return message === null;
                   }}
                   onStop={() => {
+                    if (openEditToken.current === token) openEditToken.current = null;
                     changeEdit(token, () => null);
                   }}
                 />
@@ -302,7 +314,9 @@ export function ProfileTabs({
                   <ProfileTabMenu
                     name={tab.name}
                     onRename={() => {
-                      setEdit({ token: nextEditToken.current++, id: tab.id, error: null });
+                      const token = nextEditToken.current++;
+                      openEditToken.current = token;
+                      setEdit({ token, id: tab.id, error: null });
                     }}
                     onDuplicate={() => {
                       onDuplicate(tab.id);

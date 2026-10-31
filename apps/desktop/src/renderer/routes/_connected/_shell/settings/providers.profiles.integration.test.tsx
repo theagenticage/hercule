@@ -465,7 +465,7 @@ describe("Settings > Providers > Models, profiles", () => {
       );
     });
 
-    it("does not show the refusal of an earlier tab's save over the rename of another", async () => {
+    it("names the profile when its rename is refused after the user left it, and leaves the other rename alone", async () => {
       const save = holdAnswer();
       await openModels({
         profiles: [MAIN, WORK],
@@ -484,11 +484,13 @@ describe("Settings > Providers > Models, profiles", () => {
         body: buildErrorBody("validation", "A profile called that exists."),
       });
 
-      await waitFor(() => {
-        expect(screen.getByRole("textbox", { name: "Name of Work" })).toBeTruthy();
-      });
-      expect(screen.queryByRole("alert")).toBeNull();
-      expect(listTabNames()[0]).toBe("Main");
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "Main was not renamed: A profile called that exists.",
+      );
+      expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Name of Work" }).value).toBe(
+        "Works",
+      );
+      expect(screen.getByRole("tab", { name: /^Main/ })).toBeTruthy();
     });
 
     it("refuses a blank name in plain words without asking the controller, and keeps the field", async () => {

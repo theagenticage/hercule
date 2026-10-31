@@ -31,7 +31,9 @@ import { useOpenModelProfile } from "./-open-model-profile";
  * newest copy of the profiles the page holds when its turn comes, so neither
  * writes over a change the user made just before, and two quick Duplicates
  * name their copies "Main copy" and "Main copy 2". A rename the controller refuses shows its message
- * above the tabs, in the tab being edited; a blank name is refused without
+ * above the tabs, in the tab being edited, or, when the user has opened
+ * another tab since, as "<name> was not renamed: <message>" above the tabs
+ * until the next tab is opened; a blank name is refused without
  * asking the controller; a failed Duplicate shows above the tabs.
  */
 export function ModelProfileTabs({
@@ -44,6 +46,8 @@ export function ModelProfileTabs({
   const queryClient = useQueryClient();
   const { profile, profiles, openProfile } = useOpenModelProfile(client);
   const [deleting, setDeleting] = useState<ModelProfile | null>(null);
+  // A rename the controller refused after the user had left its tab.
+  const [leftRenameError, setLeftRenameError] = useState<string | null>(null);
 
   const rename = useMutation({
     scope: { id: "model-profile" },
@@ -86,6 +90,11 @@ export function ModelProfileTabs({
           {`Could not duplicate ${profile.name}. ${readErrorMessage(duplicate.error)}`}
         </p>
       ) : null}
+      {leftRenameError === null ? null : (
+        <p className="pm-err" role="alert">
+          {leftRenameError}
+        </p>
+      )}
       <ProfileTabs
         tabs={profiles.map((each) => ({
           id: each.id,
@@ -95,6 +104,7 @@ export function ModelProfileTabs({
         openId={profile.id}
         onOpen={(id) => {
           duplicate.reset();
+          setLeftRenameError(null);
           openProfile(id);
         }}
         onNew={onNew}
@@ -108,6 +118,9 @@ export function ModelProfileTabs({
                 (error: unknown) => readErrorMessage(error),
               )
         }
+        onRenameRefusedLater={(profileName, message) => {
+          setLeftRenameError(`${profileName} was not renamed: ${message}`);
+        }}
         onDuplicate={(id) => {
           duplicate.mutate(id);
         }}
