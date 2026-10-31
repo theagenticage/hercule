@@ -34,7 +34,7 @@ import {
   isLiveSessionTestEnabled,
   LOGIN_DEADLINE_MS,
   isLoginAvailable,
-  prepareLoggedInInstance,
+  prepareLoggedInAccount,
   collectAssistantText,
   readSession,
   createTemporaryHome,
@@ -96,7 +96,7 @@ interface Ready {
 let ready: Ready | undefined;
 
 const prepare = async (): Promise<Ready> => {
-  const { snapshot } = await prepareLoggedInInstance({ home: state.home, binary, url, apiKey });
+  const { snapshot } = await prepareLoggedInAccount({ home: state.home, binary, url, apiKey });
   const profiles = parseJsonOutputOrFail<Page<Profile>>(
     await runCli(["profile", "list", "--json", "--all"], { home: state.home, binary }),
   ).items;
@@ -182,7 +182,7 @@ describe.skipIf(!wanted)("an event waking a session that subscribed to it", () =
     async (ctx) => {
       if (ready === undefined) {
         ctx.skip(
-          "no login for the claude-code instance: name a credentials file in " +
+          "no login for the claude-code account: name a credentials file in " +
             "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
         );
         return;
