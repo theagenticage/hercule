@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { AnswerNotDelivered } from "@hercule/protocol";
 import type { CatalogModel, OutputSchema, SessionSpec } from "@hercule/protocol";
@@ -307,14 +307,20 @@ describe("declaring the models pi does not list", () => {
     modelSelection: { model: UNLISTED_ID, options: { thinking: "high" } },
   };
 
-  const readModelsFile = (
-    home: string,
-  ): {
-    readonly providers: Record<
-      string,
-      { readonly baseUrl?: string; readonly models: ReadonlyArray<{ readonly id: string }> }
-    >;
-  } => JSON.parse(readFileSync(join(home, "models.json"), "utf8"));
+  const ModelsFile = Schema.Struct({
+    providers: Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        baseUrl: Schema.optionalKey(Schema.String),
+        models: Schema.Array(Schema.Struct({ id: Schema.String })),
+      }),
+    ),
+  });
+
+  const readModelsFile = (home: string) =>
+    Schema.decodeUnknownSync(ModelsFile)(
+      JSON.parse(readFileSync(join(home, "models.json"), "utf8")),
+    );
 
   it("writes the models into the Harness Home before pi is spawned", async () => {
     const home = createPiHome();

@@ -11,7 +11,7 @@
  * - functions that insert the rows other domains own (agents, sessions,
  *   settings), which the delete check reads.
  */
-import { Context, Effect, Layer, Option, Redacted } from "effect";
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
@@ -235,18 +235,27 @@ export const CATALOGUED: ProviderDefinition = {
   defaultSelection: "current-models",
 };
 
+const CataloguedBody = Schema.Struct({
+  models: Schema.Array(
+    Schema.Struct({
+      id: Schema.optionalKey(Schema.String),
+      name: Schema.optionalKey(Schema.String),
+      context: Schema.optionalKey(Schema.Number),
+      price: Schema.optionalKey(Schema.Number),
+    }),
+  ),
+});
+
 /**
  * Reads Catalogued's catalog body: `{ "models": [{ "id": "a", "name": "A",
  * "context": 1000, "price": 2 }] }`. An item with no id is skipped, and any
- * body without a `models` list is a defect the parser throws on.
+ * body without a well-formed `models` list is a defect the parser throws on.
  */
 export const parseCataloguedBody: ParseCatalogBody = (body) => {
-  const { models } = body as {
-    models?: ReadonlyArray<{ id?: string; name?: string; context?: number; price?: number }>;
-  };
-  if (!Array.isArray(models)) throw new Error("the body has no models list");
+  if (!Schema.is(CataloguedBody)(body)) throw new Error("the body has no models list");
+  const { models } = body;
   return models.flatMap((model) =>
-    typeof model.id === "string"
+    model.id !== undefined
       ? [
           {
             slug: model.id,
