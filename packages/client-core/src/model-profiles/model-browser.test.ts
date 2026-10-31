@@ -13,7 +13,6 @@ import {
   describeModelPrice,
   hasActiveFacets,
   indexModelCatalog,
-  opensModelBrowser,
   type ModelBrowserQuery,
   type ModelFacets,
 } from "./model-browser";
@@ -91,13 +90,6 @@ const browse = (
     ...query,
     facets: { ...NO_MODEL_FACETS, ...query.facets },
   }).map(({ slug }) => slug);
-
-describe("opensModelBrowser", () => {
-  it("opens for a catalog of more than 40 models", () => {
-    expect(opensModelBrowser(40)).toBe(false);
-    expect(opensModelBrowser(41)).toBe(true);
-  });
-});
 
 describe("browseModels", () => {
   it("lists every model, the newest first, for an empty query", () => {

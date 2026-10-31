@@ -1,10 +1,42 @@
 import { useId, useState, type JSX, type ReactNode } from "react";
 import type { ModelCatalogItem } from "@hercule/contract";
-import { useAgeWords } from "../../../app/age-clock";
 import { PlusIcon } from "../../../icons/plus";
+import { SearchIcon } from "../../../icons/search";
 import { MenuLine } from "../../thread/menu-line";
+import { CatalogHead } from "./catalog-head";
 import "../../thread/menus.css";
 import "./models.css";
+
+/**
+ * Renders "Browse 466 models", the button that takes the place of "Add a
+ * model" for an account whose catalog is too large for the picker. It opens
+ * the model browser through `onBrowse`.
+ *
+ * `name` is the account's name, which tells this button from the other
+ * sections'.
+ */
+export function BrowseModelsButton({
+  name,
+  modelCount,
+  onBrowse,
+}: {
+  readonly name: string;
+  readonly modelCount: number;
+  readonly onBrowse: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="pm-add"
+      aria-haspopup="dialog"
+      aria-label={`Browse ${String(modelCount)} models from ${name}`}
+      onClick={onBrowse}
+    >
+      <SearchIcon size={12} />
+      {`Browse ${String(modelCount)} models`}
+    </button>
+  );
+}
 
 /**
  * Renders "Add a model" and the popover it opens, which holds `children`
@@ -13,13 +45,17 @@ import "./models.css";
  * The browser closes the popover on Esc and on a click outside it.
  *
  * `name` is the account's name, which tells this button from the other
- * sections'.
+ * sections'. The popover's foot holds "Browse all <n>" when `browseAll` is
+ * given: it closes the popover and calls `onBrowse`, which opens the model
+ * browser.
  */
 export function AddModelPopover({
   name,
+  browseAll,
   children,
 }: {
   readonly name: string;
+  readonly browseAll?: { readonly modelCount: number; readonly onBrowse: () => void } | undefined;
   readonly children: ReactNode;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -51,6 +87,17 @@ export function AddModelPopover({
           <>
             {children}
             <div className="pop-sec pm-done">
+              {browseAll === undefined ? null : (
+                <button
+                  type="button"
+                  className="link pm-browse-all"
+                  popoverTarget={menuId}
+                  popoverTargetAction="hide"
+                  onClick={browseAll.onBrowse}
+                >
+                  {`Browse all ${String(browseAll.modelCount)}`}
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn--sm"
@@ -65,11 +112,6 @@ export function AddModelPopover({
       </div>
     </>
   );
-}
-
-/** Renders "Updated 3 hours ago", from the time of the last good read of the catalog. */
-function CatalogAge({ readAt }: { readonly readAt: string }): JSX.Element {
-  return <span>{`Updated ${useAgeWords(readAt, true)}`}</span>;
 }
 
 /**
@@ -116,13 +158,7 @@ export function ModelPicker({
   return (
     <>
       <div className="pop-sec">
-        <div className="q-h">
-          {readAt === null ? <span>Not read yet</span> : <CatalogAge readAt={readAt} />}
-          <span aria-hidden="true">·</span>
-          <button type="button" className="link" disabled={refreshing} onClick={onRefresh}>
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
+        <CatalogHead readAt={readAt} refreshing={refreshing} onRefresh={onRefresh} />
         {readError === null ? null : <p className="menu-note pm-error">{readError}</p>}
       </div>
       <div className="pop-sec">

@@ -1,12 +1,12 @@
 /**
- * The virtual list Tracking's opened sheet draws its lines in, built as
- * Intake's list is (`intake-list.tsx`): only the lines in view and a few past
- * each edge are drawn, each at its estimated place, with an empty spacer
- * before each run of lines that are not drawn (spec 17 §Rules, rule 1).
+ * The virtual list that Intake's list, opened Tracking and the model browser
+ * draw their lines in: only the lines in view and a few past each edge are
+ * drawn, each at its estimated place, with an empty spacer before each run of
+ * lines that are not drawn (spec 17 §Rules, rule 1).
  */
 import { useCallback, useMemo, type RefObject } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import { useItemKeyOfSizes, useKeepTopItem } from "../use-keep-top-item";
+import { useItemKeyOfSizes, useKeepTopItem } from "./use-keep-top-item";
 
 /** How many lines past each edge of the visible part stay drawn, so a fast scroll shows no gap. */
 export const VIRTUAL_OVERSCAN = 8;
@@ -87,7 +87,7 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
     rangeExtractor,
     overscan: VIRTUAL_OVERSCAN,
     // Before the scroll element is measured, the list is taken to be as tall as the window. The
-    // sheet's first render then draws its rows, which the motion that opens it needs to find.
+    // first render then draws the rows, which the motion that opens Tracking's sheet needs to find.
     initialRect: { width: 0, height: window.innerHeight },
   });
 

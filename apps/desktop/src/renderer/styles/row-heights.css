@@ -113,6 +113,16 @@
   initial-value: 46px;
 }
 
+/* ---------- The model browser ---------- */
+
+/* A model's row in the model browser, two lines: the name, then the maker and
+   the id. */
+@property --model-browser-height-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 46px;
+}
+
 :root {
   --side-height-header: calc(24px + var(--text-size-step));
   --side-height-waiting-row: calc(38px + 2 * var(--text-size-step));
@@ -130,4 +140,6 @@
   --intake-height-section: calc(40px + var(--text-size-step));
   --intake-height-row: calc(52px + 2 * var(--text-size-step));
   --tracking-height-row: calc(46px + 2 * var(--text-size-step));
+
+  --model-browser-height-row: calc(46px + 2 * var(--text-size-step));
 }

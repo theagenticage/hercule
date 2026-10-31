@@ -24,7 +24,7 @@ import { useMeasuredAtTextSize } from "../../app/text-size";
 import { readIntakeListHeights, ROW_GAP, type IntakeListHeights } from "./list-heights";
 import { useLineFade } from "./use-line-fade";
 import { useRowMotion } from "./use-row-motion";
-import { useVirtualLines } from "./use-virtual-lines";
+import { useVirtualLines } from "../use-virtual-lines";
 import "./tracking.css";
 
 /** The rows of Tracking that are in one state, drawn under the state's mark and word. */

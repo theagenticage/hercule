@@ -47,6 +47,7 @@ describe("row-heights.css", () => {
       "--intake-height-section": [40, 1],
       "--intake-height-row": [52, 2],
       "--tracking-height-row": [46, 2],
+      "--model-browser-height-row": [46, 2],
     };
     expect([...initialValues.keys()].sort()).toEqual(Object.keys(rows).sort());
     for (const [name, [height, lines]] of Object.entries(rows)) {

@@ -786,6 +786,7 @@ export {
 export type { NewModelRow } from "./model-profiles/new-model-rows";
 export type { ModelProfileHarnessChoice, SectionHarness } from "./model-profiles/profile-harnesses";
 export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
+export { opensModelBrowser } from "./model-profiles/opens-model-browser";
 export {
   MODEL_CONTEXT_CHOICES,
   MODEL_PRICE_CHOICES,
@@ -797,7 +798,6 @@ export {
   describeModelPrice,
   hasActiveFacets,
   indexModelCatalog,
-  opensModelBrowser,
   type ModelBrowserChoice,
   type ModelBrowserIndex,
   type ModelBrowserQuery,

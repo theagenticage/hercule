@@ -13,10 +13,19 @@
  * does no sorting and builds no strings.
  */
 import type { ModelCatalogItem } from "@hercule/contract";
-import { buildModelSearchText, containsEveryWord, splitSearchWords } from "./catalog-search";
 
-/** An account whose catalog holds more models than this opens the browser, not the picker. */
-const MAX_PICKER_CATALOG_MODELS = 40;
+// The search below has its own helpers, apart from `catalog-search.ts`, which the
+// composer's menu loads with the first screen: sharing them would make the first
+// screen's chunk export them to this lazy one, and the first screen is held to its size
+// (spec 17 §Measured).
+
+/** Returns the words of a search text, lowercased. A blank text has none. */
+const splitSearchWords = (search: string): string[] =>
+  search.toLowerCase().split(/\s+/).filter(Boolean);
+
+/** Returns the lowercased text that a search looks in: the model's name, id and maker. */
+const buildSearchText = (model: ModelCatalogItem): string =>
+  `${model.name} ${model.slug} ${model.maker ?? ""}`.toLowerCase();
 
 /** The orders the browser sorts in. */
 export type ModelSort = "newest" | "price" | "context" | "name";
@@ -151,14 +160,6 @@ const listMakers = (models: readonly ModelCatalogItem[]): ModelMaker[] => {
 };
 
 /**
- * Checks whether an account's catalog is large enough for the model browser.
- * An account with `modelCount` models above 40 opens the browser; a smaller
- * one opens the quick picker.
- */
-export const opensModelBrowser = (modelCount: number): boolean =>
-  modelCount > MAX_PICKER_CATALOG_MODELS;
-
-/**
  * Prepares a catalog for `browseModels`: builds each model's search text and
  * release time once, sorts the models in each of the four orders (ties are
  * broken by name, then slug) and counts the makers. Build it once per catalog
@@ -174,7 +175,7 @@ export const opensModelBrowser = (modelCount: number): boolean =>
 export const indexModelCatalog = (models: readonly ModelCatalogItem[]): ModelBrowserIndex => {
   const indexed = models.map((model): IndexedModel => ({
     model,
-    searchText: buildModelSearchText(model),
+    searchText: buildSearchText(model),
     releasedMs: Date.parse(model.releasedAt ?? model.firstSeenAt),
   }));
   const sortedBy = (sort: ModelSort): IndexedModel[] =>
@@ -222,7 +223,7 @@ export const browseModels = (
   const matches: ModelCatalogItem[] = [];
   for (const { model, searchText } of index.inOrder[sort]) {
     if (
-      (words.length === 0 || containsEveryWord(searchText, words)) &&
+      words.every((word) => searchText.includes(word)) &&
       (makers === null || (model.maker !== undefined && makers.has(model.maker))) &&
       (!facets.tools || model.tools === true) &&
       (!facets.images || model.imageInput !== null) &&

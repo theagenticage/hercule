@@ -6,13 +6,25 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { readErrorMessage, searchPickerModels, type HerculeClient } from "@hercule/client-core";
+import {
+  opensModelBrowser,
+  readErrorMessage,
+  searchPickerModels,
+  type HerculeClient,
+} from "@hercule/client-core";
 import { providerAccountsQuery } from "../../../../app/queries";
-import { AddModelPopover, ModelPicker } from "../../../../screens/settings/providers/model-picker";
+import {
+  AddModelPopover,
+  BrowseModelsButton,
+  ModelPicker,
+} from "../../../../screens/settings/providers/model-picker";
 
 /**
  * Renders an account's "Add a model" button and the picker it opens, over the
- * account's Model Catalog (`providerAccount.readCatalog`).
+ * account's Model Catalog (`providerAccount.readCatalog`). An account whose
+ * catalog has more than 40 models (`modelCount`) gets "Browse <n> models"
+ * instead, and the picker of a smaller one ends in "Browse all <n>". Both
+ * call `onBrowse`, which opens the model browser; the caller owns it.
  *
  * The catalog is read when the picker opens and lives in the picker alone: it
  * is a query that is removed the moment the picker closes, and it is not one
@@ -28,17 +40,24 @@ export function AccountModelPicker({
   client,
   providerAccountId,
   name,
+  modelCount,
   held,
   onToggle,
+  onBrowse,
 }: {
   readonly client: HerculeClient;
   readonly providerAccountId: string;
   readonly name: string;
+  readonly modelCount: number;
   readonly held: ReadonlySet<string>;
   readonly onToggle: (slug: string) => void;
+  readonly onBrowse: () => void;
 }): JSX.Element {
+  if (opensModelBrowser(modelCount)) {
+    return <BrowseModelsButton name={name} modelCount={modelCount} onBrowse={onBrowse} />;
+  }
   return (
-    <AddModelPopover name={name}>
+    <AddModelPopover name={name} browseAll={modelCount > 0 ? { modelCount, onBrowse } : undefined}>
       <OpenPicker
         client={client}
         providerAccountId={providerAccountId}
@@ -74,6 +93,7 @@ function OpenPicker({
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
+  // The model browser has its own copy of this mutation (`-model-browser.tsx`).
   const refresh = useMutation({
     mutationFn: () => client.providerAccount.refresh({ params: { id: providerAccountId } }),
     onSuccess: (updated) => {

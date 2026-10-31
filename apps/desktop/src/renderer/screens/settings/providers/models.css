@@ -512,7 +512,14 @@
 }
 .pm-done {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+}
+/* "Browse all <n>" sits at the foot's left edge, level with Done at the right. */
+.pm-done > .pm-browse-all {
+  margin-right: auto;
+  padding: 0 6px;
+  font-size: var(--t-12);
 }
 
 /* ---------- "Add an account to <profile>", after the last section ---------- */

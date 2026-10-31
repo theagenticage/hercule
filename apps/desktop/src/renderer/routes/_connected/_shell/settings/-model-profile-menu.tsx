@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState, type HTMLAttributes, type JSX } from "react";
+import { Suspense, useMemo, useRef, useState, type HTMLAttributes, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   addModelProfileAccount,
+  addModelProfileEntries,
   addNewModel,
   buildModelProfileSections,
   buildProviderAccountName,
@@ -38,6 +39,7 @@ import { useOptimisticOrder } from "../../../../screens/settings/providers/use-o
 import "../../../../screens/settings/providers/models.css";
 import { useModelProfileUpdate } from "../../../../app/model-profile-cache";
 import { ModelProfilePreview } from "./-model-profile-preview";
+import { LazyModelBrowser } from "./-lazy-model-browser";
 import { AccountModelPicker } from "./-models-picker";
 
 /**
@@ -76,6 +78,11 @@ import { AccountModelPicker } from "./-models-picker";
  * The pointer on a section lights the same lane in the preview, and the
  * pointer on a lane lights the section.
  *
+ * An account with more than 40 models has "Browse <n> models" in place of
+ * "Add a model", and a smaller picker ends in "Browse all <n>". Both open the
+ * account's model browser (`LazyModelBrowser`), which this menu renders for the
+ * one account being browsed and which loads the first time it opens.
+ *
  * Everything it reads is a shell read that the live connection keeps
  * current, so opening the section sends no request. The settings, which
  * hold the time zone, are cached by the Providers route's loader.
@@ -100,6 +107,9 @@ export function ModelProfileMenu({
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
 
   const save = useModelProfileUpdate(client);
+  // The account whose model browser is open, if any. One browser is open at a
+  // time, whichever section's button opened it.
+  const [browsingProviderAccountId, setBrowsingProviderAccountId] = useState<string | null>(null);
 
   /**
    * Saves one change and resolves when the save is over, never rejecting:
@@ -182,6 +192,7 @@ export function ModelProfileMenu({
   };
 
   const byId = new Map(sections.map((section) => [section.providerAccountId, section]));
+  const browsingSection = byId.get(browsingProviderAccountId ?? "");
   // Built when the sections change, not when the pointer moves, so a section's
   // picker is handed the same set while the pointer crosses the page.
   const heldBySection = useMemo(
@@ -245,7 +256,13 @@ export function ModelProfileMenu({
                       client={client}
                       providerAccountId={providerAccountId}
                       name={section.name}
+                      modelCount={
+                        accounts.find(({ id }) => id === providerAccountId)?.modelCount ?? 0
+                      }
                       held={held}
+                      onBrowse={() => {
+                        setBrowsingProviderAccountId(providerAccountId);
+                      }}
                       onToggle={(model) => {
                         // The change is "hold it" or "do not hold it", decided
                         // here from what the user saw, so a retry on a newer
@@ -311,6 +328,24 @@ export function ModelProfileMenu({
             onLeaveLane={leave}
           />
         </div>
+      )}
+      {browsingSection === undefined ? null : (
+        // Without its own boundary, the browser's load would suspend the page behind it.
+        <Suspense fallback={null}>
+          <LazyModelBrowser
+            client={client}
+            providerAccountId={browsingSection.providerAccountId}
+            accountName={browsingSection.name}
+            pluginId={browsingSection.pluginId}
+            profileId={profile.id}
+            profileName={profile.name}
+            held={heldBySection.get(browsingSection.providerAccountId) ?? new Set<string>()}
+            addEntries={addModelProfileEntries}
+            onClose={() => {
+              setBrowsingProviderAccountId(null);
+            }}
+          />
+        </Suspense>
       )}
     </>
   );

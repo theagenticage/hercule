@@ -47,7 +47,7 @@ import { SignalMark } from "./source-mark";
 import { useRowMotion, type RowExitHandler } from "./use-row-motion";
 import { useMeasuredAtTextSize } from "../../app/text-size";
 import { readIntakeListHeights, ROW_GAP, type IntakeListHeights } from "./list-heights";
-import { useVirtualLines, VIRTUAL_OVERSCAN } from "./use-virtual-lines";
+import { useVirtualLines, VIRTUAL_OVERSCAN } from "../use-virtual-lines";
 
 /** What a press on a row's own controls asks for: its checkbox, or one of its moves. */
 export type SignalRowAction = "check" | SignalMove;

@@ -30,6 +30,11 @@ import {
   PROVIDERS_SIDEBAR_RECORDS,
   PROVIDER_MODEL_PROFILES,
 } from "./settings-providers-fixture";
+import {
+  OPENROUTER_ACCOUNT,
+  OPENROUTER_CATALOG,
+  addOpenRouterSection,
+} from "./model-browser-fixture";
 
 /** Waits for the frame after `find` returns an element, and returns it. */
 async function waitFor<T>(find: () => T | null | undefined, what: string): Promise<T> {
@@ -117,7 +122,7 @@ const main =
 const baseRecords = noAccounts
   ? { ...PROVIDERS_SIDEBAR_RECORDS, accounts: [] }
   : PROVIDERS_SIDEBAR_RECORDS;
-await mountProvidersSettingsSpecimen(
+const sidebarRecords =
   query.get("profiles") === "2" && main !== undefined && fixtureMain !== undefined
     ? {
         ...baseRecords,
@@ -133,8 +138,20 @@ await mountProvidersSettingsSpecimen(
       }
     : main !== undefined && (query.has("empty") || noAccounts)
       ? { ...baseRecords, modelProfiles: [main] }
-      : baseRecords,
-  PROVIDERS_SETTINGS_RECORDS,
+      : baseRecords;
+// `?browse` adds the OpenRouter account, with its 466 models. `?browser` also opens its model browser.
+const browsing = query.has("browser") || query.has("browse");
+await mountProvidersSettingsSpecimen(
+  browsing
+    ? {
+        ...sidebarRecords,
+        accounts: [...sidebarRecords.accounts, OPENROUTER_ACCOUNT],
+        modelProfiles: (sidebarRecords.modelProfiles ?? []).map(addOpenRouterSection),
+      }
+    : sidebarRecords,
+  browsing
+    ? { ...PROVIDERS_SETTINGS_RECORDS, catalog: OPENROUTER_CATALOG }
+    : PROVIDERS_SETTINGS_RECORDS,
 );
 const sheet = new URLSearchParams(location.search).get("sheet");
 if (sheet !== null) {
@@ -157,6 +174,62 @@ if (picker !== null) {
   if (button === null) throw new Error(`The page has no "Add a model" for ${picker}.`);
   button.click();
   await waitFor(() => document.querySelector(".pm-models .line"), "the picker's models");
+}
+// `?browser` opens the OpenRouter account's model browser. `&bq=<text>` types
+// that text into its search, `&bsort=<newest|price|context|name>` picks the
+// sort, `&bmaker=<maker>` and `&bcan=<tools|images|reasoning>` turn a facet
+// on, and `&bpick=<n>` picks the first n rows.
+if (query.has("browser")) {
+  (
+    await waitFor(
+      () =>
+        document.querySelector<HTMLElement>(
+          'button[aria-label^="Browse "][aria-label$=" from OpenRouter"]',
+        ),
+      "the Browse button",
+    )
+  ).click();
+  const dialog = await waitFor(
+    () => document.querySelector<HTMLElement>("dialog.model-browser[open]"),
+    "the model browser",
+  );
+  await waitFor(() => dialog.querySelector(".mb-row"), "the browser's rows");
+  const setField = (element: HTMLInputElement | HTMLSelectElement, value: string): void => {
+    const prototype = element instanceof HTMLSelectElement ? HTMLSelectElement : HTMLInputElement;
+    Object.getOwnPropertyDescriptor(prototype.prototype, "value")!.set!.call(element, value);
+    element.dispatchEvent(
+      new Event(element instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }),
+    );
+  };
+  const search = query.get("bq");
+  if (search !== null)
+    setField(dialog.querySelector<HTMLInputElement>('input[aria-label="Search models"]')!, search);
+  const sort = query.get("bsort");
+  if (sort !== null) setField(dialog.querySelector<HTMLSelectElement>("select")!, sort);
+  const facet = (text: string): void => {
+    [...dialog.querySelectorAll<HTMLElement>(".mb-check")]
+      .find((each) => each.textContent.startsWith(text))
+      ?.querySelector("input")
+      ?.click();
+  };
+  const maker = query.get("bmaker");
+  if (maker !== null) facet(maker);
+  const can = query.get("bcan");
+  if (can !== null)
+    facet({ tools: "Use tools", images: "Read images", reasoning: "Reason" }[can] ?? can);
+  const context = query.get("bcontext");
+  if (context !== null) {
+    [...dialog.querySelectorAll<HTMLElement>(".mb-seg button")]
+      .find((each) => each.textContent === context)
+      ?.click();
+  }
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const pick = Number(query.get("bpick") ?? 0);
+  for (const row of [...dialog.querySelectorAll<HTMLElement>(".mb-row:not(.is-held)")].slice(
+    0,
+    pick,
+  ))
+    row.click();
 }
 const rowMenu = new URLSearchParams(location.search).get("rowmenu");
 if (rowMenu !== null) {
