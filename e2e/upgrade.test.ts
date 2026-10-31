@@ -107,6 +107,7 @@ import {
   ROOT,
   USERNAME,
   completeSetup,
+  encryptAccountKey,
   runCli,
   startController,
   type Controller,
@@ -950,52 +951,15 @@ function persistAccountIdentity(
 }
 
 /**
- * Returns the controller's Master Key for the Hercule Home `home`, as AES-GCM
- * key bytes. On macOS it sits in the login keychain, under the home's path;
- * elsewhere it is the base64 text of `<home>/master.key`.
- */
-function readMasterKey(home: string): Buffer {
-  const encoded =
-    process.platform === "darwin"
-      ? Bun.spawnSync([
-          "security",
-          "find-generic-password",
-          "-s",
-          "Hercule",
-          "-a",
-          home,
-          "-w",
-        ]).stdout.toString()
-      : readFileSync(join(home, "master.key"), "utf8");
-  return Buffer.from(encoded.trim(), "base64");
-}
-
-/**
  * Adds a Z.ai Provider Account to the database the edge binary created, with
  * its API key stored the way the edge binary stores a credential: encrypted
  * with AES-GCM under the Master Key, owned by the account, with the owner and
  * name as associated data. Returns the id of the account.
  */
-async function persistZaiAccount(home: string, apiKey: string): Promise<string> {
+function persistZaiAccount(home: string, apiKey: string): string {
   const id = Bun.randomUUIDv7();
   const now = new Date().toISOString();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new Uint8Array(readMasterKey(home)),
-    "AES-GCM",
-    false,
-    ["encrypt"],
-  );
-  const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    {
-      name: "AES-GCM",
-      iv: nonce,
-      additionalData: new TextEncoder().encode(`provider-account|${id}|apiKey`),
-    },
-    key,
-    new TextEncoder().encode(apiKey),
-  );
+  const { nonce, ciphertext } = encryptAccountKey(home, id, apiKey);
   const database = new Database(join(home, "data", "hercule.db"));
   try {
     database
@@ -1009,7 +973,7 @@ async function persistZaiAccount(home: string, apiKey: string): Promise<string> 
         `INSERT INTO secrets (id, owner_kind, owner_id, name, nonce, ciphertext, created_at)
          VALUES (?, 'provider-account', ?, 'apiKey', ?, ?, ?)`,
       )
-      .run(uuidBlob(Bun.randomUUIDv7()), id, nonce, new Uint8Array(ciphertext), now);
+      .run(uuidBlob(Bun.randomUUIDv7()), id, nonce, ciphertext, now);
   } finally {
     database.close();
   }
@@ -1561,7 +1525,7 @@ describe("upgrading from the previous edge release", () => {
       // against api.z.ai before it stores anything, and a fixture key fails
       // that check. So the account and its encrypted key are written into the
       // database the edge binary created, in the shape that binary stores them.
-      const piAccountId = await persistZaiAccount(home, ZAI_API_KEY);
+      const piAccountId = persistZaiAccount(home, ZAI_API_KEY);
 
       const edgeAccounts = readListedItems<ListedAccount>(
         await runCli(["provider-account", "list", "--json"], edge),

@@ -8,11 +8,17 @@
  * install has no account. Usage readings and a refused key are written the
  * same way, because only a harness reports the first and only a provider
  * refuses the second. The module runs on plain Node, like the perf script.
+ *
+ * An account can also hold an API key and a Model Catalog that were "read".
+ * Creating such an account through the API checks the key with the provider
+ * and reads the catalog from it, over the network, and a test has no key a
+ * provider accepts.
  */
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { UsageReading } from "../../../packages/protocol/src/index";
+import { encryptAccountKey } from "../../../scripts/controller-process.ts";
+import type { CatalogModel, UsageReading } from "../../../packages/protocol/src/index";
 
 /** One Provider Account for `writeProviderAccounts` to write. */
 export interface ProviderAccountFixture {
@@ -32,19 +38,47 @@ export interface ProviderAccountFixture {
   readonly usage?: ReadonlyArray<UsageReading>;
   /** The provider's words when it refused the account's key; absent for an account that works. */
   readonly failureMessage?: string;
+  /**
+   * The API key the account stores, encrypted under the Master Key of the
+   * controller's home. A key the provider accepts is not needed: the account
+   * also counts as just read for usage, so for the next 15 minutes the
+   * controller does not send the key to the provider.
+   */
+  readonly apiKey?: string;
+  /**
+   * The models of the account's Model Catalog, stored as if a read had just
+   * listed them, with every model first seen at that read. The account then
+   * has an empty section in "Main", which is what a Default Selection of
+   * `none` leaves after the first read. Because the catalog was just read, the
+   * controller does not read it again for hours.
+   */
+  readonly catalog?: ReadonlyArray<CatalogModel>;
 }
 
 /**
  * Returns a new UUID version 7 as the 16 bytes a row's id holds: the
  * controller accepts no other version for an account's id.
  */
-function buildProviderAccountId(at: number): Buffer {
+function buildUuidV7(at: number): Buffer {
   const id = randomBytes(16);
   id.writeUIntBE(at, 0, 6);
   id[6] = (id[6]! & 0x0f) | 0x70;
   id[8] = (id[8]! & 0x3f) | 0x80;
   return id;
 }
+
+/** A section of the profile "Main" as the controller stores it; `entries: null` is a Default Selection not yet applied. */
+interface MainSection {
+  readonly providerAccountId: string;
+  readonly harnessId: string | null;
+  readonly entries: ReadonlyArray<unknown> | null;
+}
+
+/** Returns the canonical text of the 16 bytes of a stored UUID, such as `01a06d02-8000-7000-8000-000000000a0f`. */
+const formatUuid = (id: Uint8Array): string =>
+  Buffer.from(id)
+    .toString("hex")
+    .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
 
 /**
  * Returns the name that identifies a reading among an account's readings: its
@@ -62,7 +96,8 @@ const identifyReading = (reading: UsageReading): string =>
  * order given and after the old ones.
  *
  * A fixture's usage readings replace the account's, and its `failureMessage`
- * marks the account refused as of now.
+ * marks the account refused as of now. Its `apiKey` and `catalog` replace the
+ * account's key and Model Catalog.
  *
  * Nothing is deleted: assistants and settings may already name an account
  * that is there. The controller must be
@@ -94,7 +129,24 @@ export function writeProviderAccounts(
       "INSERT INTO account_usage_readings (provider_account_id, reading, source, taken_at, value) " +
         "VALUES (?, ?, 'read', ?, ?)",
     );
+    const clearKey = database.prepare(
+      "DELETE FROM secrets WHERE owner_kind = 'provider-account' AND owner_id = ? AND name = 'apiKey'",
+    );
+    const insertKey = database.prepare(
+      "INSERT INTO secrets (id, owner_kind, owner_id, name, nonce, ciphertext, created_at) " +
+        "VALUES (?, 'provider-account', ?, 'apiKey', ?, ?, ?)",
+    );
+    const markJustRead = database.prepare(
+      "INSERT OR REPLACE INTO account_usage_reads (provider_account_id, read_started_at) VALUES (?, ?)",
+    );
+    const storeCatalog = database.prepare(
+      "INSERT OR REPLACE INTO model_catalogs (provider_account_id, models, first_seen, read_at, " +
+        "first_read_at, error, models_stamp, attempt_stamp) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+    );
+    const readMain = database.prepare("SELECT body FROM model_profiles WHERE name = 'Main'");
+    const writeMain = database.prepare("UPDATE model_profiles SET body = ? WHERE name = 'Main'");
     const now = Date.now();
+    const readAt = new Date(now).toISOString();
     database.exec("BEGIN");
     for (const [index, fixture] of fixtures.entries()) {
       const { providerId, kind, label = null, identity = null, planLabel = null } = fixture;
@@ -104,7 +156,7 @@ export function writeProviderAccounts(
       const existing = find.get(providerId, label) as { id: Uint8Array } | undefined;
       let id: Uint8Array;
       if (existing === undefined) {
-        id = buildProviderAccountId(now + index);
+        id = buildUuidV7(now + index);
         insert.run(
           id,
           providerId,
@@ -126,6 +178,33 @@ export function writeProviderAccounts(
       for (const reading of fixture.usage ?? []) {
         insertReading.run(id, identifyReading(reading), reading.takenAt, JSON.stringify(reading));
       }
+      if (fixture.apiKey !== undefined) {
+        const key = encryptAccountKey(home, formatUuid(id), fixture.apiKey);
+        clearKey.run(formatUuid(id));
+        insertKey.run(buildUuidV7(now + index), formatUuid(id), key.nonce, key.ciphertext, readAt);
+        markJustRead.run(id, readAt);
+      }
+      if (fixture.catalog !== undefined) {
+        const firstSeen = Object.fromEntries(fixture.catalog.map(({ slug }) => [slug, readAt]));
+        storeCatalog.run(
+          id,
+          JSON.stringify(fixture.catalog),
+          JSON.stringify(firstSeen),
+          readAt,
+          readAt,
+          readAt,
+          readAt,
+        );
+        const main = readMain.get() as { body: string } | undefined;
+        if (main !== undefined) {
+          const body = JSON.parse(main.body) as { accounts: MainSection[] };
+          const accountId = formatUuid(id);
+          if (!body.accounts.some(({ providerAccountId }) => providerAccountId === accountId)) {
+            body.accounts.push({ providerAccountId: accountId, harnessId: null, entries: [] });
+            writeMain.run(JSON.stringify(body));
+          }
+        }
+      }
     }
     database.exec("COMMIT");
   } finally {
@@ -137,7 +216,8 @@ export function writeProviderAccounts(
  * Puts the accounts of the controller whose Hercule Home is `home` back as the
  * fleet leaves them (`connectFleet` in `fleet.ts` makes one unlabelled
  * Anthropic account, which every thread it spawns runs on): that account stays,
- * every other account is deleted, with its Capability Snapshots, and the
+ * every other account is deleted, with its Capability Snapshots, API key and
+ * Model Catalog, and the
  * account that stays loses its identity, plan, usage readings and refusal. Every Model
  * Profile but "Main" is deleted, and "Main" keeps only the section of the account that
  * stays. It undoes `writeProviderAccounts` and the profiles that the Providers launch
@@ -151,6 +231,8 @@ export function resetProviderAccounts(home: string): void {
   try {
     database.exec("BEGIN");
     database.exec("DELETE FROM account_usage_readings");
+    // The one account that stays has no API key.
+    database.exec("DELETE FROM secrets WHERE owner_kind = 'provider-account'");
     database.exec(
       "DELETE FROM provider_accounts WHERE NOT (provider_id = 'anthropic/anthropic' AND label IS NULL)",
     );
@@ -160,17 +242,15 @@ export function resetProviderAccounts(home: string): void {
     );
     database.exec("DELETE FROM model_profiles WHERE name <> 'Main'");
     const kept = new Set(
-      (
-        database.prepare("SELECT lower(hex(id)) AS id FROM provider_accounts").all() as {
-          id: string;
-        }[]
-      ).map(({ id }) => id.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5")),
+      (database.prepare("SELECT id FROM provider_accounts").all() as { id: Uint8Array }[]).map(
+        ({ id }) => formatUuid(id),
+      ),
     );
     const main = database.prepare("SELECT body FROM model_profiles WHERE name = 'Main'").get() as
       | { body: string }
       | undefined;
     if (main !== undefined) {
-      const body = JSON.parse(main.body) as { accounts: { providerAccountId: string }[] };
+      const body = JSON.parse(main.body) as { accounts: MainSection[] };
       body.accounts = body.accounts.filter(({ providerAccountId }) => kept.has(providerAccountId));
       database
         .prepare("UPDATE model_profiles SET body = ? WHERE name = 'Main'")

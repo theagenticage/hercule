@@ -17,6 +17,7 @@
  * caller has to read what the command printed.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createCipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -61,6 +62,53 @@ export function deleteMasterKeyItem(home: string): void {
   spawnSync("security", ["delete-generic-password", "-s", "Hercule", "-a", home], {
     stdio: "ignore",
   });
+}
+
+/**
+ * Returns the controller's Master Key for the Hercule Home `home`, as AES-GCM
+ * key bytes. On macOS it sits in the login keychain, under the home's path;
+ * elsewhere it is the base64 text of `<home>/master.key`. The controller must
+ * have booted in `home` already, because it makes the key on its first boot.
+ */
+export function readMasterKey(home: string): Buffer {
+  const encoded =
+    process.platform === "darwin"
+      ? spawnSync("security", ["find-generic-password", "-s", "Hercule", "-a", home, "-w"], {
+          encoding: "utf8",
+        }).stdout
+      : readFileSync(join(home, "master.key"), "utf8");
+  return Buffer.from(encoded.trim(), "base64");
+}
+
+/** A Provider Account's API key as the controller stores it in the `secrets` table. */
+export interface EncryptedAccountKey {
+  readonly nonce: Uint8Array;
+  readonly ciphertext: Uint8Array;
+}
+
+/**
+ * Encrypts `apiKey` the way the controller stores a Provider Account's API
+ * key: AES-256-GCM under the Master Key of `home`, with the owner and the name
+ * of the secret as associated data, so a stored key cannot be moved to another
+ * account. The ciphertext ends with the 16-byte authentication tag, as Web
+ * Crypto lays it out. `providerAccountId` is the account's canonical UUID
+ * text. The caller inserts the result as the `secrets` row
+ * `(provider-account, providerAccountId, apiKey)`.
+ */
+export function encryptAccountKey(
+  home: string,
+  providerAccountId: string,
+  apiKey: string,
+): EncryptedAccountKey {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", readMasterKey(home), nonce);
+  cipher.setAAD(Buffer.from(`provider-account|${providerAccountId}|apiKey`));
+  const ciphertext = Buffer.concat([
+    cipher.update(apiKey, "utf8"),
+    cipher.final(),
+    cipher.getAuthTag(),
+  ]);
+  return { nonce, ciphertext };
 }
 
 /** The result of a finished command. */
