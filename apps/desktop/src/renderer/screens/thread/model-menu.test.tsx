@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  buildModelMenu,
   readThreadConfig,
   type RecentModel,
   type SignInTarget,
@@ -31,7 +30,6 @@ import {
 } from "@hercule/client-core/testing";
 import { SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
 import { ModelMenu } from "./model-menu";
-import { ModelMenuList } from "./model-menu-list";
 
 const MOSS = SIDEBAR_FIXTURE.runners[0]!;
 
@@ -373,57 +371,6 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
     await user.keyboard("{Enter}");
     expect(document.activeElement?.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
-  });
-});
-
-describe("the list of a model menu drawn by another screen", () => {
-  /** Builds the menu of a Draft Thread with the profile "Main" unfolded, and draws its list. */
-  const renderList = (props: Partial<Parameters<typeof ModelMenuList>[0]> = {}) => {
-    const catalogs: ThreadCatalogs = {
-      accounts: [CLAUDE, CODEX],
-      providers: PROVIDERS,
-      harnesses: HARNESSES,
-      modelProfiles: [MAIN],
-      runners: SIDEBAR_FIXTURE.runners,
-      thisMacRunnerId: null,
-    };
-    const menu = buildModelMenu(catalogs, CONFIG, {
-      kind: "draft",
-      filter: "",
-      recent: [],
-      openedProfileId: null,
-      lastOpenProfileId: null,
-      runnerId: null,
-    });
-    render(
-      <ModelMenuList
-        menu={menu}
-        providers={PROVIDERS}
-        plugins={[]}
-        onChoose={() => undefined}
-        onOpenProfile={() => undefined}
-        {...props}
-      />,
-    );
-  };
-
-  it("reports the pointer entering and leaving the lane of an account", async () => {
-    const user = userEvent.setup();
-    const onEnterLane = vi.fn<(providerAccountId: string) => void>();
-    const onLeaveLane = vi.fn<(providerAccountId: string) => void>();
-    renderList({ onEnterLane, onLeaveLane });
-
-    await user.hover(screen.getByText("Claude Opus 5"));
-    expect(onEnterLane.mock.calls).toEqual([[CLAUDE.id]]);
-    await user.unhover(screen.getByText("Claude Opus 5"));
-    expect(onLeaveLane.mock.calls).toEqual([[CLAUDE.id]]);
-  });
-
-  it("lights the lane of the highlighted account only", () => {
-    renderList({ highlightedAccountId: CODEX.id });
-
-    const lit = [...document.querySelectorAll(".pop-sec.is-lit")];
-    expect(lit.map((lane) => readWords(lane.firstElementChild!))).toEqual(["OpenAI"]);
   });
 });
 

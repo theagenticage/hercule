@@ -339,6 +339,12 @@ describe("Settings > Providers > Models, getting accounts into a profile", () =>
       await userEvent.hover(getLane("Anthropic"));
       expect(screen.getByRole("region", { name: "Anthropic" }).hasAttribute("data-lit")).toBe(true);
       expect(section.hasAttribute("data-lit")).toBe(false);
+
+      await userEvent.unhover(getLane("Anthropic"));
+      expect(getLane("Anthropic").classList.contains("is-lit")).toBe(false);
+      expect(screen.getByRole("region", { name: "Anthropic" }).hasAttribute("data-lit")).toBe(
+        false,
+      );
     });
   });
 });
