@@ -1,18 +1,16 @@
 /**
  * Tests how the answer of OpenRouter's model list becomes catalog models, with
- * answers recorded from OpenRouter: eight items chosen for the cases the
- * mapping has to handle, and the whole list of 452 models.
+ * the whole list of 452 models recorded from OpenRouter.
  *
- * Both fixtures come from one unauthenticated `GET /api/v1/models` recorded on
+ * The recording is one unauthenticated `GET /api/v1/models` made on
  * 2026-10-31. The user list (`/api/v1/models/user`, which the plugin reads with
- * a key) has the same item shape.
- *
- * - `recorded-models-sample.json` holds the eight items verbatim, long
- *   descriptions included (OpenRouter already cuts them to about 200 characters).
- * - `recorded-models.json.gz` holds all 452 items, each reduced to the fields
- *   the parser reads, and gzipped, so the repository does not carry 800 KB of
- *   descriptions and benchmarks that no test looks at (215 KB reduced, 15 KB
- *   gzipped).
+ * a key) has the same item shape. `recorded-models.json.gz` holds all 452 items,
+ * each reduced to the fields the parser reads (id, name, created,
+ * context_length, architecture.input_modalities, pricing.prompt and
+ * pricing.completion, top_provider.max_completion_tokens, supported_parameters)
+ * and gzipped, so the repository does not carry 800 KB of descriptions and
+ * benchmarks that no test looks at. Most tests parse eight of its items,
+ * chosen by id for the cases the mapping has to handle.
  */
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
@@ -21,10 +19,33 @@ import { Schema } from "effect";
 import { CatalogModel } from "@hercule/plugin-host";
 import { parseModelsBody } from "./models";
 
-const readFixture = (name: string): Buffer => readFileSync(new URL(name, import.meta.url));
+/** The whole recorded answer, as OpenRouter sent it (reduced to the fields the parser reads). */
+const RECORDED: unknown = JSON.parse(
+  gunzipSync(readFileSync(new URL("./recorded-models.json.gz", import.meta.url))).toString(),
+);
 
-/** Eight recorded items: a free model, two routers with a varying price, models with and without a maker, image input, no output limit, tools and reasoning. */
-const SAMPLE: unknown = JSON.parse(readFixture("./recorded-models-sample.json").toString());
+/** The ids of eight recorded items, in the order the tests expect them: a free model, two routers with a varying price, models with and without a maker, image input, no output limit, tools and reasoning. */
+const SAMPLE_IDS = [
+  "recursive/flint-v1.0:free",
+  "openrouter/auto",
+  "openrouter/fusion",
+  "nvidia/nemotron-3.5-super-vl:free",
+  "unbiased/pareto-26.10",
+  "moonshotai/kimi-k3.1-pro",
+  "particle-ai/particle-1",
+  "rekaai/reka-edge",
+];
+
+/** The recorded answer cut down to the raw items with `SAMPLE_IDS`, in that order. The items are picked on their raw id, never on parsed output. */
+const SAMPLE: unknown = {
+  data: SAMPLE_IDS.map((id) => {
+    const item = (RECORDED as { data: ReadonlyArray<{ id: string }> }).data.find(
+      (one) => one.id === id,
+    );
+    if (item === undefined) throw new Error(`the recording has no model ${id}`);
+    return item;
+  }),
+};
 
 /** Parses the sample and returns the model with `slug`. */
 const parseSampleModel = (slug: string) => {
@@ -35,16 +56,7 @@ const parseSampleModel = (slug: string) => {
 
 describe("parseModelsBody", () => {
   it("keeps the order of the list and the count of the items", () => {
-    expect(parseModelsBody(SAMPLE).map((model) => model.slug)).toEqual([
-      "recursive/flint-v1.0:free",
-      "openrouter/auto",
-      "openrouter/fusion",
-      "nvidia/nemotron-3.5-super-vl:free",
-      "unbiased/pareto-26.10",
-      "moonshotai/kimi-k3.1-pro",
-      "particle-ai/particle-1",
-      "rekaai/reka-edge",
-    ]);
+    expect(parseModelsBody(SAMPLE).map((model) => model.slug)).toEqual(SAMPLE_IDS);
   });
 
   it("maps a free model with tools and reasoning, and takes the maker out of its name", () => {
@@ -119,11 +131,7 @@ describe("parseModelsBody", () => {
   });
 
   it("parses the whole recorded list into models that the controller accepts", () => {
-    const body: unknown = JSON.parse(
-      gunzipSync(readFixture("./recorded-models.json.gz")).toString(),
-    );
-
-    const models = parseModelsBody(body);
+    const models = parseModelsBody(RECORDED);
 
     expect(models).toHaveLength(452);
     const decode = Schema.decodeUnknownSync(CatalogModel);
