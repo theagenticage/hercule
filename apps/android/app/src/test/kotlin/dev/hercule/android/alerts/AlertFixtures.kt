@@ -43,7 +43,6 @@ fun buildSession(
     conversationId = null,
     runId = runId,
     stepId = null,
-    instanceId = "instance-1",
     runnerId = "runner-1",
     workspaceId = null,
     projectId = null,
@@ -85,7 +84,6 @@ fun buildAsked(
 fun buildAssistant(id: String = "assistant-1", name: String = "Poirot") = Assistant(
     id = id,
     name = name,
-    instanceId = "instance-1",
     permissionProfileId = "profile-1",
     accessMode = AccessMode.ApprovalRequired,
     model = null,

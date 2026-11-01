@@ -27,6 +27,15 @@ class ConversationWireTest {
     }
 
     @Test
+    fun `decodes an assistant from a controller that no longer sends instanceId`() {
+        val assistant = WireJson.decodeFromString<Assistant>(
+            """{"id":"01a1321f-9530-7000-8000-0000000000a1","name":"Hercule","providerAccountId":"01a1321f-9470-77f6-ba91-0bc1a99f0001","harnessId":null,"permissionProfileId":"01a1321f-93ca-77f0-ba8a-b49a69e00001","accessMode":"auto","model":null,"systemPrompt":"","heartbeat":null,"createdAt":"2026-10-12T21:58:20.001Z","updatedAt":"2026-10-12T21:58:20.001Z","reply":"turn-end","mainConversationId":"01a1321f-9530-7000-8000-0000000000c1"}""",
+        )
+
+        assertEquals("Hercule", assistant.name)
+    }
+
+    @Test
     fun `decodes a conversations page`() {
         val page = WireJson.decodeFromString<Page<Conversation>>(
             """{"items":[{"id":"01a1321f-9530-7000-8000-0000000000c1","assistantId":"01a1321f-9530-7000-8000-0000000000a1","channel":"web","containerKey":null,"createdAt":"2026-10-12T21:58:20.001Z"}],"nextCursor":null}""",

@@ -435,7 +435,6 @@ private fun buildSession(
         conversationId = null,
         runId = null,
         stepId = null,
-        instanceId = "i-claude-code",
         runnerId = runner.id,
         workspaceId = null,
         projectId = project?.id,
@@ -471,7 +470,6 @@ private fun buildProject(id: String, name: String) = Project(id = id, name = nam
 private fun buildAssistant(id: String, name: String, mainConversationId: String) = Assistant(
     id = id,
     name = name,
-    instanceId = "i-claude-code",
     permissionProfileId = "p-assistant",
     accessMode = AccessMode.ApprovalRequired,
     model = null,
