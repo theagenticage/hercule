@@ -53,7 +53,7 @@ describe("buildRunnerMenu", () => {
       ["r-ready", null],
       ["r-signed-out", "not signed in"],
       ["r-no-key", "no key or token"],
-      ["r-expired", "token expired"],
+      ["r-expired", "key or token expired"],
       ["r-missing", "not installed"],
       ["r-old", "harness too old"],
       ["r-unknown", "not installed"],

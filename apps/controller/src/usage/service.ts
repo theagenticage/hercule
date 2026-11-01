@@ -54,13 +54,17 @@ const ANNOUNCE_UNCHANGED_AFTER_MILLIS = 5 * 60 * 1000;
  *   is the time the session's process got its credential, or null when
  *   unknown.
  * - `read`: the controller read them itself, from the provider's endpoint or
- *   with a probe. It used the account's current credential.
+ *   with a probe. It used the account's current credential. An endpoint read
+ *   sets `wholeAnswerAt`, the time its answer arrived: the readings are then
+ *   all the provider says about the account's usage, so `record` also removes
+ *   the readings an earlier read stored and this one leaves out. A probe
+ *   leaves it out, because a harness's answer can be partial.
  *
  * `source` is the value the contract exposes on each stored reading.
  */
 export type UsageOrigin =
   | { readonly source: "session"; readonly credentialSince: string | null }
-  | { readonly source: "read" };
+  | { readonly source: "read"; readonly wholeAnswerAt?: string };
 
 /** Returns the newest reading of each window (and of the credit), in the order they first appear. */
 const keepNewestOfEach = (readings: ReadonlyArray<UsageReading>): ReadonlyArray<UsageReading> => {
@@ -81,7 +85,8 @@ const make = Effect.gen(function* () {
     /**
      * Stores readings the account has no newer reading of, and announces the
      * account on the `provider` topic once the transaction commits, when a
-     * client needs to hear of it. Returns whether any reading was stored.
+     * client needs to hear of it. Returns whether any reading was stored or
+     * removed.
      *
      * - Readings are ordered by the time they were taken, not the time they
      *   arrived: a reading of the same window (or credit) that was taken at
@@ -97,6 +102,21 @@ const make = Effect.gen(function* () {
      *   is announced only when its value (ignoring time and source) differs
      *   from the stored one, or the account was last announced at least 5
      *   minutes ago by the controller's clock.
+     * - An origin with `wholeAnswerAt` (an endpoint read) is the provider's
+     *   whole answer, so a stored reading of a window (or the credit) that the
+     *   answer does not give is removed, even when the answer gives no reading
+     *   at all: a spending limit taken off a key leaves no credit, and a
+     *   window the provider stopped reporting leaves no gauge. Only a reading
+     *   that an earlier read stored (`source` `read`) and that was taken
+     *   before `wholeAnswerAt` is removed. A reading that a session reported
+     *   stays, because a session reports only what changed and says nothing
+     *   about the windows it leaves out. A reading taken at `wholeAnswerAt`
+     *   or later stays too, so an older read that arrives late cannot remove
+     *   what a newer one stored. A removal is not remembered: an older reading
+     *   arriving after it would be stored again. That cannot happen today,
+     *   because the 15-minute claim lets one endpoint read run at a time per
+     *   account, and the accounts that have an endpoint run in pi, which
+     *   reports no usage. A removal is always announced.
      * - For the origin `session`, the time of the account's newest session
      *   report is raised to the newest `takenAt` kept, but not beyond now.
      *   The report is dropped when the account's readings were cleared (its
@@ -163,11 +183,20 @@ const make = Effect.gen(function* () {
             );
             yield* repository.raiseReportedAt(providerAccountId, newest < now ? newest : now);
           }
-          const announcedAt = stored ? yield* repository.readAnnouncedAt(providerAccountId) : null;
+          const removed =
+            origin.source === "read" && origin.wholeAnswerAt !== undefined
+              ? yield* repository.deleteUnreportedReadings(
+                  providerAccountId,
+                  received,
+                  origin.wholeAnswerAt,
+                )
+              : false;
+          const changed = stored || removed;
+          const announcedAt = changed ? yield* repository.readAnnouncedAt(providerAccountId) : null;
           const refreshDue =
             announcedAt === null ||
             nowMillis - Date.parse(announcedAt) >= ANNOUNCE_UNCHANGED_AFTER_MILLIS;
-          if (stored && (valueChanged || refreshDue)) {
+          if (changed && (removed || valueChanged || refreshDue)) {
             yield* repository.markAnnounced(providerAccountId, now);
             yield* announce({
               _tag: "record",
@@ -176,7 +205,7 @@ const make = Effect.gen(function* () {
               kind: "updated",
             });
           }
-          return stored;
+          return changed;
         }),
       ),
 
@@ -246,7 +275,9 @@ const make = Effect.gen(function* () {
      * report from a session whose process started with the old credential is
      * dropped (see `record`). The caller replaces the credential in the same
      * transaction and announces the account. The 15-minute limit on active
-     * reads is kept, so replacing a credential does not allow a read sooner.
+     * reads starts over, so the new credential is read at the loop's next
+     * tick: its expiry and credit appear within a minute, not after the old
+     * credential's claim window.
      */
     clear: (providerAccountId: string): Effect.Effect<void, SqlError> =>
       withTransaction(

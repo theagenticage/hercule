@@ -4974,6 +4974,24 @@ describe("the skills a start names", () => {
     expect(fake.contexts[0]?.sessionSkillsFolder).toBeUndefined();
   });
 
+  it("hands the harness the catalog models of the start frame, and none when the frame has none", async () => {
+    const fake = createFake();
+    const { supervisor } = buildConnection(fake);
+    const catalogModels = [{ slug: "vendor/model", name: "Model", imageInput: null }];
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, catalogModels });
+        yield* supervisor.start({ ...START, sessionId: OTHER_SESSION });
+      }),
+    );
+
+    expect(fake.contexts[0]?.catalogModels).toEqual(catalogModels);
+    expect(fake.contexts[1]?.catalogModels).toBeUndefined();
+  });
+
   it("gives two sessions that name one revision each their own copy, and keeps one when the other exits", async () => {
     const fake = createFake();
     const stub = serve(IMPLEMENT, REVIEW);

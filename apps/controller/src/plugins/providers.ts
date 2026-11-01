@@ -3,6 +3,7 @@ import {
   PluginError,
   ProviderDefinition,
   type AccountKind,
+  type ParseCatalogBody,
   type ParseUsageBody,
   type PluginManifest,
   type ProviderRegistrationOptions,
@@ -27,6 +28,12 @@ export type RegisteredProvider = Omit<ProviderDefinition, "id"> & {
    * Code, so it lives here and not in the stored definition.
    */
   readonly parseUsageBody: Readonly<Record<string, ParseUsageBody>>;
+  /**
+   * The parser of the provider's catalog body, for a provider whose
+   * `catalogSource` is a `provider-api`. Code, so it lives here and not in the
+   * stored definition.
+   */
+  readonly parseCatalogBody?: ParseCatalogBody;
 };
 
 /**
@@ -203,6 +210,10 @@ const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
  * an `oauth`, `device` or `pairing` setup step (see `findUnsupportedStepProblem`), that has
  * a key kind without a valid `keyCheck` (one that sends the key), a kind whose `usage` is invalid (see `findUsageProblem`), an `endpoint` kind with no parser or a parser for any other kind, one of whose account kinds does not list the provider's `defaultHarnessId`
  * or its `catalogSource.harnessId`, or that the plugin registered twice.
+ * A `provider-api` catalog source is refused without a `parseCatalogBody`, with
+ * a kind that has no `credentials` step, or with a request that breaks the key
+ * request rules (see `findKeyRequestProblem`). A `parseCatalogBody` is refused
+ * for any other catalog source.
  *
  * The harnesses an account kind lists are qualified ids and are not checked
  * against the harnesses that are loaded: their plugin may be absent or
@@ -300,6 +311,40 @@ export const registerProviderContribution = (
         );
       }
     }
+    // A `provider-api` catalog is read with the account's key and turned into
+    // models by the plugin's parser, so the source, the parser and a key on
+    // every kind must come together.
+    if (decoded.catalogSource.kind === "provider-api") {
+      if (options.parseCatalogBody === undefined) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the provider ${id} reads its Model Catalog from its API but registers no parseCatalogBody; pass a parser beside the definition`,
+          }),
+        );
+      }
+      const kindsWithoutKey = decoded.kinds.filter(
+        (kind) => !kind.setup.some((step) => step.kind === "credentials"),
+      );
+      if (kindsWithoutKey.length > 0) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the provider ${id} reads its Model Catalog from its API with the account's key, but its account kinds ${kindsWithoutKey.map((kind) => kind.id).join(", ")} have no credentials step and so hold no key; read the catalog through a harness probe, or give every kind a credentials step`,
+          }),
+        );
+      }
+      const catalogSourceProblem = findKeyRequestProblem("catalogSource", decoded.catalogSource);
+      if (catalogSourceProblem !== undefined) {
+        return yield* Effect.fail(
+          new PluginError({ message: `the provider ${id}: ${catalogSourceProblem}` }),
+        );
+      }
+    } else if (options.parseCatalogBody !== undefined) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the provider ${id} registers a parseCatalogBody but its Model Catalog is not read from its API; remove it, or declare catalogSource kind provider-api`,
+        }),
+      );
+    }
     // `providerAccount.create` gives every new account the provider's default
     // harness, whatever its kind, so each kind must allow it.
     const kindsWithoutDefault = decoded.kinds.filter(
@@ -312,17 +357,21 @@ export const registerProviderContribution = (
         }),
       );
     }
-    // An account's Model Catalog is read by probing this harness, so an
-    // account of a kind that cannot run in it would never get a catalog.
-    const kindsWithoutCatalogSource = decoded.kinds.filter(
-      (kind) => !kind.harnesses.includes(decoded.catalogSource.harnessId),
-    );
-    if (kindsWithoutCatalogSource.length > 0) {
-      return yield* Effect.fail(
-        new PluginError({
-          message: `the provider ${id} reads its Model Catalog from the harness ${decoded.catalogSource.harnessId}, which its account kinds ${kindsWithoutCatalogSource.map((kind) => kind.id).join(", ")} do not list; every account kind must list the catalog source harness, or an account of that kind could never be read`,
-        }),
+    // Only a `harness-probe` source names a harness. An account's Model
+    // Catalog is read by probing it, so an account of a kind that cannot run
+    // in it would never get a catalog.
+    if (decoded.catalogSource.kind === "harness-probe") {
+      const catalogHarnessId = decoded.catalogSource.harnessId;
+      const kindsWithoutCatalogSource = decoded.kinds.filter(
+        (kind) => !kind.harnesses.includes(catalogHarnessId),
       );
+      if (kindsWithoutCatalogSource.length > 0) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the provider ${id} reads its Model Catalog from the harness ${catalogHarnessId}, which its account kinds ${kindsWithoutCatalogSource.map((kind) => kind.id).join(", ")} do not list; every account kind must list the catalog source harness, or an account of that kind could never be read`,
+          }),
+        );
+      }
     }
     if (declared.some((row) => row.extensionPoint === PROVIDER && row.id === id)) {
       return yield* Effect.fail(
@@ -335,5 +384,13 @@ export const registerProviderContribution = (
       id,
       definition: { ...decoded, id },
     });
-    live.push({ ...decoded, id, pluginId: manifest.id, parseUsageBody });
+    live.push({
+      ...decoded,
+      id,
+      pluginId: manifest.id,
+      parseUsageBody,
+      ...(options.parseCatalogBody === undefined
+        ? {}
+        : { parseCatalogBody: options.parseCatalogBody }),
+    });
   });

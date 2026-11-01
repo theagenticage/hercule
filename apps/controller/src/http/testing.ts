@@ -171,7 +171,6 @@ const buildServices = (
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
-        ProviderAccountServiceLayer,
         // Observed by the assistants and runs domains, as in the real boot,
         // so a session's replies and notices reach its conversation, and an
         // agent step whose turn no runner will report fails.
@@ -204,6 +203,9 @@ const buildServices = (
     // read harness definitions from it.
     Layer.provideMerge(
       ProviderAccountProbingLayer.pipe(
+        // Probing reads the catalogs that the provider's own API lists, which
+        // the provider account service does.
+        Layer.provideMerge(ProviderAccountServiceLayer),
         Layer.provideMerge(ProviderAccountProbesLayer),
         Layer.provideMerge(ModelCatalogsLayer),
         Layer.provideMerge(ProviderAccountRunnersLayer),

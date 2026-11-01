@@ -21,6 +21,7 @@ import type {
   SessionBinding,
   SessionSpec,
   AttachmentReference,
+  ModelDeclaration,
   SubagentId,
   TurnInput,
   UsageReading,
@@ -135,6 +136,15 @@ export interface HarnessRunnerContext {
    * when the workspace has none, and for a probe, an install or a login.
    */
   readonly repositorySkillsFolders?: ReadonlyArray<string>;
+  /**
+   * The account's whole Model Catalog, from the session's start frame or the
+   * text generation request, so the harness can run any model the user picked
+   * from it. The pi adapter declares to pi the ones pi does not ship, and
+   * every other adapter ignores the field. Absent when the frame manages no
+   * declarations; an empty list tells the adapter to declare none. Absent for a
+   * probe, an install and a login.
+   */
+  readonly catalogModels?: ReadonlyArray<ModelDeclaration>;
   /**
    * The directory the runner caches this session's attached images in, one
    * file per image. It sits outside the workspace, so git never sees the

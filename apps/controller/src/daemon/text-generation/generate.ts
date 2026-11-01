@@ -35,7 +35,7 @@ import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import { PromotionState } from "../../promotion";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
-import { HarnessAccounts } from "../../provider-accounts";
+import { HarnessAccounts, ModelCatalogs } from "../../provider-accounts";
 import {
   explainTextGenerationUnavailable,
   LastTextGenerationFailure,
@@ -222,6 +222,7 @@ const make = Effect.gen(function* () {
   const lastFailure = yield* LastTextGenerationFailure;
   const connections = yield* RunnerConnections;
   const harnessAccounts = yield* HarnessAccounts;
+  const modelCatalogs = yield* ModelCatalogs;
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
   const localRunnerId = yield* LocalRunnerId;
@@ -415,6 +416,10 @@ const make = Effect.gen(function* () {
                           ? ({ _tag: "notPrepared", message: error.error.message } as const)
                           : yield* Effect.die(error);
                       }
+                      // A database failure ends the call like one in `prepare` above.
+                      const declarations = yield* Effect.orDie(
+                        modelCatalogs.findModelDeclarations(providerAccountId, harnessId),
+                      );
                       yield* Ref.set(requestSent, true);
                       return yield* connections.sendRequest(
                         runnerId,
@@ -429,6 +434,7 @@ const make = Effect.gen(function* () {
                             input: call.input,
                             outputSchema: call.outputSchema,
                           },
+                          ...(declarations === undefined ? {} : { catalogModels: declarations }),
                         },
                         Duration.millis(SLOT_HOLD_MS),
                       );
@@ -619,6 +625,7 @@ export const TextGenerationLayer: Layer.Layer<
   | LastTextGenerationFailure
   | RunnerConnections
   | HarnessAccounts
+  | ModelCatalogs
   | AuditLog
   | PromotionState
   | LocalRunnerId

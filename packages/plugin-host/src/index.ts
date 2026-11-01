@@ -90,10 +90,13 @@ export {
   HarnessLoginStep,
   KeyCheck,
   ProviderDefinition,
+  type ParseCatalogBody,
   type ParseUsageBody,
 } from "./providers";
 
-// What a usage parser takes and returns, so a plugin names them without linking the protocol.
+// What a usage or catalog parser takes and returns, so a plugin names them without linking the protocol.
+// `CatalogModel` is also exported as a schema, so a catalog parser can check what it builds.
+export { CatalogModel } from "@hercule/protocol";
 export type { Timestamp, UsageReading } from "@hercule/protocol";
 
 export { checkEmittedEvent } from "./check-event";

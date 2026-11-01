@@ -40,7 +40,17 @@ const send = (frame: unknown): void => {
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   const command = JSON.parse(line) as { readonly id: string; readonly type: string };
-  send({ type: "response", id: command.id, command: command.type, success: true });
+  // `get_state` reports the model pi started on. This stand-in always runs
+  // the model the test asks for: provider `fake`, model `fake-model`.
+  send({
+    type: "response",
+    id: command.id,
+    command: command.type,
+    success: true,
+    ...(command.type === "get_state"
+      ? { data: { model: { provider: "fake", id: "fake-model" } } }
+      : {}),
+  });
   if (command.type !== "prompt" || process.env["HARNESS_ANSWER"] !== "submit") return;
   send({ type: "agent_start" });
   send({

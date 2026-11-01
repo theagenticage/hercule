@@ -7,15 +7,41 @@
  * test says otherwise.
  */
 import { describe, expect, it } from "vitest";
-import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Scope,
+} from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
-import { uuidFromString, withTransaction } from "../../db";
+import type { CatalogModel, TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
+import { nowIso, uuidFromString, withTransaction } from "../../db";
 import { readEventsOfKind } from "../../events/testing";
 import { PluginHost } from "../../plugins";
-import { buildPluginStack } from "../../plugins/testing";
-import { HarnessAccountsLayer } from "../../provider-accounts";
+import {
+  buildHarnessDefinition,
+  buildPluginStack,
+  buildProviderDefinition,
+  createPluginFixture,
+} from "../../plugins/testing";
+import {
+  HarnessAccountsLayer,
+  modelCatalogRepository,
+  providerAccountRepository,
+  ModelCatalogsLayer,
+  ProviderAccountRunnersLayer,
+} from "../../provider-accounts";
+import { inertMembership } from "../../provider-accounts/testing";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
+import { buildProviderAccountOwner, Secrets } from "../../secrets";
+import { SettingsLayer } from "../../settings";
+import { AccountUsageLayer } from "../../usage";
 import {
   LastTextGenerationFailure,
   LastTextGenerationFailureLayer,
@@ -122,6 +148,11 @@ const buildServiceLayer = (
 ) =>
   TextGenerationLayer.pipe(
     Layer.provideMerge(HarnessAccountsLayer),
+    Layer.provideMerge(ModelCatalogsLayer),
+    Layer.provideMerge(inertMembership),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(AccountUsageLayer),
+    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         LastTextGenerationFailureLayer,
@@ -649,5 +680,147 @@ describe("a caller interrupted as the runner answers", () => {
     );
 
     expect(entries).toBe(ROUNDS);
+  });
+});
+
+describe("the catalog models the harness does not list, on the request", () => {
+  const WIDE = "wide/wide";
+  const NARROW = "narrow/narrow";
+  const API_ONLY: CatalogModel = {
+    slug: "api-only",
+    name: "API only",
+    imageInput: null,
+    options: [],
+    contextWindow: 200_000,
+    reasoning: true,
+  };
+
+  /**
+   * A provider that reads its catalog from its API, a harness that can run
+   * any of its models and one that runs only what it lists.
+   */
+  const buildApiPlugins = () => [
+    createPluginFixture({
+      id: "wide",
+      definitions: [
+        buildHarnessDefinition("wide", [
+          {
+            providerId: "apiprov/apiprov",
+            kinds: [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "API_KEY" }],
+            models: "all",
+          },
+        ]),
+      ],
+    }).plugin,
+    createPluginFixture({
+      id: "narrow",
+      definitions: [
+        buildHarnessDefinition("narrow", [
+          {
+            providerId: "apiprov/apiprov",
+            kinds: [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "API_KEY" }],
+            models: "own-list",
+          },
+        ]),
+      ],
+    }).plugin,
+    createPluginFixture({
+      id: "apiprov",
+      capabilities: ["providers"],
+      definitions: [],
+      providers: [
+        {
+          ...buildProviderDefinition("apiprov", [WIDE, NARROW]),
+          catalogSource: {
+            kind: "provider-api",
+            url: "https://api.example.com/v1/models",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+        },
+      ],
+      providerOptions: { parseCatalogBody: () => [] },
+    }).plugin,
+  ];
+
+  /** Makes a call in `harnessId` on an account whose catalog holds `API_ONLY`, and returns the request sent. */
+  const sendInHarness = async (harnessId: string): Promise<TextGenerationRequest> => {
+    const requests: Array<TextGenerationRequest> = [];
+    // Set once the account exists, because the repository mints its id.
+    const target = Ref.makeUnsafe<TextGenerationTarget>({
+      ...TARGET,
+      harnessId,
+      model: "api-only",
+    });
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const catalogs = yield* modelCatalogRepository;
+        yield* Effect.flatMap(PluginHost, (host) => host.boot(buildApiPlugins()));
+        const account = yield* withTransaction(
+          sql,
+          accounts.insert({
+            providerId: "apiprov/apiprov",
+            kind: "api-key",
+            label: null,
+            defaultHarnessId: WIDE,
+            at: yield* nowIso,
+          }),
+        );
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const secrets = yield* Secrets;
+            yield* secrets.set(
+              buildProviderAccountOwner(account.id),
+              "apiKey",
+              Redacted.make("a-fixture-key"),
+            );
+            yield* catalogs.recordSuccess(
+              account.id,
+              [API_ONLY],
+              yield* nowIso,
+              "2026-10-31T10:00:00.000Z",
+            );
+          }),
+        );
+        yield* Ref.update(target, (one) => ({ ...one, providerAccountId: account.id }));
+        const service = yield* TextGeneration;
+        yield* service.generate(CALL);
+      }).pipe(
+        Effect.provide(
+          buildLayer(
+            (_, request) => {
+              requests.push(request);
+              return Effect.succeed(buildAnswer(request, OK));
+            },
+            { target },
+          ),
+        ),
+        Effect.provideService(TextGenerationDeadline, Duration.seconds(60)),
+        Effect.orDie,
+      ),
+    );
+    return requests[0]!;
+  };
+
+  it("carries the catalog when the harness can run any model of the provider", async () => {
+    const request = await sendInHarness(WIDE);
+
+    expect(request.catalogModels).toEqual([
+      {
+        slug: "api-only",
+        name: "API only",
+        imageInput: null,
+        contextWindow: 200_000,
+        reasoning: true,
+      },
+    ]);
+  });
+
+  it("leaves the catalog off when the harness runs only the models it lists", async () => {
+    const request = await sendInHarness(NARROW);
+
+    expect("catalogModels" in request).toBe(false);
   });
 });

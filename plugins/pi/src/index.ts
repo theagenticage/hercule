@@ -34,8 +34,8 @@ const definition: HarnessDefinition = {
     structuredOutput: "supported",
   },
   // pi runs the keys of several providers. It names a model `<provider>/<id>`,
-  // runs only the ones in its own list, and reads each provider's key from that
-  // provider's usual variable. OpenCode is two pi providers: `opencode-go` for
+  // runs only the ones in its own list (but see OpenRouter below), and reads
+  // each provider's key from that provider's usual variable. OpenCode is two pi providers: `opencode-go` for
   // a Go key and `opencode` for a Zen key, which both read the same variable.
   // MiniMax is one pi provider (`minimax`) for both of its kinds of key.
   runs: [
@@ -61,6 +61,19 @@ const definition: HarnessDefinition = {
       providerId: "zai/zai",
       kinds: [{ kind: "api-key", modelArgument: "zai/{model}", credentialVariable: "ZAI_API_KEY" }],
       models: "own-list",
+    },
+    {
+      // OpenRouter lists hundreds of models that pi's own list lacks. The
+      // controller sends the ones pi lacks, and pi can run any of them.
+      providerId: "openrouter/openrouter",
+      kinds: [
+        {
+          kind: "api-key",
+          modelArgument: "openrouter/{model}",
+          credentialVariable: "OPENROUTER_API_KEY",
+        },
+      ],
+      models: "all",
     },
     {
       providerId: "opencode/opencode",

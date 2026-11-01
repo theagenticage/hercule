@@ -30,6 +30,7 @@ import { createInvalidStateError } from "@hercule/contract";
 import {
   buildRunnerRefusal,
   HarnessAccounts,
+  ModelCatalogs,
   ProviderAccountRunners,
 } from "../../provider-accounts";
 import { Secrets } from "../../secrets";
@@ -46,6 +47,7 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const accounts = yield* githubAccounts;
   const harnessAccounts = yield* HarnessAccounts;
+  const modelCatalogs = yield* ModelCatalogs;
   const accountRunners = yield* ProviderAccountRunners;
   const localRunnerId = yield* LocalRunnerId;
   const promotion = yield* PromotionState;
@@ -159,6 +161,7 @@ const make = Effect.gen(function* () {
                     }
                   }),
                 prepareHarnessAccount: harnessAccounts.prepare,
+                findModelDeclarations: modelCatalogs.findModelDeclarations,
                 buildCoordination: (sessionId) =>
                   Effect.provideService(
                     buildSessionCoordination(sessionId),
@@ -198,6 +201,7 @@ export const DispatchLayer: Layer.Layer<
   | RunnerConnections
   | Secrets
   | HarnessAccounts
+  | ModelCatalogs
   | ProviderAccountRunners
   | LocalRunnerId
   | PromotionState

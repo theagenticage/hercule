@@ -11,13 +11,18 @@
  * - functions that insert the rows other domains own (agents, sessions,
  *   settings), which the delete check reads.
  */
-import { Context, Effect, Layer, Option, Redacted } from "effect";
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { ParseUsageBody, Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type {
+  ParseCatalogBody,
+  ParseUsageBody,
+  Plugin,
+  ProviderDefinition,
+} from "@hercule/plugin-host";
 import type { ProbeResult } from "@hercule/protocol";
 import { mintUuid, nowIso, uuidFromString, withTransaction } from "../db";
 import { NotifierLayer } from "../notifications";
@@ -156,13 +161,24 @@ export const METERED: ProviderDefinition = {
 
 /**
  * Reads Metered's usage body: `{ "used": 40 }` is a five-hour reading of 40%,
- * `{ "refuse": "..." }` is a refusal, `{ "nothing": true }` makes the parser
- * return nothing, and any other body is a defect the parser throws on.
+ * and `"weekly": 20` beside it adds a weekly reading of 20%. `{ "empty": true }`
+ * is an accepted answer with no readings. `{ "refuse": "..." }` is a refusal, `{ "nothing": true }` makes the parser
+ * return nothing, and any other body is a defect the parser throws on. A
+ * reading may also carry `"expires"`: a timestamp is the key's expiry, `null`
+ * says the key does not expire, and leaving it out says nothing about expiry.
  */
 const parseMeteredUsageBody: ParseUsageBody = (body, takenAt) => {
-  const answer = body as { used?: number; refuse?: string; nothing?: boolean };
+  const answer = body as {
+    used?: number;
+    weekly?: number;
+    empty?: boolean;
+    refuse?: string;
+    nothing?: boolean;
+    expires?: string | null;
+  };
   if (typeof answer.refuse === "string") return { refused: answer.refuse };
   if (answer.nothing === true) return undefined as never;
+  if (answer.empty === true) return { readings: [] };
   if (typeof answer.used !== "number") {
     throw new Error("not a Metered answer\nsecond line \u001b[31mred");
   }
@@ -176,7 +192,20 @@ const parseMeteredUsageBody: ParseUsageBody = (body, takenAt) => {
         hit: false,
         takenAt,
       },
+      ...(answer.weekly === undefined
+        ? []
+        : [
+            {
+              kind: "window" as const,
+              window: "weekly" as const,
+              usedPercent: answer.weekly,
+              resetsAt: null,
+              hit: false,
+              takenAt,
+            },
+          ]),
     ],
+    ...(answer.expires === undefined ? {} : { expiresAt: answer.expires }),
   };
 };
 
@@ -188,6 +217,83 @@ export const buildMeteredPlugin = (provider: ProviderDefinition = METERED): Plug
     definitions: [],
     providers: [provider],
     providerOptions: { parseUsageBody: { [METERED_KEY_KIND]: parseMeteredUsageBody } },
+  }).plugin;
+
+export const CATALOGUED_PROVIDER_ID = "catalogued/catalogued";
+export const CATALOGUED_CATALOG_URL = "https://api.catalogued.test/v1/models";
+
+/** The account kind of Catalogued, which holds a key. */
+export const CATALOGUED_KEY_KIND = "api-key";
+
+/** A provider whose Model Catalog is read from `CATALOGUED_CATALOG_URL` with the account's key, on no runner. */
+export const CATALOGUED: ProviderDefinition = {
+  id: "catalogued",
+  displayName: "Catalogued",
+  kinds: [
+    {
+      id: CATALOGUED_KEY_KIND,
+      title: "API key",
+      description: "A key for Catalogued.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: {
+        url: "https://api.catalogued.test/v1/key",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+      harnesses: [ALPHA_HARNESS_ID],
+    },
+  ],
+  defaultHarnessId: ALPHA_HARNESS_ID,
+  catalogSource: {
+    kind: "provider-api",
+    url: CATALOGUED_CATALOG_URL,
+    headers: { authorization: "Bearer {apiKey}" },
+  },
+  defaultSelection: "current-models",
+};
+
+const CataloguedBody = Schema.Struct({
+  models: Schema.Array(
+    Schema.Struct({
+      id: Schema.optionalKey(Schema.String),
+      name: Schema.optionalKey(Schema.String),
+      context: Schema.optionalKey(Schema.Number),
+      price: Schema.optionalKey(Schema.Number),
+    }),
+  ),
+});
+
+/**
+ * Reads Catalogued's catalog body: `{ "models": [{ "id": "a", "name": "A",
+ * "context": 1000, "price": 2 }] }`. An item with no id is skipped, and any
+ * body without a well-formed `models` list is a defect the parser throws on.
+ */
+export const parseCataloguedBody: ParseCatalogBody = (body) => {
+  if (!Schema.is(CataloguedBody)(body)) throw new Error("the body has no models list");
+  const { models } = body;
+  return models.flatMap((model) =>
+    model.id !== undefined
+      ? [
+          {
+            slug: model.id,
+            name: model.name ?? model.id,
+            imageInput: null,
+            options: [],
+            ...(model.context === undefined ? {} : { contextWindow: model.context }),
+            ...(model.price === undefined ? {} : { inputPrice: model.price }),
+          },
+        ]
+      : [],
+  );
+};
+
+/** Builds the plugin that registers `CATALOGUED` with its catalog parser. */
+export const buildCataloguedPlugin = (): Plugin =>
+  createPluginFixture({
+    id: "catalogued",
+    capabilities: ["providers"],
+    definitions: [],
+    providers: [CATALOGUED],
+    providerOptions: { parseCatalogBody: parseCataloguedBody },
   }).plugin;
 
 /** What the fake provider API does with a request: answer it, fail to connect, or never answer. */
@@ -348,7 +454,7 @@ export const storeCredential = (
     );
   });
 
-/** Sets the time at which the account's token expires. */
+/** Sets the time at which the account's key or token expires. */
 export const setTokenExpiry = (
   accountId: string,
   expiresAt: string,

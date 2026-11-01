@@ -139,7 +139,18 @@ export const makeTextGenerator = (
       }
       return yield* Effect.acquireUseRelease(
         makeScratchDirectory,
-        (cwd) => adapter.generateText({ ...context, binary, cwd }, request.spec),
+        (cwd) =>
+          adapter.generateText(
+            {
+              ...context,
+              binary,
+              cwd,
+              ...(request.catalogModels === undefined
+                ? {}
+                : { catalogModels: request.catalogModels }),
+            },
+            request.spec,
+          ),
         removeScratchDirectory,
       );
     });

@@ -10,7 +10,13 @@
  * `providerAccount.update` and never read back.
  */
 import { Schema } from "effect";
-import { ModelDescriptor, SnapshotAuth, UsageCredit, UsageWindow } from "@hercule/protocol";
+import {
+  CatalogModel,
+  ModelDescriptor,
+  SnapshotAuth,
+  UsageCredit,
+  UsageWindow,
+} from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import {
@@ -28,7 +34,7 @@ import { bounded, SecretValue } from "../strings";
 import { VersionVerdict } from "./harness";
 
 /** Re-exported rather than copied, so the public shape cannot drift from the wire shape. */
-export { ModelDescriptor, ModelOption, SnapshotAuth } from "@hercule/protocol";
+export { CatalogModel, ModelDescriptor, ModelOption, SnapshotAuth } from "@hercule/protocol";
 
 /** The longest label an account may carry. */
 export const MAX_PROVIDER_ACCOUNT_LABEL_LENGTH = 128;
@@ -76,7 +82,8 @@ export type AccountUsageReading = Schema.Schema.Type<typeof AccountUsageReading>
  * - `not-signed-in`: the account needs a login on that machine (or the login
  *   there belongs to someone else), or the vendor refused the stored key.
  * - `credential-missing`: the controller holds no key or token for the account.
- * - `token-expired`: the account's token has passed its expiry.
+ * - `token-expired`: the account's key or token has passed its expiry. The
+ *   name says token for historical reasons; it covers an expired key too.
  * - `harness-missing`: the harness is not installed on the runner.
  * - `harness-too-old`: the harness is installed but below the lowest version
  *   Hercule supports.
@@ -126,9 +133,10 @@ export const ProviderAccount = Schema.Struct({
   /** The qualified id of the harness a session uses when it names none. */
   defaultHarnessId: Schema.String,
   /**
-   * When the account's token stops working. Set only for a kind whose
-   * credential is a token Hercule minted (a Claude subscription token); `null`
-   * for every other kind.
+   * When the account's credential stops working. Set for a kind whose
+   * credential is a token Hercule minted (a Claude subscription token), and
+   * for a key whose provider reports an expiry (an OpenRouter key). `null`
+   * for every other account, and for a key the provider says does not expire.
    */
   expiresAt: Schema.NullOr(Timestamp),
   /**
@@ -169,12 +177,12 @@ export const ProviderAccount = Schema.Struct({
 export type ProviderAccount = Schema.Schema.Type<typeof ProviderAccount>;
 
 /**
- * One model of an account's Model Catalog: what the harness reports for the
- * model, and when Hercule first saw it. `firstSeenAt` is kept when a model
+ * One model of an account's Model Catalog: what the harness or the provider's
+ * catalog reports for the model, and when Hercule first saw it. `firstSeenAt` is kept when a model
  * leaves the catalog and returns, so it never moves later.
  */
 export const ModelCatalogItem = Schema.Struct({
-  ...ModelDescriptor.fields,
+  ...CatalogModel.fields,
   firstSeenAt: Timestamp,
 });
 

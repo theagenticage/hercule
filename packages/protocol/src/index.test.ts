@@ -466,8 +466,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 18, the version that raised the most models a probe lists", () => {
-    expect(PROTOCOL_VERSION).toBe(18);
+  it("is 19, the version that added the catalog models of a session start", () => {
+    expect(PROTOCOL_VERSION).toBe(19);
   });
 });
 

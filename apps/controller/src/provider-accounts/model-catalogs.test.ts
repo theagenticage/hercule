@@ -7,21 +7,32 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { ModelDescriptor, ProbeResult } from "@hercule/protocol";
-import { withTransaction } from "../db";
+import type { HarnessDefinition } from "@hercule/plugin-host";
+import type { CatalogModel, ModelDescriptor, ProbeResult } from "@hercule/protocol";
+import { nowIso, withTransaction } from "../db";
 import { ModelProfileService } from "../model-profiles";
 import { runWithProfiles } from "../model-profiles/testing";
+import {
+  buildHarnessDefinition,
+  buildProviderDefinition,
+  createPluginFixture,
+} from "../plugins/testing";
 import { ModelCatalogs, computeArrivedModels, computeDefaultSelection } from "./model-catalogs";
 import { modelCatalogRepository } from "./model-catalog-repository";
 import { ProviderAccountProbes } from "./probes";
 import { providerAccountRepository } from "./repository";
 import { ProviderAccountService } from "./service";
 import {
+  type AccountServices,
   addAccount,
   addRunner,
   addSnapshot,
   ALPHA_HARNESS_ID,
   BETA_HARNESS_ID,
+  buildAccountPlugins,
+  buildCataloguedPlugin,
+  CATALOGUED_KEY_KIND,
+  CATALOGUED_PROVIDER_ID,
   KEY_KIND,
   MACHINE_KIND,
   runWithAccounts,
@@ -569,6 +580,7 @@ describe("which catalog reads are due, and where they go", () => {
 
     const pair = (runnerId: string) => ({
       reads: [{ runnerId, providerAccountId: outcome.account.id, harnessId: ALPHA_HARNESS_ID }],
+      apiReads: [],
       unserved: [],
     });
     expect(outcome.withLocal).toEqual(pair(outcome.local));
@@ -639,7 +651,7 @@ describe("which catalog reads are due, and where they go", () => {
         yield* catalogs.recordCatalogRead(
           account.id,
           { _tag: "failed", message: chosen.unserved[0]!.message },
-          yield* probes.readProbeStamp(account.id, false),
+          yield* probes.buildReadStamp(account.id),
         );
         return { chosen, catalog: yield* readCatalog(account.id) };
       }),
@@ -661,6 +673,93 @@ describe("which catalog reads are due, and where they go", () => {
 
     expect(chosen.reads).toEqual([]);
     expect(chosen.unserved[0]?.message).toContain("not signed in on any connected machine");
+  });
+
+  describe("for a provider that lists its models through its API", () => {
+    const runWithCatalogued = <A, E>(body: Parameters<typeof runWithAccounts<A, E>>[0]) =>
+      runWithAccounts(body, undefined, [...buildAccountPlugins(), buildCataloguedPlugin()]);
+
+    it("returns the account as an API read, with no runner connected and no complaint about it", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          return { account, chosen: yield* choose() };
+        }),
+      );
+
+      expect(outcome.chosen).toEqual({
+        reads: [],
+        apiReads: [{ providerAccountId: outcome.account.id }],
+        unserved: [],
+      });
+    });
+
+    it("keeps the rule for when a read is due: not within four hours of a good read, unless forced", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const catalogs = yield* ModelCatalogs;
+          const probes = yield* ProviderAccountProbes;
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          yield* catalogs.recordCatalogRead(
+            account.id,
+            { _tag: "listed", models: [model("a")] },
+            yield* probes.buildReadStamp(account.id),
+          );
+          const fresh = yield* choose();
+          const forced = yield* choose({ force: true });
+          yield* withTransaction(
+            sql,
+            sql`UPDATE model_catalogs SET read_at = '2020-01-01T00:00:00.000Z'`,
+          );
+          return { fresh, forced, stale: yield* choose() };
+        }),
+      );
+
+      expect(outcome.fresh.apiReads).toEqual([]);
+      expect(outcome.forced.apiReads).toHaveLength(1);
+      expect(outcome.stale.apiReads).toHaveLength(1);
+    });
+
+    it("skips a due read of an account whose key the provider refused, until the read is forced", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const accounts = yield* providerAccountRepository;
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          const before = yield* choose();
+          yield* withTransaction(
+            sql,
+            accounts.markCredentialRefused(
+              account.id,
+              account.credentialGeneration,
+              "Key revoked",
+              "2026-10-31T10:00:00.000Z",
+            ),
+          );
+          return {
+            account,
+            before,
+            refused: yield* choose(),
+            forced: yield* choose({ force: true }),
+          };
+        }),
+      );
+
+      const read = [{ providerAccountId: outcome.account.id }];
+      expect(outcome.before.apiReads).toEqual(read);
+      expect(outcome.refused.apiReads).toEqual([]);
+      expect(outcome.forced.apiReads).toEqual(read);
+    });
   });
 
   it("serves a sign-in account on the machine where it is signed in", async () => {
@@ -781,5 +880,178 @@ describe("deleting an account", () => {
     expect(outcome.after.defaultEntry).toBeNull();
     expect(outcome.after.revision).toBe(outcome.before.revision + 1);
     expect(outcome.catalogRead).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("the declarations a frame carries for a catalog", () => {
+  const WIDE = "wide/wide";
+  const NARROW = "narrow/narrow";
+  const OTHER = "other/other";
+  const API_PROVIDER = "apiprov/apiprov";
+  const PROBED_PROVIDER = "probed/probed";
+
+  const runs = (providerId: string, models: "all" | "own-list") => ({
+    providerId,
+    kinds: [{ kind: "api-key", modelArgument: "{model}" }],
+    models,
+  });
+
+  /**
+   * Two providers and three harnesses:
+   *
+   * - `apiprov` reads its catalog from its API. `wide` runs any of its models,
+   *   `narrow` only those it lists itself.
+   * - `probed` reads its catalog by probing `wide`. `wide` and `other` both run
+   *   any of its models.
+   */
+  const buildPlugins = () => {
+    const harness = (id: string, supports: HarnessDefinition["runs"]) =>
+      createPluginFixture({ id, definitions: [buildHarnessDefinition(id, supports)] }).plugin;
+    return [
+      harness("wide", [runs(API_PROVIDER, "all"), runs(PROBED_PROVIDER, "all")]),
+      harness("narrow", [runs(API_PROVIDER, "own-list")]),
+      harness("other", [runs(PROBED_PROVIDER, "all")]),
+      createPluginFixture({
+        id: "apiprov",
+        capabilities: ["providers"],
+        definitions: [],
+        providers: [
+          {
+            ...buildProviderDefinition("apiprov", [WIDE, NARROW]),
+            catalogSource: {
+              kind: "provider-api",
+              url: "https://api.example.com/v1/models",
+              headers: { authorization: "Bearer {apiKey}" },
+            },
+          },
+        ],
+        providerOptions: { parseCatalogBody: () => [] },
+      }).plugin,
+      createPluginFixture({
+        id: "probed",
+        capabilities: ["providers"],
+        definitions: [],
+        providers: [buildProviderDefinition("probed", [WIDE, OTHER])],
+      }).plugin,
+    ];
+  };
+
+  const catalogModel = (slug: string, extra: Partial<CatalogModel> = {}): CatalogModel => ({
+    slug,
+    name: `Model ${slug}`,
+    imageInput: null,
+    options: [],
+    ...extra,
+  });
+
+  /** The details a provider's API gives, which a harness probe does not. */
+  const WITH_DETAILS = { maker: "Maker", contextWindow: 200_000, inputPrice: 1.5, reasoning: true };
+
+  const catalog = [
+    catalogModel("a"),
+    catalogModel("b", WITH_DETAILS),
+    catalogModel("c", { contextWindow: 8_000 }),
+  ];
+
+  /** Stores the catalog the account has after a successful read. */
+  const storeCatalog = (accountId: string, models: ReadonlyArray<CatalogModel>) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const catalogs = yield* modelCatalogRepository;
+      yield* withTransaction(
+        sql,
+        catalogs.recordSuccess(accountId, models, yield* nowIso, "2026-10-31T10:00:00.000Z"),
+      );
+    });
+
+  /** Finds the declarations for a frame that runs `harnessId` for the account. */
+  const findDeclarations = (accountId: string, harnessId: string) =>
+    Effect.flatMap(ModelCatalogs, (catalogs) =>
+      catalogs.findModelDeclarations(accountId, harnessId),
+    );
+
+  /** Runs `body` against an account of `apiprov`, running in `wide` by default, whose catalog holds `models`. */
+  const withApiAccount = <A, E>(
+    body: (accountId: string) => Effect.Effect<A, E, AccountServices>,
+    models: ReadonlyArray<CatalogModel> = catalog,
+  ) =>
+    runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ providerId: API_PROVIDER, defaultHarnessId: WIDE });
+        yield* storeCatalog(account.id, models);
+        return yield* body(account.id);
+      }),
+      undefined,
+      buildPlugins(),
+    );
+
+  it("returns the whole catalog in catalog order, with only what a runner needs, whatever any runner lists", async () => {
+    const declarations = await withApiAccount((accountId) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        yield* addSnapshot(accountId, WIDE, runner, {
+          harnessVersion: "1.0.0",
+          auth: { status: "ok" },
+          models: [catalogModel("a")],
+          usage: null,
+        });
+        return yield* findDeclarations(accountId, WIDE);
+      }),
+    );
+
+    expect(declarations).toEqual([
+      { slug: "a", name: "Model a", imageInput: null },
+      {
+        slug: "b",
+        name: "Model b",
+        imageInput: null,
+        contextWindow: 200_000,
+        reasoning: true,
+      },
+      { slug: "c", name: "Model c", imageInput: null, contextWindow: 8_000 },
+    ]);
+  });
+
+  it("returns nothing for a harness that runs only the models it lists itself", async () => {
+    const declarations = await withApiAccount((accountId) => findDeclarations(accountId, NARROW));
+
+    expect(declarations).toBeUndefined();
+  });
+
+  it("returns an empty list for a catalog that was read and holds no models", async () => {
+    const declarations = await withApiAccount((accountId) => findDeclarations(accountId, WIDE), []);
+
+    expect(declarations).toEqual([]);
+  });
+
+  it("returns nothing for a catalog that was never read", async () => {
+    const declarations = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ providerId: API_PROVIDER, defaultHarnessId: WIDE });
+        return yield* findDeclarations(account.id, WIDE);
+      }),
+      undefined,
+      buildPlugins(),
+    );
+
+    expect(declarations).toBeUndefined();
+  });
+
+  it("returns nothing for the harness the provider's catalog is read from, but the catalog for another harness that runs any model", async () => {
+    const { source, other } = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ providerId: PROBED_PROVIDER, defaultHarnessId: WIDE });
+        yield* storeCatalog(account.id, catalog);
+        return {
+          source: yield* findDeclarations(account.id, WIDE),
+          other: yield* findDeclarations(account.id, OTHER),
+        };
+      }),
+      undefined,
+      buildPlugins(),
+    );
+
+    expect(source).toBeUndefined();
+    expect(other?.map((one) => one.slug)).toEqual(["a", "b", "c"]);
   });
 });

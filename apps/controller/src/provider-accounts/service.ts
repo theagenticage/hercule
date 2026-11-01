@@ -73,6 +73,7 @@ import { ProviderKeyRequests } from "./provider-key-requests";
 import type { StoredModelCatalogSummary } from "./model-catalog-repository";
 import { ModelCatalogs } from "./model-catalogs";
 import { ModelProfileMembership } from "./model-profile-membership";
+import { ProviderAccountProbes, type ReadStamp } from "./probes";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
@@ -176,6 +177,22 @@ const make = Effect.gen(function* () {
   const catalogs = yield* ModelCatalogs;
   const accountRunners = yield* ProviderAccountRunners;
   const membership = yield* ModelProfileMembership;
+  const probes = yield* ProviderAccountProbes;
+
+  /**
+   * Stores or clears (`null`) the account's credential expiry, and wakes the
+   * daemon's watcher of expiries so it plans its wait for the new date. Call
+   * it in a transaction.
+   */
+  const storeCredentialExpiry = (
+    id: string,
+    expiresAt: string | null,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.andThen(
+      accounts.setCredentialExpiry(id, expiresAt, at),
+      probes.notifyCredentialExpiryChanged(),
+    );
 
   const announceAccountChanged = (id: string): Effect.Effect<void> =>
     announce({ _tag: "record", topic: "provider", id, kind: "updated" });
@@ -434,6 +451,30 @@ const make = Effect.gen(function* () {
   };
 
   /**
+   * Returns the account's stored key, or `Option.none()` when the account has
+   * none or the stored key cannot be decrypted (the latter is logged as a
+   * warning that names `reading`, the thing the caller wanted to read with the
+   * key, such as "usage"). Never logs the key. `secretName` is the name of the
+   * kind's credential Secret.
+   */
+  const readAccountKey = (
+    providerAccountId: string,
+    secretName: string,
+    reading: string,
+  ): Effect.Effect<Option.Option<Redacted.Redacted<string>>, SqlError | Schema.SchemaError> =>
+    secrets.get(buildProviderAccountOwner(providerAccountId), secretName).pipe(
+      // The name comes from the plugin catalog, which refuses names the
+      // secrets store rejects.
+      Effect.catchTag("SecretNameError", Effect.die),
+      Effect.catchTag("SecretDecryptError", (error) =>
+        Effect.logWarning(
+          `Could not read the ${reading} of account ${providerAccountId}: its stored key cannot be decrypted`,
+          error,
+        ).pipe(Effect.as(Option.none<Redacted.Redacted<string>>())),
+      ),
+    );
+
+  /**
    * Checks that the account can run in the harness and that the harness is
    * installed on at least one runner (spec 06 section 15.4). Fails with
    * `Validation` on `defaultHarnessId`, with the reason, when it cannot.
@@ -576,6 +617,32 @@ const make = Effect.gen(function* () {
         if (cleared) yield* announceAccountChanged(providerAccountId);
       }),
     );
+
+  /**
+   * Stores the expiry a provider's answer reported for the account's key,
+   * and announces the account on the `provider` topic when it differs from the
+   * stored one. `reported` is absent when the answer said nothing about
+   * expiry, which leaves the stored expiry alone; `null` clears it. Storing a
+   * different expiry also clears the account's expiry warning, so the new
+   * date warns again. The usage announcement alone would not do: it skips
+   * readings that did not change. Call it in a transaction, after checking
+   * that the key is still the one the answer was read with.
+   */
+  const storeReportedExpiry = (
+    account: StoredProviderAccount,
+    reported: string | null | undefined,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      if (reported === undefined) return;
+      const stored = account.credentialExpiresAt;
+      const unchanged =
+        stored === null || reported === null
+          ? stored === reported
+          : Date.parse(stored) === Date.parse(reported);
+      if (unchanged) return;
+      yield* storeCredentialExpiry(account.id, reported, yield* nowIso);
+      yield* announceAccountChanged(account.id);
+    });
 
   return {
     /** Returns every account with its snapshots, oldest account first. */
@@ -813,6 +880,9 @@ const make = Effect.gen(function* () {
               // An answer to a probe sent with the old key must not be stored.
               // It also clears the account's failure and expiry warning.
               yield* accounts.advanceCredentialGeneration(id, at);
+              // The old key's expiry does not apply to the new key. The next
+              // usage read of the provider sets the new key's, if it has one.
+              yield* storeCredentialExpiry(id, null, at);
               // The new key may be someone else's, so its readings no longer apply.
               yield* accountUsage.clear(id);
             }
@@ -1021,7 +1091,7 @@ const make = Effect.gen(function* () {
                 );
               }
               yield* secrets.set(buildProviderAccountOwner(id), secretName, Redacted.make(token));
-              yield* accounts.setCredentialExpiry(id, computeTokenExpiry(at), at);
+              yield* storeCredentialExpiry(id, computeTokenExpiry(at), at);
               // The new token may belong to someone else. See spec 06 section 11.
               yield* accounts.clearIdentity(id, at);
               // The new token may be someone else's, so its readings no longer apply.
@@ -1095,7 +1165,12 @@ const make = Effect.gen(function* () {
      * key is never logged.
      *
      * - The provider accepted the key: the readings are stored as read, and
-     *   the account's failure is cleared.
+     *   the account's failure is cleared. The answer is the provider's whole
+     *   account of the usage, so a reading it stored earlier and the answer no
+     *   longer gives (a spending limit that was removed, a window that is gone)
+     *   is removed (`AccountUsage.record`). When the answer also says when the
+     *   key expires (or that it never does), that is stored too, and a changed
+     *   expiry is announced and warns again.
      * - The provider refused the key (a 401, or an answer its plugin reads as
      *   a refusal): the account is failed with the provider's words.
      * - Anything else (no answer in time, 403, 429, 5xx, a redirect, an answer
@@ -1131,17 +1206,7 @@ const make = Effect.gen(function* () {
         // The generation is read before the key. A key replaced in between
         // makes this read's outcome stale, and a stale outcome is not stored.
         const generation = account.credentialGeneration;
-        const key = yield* secrets.get(buildProviderAccountOwner(account.id), secretName).pipe(
-          // The name comes from the plugin catalog, which refuses names the
-          // secrets store rejects.
-          Effect.catchTag("SecretNameError", Effect.die),
-          Effect.catchTag("SecretDecryptError", (error) =>
-            Effect.logWarning(
-              `Could not read the usage of account ${account.id}: its stored key cannot be decrypted`,
-              error,
-            ).pipe(Effect.as(Option.none<Redacted.Redacted<string>>())),
-          ),
-        );
+        const key = yield* readAccountKey(account.id, secretName, "usage");
         if (Option.isNone(key)) return;
         const outcome = yield* keyRequests.readUsage(kind.usage, parse, key.value);
         if (outcome._tag === "unavailable") {
@@ -1158,10 +1223,114 @@ const make = Effect.gen(function* () {
               return;
             }
             if (outcome._tag === "readings") {
-              yield* accountUsage.record(account.id, outcome.readings, { source: "read" });
+              yield* accountUsage.record(account.id, outcome.readings, {
+                source: "read",
+                wholeAnswerAt: outcome.takenAt,
+              });
               yield* recordCredentialAccepted(account.id, generation);
+              yield* storeReportedExpiry(current.value, outcome.expiresAt);
             } else {
               yield* recordCredentialRefused(account.id, generation, outcome.message);
+            }
+          }),
+        );
+        yield* promotion.whenServingOr(store, () => Effect.void);
+      }),
+
+    /**
+     * Reads the account's Model Catalog from its provider's API with the
+     * account's key, and stores the outcome (spec 06 section 16). It is for a
+     * provider whose `catalogSource` is `provider-api`. The controller daemon
+     * calls it for each API read and checks no grant. Nothing is returned, and
+     * the key is never logged.
+     *
+     * `stamp` is when the read started and which credential the account had
+     * then (`ProviderAccountProbes.buildReadStamp`), taken before this call
+     * reads the key. The outcome is stored through
+     * `ModelCatalogs.recordCatalogRead`:
+     *
+     * - The provider listed models: they replace the catalog's models. This
+     *   never marks a refused key as accepted, because some providers list
+     *   their public models for any key.
+     * - The provider answered 401: a failed read with the provider's words,
+     *   and the account's credential is recorded as refused with the same
+     *   words.
+     * - Anything else (no answer in time, 403, 429, 5xx, a redirect, a body
+     *   that is too large or that the plugin cannot read, more models than
+     *   Hercule keeps, a stored key that is missing, cannot be decrypted or
+     *   cannot be sent in a header): a failed read with a sentence that says
+     *   what happened. The models stay, and the account keeps its status.
+     *
+     * The outcome is stored in one transaction, and only when the account
+     * still has the credential generation of `stamp`. A key replaced while the
+     * request was in flight therefore gets neither the old key's models nor
+     * its refusal. The transaction waits for the promotion gate, but the
+     * request does not hold it, and a sealed controller stores nothing.
+     *
+     * Does nothing for an account that does not exist or whose provider does
+     * not read its catalog from its API.
+     */
+    readCatalogWithKey: (
+      providerAccountId: string,
+      stamp: ReadStamp,
+    ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const found = yield* accounts.one(providerAccountId);
+        if (Option.isNone(found)) return;
+        const account = found.value;
+        const providers = yield* host.providers();
+        const provider = providers.find(({ id }) => id === account.providerId);
+        const kind = findAccountKind(providers, account);
+        const source = provider?.catalogSource;
+        const parse = provider?.parseCatalogBody;
+        const secretName = kind === undefined ? undefined : findCredentialSecretName(kind);
+        if (
+          provider === undefined ||
+          source?.kind !== "provider-api" ||
+          parse === undefined ||
+          secretName === undefined
+        ) {
+          return;
+        }
+        const recordFailedRead = (message: string) =>
+          catalogs.recordCatalogRead(account.id, { _tag: "failed", message }, stamp);
+        const key = yield* readAccountKey(account.id, secretName, "models");
+        if (Option.isNone(key)) {
+          return yield* recordFailedRead(
+            `No usable key is stored for this account, so ${provider.displayName} cannot be asked for its models. Set the key again.`,
+          );
+        }
+        const outcome = yield* keyRequests.readCatalog(
+          provider.displayName,
+          source,
+          parse,
+          key.value,
+        );
+        if (outcome._tag === "unavailable") {
+          yield* Effect.logWarning(
+            `Could not read the models of account ${account.id}: ${outcome.message}`,
+          );
+        }
+        const store = withTransaction(
+          sql,
+          Effect.gen(function* () {
+            // Both writes check the stamp's credential generation themselves,
+            // and share this transaction so a refusal is never half stored.
+            if (outcome._tag === "listed") {
+              yield* catalogs.recordCatalogRead(
+                account.id,
+                { _tag: "listed", models: outcome.models },
+                stamp,
+              );
+            } else {
+              yield* recordFailedRead(outcome.message);
+              if (outcome._tag === "refused") {
+                yield* recordCredentialRefused(
+                  account.id,
+                  stamp.credentialGeneration,
+                  outcome.message,
+                );
+              }
             }
           }),
         );
@@ -1215,4 +1384,5 @@ export const ProviderAccountServiceLayer: Layer.Layer<
   | ModelCatalogs
   | ProviderAccountRunners
   | ModelProfileMembership
+  | ProviderAccountProbes
 > = Layer.effect(ProviderAccountService)(make);

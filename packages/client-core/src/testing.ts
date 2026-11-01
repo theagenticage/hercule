@@ -23,6 +23,7 @@ export {
   WITH_CLAUDE,
   WITH_CLAUDE_AND_PI,
   ZAI_IDENTITY,
+  buildModelCatalogItem,
   buildModelProfile,
   buildProfileEntry,
   buildProfileSection,

@@ -1678,6 +1678,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
                 ? {}
                 : { checkoutPaths: resolved.checkouts.map((checkout) => checkout.path) }),
               ...(repositorySkillsFolders.length === 0 ? {} : { repositorySkillsFolders }),
+              ...(frame.catalogModels === undefined ? {} : { catalogModels: frame.catalogModels }),
               editMarks:
                 resolved.sessionMarksDir === null || editWatch === undefined
                   ? null

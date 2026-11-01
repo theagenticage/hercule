@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import {
   keepPreviousData,
   useMutation,
@@ -6,18 +6,35 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { readErrorMessage, searchPickerModels, type HerculeClient } from "@hercule/client-core";
+import {
+  opensModelBrowser,
+  readErrorMessage,
+  searchPickerModels,
+  type HerculeClient,
+} from "@hercule/client-core";
 import { providerAccountsQuery } from "../../../../app/queries";
-import { AddModelPopover, ModelPicker } from "../../../../screens/settings/providers/model-picker";
+import { accountCatalogQuery } from "./-account-catalog-query";
+import {
+  AddModelPopover,
+  BrowseModelsButton,
+  ModelPicker,
+} from "../../../../screens/settings/providers/model-picker";
 
 /**
  * Renders an account's "Add a model" button and the picker it opens, over the
- * account's Model Catalog (`providerAccount.readCatalog`).
+ * account's Model Catalog (`providerAccount.readCatalog`). An account whose
+ * catalog has more than 40 models (`modelCount`) gets "Browse <n> models"
+ * instead, and the picker of a smaller one ends in "Browse all <n>". Both
+ * call `onBrowse`, which opens the model browser; the caller owns it.
+ * `onBrowse` gets the element to give the focus back to when the browser
+ * closes, or `null` when the dialog's own return of focus is enough. It is
+ * "Add a model" for "Browse all <n>", because the button that was pressed
+ * is in a popover that closes.
  *
- * The catalog is read when the picker opens and lives in the picker alone: it
- * is a query that is removed the moment the picker closes, and it is not one
- * the live connection keeps current. It is read again when the account's
- * `catalogReadAt` changes, which is how a Refresh that finished shows up.
+ * The catalog is read when the picker opens and lives in the picker alone
+ * (`accountCatalogQuery`): it is removed the moment the picker closes. It is
+ * read again when the account's `catalogReadAt` changes, which is how a
+ * Refresh that finished shows up.
  * Refresh (`providerAccount.refresh`) answers at once and the read follows on
  * its own, so the button is busy only while the request runs.
  *
@@ -28,17 +45,46 @@ export function AccountModelPicker({
   client,
   providerAccountId,
   name,
+  modelCount,
   held,
   onToggle,
+  onBrowse,
 }: {
   readonly client: HerculeClient;
   readonly providerAccountId: string;
   readonly name: string;
+  readonly modelCount: number;
   readonly held: ReadonlySet<string>;
   readonly onToggle: (slug: string) => void;
+  readonly onBrowse: (returnFocusTo: HTMLElement | null) => void;
 }): JSX.Element {
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  if (opensModelBrowser(modelCount)) {
+    return (
+      <BrowseModelsButton
+        name={name}
+        modelCount={modelCount}
+        onBrowse={() => {
+          onBrowse(null);
+        }}
+      />
+    );
+  }
   return (
-    <AddModelPopover name={name}>
+    <AddModelPopover
+      name={name}
+      triggerRef={addButtonRef}
+      browseAll={
+        modelCount > 0
+          ? {
+              modelCount,
+              onBrowse: () => {
+                onBrowse(addButtonRef.current);
+              },
+            }
+          : undefined
+      }
+    >
       <OpenPicker
         client={client}
         providerAccountId={providerAccountId}
@@ -67,13 +113,10 @@ function OpenPicker({
   const [query, setQuery] = useState("");
 
   const catalog = useQuery({
-    queryKey: ["model-catalog", providerAccountId, account?.catalogReadAt ?? null],
-    queryFn: () => client.providerAccount.readCatalog({ params: { id: providerAccountId } }),
-    // Gone when the picker closes, and never refetched behind the user's back.
-    gcTime: 0,
-    staleTime: Infinity,
+    ...accountCatalogQuery(client, providerAccountId, account?.catalogReadAt ?? null),
     placeholderData: keepPreviousData,
   });
+  // The model browser has its own copy of this mutation (`-model-browser.tsx`).
   const refresh = useMutation({
     mutationFn: () => client.providerAccount.refresh({ params: { id: providerAccountId } }),
     onSuccess: (updated) => {

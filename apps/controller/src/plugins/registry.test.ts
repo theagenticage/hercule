@@ -154,6 +154,17 @@ const SHIPPED = [
           models: "own-list",
         },
         {
+          providerId: "openrouter/openrouter",
+          kinds: [
+            {
+              kind: "api-key",
+              modelArgument: "openrouter/{model}",
+              credentialVariable: "OPENROUTER_API_KEY",
+            },
+          ],
+          models: "all",
+        },
+        {
           providerId: "opencode/opencode",
           kinds: [
             {
@@ -303,6 +314,40 @@ const SHIPPED_PROVIDERS = [
     },
   },
   {
+    id: "openrouter",
+    displayName: "OpenRouter",
+    definition: {
+      id: "openrouter/openrouter",
+      displayName: "OpenRouter",
+      kinds: [
+        {
+          id: "api-key",
+          title: "API key",
+          description:
+            "From the Keys page of your OpenRouter account (openrouter.ai/keys). It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          keyCheck: {
+            url: "https://openrouter.ai/api/v1/key",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          usage: {
+            readBy: "endpoint",
+            url: "https://openrouter.ai/api/v1/key",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          harnesses: ["pi/pi"],
+        },
+      ],
+      defaultHarnessId: "pi/pi",
+      catalogSource: {
+        kind: "provider-api",
+        url: "https://openrouter.ai/api/v1/models/user",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+      defaultSelection: "none",
+    },
+  },
+  {
     id: "opencode",
     displayName: "OpenCode",
     definition: {
@@ -407,7 +452,7 @@ describe("the shipped registry after a boot", () => {
     );
   });
 
-  it("holds the three harness plugins, the five provider plugins and the github, sentry and linear plugins, in registry order", () => {
+  it("holds the three harness plugins, the six provider plugins and the github, sentry and linear plugins, in registry order", () => {
     expect(details.map((detail) => detail.id)).toEqual([
       "claude-code",
       "codex",
@@ -415,6 +460,7 @@ describe("the shipped registry after a boot", () => {
       "anthropic",
       "openai",
       "zai",
+      "openrouter",
       "opencode",
       "minimax",
       "github",

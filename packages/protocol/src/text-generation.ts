@@ -8,6 +8,7 @@
  * session slot, so none of the session frames carry it.
  */
 import { Schema } from "effect";
+import { MAX_CATALOG_MODELS, ModelDeclaration } from "./models";
 import { OutputSchema } from "./output-schema";
 import { Fact, HarnessAccount, MAX_MESSAGE_LENGTH } from "./primitives";
 import { Usage } from "./sessions";
@@ -78,6 +79,13 @@ export const TextGenerationRequest = Schema.Struct({
   harnessId: Fact,
   harnessAccount: HarnessAccount,
   spec: TextGenerationSpec,
+  /**
+   * The account's whole Model Catalog, as `SessionStart.catalogModels` carries
+   * it, with the same meaning of absent and of empty.
+   */
+  catalogModels: Schema.optionalKey(
+    Schema.Array(ModelDeclaration).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
+  ),
 });
 
 export type TextGenerationRequest = Schema.Schema.Type<typeof TextGenerationRequest>;

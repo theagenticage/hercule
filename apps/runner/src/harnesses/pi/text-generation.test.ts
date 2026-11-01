@@ -18,10 +18,13 @@ import {
   SUBMIT_RESULT_TOOL,
 } from "./extension";
 import {
+  answerShippedModels,
   buildContext,
   buildFakePiSeam,
+  buildRefusal,
   cleanupHomes,
   createPiHome,
+  listAgentSpawns,
   settle,
   waitUntil,
   type FakePiBehaviour,
@@ -393,6 +396,142 @@ describe("launching pi for a text generation", () => {
     await outcome;
 
     expect(readdirSync(home)).toEqual([]);
+  });
+
+  it("declares the request's catalog models that pi lacks in the scratch directory, never in the Harness Home", async () => {
+    const { seam, spawns } = buildFakePiSeam({
+      answers: answerShippedModels("openrouter", ["shipped/model"]),
+    });
+    const home = createPiHome();
+    const ctx = {
+      ...buildContext(home),
+      modelArgument: "openrouter/{model}",
+      catalogModels: [
+        { slug: "shipped/model", name: "Shipped: Model", imageInput: null },
+        { slug: "fake-vendor/fake-model:free", name: "Fake: Model", imageInput: null },
+      ],
+    };
+    const outcome = Effect.runPromise(
+      Effect.catch(
+        makePiAdapter(seam).generateText(buildTextGenerationContext(ctx), {
+          ...SPEC,
+          model: "fake-vendor/fake-model:free",
+        }),
+        (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+      ),
+    );
+    await waitUntil("launched a pi", () => listAgentSpawns(spawns).length === 1);
+    const child = listAgentSpawns(spawns)[0]!;
+
+    expect(
+      JSON.parse(readFileSync(join(child.cwd!, "models.json"), "utf8")) as unknown,
+    ).toMatchObject({
+      providers: { openrouter: { models: [{ id: "fake-vendor/fake-model:free" }] } },
+    });
+    expect(readdirSync(home)).toEqual([]);
+
+    answerWith(child, ANSWER);
+    await outcome;
+  });
+
+  it("lists the shipped models from the store it copied, so a store that changes meanwhile does not reach the call's pi", async () => {
+    const home = createPiHome();
+    const copied = '{"stored":"when the call began"}';
+    writeFileSync(join(home, "models-store.json"), copied);
+    const seenStores: Array<string | undefined> = [];
+    const { seam, spawns } = buildFakePiSeam({
+      answers: answerShippedModels("openrouter", ["shipped/model"]),
+      atSpawn: (env) => {
+        const path = join(env["PI_CODING_AGENT_DIR"]!, "models-store.json");
+        seenStores.push(existsSync(path) ? readFileSync(path, "utf8") : undefined);
+        // A refreshed store lands in the home while the call starts.
+        writeFileSync(join(home, "models-store.json"), '{"stored":"by a later refresh"}');
+      },
+    });
+    const ctx = {
+      ...buildContext(home),
+      modelArgument: "openrouter/{model}",
+      catalogModels: [{ slug: "fake-vendor/fake-model:free", name: "Fake", imageInput: null }],
+    };
+    const outcome = Effect.runPromise(
+      Effect.catch(
+        makePiAdapter(seam).generateText(buildTextGenerationContext(ctx), SPEC),
+        (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+      ),
+    );
+    await waitUntil("launched a pi", () => listAgentSpawns(spawns).length === 1);
+
+    // The listing of shipped models and the call's own pi saw the same store.
+    expect(seenStores).toEqual([copied, copied]);
+
+    answerWith(listAgentSpawns(spawns)[0]!, ANSWER);
+    await outcome;
+  });
+
+  it("fails the call, and launches no pi, when pi cannot list the models it ships", async () => {
+    const { seam, spawns } = buildFakePiSeam({
+      answers: { get_available_models: () => buildRefusal("no models") },
+    });
+    const ctx = {
+      ...buildContext(createPiHome()),
+      modelArgument: "openrouter/{model}",
+      catalogModels: [{ slug: "a/b", name: "A B", imageInput: null }],
+    };
+
+    const outcome = await Effect.runPromise(
+      Effect.catch(
+        makePiAdapter(seam).generateText(buildTextGenerationContext(ctx), SPEC),
+        (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+      ),
+    );
+
+    expect(outcome).toMatchObject({
+      outcome: "failed",
+      message: expect.stringContaining("could not list the models it ships") as unknown,
+    });
+    expect(listAgentSpawns(spawns)).toEqual([]);
+  });
+
+  it("writes no models file when the request carries no catalog models", async () => {
+    const { outcome, child } = await startGeneration();
+
+    expect(existsSync(join(child.cwd!, "models.json"))).toBe(false);
+
+    answerWith(child, ANSWER);
+    await outcome;
+  });
+
+  it("gives pi a copy of the Harness Home's models.json, so a provider's own settings apply", async () => {
+    const home = createPiHome();
+    const original = JSON.stringify({ providers: { zai: { baseUrl: "http://127.0.0.1:9" } } });
+    writeFileSync(join(home, "models.json"), original);
+    const { seam, spawns } = buildFakePiSeam();
+    const outcome = Effect.runPromise(generate(makePiAdapter(seam), home));
+    await waitUntil("launched a pi", () => spawns.length === 1);
+
+    expect(readFileSync(join(spawns[0]!.cwd!, "models.json"), "utf8")).toBe(original);
+
+    answerWith(spawns[0]!, ANSWER);
+    await outcome;
+    expect(readFileSync(join(home, "models.json"), "utf8")).toBe(original);
+  });
+
+  it("fails without prompting when pi picked a similar model instead of the one asked for", async () => {
+    const { outcome, child } = await startGeneration({
+      answers: {
+        get_state: () => ({
+          success: true,
+          data: { model: { provider: "zai", id: "glm-5.3-flash-pro" } },
+        }),
+      },
+    });
+
+    await expect(outcome).resolves.toMatchObject({
+      outcome: "failed",
+      message: expect.stringContaining("instead of zai/glm-5.3-flash") as unknown,
+    });
+    expect(child.sent.map((one) => one.type)).toEqual(["get_state"]);
+    expect(child.kills()).toBe(1);
   });
 
   it("kills pi when the caller gives up", async () => {

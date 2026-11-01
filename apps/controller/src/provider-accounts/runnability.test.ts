@@ -113,6 +113,21 @@ describe("findCredentialProblem", () => {
       ),
     ).toBeNull();
   });
+
+  it("calls an expired key a key, and says to add a new one", () => {
+    const [provider] = providers;
+    const kind = provider!.kinds.find((one) => one.id === "api-key")!;
+
+    expect(
+      findCredentialProblem(
+        account("api-key", "2026-10-30T09:00:00.000Z"),
+        provider!,
+        kind,
+        true,
+        Date.parse("2026-10-31T00:00:00.000Z"),
+      ),
+    ).toBe("OpenAI · work's key expired on 2026-10-30. Add a new key in Settings › Providers.");
+  });
 });
 
 describe("isIdentityCompatible", () => {

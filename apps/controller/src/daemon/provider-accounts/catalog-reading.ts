@@ -1,18 +1,21 @@
 /**
- * Reads the Model Catalogs of Provider Accounts from the runners.
+ * Reads the Model Catalogs of Provider Accounts. The provider's
+ * `catalogSource` says how:
  *
- * A catalog read is always a probe of its own: the account is probed in the
- * provider's source harness on one runner, and the outcome is stored as the
- * read (`ModelCatalogs.recordCatalogRead`). No sweep probe or sign-in probe
- * is reused as a read, so a read has one meaning wherever it came from.
+ * - `harness-probe`: a probe of its own. The account is probed in the
+ *   provider's source harness on one runner, and the outcome is stored as the
+ *   read (`ModelCatalogs.recordCatalogRead`). No sweep probe or sign-in probe
+ *   is reused as a read, so a read has one meaning wherever it came from. The
+ *   runner is chosen before the probe is sent: the controller's own runner
+ *   when the account is ready there, else the first connected runner where it
+ *   is (`ModelCatalogs.chooseDueReads`). A read of an account that no
+ *   connected runner can serve is recorded as a failed read, with what the
+ *   user can do about it.
+ * - `provider-api`: the controller asks the provider's API with the account's
+ *   key (`ProviderAccountService.readCatalogWithKey`). It needs no runner and
+ *   takes no probe slot, so it works with no runner connected.
  *
- * The runner is chosen before the probe is sent: the controller's own runner
- * when the account is ready there, else the first connected runner where it
- * is (`ModelCatalogs.chooseDueReads`). A read of an account that no connected
- * runner can serve is recorded as a failed read, with what the user can do
- * about it.
- *
- * Only one read per account is in flight. See `readCatalog` and
+ * Only one read per account is in flight, whichever way it is read. See `readCatalog` and
  * `readDueCatalogs` for what happens to a read that finds another running.
  *
  * Probing builds this module once (see `makeCatalogReading`), because both
@@ -26,6 +29,8 @@ import { NotFound } from "@hercule/contract";
 import {
   ModelCatalogs,
   ProviderAccountProbes,
+  ProviderAccountService,
+  type ApiRead,
   type ChosenReads,
   type ProbePair,
   type UnservedRead,
@@ -46,6 +51,7 @@ export const makeCatalogReading = (sendCatalogProbe: SendCatalogProbe) =>
   Effect.gen(function* () {
     const catalogs = yield* ModelCatalogs;
     const probes = yield* ProviderAccountProbes;
+    const providerAccounts = yield* ProviderAccountService;
     const localRunnerId = yield* LocalRunnerId;
 
     // The accounts whose catalog read is running, each with a Deferred that
@@ -99,7 +105,7 @@ export const makeCatalogReading = (sendCatalogProbe: SendCatalogProbe) =>
      * models stay. Does nothing when the account was deleted meanwhile.
      */
     const recordUnservedRead = ({ providerAccountId, message }: UnservedRead) =>
-      probes.readProbeStamp(providerAccountId, false).pipe(
+      probes.buildReadStamp(providerAccountId).pipe(
         Effect.flatMap((stamp) =>
           catalogs.recordCatalogRead(providerAccountId, { _tag: "failed", message }, stamp),
         ),
@@ -109,11 +115,32 @@ export const makeCatalogReading = (sendCatalogProbe: SendCatalogProbe) =>
         ),
       );
 
-    /** Lists, by account, the work of the chosen reads: a probe on the chosen runner, or the record of why none was chosen. */
+    /**
+     * Reads the account's catalog from its provider's API. Does nothing when
+     * the account was deleted meanwhile.
+     */
+    const readFromApi = ({ providerAccountId }: ApiRead) =>
+      probes.buildReadStamp(providerAccountId).pipe(
+        Effect.flatMap((stamp) => providerAccounts.readCatalogWithKey(providerAccountId, stamp)),
+        Effect.catchIf(
+          (error): error is NotFound => error instanceof NotFound,
+          () => Effect.void,
+        ),
+      );
+
+    /**
+     * Lists, by account, the work of the chosen reads: a probe on the chosen
+     * runner, a read of the provider's API, or the record of why no runner was
+     * chosen.
+     */
     const listWork = (chosen: ChosenReads) => [
       ...chosen.reads.map((read) => ({
         providerAccountId: read.providerAccountId,
         work: sendCatalogProbe(read),
+      })),
+      ...chosen.apiReads.map((read) => ({
+        providerAccountId: read.providerAccountId,
+        work: readFromApi(read),
       })),
       ...chosen.unserved.map((one) => ({
         providerAccountId: one.providerAccountId,
@@ -135,8 +162,9 @@ export const makeCatalogReading = (sendCatalogProbe: SendCatalogProbe) =>
        *
        * If the account is being read already, this waits for that read to end
        * and then reads again, and forced reads that wait together are one read.
-       * The runner is chosen after the wait, so it is chosen with what the
-       * world looks like by then.
+       * For a probed catalog, the runner is chosen after the wait, so it is
+       * chosen with what the world looks like by then. A catalog read through
+       * the provider's API needs no runner.
        */
       readCatalog: (providerAccountId: string): Effect.Effect<void> =>
         logReadFailure(
@@ -157,8 +185,8 @@ export const makeCatalogReading = (sendCatalogProbe: SendCatalogProbe) =>
         ),
 
       /**
-       * Reads the catalogs that are due, one probe each, and returns when the
-       * reads end. Skips an account that is being read already. Logs a failure
+       * Reads the catalogs that are due, one probe or one API read each, and
+       * returns when the reads end. Skips an account that is being read already. Logs a failure
        * instead of returning it.
        *
        * Call it after the probes of a sweep, because a probe can be what finds
@@ -166,7 +194,8 @@ export const makeCatalogReading = (sendCatalogProbe: SendCatalogProbe) =>
        * that runner can serve are read, and no account is recorded as unserved:
        * a runner that just connected knows nothing about an account whose
        * machine has not connected yet. Without it, an account that no
-       * connected runner can serve is recorded as a failed read.
+       * connected runner can serve is recorded as a failed read. The catalogs
+       * read through a provider's API are read either way.
        */
       readDueCatalogs: (servedBy?: string): Effect.Effect<void> =>
         logReadFailure(

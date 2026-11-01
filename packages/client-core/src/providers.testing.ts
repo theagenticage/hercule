@@ -7,6 +7,7 @@
 import type {
   CapabilitySnapshot,
   Harness,
+  ModelCatalogItem,
   ModelProfile,
   Provider,
   ProviderAccount,
@@ -410,5 +411,21 @@ export const buildModelProfile = (
   dismissedNewModels: [],
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
+  ...fields,
+});
+
+/**
+ * Returns a catalog model with the given slug, named after it, with no image
+ * input and no details; `fields` overrides any of it.
+ */
+export const buildModelCatalogItem = (
+  slug: string,
+  fields: Partial<ModelCatalogItem> = {},
+): ModelCatalogItem => ({
+  slug,
+  name: slug,
+  imageInput: null,
+  options: [],
+  firstSeenAt: "2026-09-05T09:00:00.000Z",
   ...fields,
 });

@@ -59,6 +59,17 @@ describe("the pi harness", () => {
         models: "own-list",
       },
       {
+        providerId: "openrouter/openrouter",
+        kinds: [
+          {
+            kind: "api-key",
+            modelArgument: "openrouter/{model}",
+            credentialVariable: "OPENROUTER_API_KEY",
+          },
+        ],
+        models: "all",
+      },
+      {
         providerId: "opencode/opencode",
         kinds: [
           {

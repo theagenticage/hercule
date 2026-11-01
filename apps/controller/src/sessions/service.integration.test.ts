@@ -23,6 +23,7 @@ import {
   SessionSpec,
   SteerRefused,
   type AdapterError,
+  type ModelDeclaration,
   type ModelSelection,
   type HarnessAccount,
   type HarnessEvent,
@@ -67,6 +68,7 @@ import {
   SessionService,
   SessionServiceLayer,
   type PassageQueryInput,
+  type StartNeeds,
   type StartRequest,
 } from "./service";
 
@@ -357,12 +359,14 @@ const prepareAccount = (providerAccountId: string): Effect.Effect<HarnessAccount
  * Calls `claimStarts` the way the controller daemon does: inside the caller's
  * transaction. The controller has no local runner, no connection has a GitHub
  * account, and every session gets `coordination` as its coordination
- * paragraph, or none when it is left out.
+ * paragraph, or none when it is left out. No harness is told about the catalog,
+ * unless `findModelDeclarations` says otherwise.
  */
 const claimStarting = (
   runnerId: string,
   room: number,
   coordination?: string,
+  findModelDeclarations: StartNeeds["findModelDeclarations"] = () => Effect.succeed(undefined),
 ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -374,6 +378,7 @@ const claimStarting = (
         readGitIdentity: () => Effect.succeed(undefined),
         requireAccountRunnable: () => Effect.void,
         prepareHarnessAccount: prepareAccount,
+        findModelDeclarations,
         buildCoordination: () => Effect.succeed(coordination),
         runner: { name: "a runner", negotiatedCapabilities: [] },
         localRunnerId: undefined,
@@ -476,6 +481,57 @@ describe("SessionService.claimStarts", () => {
     );
   });
 
+  it("puts the account's catalog on the frame, an empty one included, asking once for each account and harness", async () => {
+    const catalog: ReadonlyArray<ModelDeclaration> = [
+      { slug: "api-only", name: "API only", imageInput: null, contextWindow: 200_000 },
+    ];
+    const asked: Array<ReadonlyArray<string>> = [];
+    const claimAll = (declarations: ReadonlyArray<ModelDeclaration>) =>
+      run(
+        Effect.gen(function* () {
+          const providerAccountId = mintId();
+          const runnerId = mintId();
+          yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
+          });
+          yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "other"),
+          });
+          const claimed = yield* claimStarting(runnerId, 2, undefined, (...args) => {
+            asked.push(args);
+            return Effect.succeed(declarations);
+          });
+          return { claimed, providerAccountId };
+        }),
+      );
+
+    const full = await claimAll(catalog);
+    expect(full.claimed.map((claim) => claim.frame.catalogModels)).toEqual([catalog, catalog]);
+    expect(asked).toEqual([[full.providerAccountId, HARNESS_ID]]);
+
+    const empty = await claimAll([]);
+    expect(empty.claimed.map((claim) => claim.frame.catalogModels)).toEqual([[], []]);
+  });
+
+  it("leaves catalogModels off the frame when the harness is told nothing about the catalog", async () => {
+    const claimed = await run(
+      Effect.gen(function* () {
+        const providerAccountId = mintId();
+        const runnerId = mintId();
+        yield* insertQueuedSession(runnerId, {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+        });
+        return yield* claimStarting(runnerId, 1);
+      }),
+    );
+
+    expect(claimed).toHaveLength(1);
+    expect("catalogModels" in claimed[0]!.frame).toBe(false);
+  });
+
   it("ends a queued session, with the reason, when its account cannot be prepared", async () => {
     // A refusal never passes by itself: retrying it on every pass would only
     // log it again and keep the account from being deleted.
@@ -508,6 +564,7 @@ describe("SessionService.claimStarts", () => {
               requireAccountRunnable: () => Effect.void,
               prepareHarnessAccount: (id) =>
                 id === refusedAccountId ? Effect.fail(refusal) : prepareAccount(id),
+              findModelDeclarations: () => Effect.succeed(undefined),
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },
               localRunnerId: undefined,
@@ -579,6 +636,7 @@ describe("SessionService.claimStarts", () => {
                 : Effect.void;
             },
             prepareHarnessAccount: prepareAccount,
+            findModelDeclarations: () => Effect.succeed(undefined),
             buildCoordination: () => Effect.succeed(undefined),
             runner: { name: "a runner", negotiatedCapabilities: [] },
             localRunnerId: undefined,
@@ -898,6 +956,7 @@ describe("SessionService.claimStarts", () => {
               readGitIdentity: accounts.readGitIdentity,
               requireAccountRunnable: () => Effect.void,
               prepareHarnessAccount: prepareAccount,
+              findModelDeclarations: () => Effect.succeed(undefined),
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },
               localRunnerId: undefined,

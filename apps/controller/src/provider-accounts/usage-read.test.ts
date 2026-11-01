@@ -8,6 +8,8 @@ import { Duration, Effect, Logger } from "effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as SqlClient from "effect/sql/SqlClient";
+import { buildAnnouncementRecorder } from "../db/testing";
+import { AccountUsage } from "../usage";
 import { ProviderKeyRequestTimeout } from "./provider-key-requests";
 import { ProviderAccountService } from "./service";
 import {
@@ -29,6 +31,9 @@ const json = (body: unknown, status = 200): Response =>
 
 /** A 401 with the words a provider gives for refusing a key. */
 const refusal = (message: string): Response => json({ error: { message } }, 401);
+
+/** Returns the instant `days` from now, as the fixed-width UTC text a provider's expiry is stored as. */
+const inDays = (days: number): string => new Date(Date.now() + days * 86_400_000).toISOString();
 
 const withService = <A, E, R>(
   body: (service: ProviderAccountService["Service"]) => Effect.Effect<A, E, R>,
@@ -212,10 +217,15 @@ describe("ProviderAccountService.readUsageWithKey", () => {
     /**
      * Reads the usage of a Metered account whose provider answers `answer`
      * only after the key has been replaced. When `refuseNewKey` is true, the
-     * new key is read, and refused, before the first read ends. Returns the
+     * new key is read before the first read ends, and the provider answers
+     * that read with `newKeyAnswer`, a refusal unless given. Returns the
      * account as the user sees it afterwards.
      */
-    const readWhileKeyIsReplaced = (answer: () => Response, refuseNewKey: boolean) => {
+    const readWhileKeyIsReplaced = (
+      answer: () => Response,
+      refuseNewKey: boolean,
+      newKeyAnswer: () => Response = () => refusal("the new key is refused"),
+    ) => {
       const hook: { replaceKey: Effect.Effect<unknown> | undefined } = { replaceKey: undefined };
       let usageRequests = 0;
       const client = HttpClient.make((request) =>
@@ -226,7 +236,7 @@ describe("ProviderAccountService.readUsageWithKey", () => {
           usageRequests += 1;
           // The first usage request is the read in flight. A second one reads the new key.
           if (usageRequests > 1) {
-            return HttpClientResponse.fromWeb(request, refusal("the new key is refused"));
+            return HttpClientResponse.fromWeb(request, newKeyAnswer());
           }
           yield* hook.replaceKey ?? Effect.void;
           return HttpClientResponse.fromWeb(request, answer());
@@ -256,11 +266,32 @@ describe("ProviderAccountService.readUsageWithKey", () => {
       expect(account.failure).toBeNull();
     });
 
+    it("stores none of the old key's expiry", async () => {
+      const account = await readWhileKeyIsReplaced(
+        () => json({ used: 40, expires: inDays(30) }),
+        false,
+      );
+
+      expect(account.expiresAt).toBeNull();
+    });
+
     it("stores none of the old key's readings and does not clear the new key's failure", async () => {
       const account = await readWhileKeyIsReplaced(() => json({ used: 40 }), true);
 
       expect(account.usage).toEqual([]);
       expect(account.failure).toMatchObject({ message: "the new key is refused" });
+    });
+
+    it("removes none of the new key's readings when the old key's answer has none", async () => {
+      const account = await readWhileKeyIsReplaced(
+        () => json({ empty: true }),
+        true,
+        () => json({ used: 50 }),
+      );
+
+      expect(account.usage).toMatchObject([
+        { kind: "window", window: "five-hour", usedPercent: 50 },
+      ]);
     });
   });
 
@@ -340,5 +371,198 @@ describe("ProviderAccountService.readUsageWithKey", () => {
     );
 
     expect(api.requests).toEqual([]);
+  });
+});
+
+describe("the readings a usage read no longer reports", () => {
+  /**
+   * Reads the usage of a new Metered account once for each of `bodies`, with a
+   * short wait before each so every read is taken at a later time. Returns the
+   * account's readings after each read, and how often each read announced the
+   * account.
+   */
+  const readBodies = async (bodies: ReadonlyArray<unknown>) => {
+    let next = 0;
+    const api = buildFakeProviderApi(() => json(bodies[next++]));
+    const recorder = buildAnnouncementRecorder();
+    return runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addMeteredAccount;
+        const afterEach = [];
+        for (let read = 0; read < bodies.length; read++) {
+          yield* Effect.sleep("5 millis");
+          const before = recorder.announced.length;
+          yield* withService((service) => service.readUsageWithKey(added.id));
+          afterEach.push({
+            usage: (yield* withService((service) => service.read(added.id))).usage,
+            announced: recorder.announced
+              .slice(before)
+              .filter((change) => change._tag === "record" && change.id === added.id).length,
+          });
+        }
+        return afterEach;
+      }).pipe(Effect.provide(recorder.listener)),
+      api.client,
+      METERED_PLUGINS,
+    );
+  };
+
+  it("removes a window the provider stopped reporting, and announces the account", async () => {
+    const steps = await readBodies([{ used: 40, weekly: 20 }, { used: 40 }]);
+
+    expect(steps[0]!.usage.map((reading) => reading.kind === "window" && reading.window)).toEqual([
+      "five-hour",
+      "weekly",
+    ]);
+    expect(steps[1]!.usage).toMatchObject([{ kind: "window", window: "five-hour" }]);
+    expect(steps[1]!.announced).toBe(1);
+  });
+
+  it("removes every reading when the provider accepts the key and reports none", async () => {
+    const steps = await readBodies([{ used: 40, weekly: 20 }, { empty: true }, { used: 41 }]);
+
+    expect(steps[1]!.usage).toEqual([]);
+    expect(steps[1]!.announced).toBe(1);
+    // The provider reports a window again, and it is stored again.
+    expect(steps[2]!.usage).toMatchObject([{ window: "five-hour", usedPercent: 41 }]);
+  });
+});
+
+describe("the expiry of a key, from the usage read", () => {
+  /** Counts the notifications that warn of an expiring credential. */
+  const countExpiryWarnings = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ readonly n: number }>`
+      SELECT COUNT(*) AS n FROM notifications WHERE kind = 'core.account-expiring'`;
+    return rows[0]!.n;
+  });
+
+  /**
+   * Reads the usage of a new Metered account once for each of `bodies`, then
+   * returns the account's expiry after each read, and the announcements of
+   * the account that each read caused.
+   */
+  const readBodies = async (bodies: ReadonlyArray<unknown>) => {
+    let next = 0;
+    const api = buildFakeProviderApi(() => json(bodies[next++]));
+    const recorder = buildAnnouncementRecorder();
+    const steps = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addMeteredAccount;
+        const afterEach = [];
+        for (let read = 0; read < bodies.length; read++) {
+          const before = recorder.announced.length;
+          yield* withService((service) => service.readUsageWithKey(added.id));
+          afterEach.push({
+            expiresAt: (yield* withService((service) => service.read(added.id))).expiresAt,
+            announced: recorder.announced
+              .slice(before)
+              .filter((change) => change._tag === "record" && change.id === added.id).length,
+          });
+        }
+        return afterEach;
+      }).pipe(Effect.provide(recorder.listener)),
+      api.client,
+      METERED_PLUGINS,
+    );
+    return steps;
+  };
+
+  it("stores the expiry the answer reports, and announces the account even when the readings are unchanged", async () => {
+    const expiry = inDays(30);
+
+    const steps = await readBodies([{ used: 40 }, { used: 40, expires: expiry }]);
+
+    expect(steps[0]!.expiresAt).toBeNull();
+    expect(steps[1]!.expiresAt).toBe(expiry);
+    // The readings are the same as in the first read and were announced less than 5 minutes ago.
+    expect(steps[1]!.announced).toBe(1);
+  });
+
+  it("does not announce an expiry that is the one stored", async () => {
+    const expiry = inDays(30);
+
+    const steps = await readBodies([
+      { used: 40, expires: expiry },
+      { used: 40, expires: expiry },
+    ]);
+
+    expect(steps[1]!.expiresAt).toBe(expiry);
+    expect(steps[1]!.announced).toBe(0);
+  });
+
+  it("clears the stored expiry when the answer says the key does not expire, and keeps it when the answer says nothing", async () => {
+    const expiry = inDays(30);
+
+    const steps = await readBodies([
+      { used: 40, expires: expiry },
+      { used: 41 },
+      { used: 41, expires: null },
+    ]);
+
+    expect(steps.map((step) => step.expiresAt)).toEqual([expiry, expiry, null]);
+    expect(steps[2]!.announced).toBe(1);
+  });
+
+  it("warns again about a new expiry, but not twice about the same one", async () => {
+    const expiry = inDays(10);
+    const bodies = [
+      { used: 40, expires: expiry },
+      { used: 40, expires: expiry },
+      { used: 40, expires: inDays(9) },
+    ];
+    let next = 0;
+    const api = buildFakeProviderApi(() => json(bodies[next++]));
+
+    const warnings = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addMeteredAccount;
+        const counts = [];
+        for (let read = 0; read < bodies.length; read++) {
+          yield* withService((service) => service.readUsageWithKey(added.id));
+          yield* withService((service) => service.notifyExpiring());
+          counts.push(yield* countExpiryWarnings);
+        }
+        return counts;
+      }),
+      api.client,
+      METERED_PLUGINS,
+    );
+
+    expect(warnings).toEqual([1, 1, 2]);
+  });
+
+  it("clears the expiry of the old key when the key is replaced, and makes the account due for a read at once", async () => {
+    const expiry = inDays(30);
+    const api = buildFakeProviderApi(() => json({ used: 40, expires: expiry }));
+
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addMeteredAccount;
+        yield* withService((service) => service.readUsageWithKey(added.id));
+        const usage = yield* AccountUsage;
+        const claimed = yield* usage.claimRead(added.id);
+        const dueBefore = yield* usage.listDueAccounts([added.id]);
+        const readBefore = yield* withService((service) => service.read(added.id));
+        yield* withService((service) =>
+          service.update({ id: added.id, credentials: { apiKey: "sk-new" } }),
+        );
+        const replaced = yield* withService((service) => service.read(added.id));
+        const dueAfter = yield* usage.listDueAccounts([added.id]);
+        yield* withService((service) => service.readUsageWithKey(added.id));
+        const readAgain = yield* withService((service) => service.read(added.id));
+        return { claimed, dueBefore, readBefore, replaced, dueAfter, readAgain, id: added.id };
+      }),
+      api.client,
+      METERED_PLUGINS,
+    );
+
+    expect(outcome.claimed).toBe(true);
+    expect(outcome.dueBefore).toEqual([]);
+    expect(outcome.readBefore.expiresAt).toBe(expiry);
+    expect(outcome.replaced.expiresAt).toBeNull();
+    expect(outcome.dueAfter).toEqual([outcome.id]);
+    // The new key's own read sets its expiry.
+    expect(outcome.readAgain.expiresAt).toBe(expiry);
   });
 });

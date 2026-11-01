@@ -5,7 +5,12 @@
  * plugin contributes only these facts.
  */
 import { Schema } from "effect";
-import { LoginMethod, type Timestamp, type UsageReading } from "@hercule/protocol";
+import {
+  LoginMethod,
+  type CatalogModel,
+  type Timestamp,
+  type UsageReading,
+} from "@hercule/protocol";
 import { SetupStep } from "./connections";
 import { ContributionName, ContributionWord, QualifiedContributionId } from "./contributions";
 
@@ -60,11 +65,30 @@ export type KeyCheck = Schema.Schema.Type<typeof KeyCheck>;
  * what it is given. `refused` is the provider's own words for why it rejected
  * the credential (spec 06 section 15.6). A body that is not the expected
  * shape is a defect of the plugin and is thrown, not returned.
+ *
+ * A success may also say when the credential expires. `expiresAt` absent means
+ * the body says nothing about expiry, so the stored expiry stays as it is.
+ * `null` means the credential does not expire. A `Timestamp` is the moment it
+ * stops working.
  */
 export type ParseUsageBody = (
   body: unknown,
   takenAt: Timestamp,
-) => { readonly readings: ReadonlyArray<UsageReading> } | { readonly refused: string };
+) =>
+  | {
+      readonly readings: ReadonlyArray<UsageReading>;
+      readonly expiresAt?: Timestamp | null;
+    }
+  | { readonly refused: string };
+
+/**
+ * What a provider's catalog endpoint answered, turned into models. `body` is
+ * the parsed JSON of a 2xx answer, and the models come in the order the
+ * provider lists them. The parser skips an item it cannot read (one with no
+ * id) and throws on a body that is not the expected shape at all, which the
+ * controller records as a failed read.
+ */
+export type ParseCatalogBody = (body: unknown) => ReadonlyArray<CatalogModel>;
 
 /**
  * How an Account Kind's Account Usage is read (spec 06 section 18). A kind
@@ -119,19 +143,37 @@ export const AccountKind = Schema.Struct({
 export type AccountKind = Schema.Schema.Type<typeof AccountKind>;
 
 /**
- * Where the controller reads a provider's Model Catalog from. Only one source
- * exists so far: probing a harness.
- *
- * - `harness-probe` reads the catalog from the list of models that a probe of
- *   `harnessId` returns for the account, on a runner where the account is
- *   ready in that harness. A probe of any other harness never changes the
- *   catalog.
+ * Reads the catalog from the list of models that a probe of `harnessId`
+ * returns for the account, on a runner where the account is ready in that
+ * harness. A probe of any other harness never changes the catalog.
  */
-export const CatalogSource = Schema.Struct({
+export const HarnessProbeCatalogSource = Schema.Struct({
   kind: Schema.Literal("harness-probe"),
   /** The qualified id of the harness to probe, such as `claude-code/claude-code`. */
   harnessId: QualifiedContributionId,
 });
+
+export type HarnessProbeCatalogSource = Schema.Schema.Type<typeof HarnessProbeCatalogSource>;
+
+/**
+ * Reads the catalog from the provider's own API: the controller sends one GET
+ * request with the account's key and turns the answer into models with the
+ * provider's `parseCatalogBody`. No runner is involved. `url` and `headers`
+ * follow the rules of `KeyCheck`, and only a provider whose account kinds all
+ * have a `credentials` step can declare this, because the request needs a key.
+ */
+export const ProviderApiCatalogSource = Schema.Struct({
+  kind: Schema.Literal("provider-api"),
+  ...KeyCheck.fields,
+});
+
+export type ProviderApiCatalogSource = Schema.Schema.Type<typeof ProviderApiCatalogSource>;
+
+/**
+ * Where the controller reads a provider's Model Catalog from: a probe of a
+ * harness (`harness-probe`) or the provider's own API (`provider-api`).
+ */
+export const CatalogSource = Schema.Union([HarnessProbeCatalogSource, ProviderApiCatalogSource]);
 
 export type CatalogSource = Schema.Schema.Type<typeof CatalogSource>;
 
@@ -163,10 +205,10 @@ export const ProviderDefinition = Schema.Struct({
    */
   defaultHarnessId: QualifiedContributionId,
   /**
-   * Where the controller reads an account's Model Catalog from. The host
-   * refuses a provider when one of its account kinds does not list
-   * `catalogSource.harnessId` in `harnesses`, because an account of that kind
-   * could never be read.
+   * Where the controller reads an account's Model Catalog from. When the
+   * source is a `harness-probe`, the host refuses a provider when one of its
+   * account kinds does not list `catalogSource.harnessId` in `harnesses`,
+   * because an account of that kind could never be read.
    */
   catalogSource: CatalogSource,
   /** Which models of the catalog an account brings into a Model Profile when it is first added. */

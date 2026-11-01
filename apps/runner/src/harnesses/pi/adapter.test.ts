@@ -4,7 +4,7 @@
  * pi 0.85.1's, and the commands and responses follow the shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber } from "effect";
@@ -22,6 +22,7 @@ import {
   SUBMIT_RESULT_TOOL,
 } from "./extension";
 import {
+  agentFolderOf,
   buildFakePiSeam,
   startBusySession,
   cleanupHomes,
@@ -44,7 +45,7 @@ import {
 afterAll(cleanupHomes);
 
 /** Returns the flags every pi this adapter starts is given, in order. */
-const buildFlags = (home: string): ReadonlyArray<string> => [
+const buildFlags = (home: string, agentFolder: string): ReadonlyArray<string> => [
   "--mode",
   "rpc",
   "--no-context-files",
@@ -55,7 +56,7 @@ const buildFlags = (home: string): ReadonlyArray<string> => [
   "--no-approve",
   "--offline",
   "-e",
-  join(home, `extension-${SESSION}.ts`),
+  join(agentFolder, `extension-${SESSION}.ts`),
   "--session-dir",
   join(home, "sessions"),
   "--session-id",
@@ -82,7 +83,10 @@ describe("launching pi for a session", () => {
   it("turns off context files, the user's own extensions and pi's own approvals for a workspace-less session", async () => {
     const run = await startTestSession();
 
-    expect(run.child.command).toEqual([run.ctx.binary, ...buildFlags(run.ctx.home)]);
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+    ]);
   });
 
   it("reads the workspace's own context files when the session has a workspace", async () => {
@@ -96,7 +100,9 @@ describe("launching pi for a session", () => {
 
     expect(run.child.command).toEqual([
       run.ctx.binary,
-      ...buildFlags(run.ctx.home).filter((flag) => flag !== "--no-context-files"),
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)).filter(
+        (flag) => flag !== "--no-context-files",
+      ),
     ]);
   });
 
@@ -109,10 +115,14 @@ describe("launching pi for a session", () => {
     expect(run.child.cwd).toBe(run.ctx.cwd);
   });
 
-  it("sets the Harness Home and Z.ai key, and turns off the update check", async () => {
+  it("sets a private agent folder outside the Harness Home and the Z.ai key, and turns off the update check", async () => {
     const run = await startTestSession();
 
-    expect(run.child.env["PI_CODING_AGENT_DIR"]).toBe(run.ctx.home);
+    const folder = agentFolderOf(run.child);
+    expect(folder).not.toBe(run.ctx.home);
+    expect(folder.startsWith(run.ctx.home)).toBe(false);
+    // Only this user may read it: it holds the account's model files.
+    expect(statSync(folder).mode & 0o777).toBe(0o700);
     expect(run.child.env["PI_SKIP_VERSION_CHECK"]).toBe("1");
     expect(run.child.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
   });
@@ -158,7 +168,7 @@ describe("launching pi for a session", () => {
   it("writes the extension pi loads, with the approval dialog tied to the abort signal", async () => {
     const run = await startTestSession();
 
-    const path = join(run.ctx.home, `extension-${SESSION}.ts`);
+    const path = join(agentFolderOf(run.child), `extension-${SESSION}.ts`);
     expect(run.child.env[AGENT_FILE_VARIABLE]).toBe(path);
     const source = readFileSync(path, "utf8");
     expect(source).not.toBe("");
@@ -169,7 +179,7 @@ describe("launching pi for a session", () => {
 
   it("kills what the session's bash calls left running once its pi exits, then deletes its extension", async () => {
     const run = await startTestSession();
-    const path = join(run.ctx.home, `extension-${SESSION}.ts`);
+    const path = join(agentFolderOf(run.child), `extension-${SESSION}.ts`);
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
 
@@ -291,6 +301,112 @@ describe("launching pi for a session", () => {
   });
 });
 
+describe("starting pi on exactly the model that was asked for", () => {
+  const wrongModel = {
+    answers: {
+      get_state: () => ({
+        success: true,
+        data: { model: { provider: "openrouter", id: "vendor/fake-model-pro" } },
+      }),
+    },
+  };
+  const OPENROUTER = { modelArgument: "openrouter/{model}" };
+  const SPEC_ON_FAKE: SessionSpec = {
+    ...SPEC,
+    modelSelection: { model: "vendor/fake-model", options: { thinking: "high" } },
+  };
+
+  it("asks pi which model it started on before it reports the session started", async () => {
+    const run = await startTestSession();
+
+    expect(listSentCommands(run.sent, "get_state")).toHaveLength(1);
+    await waitUntil(
+      "reported the session started",
+      () => filterByTag(run.seen, "session.started").length === 1,
+    );
+  });
+
+  it("fails the start, and stops pi, when pi picked a similar model instead", async () => {
+    const run = createDriving(wrongModel);
+    const ctx = { ...run.ctx, ...OPENROUTER };
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC_ON_FAKE, ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain("openrouter/vendor/fake-model-pro");
+    expect(failed.message).toContain("instead of openrouter/vendor/fake-model");
+    expect(run.spawns[0]!.kills()).toBe(1);
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+    await settle();
+    // The start failed, so the supervisor reports it. No exit or start event
+    // of the adapter may follow.
+    expect(filterByTag(run.seen, "session.started")).toEqual([]);
+    expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("fails the start when pi reports no model at all", async () => {
+    const run = createDriving({ answers: { get_state: () => ({ success: true, data: {} }) } });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed.message).toContain("started on no model");
+  });
+
+  it("fails the start when pi refuses to say which model it started on", async () => {
+    const run = createDriving({ answers: { get_state: () => buildRefusal("not now") } });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed.message).toContain("did not report which model it started on");
+    expect(failed.message).toContain("not now");
+  });
+
+  it("fails the start, with pi's own words, when pi exits while it starts", async () => {
+    const run = createDriving({ dies: true });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain("stopped while it was starting");
+    expect(failed.message).toContain("pi: could not start");
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+    await settle();
+    // The failed start is the one report: the exit is not reported as well.
+    expect(filterByTag(run.seen, "session.started")).toEqual([]);
+    expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("reports the exit after the start when pi answers and then exits before the check is over", async () => {
+    const run = createDriving({
+      answers: {
+        get_state: () => {
+          // pi answers, then crashes before the adapter looks at the answer.
+          queueMicrotask(() => run.spawns[0]!.crash("pi: crashed right after loading"));
+          return { success: true, data: { model: { provider: "zai", id: "glm-5.3" } } };
+        },
+      },
+    });
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    await waitUntil(
+      "said the session ended",
+      () => filterByTag(run.seen, "session.exited").length === 1,
+    );
+    const tags = run.seen.map((event) => event._tag).filter((tag) => tag.startsWith("session."));
+    expect(tags).toEqual(["session.started", "session.exited"]);
+    expect(filterByTag(run.seen, "session.exited")[0]?.message).toContain("crashed right after");
+  });
+});
+
 /** The User Material the runner finds on a machine that has all of the user's material. */
 const USER_MATERIAL: UserMaterial = {
   promptTemplateDirs: ["/Users/someone/.pi/agent/prompts"],
@@ -324,7 +440,7 @@ describe("launching pi for a session with a session skills folder", () => {
     // pi loads a directory named with `--skill` even under `--no-skills`.
     expect(run.child.command).toEqual([
       run.ctx.binary,
-      ...buildFlags(run.ctx.home),
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
       "--skill",
       join(librarySkillsFolder, "skills"),
     ]);
@@ -348,7 +464,7 @@ describe("launching pi for a session with repository skills folders", () => {
     // pi keeps the first skill of a name, so this order is the precedence.
     expect(run.child.command).toEqual([
       run.ctx.binary,
-      ...buildFlags(run.ctx.home),
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
       "--skill",
       join(librarySkillsFolder, "skills"),
       "--skill",
@@ -364,7 +480,7 @@ describe("launching pi for a session with repository skills folders", () => {
 
     expect(run.child.command).toEqual([
       run.ctx.binary,
-      ...buildFlags(run.ctx.home),
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
       "--skill",
       join(repositorySkillsFolders[0]!, "skills"),
     ]);
@@ -379,7 +495,7 @@ describe("launching pi for a Thread that sees the user's own material", () => {
     // named on the command line still loads. Extensions stay off even here.
     expect(run.child.command).toEqual([
       run.ctx.binary,
-      ...buildFlags(run.ctx.home),
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
       ...USER_MATERIAL_FLAGS,
     ]);
   });
@@ -393,9 +509,9 @@ describe("launching pi for a Thread that sees the user's own material", () => {
     // pi appends each `--append-system-prompt` in the order given.
     expect(run.child.command).toEqual([
       run.ctx.binary,
-      ...buildFlags(run.ctx.home),
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
       "--append-system-prompt",
-      join(run.ctx.home, `system-prompt-${SESSION}.txt`),
+      join(agentFolderOf(run.child), "system-prompt.txt"),
       ...USER_MATERIAL_FLAGS,
     ]);
   });
@@ -403,7 +519,10 @@ describe("launching pi for a Thread that sees the user's own material", () => {
   it("adds nothing for a Thread whose user has no material on this machine", async () => {
     const run = await startSessionWithMaterial(NO_USER_MATERIAL_PATHS);
 
-    expect(run.child.command).toEqual([run.ctx.binary, ...buildFlags(run.ctx.home)]);
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+    ]);
   });
 
   it("adds none of the user's material to an isolated session", async () => {
@@ -573,7 +692,13 @@ describe("sending an input to a pi session", () => {
       }),
     );
 
-    expect(run.sent.map((one) => one.type)).toEqual(["set_model", "set_thinking_level", "prompt"]);
+    // The first command is the check of the model pi started on.
+    expect(run.sent.map((one) => one.type)).toEqual([
+      "get_state",
+      "set_model",
+      "set_thinking_level",
+      "prompt",
+    ]);
     expect(listSentCommands(run.sent, "set_model")[0]).toMatchObject({
       provider: "zai",
       modelId: "glm-5.3-flash",
@@ -1089,7 +1214,7 @@ describe("launching pi for a session with an Agent", () => {
     // The path, never the text: instructions on the command line would be
     // visible in the machine's process list.
     const path = readFlagValue(run.child.command, "--append-system-prompt")!;
-    expect(path.startsWith(run.ctx.home)).toBe(true);
+    expect(path.startsWith(agentFolderOf(run.child))).toBe(true);
     expect(readFileSync(path, "utf8")).toBe(SYSTEM_PROMPT);
     expect(run.child.command).not.toContain(SYSTEM_PROMPT);
   });
@@ -1123,28 +1248,28 @@ describe("launching pi for a session with an Agent", () => {
     expect(readFileSync(path, "utf8")).toBe(memory);
   });
 
-  it("deletes the session's instructions file when the session ends", async () => {
+  it("removes the session's private folder, and the instructions in it, when the session ends", async () => {
     const run = await startTestSession({}, STRUCTURED);
+    const folder = agentFolderOf(run.child);
     const path = readFlagValue(run.child.command, "--append-system-prompt")!;
     expect(existsSync(path)).toBe(true);
 
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
 
-    // Otherwise one file per session ever started would pile up in the
-    // Harness Home, each holding an Agent's instructions.
-    await waitUntil(
-      "said the session ended",
-      () => filterByTag(run.seen, "session.exited").length === 1,
-    );
+    // Otherwise one folder per session ever started would pile up, each
+    // holding an Agent's instructions.
+    await waitUntil("removed the folder", () => !existsSync(folder));
     expect(existsSync(path)).toBe(false);
   });
 
-  it("deletes the instructions file when pi fails to start", async () => {
+  it("removes the private folder when pi fails to start", async () => {
     const ctx = buildContext(createPiHome());
     const { seam } = buildFakePiSeam();
+    let folder: string | undefined;
     const refusing = makePiAdapter({
       ...seam,
-      spawn: () => {
+      spawn: (_command, env) => {
+        folder = env["PI_CODING_AGENT_DIR"];
         throw new Error("spawn: permission denied");
       },
     });
@@ -1157,8 +1282,9 @@ describe("launching pi for a session with an Agent", () => {
       _tag: "AdapterFailed",
       message: expect.stringContaining("permission denied") as unknown,
     });
-    // No session was opened, so no session end will ever delete the file.
-    expect(existsSync(join(ctx.home, `system-prompt-${SESSION}.txt`))).toBe(false);
+    // No session was opened, so no session end will ever remove the folder.
+    expect(folder).toBeDefined();
+    expect(existsSync(folder!)).toBe(false);
   });
 
   it("passes instructions that look like a filename as text, not as that file", async () => {

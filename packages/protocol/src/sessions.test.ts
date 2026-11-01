@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { AdapterError } from "./adapter-errors";
+import { MAX_CATALOG_MODELS } from "./models";
 import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "./primitives";
 import {
   EditedFile,
@@ -791,6 +792,48 @@ describe("what the controller sends for a session", () => {
     const flagged = { ...start, userMaterial: true };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(flagged))).toEqual(flagged);
     expect(decode(SessionStart, { ...start, userMaterial: false })._tag).toBe("Failure");
+  });
+
+  it("carries the catalog models with only what a harness needs, up to a limit", () => {
+    const bare = { slug: "acme/free", name: "Acme: Free", imageInput: null };
+    const detailed = {
+      ...bare,
+      contextWindow: 200_000,
+      outputLimit: 8_192,
+      reasoning: true,
+      imageInput: { maxBytes: null },
+    };
+    const withModels = { ...start, catalogModels: [bare, detailed] };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(withModels))).toEqual(
+      withModels,
+    );
+    // A start without the key is a start that manages no declarations.
+    expect(decode(SessionStart, start)._tag).toBe("Success");
+    const tooMany = Array.from({ length: MAX_CATALOG_MODELS + 1 }, () => bare);
+    expect(decode(SessionStart, { ...start, catalogModels: tooMany })._tag).toBe("Failure");
+    expect(
+      decode(SessionStart, { ...start, catalogModels: [{ ...bare, contextWindow: 0 }] })._tag,
+    ).toBe("Failure");
+  });
+
+  it("drops the catalog details of a model declaration instead of carrying them to the runner", () => {
+    const catalogModel = {
+      slug: "acme/free",
+      name: "Acme: Free",
+      imageInput: null,
+      options: [],
+      maker: "Acme",
+      inputPrice: 0,
+      releasedAt: "2026-10-01T00:00:00.000Z",
+      tools: true,
+      isDefault: true,
+    };
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(SessionStart)({ ...start, catalogModels: [catalogModel] }),
+    );
+    expect(decoded.catalogModels).toEqual([
+      { slug: "acme/free", name: "Acme: Free", imageInput: null },
+    ]);
   });
 
   it("rejects a Provider Account id that could escape its directory, on the spec and on the binding", () => {

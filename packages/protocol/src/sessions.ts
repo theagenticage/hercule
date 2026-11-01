@@ -11,6 +11,7 @@ import { Schema, SchemaGetter } from "effect";
 
 import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
+import { MAX_CATALOG_MODELS, ModelDeclaration } from "./models";
 import { OutputSchema } from "./output-schema";
 import { MAX_SKILLS, LibrarySkillRevision } from "./skills";
 import {
@@ -1227,6 +1228,19 @@ export const SessionStart = Schema.Struct({
    */
   skills: Schema.optionalKey(
     Schema.Array(LibrarySkillRevision).check(Schema.isMaxLength(MAX_SKILLS)),
+  ),
+  /**
+   * The whole Model Catalog of the session's Provider Account, narrowed to
+   * what a harness needs to run a model (`ModelDeclaration`), in the catalog's
+   * order. The pi adapter declares to pi the models of this list that pi does
+   * not ship, so the session can run any model of the catalog. Absent means
+   * this start does not manage the declarations (the harness lists all its
+   * models itself). Present and empty means the catalog holds no model, so the
+   * adapter clears the declarations of an earlier start. Every other adapter
+   * ignores the field.
+   */
+  catalogModels: Schema.optionalKey(
+    Schema.Array(ModelDeclaration).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
   ),
 });
 

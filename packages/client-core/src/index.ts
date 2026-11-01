@@ -786,6 +786,25 @@ export {
 export type { NewModelRow } from "./model-profiles/new-model-rows";
 export type { ModelProfileHarnessChoice, SectionHarness } from "./model-profiles/profile-harnesses";
 export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
+export { opensModelBrowser } from "./model-profiles/opens-model-browser";
+export {
+  MODEL_CONTEXT_CHOICES,
+  MODEL_PRICE_CHOICES,
+  MODEL_SORT_CHOICES,
+  NO_MODEL_FACETS,
+  NO_MODEL_MATCHES_TEXT,
+  browseModels,
+  describeContextWindow,
+  describeModelPrice,
+  hasActiveFacets,
+  indexModelCatalog,
+  type ModelBrowserChoice,
+  type ModelBrowserIndex,
+  type ModelBrowserQuery,
+  type ModelFacets,
+  type ModelMaker,
+  type ModelSort,
+} from "./model-profiles/model-browser";
 export {
   findModelProfileOrFirst,
   findProjectModelProfile,

@@ -34,9 +34,9 @@ const isRetired = (runner: Runner): boolean => runner.lifecycle === "retired";
  * Returns why `runner` cannot host a thread of an account that is `readiness`
  * on it right now, or `null` when it can: "retired", its connectivity when it
  * is not online, "draining", "not signed in", "no key or token" when the
- * controller holds no credential for the account, "token expired", "not
- * installed" when the harness is not on the runner, or "harness too old" when
- * it is older than this build supports.
+ * controller holds no credential for the account, "key or token expired",
+ * "not installed" when the harness is not on the runner, or "harness too old"
+ * when it is older than this build supports.
  */
 export const findDimmedReason = (
   runner: Runner,
@@ -53,7 +53,7 @@ export const findDimmedReason = (
           : readiness === "credential-missing"
             ? "no key or token"
             : readiness === "token-expired"
-              ? "token expired"
+              ? "key or token expired"
               : readiness === "harness-too-old"
                 ? "harness too old"
                 : readiness === "harness-missing"

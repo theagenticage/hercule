@@ -303,7 +303,10 @@ const make = Effect.gen(function* () {
         harnessId: session.harnessId,
         model: session.modelSelection.model,
         attachments: row.attachments,
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+      }).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.provideService(PluginHost, host),
+      );
       if (refusal !== undefined) {
         yield* sessions.refuseClaimedInput(row, refusal);
         return yield* Effect.fail(createInvalidStateError(refusal));

@@ -21,6 +21,7 @@
     "@hercule/plugin-minimax": "workspace:*",
     "@hercule/plugin-opencode": "workspace:*",
     "@hercule/plugin-openai": "workspace:*",
+    "@hercule/plugin-openrouter": "workspace:*",
     "@hercule/plugin-pi": "workspace:*",
     "@hercule/plugin-sentry": "workspace:*",
     "@hercule/plugin-zai": "workspace:*",

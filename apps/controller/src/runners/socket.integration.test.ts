@@ -486,20 +486,20 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 18 raised the most models a probe lists, which a version 17 peer cannot read. So
-  // versions 17 and 18 refuse each other at hello; this is the version 18 controller refusing a
-  // version 17 runner.
-  it("refuses a runner on protocol version 17 and says to upgrade it", async () => {
+  // Version 19 added the catalog models a session start carries, which a version 18 runner would
+  // drop. So versions 18 and 19 refuse each other at hello; this is the version 19 controller
+  // refusing a version 18 runner.
+  it("refuses a runner on protocol version 18 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 17 }));
+      wire.send(buildHello({ protocolVersion: 18 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(18);
+      expect(PROTOCOL_VERSION).toBe(19);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 18 and the runner does not; " +
-          "upgrade the runner to a build that uses version 18",
+        "this controller uses runner protocol version 19 and the runner does not; " +
+          "upgrade the runner to a build that uses version 19",
       );
       expect(wire.frames).toEqual([]);
     });

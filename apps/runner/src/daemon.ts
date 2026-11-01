@@ -301,6 +301,21 @@ export const runDaemon = (
           });
         }),
         signals: streamReconnectSignals({ now: () => Date.now(), addresses: listNetworkAddresses }),
-      });
+      }).pipe(
+        // The loop ends on its own only when the controller retires this
+        // runner, and nothing has asked the sessions to stop. Each live
+        // session would then keep this process running:
+        //
+        // - its harness is a child process the process waits for;
+        // - its absolute deadline is a timer of hours, and a timer keeps the
+        //   process running until it fires. The timer is cancelled only when
+        //   the watch sees the session's exit, so a session that exits just as
+        //   the controller retires the runner keeps it too.
+        //
+        // The watch above is still running here, which is what lets the
+        // shutdown wait for each exit and cancel its timers. After the stop
+        // signal's own shutdown there is nothing left for this one to stop.
+        Effect.ensuring(sessions.shutdown("runner_restart")),
+      );
     }),
   );

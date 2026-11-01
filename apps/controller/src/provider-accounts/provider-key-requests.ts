@@ -1,6 +1,6 @@
 /**
  * The requests the controller makes to a provider with an account's key
- * (spec 06 sections 15.2 and 18). An account kind declares each request: one
+ * (spec 06 sections 15.2, 16 and 18). An account kind declares each request: one
  * GET with headers that may hold the placeholder `{apiKey}`.
  *
  * - `check` asks the provider whether it accepts a key, before the key is
@@ -8,8 +8,11 @@
  * - `readUsage` reads the account's usage from the provider's endpoint. The
  *   kind's plugin supplies the function that turns the response body into
  *   readings.
+ * - `readCatalog` reads the account's Model Catalog from the provider's API
+ *   (spec 06 section 16). The provider's plugin supplies the function that
+ *   turns the response body into models.
  *
- * Both touch no database: the caller stores what they find. The request is
+ * All three touch no database: the caller stores what they find. The request is
  * sent as `sendKeyRequest` describes, so the key is never logged and never
  * put in an error message or an outcome. Errors and outcomes hold the
  * provider's name, a status, or the provider's own words about why it refused.
@@ -30,12 +33,13 @@ import {
   type InvalidState,
   type Validation,
 } from "@hercule/contract";
-import type { AccountKind, ParseUsageBody } from "@hercule/plugin-host";
-import { UsageReading } from "@hercule/protocol";
+import type { AccountKind, ParseCatalogBody, ParseUsageBody } from "@hercule/plugin-host";
+import { CatalogModel, MAX_CATALOG_MODELS, Timestamp, UsageReading } from "@hercule/protocol";
 import { findCredentialSecretName, type RegisteredProvider } from "../plugins";
 import {
   cleanRefusalMessage,
   isHeaderSafe,
+  readBodyWithin,
   readBoundedBody,
   readRefusalMessage,
   sendKeyRequest,
@@ -52,10 +56,62 @@ export const ProviderKeyRequestTimeout = Context.Reference<Duration.Duration>(
 );
 
 /**
+ * The most bytes of a catalog's response body that are read. A catalog lists
+ * every model of a provider with its details, so it is far larger than the
+ * other answers: OpenRouter's is about 0.8 MB for 450 models. 4 MiB leaves room
+ * for several times that, while a provider that never stops sending still
+ * cannot fill memory.
+ */
+const MAX_CATALOG_BODY_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The most bytes a parsed catalog may take once encoded as JSON, which is about
+ * what the controller stores and sends. The count bound alone does not limit
+ * that, because a model may carry long names and options. OpenRouter's 452
+ * models encode to about 121 kB. A `SessionStart` or a `TextGenerationRequest`
+ * carries at most the catalog, and a frame must stay under `MAX_FRAME_BYTES`
+ * (2 MiB) with everything else in it, so the catalog gets half of that.
+ */
+const MAX_STORED_CATALOG_BYTES = 1024 * 1024;
+
+const encodeUtf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+/** Returns `models` without the second and later model of each slug, which the browser keys its rows by. */
+const keepFirstOfEachSlug = (models: ReadonlyArray<CatalogModel>): ReadonlyArray<CatalogModel> => {
+  const seen = new Set<string>();
+  return models.filter((model) => {
+    if (seen.has(model.slug)) return false;
+    seen.add(model.slug);
+    return true;
+  });
+};
+
+/**
+ * What a read of a provider's catalog found out:
+ *
+ * - `listed`: the provider accepted the key and listed these models, in its
+ *   order.
+ * - `refused`: the provider answered 401, with its own words in `message`.
+ *   Only a 401 shows that the key is wrong.
+ * - `unavailable`: the read told nothing about the key or the catalog (no
+ *   answer, any other status, a body that is too large, not JSON or not read
+ *   by the plugin, more models than Hercule keeps, a key a header cannot
+ *   carry). `message` is a sentence for the user, and for the log. It holds
+ *   the provider's name and no key.
+ */
+export type CatalogApiReadOutcome =
+  | { readonly _tag: "listed"; readonly models: ReadonlyArray<CatalogModel> }
+  | { readonly _tag: "refused"; readonly message: string }
+  | { readonly _tag: "unavailable"; readonly message: string };
+
+/**
  * What a usage read found out:
  *
  * - `readings`: the provider accepted the key and gave these readings, taken
- *   at the time its answer arrived. There may be none.
+ *   at `takenAt`, the time its answer arrived. There may be none: an answer
+ *   with no readings still tells that the account has none now. `expiresAt` is set
+ *   when the answer also says when the key expires (`null`: it does not
+ *   expire) and absent when the answer says nothing about it.
  * - `refused`: the provider rejected the key, with its own words in
  *   `message`. Either it answered 401, or its plugin read the answer as a
  *   rejection.
@@ -64,23 +120,34 @@ export const ProviderKeyRequestTimeout = Context.Reference<Duration.Duration>(
  *   `reason` is for the log.
  */
 export type UsageReadOutcome =
-  | { readonly _tag: "readings"; readonly readings: ReadonlyArray<UsageReading> }
+  | {
+      readonly _tag: "readings";
+      readonly readings: ReadonlyArray<UsageReading>;
+      readonly takenAt: Timestamp;
+      readonly expiresAt?: Timestamp | null;
+    }
   | { readonly _tag: "refused"; readonly message: string }
   | { readonly _tag: "unavailable"; readonly reason: string };
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json));
 
 /**
- * What a plugin's parser must return: the readings, or the provider's words
- * when it read the answer as a refusal. The plugin is third-party code, so its
- * result is checked and not trusted.
+ * What a plugin's parser must return: the readings and, optionally, when the
+ * key expires, or the provider's words when it read the answer as a refusal.
+ * The plugin is third-party code, so its result is checked and not trusted.
  */
 const decodeParsedUsage = Schema.decodeUnknownOption(
   Schema.Union([
-    Schema.Struct({ readings: Schema.Array(UsageReading) }),
+    Schema.Struct({
+      readings: Schema.Array(UsageReading),
+      expiresAt: Schema.optionalKey(Schema.NullOr(Timestamp)),
+    }),
     Schema.Struct({ refused: Schema.String }),
   ]),
 );
+
+/** What a plugin's catalog parser must return. The plugin is third-party code, so its result is checked and not trusted. */
+const decodeParsedCatalog = Schema.decodeUnknownOption(Schema.Array(CatalogModel));
 
 /** Returns the text of a thrown value, cleaned for the log. */
 const describeThrown = (error: unknown): string =>
@@ -237,7 +304,10 @@ const make = Effect.gen(function* () {
                   const message = cleanRefusalMessage(checked.value.refused);
                   return { _tag: "refused", message: message === "" ? "Unauthorized" : message };
                 }
-                return { _tag: "readings", readings: checked.value.readings };
+                const { readings, expiresAt } = checked.value;
+                return expiresAt === undefined
+                  ? { _tag: "readings", readings, takenAt }
+                  : { _tag: "readings", readings, takenAt, expiresAt };
               }),
               Effect.catch((message) =>
                 Effect.succeed<UsageReadOutcome>({
@@ -256,10 +326,140 @@ const make = Effect.gen(function* () {
           ),
         );
       }),
+
+    /**
+     * Sends `request` with the key and returns what the answer means. Never
+     * fails: every problem is an `unavailable` outcome. Reads up to 4 MiB of
+     * the answer, where the other requests read 64 kB.
+     *
+     * - A key a header cannot carry is `unavailable`, and nothing is sent.
+     * - A 401 is `refused`, with the `error.message` of the provider's body or
+     *   `Unauthorized`.
+     * - A 2xx answer with a JSON body goes to `parse`. The outcome is `listed`
+     *   with the models it returns.
+     * - Anything else is `unavailable`: 403 or another status, a redirect, no
+     *   answer within 10 seconds, a body over the bound or not JSON, a `parse`
+     *   that throws, a `parse` result that is not a list of valid models, a
+     *   list longer than `MAX_CATALOG_MODELS`, or a list that encodes to more
+     *   than 1 MiB of JSON. A list that is too long or too large is not cut,
+     *   because a cut list would hide models without saying so.
+     * - A list with two models of one slug keeps the first of each slug and
+     *   logs how many it dropped, because the browser keys its rows by slug.
+     *
+     * `displayName` is the provider's name, for the sentence about a list that
+     * is too long. A plugin's thrown message is logged and not shown, because
+     * it may quote the answer. Every `unavailable` message holds `displayName`.
+     */
+    readCatalog: (
+      displayName: string,
+      request: KeyRequest,
+      parse: ParseCatalogBody,
+      apiKey: Redacted.Redacted<string>,
+    ): Effect.Effect<CatalogApiReadOutcome> =>
+      Effect.gen(function* () {
+        if (!isHeaderSafe(Redacted.value(apiKey))) {
+          return {
+            _tag: "unavailable",
+            message: `The key stored for ${displayName} holds characters a header cannot carry. Set the key again.`,
+          } as const;
+        }
+        return yield* send(request, apiKey, (response): Effect.Effect<CatalogApiReadOutcome> =>
+          Effect.gen(function* () {
+            const { status } = response;
+            if (status === 401) {
+              return {
+                _tag: "refused",
+                message: readRefusalMessage(yield* readBoundedBody(response), "Unauthorized"),
+              };
+            }
+            if (status < 200 || status >= 300) {
+              return {
+                _tag: "unavailable",
+                message: `${displayName} answered HTTP ${status} when asked for its models.`,
+              };
+            }
+            const read = yield* readBodyWithin(response, MAX_CATALOG_BODY_BYTES).pipe(
+              Effect.option,
+            );
+            if (Option.isNone(read)) {
+              return {
+                _tag: "unavailable",
+                message: `The connection to ${displayName} failed before the list of models ended.`,
+              };
+            }
+            const { text, complete } = read.value;
+            if (!complete) {
+              return {
+                _tag: "unavailable",
+                message: `The list of models ${displayName} sent is larger than 4 MiB.`,
+              };
+            }
+            const body = decodeJson(text);
+            if (Option.isNone(body)) {
+              return {
+                _tag: "unavailable",
+                message: `The list of models ${displayName} sent is not JSON.`,
+              };
+            }
+            return yield* Effect.try({
+              try: () => parse(body.value),
+              catch: describeThrown,
+            }).pipe(
+              Effect.flatMap((parsed) =>
+                Effect.gen(function* () {
+                  const decoded = decodeParsedCatalog(parsed);
+                  if (Option.isNone(decoded)) {
+                    return {
+                      _tag: "unavailable",
+                      message: `Hercule could not read the list of models ${displayName} sent: the plugin that reads it returned models that are not valid.`,
+                    } as const;
+                  }
+                  const models = keepFirstOfEachSlug(decoded.value);
+                  if (models.length < decoded.value.length) {
+                    yield* Effect.logWarning(
+                      `${displayName} listed ${decoded.value.length - models.length} models whose slug it had already listed, so only the first model of each slug is kept`,
+                    );
+                  }
+                  if (models.length > MAX_CATALOG_MODELS) {
+                    return {
+                      _tag: "unavailable",
+                      message: `${displayName} lists ${models.length.toLocaleString("en-US")} models, more than the ${MAX_CATALOG_MODELS.toLocaleString("en-US")} Hercule can keep.`,
+                    } as const;
+                  }
+                  if (encodeUtf8(JSON.stringify(models)).byteLength > MAX_STORED_CATALOG_BYTES) {
+                    return {
+                      _tag: "unavailable",
+                      message: `The list of models ${displayName} sent is larger than the 1 MiB Hercule keeps, so Hercule keeps the list it already has.`,
+                    } as const;
+                  }
+                  return { _tag: "listed", models } as const;
+                }),
+              ),
+              Effect.catch((message) =>
+                Effect.logWarning(
+                  `The plugin of ${displayName} could not read the answer of its catalog: ${message}`,
+                ).pipe(
+                  Effect.as<CatalogApiReadOutcome>({
+                    _tag: "unavailable",
+                    message: `Hercule could not read the list of models ${displayName} sent: the plugin that reads it failed on it.`,
+                  }),
+                ),
+              ),
+            );
+          }),
+        ).pipe(
+          Effect.catchTag("KeyRequestUnreachable", () =>
+            Effect.succeed<CatalogApiReadOutcome>({
+              _tag: "unavailable",
+              message: `${displayName} did not answer in time when asked for its models.`,
+            }),
+          ),
+        );
+      }),
   };
 });
 
-/** Sends the requests that need an account's key: checking a key, and reading an account's usage. */
+/** Sends the requests that need an account's key: checking a key, and reading an account's usage or catalog. */
 export class ProviderKeyRequests extends Context.Service<
   ProviderKeyRequests,
   Effect.Success<typeof make>

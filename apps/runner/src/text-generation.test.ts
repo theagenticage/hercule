@@ -102,6 +102,23 @@ describe("the outcome of a text generation", () => {
     await expect(Effect.runPromise(generate(REQUEST))).resolves.toEqual(OK);
   });
 
+  it("hands the adapter the catalog models of the request", async () => {
+    const catalogModels = [{ slug: "vendor/model", name: "Model", imageInput: null }];
+    let received: HarnessRunnerContext["catalogModels"];
+    const generate = buildGenerator(
+      buildAdapter((ctx) => {
+        received = ctx.catalogModels;
+        return Effect.succeed(OK);
+      }),
+    );
+
+    await Effect.runPromise(generate({ ...REQUEST, catalogModels }));
+    expect(received).toEqual(catalogModels);
+
+    await Effect.runPromise(generate(REQUEST));
+    expect(received).toBeUndefined();
+  });
+
   it("reports a timeout, and interrupts the adapter, when the call outlives the deadline", async () => {
     let interrupted = false;
     const generate = buildGenerator(

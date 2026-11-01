@@ -40,6 +40,13 @@ describe("limiting a probe result's models", () => {
     expect(warnings).toEqual([]);
   });
 
+  it("keeps the 366 OpenRouter models pi 0.85.1 ships, which the cap of 256 once cut", async () => {
+    const { limited, warnings } = await limitCollectingWarnings(366);
+
+    expect(limited.models).toHaveLength(366);
+    expect(warnings).toEqual([]);
+  });
+
   it("cuts a longer list at the cap and warns once with how many models it dropped", async () => {
     const { limited, warnings } = await limitCollectingWarnings(MAX_PROBE_MODELS + 5);
 

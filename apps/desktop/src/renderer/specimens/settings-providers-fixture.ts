@@ -21,11 +21,11 @@
  * - Anthropic · Token expires in 12 days, and Anthropic · Old token has
  *   expired. OpenAI · API holds a key OpenAI refused. OpenAI · Personal is
  *   signed in nowhere, so its card says it is signed out.
- * - OpenCode and MiniMax are listed in the add-account sheet only: no account
- *   uses them, so the page has no card for them.
+ * - OpenRouter, OpenCode and MiniMax are listed in the add-account sheet only:
+ *   no account uses them, so the page has no card for them.
  * - Each plugin declares the mark the shipped plugin declares: the book's
  *   brand path scaled by 2/3 onto the 16-unit grid a plugin's mark uses. The
- *   OpenCode and MiniMax plugins draw their own marks on that grid.
+ *   OpenRouter, OpenCode and MiniMax plugins draw their own marks on that grid.
  */
 import type {
   AccountKind,
@@ -62,6 +62,12 @@ const OPENAI_MARK: PluginMark = {
 };
 const ZAI_MARK: PluginMark = {
   paths: ["M3 2.333333h10v2.2L6.6 11.466667h6.4v2.2h-10v-2.2l6.4 -6.933333H3z"],
+};
+/** OpenRouter's mark, copied from OPENROUTER_MARK_PATH in plugins/openrouter/src/index.ts. */
+const OPENROUTER_MARK: PluginMark = {
+  paths: [
+    "M12.436 2.58a3.391333 3.391333 0 1 1 0 6.782667L15.8 12.726667c0.426667 0.427333 0.124667 1.158 -0.48 1.158H5.653333a5.652667 5.652667 0 0 1 0 -11.305333h6.783333zM5.652667 4.84a3.391333 3.391333 0 1 0 0 6.784 3.391333 3.391333 0 0 0 0 -6.783333z",
+  ],
 };
 /** OpenCode's mark, copied from OPENCODE_MARK_PATH in plugins/opencode/src/index.ts. */
 const OPENCODE_MARK: PluginMark = {
@@ -160,6 +166,7 @@ export const PROVIDER_PLUGINS: ReadonlyArray<PluginDetail> = [
   buildPlugin("anthropic", "Anthropic", ANTHROPIC_MARK),
   buildPlugin("openai", "OpenAI", OPENAI_MARK),
   buildPlugin("zai", "Z.ai", ZAI_MARK),
+  buildPlugin("openrouter", "OpenRouter", OPENROUTER_MARK),
   buildPlugin("opencode", "OpenCode", OPENCODE_MARK),
   buildPlugin("minimax", "MiniMax", MINIMAX_MARK),
 ];
@@ -397,6 +404,14 @@ export const SPECIMEN_KINDS: Readonly<Record<string, AccountKind>> = {
     setup: [{ kind: "credentials", fields: [KEY_FIELD] }],
     harnesses: ["pi/pi"],
   },
+  openrouterKey: {
+    id: "api-key",
+    title: "API key",
+    description:
+      "From the Keys page of your OpenRouter account (openrouter.ai/keys). It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
   opencodeGo: {
     id: "go-key",
     title: "Go key",
@@ -452,6 +467,13 @@ export const SPECIMEN_PROVIDERS: ReadonlyArray<Provider> = [
     displayName: "Z.ai",
     defaultHarnessId: "pi/pi",
     kinds: [SPECIMEN_KINDS.zaiKey!],
+  },
+  {
+    id: "openrouter/openrouter",
+    pluginId: "openrouter",
+    displayName: "OpenRouter",
+    defaultHarnessId: "pi/pi",
+    kinds: [SPECIMEN_KINDS.openrouterKey!],
   },
   {
     id: "opencode/opencode",
@@ -601,7 +623,7 @@ const SPECIMEN_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => {
       : harness.id === "codex/codex"
         ? [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "OPENAI_API_KEY" }]
         : [];
-  // pi runs the keys of Anthropic, OpenAI, OpenCode and MiniMax too, as the
+  // pi runs the keys of Anthropic, OpenAI, OpenRouter, OpenCode and MiniMax too, as the
   // pi plugin declares (the shared harness lists only Z.ai's).
   const extraRuns: Harness["runs"] =
     harness.id === "pi/pi"
@@ -627,6 +649,17 @@ const SPECIMEN_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => {
               },
             ],
             models: "own-list",
+          },
+          {
+            providerId: "openrouter/openrouter",
+            kinds: [
+              {
+                kind: "api-key",
+                modelArgument: "openrouter/{model}",
+                credentialVariable: "OPENROUTER_API_KEY",
+              },
+            ],
+            models: "all",
           },
           {
             providerId: "opencode/opencode",

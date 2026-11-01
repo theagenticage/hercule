@@ -110,6 +110,34 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Deletes the account's readings that an endpoint read stored
+     * (`source` is `read`), that were taken before `before`, and whose window
+     * (or credit) none of `reported` is a reading of. Returns whether any was deleted. A reading
+     * taken at `before` or later is never deleted, so an older read cannot
+     * remove what a newer one stored. Must run in a transaction.
+     */
+    deleteUnreportedReadings: (
+      providerAccountId: string,
+      reported: ReadonlyArray<UsageReading>,
+      before: string,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const kept = new Set(reported.map(identifyReading));
+        let deleted = false;
+        for (const identity of READING_ORDER) {
+          if (kept.has(identity)) continue;
+          const rows = yield* sql`
+            DELETE FROM account_usage_readings
+            WHERE provider_account_id = ${uuidFromString(providerAccountId)}
+              AND reading = ${identity} AND source = 'read' AND taken_at < ${before}
+            RETURNING 1 AS removed
+          `;
+          deleted ||= rows.length > 0;
+        }
+        return deleted;
+      }),
+
+    /**
      * Raises the time of the newest session report of the account to `at`.
      * An earlier `at` changes nothing. Does nothing for an account that does
      * not exist. Must run in a transaction.
@@ -154,8 +182,11 @@ const make = Effect.gen(function* () {
 
     /**
      * Deletes the account's readings and stores `at` as the time they were
-     * cleared. The rest of the bookkeeping of active reads stays. Does nothing
-     * for an account that does not exist. Must run in a transaction.
+     * cleared. It also forgets when the account was last read and when a
+     * session last reported, so a claim (`claimRead`) succeeds at once: the
+     * rule that keeps reads rare was about the old credential. The time of the
+     * last announcement stays. Does nothing for an account that does not
+     * exist. Must run in a transaction.
      */
     deleteReadings: (providerAccountId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -166,7 +197,8 @@ const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO account_usage_reads (provider_account_id, cleared_at)
           SELECT id, ${at} FROM provider_accounts WHERE id = ${uuidFromString(providerAccountId)}
-          ON CONFLICT (provider_account_id) DO UPDATE SET cleared_at = excluded.cleared_at
+          ON CONFLICT (provider_account_id) DO UPDATE
+          SET cleared_at = excluded.cleared_at, read_started_at = NULL, reported_at = NULL
         `;
       }),
 

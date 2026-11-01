@@ -52,9 +52,13 @@ export interface PiRpc {
    * error, `PiExited` when pi exits before it answers, `PiUnreachable` when
    * the write fails, and `PiTimedOut` when pi does not answer in time. Only
    * `PiRefusedCommand` proves that the command did not take effect.
+   *
+   * `deadline` replaces `RPC_DEADLINE` for this command. A command sent right
+   * after pi was spawned needs it, because pi answers nothing while it loads.
    */
   readonly send: (
     command: Record<string, unknown>,
+    deadline?: Duration.Duration,
   ) => Effect.Effect<Record<string, unknown>, PiRpcFailure>;
   /**
    * Reads pi's stdout until it closes. No response reaches `send` until this
@@ -85,6 +89,13 @@ export interface PiRpc {
  * an input whose delivery is unknown, which a follow-up has to add.
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
+
+/**
+ * How long a pi that was just spawned gets to load and answer its first
+ * command. Loading takes seconds on a slow machine, much longer than
+ * `RPC_DEADLINE`, which is meant for a pi that is already running.
+ */
+export const STARTUP_DEADLINE: Duration.Duration = Duration.seconds(30);
 
 /** The message of the `PiExited` failure: pi exited, or closed its output, before it responded. */
 const PI_GONE = "pi exited or closed its output";
@@ -163,7 +174,7 @@ export const makeRpc = (
   };
 
   return {
-    send: (command) =>
+    send: (command, deadline = RPC_DEADLINE) =>
       Effect.suspend(() => {
         if (gone) return Effect.fail(buildPiRpcFailure("PiExited", PI_GONE));
         const id = `hercule-${next++}`;
@@ -179,12 +190,12 @@ export const makeRpc = (
         }
         return Deferred.await(settled).pipe(
           Effect.timeoutOrElse({
-            duration: RPC_DEADLINE,
+            duration: deadline,
             orElse: () =>
               Effect.fail(
                 buildPiRpcFailure(
                   "PiTimedOut",
-                  `pi did not answer ${String(command["type"])} within ${Duration.format(RPC_DEADLINE)}`,
+                  `pi did not answer ${String(command["type"])} within ${Duration.format(deadline)}`,
                 ),
               ),
           }),

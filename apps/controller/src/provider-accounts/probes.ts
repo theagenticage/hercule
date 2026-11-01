@@ -76,13 +76,21 @@ export interface ProbePair {
 }
 
 /**
- * What the controller knew when it sent a probe: the time, which credential
- * the account had, and whether the probe asked for usage. The answer is
- * judged against all three.
+ * What the controller knew when it started a read of an account (a probe or
+ * a request to the provider's API): the time, and which credential the
+ * account had. The outcome is judged against both, so a read that started
+ * before a new credential never overwrites what describes the new one.
  */
-export interface ProbeStamp {
+export interface ReadStamp {
   readonly sentAt: string;
   readonly credentialGeneration: number;
+}
+
+/**
+ * The `ReadStamp` of a probe, plus whether the probe asked for usage. The
+ * answer is judged against all three.
+ */
+export interface ProbeStamp extends ReadStamp {
   /** Whether the probe asked the runner for the account's usage. Usage in the answer to a probe that did not ask is not stored. */
   readonly readUsage: boolean;
 }
@@ -116,6 +124,8 @@ const make = Effect.gen(function* () {
   // A wake needs no payload, and one unread change already says that a
   // snapshot was stored, so the PubSub keeps only the latest.
   const snapshotWrites = yield* PubSub.sliding<void>(1);
+  // Same reasoning as `snapshotWrites`, for a stored or cleared credential expiry.
+  const credentialExpiryWrites = yield* PubSub.sliding<void>(1);
   // The millisecond of the last stamp handed out. Two probes of one pair that
   // share a millisecond could not be put in order by their stamps.
   let lastStampMillis = 0;
@@ -181,31 +191,42 @@ const make = Effect.gen(function* () {
       });
     });
 
+  const buildReadStamp = (
+    providerAccountId: string,
+  ): Effect.Effect<ReadStamp, SqlError | NotFound> =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      lastStampMillis = Math.max(now, lastStampMillis + 1);
+      const sentAt = new Date(lastStampMillis).toISOString();
+      const found = yield* accounts.one(providerAccountId);
+      if (Option.isNone(found)) {
+        return yield* Effect.fail(createNotFoundError(NO_SUCH_PROVIDER_ACCOUNT));
+      }
+      return { sentAt, credentialGeneration: found.value.credentialGeneration };
+    });
+
   return {
     /**
-     * Reads what to send with a probe of the account: the time, the
-     * account's credential generation, and `readUsage`, whether the probe asks
-     * for usage. Read this before the credential is
-     * decrypted for the probe, so a credential that changes in between only
-     * makes the answer look older than it is, never newer. The times this
-     * service hands out strictly increase: when the clock has not moved past
-     * the last one, the stamp is that one plus a millisecond. Fails with
-     * `NotFound` when the account does not exist.
+     * Reads what to send with a probe of the account: the `ReadStamp`, and
+     * `readUsage`, whether the probe asks for usage. Fails as
+     * `buildReadStamp` does.
      */
     readProbeStamp: (
       providerAccountId: string,
       readUsage: boolean,
     ): Effect.Effect<ProbeStamp, SqlError | NotFound> =>
-      Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis;
-        lastStampMillis = Math.max(now, lastStampMillis + 1);
-        const sentAt = new Date(lastStampMillis).toISOString();
-        const found = yield* accounts.one(providerAccountId);
-        if (Option.isNone(found)) {
-          return yield* Effect.fail(createNotFoundError(NO_SUCH_PROVIDER_ACCOUNT));
-        }
-        return { sentAt, credentialGeneration: found.value.credentialGeneration, readUsage };
-      }),
+      Effect.map(buildReadStamp(providerAccountId), (stamp) => ({ ...stamp, readUsage })),
+
+    /**
+     * Returns the stamp for a read of the account that starts now: the time
+     * and the account's credential generation. Build it before the credential
+     * is decrypted for the read, so a credential that changes in between only
+     * makes the outcome look older than it is, never newer. The times this
+     * service hands out strictly increase: when the clock has not moved past
+     * the last one, the stamp is that one plus a millisecond. Fails with
+     * `NotFound` when the account does not exist.
+     */
+    buildReadStamp,
 
     /**
      * Records that a device login finished on a runner without Hercule storing
@@ -386,12 +407,33 @@ const make = Effect.gen(function* () {
     snapshotChanges: Stream.fromPubSub(snapshotWrites),
 
     /**
-     * Returns the earliest time after `afterMillis` (epoch milliseconds) at
-     * which a stored token expires, or `none` when no token expires later. The
-     * controller daemon wakes at that time, because nothing else changes when
-     * a token expires: the account stops being ready by the clock alone.
+     * Emits once each time a credential expiry is stored or cleared and the
+     * write commits, so the watcher of expiries plans its wait again. A
+     * subscriber that falls behind gets one emission for all the changes it
+     * missed.
      */
-    findNextTokenExpiry: (afterMillis: number): Effect.Effect<Option.Option<number>, SqlError> =>
+    credentialExpiryChanges: Stream.fromPubSub(credentialExpiryWrites),
+
+    /**
+     * Records that an account's credential expiry was stored or cleared, so
+     * `credentialExpiryChanges` emits once the transaction commits (at once
+     * outside a transaction). Does not store the expiry.
+     */
+    notifyCredentialExpiryChanged: (): Effect.Effect<void> =>
+      afterCommit(() => {
+        PubSub.publishUnsafe(credentialExpiryWrites, undefined);
+      }),
+
+    /**
+     * Returns the earliest time after `afterMillis` (epoch milliseconds) at
+     * which a stored key or token expires, or `none` when none expires later.
+     * The controller daemon wakes at that time, because nothing else changes
+     * when a credential expires: the account stops being ready by the clock
+     * alone.
+     */
+    findNextCredentialExpiry: (
+      afterMillis: number,
+    ): Effect.Effect<Option.Option<number>, SqlError> =>
       Effect.map(accounts.list(), (all) => {
         const later = all.flatMap((account) =>
           account.credentialExpiresAt === null ? [] : [Date.parse(account.credentialExpiresAt)],
@@ -401,13 +443,13 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Announces on the `provider` live topic every account whose token
+     * Announces on the `provider` live topic every account whose key or token
      * expired after `sinceMillis` and up to `untilMillis` (epoch milliseconds,
      * the end included), so a client that shows the account as ready reads it
      * again and sees `token-expired`. The caller passes the end of its last
      * call as the next `sinceMillis`, which announces each expiry once.
      */
-    announceExpiredTokens: (
+    announceExpiredCredentials: (
       sinceMillis: number,
       untilMillis: number,
     ): Effect.Effect<void, SqlError> =>

@@ -16,8 +16,12 @@ import { Schema } from "effect";
  * - Version 6 moved `modelArgument` from the provider entry of a harness's
  *   `runs` onto each account kind in it. A harness plugin built against
  *   version 5 declares it in the wrong place, so the host refuses it at load.
+ * - Version 7 made `catalogSource` a union: a `provider-api` source reads the
+ *   catalog from the provider's API, with a `parseCatalogBody` passed at
+ *   registration. A usage parser may also return `expiresAt`. A plugin built
+ *   against version 6 does not know either, so the host refuses it at load.
  */
-export const HOST_API = 6;
+export const HOST_API = 7;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are

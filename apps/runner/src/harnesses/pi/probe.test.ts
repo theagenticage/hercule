@@ -7,11 +7,14 @@
  * prints the bare version, and `pi auth check --provider zai --json` prints a
  * status object and exits with code 1 when no key is configured.
  */
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber, Logger } from "effect";
 import { TestClock } from "effect/testing";
 import type { HarnessCredential, ProbeResult } from "@hercule/protocol";
 import { makePiAdapter } from "./adapter";
+import { fetchCatalog } from "./probe";
 import {
   buildFakePiSeam,
   cleanupHomes,
@@ -22,6 +25,7 @@ import {
   createPiHome,
   TEST_CREDENTIAL,
   TEST_ZAI_KEY,
+  waitUntil,
 } from "./testing";
 
 afterAll(cleanupHomes);
@@ -214,6 +218,96 @@ describe("the pi adapter's probe", () => {
     expect(findModelOption(probed.models, "glm-4.7", "thinking")).toBeUndefined();
   });
 
+  describe("listing the models in a scratch agent directory", () => {
+    /** What the scratch agent directory held when pi was spawned. */
+    interface SeenAtSpawn {
+      readonly directory: string | undefined;
+      readonly files: ReadonlyArray<string>;
+      readonly store: string | undefined;
+    }
+
+    const probeWithHome = async (prepareHome: (home: string) => void) => {
+      const home = createPiHome();
+      prepareHome(home);
+      let seen: SeenAtSpawn = { directory: undefined, files: [], store: undefined };
+      const { seam, spawns, runs } = buildFakePiSeam({
+        atSpawn: (env) => {
+          const directory = env["PI_CODING_AGENT_DIR"];
+          seen = {
+            directory,
+            files: directory === undefined ? [] : readdirSync(directory).sort(),
+            store:
+              directory !== undefined && existsSync(join(directory, "models-store.json"))
+                ? readFileSync(join(directory, "models-store.json"), "utf8")
+                : undefined,
+          };
+        },
+      });
+      const probed = await Effect.runPromise(
+        makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+      );
+      return { home, seen, probed, spawns, runs };
+    };
+
+    it("lists from a copy of the home's model store and never from its models.json", async () => {
+      const store = '{"models":["a-model-newer-than-pi"]}';
+      const { home, seen, probed } = await probeWithHome((prepared) => {
+        writeFileSync(join(prepared, "models-store.json"), store);
+        writeFileSync(
+          join(prepared, "models.json"),
+          JSON.stringify({ providers: { zai: { models: [{ id: "declared-by-hercule" }] } } }),
+        );
+      });
+
+      expect(seen.directory).not.toBe(home);
+      expect(seen.files).toEqual(["models-store.json"]);
+      expect(seen.store).toBe(store);
+      expect(probed.models.length).toBeGreaterThan(0);
+    });
+
+    it("deletes the scratch directory when the probe is over, and leaves the home as it was", async () => {
+      const { home, seen } = await probeWithHome((prepared) => {
+        writeFileSync(join(prepared, "models.json"), "{}");
+      });
+
+      expect(existsSync(seen.directory!)).toBe(false);
+      expect(readdirSync(home)).toEqual(["models.json"]);
+    });
+
+    it("lists from an empty scratch directory when the home was never refreshed", async () => {
+      const { seen } = await probeWithHome(() => undefined);
+
+      expect(seen.files).toEqual([]);
+    });
+
+    it("keeps the key check in the home, and runs the refresh in a scratch directory", async () => {
+      const { home, runs } = await probeWithHome(() => undefined);
+
+      const directoryOf = (word: string) =>
+        runs.find((run) => run.command.includes(word))?.env["PI_CODING_AGENT_DIR"];
+      expect(directoryOf("check")).toBe(home);
+      expect(directoryOf("update")).not.toBe(home);
+    });
+
+    it("reports every model pi lists, as pi 0.85.1 lists 366 for OpenRouter", async () => {
+      const models = Array.from({ length: 366 }, (_, index) => ({
+        id: `vendor/model-${String(index)}`,
+        name: `Model ${String(index)}`,
+        provider: "zai",
+        input: ["text"],
+      }));
+      const { seam } = buildFakePiSeam({
+        answers: { get_available_models: () => ({ success: true, data: { models } }) },
+      });
+
+      const probed = await Effect.runPromise(
+        makePiAdapter(seam).probe(buildContext(createPiHome()), { readUsage: false }),
+      );
+
+      expect(probed.models).toHaveLength(366);
+    });
+  });
+
   describe("refreshing the model list", () => {
     const FAILED = { code: 1, stdout: "", stderr: "Error: could not reach pi.dev" };
 
@@ -299,7 +393,8 @@ describe("the pi adapter's probe", () => {
         "PI_SKIP_VERSION_CHECK",
         "ZAI_API_KEY",
       ]);
-      expect(refresh?.env["PI_CODING_AGENT_DIR"]).toBe(home);
+      // The refresh runs in a scratch directory (see "storing the refreshed list").
+      expect(refresh?.env["PI_CODING_AGENT_DIR"]).not.toBe(home);
       expect(refresh?.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
       expect(spawns).toHaveLength(1);
       expect(spawns[0]?.command).toContain("--offline");
@@ -405,5 +500,142 @@ describe("the pi adapter's probe", () => {
       await result;
       expect(countRefreshes(runs)).toBe(0);
     });
+
+    describe("storing the refreshed model list in the home", () => {
+      const OLD_STORE = '{"stored":"before the refresh"}';
+      const NEW_STORE = '{"stored":"by the refresh"}';
+
+      /**
+       * Builds a fake pi whose `update --models` writes `refreshed` into the
+       * agent directory it was given, as the real command does, and records what
+       * that directory held when the command started.
+       */
+      const buildRefreshingPi = (refreshed: string, behaviour: FakePiBehaviour = {}) => {
+        const seen: { directory?: string; store?: string } = {};
+        const fake = buildFakePiSeam({
+          ...behaviour,
+          ran: (command, env) => {
+            if (command[1] !== "update") return undefined;
+            const directory = env["PI_CODING_AGENT_DIR"]!;
+            const path = join(directory, "models-store.json");
+            seen.directory = directory;
+            if (existsSync(path)) seen.store = readFileSync(path, "utf8");
+            writeFileSync(path, refreshed);
+            return behaviour.refresh === undefined ? MODEL_STORE_REFRESHED : undefined;
+          },
+        });
+        return { ...fake, seen };
+      };
+
+      const readStore = (home: string) => readFileSync(join(home, "models-store.json"), "utf8");
+
+      it("starts the refresh from a copy of the home's store, and copies the result back whole", async () => {
+        const home = createPiHome();
+        writeFileSync(join(home, "models-store.json"), OLD_STORE);
+        const { seam, seen } = buildRefreshingPi(NEW_STORE);
+
+        const probed = await Effect.runPromise(
+          makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+        );
+
+        expect(seen.store).toBe(OLD_STORE);
+        expect(readStore(home)).toBe(NEW_STORE);
+        // No temporary file is left beside the store, and the scratch directory is gone.
+        expect(readdirSync(home)).toEqual(["models-store.json"]);
+        expect(existsSync(seen.directory!)).toBe(false);
+        expect(probed.models.length).toBeGreaterThan(0);
+      });
+
+      it("leaves the home's store untouched while the refresh runs", async () => {
+        const home = createPiHome();
+        writeFileSync(join(home, "models-store.json"), OLD_STORE);
+        const gate = Deferred.makeUnsafe<void>();
+        const { seam } = buildRefreshingPi(NEW_STORE, {
+          refresh: Deferred.await(gate).pipe(Effect.as(MODEL_STORE_REFRESHED)),
+        });
+        let storeWhileRunning: string | undefined;
+
+        const { result } = runOnClock(
+          Effect.gen(function* () {
+            const probing = yield* Effect.forkChild(
+              makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+            );
+            yield* TestClock.adjust(0);
+            storeWhileRunning = readStore(home);
+            yield* Deferred.succeed(gate, undefined);
+            yield* TestClock.adjust(0);
+            yield* Fiber.join(probing);
+          }),
+        );
+
+        await result;
+        expect(storeWhileRunning).toBe(OLD_STORE);
+        expect(readStore(home)).toBe(NEW_STORE);
+      });
+
+      it("leaves the home's store as it was when the refresh fails", async () => {
+        const home = createPiHome();
+        writeFileSync(join(home, "models-store.json"), OLD_STORE);
+        const { seam } = buildRefreshingPi("half a fil", {
+          refresh: Effect.succeed({ code: 1, stdout: "", stderr: "Error: could not reach pi.dev" }),
+        });
+
+        const { result } = runOnClock(
+          makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+        );
+        await result;
+
+        expect(readStore(home)).toBe(OLD_STORE);
+        expect(readdirSync(home)).toEqual(["models-store.json"]);
+      });
+
+      it("stores nothing when the refresh wrote no store", async () => {
+        const home = createPiHome();
+        const { seam } = buildFakePiSeam({});
+
+        const { result } = runOnClock(
+          makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+        );
+        await result;
+
+        expect(readdirSync(home)).toEqual([]);
+      });
+    });
+  });
+});
+
+describe("reading the catalog from a pi that is still loading", () => {
+  it("waits for the first answer of a pi that takes longer than a running pi would", async () => {
+    // A cold pi on a loaded machine can take many seconds to answer its first
+    // command. `RPC_DEADLINE` is for a pi that already runs.
+    const { seam, spawns } = buildFakePiSeam({
+      answers: { get_available_models: () => undefined },
+    });
+
+    const models = await Effect.runPromise(
+      Effect.gen(function* () {
+        const reading = yield* Effect.forkChild(
+          fetchCatalog(seam.spawn, "/usr/local/bin/pi", undefined, {}, "zai"),
+        );
+        yield* Effect.promise(() =>
+          waitUntil(
+            "asked for the models",
+            () => spawns[0]?.sent.some((one) => one.type === "get_available_models") === true,
+          ),
+        );
+        yield* TestClock.adjust(Duration.seconds(6));
+        const asked = spawns[0]!.sent.find((one) => one.type === "get_available_models")!;
+        spawns[0]!.push({
+          type: "response",
+          command: "get_available_models",
+          id: asked.command["id"],
+          success: true,
+          data: { models: [{ id: "glm-5.3", name: "GLM-5.3", provider: "zai", input: ["text"] }] },
+        });
+        return yield* Fiber.join(reading);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    expect(models.map((model) => model.slug)).toEqual(["glm-5.3"]);
   });
 });

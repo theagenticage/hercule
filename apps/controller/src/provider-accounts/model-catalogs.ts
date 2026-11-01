@@ -2,11 +2,15 @@
  * Model Catalogs: the list of models each Provider Account may use, as the
  * provider's catalog source reports it for that account (spec 06 section 16).
  *
- * A catalog is read by probing the harness the provider names
- * (`catalogSource.harnessId`) for the account, on one runner chosen before
- * the probe is sent. The outcome of that probe is the read: a probe that finds
- * the account signed in replaces the models, any other outcome records an
- * error and keeps the models. Every other probe leaves the catalog alone.
+ * A catalog is read in one of two ways, by the provider's `catalogSource`:
+ *
+ * - `harness-probe`: the harness the provider names is probed for the
+ *   account, on one runner chosen before the probe is sent. The outcome of
+ *   that probe is the read: a probe that finds the account signed in replaces
+ *   the models, any other outcome records an error and keeps the models. Every
+ *   other probe leaves the catalog alone.
+ * - `provider-api`: the controller asks the provider's API with the account's
+ *   key. No runner is involved.
  *
  * This domain stores catalogs and decides what to read. The controller daemon
  * sends the probes (it is the only module that talks to runners) and hands
@@ -21,6 +25,7 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
+import * as Struct from "effect/Struct";
 import {
   createNotFoundError,
   type ModelCatalog,
@@ -28,7 +33,13 @@ import {
   type NewModel,
   type NotFound,
 } from "@hercule/contract";
-import type { ModelDescriptor, ProbeResult } from "@hercule/protocol";
+import {
+  MODEL_DECLARATION_KEYS,
+  type CatalogModel,
+  type ModelDeclaration,
+  type ModelDescriptor,
+  type ProbeResult,
+} from "@hercule/protocol";
 import { announce, nowIso, withTransaction } from "../db";
 import { PluginHost, type RegisteredProvider } from "../plugins";
 import { PromotionState } from "../promotion";
@@ -36,8 +47,9 @@ import { runnerRepository } from "../runners";
 import { ProviderAccountRunners, type AccountRunners } from "./account-runners";
 import { modelCatalogRepository, type StoredModelCatalog } from "./model-catalog-repository";
 import { ModelProfileMembership, type DefaultSelection } from "./model-profile-membership";
-import type { ProbePair, ProbeStamp } from "./probes";
+import type { ProbePair, ReadStamp } from "./probes";
 import { providerAccountRepository } from "./repository";
+import { takesCatalogDeclarations } from "./run-descriptor";
 
 /** How old a catalog's last successful read may be before it is read again (spec 06 section 16.3). */
 const CATALOG_MAX_AGE_MILLIS = 4 * 60 * 60 * 1000;
@@ -136,18 +148,33 @@ export interface UnservedRead {
 }
 
 /**
- * What one catalog read observed: the result of the probe, judged against the
- * account's identity, or the reason there is no result because no probe was
- * sent or none was answered (no machine to ask, a key that does not decrypt,
- * a machine that did not answer in time).
+ * What one catalog read observed:
+ *
+ * - `probed`: the result of the probe, judged against the account's identity.
+ * - `listed`: the models the provider's own API listed for the account's key.
+ *   It is stored as a successful read, exactly like a probe that found the
+ *   account signed in, but it says nothing about the credential.
+ * - `failed`: the reason there is no result because no read was sent or none
+ *   was answered (no machine to ask, a key that does not decrypt, a machine
+ *   that did not answer in time, a provider that refused the key).
  */
 export type CatalogReadOutcome =
   | { readonly _tag: "probed"; readonly result: Pick<ProbeResult, "auth" | "models"> }
+  | { readonly _tag: "listed"; readonly models: ReadonlyArray<CatalogModel> }
   | { readonly _tag: "failed"; readonly message: string };
 
-/** The catalog reads `chooseDueReads` chose to send, and the accounts it could not serve. */
+/** A due catalog read that the controller makes itself, from the provider's API. No runner is involved. */
+export interface ApiRead {
+  readonly providerAccountId: string;
+}
+
+/**
+ * The catalog reads `chooseDueReads` chose to make: the probes to send, the
+ * reads of the provider's API, and the accounts it could not serve.
+ */
 export interface ChosenReads {
   readonly reads: ReadonlyArray<ProbePair>;
+  readonly apiReads: ReadonlyArray<ApiRead>;
   readonly unserved: ReadonlyArray<UnservedRead>;
 }
 
@@ -179,6 +206,15 @@ const toModelCatalog = (stored: StoredModelCatalog): Effect.Effect<ModelCatalog>
     };
   });
 
+/**
+ * Returns the part of a catalog model that a runner needs to run it, which is
+ * every field of `ModelDeclaration` and nothing else. The details a client
+ * shows and filters by (prices, maker, options) stay in the controller. This is
+ * the one place a catalog model becomes a `ModelDeclaration`.
+ */
+const toModelDeclaration = (model: CatalogModel): ModelDeclaration =>
+  Struct.pick(model, MODEL_DECLARATION_KEYS);
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const catalogs = yield* modelCatalogRepository;
@@ -198,6 +234,9 @@ const make = Effect.gen(function* () {
    *   account that waits for its first catalog the account's Default
    *   Selection (`ModelProfileMembership`). It clears the error unless a read
    *   sent later has failed since.
+   * - A listed outcome does the same. It never changes whether the account's
+   *   credential counts as accepted or refused: some providers list their
+   *   public models for any key, so a list proves nothing about the key.
    * - Any other outcome keeps the models and records why it failed.
    *
    * A success sent before the models the catalog already holds is dropped,
@@ -212,21 +251,20 @@ const make = Effect.gen(function* () {
       if (outcome._tag === "failed") {
         return yield* catalogs.recordFailure(account.id, outcome.message, sentAt);
       }
-      const { result } = outcome;
-      if (result.auth.status !== "ok") {
-        return yield* catalogs.recordFailure(account.id, describeReadFailure(result), sentAt);
+      if (outcome._tag === "probed" && outcome.result.auth.status !== "ok") {
+        return yield* catalogs.recordFailure(
+          account.id,
+          describeReadFailure(outcome.result),
+          sentAt,
+        );
       }
-      const stored = yield* catalogs.recordSuccess(
-        account.id,
-        result.models,
-        yield* nowIso,
-        sentAt,
-      );
+      const models = outcome._tag === "listed" ? outcome.models : outcome.result.models;
+      const stored = yield* catalogs.recordSuccess(account.id, models, yield* nowIso, sentAt);
       const provider = (yield* host.providers()).find((one) => one.id === account.providerId);
       if (stored && provider !== undefined) {
         yield* membership.fillPendingSelections(
           account.id,
-          computeDefaultSelection(provider, result.models),
+          computeDefaultSelection(provider, models),
         );
       }
       return stored;
@@ -268,6 +306,50 @@ const make = Effect.gen(function* () {
         ),
       ),
 
+    /**
+     * Returns the account's whole Model Catalog as the `ModelDeclaration`s a
+     * runner takes, in the catalog's order, for the frame's `catalogModels`.
+     * A harness that can run any model of the provider, such as pi with
+     * OpenRouter, gets the catalog this way, so it can run a model its own
+     * list lacks. Returns `undefined` when the frame must carry no such field,
+     * which is when:
+     *
+     * - the harness does not take catalog declarations for the account's
+     *   provider (`takesCatalogDeclarations`). It then lists every model
+     *   itself;
+     * - the account or the harness is unknown. The caller builds the
+     *   `HarnessAccount` of the same frame first, and that refuses them;
+     * - the catalog was never read. The controller knows nothing about the
+     *   account's models yet, and an empty list would tell the runner to
+     *   remove the declarations of an earlier start.
+     *
+     * The list is empty when the catalog was read and holds no model. The
+     * runner then clears the declarations it wrote earlier.
+     *
+     * The list does not depend on the runner. Which of these models the
+     * harness already ships is the runner's to find out, because only the
+     * runner can ask the harness: a model the harness ships must not be
+     * declared again, since the declaration would replace the harness's own
+     * definition of it.
+     *
+     * Reads the database only, so it can run inside a transaction. Dies when
+     * a stored catalog is corrupt.
+     */
+    findModelDeclarations: (
+      providerAccountId: string,
+      harnessId: string,
+    ): Effect.Effect<ReadonlyArray<ModelDeclaration> | undefined, SqlError> =>
+      Effect.gen(function* () {
+        const account = Option.getOrUndefined(yield* accounts.one(providerAccountId));
+        if (account === undefined) return undefined;
+        const provider = (yield* host.providers()).find((one) => one.id === account.providerId);
+        const harness = (yield* host.harnesses()).find((one) => one.id === harnessId);
+        if (!takesCatalogDeclarations(provider, harness)) return undefined;
+        const catalog = Option.getOrUndefined(yield* catalogs.readOne(providerAccountId));
+        if (catalog === undefined || catalog.readAt === null) return undefined;
+        return catalog.models.map(toModelDeclaration);
+      }).pipe(Effect.catchTag("SchemaError", Effect.die)),
+
     /** Returns the size and read state of every account's catalog, by account id, without reading the models. */
     listSummaries: () =>
       Effect.map(
@@ -276,27 +358,41 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Chooses the catalog reads to send now. `reads` holds each as the probe
-     * to send: the account, the provider's source harness, and the runner.
+     * Chooses the catalog reads to make now. `reads` holds each probe to
+     * send: the account, the provider's source harness, and the runner.
+     * `apiReads` holds the accounts whose provider lists models through its
+     * API, which the controller reads itself.
      *
      * - An account is read when its catalog is due (`isCatalogReadDue`) or
      *   `force` is set. `accountIds` limits the accounts considered; left out,
      *   every account is.
-     * - The runner is chosen here, before the probe: among the connected
+     * - An account of a `provider-api` provider is always in `apiReads` when
+     *   it is read. It is never paired with a runner, and it is never
+     *   `unserved`, not even with no runner connected, and `servedBy` does
+     *   not filter it: a runner that connects is a moment to catch up, and
+     *   nothing else reads an API catalog at boot.
+     * - A due read of a `provider-api` account whose key the provider has
+     *   refused (the account has a `failure`) is skipped, so a revoked key is
+     *   not sent to the provider again at every sweep. A forced read still
+     *   happens: a new key, creating the account, and Refresh are the user's
+     *   own requests.
+     * - For a `harness-probe` provider, the runner is chosen here, before the
+     *   probe: among the connected
      *   runners where the account is ready in the source harness, the local
      *   runner (`localRunnerId`) first, else the first in the order the runners
      *   were added.
      * - An account with no such runner is in `unserved`, with a sentence that
      *   says what to do (install the harness, sign in). The caller records
      *   that message with `recordCatalogRead`.
-     * - With `servedBy`, only the accounts that runner can serve are
+     * - With `servedBy`, only the probed accounts that runner can serve are
      *   considered. The others are in neither list: a runner that just
      *   connected knows nothing about an account whose machine has not
      *   connected yet, so it must not make that account's catalog look
      *   unreadable.
      *
-     * The caller sends each chosen read as a probe of its own and hands the
-     * outcome to `recordCatalogRead`.
+     * The caller sends each probe as a probe of its own and hands the outcome
+     * to `recordCatalogRead`. It reads each API read itself and hands that
+     * outcome over in the same way.
      */
     chooseDueReads: (options: {
       readonly accountIds?: ReadonlyArray<string>;
@@ -310,18 +406,30 @@ const make = Effect.gen(function* () {
         const summaries = new Map(
           (yield* catalogs.listSummaries()).map((one) => [one.providerAccountId, one]),
         );
+        const apiReads: Array<ApiRead> = [];
         const due = (yield* accounts.list()).flatMap((account) => {
           const provider = providers.find((one) => one.id === account.providerId);
           const readAt = summaries.get(account.id)?.readAt ?? null;
           const scoped =
             options.accountIds === undefined || options.accountIds.includes(account.id);
-          return provider !== undefined &&
-            scoped &&
-            (options.force || isCatalogReadDue(readAt, nowMillis))
-            ? [{ account, harnessId: provider.catalogSource.harnessId }]
-            : [];
+          if (
+            provider === undefined ||
+            !scoped ||
+            !(options.force || isCatalogReadDue(readAt, nowMillis))
+          ) {
+            return [];
+          }
+          if (provider.catalogSource.kind === "provider-api") {
+            // A read that is not forced would send a key the provider has
+            // refused again at every sweep and every runner connection.
+            if (account.failure === null || options.force) {
+              apiReads.push({ providerAccountId: account.id });
+            }
+            return [];
+          }
+          return [{ account, harnessId: provider.catalogSource.harnessId }];
         });
-        if (due.length === 0) return { reads: [], unserved: [] };
+        if (due.length === 0) return { reads: [], apiReads, unserved: [] };
         const available = yield* accountRunners.listMany(
           due.map(({ account, harnessId }) => ({ providerAccountId: account.id, harnessId })),
         );
@@ -344,14 +452,14 @@ const make = Effect.gen(function* () {
             });
           }
         }
-        return { reads, unserved };
+        return { reads, apiReads, unserved };
       }),
 
     /**
      * Records the outcome of one catalog read: the single place where a read
      * is stored, whether a probe answered it or no probe could be sent.
      * `stamp` is when the controller started the read and which credential the
-     * account had then (see `ProviderAccountProbes.readProbeStamp`).
+     * account had then (see `ProviderAccountProbes.buildReadStamp`).
      *
      * Runs in its own transaction, or joins the caller's: the probe that
      * carries a read stores its snapshot and the read together. In that
@@ -364,7 +472,7 @@ const make = Effect.gen(function* () {
     recordCatalogRead: (
       providerAccountId: string,
       outcome: CatalogReadOutcome,
-      stamp: ProbeStamp,
+      stamp: ReadStamp,
     ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
       promotion.whenServingOr(
         withTransaction(

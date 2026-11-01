@@ -232,6 +232,7 @@ export {
   AccountUsageReading,
   AccountUsageSource,
   CapabilitySnapshot,
+  CatalogModel,
   MAX_PROVIDER_ACCOUNT_LABEL_LENGTH,
   ModelCatalog,
   ModelCatalogItem,

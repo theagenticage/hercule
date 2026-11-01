@@ -40,7 +40,12 @@ import {
   storeCredential,
 } from "../provider-accounts/testing";
 import type { Plugin } from "@hercule/plugin-host";
-import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
+import {
+  buildHarnessDefinition,
+  buildProviderDefinition,
+  createPluginFixture,
+} from "../plugins/testing";
+import type { ModelDescriptor } from "@hercule/protocol";
 import { buildModel, runWithProfiles, storeCatalog } from "./testing";
 import { modelProfileRepository } from "./repository";
 import { ModelProfileService } from "./service";
@@ -1039,6 +1044,133 @@ describe("resolving entries", () => {
     );
 
     expect(resolved.problem).toMatchObject({ reason: "no-runner" });
+  });
+});
+
+describe("resolving an entry for a model the harness does not list", () => {
+  const WIDE = "wide/wide";
+  const API_PROVIDER = "apiprov/apiprov";
+
+  /**
+   * A provider that reads its catalog from its API, and `wide`, a harness that
+   * runs any model of it (as pi runs any OpenRouter model), beside the Acme
+   * fixtures.
+   */
+  const plugins = (): ReadonlyArray<Plugin> => [
+    ...buildAccountPlugins(),
+    createPluginFixture({
+      id: "wide",
+      definitions: [
+        buildHarnessDefinition("wide", [
+          {
+            providerId: API_PROVIDER,
+            kinds: [{ kind: "api-key", modelArgument: "{model}" }],
+            models: "all",
+          },
+        ]),
+      ],
+    }).plugin,
+    createPluginFixture({
+      id: "apiprov",
+      capabilities: ["providers"],
+      definitions: [],
+      providers: [
+        {
+          ...buildProviderDefinition("apiprov", [WIDE]),
+          catalogSource: {
+            kind: "provider-api",
+            url: "https://api.example.com/v1/models",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+        },
+      ],
+      providerOptions: { parseCatalogBody: () => [] },
+    }).plugin,
+  ];
+
+  const VISION = buildModel("vision", { imageInput: { maxBytes: 2_000_000 } });
+  const TEXT_ONLY = buildModel("text-only");
+
+  /** Resolves the entry for `model` of a `wide` account whose catalog holds both models. */
+  const resolveInWide = (model: string, listed: ReadonlyArray<ModelDescriptor> = []) =>
+    runWithProfiles(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ providerId: API_PROVIDER, defaultHarnessId: WIDE });
+        yield* storeCredential(account.id, "apiKey");
+        yield* storeCatalog(account.id, [VISION, TEXT_ONLY]);
+        if (listed.length > 0) {
+          const runner = yield* addRunner("laptop");
+          yield* addSnapshot(account.id, WIDE, runner, {
+            harnessVersion: "1.0.0",
+            usage: null,
+            auth: { status: "ok" },
+            models: listed,
+          });
+        }
+        const main = yield* readMain;
+        const written = yield* update(main, {
+          accounts: [
+            {
+              providerAccountId: account.id,
+              harnessId: null,
+              entries: [entry(account.id, model)],
+            },
+          ],
+          defaultEntry: entry(account.id, model),
+        });
+        return written.accounts[0]!.entries[0]!;
+      }),
+      plugins(),
+    );
+
+  it("takes the image input from the catalog, with no options", async () => {
+    const resolved = await resolveInWide("vision");
+
+    expect(resolved).toMatchObject({ imageInput: { maxBytes: 2_000_000 }, options: [] });
+  });
+
+  it("keeps a text-only catalog model without image input", async () => {
+    expect(await resolveInWide("text-only")).toMatchObject({ imageInput: null, options: [] });
+  });
+
+  it("prefers the model as the harness lists it, with its options", async () => {
+    const effort = {
+      id: "effort",
+      label: "Effort",
+      kind: "select" as const,
+      choices: [{ value: "high", label: "High" }],
+      default: "high",
+    };
+    const resolved = await resolveInWide("vision", [
+      buildModel("vision", { imageInput: null, options: [effort] }),
+    ]);
+
+    expect(resolved.imageInput).toBeNull();
+    expect(resolved.options.map((option) => option.id)).toEqual(["effort"]);
+  });
+
+  it("ignores the catalog's image input for a harness that lists its own models", async () => {
+    const resolved = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work", [
+          buildModel("current", { imageInput: { maxBytes: null } }),
+        ]);
+        const main = yield* readMain;
+        const written = yield* update(main, {
+          accounts: [
+            {
+              providerAccountId: accountId,
+              harnessId: null,
+              entries: [entry(accountId, "current")],
+            },
+          ],
+          defaultEntry: entry(accountId, "current"),
+        });
+        return written.accounts[0]!.entries[0]!;
+      }),
+    );
+
+    expect(resolved.imageInput).toBeNull();
   });
 });
 

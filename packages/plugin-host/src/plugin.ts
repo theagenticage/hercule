@@ -5,7 +5,7 @@ import type {
   HarnessDefinition,
   WorkflowActionContribution,
 } from "./contributions";
-import type { ParseUsageBody, ProviderDefinition } from "./providers";
+import type { ParseCatalogBody, ParseUsageBody, ProviderDefinition } from "./providers";
 import type {
   ConnectionRegistration,
   ConnectionsRuntime,
@@ -35,6 +35,12 @@ export interface ProviderRegistrationOptions {
    * have one.
    */
   readonly parseUsageBody?: Readonly<Record<string, ParseUsageBody>>;
+  /**
+   * The parser of the provider's catalog body. A provider whose `catalogSource`
+   * is a `provider-api` needs one, and no other provider may have one. It is
+   * one per provider, not per account kind, because a provider has one catalog.
+   */
+  readonly parseCatalogBody?: ParseCatalogBody;
 }
 
 export interface ProviderRegistration {
