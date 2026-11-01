@@ -434,6 +434,40 @@ describe("launching pi for a text generation", () => {
     await outcome;
   });
 
+  it("lists the shipped models from the store it copied, so a store that changes meanwhile does not reach the call's pi", async () => {
+    const home = createPiHome();
+    const copied = '{"stored":"when the call began"}';
+    writeFileSync(join(home, "models-store.json"), copied);
+    const seenStores: Array<string | undefined> = [];
+    const { seam, spawns } = buildFakePiSeam({
+      answers: answerShippedModels("openrouter", ["shipped/model"]),
+      atSpawn: (env) => {
+        const path = join(env["PI_CODING_AGENT_DIR"]!, "models-store.json");
+        seenStores.push(existsSync(path) ? readFileSync(path, "utf8") : undefined);
+        // A refreshed store lands in the home while the call starts.
+        writeFileSync(join(home, "models-store.json"), '{"stored":"by a later refresh"}');
+      },
+    });
+    const ctx = {
+      ...buildContext(home),
+      modelArgument: "openrouter/{model}",
+      catalogModels: [{ slug: "fake-vendor/fake-model:free", name: "Fake", imageInput: null }],
+    };
+    const outcome = Effect.runPromise(
+      Effect.catch(
+        makePiAdapter(seam).generateText(buildTextGenerationContext(ctx), SPEC),
+        (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+      ),
+    );
+    await waitUntil("launched a pi", () => listAgentSpawns(spawns).length === 1);
+
+    // The listing of shipped models and the call's own pi saw the same store.
+    expect(seenStores).toEqual([copied, copied]);
+
+    answerWith(listAgentSpawns(spawns)[0]!, ANSWER);
+    await outcome;
+  });
+
   it("fails the call, and launches no pi, when pi cannot list the models it ships", async () => {
     const { seam, spawns } = buildFakePiSeam({
       answers: { get_available_models: () => buildRefusal("no models") },

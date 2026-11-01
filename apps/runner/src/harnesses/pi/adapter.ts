@@ -10,14 +10,13 @@
  * - a Thread on the controller's local runner also reads the user's own
  *   prompt templates and instructions.
  */
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
-import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import type {
   ApprovalDecision,
@@ -109,8 +108,10 @@ import {
 } from "./normalize";
 import { readPiHome } from "./edited-path";
 import { setProviderModels } from "./models-file";
+import { writeFileAtomically } from "./atomic-file";
+import { makeHomeLocks } from "./home-locks";
 import { makeNativeModelLister } from "./native-models";
-import { copyModelStore } from "./model-store";
+import { readModelStore, writeModelStore } from "./model-store";
 import { DEFAULT_THINKING, makePiInstall, makeProbe } from "./probe";
 import { readPiProvider } from "./provider";
 import {
@@ -399,6 +400,16 @@ const confirmStartedModel = (
     });
   });
 
+/** A subagent launch that is still waiting before it starts its pi process. */
+interface PendingLaunch {
+  /** The agent whose `subagent` call asked for the subagent. */
+  readonly parent: RunningAgent;
+  /** The item of that call. */
+  readonly toolCallItemId: string;
+  /** Whether the call no longer waits for the subagent, so the launch must give up. */
+  cancelled: boolean;
+}
+
 /** A session this adapter hosts, and the adapter's state for its pi processes. */
 interface Held {
   readonly binding: SessionBinding;
@@ -410,6 +421,13 @@ interface Held {
   readonly root: RunningAgent;
   /** The subagents running now, by id. An ended subagent is removed. */
   readonly subagents: Map<SubagentId, Subagent>;
+  /**
+   * The subagent launches that have not put their process into `subagents`
+   * yet, because they wait for the Harness Home's lock or for pi's list of
+   * models. Ending subagents cancels these too, since there is no process of
+   * theirs to close.
+   */
+  readonly launches: Set<PendingLaunch>;
   /**
    * How many subagent pi processes have not been released yet: those running,
    * and those stopped whose process has not exited or been cleaned up. The
@@ -1097,9 +1115,13 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
 
   /**
    * Ends every running subagent `agent` started, as interrupted and with no
-   * reply, because `agent` no longer waits for one.
+   * reply, because `agent` no longer waits for one. Also cancels the launches
+   * of subagents `agent` asked for that have not started their process yet.
    */
   const endSubagentsStartedBy = (held: Held, agent: RunningAgent): void => {
+    for (const launch of held.launches) {
+      if (launch.parent === agent) launch.cancelled = true;
+    }
     for (const subagent of listStartedBy(held, agent)) {
       endSubagent(held, subagent, { state: "interrupted" }, undefined);
     }
@@ -1184,6 +1206,12 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * refuses it or the process cannot start, and when the process starts on
    * another model than the session's.
    *
+   * The launch waits more than once: for the home's lock, for pi's list of
+   * models, and for the new pi's first answer. After each wait it checks that
+   * the session is still running and the call still waits for the subagent.
+   * When that fails, it starts nothing more: it gives back the subagent count
+   * and the lock, and closes a process it already started.
+   *
    * A subagent's pi reads the Harness Home's `models.json` when it starts, and
    * another launch in the home may have rewritten the file since the session
    * started. So a session that manages declarations takes the home's lock
@@ -1215,9 +1243,23 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     // Counted now, not when the process spawns, because the launch may wait
     // for the home's lock, and a second request in the meantime must see this
     // subagent against the limit. `spawnAgent` gives the count back when the
-    // process is released; a launch that fails before the spawn gives it back
-    // itself.
+    // process is released; a launch that gives up before the spawn gives it
+    // back itself.
     held.subagentProcesses += 1;
+    const launch: PendingLaunch = { parent, toolCallItemId: item.itemId, cancelled: false };
+    held.launches.add(launch);
+    // The launch waits for the lock, for pi's list of models and for the new
+    // pi's first answer. The session can be stopped, or the call ended, during
+    // any of these waits, so the launch asks again before each next step.
+    const isWanted = (): boolean =>
+      !launch.cancelled &&
+      sessions.get(held.binding.sessionId) === held &&
+      !held.stopping &&
+      parent.state.endedBySystem === undefined;
+    const giveUpBeforeSpawn = (): void => {
+      held.subagentProcesses -= 1;
+      refuse("This agent is being stopped, so it cannot start a subagent.");
+    };
     const failBeforeSpawn = (message: string): void => {
       held.subagentProcesses -= 1;
       refuse(`The subagent could not start: ${message}`);
@@ -1229,15 +1271,15 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     Effect.runFork(
       withHomeLock(held.ctx, (releaseLock) =>
         Effect.gen(function* () {
-          // The session may have ended while the launch waited for the lock.
-          if (sessions.get(held.binding.sessionId) !== held || held.stopping) {
-            held.subagentProcesses -= 1;
-            refuse("This agent is being stopped, so it cannot start a subagent.");
+          if (!isWanted()) {
+            giveUpBeforeSpawn();
             return;
           }
-          const declared = yield* Effect.result(
-            declareCatalogModels(held.ctx.home, held.binary, held.ctx),
-          );
+          const declared = yield* Effect.result(declareCatalogModelsInHome(held.binary, held.ctx));
+          if (!isWanted()) {
+            giveUpBeforeSpawn();
+            return;
+          }
           if (declared._tag === "Failure") {
             failBeforeSpawn(declared.failure.message);
             return;
@@ -1300,6 +1342,12 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           // The subagent's pi has loaded its models, so the next launch in
           // this home may write its own declarations.
           yield* releaseLock;
+          // The session may have been stopped, or the call ended, while pi
+          // loaded. The process is then closed, or must be, and gets no task.
+          if (!isWanted()) {
+            endSubagent(held, subagent, { state: "interrupted" }, undefined);
+            return;
+          }
           if (checked._tag === "Failure") {
             // A pi that exited is reported by `watchChild`, with its stderr
             // as the reason.
@@ -1344,7 +1392,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
               }),
           );
         }),
-      ),
+      ).pipe(Effect.ensuring(Effect.sync(() => void held.launches.delete(launch)))),
     );
   };
 
@@ -1401,9 +1449,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * Closes every subagent's pi without reporting anything about their turns,
    * for a session that is ending, and reports each one's Token Usage so far.
    * Their open approvals are cancelled, because those cards could never be
-   * answered.
+   * answered. Launches that have not started a process yet are cancelled.
    */
   const endAllSubagents = (held: Held): void => {
+    for (const launch of held.launches) launch.cancelled = true;
     for (const subagent of held.subagents.values()) {
       cancelParksOf(held, subagent);
       // The subagent's record keeps what it spent so far. Its turn gets no
@@ -1491,6 +1540,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       // ends first, because its turn was aborted, no longer waits for the
       // subagent, so the subagent stops with nobody to answer.
       if (event._tag === "item.completed" && event.kind === "subagent") {
+        for (const launch of held.launches) {
+          if (launch.parent === agent && launch.toolCallItemId === event.itemId) {
+            launch.cancelled = true;
+          }
+        }
         for (const subagent of listStartedBy(held, agent)) {
           if (subagent.toolCallItemId === event.itemId) {
             endSubagent(held, subagent, { state: "interrupted" }, undefined);
@@ -1580,26 +1634,6 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     };
   };
 
-  /**
-   * Writes a file pi reads, atomically: the content goes to a temporary file
-   * beside `path`, which is then renamed to `path`. Throws when the write
-   * fails. Without this, a pi starting in this home at the same moment could
-   * read a half-written file: a session with no approval hook, or with half
-   * its instructions.
-   */
-  const writeFileAtomically = (path: string, content: string): void => {
-    const written = `${path}.${process.pid}.${crypto.randomUUID()}`;
-    try {
-      writeFileSync(written, content, { mode: 0o600 });
-      renameSync(written, path);
-    } catch (error) {
-      // A failed write can happen, but a partial temporary file with a unique
-      // name would never be cleaned up, so delete it.
-      rmSync(written, { force: true });
-      throw error;
-    }
-  };
-
   const listNativeModels = makeNativeModelLister(seam.spawn);
 
   /**
@@ -1611,8 +1645,9 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * Does nothing when the frame carried no `catalogModels`, which leaves the
    * file as it is. An empty list is not that case: it removes the
    * declarations of an earlier start. Which models pi ships comes from pi
-   * itself (`makeNativeModelLister`), listed once and kept until the home's
-   * model store changes. Fails with an `Error` when pi cannot list its
+   * itself (`makeNativeModelLister`), listed from `store`, the bytes of the
+   * `models-store.json` that the pi about to start will load (undefined when
+   * there is none), and kept until the store changes. Fails with an `Error` when pi cannot list its
    * models (a guess would declare a shipped model and replace pi's own
    * definition of it), when the file is not a plain JSON object (a file with
    * comments, say) and writing would drop what it holds, and when the file
@@ -1620,16 +1655,16 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * never quote its content.
    *
    * The file of a Harness Home is shared by every pi process the runner starts
-   * in it, and a later start can carry another catalog, or find a refreshed
-   * model store. So a pi process only loads the set its own frame carried when
-   * the launch holds the home's lock (`withHomeLock`) from this call until
-   * that pi has loaded its models. A text generation writes to its own scratch
-   * directory and needs no lock.
+   * in it, and a later start can carry another catalog. So a pi process only
+   * loads the set its own frame carried when the launch holds the home's lock
+   * (`withHomeLock`) from this call until that pi has loaded its models. A text
+   * generation writes to its own scratch directory and needs no lock.
    */
   const declareCatalogModels = (
     directory: string,
     binary: string,
     ctx: HarnessRunnerContext,
+    store: Buffer | undefined,
   ): Effect.Effect<void, Error> => {
     const declarations = ctx.catalogModels;
     if (declarations === undefined) return Effect.void;
@@ -1638,7 +1673,13 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         try: () => readPiProvider(ctx.modelArgument),
         catch: (error) => new Error(describeError(error)),
       });
-      const nativeIds = yield* listNativeModels(binary, ctx.home, buildEnv(ctx), provider).pipe(
+      const nativeIds = yield* listNativeModels(
+        binary,
+        ctx.home,
+        store,
+        buildEnv(ctx),
+        provider,
+      ).pipe(
         Effect.mapError(
           (message) =>
             new Error(
@@ -1668,50 +1709,53 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     });
   };
 
-  /** The lock of each Harness Home that has had a launch managing its declarations. */
-  const homeLocks = new Map<string, Semaphore.Semaphore>();
+  /**
+   * Declares the catalog to the pi a launch is about to start in the Harness
+   * Home (see `declareCatalogModels`). Reads the home's `models-store.json`
+   * once and derives the list of shipped models from those bytes. The launch
+   * must hold the home's lock, because the store is only replaced under it:
+   * nothing can change the store between this read and the moment the launch's
+   * pi loads it, so the declarations and the pi agree on what pi ships. Does
+   * nothing when the context carries no `catalogModels`.
+   */
+  const declareCatalogModelsInHome = (
+    binary: string,
+    ctx: HarnessRunnerContext,
+  ): Effect.Effect<void, Error> =>
+    ctx.catalogModels === undefined
+      ? Effect.void
+      : Effect.try({
+          try: () => readModelStore(ctx.home),
+          catch: (error) => new Error(describeError(error)),
+        }).pipe(Effect.flatMap((store) => declareCatalogModels(ctx.home, binary, ctx, store)));
+
+  const holdHome = makeHomeLocks();
 
   /**
-   * Runs `body` holding the lock of the context's Harness Home, when the
-   * context manages declarations (`catalogModels` is present), and gives it
+   * Runs `body` holding the launch lock of the context's Harness Home, when
+   * the context manages declarations (`catalogModels` is present), and gives it
    * `release` to let go of the lock before `body` ends. The lock is released
    * when `body` ends in any way, so a failed or interrupted launch never keeps
    * it. A context that manages no declarations takes no lock, because its
    * launch neither writes nor depends on the file.
    *
-   * The launch holds the lock from before it writes `models.json` until its pi
-   * has loaded its models and passed the exact-model check, so each pi process
-   * loads the declarations of its own frame and not those of a launch
-   * that wrote the file in between. The cost: pi processes of one account on
+   * The launch holds the lock from before it reads the model store and writes
+   * `models.json` until its pi has loaded its models and passed the exact-model
+   * check, so each pi process loads the declarations of its own frame and not
+   * those of a launch that wrote the file in between, and the store it derived
+   * them from. A refresh of the model list takes the same lock to copy a
+   * refreshed store into the home (see `refreshModelStore`), so the store does
+   * not change under a launch either. The cost: pi processes of one account on
    * one runner start one at a time, each taking the time pi needs to load (a
    * fraction of a second). A subagent start takes the lock too (see
-   * `startSubagent`). Probes and text generations never do, because they run
-   * in a scratch directory.
+   * `startSubagent`). Text generations never do, because they run in a scratch
+   * directory.
    */
   const withHomeLock = <A, E, R>(
     ctx: HarnessRunnerContext,
     body: (release: Effect.Effect<void>) => Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, E, R> => {
-    if (ctx.catalogModels === undefined) return body(Effect.void);
-    let lock = homeLocks.get(ctx.home);
-    if (lock === undefined) {
-      lock = Semaphore.makeUnsafe(1);
-      homeLocks.set(ctx.home, lock);
-    }
-    const homeLock = lock;
-    return Effect.uninterruptibleMask((restore) =>
-      Effect.gen(function* () {
-        yield* restore(homeLock.take(1));
-        let holding = true;
-        const release = Effect.suspend(() => {
-          if (!holding) return Effect.void;
-          holding = false;
-          return Effect.asVoid(homeLock.release(1));
-        });
-        return yield* restore(body(release)).pipe(Effect.ensuring(release));
-      }),
-    );
-  };
+  ): Effect.Effect<A, E, R> =>
+    ctx.catalogModels === undefined ? body(Effect.void) : holdHome(ctx.home, body);
 
   /**
    * Starts one agent's pi process with `argv`, on its own copy of the
@@ -1829,7 +1873,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       [NO_AUTO_COMPACTION_VARIABLE]: cancelsAutomaticCompaction(spec, depth) ? "1" : undefined,
     });
 
-  const probe = makeProbe(seam.spawn, seam.run);
+  const probe = makeProbe(seam.spawn, seam.run, holdHome);
 
   /** Returns the session this adapter hosts, or fails with `SessionNotRunning` when it hosts none. */
   const getHostedSession = (sessionId: string): Effect.Effect<Held, SessionNotRunning> =>
@@ -1901,8 +1945,19 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     Effect.acquireUseRelease(
       // The scratch directory is pi's agent directory for this call, and it
       // holds no `models.json` of the account's home. Only the models the
-      // request carries go into it.
-      declareCatalogModels(ctx.cwd, ctx.binary, ctx).pipe(
+      // request carries go into it. The probe's refreshed model store is copied
+      // in first, so the call can use models newer than the installed pi, and the
+      // shipped models are listed from the bytes of that copy, so the list
+      // describes the store the call's pi loads.
+      Effect.try({
+        try: () => {
+          const store = readModelStore(ctx.home);
+          writeModelStore(ctx.cwd, store);
+          return store;
+        },
+        catch: (error) => new Error(describeError(error)),
+      }).pipe(
+        Effect.flatMap((store) => declareCatalogModels(ctx.cwd, ctx.binary, ctx, store)),
         Effect.mapError(describeError),
         Effect.andThen(
           Effect.try({
@@ -1910,9 +1965,6 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
               const extensionFile = join(ctx.cwd, "extension.ts");
               const instructionsFile = join(ctx.cwd, "instructions.txt");
               writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
-              // The probe stores the model catalog it refreshed from pi.dev in the
-              // home, so the call can use models newer than the installed pi.
-              copyModelStore(ctx.home, ctx.cwd);
               const released = Promise.withResolvers<void>();
               const child = spawnAgent(
                 [
@@ -2120,7 +2172,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
             try: () => prepareHome(ctx, sessionId, instructions),
             catch: (error) => error,
           }).pipe(
-            Effect.andThen(declareCatalogModels(ctx.home, binary, ctx)),
+            Effect.andThen(declareCatalogModelsInHome(binary, ctx)),
             Effect.mapError((error) => {
               deleteUnusedInstructions();
               return buildAdapterFailed(
@@ -2193,6 +2245,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
             binary,
             root,
             subagents: new Map(),
+            launches: new Set(),
             subagentProcesses: 0,
             parks: new Map(),
             modelSelection: spec.modelSelection,

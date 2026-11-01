@@ -23,8 +23,9 @@ import { makeInstall } from "../install";
 import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Ran, Run } from "../process";
 import { truncateFact } from "../text";
-import { copyModelStore } from "./model-store";
-import { makeRpc, type PiSpawn } from "./rpc";
+import type { HoldHome } from "./home-locks";
+import { readModelStore, replaceModelStore, writeModelStore } from "./model-store";
+import { describeError, makeRpc, type PiSpawn } from "./rpc";
 
 /** The thinking level a session uses when the user picked none. */
 export const DEFAULT_THINKING = "low";
@@ -40,7 +41,8 @@ const MODEL_STORE_REFRESH_WAIT: Duration.Duration = Duration.seconds(8);
  * How long a model store refresh may run before Hercule gives up on it. pi
  * stops its own refresh after 15 seconds, so this only reaches a stuck pi, for
  * example one whose child keeps its pipes open. At the limit Hercule sends pi a
- * stop signal and does not wait for it to exit.
+ * stop signal and does not wait for it to exit. That is safe because the
+ * refresh writes only into a scratch directory.
  */
 const MODEL_STORE_REFRESH_LIMIT: Duration.Duration = Duration.seconds(30);
 
@@ -190,47 +192,90 @@ const buildRefreshEnv = (
   );
 
 /**
- * Refreshes the model list that pi stores in the Harness Home, by running
+ * Refreshes the model list that pi stores for the Harness Home, by running
  * `pi update --models`, and waits for it at most `MODEL_STORE_REFRESH_WAIT`.
  * Never fails: a refresh that fails or is not finished in time is logged as a
- * warning, and the probe goes on with the list pi has stored, or the one
- * bundled in its release.
+ * warning, and the probe goes on with the list the home has stored, or the one
+ * bundled in pi's release.
  *
  * The refresh is its own command because, in RPC mode, pi answers before its
- * background refresh ends. It runs in a detached fiber and only the wait is
- * bounded: interrupting pi while it writes its store can corrupt the file or
- * leave a lock that blocks readers for 30 seconds. A refresh that ends after
- * the wait is seen by the next probe or session. Two probes of one home close
- * together each start a refresh. pi's lock keeps the store whole, but the
- * refresh that ends last wins even if it fetched a little earlier, which is
- * accepted.
+ * background refresh ends. It runs in a scratch agent directory that starts
+ * with a copy of the home's store. pi writes its store in place, so a refresh
+ * run in the home itself could change the file under a pi that is loading it,
+ * or leave it cut short if the refresh were stopped. When the command succeeds,
+ * the refreshed store is copied into the home in one atomic step, holding the
+ * home's launch lock (`holdHome`), so no launch has the store change between
+ * the moment it reads it and the moment its pi loads it. A refresh that fails
+ * leaves the home's store as it was.
+ *
+ * The refresh runs in a detached fiber and only the wait is bounded, so a
+ * refresh that ends after the wait is seen by the next probe or session. Two
+ * probes of one home close together each start a refresh, in a scratch
+ * directory of their own. The one that finishes last wins, even if it fetched
+ * a little earlier, which is accepted.
  */
 const refreshModelStore = (
   run: Run,
+  holdHome: HoldHome,
   binary: string,
   home: string,
   env: Readonly<Record<string, string | undefined>>,
   credentialVariable: string | undefined,
 ): Effect.Effect<void> => {
-  const refresh = Effect.suspend(() =>
-    run([binary, "update", "--models"], buildRefreshEnv(env, credentialVariable)),
-  ).pipe(
-    Effect.timeoutOption(MODEL_STORE_REFRESH_LIMIT),
-    // The warnings are written here, in the fiber that ran the command, so a
-    // refresh that fails after its probe has returned is still reported.
-    Effect.flatMap(
-      Option.match({
-        onNone: () =>
-          Effect.logWarning(
-            `pi did not refresh its model list in ${home} within ${Duration.format(MODEL_STORE_REFRESH_LIMIT)}, so Hercule sent it a stop signal`,
-          ),
-        onSome: (ran) =>
-          ran.code === 0
-            ? Effect.void
-            : Effect.logWarning(
-                `pi could not refresh its model list in ${home}: ${readComplaint(ran)}`,
-              ),
+  const runCommand = (scratch: string) =>
+    Effect.suspend(() =>
+      run([binary, "update", "--models"], {
+        ...buildRefreshEnv(env, credentialVariable),
+        PI_CODING_AGENT_DIR: scratch,
       }),
+    ).pipe(Effect.timeoutOption(MODEL_STORE_REFRESH_LIMIT));
+  const copyIntoHome = (scratch: string) =>
+    holdHome(home, () =>
+      Effect.try({ try: () => replaceModelStore(scratch, home), catch: describeError }),
+    ).pipe(
+      Effect.catch((message) =>
+        Effect.logWarning(
+          `Hercule could not store the refreshed pi model list in ${home}: ${message}`,
+        ),
+      ),
+    );
+  const refresh = Effect.acquireUseRelease(
+    Effect.try({
+      try: () => {
+        const scratch = mkdtempSync(join(tmpdir(), "hercule-pi-refresh-"));
+        try {
+          writeModelStore(scratch, readModelStore(home));
+        } catch (error) {
+          removeScratchDirectory(scratch);
+          throw error;
+        }
+        return scratch;
+      },
+      catch: describeError,
+    }),
+    (scratch) =>
+      runCommand(scratch).pipe(
+        // The warnings are written here, in the fiber that ran the command, so a
+        // refresh that fails after its probe has returned is still reported.
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.logWarning(
+                `pi did not refresh its model list for ${home} within ${Duration.format(MODEL_STORE_REFRESH_LIMIT)}, so Hercule sent it a stop signal`,
+              ),
+            onSome: (ran) =>
+              ran.code === 0
+                ? copyIntoHome(scratch)
+                : Effect.logWarning(
+                    `pi could not refresh its model list for ${home}: ${readComplaint(ran)}`,
+                  ),
+          }),
+        ),
+      ),
+    (scratch) => Effect.sync(() => removeScratchDirectory(scratch)),
+  ).pipe(
+    Effect.catch((message) =>
+      Effect.logWarning(`pi could not refresh its model list for ${home}: ${message}`),
     ),
   );
   return Effect.gen(function* () {
@@ -238,7 +283,7 @@ const refreshModelStore = (
     const finished = yield* Effect.timeoutOption(Fiber.await(refreshing), MODEL_STORE_REFRESH_WAIT);
     if (Option.isNone(finished)) {
       yield* Effect.logWarning(
-        `pi has not refreshed its model list in ${home} within ${Duration.format(MODEL_STORE_REFRESH_WAIT)}, so the probe reads the list stored so far`,
+        `pi has not refreshed its model list for ${home} within ${Duration.format(MODEL_STORE_REFRESH_WAIT)}, so the probe reads the list stored so far`,
       );
     }
   });
@@ -258,9 +303,10 @@ const removeScratchDirectory = (scratch: string): void =>
  * killed as soon as it has responded: left running, it would keep the user's
  * key in its environment long after anyone looked at the Fleet page.
  *
- * pi runs in a scratch agent directory that holds only a copy of the Harness
- * Home's `models-store.json`, and the directory is deleted afterwards. So the
- * list is pi's own: its bundled models plus its refreshed list. It never
+ * pi runs in a scratch agent directory that holds only `store`, the bytes of
+ * the Harness Home's `models-store.json` (undefined when the home has none),
+ * and the directory is deleted afterwards. So the list is pi's own: its bundled
+ * models plus its refreshed list, exactly as `store` has it. It never
  * includes the models a session declared in the home's `models.json`. If it
  * did, a declared model would count as one pi ships, and the adapter would
  * never again update that model's declaration. The key comes from the
@@ -270,7 +316,7 @@ const removeScratchDirectory = (scratch: string): void =>
 export const fetchCatalog = (
   spawn: PiSpawn,
   binary: string,
-  home: string,
+  store: Buffer | undefined,
   env: Readonly<Record<string, string | undefined>>,
   provider: string,
 ): Effect.Effect<ReadonlyArray<ModelDescriptor>, string> =>
@@ -279,7 +325,7 @@ export const fetchCatalog = (
       try: () => {
         const scratch = mkdtempSync(join(tmpdir(), "hercule-pi-probe-"));
         try {
-          copyModelStore(home, scratch);
+          writeModelStore(scratch, store);
           const child = spawn(
             [
               binary,
@@ -331,7 +377,7 @@ export const fetchCatalog = (
  * key is in, or undefined for an account without one.
  */
 export const makeProbe =
-  (spawn: PiSpawn, run: Run) =>
+  (spawn: PiSpawn, run: Run, holdHome: HoldHome) =>
   (
     binary: string,
     home: string,
@@ -349,11 +395,14 @@ export const makeProbe =
       // pi lists only the providers it has a key for, so a machine with no key
       // has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [], usage: null };
-      yield* refreshModelStore(run, binary, home, env, credentialVariable);
-      return yield* Effect.match(fetchCatalog(spawn, binary, home, env, provider), {
-        onFailure: (message) => buildFailedProbe(harnessVersion, message),
-        onSuccess: (models) => ({ harnessVersion, auth, models, usage: null }),
-      });
+      yield* refreshModelStore(run, holdHome, binary, home, env, credentialVariable);
+      return yield* Effect.try({ try: () => readModelStore(home), catch: describeError }).pipe(
+        Effect.flatMap((store) => fetchCatalog(spawn, binary, store, env, provider)),
+        Effect.match({
+          onFailure: (message) => buildFailedProbe(harnessVersion, message),
+          onSuccess: (models) => ({ harnessVersion, auth, models, usage: null }),
+        }),
+      );
     });
     return Effect.map(
       Effect.timeoutOption(gather, PROBE_DEADLINE),

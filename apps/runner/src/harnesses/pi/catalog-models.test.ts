@@ -341,6 +341,40 @@ describe("launches that share one Harness Home", () => {
     await Promise.all(starts);
   });
 
+  it("makes a refresh of the model list wait for a launch that holds the home, then stores it", async () => {
+    const home = createPiHome();
+    const storePath = join(home, "models-store.json");
+    writeFileSync(storePath, "OLD");
+    let refreshed = false;
+    const { adapter, spawns } = buildRecordingPi(home, {
+      ...HOLDS_THE_CHECK,
+      ran: (command, env) => {
+        if (command[1] === "auth") {
+          return { code: 0, stdout: JSON.stringify({ status: "ready" }), stderr: "" };
+        }
+        if (command[1] !== "update") return undefined;
+        writeFileSync(join(env["PI_CODING_AGENT_DIR"]!, "models-store.json"), "NEW");
+        refreshed = true;
+        return undefined;
+      },
+    });
+    const ctx = { ...buildContext(home), ...OPENROUTER, catalogModels: [ONE] };
+
+    const start = Effect.runPromise(adapter.startSession(SESSION, buildSpecOn(ONE.slug), ctx));
+    await waitUntil("spawned the pi", () => listAgentSpawns(spawns).length === 1);
+    const probing = Effect.runPromise(adapter.probe(ctx, { readUsage: false }));
+    await waitUntil("finished the refresh command", () => refreshed);
+    // The refreshed store must not reach the home while the launch's pi loads.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(readFileSync(storePath, "utf8")).toBe("OLD");
+
+    answerStarted(listAgentSpawns(spawns)[0]!, ONE.slug);
+    await start;
+    await probing;
+
+    expect(readFileSync(storePath, "utf8")).toBe("NEW");
+  });
+
   const SECOND_START = async (
     adapter: ReturnType<typeof makePiAdapter>,
     home: string,
@@ -508,5 +542,113 @@ describe("a subagent of a session that declares the catalog", () => {
     expect(subagents).toHaveLength(1);
     expect(subagents[0]!.sent.some((one) => one.type === "prompt")).toBe(false);
     expect(subagents[0]!.stdinClosed()).toBe(true);
+  });
+
+  describe("when the session ends while the launch waits", () => {
+    /** Starts a parent whose next listing of shipped models (a changed model store) is held. */
+    const startParentWithHeldListing = async (behaviour: FakePiBehaviour = {}) => {
+      const state = { holding: false };
+      const shipped = answerShippedModels("openrouter", ["shipped/model"])["get_available_models"]!;
+      const started = await startParent({
+        ...behaviour,
+        answers: {
+          get_available_models: (command) => (state.holding ? undefined : shipped(command)),
+          ...behaviour.answers,
+        },
+      });
+      return { ...started, state };
+    };
+
+    /** Holds the next listing, asks for a subagent, and returns the held listing's pi. */
+    const askWhileListingIsHeld = async (
+      run: Awaited<ReturnType<typeof startParentWithHeldListing>>,
+    ): Promise<Spawn> => {
+      run.state.holding = true;
+      // A new store content makes the subagent's launch list again.
+      writeFileSync(join(run.run.ctx.home, "models-store.json"), '{"changed":true}');
+      const listingsBefore = run.run.spawns.filter((one) => !one.command.includes("-e")).length;
+      askForSubagent(run.run.child);
+      await waitUntil(
+        "started the held listing",
+        () => run.run.spawns.filter((one) => !one.command.includes("-e")).length > listingsBefore,
+      );
+      return run.run.spawns.filter((one) => !one.command.includes("-e")).at(-1)!;
+    };
+
+    /** Answers the held listing of shipped models, as pi does when it finally lists. */
+    const releaseListing = (listing: Spawn): void => {
+      const asked = listing.sent.find((one) => one.type === "get_available_models")!;
+      listing.push({
+        type: "response",
+        command: "get_available_models",
+        id: asked.command["id"],
+        success: true,
+        data: { models: [{ id: "shipped/model", name: "S", provider: "openrouter" }] },
+      });
+    };
+
+    const expectNoSubagentStarted = async (
+      run: Awaited<ReturnType<typeof startParentWithHeldListing>>,
+    ): Promise<void> => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(listAgentSpawns(run.run.spawns)).toEqual([run.run.child]);
+      expect(filterByTag(run.run.seen, "subagent.started")).toEqual([]);
+      // The launch gave the lock back: a later start in the home completes.
+      await Effect.runPromise(
+        run.run.adapter.startSession(OTHER_SESSION, buildSpecOn(TWO.slug), {
+          ...run.run.ctx,
+          ...OPENROUTER,
+          catalogModels: [TWO],
+        }),
+      );
+    };
+
+    it("starts no pi when the session is stopped during the listing of shipped models", async () => {
+      const run = await startParentWithHeldListing();
+      const listing = await askWhileListingIsHeld(run);
+
+      await Effect.runPromise(run.run.adapter.stopSession(SESSION, "stopped"));
+      run.state.holding = false;
+      releaseListing(listing);
+
+      await expectNoSubagentStarted(run);
+    });
+
+    it("starts no pi when the parent's turn is interrupted during the listing", async () => {
+      const run = await startParentWithHeldListing();
+      const listing = await askWhileListingIsHeld(run);
+
+      await Effect.runPromise(run.run.adapter.interrupt(SESSION));
+      run.state.holding = false;
+      releaseListing(listing);
+
+      await expectNoSubagentStarted(run);
+    });
+
+    it("sends no task to a subagent whose session is stopped while pi checks its model", async () => {
+      let asked = 0;
+      const run = await startParentWithHeldListing({
+        answers: {
+          // The parent's own check passes. The subagent's waits for the test.
+          get_state: () =>
+            asked++ === 0
+              ? { success: true, data: { model: { provider: "openrouter", id: ONE.slug } } }
+              : undefined,
+        },
+      });
+      askForSubagent(run.run.child);
+      await waitUntil(
+        "spawned the subagent's pi",
+        () => listAgentSpawns(run.run.spawns).length === 2,
+      );
+      const subagent = listAgentSpawns(run.run.spawns)[1]!;
+
+      answerStarted(subagent, ONE.slug);
+      await Effect.runPromise(run.run.adapter.stopSession(SESSION, "stopped"));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(subagent.sent.some((one) => one.type === "prompt")).toBe(false);
+      expect(subagent.stdinClosed()).toBe(true);
+    });
   });
 });

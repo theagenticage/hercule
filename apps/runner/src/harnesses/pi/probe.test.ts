@@ -278,12 +278,13 @@ describe("the pi adapter's probe", () => {
       expect(seen.files).toEqual([]);
     });
 
-    it("keeps the refresh and the key check in the home", async () => {
+    it("keeps the key check in the home, and runs the refresh in a scratch directory", async () => {
       const { home, runs } = await probeWithHome(() => undefined);
 
-      const inHome = runs.map((run) => run.env["PI_CODING_AGENT_DIR"]);
-      expect(inHome.length).toBeGreaterThan(0);
-      for (const directory of inHome) expect(directory).toBe(home);
+      const directoryOf = (word: string) =>
+        runs.find((run) => run.command.includes(word))?.env["PI_CODING_AGENT_DIR"];
+      expect(directoryOf("check")).toBe(home);
+      expect(directoryOf("update")).not.toBe(home);
     });
 
     it("reports every model pi lists, as pi 0.85.1 lists 366 for OpenRouter", async () => {
@@ -390,7 +391,8 @@ describe("the pi adapter's probe", () => {
         "PI_SKIP_VERSION_CHECK",
         "ZAI_API_KEY",
       ]);
-      expect(refresh?.env["PI_CODING_AGENT_DIR"]).toBe(home);
+      // The refresh runs in a scratch directory (see "storing the refreshed list").
+      expect(refresh?.env["PI_CODING_AGENT_DIR"]).not.toBe(home);
       expect(refresh?.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
       expect(spawns).toHaveLength(1);
       expect(spawns[0]?.command).toContain("--offline");
@@ -495,6 +497,107 @@ describe("the pi adapter's probe", () => {
 
       await result;
       expect(countRefreshes(runs)).toBe(0);
+    });
+
+    describe("storing the refreshed model list in the home", () => {
+      const OLD_STORE = '{"stored":"before the refresh"}';
+      const NEW_STORE = '{"stored":"by the refresh"}';
+
+      /**
+       * Builds a fake pi whose `update --models` writes `refreshed` into the
+       * agent directory it was given, as the real command does, and records what
+       * that directory held when the command started.
+       */
+      const buildRefreshingPi = (refreshed: string, behaviour: FakePiBehaviour = {}) => {
+        const seen: { directory?: string; store?: string } = {};
+        const fake = buildFakePiSeam({
+          ...behaviour,
+          ran: (command, env) => {
+            if (command[1] !== "update") return undefined;
+            const directory = env["PI_CODING_AGENT_DIR"]!;
+            const path = join(directory, "models-store.json");
+            seen.directory = directory;
+            if (existsSync(path)) seen.store = readFileSync(path, "utf8");
+            writeFileSync(path, refreshed);
+            return behaviour.refresh === undefined ? MODEL_STORE_REFRESHED : undefined;
+          },
+        });
+        return { ...fake, seen };
+      };
+
+      const readStore = (home: string) => readFileSync(join(home, "models-store.json"), "utf8");
+
+      it("starts the refresh from a copy of the home's store, and copies the result back whole", async () => {
+        const home = createPiHome();
+        writeFileSync(join(home, "models-store.json"), OLD_STORE);
+        const { seam, seen } = buildRefreshingPi(NEW_STORE);
+
+        const probed = await Effect.runPromise(
+          makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+        );
+
+        expect(seen.store).toBe(OLD_STORE);
+        expect(readStore(home)).toBe(NEW_STORE);
+        // No temporary file is left beside the store, and the scratch directory is gone.
+        expect(readdirSync(home)).toEqual(["models-store.json"]);
+        expect(existsSync(seen.directory!)).toBe(false);
+        expect(probed.models.length).toBeGreaterThan(0);
+      });
+
+      it("leaves the home's store untouched while the refresh runs", async () => {
+        const home = createPiHome();
+        writeFileSync(join(home, "models-store.json"), OLD_STORE);
+        const gate = Deferred.makeUnsafe<void>();
+        const { seam } = buildRefreshingPi(NEW_STORE, {
+          refresh: Deferred.await(gate).pipe(Effect.as(MODEL_STORE_REFRESHED)),
+        });
+        let storeWhileRunning: string | undefined;
+
+        const { result } = runOnClock(
+          Effect.gen(function* () {
+            const probing = yield* Effect.forkChild(
+              makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+            );
+            yield* TestClock.adjust(0);
+            storeWhileRunning = readStore(home);
+            yield* Deferred.succeed(gate, undefined);
+            yield* TestClock.adjust(0);
+            yield* Fiber.join(probing);
+          }),
+        );
+
+        await result;
+        expect(storeWhileRunning).toBe(OLD_STORE);
+        expect(readStore(home)).toBe(NEW_STORE);
+      });
+
+      it("leaves the home's store as it was when the refresh fails", async () => {
+        const home = createPiHome();
+        writeFileSync(join(home, "models-store.json"), OLD_STORE);
+        const { seam } = buildRefreshingPi("half a fil", {
+          refresh: Effect.succeed({ code: 1, stdout: "", stderr: "Error: could not reach pi.dev" }),
+        });
+
+        const { result } = runOnClock(
+          makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+        );
+        await result;
+
+        expect(readStore(home)).toBe(OLD_STORE);
+        expect(readdirSync(home)).toEqual(["models-store.json"]);
+      });
+
+      it("stores nothing when the refresh wrote no store", async () => {
+        const home = createPiHome();
+        const { seam } = buildFakePiSeam({});
+
+        const { result } = runOnClock(
+          makePiAdapter(seam).probe(buildContext(home), { readUsage: false }),
+        );
+        await result;
+
+        expect(readdirSync(home)).toEqual([]);
+      });
     });
   });
 });

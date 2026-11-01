@@ -1,27 +1,56 @@
 /**
- * Copies the model list pi stored in a Harness Home into a scratch agent
- * directory. Two callers need it: a text generation and a probe each run pi in
- * a scratch directory of their own, so that pi sees neither whatever a session
- * wrote into the Harness Home (`models.json`, `APPEND_SYSTEM.md`) nor writes
- * its own bookkeeping files there.
+ * Reads, copies and replaces the model list pi stores in a Harness Home
+ * (`models-store.json`). Everything that runs pi in a scratch agent directory
+ * (a text generation, a probe's listing of models, a model list refresh) starts
+ * from a copy of the home's store, so pi sees neither whatever a session wrote
+ * into the Harness Home (`models.json`, `APPEND_SYSTEM.md`) nor writes its own
+ * bookkeeping files there.
+ *
+ * Only one thing ever changes the home's store: `replaceModelStore`, which
+ * swaps in a whole file and is called while holding the home's launch lock. So
+ * a reader sees a complete store, and a launch that holds the lock sees the
+ * same store from its first read until its pi has loaded.
  */
-import { copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomically } from "./atomic-file";
+
+const STORE_FILE = "models-store.json";
 
 /**
- * Copies `models-store.json`, the model list `pi update --models` refreshed,
- * from the Harness Home `home` into `directory`. Does nothing when the home
- * has none (never probed): pi then uses the list bundled in its release.
- * Throws when the copy fails for another reason.
- *
- * pi writes the file in place, so a copy made during a refresh may be cut
- * short. pi then reports a model that only the stored list has as unknown for
- * that one run, which fails the run instead of picking another model.
+ * Returns the bytes of the home's `models-store.json`, or undefined when the
+ * home has none (never refreshed): pi then uses the list bundled in its
+ * release. Throws when the file cannot be read for another reason.
  */
-export const copyModelStore = (home: string, directory: string): void => {
+export const readModelStore = (home: string): Buffer | undefined => {
   try {
-    copyFileSync(join(home, "models-store.json"), join(directory, "models-store.json"));
+    return readFileSync(join(home, STORE_FILE));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return undefined;
   }
+};
+
+/**
+ * Writes `store`, bytes that `readModelStore` returned, as `models-store.json`
+ * in `directory`. Does nothing when `store` is undefined. Callers pass the
+ * bytes they derived something from, so what pi loads is exactly what they
+ * looked at.
+ */
+export const writeModelStore = (directory: string, store: Buffer | undefined): void => {
+  if (store !== undefined) writeFileSync(join(directory, STORE_FILE), store, { mode: 0o600 });
+};
+
+/**
+ * Replaces the home's `models-store.json` with the one in `directory`, which a
+ * `pi update --models` refreshed there, by writing a temporary file in the home
+ * and renaming it. Does nothing when `directory` has no store. Throws when the
+ * copy fails, leaving the home's store as it was.
+ *
+ * The caller must hold the home's launch lock: a launch that holds it relies on
+ * the store not changing until its pi has loaded.
+ */
+export const replaceModelStore = (directory: string, home: string): void => {
+  const refreshed = readModelStore(directory);
+  if (refreshed !== undefined) writeFileAtomically(join(home, STORE_FILE), refreshed);
 };

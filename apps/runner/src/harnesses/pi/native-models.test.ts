@@ -2,7 +2,7 @@
  * Tests how the runner finds the models pi ships for a provider, and when it
  * lists them again, with a fake pi so no vendor code runs.
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -53,7 +53,7 @@ describe("listing the models pi ships for a provider", () => {
       }),
     });
 
-    const ids = await Effect.runPromise(list(BINARY, createPiHome(), ENV, "openrouter"));
+    const ids = await Effect.runPromise(list(BINARY, createPiHome(), undefined, ENV, "openrouter"));
 
     expect([...ids]).toEqual(["vendor/a", "vendor/b"]);
   });
@@ -63,11 +63,17 @@ describe("listing the models pi ships for a provider", () => {
     const home = createPiHome();
 
     const together = await Effect.runPromise(
-      Effect.all([list(BINARY, home, ENV, "openrouter"), list(BINARY, home, ENV, "openrouter")], {
-        concurrency: "unbounded",
-      }),
+      Effect.all(
+        [
+          list(BINARY, home, undefined, ENV, "openrouter"),
+          list(BINARY, home, undefined, ENV, "openrouter"),
+        ],
+        {
+          concurrency: "unbounded",
+        },
+      ),
     );
-    await Effect.runPromise(list(BINARY, home, ENV, "openrouter"));
+    await Effect.runPromise(list(BINARY, home, undefined, ENV, "openrouter"));
 
     expect(together.map((ids) => [...ids])).toEqual([["vendor/a"], ["vendor/a"]]);
     expect(spawns).toHaveLength(1);
@@ -76,34 +82,67 @@ describe("listing the models pi ships for a provider", () => {
   it("keeps a separate list for each home", async () => {
     const { list, spawns } = buildLister(answerShippedModels("openrouter", ["vendor/a"]));
 
-    await Effect.runPromise(list(BINARY, createPiHome(), ENV, "openrouter"));
-    await Effect.runPromise(list(BINARY, createPiHome(), ENV, "openrouter"));
+    await Effect.runPromise(list(BINARY, createPiHome(), undefined, ENV, "openrouter"));
+    await Effect.runPromise(list(BINARY, createPiHome(), undefined, ENV, "openrouter"));
 
     expect(spawns).toHaveLength(2);
   });
 
-  it("lists again when the home's model store changes, and not before", async () => {
+  it("lists again when the model store's content changes, and not before", async () => {
     const { list, spawns, answerWith } = buildLister(
       answerShippedModels("openrouter", ["vendor/a"]),
     );
     const home = createPiHome();
-    const store = join(home, "models-store.json");
+    const stored = (content: string) => Buffer.from(content);
 
-    await Effect.runPromise(list(BINARY, home, ENV, "openrouter"));
-    writeFileSync(store, "{}");
-    const afterStoreAppeared = await Effect.runPromise(list(BINARY, home, ENV, "openrouter"));
+    await Effect.runPromise(list(BINARY, home, undefined, ENV, "openrouter"));
+    const afterStoreAppeared = await Effect.runPromise(
+      list(BINARY, home, stored("{}"), ENV, "openrouter"),
+    );
     expect(spawns).toHaveLength(2);
 
     answerWith(answerShippedModels("openrouter", ["vendor/a", "vendor/new"]));
-    await Effect.runPromise(list(BINARY, home, ENV, "openrouter"));
+    await Effect.runPromise(list(BINARY, home, stored("{}"), ENV, "openrouter"));
     expect(spawns).toHaveLength(2);
 
-    writeFileSync(store, '{"refreshed":true}');
-    const afterRefresh = await Effect.runPromise(list(BINARY, home, ENV, "openrouter"));
+    const afterRefresh = await Effect.runPromise(
+      list(BINARY, home, stored('{"refreshed":true}'), ENV, "openrouter"),
+    );
 
     expect(spawns).toHaveLength(3);
     expect([...afterStoreAppeared]).toEqual(["vendor/a"]);
     expect([...afterRefresh]).toEqual(["vendor/a", "vendor/new"]);
+  });
+
+  it("tells two stores of the same size apart, because the key is the content", async () => {
+    const { list, spawns } = buildLister(answerShippedModels("openrouter", ["vendor/a"]));
+    const home = createPiHome();
+
+    await Effect.runPromise(list(BINARY, home, Buffer.from('{"a":1}'), ENV, "openrouter"));
+    await Effect.runPromise(list(BINARY, home, Buffer.from('{"a":2}'), ENV, "openrouter"));
+
+    expect(spawns).toHaveLength(2);
+  });
+
+  it("hands pi exactly the bytes it was given as the scratch directory's store", async () => {
+    const seen: Array<string | undefined> = [];
+    const fake = buildFakePiSeam({
+      answers: answerShippedModels("openrouter", ["vendor/a"]),
+      atSpawn: (env) => {
+        const path = join(env["PI_CODING_AGENT_DIR"]!, "models-store.json");
+        seen.push(existsSync(path) ? readFileSync(path, "utf8") : undefined);
+      },
+    });
+    const list = makeNativeModelLister(fake.seam.spawn);
+    const home = createPiHome();
+    // The home's own file differs: the list must come from the bytes passed in.
+    writeFileSync(join(home, "models-store.json"), '{"from":"the home"}');
+
+    await Effect.runPromise(
+      list(BINARY, home, Buffer.from('{"from":"the caller"}'), ENV, "openrouter"),
+    );
+
+    expect(seen).toEqual(['{"from":"the caller"}']);
   });
 
   it("lists again when the pi binary changes", async () => {
@@ -112,9 +151,9 @@ describe("listing the models pi ships for a provider", () => {
     const binary = join(home, "pi");
     writeFileSync(binary, "version 1");
 
-    await Effect.runPromise(list(binary, home, ENV, "openrouter"));
+    await Effect.runPromise(list(binary, home, undefined, ENV, "openrouter"));
     writeFileSync(binary, "a longer version 2");
-    await Effect.runPromise(list(binary, home, ENV, "openrouter"));
+    await Effect.runPromise(list(binary, home, undefined, ENV, "openrouter"));
 
     expect(spawns).toHaveLength(2);
   });
@@ -125,9 +164,11 @@ describe("listing the models pi ships for a provider", () => {
     });
     const home = createPiHome();
 
-    const failure = await Effect.runPromise(Effect.flip(list(BINARY, home, ENV, "openrouter")));
+    const failure = await Effect.runPromise(
+      Effect.flip(list(BINARY, home, undefined, ENV, "openrouter")),
+    );
     answerWith(answerShippedModels("openrouter", ["vendor/a"]));
-    const ids = await Effect.runPromise(list(BINARY, home, ENV, "openrouter"));
+    const ids = await Effect.runPromise(list(BINARY, home, undefined, ENV, "openrouter"));
 
     expect(failure).toContain("pi is broken");
     expect([...ids]).toEqual(["vendor/a"]);
@@ -138,9 +179,9 @@ describe("listing the models pi ships for a provider", () => {
     const { list, spawns, answerWith } = buildLister(answerShippedModels("openrouter", []));
     const home = createPiHome();
 
-    await Effect.runPromise(list(BINARY, home, ENV, "openrouter"));
+    await Effect.runPromise(list(BINARY, home, undefined, ENV, "openrouter"));
     answerWith(answerShippedModels("openrouter", ["vendor/a"]));
-    const ids = await Effect.runPromise(list(BINARY, home, ENV, "openrouter"));
+    const ids = await Effect.runPromise(list(BINARY, home, undefined, ENV, "openrouter"));
 
     expect([...ids]).toEqual(["vendor/a"]);
     expect(spawns).toHaveLength(2);

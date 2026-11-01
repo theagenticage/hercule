@@ -11,7 +11,7 @@
  * Every run gets a throwaway agent directory: the developer's own `~/.pi` is
  * never touched.
  */
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
@@ -269,6 +269,25 @@ describe.skipIf(binary === undefined)("probing a real pi", () => {
       "high",
       "max",
     ]);
+  }, 60_000);
+
+  it("refreshes pi's model list in a scratch directory and stores it in the home whole", async () => {
+    const ctx = buildLiveContext("not-a-key-and-never-sent-anywhere");
+
+    const probed = await Effect.runPromise(pi.probe(ctx, { readUsage: false }));
+
+    expect(probed.models.map((model) => model.slug)).toContain("glm-5.3");
+    // The refresh runs in a scratch directory and the result is renamed into
+    // the home, so whatever is in the home is a complete store and no
+    // temporary file of the copy is left. Offline, the refresh fails and the
+    // home keeps the store it had, which is none.
+    const names = readdirSync(ctx.home);
+    expect(names.filter((name) => name.startsWith("models-store.json."))).toEqual([]);
+    if (names.includes("models-store.json")) {
+      expect(() =>
+        JSON.parse(readFileSync(join(ctx.home, "models-store.json"), "utf8")),
+      ).not.toThrow();
+    }
   }, 60_000);
 
   it("reports a machine with no key as unauthenticated", async () => {
