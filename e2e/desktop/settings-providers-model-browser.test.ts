@@ -193,8 +193,9 @@ describe("Settings > Providers > model browser", () => {
           env,
         });
         expect(joined.code, `${joined.stdout}\n${joined.stderr}`).toBe(0);
-        // The Harness Home pi runs the account in. The runner merges the models it declares
-        // into this file and keeps the rest of it.
+        // The Harness Home pi runs the account in. Its `models.json` points the provider at the
+        // fake upstream. The runner never writes this file: each launch builds a private
+        // `models.json` from it plus the account's catalog models, so the `baseUrl` carries over.
         const harnessHome = buildHarnessHomeDir(machine.home, seeded.id, PI);
         mkdirSync(harnessHome, { recursive: true });
         writeFileSync(
@@ -323,16 +324,11 @@ describe("Settings > Providers > model browser", () => {
         expect(after.failure).toBeNull();
         expect(after.usage).toEqual([]);
       } finally {
-        // A runner still up here means the test failed before the end. Retiring it ends the daemon.
+        // A runner still up here means the test failed before the end. Retiring it ends the
+        // daemon, and the daemon stops its sessions on the way out.
         // The controller's own runner was retired when the fleet was arranged, so the only
         // runner left to retire is the one this test joined, even if it never came online.
         if (daemon !== undefined) {
-          // A pi process that is still running holds the daemon's output open, so the daemon
-          // would not end.
-          const threads = await client.session.query({ query: { kind: "thread", limit: 10 } });
-          for (const { id } of threads.items) {
-            await client.session.stop({ params: { id } }).catch(() => undefined);
-          }
           for (const runner of (await client.runner.query({ query: { limit: 10 } })).items) {
             if (runner.lifecycle !== "retired") {
               await client.runner.retire({ params: { id: runner.id }, payload: { force: true } });
