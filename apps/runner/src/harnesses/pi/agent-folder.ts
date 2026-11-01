@@ -13,11 +13,16 @@
  * - `models.json`: the home's file, with the account's catalog models set in it
  *   when the launch carries a catalog (see `setProviderModels`). The home's file
  *   is where a user, or a test, points a provider at another `baseUrl`.
+ * - `bin`: a link to the home's `bin` folder, when the home has one. pi looks
+ *   for its `fd` and `rg` tools there before it looks on PATH, and offline it
+ *   never downloads them. Without the link, a runner whose working copies of
+ *   those tools sit only in the home would lose them in every launch. pi reads
+ *   the folder and, offline, never writes into it.
  * - The extension and the instructions of a session launch, which the adapter
  *   writes beside them.
  * - No `auth.json`: the account's key comes from the environment. No
  *   `settings.json`, `SYSTEM.md`, `APPEND_SYSTEM.md`, `AGENTS.md`, `CLAUDE.md`,
- *   `keybindings.json`, `trust.json`, `bin`, `prompts`, `themes`, `skills` or
+ *   `keybindings.json`, `trust.json`, `prompts`, `themes`, `skills` or
  *   `extensions`: Hercule passes the model, the thinking level, the
  *   instructions and the extension on the command line, turns off pi's own
  *   discovery of the rest, and runs pi offline, so none of it is ever needed.
@@ -25,7 +30,7 @@
  * Sessions and their transcripts stay in the Harness Home: pi gets
  * `--session-dir` and the transcript paths explicitly.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
@@ -87,6 +92,17 @@ export const createAgentFolder = (): AgentFolder => {
 };
 
 const MODELS_FILE = "models.json";
+const TOOLS_FOLDER = "bin";
+
+/** Returns whether `path` is a folder, or a link to one. */
+const isFolder = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return false;
+  }
+};
 
 /** Reads a text file, or returns undefined when there is none. Throws when it cannot be read for another reason. */
 const readOptionalText = (path: string): string | undefined => {
@@ -105,7 +121,9 @@ const readOptionalText = (path: string): string | undefined => {
  * Session launches and text generations both use it.
  *
  * The returned function reads the home's model store once and writes those
- * bytes into `directory` as `models-store.json`. It then writes `directory`'s
+ * bytes into `directory` as `models-store.json`, and links the home's `bin`
+ * folder (the `fd` and `rg` tools pi found or fetched earlier) as `directory`'s
+ * `bin` when the home has one. It then writes `directory`'s
  * `models.json`, built from the home's `models.json`, if there is one:
  *
  * - `ctx.catalogModels` absent: the home's file as it is.
@@ -169,6 +187,8 @@ export const makeModelFilesWriter = (spawn: PiSpawn) => {
       yield* Effect.try({
         try: () => {
           writeModelStore(directory, store);
+          const homeTools = join(ctx.home, TOOLS_FOLDER);
+          if (isFolder(homeTools)) symlinkSync(homeTools, join(directory, TOOLS_FOLDER));
           if (text !== undefined) {
             writeFileSync(join(directory, MODELS_FILE), text, { mode: 0o600 });
           }
