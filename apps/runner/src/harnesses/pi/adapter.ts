@@ -17,6 +17,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import type {
   ApprovalDecision,
@@ -107,7 +108,8 @@ import {
   type RunningTool,
 } from "./normalize";
 import { readPiHome } from "./edited-path";
-import { replaceProviderModels } from "./models-file";
+import { setProviderModels } from "./models-file";
+import { makeNativeModelLister } from "./native-models";
 import { copyModelStore } from "./model-store";
 import { DEFAULT_THINKING, makePiInstall, makeProbe } from "./probe";
 import { readPiProvider } from "./provider";
@@ -1179,7 +1181,17 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * Starts the subagent an agent's `subagent` tool asked for: a pi process of
    * its own, on the session's current model, prompted with the call's task.
    * The call fails at once, with the reason as its result, when `findRefusal`
-   * refuses it or the process cannot start.
+   * refuses it or the process cannot start, and when the process starts on
+   * another model than the session's.
+   *
+   * A subagent's pi reads the Harness Home's `models.json` when it starts, and
+   * another launch in the home may have rewritten the file since the session
+   * started. So a session that manages declarations takes the home's lock
+   * (`withHomeLock`), writes its own set again (the one its start frame
+   * carried), and holds the lock until the subagent's pi has passed the
+   * exact-model check. The subagent therefore runs the models the session's
+   * parent runs, or fails loudly. Returns before the process is started, since
+   * the launch may wait for the lock.
    */
   const startSubagent = (
     held: Held,
@@ -1200,86 +1212,136 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       refuse(refusal);
       return;
     }
+    // Counted now, not when the process spawns, because the launch may wait
+    // for the home's lock, and a second request in the meantime must see this
+    // subagent against the limit. `spawnAgent` gives the count back when the
+    // process is released; a launch that fails before the spawn gives it back
+    // itself.
+    held.subagentProcesses += 1;
+    const failBeforeSpawn = (message: string): void => {
+      held.subagentProcesses -= 1;
+      refuse(`The subagent could not start: ${message}`);
+      warn(held.binding.sessionId, `could not start a pi subagent: ${message}`);
+    };
     const subagentId = crypto.randomUUID();
     const depth = parent.depth + 1;
     const extensionFile = buildExtensionPath(held.ctx.home, subagentId);
-    let child: PiChild;
-    try {
-      child = spawnAgent(
-        [
-          held.binary,
-          ...buildArgv(
-            held.spec,
-            held.ctx,
-            held.modelSelection,
-            { kind: "subagent" },
-            extensionFile,
-          ),
-        ],
-        buildAgentEnv(held.ctx, held.spec, depth, extensionFile),
-        held.ctx.cwd,
-        extensionFile,
-        () => {
-          held.subagentProcesses -= 1;
-        },
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      refuse(`The subagent could not start: ${message}`);
-      warn(held.binding.sessionId, `could not start a pi subagent: ${message}`);
-      return;
-    }
-    held.subagentProcesses += 1;
-    item.subagentId = subagentId;
-    const state = buildSubagentState(held.root.state, subagentId);
-    const subagent: Subagent = {
-      child,
-      rpc: makeRpc(child, (line, frame) => onLine(held, subagent, line, frame)),
-      state,
-      depth,
-      subagentId,
-      parent,
-      dialogId: dialog.id,
-      toolCallItemId: item.itemId,
-    };
-    held.subagents.set(subagentId, subagent);
-    const parentSubagentId = parent.state.subagentId;
-    emit({
-      _tag: "subagent.started",
-      eventId: crypto.randomUUID(),
-      sessionId: held.binding.sessionId,
-      at: now(),
-      subagentId,
-      ...(parentSubagentId === undefined ? {} : { parentSubagentId }),
-      itemId: item.itemId,
-      ...(dialog.description === "" ? {} : { description: truncateMessage(dialog.description) }),
-    });
-    watchChild(held, subagent);
-    Effect.runFork(subagent.rpc.pump);
-    // Create the id before sending, as `sendInput` does: pi's `agent_start`
-    // can arrive before its response to the prompt.
-    const turnId = (state.turnId = crypto.randomUUID());
-    for (const event of buildUserMessage({
-      sessionId: held.binding.sessionId,
-      subagentId,
-      turnId,
-      text: dialog.prompt,
-      steered: false,
-      harnessRefs: { nativeSessionId: held.binding.nativeSessionId },
-    })) {
-      emit(event);
-    }
     Effect.runFork(
-      Effect.catch(subagent.rpc.send({ type: "prompt", message: dialog.prompt }), (error) =>
-        Effect.sync(() => {
-          // A pi that exited is reported by `watchChild`, with its stderr as
-          // the reason, which tells more than this error does.
-          if (error._tag === "PiExited") return;
-          endSubagent(
-            held,
-            subagent,
-            { state: "failed", error: `pi did not take the subagent's task: ${error.message}` },
-            { error: `The subagent could not start: ${error.message}` },
+      withHomeLock(held.ctx, (releaseLock) =>
+        Effect.gen(function* () {
+          // The session may have ended while the launch waited for the lock.
+          if (sessions.get(held.binding.sessionId) !== held || held.stopping) {
+            held.subagentProcesses -= 1;
+            refuse("This agent is being stopped, so it cannot start a subagent.");
+            return;
+          }
+          const declared = yield* Effect.result(
+            declareCatalogModels(held.ctx.home, held.binary, held.ctx),
+          );
+          if (declared._tag === "Failure") {
+            failBeforeSpawn(declared.failure.message);
+            return;
+          }
+          let child: PiChild;
+          try {
+            child = spawnAgent(
+              [
+                held.binary,
+                ...buildArgv(
+                  held.spec,
+                  held.ctx,
+                  held.modelSelection,
+                  { kind: "subagent" },
+                  extensionFile,
+                ),
+              ],
+              buildAgentEnv(held.ctx, held.spec, depth, extensionFile),
+              held.ctx.cwd,
+              extensionFile,
+              () => {
+                held.subagentProcesses -= 1;
+              },
+            );
+          } catch (error) {
+            failBeforeSpawn(error instanceof Error ? error.message : String(error));
+            return;
+          }
+          item.subagentId = subagentId;
+          const state = buildSubagentState(held.root.state, subagentId);
+          const subagent: Subagent = {
+            child,
+            rpc: makeRpc(child, (line, frame) => onLine(held, subagent, line, frame)),
+            state,
+            depth,
+            subagentId,
+            parent,
+            dialogId: dialog.id,
+            toolCallItemId: item.itemId,
+          };
+          held.subagents.set(subagentId, subagent);
+          const parentSubagentId = parent.state.subagentId;
+          emit({
+            _tag: "subagent.started",
+            eventId: crypto.randomUUID(),
+            sessionId: held.binding.sessionId,
+            at: now(),
+            subagentId,
+            ...(parentSubagentId === undefined ? {} : { parentSubagentId }),
+            itemId: item.itemId,
+            ...(dialog.description === ""
+              ? {}
+              : { description: truncateMessage(dialog.description) }),
+          });
+          watchChild(held, subagent);
+          Effect.runFork(subagent.rpc.pump);
+          const checked = yield* Effect.result(
+            confirmStartedModel(subagent.rpc, held.ctx.modelArgument, held.modelSelection.model),
+          );
+          // The subagent's pi has loaded its models, so the next launch in
+          // this home may write its own declarations.
+          yield* releaseLock;
+          if (checked._tag === "Failure") {
+            // A pi that exited is reported by `watchChild`, with its stderr
+            // as the reason.
+            if (checked.failure.exited) return;
+            endSubagent(
+              held,
+              subagent,
+              { state: "failed", error: checked.failure.message },
+              { error: `The subagent could not start: ${checked.failure.message}` },
+            );
+            return;
+          }
+          // Create the id before sending, as `sendInput` does: pi's
+          // `agent_start` can arrive before its response to the prompt.
+          const turnId = (state.turnId = crypto.randomUUID());
+          for (const event of buildUserMessage({
+            sessionId: held.binding.sessionId,
+            subagentId,
+            turnId,
+            text: dialog.prompt,
+            steered: false,
+            harnessRefs: { nativeSessionId: held.binding.nativeSessionId },
+          })) {
+            emit(event);
+          }
+          yield* Effect.catch(
+            subagent.rpc.send({ type: "prompt", message: dialog.prompt }),
+            (error) =>
+              Effect.sync(() => {
+                // A pi that exited is reported by `watchChild`, with its stderr as
+                // the reason, which tells more than this error does.
+                if (error._tag === "PiExited") return;
+                endSubagent(
+                  held,
+                  subagent,
+                  {
+                    state: "failed",
+                    error: `pi did not take the subagent's task: ${error.message}`,
+                  },
+                  { error: `The subagent could not start: ${error.message}` },
+                );
+              }),
           );
         }),
       ),
@@ -1538,41 +1600,117 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     }
   };
 
+  const listNativeModels = makeNativeModelLister(seam.spawn);
+
   /**
-   * Declares `models` to pi by setting them as the provider's models in the
-   * `models.json` in `directory`, pi's agent directory (see
-   * `replaceProviderModels`). pi reads the file when it starts. Does nothing
-   * when there are no models, or when the file already holds exactly them.
-   * Throws when the file cannot be read or written, and when it is not a plain
-   * JSON object (a file with comments, say), because writing would drop what
-   * it holds. That message names the file and what to do, and never quotes the
-   * file's content.
+   * Declares the account's Model Catalog to pi: sets the provider's models in
+   * the `models.json` in `directory`, pi's agent directory, to the models of
+   * `ctx.catalogModels` that pi does not ship (see `setProviderModels`). pi
+   * reads the file when it starts.
    *
-   * Everything here is synchronous, so two sessions of one account starting in
-   * this process cannot interleave their read and write and lose each other's
-   * models. No lock is needed.
+   * Does nothing when the frame carried no `catalogModels`, which leaves the
+   * file as it is. An empty list is not that case: it removes the
+   * declarations of an earlier start. Which models pi ships comes from pi
+   * itself (`makeNativeModelLister`), listed once and kept until the home's
+   * model store changes. Fails with an `Error` when pi cannot list its
+   * models (a guess would declare a shipped model and replace pi's own
+   * definition of it), when the file is not a plain JSON object (a file with
+   * comments, say) and writing would drop what it holds, and when the file
+   * cannot be read or written. The messages name the file and what to do, and
+   * never quote its content.
+   *
+   * The file of a Harness Home is shared by every pi process the runner starts
+   * in it, and a later start can carry another catalog, or find a refreshed
+   * model store. So a pi process only loads the set its own frame carried when
+   * the launch holds the home's lock (`withHomeLock`) from this call until
+   * that pi has loaded its models. A text generation writes to its own scratch
+   * directory and needs no lock.
    */
-  const declareUnlistedModels = (
+  const declareCatalogModels = (
     directory: string,
-    modelArgument: string,
-    models: HarnessRunnerContext["unlistedModels"],
-  ): void => {
-    if (models === undefined || models.length === 0) return;
-    const path = join(directory, "models.json");
-    let existing: string | undefined;
-    try {
-      existing = readFileSync(path, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    const provider = readPiProvider(modelArgument);
-    const update = replaceProviderModels(existing, provider, models);
-    if (update._tag === "unreadable") {
-      throw new Error(
-        `${PI_NAME}'s models.json (${path}) is not a plain JSON object, so the models of ${provider} cannot be added to it without losing what it holds. Remove its comments, or delete the file.`,
+    binary: string,
+    ctx: HarnessRunnerContext,
+  ): Effect.Effect<void, Error> => {
+    const declarations = ctx.catalogModels;
+    if (declarations === undefined) return Effect.void;
+    return Effect.gen(function* () {
+      const provider = yield* Effect.try({
+        try: () => readPiProvider(ctx.modelArgument),
+        catch: (error) => new Error(describeError(error)),
+      });
+      const nativeIds = yield* listNativeModels(binary, ctx.home, buildEnv(ctx), provider).pipe(
+        Effect.mapError(
+          (message) =>
+            new Error(
+              `${PI_NAME} could not list the models it ships for ${provider}, so Hercule cannot tell which models to declare to it: ${message}`,
+            ),
+        ),
       );
+      yield* Effect.try({
+        try: () => {
+          const path = join(directory, "models.json");
+          let existing: string | undefined;
+          try {
+            existing = readFileSync(path, "utf8");
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+          const update = setProviderModels(existing, provider, declarations, nativeIds);
+          if (update._tag === "unreadable") {
+            throw new Error(
+              `${PI_NAME}'s models.json (${path}) is not a plain JSON object, so the models of ${provider} cannot be added to it without losing what it holds. Remove its comments, or delete the file.`,
+            );
+          }
+          if (update._tag === "write") writeFileAtomically(path, update.text);
+        },
+        catch: (error) => (error instanceof Error ? error : new Error(describeError(error))),
+      });
+    });
+  };
+
+  /** The lock of each Harness Home that has had a launch managing its declarations. */
+  const homeLocks = new Map<string, Semaphore.Semaphore>();
+
+  /**
+   * Runs `body` holding the lock of the context's Harness Home, when the
+   * context manages declarations (`catalogModels` is present), and gives it
+   * `release` to let go of the lock before `body` ends. The lock is released
+   * when `body` ends in any way, so a failed or interrupted launch never keeps
+   * it. A context that manages no declarations takes no lock, because its
+   * launch neither writes nor depends on the file.
+   *
+   * The launch holds the lock from before it writes `models.json` until its pi
+   * has loaded its models and passed the exact-model check, so each pi process
+   * loads the declarations of its own frame and not those of a launch
+   * that wrote the file in between. The cost: pi processes of one account on
+   * one runner start one at a time, each taking the time pi needs to load (a
+   * fraction of a second). A subagent start takes the lock too (see
+   * `startSubagent`). Probes and text generations never do, because they run
+   * in a scratch directory.
+   */
+  const withHomeLock = <A, E, R>(
+    ctx: HarnessRunnerContext,
+    body: (release: Effect.Effect<void>) => Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> => {
+    if (ctx.catalogModels === undefined) return body(Effect.void);
+    let lock = homeLocks.get(ctx.home);
+    if (lock === undefined) {
+      lock = Semaphore.makeUnsafe(1);
+      homeLocks.set(ctx.home, lock);
     }
-    if (update._tag === "write") writeFileAtomically(path, update.text);
+    const homeLock = lock;
+    return Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        yield* restore(homeLock.take(1));
+        let holding = true;
+        const release = Effect.suspend(() => {
+          if (!holding) return Effect.void;
+          holding = false;
+          return Effect.asVoid(homeLock.release(1));
+        });
+        return yield* restore(body(release)).pipe(Effect.ensuring(release));
+      }),
+    );
   };
 
   /**
@@ -1623,11 +1761,9 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
   };
 
   /**
-   * Prepares the Harness Home for a session: creates the sessions
-   * directory, writes the session's instructions when it has any, and declares
-   * the models the start carried that pi does not list (for a fresh start, a
-   * resume and a fork alike). Throws when a write fails, and when
-   * `models.json` cannot take the models (see `declareUnlistedModels`).
+   * Prepares the Harness Home for a session: creates the sessions directory
+   * and writes the session's instructions when it has any. Throws when a write
+   * fails.
    */
   const prepareHome = (
     ctx: HarnessRunnerContext,
@@ -1638,7 +1774,6 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     if (instructions !== undefined) {
       writeFileAtomically(buildSystemPromptPath(ctx.home, sessionId), instructions);
     }
-    declareUnlistedModels(ctx.home, ctx.modelArgument, ctx.unlistedModels);
   };
 
   const buildEnv = (
@@ -1764,56 +1899,65 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     spec: TextGenerationSpec,
   ): Effect.Effect<TextGenerationOutcome, string> =>
     Effect.acquireUseRelease(
-      Effect.try({
-        try: () => {
-          const extensionFile = join(ctx.cwd, "extension.ts");
-          const instructionsFile = join(ctx.cwd, "instructions.txt");
-          writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
-          // The scratch directory is pi's agent directory for this call, and
-          // it holds no `models.json` of the account's home. Only the models
-          // the request carries go into it.
-          declareUnlistedModels(ctx.cwd, ctx.modelArgument, ctx.unlistedModels);
-          // The probe stores the model catalog it refreshed from pi.dev in the
-          // home, so the call can use models newer than the installed pi.
-          copyModelStore(ctx.home, ctx.cwd);
-          const released = Promise.withResolvers<void>();
-          const child = spawnAgent(
-            [
-              ctx.binary,
-              ...buildTextGenerationArgv(spec, ctx.modelArgument, extensionFile, instructionsFile),
-            ],
-            buildEnv(ctx, {
-              // pi writes bookkeeping files into its agent directory even with
-              // `--no-session`. Pointing it at the scratch directory removes
-              // them with the call. It also keeps out whatever a session may
-              // have written into the Harness Home, such as an
-              // `APPEND_SYSTEM.md`, which pi would append to the instructions.
-              // The key comes from the environment, not from this directory.
-              PI_CODING_AGENT_DIR: ctx.cwd,
-              // The approval hook never asks about `submit_result`, so the
-              // answer does not wait. It asks about every other tool, and
-              // such a request fails the call (see
-              // `findTextGenerationViolation`). Full access would instead run
-              // a tool that pi kept by mistake, without asking.
-              [ACCESS_MODE_VARIABLE]: "approval-required",
-              [AGENT_FILE_VARIABLE]: extensionFile,
-              [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(spec.outputSchema),
-              // Given as undefined so `buildEnv` removes them, in case the
-              // runner itself was started from inside a pi session.
-              [SUBAGENTS_VARIABLE]: undefined,
-              [NO_AUTO_COMPACTION_VARIABLE]: undefined,
-              [SESSION_MARKS_DIR_VARIABLE]: undefined,
-            }),
-            // pi's working directory. It is the scratch directory, never a
-            // workspace, so a call can neither see nor change the user's files.
-            ctx.cwd,
-            extensionFile,
-            released.resolve,
-          );
-          return { child, released: released.promise };
-        },
-        catch: describeError,
-      }),
+      // The scratch directory is pi's agent directory for this call, and it
+      // holds no `models.json` of the account's home. Only the models the
+      // request carries go into it.
+      declareCatalogModels(ctx.cwd, ctx.binary, ctx).pipe(
+        Effect.mapError(describeError),
+        Effect.andThen(
+          Effect.try({
+            try: () => {
+              const extensionFile = join(ctx.cwd, "extension.ts");
+              const instructionsFile = join(ctx.cwd, "instructions.txt");
+              writeFileSync(instructionsFile, spec.instructions, { mode: 0o600 });
+              // The probe stores the model catalog it refreshed from pi.dev in the
+              // home, so the call can use models newer than the installed pi.
+              copyModelStore(ctx.home, ctx.cwd);
+              const released = Promise.withResolvers<void>();
+              const child = spawnAgent(
+                [
+                  ctx.binary,
+                  ...buildTextGenerationArgv(
+                    spec,
+                    ctx.modelArgument,
+                    extensionFile,
+                    instructionsFile,
+                  ),
+                ],
+                buildEnv(ctx, {
+                  // pi writes bookkeeping files into its agent directory even with
+                  // `--no-session`. Pointing it at the scratch directory removes
+                  // them with the call. It also keeps out whatever a session may
+                  // have written into the Harness Home, such as an
+                  // `APPEND_SYSTEM.md`, which pi would append to the instructions.
+                  // The key comes from the environment, not from this directory.
+                  PI_CODING_AGENT_DIR: ctx.cwd,
+                  // The approval hook never asks about `submit_result`, so the
+                  // answer does not wait. It asks about every other tool, and
+                  // such a request fails the call (see
+                  // `findTextGenerationViolation`). Full access would instead run
+                  // a tool that pi kept by mistake, without asking.
+                  [ACCESS_MODE_VARIABLE]: "approval-required",
+                  [AGENT_FILE_VARIABLE]: extensionFile,
+                  [OUTPUT_SCHEMA_VARIABLE]: JSON.stringify(spec.outputSchema),
+                  // Given as undefined so `buildEnv` removes them, in case the
+                  // runner itself was started from inside a pi session.
+                  [SUBAGENTS_VARIABLE]: undefined,
+                  [NO_AUTO_COMPACTION_VARIABLE]: undefined,
+                  [SESSION_MARKS_DIR_VARIABLE]: undefined,
+                }),
+                // pi's working directory. It is the scratch directory, never a
+                // workspace, so a call can neither see nor change the user's files.
+                ctx.cwd,
+                extensionFile,
+                released.resolve,
+              );
+              return { child, released: released.promise };
+            },
+            catch: describeError,
+          }),
+        ),
+      ),
       ({ child }) =>
         Effect.gen(function* () {
           const settled = Deferred.makeUnsafe<TextGenerationOutcome>();
@@ -1933,172 +2077,180 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     },
 
     startSession: (sessionId, spec, ctx) =>
-      Effect.gen(function* () {
-        const binary = ctx.binary;
-        if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(PI_NAME));
-        // The entry stays until its pi has exited, so this session's pi is
-        // still running. A second pi under the same id would write the same
-        // transcript and leave the first one orphaned.
-        if (sessions.has(sessionId)) {
-          return yield* Effect.fail(buildSessionAlreadyRunning());
-        }
-        const carried = spec.continue;
-        const transcript =
-          carried === undefined ? undefined : findTranscript(ctx.home, carried.nativeSessionId);
-        if (carried !== undefined && transcript === undefined) {
-          // Launching without it would start an empty session under the
-          // resumed session's id: the conversation would silently lose its
-          // history.
-          return yield* Effect.fail(
-            new ResumeTranscriptMissing({
-              message:
-                "The conversation cannot be resumed on this runner: pi's record of it is no longer here. Start a new thread to continue the work.",
+      withHomeLock(ctx, (releaseLock) =>
+        Effect.gen(function* () {
+          const binary = ctx.binary;
+          if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(PI_NAME));
+          // The entry stays until its pi has exited, so this session's pi is
+          // still running. A second pi under the same id would write the same
+          // transcript and leave the first one orphaned.
+          if (sessions.has(sessionId)) {
+            return yield* Effect.fail(buildSessionAlreadyRunning());
+          }
+          const carried = spec.continue;
+          const transcript =
+            carried === undefined ? undefined : findTranscript(ctx.home, carried.nativeSessionId);
+          if (carried !== undefined && transcript === undefined) {
+            // Launching without it would start an empty session under the
+            // resumed session's id: the conversation would silently lose its
+            // history.
+            return yield* Effect.fail(
+              new ResumeTranscriptMissing({
+                message:
+                  "The conversation cannot be resumed on this runner: pi's record of it is no longer here. Start a new thread to continue the work.",
+              }),
+            );
+          }
+          // Compute the path before the launch, because `prepareHome` below
+          // writes the file, and the file must be deleted whether the session
+          // ends or never starts.
+          const instructions = buildSessionInstructions(ctx.herculeTool.orientation, spec);
+          const systemPromptFile =
+            instructions === undefined ? undefined : buildSystemPromptPath(ctx.home, sessionId);
+          const extensionFile = buildExtensionPath(ctx.home, sessionId);
+          // A pi that never started has no session to end, and ending the
+          // session is what deletes the instructions file. So delete it here, or
+          // the instructions of every failed launch would stay in the home.
+          const deleteUnusedInstructions = (): void => {
+            if (systemPromptFile !== undefined) {
+              attempt(() => rmSync(systemPromptFile, { force: true }));
+            }
+          };
+          yield* Effect.try({
+            try: () => prepareHome(ctx, sessionId, instructions),
+            catch: (error) => error,
+          }).pipe(
+            Effect.andThen(declareCatalogModels(ctx.home, binary, ctx)),
+            Effect.mapError((error) => {
+              deleteUnusedInstructions();
+              return buildAdapterFailed(
+                `The runner could not prepare ${PI_NAME}'s folder for the session: ${describeError(error)}`,
+              );
             }),
           );
-        }
-        // Compute the path before the launch, because `prepareHome` below
-        // writes the file, and the file must be deleted whether the session
-        // ends or never starts.
-        const instructions = buildSessionInstructions(ctx.herculeTool.orientation, spec);
-        const systemPromptFile =
-          instructions === undefined ? undefined : buildSystemPromptPath(ctx.home, sessionId);
-        const extensionFile = buildExtensionPath(ctx.home, sessionId);
-        // A pi that never started has no session to end, and ending the
-        // session is what deletes the instructions file. So delete it here, or
-        // the instructions of every failed launch would stay in the home.
-        const deleteUnusedInstructions = (): void => {
-          if (systemPromptFile !== undefined) {
-            attempt(() => rmSync(systemPromptFile, { force: true }));
-          }
-        };
-        yield* Effect.try({
-          try: () => prepareHome(ctx, sessionId, instructions),
-          catch: (error) => {
-            deleteUnusedInstructions();
-            return buildAdapterFailed(
-              `The runner could not prepare ${PI_NAME}'s folder for the session: ${describeError(error)}`,
-            );
-          },
-        });
-        const child = yield* Effect.try({
-          try: () =>
-            spawnAgent(
-              [
-                binary,
-                ...buildArgv(
-                  spec,
-                  ctx,
-                  spec.modelSelection,
-                  { kind: "session", sessionId, transcript, systemPromptFile },
-                  extensionFile,
-                ),
-              ],
-              buildAgentEnv(ctx, spec, 0, extensionFile),
-              // The session's working directory. pi resolves every relative
-              // path against the directory it starts in, so a child that
-              // inherited the runner's directory would write the user's work
-              // into whatever directory the runner was started from.
-              ctx.cwd,
-              extensionFile,
-            ),
-          catch: (error) => {
-            deleteUnusedInstructions();
-            if (!(error instanceof SpawnFailed)) {
-              // A failed file write before the spawn.
-              return buildStartFailure(PI_NAME, describeError(error));
-            }
-            // Only a spawn that failed because the binary is missing means pi
-            // is not installed. Otherwise the binary exists but cannot run,
-            // for example because node is not on the PATH of the runner.
-            return isExecutableNotFound(error.cause, { binary, cwd: ctx.cwd })
-              ? buildHarnessNotInstalled(PI_NAME)
-              : buildHarnessNotRunnable(PI_NAME, describeError(error));
-          },
-        });
-        // A resumed session continues the native session. A fork is a new
-        // native session, created under this session's id.
-        const nativeSessionId = carried?.mode === "resume" ? carried.nativeSessionId : sessionId;
-        const state = buildNormalizingState(
-          sessionId,
-          nativeSessionId,
-          spec.outputSchema,
-          readPiHome(ctx.env),
-          yield* captureUnknownItemReporter("Pi", sessionId),
-        );
-        state.model = spec.modelSelection.model;
-        state.automaticCompactionCancelled = cancelsAutomaticCompaction(spec, 0);
-        const binding: SessionBinding = {
-          sessionId,
-          nativeSessionId,
-          providerAccountId: spec.providerAccountId,
-        };
-        const root: RunningAgent = {
-          child,
-          rpc: makeRpc(child, (line, frame) => onLine(held, root, line, frame)),
-          state,
-          depth: 0,
-        };
-        const held: Held = {
-          binding,
-          spec,
-          ctx,
-          binary,
-          root,
-          subagents: new Map(),
-          subagentProcesses: 0,
-          parks: new Map(),
-          modelSelection: spec.modelSelection,
-          systemPromptFile,
-          stopping: false,
-          startup: { _tag: "checking" },
-          inputGeneration: 0,
-        };
-        sessions.set(sessionId, held);
-        const readComplaints = watchChild(held, root);
-        Effect.runFork(root.rpc.pump);
-        const checkFailure = yield* Effect.match(
-          confirmStartedModel(root.rpc, ctx.modelArgument, spec.modelSelection.model),
-          { onFailure: (failure) => failure, onSuccess: () => undefined },
-        );
-        if (checkFailure !== undefined) {
-          // pi has done nothing yet, so it is stopped without the careful
-          // shutdown of `stopSession`. `stopping` keeps the watch on its
-          // process from reporting the exit of a session that never started:
-          // the failed start is the one report.
-          held.stopping = true;
-          sessions.delete(sessionId);
-          deleteUnusedInstructions();
-          yield* stopChild(child);
-          // A pi that exited has said why on its error output. Without it the
-          // user would only learn that pi stopped.
-          const complaints = checkFailure.exited ? yield* Effect.promise(readComplaints) : "";
-          return yield* Effect.fail(
-            buildAdapterFailed(
-              complaints === ""
-                ? checkFailure.message
-                : `${checkFailure.message} ${truncateMessage(complaints)}`,
-            ),
+          const child = yield* Effect.try({
+            try: () =>
+              spawnAgent(
+                [
+                  binary,
+                  ...buildArgv(
+                    spec,
+                    ctx,
+                    spec.modelSelection,
+                    { kind: "session", sessionId, transcript, systemPromptFile },
+                    extensionFile,
+                  ),
+                ],
+                buildAgentEnv(ctx, spec, 0, extensionFile),
+                // The session's working directory. pi resolves every relative
+                // path against the directory it starts in, so a child that
+                // inherited the runner's directory would write the user's work
+                // into whatever directory the runner was started from.
+                ctx.cwd,
+                extensionFile,
+              ),
+            catch: (error) => {
+              deleteUnusedInstructions();
+              if (!(error instanceof SpawnFailed)) {
+                // A failed file write before the spawn.
+                return buildStartFailure(PI_NAME, describeError(error));
+              }
+              // Only a spawn that failed because the binary is missing means pi
+              // is not installed. Otherwise the binary exists but cannot run,
+              // for example because node is not on the PATH of the runner.
+              return isExecutableNotFound(error.cause, { binary, cwd: ctx.cwd })
+                ? buildHarnessNotInstalled(PI_NAME)
+                : buildHarnessNotRunnable(PI_NAME, describeError(error));
+            },
+          });
+          // A resumed session continues the native session. A fork is a new
+          // native session, created under this session's id.
+          const nativeSessionId = carried?.mode === "resume" ? carried.nativeSessionId : sessionId;
+          const state = buildNormalizingState(
+            sessionId,
+            nativeSessionId,
+            spec.outputSchema,
+            readPiHome(ctx.env),
+            yield* captureUnknownItemReporter("Pi", sessionId),
           );
-        }
-        const exitedDuringCheck = held.startup._tag === "exited" ? held.startup : undefined;
-        held.startup = { _tag: "done" };
-        // The native id goes on this event because the controller has no
-        // other way to learn it: a session started after the runner's hello
-        // is not listed again.
-        emit({
-          _tag: "session.started",
-          eventId: crypto.randomUUID(),
-          sessionId,
-          at: now(),
-          harnessRefs: { nativeSessionId },
-        });
-        // pi answered and then exited before the check was over. The exit is
-        // reported now, after the start it follows.
-        if (exitedDuringCheck !== undefined) {
-          exitSession(sessionId, "process_exit", exitedDuringCheck.message);
-        }
-        return binding;
-      }),
+          state.model = spec.modelSelection.model;
+          state.automaticCompactionCancelled = cancelsAutomaticCompaction(spec, 0);
+          const binding: SessionBinding = {
+            sessionId,
+            nativeSessionId,
+            providerAccountId: spec.providerAccountId,
+          };
+          const root: RunningAgent = {
+            child,
+            rpc: makeRpc(child, (line, frame) => onLine(held, root, line, frame)),
+            state,
+            depth: 0,
+          };
+          const held: Held = {
+            binding,
+            spec,
+            ctx,
+            binary,
+            root,
+            subagents: new Map(),
+            subagentProcesses: 0,
+            parks: new Map(),
+            modelSelection: spec.modelSelection,
+            systemPromptFile,
+            stopping: false,
+            startup: { _tag: "checking" },
+            inputGeneration: 0,
+          };
+          sessions.set(sessionId, held);
+          const readComplaints = watchChild(held, root);
+          Effect.runFork(root.rpc.pump);
+          const checkFailure = yield* Effect.match(
+            confirmStartedModel(root.rpc, ctx.modelArgument, spec.modelSelection.model),
+            { onFailure: (failure) => failure, onSuccess: () => undefined },
+          );
+          // pi has loaded its models, so the next launch in this home may write
+          // its own declarations.
+          yield* releaseLock;
+          if (checkFailure !== undefined) {
+            // pi has done nothing yet, so it is stopped without the careful
+            // shutdown of `stopSession`. `stopping` keeps the watch on its
+            // process from reporting the exit of a session that never started:
+            // the failed start is the one report.
+            held.stopping = true;
+            sessions.delete(sessionId);
+            deleteUnusedInstructions();
+            yield* stopChild(child);
+            // A pi that exited has said why on its error output. Without it the
+            // user would only learn that pi stopped.
+            const complaints = checkFailure.exited ? yield* Effect.promise(readComplaints) : "";
+            return yield* Effect.fail(
+              buildAdapterFailed(
+                complaints === ""
+                  ? checkFailure.message
+                  : `${checkFailure.message} ${truncateMessage(complaints)}`,
+              ),
+            );
+          }
+          const exitedDuringCheck = held.startup._tag === "exited" ? held.startup : undefined;
+          held.startup = { _tag: "done" };
+          // The native id goes on this event because the controller has no
+          // other way to learn it: a session started after the runner's hello
+          // is not listed again.
+          emit({
+            _tag: "session.started",
+            eventId: crypto.randomUUID(),
+            sessionId,
+            at: now(),
+            harnessRefs: { nativeSessionId },
+          });
+          // pi answered and then exited before the check was over. The exit is
+          // reported now, after the start it follows.
+          if (exitedDuringCheck !== undefined) {
+            exitSession(sessionId, "process_exit", exitedDuringCheck.message);
+          }
+          return binding;
+        }),
+      ),
 
     sendInput: (
       sessionId: string,

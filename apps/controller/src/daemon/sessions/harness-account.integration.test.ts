@@ -446,29 +446,12 @@ const API_ONLY_MODEL: CatalogModel = {
 
 /**
  * Stores a catalog for the account that holds the model the runner lists and
- * `API_ONLY_MODEL`, as if it had been read from the provider's API. It waits
- * until the runner's probe of the account in `harnessId` is stored, because
- * the models a harness lists come from that snapshot.
+ * `API_ONLY_MODEL`, as if it had been read from the provider's API.
  */
 const storeCatalogWithApiOnlyModel = async (
   arranged: Arranged,
   providerAccountId: string,
-  harnessId: string,
 ): Promise<void> => {
-  await waitUntil(`stored the probe of the account in ${harnessId}`, async () => {
-    const response = await send("GET", arranged.harness.base, "/api/v1/provider-accounts", {
-      token: arranged.token,
-    });
-    const accounts = (await response.json()) as ReadonlyArray<{
-      readonly id: string;
-      readonly snapshots: ReadonlyArray<{ readonly harnessId: string }>;
-    }>;
-    return accounts
-      .find((account) => account.id === providerAccountId)
-      ?.snapshots.some((snapshot) => snapshot.harnessId === harnessId)
-      ? true
-      : undefined;
-  });
   await Effect.runPromise(
     Effect.orDie(
       withTransaction(
@@ -518,12 +501,12 @@ const endSession = async (arranged: Arranged, session: Session): Promise<void> =
   await waitForSession(arranged, session.id, (one) => one.status === "exited");
 };
 
-describe("the catalog models a harness does not list, on a session's start frame", () => {
+describe("the catalog models on a session's start frame", () => {
   it("carries them on a start, a resume and a fork in a harness that runs any model, and the others on none", async () => {
     await withFleet(async (arranged) => {
       const dual = findProviderAccountId(arranged, "harnesses/main");
       await setKey(arranged, dual, KEY_VALUE);
-      await storeCatalogWithApiOnlyModel(arranged, dual, "harnesses/second");
+      await storeCatalogWithApiOnlyModel(arranged, dual);
 
       const parent = await spawnSessionOrFail(arranged, {
         prompt: "hello",
@@ -552,10 +535,11 @@ describe("the catalog models a harness does not list, on a session's start frame
       const [fork] = await waitForStartFrames(arranged, child.id, 1);
       expect(resume!.spec.continue?.mode).toBe("resume");
       expect(fork!.spec.continue?.mode).toBe("fork");
-      // The runner lists `clever`, so only the model it lacks is sent, with
-      // what a runner needs and without the catalog's prices and maker.
+      // The whole catalog is sent, with what a runner needs and without the
+      // catalog's prices and maker.
       for (const frame of [start!, resume!, fork!]) {
-        expect(frame.unlistedModels).toEqual([
+        expect(frame.catalogModels).toEqual([
+          { slug: "clever", name: "Clever", imageInput: { maxBytes: null } },
           {
             slug: "api-only",
             name: "API only",
@@ -574,7 +558,7 @@ describe("the catalog models a harness does not list, on a session's start frame
       });
       const [main] = await waitForStartFrames(arranged, inMain.id, 1);
       expect(main!.harnessId).toBe("harnesses/main");
-      expect("unlistedModels" in main!).toBe(false);
+      expect("catalogModels" in main!).toBe(false);
     });
   });
 });

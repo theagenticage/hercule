@@ -452,6 +452,25 @@ export const createDriving = (
   };
 };
 
+/**
+ * Returns the spawns that are an agent's pi (a session's, a subagent's or a
+ * text generation's), which carry the extension with `-e`. The other spawns
+ * are listings of the models pi ships, made in a scratch directory.
+ */
+export const listAgentSpawns = (spawns: ReadonlyArray<Spawn>): ReadonlyArray<Spawn> =>
+  spawns.filter((one) => one.command.includes("-e"));
+
+/**
+ * Builds the answer to `get_available_models` of a pi that ships the given
+ * models for `provider`, with names that are not the ids.
+ */
+export const answerShippedModels = (provider: string, ids: ReadonlyArray<string>): Answers => ({
+  get_available_models: () => ({
+    success: true,
+    data: { models: ids.map((id) => ({ id, name: `Shipped ${id}`, provider, input: ["text"] })) },
+  }),
+});
+
 export const listSentCommands = (
   sent: ReadonlyArray<Sent>,
   type: string,
@@ -461,7 +480,7 @@ export const listSentCommands = (
 /**
  * The fields of a session's context a test can set: its edit marks, its
  * library skills folder, its repository skills folders, its model argument
- * and its unlisted models. None is set by default, and the default model
+ * and its catalog models. None is set by default, and the default model
  * argument is Z.ai's.
  */
 type SessionContextOverrides = Partial<
@@ -471,7 +490,7 @@ type SessionContextOverrides = Partial<
     | "librarySkillsFolder"
     | "repositorySkillsFolders"
     | "modelArgument"
-    | "unlistedModels"
+    | "catalogModels"
   >
 >;
 
@@ -493,8 +512,8 @@ export const startTestSession = async (
     ctx: { ...driving.ctx, ...contextOverrides, env: { ...driving.ctx.env, ...runnerEnv } },
   };
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
-  await waitUntil("spawned a pi", () => run.spawns.length === 1);
-  return { ...run, child: run.spawns[0]! };
+  await waitUntil("spawned a pi", () => listAgentSpawns(run.spawns).length === 1);
+  return { ...run, child: listAgentSpawns(run.spawns)[0]! };
 };
 
 /** Starts a session with a turn running, so the next input steers that turn. */

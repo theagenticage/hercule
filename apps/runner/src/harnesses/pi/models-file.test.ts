@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { UnlistedModel } from "@hercule/protocol";
-import { replaceProviderModels, type ModelsFileUpdate } from "./models-file";
+import type { ModelDeclaration } from "@hercule/protocol";
+import { setProviderModels, type ModelsFileUpdate } from "./models-file";
 
-const buildModel = (slug: string, details: Partial<UnlistedModel> = {}): UnlistedModel => ({
+const buildModel = (slug: string, details: Partial<ModelDeclaration> = {}): ModelDeclaration => ({
   slug,
   name: `Name of ${slug}`,
   imageInput: null,
@@ -18,18 +18,20 @@ interface WrittenFile {
   >;
 }
 
-/** Replaces the models and parses the written text, failing the test when nothing is written. */
+const NO_NATIVE_MODELS: ReadonlySet<string> = new Set();
+
+/** Sets the models and parses the written text, failing the test when nothing is written. */
 const replaceAndParse = (
   existing: string | undefined,
-  models: ReadonlyArray<UnlistedModel>,
-  provider = "openrouter",
+  models: ReadonlyArray<ModelDeclaration>,
+  nativeIds: ReadonlySet<string> = NO_NATIVE_MODELS,
 ): WrittenFile => {
-  const update = replaceProviderModels(existing, provider, models);
+  const update = setProviderModels(existing, "openrouter", models, nativeIds);
   if (update._tag !== "write") throw new Error("expected the file to be written");
   return JSON.parse(update.text) as WrittenFile;
 };
 
-describe("setting the models of a provider in pi's models.json", () => {
+describe("declaring the models of a provider in pi's models.json", () => {
   it("builds a new file with the entry of a model whose details are all known", () => {
     const written = replaceAndParse(undefined, [
       buildModel("fake-vendor/fake-model:free", {
@@ -123,23 +125,65 @@ describe("setting the models of a provider in pi's models.json", () => {
     ]);
   });
 
-  it("writes nothing for an empty list, and does not clear the models already there", () => {
-    const existing = JSON.stringify({ providers: { openrouter: { models: [{ id: "a/b" }] } } });
-    expect(replaceProviderModels(undefined, "openrouter", [])).toEqual<ModelsFileUpdate>({
+  it("leaves out the models pi ships, so pi keeps its own definition of them", () => {
+    const written = replaceAndParse(
+      undefined,
+      [buildModel("shipped/one"), buildModel("new/two"), buildModel("shipped/three")],
+      new Set(["shipped/one", "shipped/three"]),
+    );
+    expect(written.providers.openrouter!.models!.map((entry) => entry["id"])).toEqual(["new/two"]);
+  });
+
+  it("empties the provider's list when nothing is left to declare, removing an earlier start's entries", () => {
+    const existing = JSON.stringify({
+      providers: { openrouter: { baseUrl: "http://127.0.0.1:9", models: [{ id: "old/one" }] } },
+    });
+    const written = replaceAndParse(
+      existing,
+      [buildModel("shipped/one")],
+      new Set(["shipped/one"]),
+    );
+    expect(written.providers.openrouter).toEqual({ baseUrl: "http://127.0.0.1:9", models: [] });
+    expect(replaceAndParse(existing, [])).toEqual(written);
+  });
+
+  it("creates no file and no entry when there is nothing to declare and nothing declared", () => {
+    const noKey = JSON.stringify({ providers: { zai: { baseUrl: "http://x" } } });
+    expect(
+      setProviderModels(undefined, "openrouter", [], NO_NATIVE_MODELS),
+    ).toEqual<ModelsFileUpdate>({
       _tag: "unchanged",
     });
-    expect(replaceProviderModels(existing, "openrouter", [])).toEqual<ModelsFileUpdate>({
+    expect(setProviderModels(noKey, "openrouter", [], NO_NATIVE_MODELS)).toEqual<ModelsFileUpdate>({
       _tag: "unchanged",
     });
+    expect(
+      setProviderModels(
+        JSON.stringify({ providers: { openrouter: { models: [] } } }),
+        "openrouter",
+        [],
+        NO_NATIVE_MODELS,
+      ),
+    ).toEqual<ModelsFileUpdate>({ _tag: "unchanged" });
+  });
+
+  it("leaves a file with comments alone when there is nothing to declare", () => {
+    expect(
+      setProviderModels('{ // mine\n "providers": {} }', "openrouter", [], NO_NATIVE_MODELS),
+    ).toEqual<ModelsFileUpdate>({ _tag: "unchanged" });
   });
 
   it("writes nothing when the new content equals the file, whatever its formatting", () => {
     const models = [buildModel("a/b", { contextWindow: 5000 })];
-    const first = replaceProviderModels(undefined, "openrouter", models);
+    const first = setProviderModels(undefined, "openrouter", models, NO_NATIVE_MODELS);
     if (first._tag !== "write") throw new Error("expected a write");
     const compact = JSON.stringify(JSON.parse(first.text));
-    expect(replaceProviderModels(first.text, "openrouter", models)._tag).toBe("unchanged");
-    expect(replaceProviderModels(compact, "openrouter", models)._tag).toBe("unchanged");
+    expect(setProviderModels(first.text, "openrouter", models, NO_NATIVE_MODELS)._tag).toBe(
+      "unchanged",
+    );
+    expect(setProviderModels(compact, "openrouter", models, NO_NATIVE_MODELS)._tag).toBe(
+      "unchanged",
+    );
   });
 
   it("refuses a file that is not a plain JSON object, so what it holds is not lost", () => {
@@ -148,7 +192,7 @@ describe("setting the models of a provider in pi's models.json", () => {
       '{\n  // my own models\n  "providers": { "zai": { "baseUrl": "http://x" } }\n}';
     for (const unreadable of ["{ not json", "[1, 2]", "42", "null", withComment]) {
       expect(
-        replaceProviderModels(unreadable, "openrouter", [buildModel("a/b")]),
+        setProviderModels(unreadable, "openrouter", [buildModel("a/b")], NO_NATIVE_MODELS),
         unreadable,
       ).toEqual<ModelsFileUpdate>({
         _tag: "unreadable",

@@ -22,8 +22,7 @@ export const MAX_FACT_ITEMS = 64;
  * of one Provider Account. It is higher than `MAX_FACT_ITEMS` because a
  * provider can list far more than 64 models: pi lists 68 for OpenCode Zen, and
  * pi 0.85.1 ships 366 OpenRouter models. A probe that cut the list short would
- * give the user an incomplete catalog, and (for pi) would make the controller
- * treat the models it missed as unlisted. A probe lists only the models of the
+ * give the user an incomplete catalog. A probe lists only the models of the
  * account's own provider, so 1024 is room to grow, and it matches
  * `MAX_CATALOG_MODELS`, the most a Model Catalog holds.
  *

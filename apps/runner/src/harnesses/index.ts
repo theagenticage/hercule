@@ -21,7 +21,7 @@ import type {
   SessionBinding,
   SessionSpec,
   AttachmentReference,
-  UnlistedModel,
+  ModelDeclaration,
   SubagentId,
   TurnInput,
   UsageReading,
@@ -137,14 +137,14 @@ export interface HarnessRunnerContext {
    */
   readonly repositorySkillsFolders?: ReadonlyArray<string>;
   /**
-   * The models of the account that the harness's own model list lacks, from
-   * the session's start frame or the text generation request, so the
-   * harness can run a model the user picked from the catalog. The pi adapter
-   * declares them to pi before it starts; every other adapter ignores them.
-   * Absent when the frame carried none, and for a probe, an install or a
-   * login.
+   * The account's whole Model Catalog, from the session's start frame or the
+   * text generation request, so the harness can run any model the user picked
+   * from it. The pi adapter declares to pi the ones pi does not ship, and
+   * every other adapter ignores the field. Absent when the frame manages no
+   * declarations; an empty list tells the adapter to clear the ones it declared
+   * earlier. Absent for a probe, an install and a login.
    */
-  readonly unlistedModels?: ReadonlyArray<UnlistedModel>;
+  readonly catalogModels?: ReadonlyArray<ModelDeclaration>;
   /**
    * The directory the runner caches this session's attached images in, one
    * file per image. It sits outside the workspace, so git never sees the

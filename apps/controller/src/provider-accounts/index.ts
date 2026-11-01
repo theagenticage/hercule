@@ -55,7 +55,7 @@ export {
 } from "./repository";
 export { describeProviderAccount } from "./runnability";
 export { findRunDescriptor, takesCatalogDeclarations } from "./run-descriptor";
-export { UnlistedModels, UnlistedModelsLayer } from "./unlisted-models";
+export { ModelDeclarations, ModelDeclarationsLayer } from "./model-declarations";
 export {
   ProviderAccountService,
   ProviderAccountServiceLayer,

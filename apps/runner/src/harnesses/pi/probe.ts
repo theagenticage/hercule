@@ -262,11 +262,12 @@ const removeScratchDirectory = (scratch: string): void =>
  * Home's `models-store.json`, and the directory is deleted afterwards. So the
  * list is pi's own: its bundled models plus its refreshed list. It never
  * includes the models a session declared in the home's `models.json`. If it
- * did, the controller would stop sending a declared model as unlisted, and
- * would never again update that model's details in the file. The key comes
- * from the environment, not from the agent directory.
+ * did, a declared model would count as one pi ships, and the adapter would
+ * never again update that model's declaration. The key comes from the
+ * environment, not from the agent directory. The adapter also calls this to
+ * find the models pi ships (`makeNativeModelLister`).
  */
-const fetchCatalog = (
+export const fetchCatalog = (
   spawn: PiSpawn,
   binary: string,
   home: string,

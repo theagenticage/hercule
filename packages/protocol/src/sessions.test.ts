@@ -794,7 +794,7 @@ describe("what the controller sends for a session", () => {
     expect(decode(SessionStart, { ...start, userMaterial: false })._tag).toBe("Failure");
   });
 
-  it("carries the unlisted models with only what a harness needs, up to a limit", () => {
+  it("carries the catalog models with only what a harness needs, up to a limit", () => {
     const bare = { slug: "acme/free", name: "Acme: Free", imageInput: null };
     const detailed = {
       ...bare,
@@ -803,20 +803,20 @@ describe("what the controller sends for a session", () => {
       reasoning: true,
       imageInput: { maxBytes: null },
     };
-    const withModels = { ...start, unlistedModels: [bare, detailed] };
+    const withModels = { ...start, catalogModels: [bare, detailed] };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(withModels))).toEqual(
       withModels,
     );
-    // A start without the key is a start with nothing unlisted.
+    // A start without the key is a start that manages no declarations.
     expect(decode(SessionStart, start)._tag).toBe("Success");
     const tooMany = Array.from({ length: MAX_CATALOG_MODELS + 1 }, () => bare);
-    expect(decode(SessionStart, { ...start, unlistedModels: tooMany })._tag).toBe("Failure");
+    expect(decode(SessionStart, { ...start, catalogModels: tooMany })._tag).toBe("Failure");
     expect(
-      decode(SessionStart, { ...start, unlistedModels: [{ ...bare, contextWindow: 0 }] })._tag,
+      decode(SessionStart, { ...start, catalogModels: [{ ...bare, contextWindow: 0 }] })._tag,
     ).toBe("Failure");
   });
 
-  it("drops the catalog details of an unlisted model instead of carrying them to the runner", () => {
+  it("drops the catalog details of a model declaration instead of carrying them to the runner", () => {
     const catalogModel = {
       slug: "acme/free",
       name: "Acme: Free",
@@ -829,9 +829,9 @@ describe("what the controller sends for a session", () => {
       isDefault: true,
     };
     const decoded = Effect.runSync(
-      Schema.decodeUnknownEffect(SessionStart)({ ...start, unlistedModels: [catalogModel] }),
+      Schema.decodeUnknownEffect(SessionStart)({ ...start, catalogModels: [catalogModel] }),
     );
-    expect(decoded.unlistedModels).toEqual([
+    expect(decoded.catalogModels).toEqual([
       { slug: "acme/free", name: "Acme: Free", imageInput: null },
     ]);
   });

@@ -8,7 +8,7 @@
  * session slot, so none of the session frames carry it.
  */
 import { Schema } from "effect";
-import { MAX_CATALOG_MODELS, UnlistedModel } from "./models";
+import { MAX_CATALOG_MODELS, ModelDeclaration } from "./models";
 import { OutputSchema } from "./output-schema";
 import { Fact, HarnessAccount, MAX_MESSAGE_LENGTH } from "./primitives";
 import { Usage } from "./sessions";
@@ -80,13 +80,11 @@ export const TextGenerationRequest = Schema.Struct({
   harnessAccount: HarnessAccount,
   spec: TextGenerationSpec,
   /**
-   * The catalog models of the account that the harness's own model list
-   * lacks, so the harness can run a model the user picked from the catalog.
-   * The pi adapter declares them to pi before it runs; every other adapter
-   * ignores them. Absent or empty means there are none.
+   * The account's whole Model Catalog, as `SessionStart.catalogModels` carries
+   * it, with the same meaning of absent and of empty.
    */
-  unlistedModels: Schema.optionalKey(
-    Schema.Array(UnlistedModel).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
+  catalogModels: Schema.optionalKey(
+    Schema.Array(ModelDeclaration).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
   ),
 });
 

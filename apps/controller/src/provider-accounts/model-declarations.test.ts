@@ -11,7 +11,7 @@ import {
 } from "../plugins/testing";
 import { modelCatalogRepository } from "./model-catalog-repository";
 import { addAccount, addRunner, addSnapshot, runWithAccounts } from "./testing";
-import { UnlistedModels, UnlistedModelsLayer } from "./unlisted-models";
+import { ModelDeclarations, ModelDeclarationsLayer } from "./model-declarations";
 
 const WIDE = "wide/wide";
 const NARROW = "narrow/narrow";
@@ -100,15 +100,15 @@ const storeCatalog = (accountId: string, models: ReadonlyArray<CatalogModel>) =>
     );
   });
 
-/** Lists the unlisted models for a frame that runs `model`, which only matters for a runner with no snapshot. */
-const listUnlisted = (accountId: string, harnessId: string, runnerId: string, model = "a") =>
-  Effect.flatMap(UnlistedModels, (unlisted) =>
-    unlisted.listUnlistedModels(accountId, harnessId, runnerId, model),
+/** Finds the declarations for a frame that runs `harnessId` for the account. */
+const findDeclarations = (accountId: string, harnessId: string) =>
+  Effect.flatMap(ModelDeclarations, (declarations) =>
+    declarations.findModelDeclarations(accountId, harnessId),
   );
 
 /** Runs `body` against an account of `apiprov`, running in `wide` by default, whose catalog holds `models`. */
 const withApiAccount = <A, E>(
-  body: (accountId: string) => Effect.Effect<A, E, SqlClient.SqlClient | UnlistedModels>,
+  body: (accountId: string) => Effect.Effect<A, E, SqlClient.SqlClient | ModelDeclarations>,
   models: ReadonlyArray<CatalogModel> = catalog,
 ) =>
   runWithAccounts(
@@ -119,22 +119,23 @@ const withApiAccount = <A, E>(
       });
       yield* storeCatalog(account.id, models);
       return yield* body(account.id);
-    }).pipe(Effect.provide(UnlistedModelsLayer)),
+    }).pipe(Effect.provide(ModelDeclarationsLayer)),
     undefined,
     buildPlugins(),
   );
 
-describe("UnlistedModels.listUnlistedModels", () => {
-  it("returns the catalog models the harness lacks on the runner, in catalog order and with only what a runner needs", async () => {
-    const unlisted = await withApiAccount((accountId) =>
+describe("ModelDeclarations.findModelDeclarations", () => {
+  it("returns the whole catalog in catalog order, with only what a runner needs, whatever any runner lists", async () => {
+    const declarations = await withApiAccount((accountId) =>
       Effect.gen(function* () {
         const runner = yield* addRunner("laptop");
         yield* addSnapshot(accountId, WIDE, runner, listing("a"));
-        return yield* listUnlisted(accountId, WIDE, runner);
+        return yield* findDeclarations(accountId, WIDE);
       }),
     );
 
-    expect(unlisted).toEqual([
+    expect(declarations).toEqual([
+      { slug: "a", name: "Model a", imageInput: null },
       {
         slug: "b",
         name: "Model b",
@@ -146,99 +147,46 @@ describe("UnlistedModels.listUnlistedModels", () => {
     ]);
   });
 
-  it("judges by the target runner's snapshot, not another runner's", async () => {
-    const unlisted = await withApiAccount((accountId) =>
-      Effect.gen(function* () {
-        const target = yield* addRunner("target");
-        const other = yield* addRunner("other");
-        yield* addSnapshot(accountId, WIDE, target, listing("a"));
-        yield* addSnapshot(accountId, WIDE, other, listing("a", "b", "c"));
-        return yield* listUnlisted(accountId, WIDE, target);
-      }),
-    );
-
-    expect(unlisted.map((model) => model.slug)).toEqual(["b", "c"]);
-  });
-
-  it("returns only the model the frame runs for a runner with no snapshot, whatever another runner lists", async () => {
-    const unlisted = await withApiAccount((accountId) =>
-      Effect.gen(function* () {
-        const target = yield* addRunner("target");
-        const other = yield* addRunner("other");
-        yield* addSnapshot(accountId, WIDE, other, listing("a", "b"));
-        return yield* listUnlisted(accountId, WIDE, target, "c");
-      }),
-    );
-
-    expect(unlisted.map((model) => model.slug)).toEqual(["c"]);
-  });
-
-  it("returns nothing for a runner with no snapshot when the catalog lacks the model the frame runs", async () => {
-    const unlisted = await withApiAccount((accountId) =>
-      Effect.gen(function* () {
-        const target = yield* addRunner("target");
-        return yield* listUnlisted(accountId, WIDE, target, "not-in-catalog");
-      }),
-    );
-
-    expect(unlisted).toEqual([]);
-  });
-
-  it("treats the snapshot of a signed-out probe as no snapshot", async () => {
-    const unlisted = await withApiAccount((accountId) =>
-      Effect.gen(function* () {
-        const target = yield* addRunner("target");
-        yield* addSnapshot(accountId, WIDE, target, {
-          ...listing("a", "b"),
-          auth: { status: "unauthenticated" },
-        });
-        return yield* listUnlisted(accountId, WIDE, target, "c");
-      }),
-    );
-
-    expect(unlisted.map((model) => model.slug)).toEqual(["c"]);
-  });
-
   it("returns nothing for a harness that runs only the models it lists itself", async () => {
-    const unlisted = await withApiAccount((accountId) =>
-      Effect.gen(function* () {
-        const runner = yield* addRunner("laptop");
-        return yield* listUnlisted(accountId, NARROW, runner);
-      }),
-    );
+    const declarations = await withApiAccount((accountId) => findDeclarations(accountId, NARROW));
 
-    expect(unlisted).toEqual([]);
+    expect(declarations).toBeUndefined();
   });
 
-  it("returns nothing for a catalog that has no models", async () => {
-    const unlisted = await withApiAccount(
-      (accountId) =>
-        Effect.gen(function* () {
-          const runner = yield* addRunner("laptop");
-          return yield* listUnlisted(accountId, WIDE, runner);
-        }),
-      [],
-    );
+  it("returns an empty list for a catalog that was read and holds no models", async () => {
+    const declarations = await withApiAccount((accountId) => findDeclarations(accountId, WIDE), []);
 
-    expect(unlisted).toEqual([]);
+    expect(declarations).toEqual([]);
   });
 
-  it("returns nothing for the harness the provider's catalog is read from, but the frame's model for another harness that runs any model", async () => {
-    const { source, other } = await runWithAccounts(
+  it("returns nothing for a catalog that was never read", async () => {
+    const declarations = await runWithAccounts(
       Effect.gen(function* () {
-        const account = yield* addAccount({ providerId: PROBED_PROVIDER, defaultHarnessId: WIDE });
-        yield* storeCatalog(account.id, catalog);
-        const runner = yield* addRunner("laptop");
-        return {
-          source: yield* listUnlisted(account.id, WIDE, runner),
-          other: yield* listUnlisted(account.id, OTHER, runner),
-        };
-      }).pipe(Effect.provide(UnlistedModelsLayer)),
+        const account = yield* addAccount({ providerId: API_PROVIDER, defaultHarnessId: WIDE });
+        return yield* findDeclarations(account.id, WIDE);
+      }).pipe(Effect.provide(ModelDeclarationsLayer)),
       undefined,
       buildPlugins(),
     );
 
-    expect(source).toEqual([]);
-    expect(other.map((model) => model.slug)).toEqual(["a"]);
+    expect(declarations).toBeUndefined();
+  });
+
+  it("returns nothing for the harness the provider's catalog is read from, but the catalog for another harness that runs any model", async () => {
+    const { source, other } = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ providerId: PROBED_PROVIDER, defaultHarnessId: WIDE });
+        yield* storeCatalog(account.id, catalog);
+        return {
+          source: yield* findDeclarations(account.id, WIDE),
+          other: yield* findDeclarations(account.id, OTHER),
+        };
+      }).pipe(Effect.provide(ModelDeclarationsLayer)),
+      undefined,
+      buildPlugins(),
+    );
+
+    expect(source).toBeUndefined();
+    expect(other?.map((model) => model.slug)).toEqual(["a", "b", "c"]);
   });
 });

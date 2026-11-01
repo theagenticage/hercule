@@ -35,7 +35,7 @@ import {
   type HarnessAccount,
   SubagentId,
   type ModelSelection,
-  type UnlistedModel,
+  type ModelDeclaration,
   type HarnessEvent,
   type QuestionAnswers,
   type SessionBinding,
@@ -358,17 +358,14 @@ export interface StartNeeds {
     harnessId: string,
   ) => Effect.Effect<HarnessAccount, NotFound | InvalidState | SqlError>;
   /**
-   * Returns the models of the account's Model Catalog that the harness's own
-   * list on the runner lacks, for the frame's `unlistedModels`
-   * (`UnlistedModels.listUnlistedModels`), where `model` is the model the
-   * session runs. Empty when the harness is told of none. A database read only.
+   * Returns the account's whole Model Catalog for the frame's `catalogModels`
+   * (`ModelDeclarations.findModelDeclarations`), or `undefined` when the frame
+   * carries none. A database read only.
    */
-  readonly listUnlistedModels: (
+  readonly findModelDeclarations: (
     providerAccountId: string,
     harnessId: string,
-    runnerId: string,
-    model: string,
-  ) => Effect.Effect<ReadonlyArray<UnlistedModel>, SqlError>;
+  ) => Effect.Effect<ReadonlyArray<ModelDeclaration> | undefined, SqlError>;
   /**
    * Builds the session's coordination paragraph (spec 19 section 7.1), or
    * returns `undefined` when the session gets none.
@@ -2168,10 +2165,12 @@ const make = Effect.gen(function* () {
         // One answer per account and harness, because every queued session of
         // a pair gets the same one and the check reads the whole fleet.
         const runnableRefusals = new Map<string, string | null>();
-        // Likewise one list per account, harness and model: the catalog is
-        // large, and the list depends on the session's model when the runner
-        // has no list of its own yet.
-        const unlistedModelsByRun = new Map<string, ReadonlyArray<UnlistedModel>>();
+        // Likewise one catalog per account and harness: it is large, and every
+        // queued session of a pair gets the same one.
+        const modelDeclarationsByPair = new Map<
+          string,
+          ReadonlyArray<ModelDeclaration> | undefined
+        >();
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
         // room is for sessions that can start, not for specs that cannot.
@@ -2316,17 +2315,13 @@ const make = Effect.gen(function* () {
             }
             // Decided at every start, so a resume or a fork sees the catalog as
             // it is now.
-            const runKey = `${pair}/${row.modelSelection.model}`;
-            let unlistedModels = unlistedModelsByRun.get(runKey);
-            if (unlistedModels === undefined) {
-              unlistedModels = yield* needs.listUnlistedModels(
-                row.providerAccountId,
-                row.harnessId,
-                runnerId,
-                row.modelSelection.model,
+            if (!modelDeclarationsByPair.has(pair)) {
+              modelDeclarationsByPair.set(
+                pair,
+                yield* needs.findModelDeclarations(row.providerAccountId, row.harnessId),
               );
-              unlistedModelsByRun.set(runKey, unlistedModels);
             }
+            const catalogModels = modelDeclarationsByPair.get(pair);
             // Saved so a client can read exactly the library skills this
             // session got. A runner that cannot load skills gets none, so
             // none is recorded.
@@ -2371,9 +2366,9 @@ const make = Effect.gen(function* () {
                 ...(runnerLoadsSkills && skills.length > 0
                   ? { skills: skills.map(({ name, revisionHash }) => ({ name, revisionHash })) }
                   : {}),
-                // An absent list and an empty one both mean none, so an empty
-                // list is left out.
-                ...(unlistedModels.length > 0 ? { unlistedModels } : {}),
+                // Absent means the harness lists its models itself; an empty list
+                // is sent, because it tells the runner to clear its declarations.
+                ...(catalogModels === undefined ? {} : { catalogModels }),
               },
             });
           }

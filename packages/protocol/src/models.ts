@@ -111,11 +111,11 @@ export const CatalogModel = Schema.Struct({
 export type CatalogModel = Schema.Schema.Type<typeof CatalogModel>;
 
 /**
- * The fields of a `CatalogModel` that an `UnlistedModel` keeps. The controller
- * picks the same keys when it converts a catalog model, so the two cannot
- * drift apart.
+ * The fields of a `CatalogModel` that a `ModelDeclaration` keeps. The
+ * controller picks the same keys when it converts a catalog model, so the two
+ * cannot drift apart.
  */
-export const UNLISTED_MODEL_KEYS = [
+export const MODEL_DECLARATION_KEYS = [
   "slug",
   "name",
   "contextWindow",
@@ -125,34 +125,34 @@ export const UNLISTED_MODEL_KEYS = [
 ] as const;
 
 /**
- * What a harness needs to run a model it does not list itself: the model's
- * id and name, the numbers it needs to size a request, whether it reasons,
- * and whether it takes images. It is the part of a `CatalogModel` that a
- * runner reads. The rest (options, prices, maker, release date) is only for
- * showing and filtering in the controller's clients, so it never crosses to a
- * runner. The fields are the catalog model's own, with the same names and
- * rules.
+ * What a harness is told about a model of the account's Model Catalog so it
+ * can run it: the model's id and name, the numbers it needs to size a request,
+ * whether it reasons, and whether it takes images. It is the part of a
+ * `CatalogModel` that a runner reads. The rest (options, prices, maker,
+ * release date) is only for showing and filtering in the controller's
+ * clients, so it never crosses to a runner. The fields are the catalog
+ * model's own, with the same names and rules.
  */
-export const UnlistedModel = CatalogModel.mapFields(Struct.pick(UNLISTED_MODEL_KEYS));
+export const ModelDeclaration = CatalogModel.mapFields(Struct.pick(MODEL_DECLARATION_KEYS));
 
-export type UnlistedModel = Schema.Schema.Type<typeof UnlistedModel>;
+export type ModelDeclaration = Schema.Schema.Type<typeof ModelDeclaration>;
 
 /**
  * The most models one Model Catalog may hold when the controller reads it from
  * a provider's API, and so the most models a `SessionStart` or a
- * `TextGenerationRequest` may carry in `unlistedModels`. OpenRouter lists about
+ * `TextGenerationRequest` may carry in `catalogModels`. OpenRouter lists about
  * 450 models, so this leaves room to grow. The catalog read keeps at most this
  * many and says so, so a frame never has to cut the list.
  *
  * The count does not bound the frame's size, because a name may be up to
  * `MAX_FACT_LENGTH` characters. The size is bounded where the models come from:
  * the controller refuses a catalog read from a provider's API whose JSON
- * encoding is over 1 MiB, and an `UnlistedModel` holds only some of the fields
- * of the `CatalogModel` it comes from, so the list of a frame is at most that
- * 1 MiB. That leaves the other half of `MAX_FRAME_BYTES` (2 MiB) for the rest
- * of the frame. OpenRouter's 452 models measure about 121 kB as catalog models,
- * and less as unlisted models. A catalog read by probing a harness arrived in a
- * probe result, which is itself under `MAX_FRAME_BYTES`, and an unlisted model
+ * encoding is over 1 MiB, and a `ModelDeclaration` holds only some of the
+ * fields of the `CatalogModel` it comes from, so the list of a frame is at most
+ * that 1 MiB. That leaves the other half of `MAX_FRAME_BYTES` (2 MiB) for the
+ * rest of the frame. OpenRouter's 452 models measure about 121 kB as catalog
+ * models, and less as declarations. A catalog read by probing a harness arrived
+ * in a probe result, which is itself under `MAX_FRAME_BYTES`, and a declaration
  * is smaller than the descriptor it comes from.
  */
 export const MAX_CATALOG_MODELS = 1024;

@@ -102,18 +102,18 @@ describe("the outcome of a text generation", () => {
     await expect(Effect.runPromise(generate(REQUEST))).resolves.toEqual(OK);
   });
 
-  it("hands the adapter the unlisted models of the request", async () => {
-    const unlistedModels = [{ slug: "vendor/model", name: "Model", imageInput: null }];
-    let received: HarnessRunnerContext["unlistedModels"];
+  it("hands the adapter the catalog models of the request", async () => {
+    const catalogModels = [{ slug: "vendor/model", name: "Model", imageInput: null }];
+    let received: HarnessRunnerContext["catalogModels"];
     const generate = buildGenerator(
       buildAdapter((ctx) => {
-        received = ctx.unlistedModels;
+        received = ctx.catalogModels;
         return Effect.succeed(OK);
       }),
     );
 
-    await Effect.runPromise(generate({ ...REQUEST, unlistedModels }));
-    expect(received).toEqual(unlistedModels);
+    await Effect.runPromise(generate({ ...REQUEST, catalogModels }));
+    expect(received).toEqual(catalogModels);
 
     await Effect.runPromise(generate(REQUEST));
     expect(received).toBeUndefined();

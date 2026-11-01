@@ -4,13 +4,13 @@
  * pi 0.85.1's, and the commands and responses follow the shapes
  * `dist/modes/rpc/rpc-types.d.ts` declares.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Effect, Fiber, Schema } from "effect";
+import { Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { AnswerNotDelivered } from "@hercule/protocol";
-import type { UnlistedModel, OutputSchema, SessionSpec } from "@hercule/protocol";
+import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
@@ -287,167 +287,6 @@ describe("launching pi for a session", () => {
       _tag: "AdapterFailed",
       message: expect.stringContaining("prepare") as unknown,
     });
-    expect(run.spawns).toEqual([]);
-  });
-});
-
-describe("declaring the models pi does not list", () => {
-  const OPENROUTER = { modelArgument: "openrouter/{model}" };
-  const UNLISTED_ID = "fake-vendor/fake-model:free";
-  const UNLISTED_MODEL: UnlistedModel = {
-    slug: UNLISTED_ID,
-    name: "Fake: Model",
-    imageInput: null,
-    contextWindow: 65_536,
-    reasoning: true,
-  };
-  const SPEC_ON_UNLISTED: SessionSpec = {
-    ...SPEC,
-    modelSelection: { model: UNLISTED_ID, options: { thinking: "high" } },
-  };
-
-  const ModelsFile = Schema.Struct({
-    providers: Schema.Record(
-      Schema.String,
-      Schema.Struct({
-        baseUrl: Schema.optionalKey(Schema.String),
-        models: Schema.Array(Schema.Struct({ id: Schema.String })),
-      }),
-    ),
-  });
-
-  const readModelsFile = (home: string) =>
-    Schema.decodeUnknownSync(ModelsFile)(
-      JSON.parse(readFileSync(join(home, "models.json"), "utf8")),
-    );
-
-  it("writes the models into the Harness Home before pi is spawned", async () => {
-    const home = createPiHome();
-    let fileWhenSpawned: string | undefined;
-    const { seam, spawns } = buildFakePiSeam({
-      atSpawn: () => {
-        fileWhenSpawned = existsSync(join(home, "models.json"))
-          ? readFileSync(join(home, "models.json"), "utf8")
-          : undefined;
-      },
-    });
-    const adapter = makePiAdapter(seam);
-    const ctx = { ...buildContext(home), ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
-
-    await Effect.runPromise(adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
-    await waitUntil("spawned a pi", () => spawns.length === 1);
-
-    expect(JSON.parse(fileWhenSpawned!)).toEqual({
-      providers: {
-        openrouter: {
-          models: [
-            {
-              id: UNLISTED_ID,
-              name: "Fake: Model",
-              contextWindow: 65_536,
-              input: ["text"],
-              reasoning: true,
-            },
-          ],
-        },
-      },
-    });
-    expect(readFlagValue(spawns[0]!.command, "--model")).toBe(`openrouter/${UNLISTED_ID}`);
-  });
-
-  it("sets the provider's models in a file that is already there, keeping its other keys, and does so again for a resume", async () => {
-    const run = createDriving();
-    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
-    writeFileSync(
-      join(ctx.home, "models.json"),
-      JSON.stringify({
-        providers: {
-          openrouter: { baseUrl: "http://127.0.0.1:9", models: [{ id: "kept/model" }] },
-        },
-      }),
-    );
-    writePriorSessionFile(ctx.home, PRIOR);
-    const resume: SessionSpec = {
-      ...SPEC_ON_UNLISTED,
-      continue: { nativeSessionId: PRIOR, mode: "resume" },
-    };
-
-    await Effect.runPromise(run.adapter.startSession(SESSION, resume, ctx));
-
-    const written = readModelsFile(ctx.home);
-    expect(written.providers.openrouter!.baseUrl).toBe("http://127.0.0.1:9");
-    // The entry of an earlier start is gone: only what the start carried stays.
-    expect(written.providers.openrouter!.models.map((entry) => entry.id)).toEqual([UNLISTED_ID]);
-  });
-
-  it("does not rewrite a file that already holds the models", async () => {
-    const run = createDriving();
-    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
-    const path = join(ctx.home, "models.json");
-    const before = statSync(path).mtimeMs;
-    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
-
-    await new Promise((resolve) => setTimeout(resolve, 15));
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
-
-    expect(statSync(path).mtimeMs).toBe(before);
-  });
-
-  it("writes no models file for a start that carries no models", async () => {
-    const withoutField = await startTestSession();
-    const withEmptyList = await startTestSession({}, SPEC, {}, { unlistedModels: [] });
-
-    expect(existsSync(join(withoutField.ctx.home, "models.json"))).toBe(false);
-    expect(existsSync(join(withEmptyList.ctx.home, "models.json"))).toBe(false);
-  });
-
-  it("reads a models file that starts with a byte-order mark", async () => {
-    const run = createDriving();
-    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
-    writeFileSync(
-      join(ctx.home, "models.json"),
-      `\uFEFF${JSON.stringify({ providers: { zai: { models: [{ id: "kept" }] } } })}`,
-    );
-
-    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
-
-    const written = readModelsFile(ctx.home);
-    expect(written.providers["zai"]!.models.map((entry) => entry.id)).toEqual(["kept"]);
-    expect(written.providers.openrouter!.models.map((entry) => entry.id)).toEqual([UNLISTED_ID]);
-  });
-
-  it("refuses to start on a models file with comments, names the file, and leaves it as it is", async () => {
-    const run = createDriving();
-    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
-    const path = join(ctx.home, "models.json");
-    const content = '{\n  // secret-looking-comment\n  "providers": {}\n}';
-    writeFileSync(path, content);
-
-    const failed = await Effect.runPromise(
-      Effect.flip(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx)),
-    );
-
-    expect(failed._tag).toBe("AdapterFailed");
-    expect(failed.message).toContain(path);
-    expect(failed.message).toContain("openrouter");
-    expect(failed.message).toContain("Remove its comments, or delete the file");
-    expect(failed.message).not.toContain("secret-looking-comment");
-    expect(readFileSync(path, "utf8")).toBe(content);
-    expect(run.spawns).toEqual([]);
-  });
-
-  it("fails the start, and spawns no pi, when the models file cannot be written", async () => {
-    const run = createDriving();
-    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
-    // A directory where the file should be makes the rename fail.
-    mkdirSync(join(ctx.home, "models.json"));
-
-    const failed = await Effect.runPromise(
-      Effect.flip(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx)),
-    );
-
-    expect(failed).toMatchObject({ _tag: "AdapterFailed" });
     expect(run.spawns).toEqual([]);
   });
 });

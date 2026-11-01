@@ -18,10 +18,13 @@ import {
   SUBMIT_RESULT_TOOL,
 } from "./extension";
 import {
+  answerShippedModels,
   buildContext,
   buildFakePiSeam,
+  buildRefusal,
   cleanupHomes,
   createPiHome,
+  listAgentSpawns,
   settle,
   waitUntil,
   type FakePiBehaviour,
@@ -395,13 +398,16 @@ describe("launching pi for a text generation", () => {
     expect(readdirSync(home)).toEqual([]);
   });
 
-  it("declares the request's unlisted models to pi in the scratch directory, never in the Harness Home", async () => {
-    const { seam, spawns } = buildFakePiSeam();
+  it("declares the request's catalog models that pi lacks in the scratch directory, never in the Harness Home", async () => {
+    const { seam, spawns } = buildFakePiSeam({
+      answers: answerShippedModels("openrouter", ["shipped/model"]),
+    });
     const home = createPiHome();
     const ctx = {
       ...buildContext(home),
       modelArgument: "openrouter/{model}",
-      unlistedModels: [
+      catalogModels: [
+        { slug: "shipped/model", name: "Shipped: Model", imageInput: null },
         { slug: "fake-vendor/fake-model:free", name: "Fake: Model", imageInput: null },
       ],
     };
@@ -414,8 +420,8 @@ describe("launching pi for a text generation", () => {
         (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
       ),
     );
-    await waitUntil("launched a pi", () => spawns.length === 1);
-    const child = spawns[0]!;
+    await waitUntil("launched a pi", () => listAgentSpawns(spawns).length === 1);
+    const child = listAgentSpawns(spawns)[0]!;
 
     expect(
       JSON.parse(readFileSync(join(child.cwd!, "models.json"), "utf8")) as unknown,
@@ -428,7 +434,31 @@ describe("launching pi for a text generation", () => {
     await outcome;
   });
 
-  it("writes no models file when the request carries no unlisted models", async () => {
+  it("fails the call, and launches no pi, when pi cannot list the models it ships", async () => {
+    const { seam, spawns } = buildFakePiSeam({
+      answers: { get_available_models: () => buildRefusal("no models") },
+    });
+    const ctx = {
+      ...buildContext(createPiHome()),
+      modelArgument: "openrouter/{model}",
+      catalogModels: [{ slug: "a/b", name: "A B", imageInput: null }],
+    };
+
+    const outcome = await Effect.runPromise(
+      Effect.catch(
+        makePiAdapter(seam).generateText(buildTextGenerationContext(ctx), SPEC),
+        (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+      ),
+    );
+
+    expect(outcome).toMatchObject({
+      outcome: "failed",
+      message: expect.stringContaining("could not list the models it ships") as unknown,
+    });
+    expect(listAgentSpawns(spawns)).toEqual([]);
+  });
+
+  it("writes no models file when the request carries no catalog models", async () => {
     const { outcome, child } = await startGeneration();
 
     expect(existsSync(join(child.cwd!, "models.json"))).toBe(false);

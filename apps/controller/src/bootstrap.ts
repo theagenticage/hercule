@@ -120,8 +120,8 @@ import {
   ProviderAccountService,
   ProviderAccountServiceLayer,
   ProviderKeyRequestsLayer,
-  UnlistedModels,
-  UnlistedModelsLayer,
+  ModelDeclarations,
+  ModelDeclarationsLayer,
 } from "./provider-accounts";
 import { seed } from "./seed";
 import { readSetupComplete } from "./setup";
@@ -273,7 +273,7 @@ export type ControllerServices =
   | ConnectionTypes
   | RunnerConnections
   | HarnessAccounts
-  | UnlistedModels
+  | ModelDeclarations
   | ModelCatalogs
   | ModelProfileLookup
   | ProviderAccountProbes
@@ -412,7 +412,7 @@ export const bootWith = <A, E>(
       Layer.provideMerge(ProviderAccountRunnersLayer),
       Layer.provideMerge(localRunnerIdLayer),
       Layer.provideMerge(HarnessAccountsLayer),
-      Layer.provideMerge(UnlistedModelsLayer),
+      Layer.provideMerge(ModelDeclarationsLayer),
       Layer.provideMerge(RunnerConnectionsLayer),
       Layer.provideMerge(catalog),
     );

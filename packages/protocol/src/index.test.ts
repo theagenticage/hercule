@@ -466,7 +466,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 19, the version that added the unlisted models of a session start", () => {
+  it("is 19, the version that added the catalog models of a session start", () => {
     expect(PROTOCOL_VERSION).toBe(19);
   });
 });

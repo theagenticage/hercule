@@ -20,8 +20,8 @@
  *   the probe is the one that would otherwise go out, with the dummy key.
  *
  * The catalog's models are ones pi does not ship, so the controller sends
- * them to the runner as `unlistedModels` and the pi adapter declares them in
- * `models.json`. The fake upstream receiving the exact id of the picked model
+ * the catalog to the runner as `catalogModels` and the pi adapter declares
+ * the ones pi lacks in `models.json`. The fake upstream receiving the exact id of the picked model
  * shows that whole path works.
  *
  * Skips without `pi` on the `PATH`. Run `pnpm build:binary` and then

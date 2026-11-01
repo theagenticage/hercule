@@ -486,7 +486,7 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 19 added the unlisted models a session start carries, which a version 18 runner would
+  // Version 19 added the catalog models a session start carries, which a version 18 runner would
   // drop. So versions 18 and 19 refuse each other at hello; this is the version 19 controller
   // refusing a version 18 runner.
   it("refuses a runner on protocol version 18 and says to upgrade it", async () => {

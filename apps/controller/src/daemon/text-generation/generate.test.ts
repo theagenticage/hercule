@@ -34,7 +34,7 @@ import {
   HarnessAccountsLayer,
   modelCatalogRepository,
   providerAccountRepository,
-  UnlistedModelsLayer,
+  ModelDeclarationsLayer,
 } from "../../provider-accounts";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
 import { buildProviderAccountOwner, Secrets } from "../../secrets";
@@ -144,7 +144,7 @@ const buildServiceLayer = (
 ) =>
   TextGenerationLayer.pipe(
     Layer.provideMerge(HarnessAccountsLayer),
-    Layer.provideMerge(UnlistedModelsLayer),
+    Layer.provideMerge(ModelDeclarationsLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         LastTextGenerationFailureLayer,
@@ -796,10 +796,10 @@ describe("the catalog models the harness does not list, on the request", () => {
     return requests[0]!;
   };
 
-  it("carries them when the harness can run any model of the provider", async () => {
+  it("carries the catalog when the harness can run any model of the provider", async () => {
     const request = await sendInHarness(WIDE);
 
-    expect(request.unlistedModels).toEqual([
+    expect(request.catalogModels).toEqual([
       {
         slug: "api-only",
         name: "API only",
@@ -810,9 +810,9 @@ describe("the catalog models the harness does not list, on the request", () => {
     ]);
   });
 
-  it("leaves them off when the harness runs only the models it lists", async () => {
+  it("leaves the catalog off when the harness runs only the models it lists", async () => {
     const request = await sendInHarness(NARROW);
 
-    expect("unlistedModels" in request).toBe(false);
+    expect("catalogModels" in request).toBe(false);
   });
 });

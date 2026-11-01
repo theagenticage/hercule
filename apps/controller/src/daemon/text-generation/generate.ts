@@ -35,7 +35,7 @@ import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import { PromotionState } from "../../promotion";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
-import { HarnessAccounts, UnlistedModels } from "../../provider-accounts";
+import { HarnessAccounts, ModelDeclarations } from "../../provider-accounts";
 import {
   explainTextGenerationUnavailable,
   LastTextGenerationFailure,
@@ -222,7 +222,7 @@ const make = Effect.gen(function* () {
   const lastFailure = yield* LastTextGenerationFailure;
   const connections = yield* RunnerConnections;
   const harnessAccounts = yield* HarnessAccounts;
-  const unlistedModels = yield* UnlistedModels;
+  const modelDeclarations = yield* ModelDeclarations;
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
   const localRunnerId = yield* LocalRunnerId;
@@ -417,13 +417,8 @@ const make = Effect.gen(function* () {
                           : yield* Effect.die(error);
                       }
                       // A database failure ends the call like one in `prepare` above.
-                      const unlisted = yield* Effect.orDie(
-                        unlistedModels.listUnlistedModels(
-                          providerAccountId,
-                          harnessId,
-                          runnerId,
-                          model,
-                        ),
+                      const declarations = yield* Effect.orDie(
+                        modelDeclarations.findModelDeclarations(providerAccountId, harnessId),
                       );
                       yield* Ref.set(requestSent, true);
                       return yield* connections.sendRequest(
@@ -439,7 +434,7 @@ const make = Effect.gen(function* () {
                             input: call.input,
                             outputSchema: call.outputSchema,
                           },
-                          ...(unlisted.length > 0 ? { unlistedModels: unlisted } : {}),
+                          ...(declarations === undefined ? {} : { catalogModels: declarations }),
                         },
                         Duration.millis(SLOT_HOLD_MS),
                       );
@@ -630,7 +625,7 @@ export const TextGenerationLayer: Layer.Layer<
   | LastTextGenerationFailure
   | RunnerConnections
   | HarnessAccounts
-  | UnlistedModels
+  | ModelDeclarations
   | AuditLog
   | PromotionState
   | LocalRunnerId

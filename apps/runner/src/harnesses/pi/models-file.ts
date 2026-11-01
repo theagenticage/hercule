@@ -10,7 +10,7 @@
  * only values that are valid, and a value that is missing or invalid is left
  * out, which gives the model pi's own default for it.
  */
-import type { UnlistedModel } from "@hercule/protocol";
+import type { ModelDeclaration } from "@hercule/protocol";
 
 /** What setting the models of a provider asks the caller to do. */
 export type ModelsFileUpdate =
@@ -36,11 +36,28 @@ const isPositiveInteger = (value: number | undefined): value is number =>
   value !== undefined && Number.isSafeInteger(value) && value > 0;
 
 /**
+ * Parses the text of a `models.json` to its JSON object. A missing file
+ * (undefined), a text of only white space and a leading byte-order mark all
+ * give what an empty file would: an empty object. Returns `undefined` when the
+ * text is not a JSON object.
+ */
+const parseJsonObject = (text: string | undefined): JsonObject | undefined => {
+  const content = text?.replace(/^\uFEFF/, "");
+  if (content === undefined || content.trim() === "") return {};
+  try {
+    const parsed: unknown = JSON.parse(content);
+    return isJsonObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * Builds the `models.json` entry for one catalog model. The entry holds the
  * id, the name, the kinds of input, and each of the context window, the output
  * limit and the reasoning flag that the catalog gave and pi accepts.
  */
-const buildEntry = (model: UnlistedModel): JsonObject => ({
+const buildEntry = (model: ModelDeclaration): JsonObject => ({
   id: model.slug,
   name: model.name,
   ...(isPositiveInteger(model.contextWindow) ? { contextWindow: model.contextWindow } : {}),
@@ -50,15 +67,16 @@ const buildEntry = (model: UnlistedModel): JsonObject => ({
 });
 
 /**
- * Sets the models of `provider` in the text of a `models.json` to exactly
- * `models`, and returns what to write.
+ * Sets the declared models of `provider` in the text of a `models.json` to the
+ * models of `declarations` that pi does not ship, and returns what to write.
+ * `nativeIds` are the ids of the models pi ships for the provider. They are
+ * left out, because a declaration with the id of a shipped model would
+ * replace pi's own definition of it (its thinking levels, compatibility
+ * settings and cost).
  *
- * - The provider's `models` array is replaced as a whole. Hercule owns that
- *   array in its Harness Home. An entry kept from an earlier start would
- *   override pi's own definition of a model that pi ships (its thinking
- *   levels, compatibility settings and cost), and pi's own list is what the
- *   controller compares the catalog with, so every model it sends is one pi
- *   lacks. A model listed twice takes its last details.
+ * - The provider's `models` array is replaced as a whole, in the order of
+ *   `declarations`. Hercule owns that array in its Harness Home. A model
+ *   listed twice takes its last details.
  * - Every other key of the file, every other key of the provider (such as
  *   `baseUrl`) and every other provider stay as they are.
  *
@@ -66,39 +84,40 @@ const buildEntry = (model: UnlistedModel): JsonObject => ({
  * file. A leading byte-order mark is ignored, and so is a text of only white
  * space. Returns:
  *
- * - `unchanged` when `models` is empty or the new content equals the existing
- *   content, so the caller does not rewrite a file for nothing. An empty list
- *   does not clear the array: the controller sends no models for a harness
- *   that lists everything itself, and a start that carries none must leave the
- *   file alone.
- * - `unreadable` when the text is not a JSON object. pi accepts comments in
- *   the file and `JSON.parse` does not, so such a file may be fine for pi. The
- *   caller refuses it instead of replacing it, because other providers'
- *   overrides in it would be lost.
- * - `write` with the new text otherwise.
+ * - `unchanged` when the new content equals the existing content, so the
+ *   caller does not rewrite a file for nothing. That includes nothing to
+ *   declare in a file that declares nothing for the provider: no file is
+ *   created for it.
+ * - `unreadable` when there are models to declare and the text is not a JSON
+ *   object. pi accepts comments in the file and `JSON.parse` does not, so such
+ *   a file may be fine for pi. The caller refuses it instead of replacing it,
+ *   because other providers' overrides in it would be lost. When there is
+ *   nothing to declare, such a file is `unchanged`: Hercule only ever writes
+ *   plain JSON, so it holds no declaration of Hercule to clear.
+ * - `write` with the new text otherwise. Nothing to declare in a file that
+ *   declares models for the provider gives an empty `models` array, which
+ *   removes the declarations of an earlier start.
  */
-export const replaceProviderModels = (
+export const setProviderModels = (
   existingText: string | undefined,
   provider: string,
-  models: ReadonlyArray<UnlistedModel>,
+  declarations: ReadonlyArray<ModelDeclaration>,
+  nativeIds: ReadonlySet<string>,
 ): ModelsFileUpdate => {
-  if (models.length === 0) return { _tag: "unchanged" };
+  const entries = new Map(
+    declarations
+      .filter((model) => !nativeIds.has(model.slug))
+      .map((model) => [model.slug, buildEntry(model)]),
+  );
 
-  let existing: JsonObject = {};
-  const content = existingText?.replace(/^\uFEFF/, "");
-  if (content !== undefined && content.trim() !== "") {
-    try {
-      const parsed: unknown = JSON.parse(content);
-      if (!isJsonObject(parsed)) return { _tag: "unreadable" };
-      existing = parsed;
-    } catch {
-      return { _tag: "unreadable" };
-    }
+  const existing = parseJsonObject(existingText);
+  if (existing === undefined) {
+    return entries.size === 0 ? { _tag: "unchanged" } : { _tag: "unreadable" };
   }
 
-  const entries = new Map(models.map((model) => [model.slug, buildEntry(model)]));
   const providers = isJsonObject(existing["providers"]) ? existing["providers"] : {};
   const current = isJsonObject(providers[provider]) ? providers[provider] : {};
+  if (entries.size === 0 && !Array.isArray(current["models"])) return { _tag: "unchanged" };
 
   const result: JsonObject = {
     ...existing,

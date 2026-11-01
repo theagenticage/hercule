@@ -145,9 +145,9 @@ export const makeTextGenerator = (
               ...context,
               binary,
               cwd,
-              ...(request.unlistedModels === undefined
+              ...(request.catalogModels === undefined
                 ? {}
-                : { unlistedModels: request.unlistedModels }),
+                : { catalogModels: request.catalogModels }),
             },
             request.spec,
           ),

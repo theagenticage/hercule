@@ -2,8 +2,8 @@
  * Decides what a harness runs a model of a Provider Account with: the one
  * descriptor that says whether the model takes images and which options it
  * offers. A Model Profile entry and an attachment check both ask this module,
- * so they cannot disagree, and `UnlistedModels` uses its rule to decide which
- * models a harness must be told about.
+ * so they cannot disagree, and `ModelDeclarations` uses its rule to decide which
+ * harness is told about the catalog.
  */
 import type { CatalogModel, ModelDescriptor } from "@hercule/protocol";
 import type { RegisteredHarness, RegisteredProvider } from "../plugins";

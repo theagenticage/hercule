@@ -181,10 +181,11 @@ export {
  *   `MAX_PROBE_MODELS` (256). A controller on 17 cannot decode a list of more
  *   than 64 models and would close the socket on it, so the two refuse each
  *   other at hello.
- * - Version 19 added `SessionStart.unlistedModels`, the catalog models a
- *   harness's own list lacks. A runner on 18 would drop the key and start a pi
- *   session that cannot run the model the user chose, with no error, so the
- *   two refuse each other at hello. It also raised the most models a probe
+ * - Version 19 added `SessionStart.catalogModels` and
+ *   `TextGenerationRequest.catalogModels`, the account's whole Model Catalog
+ *   for a harness that declares models. A runner on 18 would drop the key and
+ *   start a pi session that cannot run the model the user chose, with no
+ *   error, so the two refuse each other at hello. It also raised the most models a probe
  *   result may list from 256 to 1024 (`MAX_PROBE_MODELS`), because pi ships 366
  *   OpenRouter models. A controller on 18 cannot decode more than 256 models.
  */
