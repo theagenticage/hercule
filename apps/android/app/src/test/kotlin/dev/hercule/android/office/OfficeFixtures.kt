@@ -49,7 +49,6 @@ internal fun buildSession(
     conversationId = conversationId,
     runId = runId,
     stepId = null,
-    instanceId = "i-claude",
     runnerId = runnerId,
     workspaceId = null,
     projectId = projectId,
@@ -92,7 +91,6 @@ internal fun buildProject(id: String, name: String): Project =
 internal fun buildAssistant(id: String, name: String): Assistant = Assistant(
     id = id,
     name = name,
-    instanceId = "i-claude",
     permissionProfileId = "p-unrestricted",
     accessMode = AccessMode.ApprovalRequired,
     model = null,
