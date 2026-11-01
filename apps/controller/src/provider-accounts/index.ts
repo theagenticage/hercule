@@ -55,7 +55,6 @@ export {
 } from "./repository";
 export { describeProviderAccount } from "./runnability";
 export { findRunDescriptor, takesCatalogDeclarations } from "./run-descriptor";
-export { ModelDeclarations, ModelDeclarationsLayer } from "./model-declarations";
 export {
   ProviderAccountService,
   ProviderAccountServiceLayer,

@@ -110,7 +110,6 @@ import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../pl
 import {
   providerAccountRepository,
   HarnessAccountsLayer,
-  ModelDeclarationsLayer,
   ModelCatalogsLayer,
   ProviderAccountProbesLayer,
   ProviderAccountRunnersLayer,
@@ -212,7 +211,6 @@ const buildServices = (
         Layer.provideMerge(ProviderAccountRunnersLayer),
         Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: readLocalRunnerId })),
         Layer.provideMerge(HarnessAccountsLayer),
-        Layer.provideMerge(ModelDeclarationsLayer),
         Layer.provideMerge(RunnerConnectionsLayer),
         Layer.provideMerge(
           PluginHostLayer.pipe(

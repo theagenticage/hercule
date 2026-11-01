@@ -34,10 +34,14 @@ import {
   HarnessAccountsLayer,
   modelCatalogRepository,
   providerAccountRepository,
-  ModelDeclarationsLayer,
+  ModelCatalogsLayer,
+  ProviderAccountRunnersLayer,
 } from "../../provider-accounts";
+import { inertMembership } from "../../provider-accounts/testing";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
 import { buildProviderAccountOwner, Secrets } from "../../secrets";
+import { SettingsLayer } from "../../settings";
+import { AccountUsageLayer } from "../../usage";
 import {
   LastTextGenerationFailure,
   LastTextGenerationFailureLayer,
@@ -144,7 +148,11 @@ const buildServiceLayer = (
 ) =>
   TextGenerationLayer.pipe(
     Layer.provideMerge(HarnessAccountsLayer),
-    Layer.provideMerge(ModelDeclarationsLayer),
+    Layer.provideMerge(ModelCatalogsLayer),
+    Layer.provideMerge(inertMembership),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(AccountUsageLayer),
+    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         LastTextGenerationFailureLayer,

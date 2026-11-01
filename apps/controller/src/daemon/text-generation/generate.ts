@@ -35,7 +35,7 @@ import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import { PromotionState } from "../../promotion";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
-import { HarnessAccounts, ModelDeclarations } from "../../provider-accounts";
+import { HarnessAccounts, ModelCatalogs } from "../../provider-accounts";
 import {
   explainTextGenerationUnavailable,
   LastTextGenerationFailure,
@@ -222,7 +222,7 @@ const make = Effect.gen(function* () {
   const lastFailure = yield* LastTextGenerationFailure;
   const connections = yield* RunnerConnections;
   const harnessAccounts = yield* HarnessAccounts;
-  const modelDeclarations = yield* ModelDeclarations;
+  const modelCatalogs = yield* ModelCatalogs;
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
   const localRunnerId = yield* LocalRunnerId;
@@ -418,7 +418,7 @@ const make = Effect.gen(function* () {
                       }
                       // A database failure ends the call like one in `prepare` above.
                       const declarations = yield* Effect.orDie(
-                        modelDeclarations.findModelDeclarations(providerAccountId, harnessId),
+                        modelCatalogs.findModelDeclarations(providerAccountId, harnessId),
                       );
                       yield* Ref.set(requestSent, true);
                       return yield* connections.sendRequest(
@@ -625,7 +625,7 @@ export const TextGenerationLayer: Layer.Layer<
   | LastTextGenerationFailure
   | RunnerConnections
   | HarnessAccounts
-  | ModelDeclarations
+  | ModelCatalogs
   | AuditLog
   | PromotionState
   | LocalRunnerId

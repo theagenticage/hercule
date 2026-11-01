@@ -359,7 +359,7 @@ export interface StartNeeds {
   ) => Effect.Effect<HarnessAccount, NotFound | InvalidState | SqlError>;
   /**
    * Returns the account's whole Model Catalog for the frame's `catalogModels`
-   * (`ModelDeclarations.findModelDeclarations`), or `undefined` when the frame
+   * (`ModelCatalogs.findModelDeclarations`), or `undefined` when the frame
    * carries none. A database read only.
    */
   readonly findModelDeclarations: (
