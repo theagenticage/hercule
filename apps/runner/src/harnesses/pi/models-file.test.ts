@@ -147,43 +147,18 @@ describe("declaring the models of a provider in pi's models.json", () => {
     expect(replaceAndParse(existing, [])).toEqual(written);
   });
 
-  it("creates no file and no entry when there is nothing to declare and nothing declared", () => {
+  it("writes an empty list for a provider when nothing is declared and the file knows none", () => {
+    expect(replaceAndParse(undefined, []).providers.openrouter).toEqual({ models: [] });
     const noKey = JSON.stringify({ providers: { zai: { baseUrl: "http://x" } } });
-    expect(
-      setProviderModels(undefined, "openrouter", [], NO_NATIVE_MODELS),
-    ).toEqual<ModelsFileUpdate>({
-      _tag: "unchanged",
-    });
-    expect(setProviderModels(noKey, "openrouter", [], NO_NATIVE_MODELS)).toEqual<ModelsFileUpdate>({
-      _tag: "unchanged",
-    });
-    expect(
-      setProviderModels(
-        JSON.stringify({ providers: { openrouter: { models: [] } } }),
-        "openrouter",
-        [],
-        NO_NATIVE_MODELS,
-      ),
-    ).toEqual<ModelsFileUpdate>({ _tag: "unchanged" });
+    const written = replaceAndParse(noKey, []);
+    expect(written.providers.openrouter).toEqual({ models: [] });
+    expect(written.providers.zai).toEqual({ baseUrl: "http://x" });
   });
 
-  it("leaves a file with comments alone when there is nothing to declare", () => {
+  it("leaves a file with comments as it is when there is nothing to declare", () => {
     expect(
       setProviderModels('{ // mine\n "providers": {} }', "openrouter", [], NO_NATIVE_MODELS),
     ).toEqual<ModelsFileUpdate>({ _tag: "unchanged" });
-  });
-
-  it("writes nothing when the new content equals the file, whatever its formatting", () => {
-    const models = [buildModel("a/b", { contextWindow: 5000 })];
-    const first = setProviderModels(undefined, "openrouter", models, NO_NATIVE_MODELS);
-    if (first._tag !== "write") throw new Error("expected a write");
-    const compact = JSON.stringify(JSON.parse(first.text));
-    expect(setProviderModels(first.text, "openrouter", models, NO_NATIVE_MODELS)._tag).toBe(
-      "unchanged",
-    );
-    expect(setProviderModels(compact, "openrouter", models, NO_NATIVE_MODELS)._tag).toBe(
-      "unchanged",
-    );
   });
 
   it("refuses a file that is not a plain JSON object, so what it holds is not lost", () => {

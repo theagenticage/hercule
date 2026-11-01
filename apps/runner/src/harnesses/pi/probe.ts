@@ -23,9 +23,8 @@ import { makeInstall } from "../install";
 import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Ran, Run } from "../process";
 import { truncateFact } from "../text";
-import type { HoldHome } from "./home-locks";
 import { readModelStore, replaceModelStore, writeModelStore } from "./model-store";
-import { describeError, makeRpc, type PiSpawn } from "./rpc";
+import { describeError, makeRpc, STARTUP_DEADLINE, type PiSpawn } from "./rpc";
 
 /** The thinking level a session uses when the user picked none. */
 export const DEFAULT_THINKING = "low";
@@ -203,9 +202,8 @@ const buildRefreshEnv = (
  * with a copy of the home's store. pi writes its store in place, so a refresh
  * run in the home itself could change the file under a pi that is loading it,
  * or leave it cut short if the refresh were stopped. When the command succeeds,
- * the refreshed store is copied into the home in one atomic step, holding the
- * home's launch lock (`holdHome`), so no launch has the store change between
- * the moment it reads it and the moment its pi loads it. A refresh that fails
+ * the refreshed store is renamed into the home in one atomic step, so a launch
+ * that copies the home's store never copies half of one. A refresh that fails
  * leaves the home's store as it was.
  *
  * The refresh runs in a detached fiber and only the wait is bounded, so a
@@ -216,7 +214,6 @@ const buildRefreshEnv = (
  */
 const refreshModelStore = (
   run: Run,
-  holdHome: HoldHome,
   binary: string,
   home: string,
   env: Readonly<Record<string, string | undefined>>,
@@ -230,9 +227,7 @@ const refreshModelStore = (
       }),
     ).pipe(Effect.timeoutOption(MODEL_STORE_REFRESH_LIMIT));
   const copyIntoHome = (scratch: string) =>
-    holdHome(home, () =>
-      Effect.try({ try: () => replaceModelStore(scratch, home), catch: describeError }),
-    ).pipe(
+    Effect.try({ try: () => replaceModelStore(scratch, home), catch: describeError }).pipe(
       Effect.catch((message) =>
         Effect.logWarning(
           `Hercule could not store the refreshed pi model list in ${home}: ${message}`,
@@ -354,7 +349,9 @@ export const fetchCatalog = (
     ({ child }) => {
       const rpc = makeRpc(child, () => undefined);
       Effect.runFork(rpc.pump);
-      return rpc.send({ type: "get_available_models" }).pipe(
+      // A pi just spawned is still loading, so its first command gets the
+      // startup deadline and not the one for a pi that is already running.
+      return rpc.send({ type: "get_available_models" }, STARTUP_DEADLINE).pipe(
         Effect.mapError((failure) => failure.message),
         Effect.map((answer) => {
           const models = (
@@ -377,7 +374,7 @@ export const fetchCatalog = (
  * key is in, or undefined for an account without one.
  */
 export const makeProbe =
-  (spawn: PiSpawn, run: Run, holdHome: HoldHome) =>
+  (spawn: PiSpawn, run: Run) =>
   (
     binary: string,
     home: string,
@@ -395,7 +392,7 @@ export const makeProbe =
       // pi lists only the providers it has a key for, so a machine with no key
       // has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [], usage: null };
-      yield* refreshModelStore(run, holdHome, binary, home, env, credentialVariable);
+      yield* refreshModelStore(run, binary, home, env, credentialVariable);
       return yield* Effect.try({ try: () => readModelStore(home), catch: describeError }).pipe(
         Effect.flatMap((store) => fetchCatalog(spawn, binary, store, env, provider)),
         Effect.match({

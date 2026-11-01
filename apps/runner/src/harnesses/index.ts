@@ -141,8 +141,8 @@ export interface HarnessRunnerContext {
    * text generation request, so the harness can run any model the user picked
    * from it. The pi adapter declares to pi the ones pi does not ship, and
    * every other adapter ignores the field. Absent when the frame manages no
-   * declarations; an empty list tells the adapter to clear the ones it declared
-   * earlier. Absent for a probe, an install and a login.
+   * declarations; an empty list tells the adapter to declare none. Absent for a
+   * probe, an install and a login.
    */
   readonly catalogModels?: ReadonlyArray<ModelDeclaration>;
   /**

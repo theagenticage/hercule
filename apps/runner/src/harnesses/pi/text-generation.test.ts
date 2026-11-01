@@ -501,6 +501,21 @@ describe("launching pi for a text generation", () => {
     await outcome;
   });
 
+  it("gives pi a copy of the Harness Home's models.json, so a provider's own settings apply", async () => {
+    const home = createPiHome();
+    const original = JSON.stringify({ providers: { zai: { baseUrl: "http://127.0.0.1:9" } } });
+    writeFileSync(join(home, "models.json"), original);
+    const { seam, spawns } = buildFakePiSeam();
+    const outcome = Effect.runPromise(generate(makePiAdapter(seam), home));
+    await waitUntil("launched a pi", () => spawns.length === 1);
+
+    expect(readFileSync(join(spawns[0]!.cwd!, "models.json"), "utf8")).toBe(original);
+
+    answerWith(spawns[0]!, ANSWER);
+    await outcome;
+    expect(readFileSync(join(home, "models.json"), "utf8")).toBe(original);
+  });
+
   it("fails without prompting when pi picked a similar model instead of the one asked for", async () => {
     const { outcome, child } = await startGeneration({
       answers: {

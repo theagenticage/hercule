@@ -15,13 +15,16 @@
  * one-shot command. The child supports `write`, `stdout`, `stderr`, `exited`,
  * `kill` and `end`. `end` closes stdin, which tells pi to exit.
  */
-import { join } from "node:path";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { Effect, Stream } from "effect";
 import type { HarnessCredential, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import type { HarnessRunnerContext } from "../index";
 import type { Ran } from "../process";
 import {
   CWD,
+  cleanupHomes as cleanupScratchHomes,
   createLines,
   createScratchHome,
   filterByTag,
@@ -30,16 +33,20 @@ import {
 } from "../testing";
 import { makePiAdapter, type PiSeam } from "./adapter";
 
-export {
-  cleanupHomes,
-  CWD,
-  createLines,
-  PRIOR,
-  settle,
-  filterByTag,
-  waitUntil,
-  WAIT_MS,
-} from "../testing";
+export { CWD, createLines, PRIOR, settle, filterByTag, waitUntil, WAIT_MS } from "../testing";
+
+/** The private agent folders the fake pi was started in, which no session has removed yet. */
+const agentFolders = new Set<string>();
+
+/**
+ * Deletes every scratch home the tests created, and the private agent folders
+ * of the sessions they left running. Each test file calls it once.
+ */
+export const cleanupHomes = (): void => {
+  cleanupScratchHomes();
+  for (const folder of agentFolders) rmSync(folder, { recursive: true, force: true });
+  agentFolders.clear();
+};
 
 export const createPiHome = (): string => createScratchHome("pi");
 
@@ -198,6 +205,9 @@ export interface Spawn {
   readonly crash: (...complaints: ReadonlyArray<string>) => void;
 }
 
+/** Returns the private agent folder pi was started in. */
+export const agentFolderOf = (spawn: Spawn): string => spawn.env["PI_CODING_AGENT_DIR"]!;
+
 /** A command the adapter wrote to pi. The list keeps them in the order written. */
 export interface Sent {
   readonly type: string;
@@ -323,6 +333,14 @@ export const buildFakePiSeam = (
     cwd: string | null,
   ) => {
     behaviour.atSpawn?.(env);
+    const folder = env["PI_CODING_AGENT_DIR"];
+    if (
+      folder !== undefined &&
+      dirname(folder) === tmpdir() &&
+      basename(folder).startsWith("hercule-pi-agent-")
+    ) {
+      agentFolders.add(folder);
+    }
     const out = createLines();
     const err = createLines();
     const sentToThisPi: Array<Sent> = [];

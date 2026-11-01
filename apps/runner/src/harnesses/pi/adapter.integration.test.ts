@@ -284,9 +284,9 @@ describe.skipIf(binary === undefined)("probing a real pi", () => {
     const names = readdirSync(ctx.home);
     expect(names.filter((name) => name.startsWith("models-store.json."))).toEqual([]);
     if (names.includes("models-store.json")) {
-      expect(() =>
-        JSON.parse(readFileSync(join(ctx.home, "models-store.json"), "utf8")),
-      ).not.toThrow();
+      expect(() => {
+        JSON.parse(readFileSync(join(ctx.home, "models-store.json"), "utf8"));
+      }).not.toThrow();
     }
   }, 60_000);
 

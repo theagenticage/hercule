@@ -90,6 +90,13 @@ export interface PiRpc {
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 
+/**
+ * How long a pi that was just spawned gets to load and answer its first
+ * command. Loading takes seconds on a slow machine, much longer than
+ * `RPC_DEADLINE`, which is meant for a pi that is already running.
+ */
+export const STARTUP_DEADLINE: Duration.Duration = Duration.seconds(30);
+
 /** The message of the `PiExited` failure: pi exited, or closed its output, before it responded. */
 const PI_GONE = "pi exited or closed its output";
 

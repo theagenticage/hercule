@@ -14,6 +14,7 @@ import { Deferred, Duration, Effect, Fiber, Logger } from "effect";
 import { TestClock } from "effect/testing";
 import type { HarnessCredential, ProbeResult } from "@hercule/protocol";
 import { makePiAdapter } from "./adapter";
+import { fetchCatalog } from "./probe";
 import {
   buildFakePiSeam,
   cleanupHomes,
@@ -24,6 +25,7 @@ import {
   createPiHome,
   TEST_CREDENTIAL,
   TEST_ZAI_KEY,
+  waitUntil,
 } from "./testing";
 
 afterAll(cleanupHomes);
@@ -599,5 +601,41 @@ describe("the pi adapter's probe", () => {
         expect(readdirSync(home)).toEqual([]);
       });
     });
+  });
+});
+
+describe("reading the catalog from a pi that is still loading", () => {
+  it("waits for the first answer of a pi that takes longer than a running pi would", async () => {
+    // A cold pi on a loaded machine can take many seconds to answer its first
+    // command. `RPC_DEADLINE` is for a pi that already runs.
+    const { seam, spawns } = buildFakePiSeam({
+      answers: { get_available_models: () => undefined },
+    });
+
+    const models = await Effect.runPromise(
+      Effect.gen(function* () {
+        const reading = yield* Effect.forkChild(
+          fetchCatalog(seam.spawn, "/usr/local/bin/pi", undefined, {}, "zai"),
+        );
+        yield* Effect.promise(() =>
+          waitUntil(
+            "asked for the models",
+            () => spawns[0]?.sent.some((one) => one.type === "get_available_models") === true,
+          ),
+        );
+        yield* TestClock.adjust(Duration.seconds(6));
+        const asked = spawns[0]!.sent.find((one) => one.type === "get_available_models")!;
+        spawns[0]!.push({
+          type: "response",
+          command: "get_available_models",
+          id: asked.command["id"],
+          success: true,
+          data: { models: [{ id: "glm-5.3", name: "GLM-5.3", provider: "zai", input: ["text"] }] },
+        });
+        return yield* Fiber.join(reading);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+
+    expect(models.map((model) => model.slug)).toEqual(["glm-5.3"]);
   });
 });

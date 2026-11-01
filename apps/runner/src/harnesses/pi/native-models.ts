@@ -9,9 +9,8 @@ import { statSync } from "node:fs";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { PROBE_DEADLINE } from "../probe";
 import { fetchCatalog } from "./probe";
-import type { PiSpawn } from "./rpc";
+import { STARTUP_DEADLINE, type PiSpawn } from "./rpc";
 
 /** How a listing ended, as the cache keeps it. */
 type Listing =
@@ -51,7 +50,8 @@ const hashModelStore = (store: Buffer | undefined): string =>
  * provider and none the home declared. The caller reads the store once and
  * passes the bytes, so the list is derived from exactly the store its own pi
  * will load. It fails with a message when pi cannot be started or does not
- * answer within `PROBE_DEADLINE`.
+ * answer within `STARTUP_DEADLINE`, the same time a launch gives its pi to
+ * answer its model check.
  *
  * pi's list depends on its binary and on the store (the list `pi update
  * --models` refreshed). So the answer is cached per home and provider, and used
@@ -75,12 +75,12 @@ export const makeNativeModelLister = (spawn: PiSpawn) => {
   ): Promise<Listing> =>
     Effect.runPromise(
       fetchCatalog(spawn, binary, store, env, provider).pipe(
-        Effect.timeoutOption(PROBE_DEADLINE),
+        Effect.timeoutOption(STARTUP_DEADLINE),
         Effect.map(
           Option.match({
             onNone: (): Listing => ({
               _tag: "failed",
-              message: `pi did not list its models within ${Duration.format(PROBE_DEADLINE)}`,
+              message: `pi did not list its models within ${Duration.format(STARTUP_DEADLINE)}`,
             }),
             onSome: (models): Listing => ({
               _tag: "listed",

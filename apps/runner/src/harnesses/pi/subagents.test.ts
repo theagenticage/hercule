@@ -31,6 +31,7 @@ import {
   type SubagentReply,
 } from "./extension";
 import {
+  agentFolderOf,
   startBusySession,
   cleanupHomes,
   SESSION,
@@ -246,7 +247,7 @@ describe("how a subagent's pi is started", () => {
     // The parent's prompt is the subagent's whole brief, so the Agent's
     // instructions file is passed to the session's own pi alone.
     const instructions = (command: ReadonlyArray<string>) =>
-      command.filter((arg) => arg.endsWith(`system-prompt-${SESSION}.txt`));
+      command.filter((arg) => arg.endsWith("system-prompt.txt"));
     expect(instructions(run.child.command)).toHaveLength(1);
     expect(instructions(child.command)).toEqual([]);
     expect(child.env[SUBAGENTS_VARIABLE]).toBe("1");
@@ -347,8 +348,8 @@ describe("how a subagent's pi is started", () => {
   it("loads a copy of the extension written for it alone, and once its pi exits kills what its bash calls left running, then deletes the copy", async () => {
     const run = await startBusySession();
     const subagent = await askForSubagent(run, run.child);
-    const copy = join(run.ctx.home, `extension-${subagent.subagentId}.ts`);
-    const rootCopy = join(run.ctx.home, `extension-${SESSION}.ts`);
+    const copy = join(agentFolderOf(subagent.child), `extension-${subagent.subagentId}.ts`);
+    const rootCopy = join(agentFolderOf(run.child), `extension-${SESSION}.ts`);
 
     const readExtensionArg = (command: ReadonlyArray<string>) => command[command.indexOf("-e") + 1];
     expect(readExtensionArg(subagent.child.command)).toBe(copy);
@@ -667,7 +668,7 @@ describe("the limits on subagents", () => {
     const spawned = run.spawns.length;
     stopped.child.crash();
     // The copy is deleted just before the slot is given back.
-    const copy = join(run.ctx.home, `extension-${stopped.subagentId}.ts`);
+    const copy = join(agentFolderOf(stopped.child), `extension-${stopped.subagentId}.ts`);
     await waitUntil("released the stopped subagent", () => !existsSync(copy));
     expect(run.cleanedFiles).toEqual([copy]);
     await askForSubagent(run, run.child, "Task number 6");

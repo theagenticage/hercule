@@ -1,15 +1,14 @@
 /**
  * Reads, copies and replaces the model list pi stores in a Harness Home
- * (`models-store.json`). Everything that runs pi in a scratch agent directory
- * (a text generation, a probe's listing of models, a model list refresh) starts
- * from a copy of the home's store, so pi sees neither whatever a session wrote
- * into the Harness Home (`models.json`, `APPEND_SYSTEM.md`) nor writes its own
- * bookkeeping files there.
+ * (`models-store.json`). Everything that runs pi in a private agent folder (a
+ * session, a text generation, a probe's listing of models, a model list
+ * refresh) starts from a copy of the home's store, so pi writes its own
+ * bookkeeping files there and not into the Harness Home.
  *
  * Only one thing ever changes the home's store: `replaceModelStore`, which
- * swaps in a whole file and is called while holding the home's launch lock. So
- * a reader sees a complete store, and a launch that holds the lock sees the
- * same store from its first read until its pi has loaded.
+ * swaps in a whole file in one rename. So a reader always sees a complete
+ * store, and a launch reads it once and uses those bytes for everything it
+ * derives from it.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,9 +45,6 @@ export const writeModelStore = (directory: string, store: Buffer | undefined): v
  * `pi update --models` refreshed there, by writing a temporary file in the home
  * and renaming it. Does nothing when `directory` has no store. Throws when the
  * copy fails, leaving the home's store as it was.
- *
- * The caller must hold the home's launch lock: a launch that holds it relies on
- * the store not changing until its pi has loaded.
  */
 export const replaceModelStore = (directory: string, home: string): void => {
   const refreshed = readModelStore(directory);

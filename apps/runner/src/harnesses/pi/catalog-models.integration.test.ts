@@ -1,7 +1,8 @@
 /**
  * Tests, against the real pi binary, that an OpenRouter model pi does not ship
- * runs once the adapter has declared it in `models.json`, that a model pi does
- * ship keeps pi's own definition because the adapter leaves it out, and that pi
+ * runs once the adapter has declared it in the launch's private `models.json`,
+ * that a model pi does ship keeps pi's own definition because the adapter leaves
+ * it out, that the Harness Home's own `models.json` is only read, and that pi
  * never starts on a model other than the one asked for.
  *
  * No paid key and no real model: the account's key is a dummy and the
@@ -10,12 +11,12 @@
  *
  * Skips without `pi` on PATH, like the other integration tests here.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type { ModelDeclaration, HarnessEvent, SessionSpec } from "@hercule/protocol";
-import { makePiAdapter, pi } from "./adapter";
+import { makePiAdapter } from "./adapter";
 import { killProcessesHolding, runProcess, spawnPi } from "../process";
 import { buildContext, cleanupHomes, filterByTag, SPEC, waitUntil } from "./testing";
 import { createScratchHome } from "../testing";
@@ -26,6 +27,8 @@ import {
 } from "./upstream";
 
 const binary = Bun.which("pi") ?? undefined;
+
+const MODELS_FILE = "models.json";
 
 const upstreams: Array<FakeModelServer> = [];
 
@@ -58,10 +61,25 @@ const buildSpec = (model: string): SessionSpec => ({
 });
 
 /**
- * Starts the fake upstream and builds the context of an OpenRouter account in
- * a scratch home whose `openrouter` provider points at it.
+ * Starts the fake upstream and builds an adapter on the real pi, with the
+ * context of an OpenRouter account in a scratch home whose `openrouter`
+ * provider points at it. The adapter records the private agent folder of each
+ * pi it starts, so a test can read the `models.json` that pi loaded while its
+ * session runs.
  */
 const buildOpenRouterContext = (catalogModels: ReadonlyArray<ModelDeclaration>) => {
+  const folders: Array<string> = [];
+  const pi = makePiAdapter({
+    spawn: (command, env, cwd) => {
+      const folder = env["PI_CODING_AGENT_DIR"];
+      if (folder !== undefined && basename(folder).startsWith("hercule-pi-agent-")) {
+        folders.push(folder);
+      }
+      return spawnPi(command, env, cwd);
+    },
+    run: runProcess,
+    killProcessesHolding,
+  });
   const upstream = startScriptedModelServer(() => ({ text: "OK" }));
   upstreams.push(upstream);
   const home = createScratchHome("pi-catalog");
@@ -77,7 +95,7 @@ const buildOpenRouterContext = (catalogModels: ReadonlyArray<ModelDeclaration>) 
     credentialVariables: ["OPENROUTER_API_KEY"],
     catalogModels,
   };
-  return { upstream, ctx };
+  return { upstream, ctx, pi, folders };
 };
 
 /** Returns the model id each request to the fake upstream named, in order. */
@@ -88,7 +106,7 @@ describe.skipIf(binary === undefined)("a real pi on OpenRouter models it does no
   it(
     "sends the declared model's exact id upstream, and again after a switch to another declared model",
     async () => {
-      const { upstream, ctx } = buildOpenRouterContext([
+      const { upstream, ctx, pi } = buildOpenRouterContext([
         buildDeclaration(FIRST_ID),
         buildDeclaration(SECOND_ID),
       ]);
@@ -125,7 +143,7 @@ describe.skipIf(binary === undefined)("a real pi on OpenRouter models it does no
   it(
     "keeps pi's own definition of a model it ships, on a start before any probe, and still runs a declared one",
     async () => {
-      const { upstream, ctx } = buildOpenRouterContext([
+      const { upstream, ctx, pi, folders } = buildOpenRouterContext([
         buildDeclaration(SHIPPED_ID),
         buildDeclaration(FIRST_ID),
       ]);
@@ -145,10 +163,12 @@ describe.skipIf(binary === undefined)("a real pi on OpenRouter models it does no
       await waitUntil("finished the first turn", () => completedTurns() === 1, BUDGET_MS / 2);
 
       // The shipped model is not in the file, so pi keeps its own definition
-      // of it, with the thinking levels and compatibility settings.
-      const file = readFileSync(join(ctx.home, "models.json"), "utf8");
+      // of it, with the thinking levels and compatibility settings. The home's
+      // own file is the one the test wrote, with the provider's `baseUrl` only.
+      const file = readFileSync(join(folders[0]!, MODELS_FILE), "utf8");
       expect(file).not.toContain(SHIPPED_ID);
       expect(file).toContain(FIRST_ID);
+      expect(readFileSync(join(ctx.home, MODELS_FILE), "utf8")).not.toContain(FIRST_ID);
 
       await Effect.runPromise(
         pi.sendInput(sessionId, {
@@ -165,34 +185,35 @@ describe.skipIf(binary === undefined)("a real pi on OpenRouter models it does no
   );
 
   it(
-    "starts on a model it ships after a start with an empty catalog cleared the declarations",
+    "declares only its own frame's models: a start with an empty catalog after one that declared a model",
     async () => {
-      const { upstream, ctx } = buildOpenRouterContext([buildDeclaration(FIRST_ID)]);
+      const { upstream, ctx, pi, folders } = buildOpenRouterContext([buildDeclaration(FIRST_ID)]);
       const first = crypto.randomUUID();
       await Effect.runPromise(pi.startSession(first, buildSpec(FIRST_ID), ctx));
+      expect(readFileSync(join(folders[0]!, MODELS_FILE), "utf8")).toContain(FIRST_ID);
       await Effect.runPromise(pi.stopSession(first, "stopped"));
-      expect(readFileSync(join(ctx.home, "models.json"), "utf8")).toContain(FIRST_ID);
+      // The session's private folder goes with its pi.
+      await waitUntil("removed the first folder", () => !existsSync(folders[0]!));
 
       const second = crypto.randomUUID();
       await Effect.runPromise(
         pi.startSession(second, buildSpec(SHIPPED_ID), { ...ctx, catalogModels: [] }),
       );
+      expect(readFileSync(join(folders[1]!, MODELS_FILE), "utf8")).not.toContain(FIRST_ID);
       await Effect.runPromise(pi.stopSession(second, "stopped"));
 
-      expect(readFileSync(join(ctx.home, "models.json"), "utf8")).not.toContain(FIRST_ID);
       expect(upstream.asked()).toBe(0);
     },
     BUDGET_MS,
   );
 
   it(
-    "does not list a model a session declared in the home, so the controller keeps sending it",
+    "does not list a model a session declared, so the controller keeps sending it",
     async () => {
-      const { ctx } = buildOpenRouterContext([buildDeclaration(FIRST_ID)]);
+      const { ctx, pi } = buildOpenRouterContext([buildDeclaration(FIRST_ID)]);
       const sessionId = crypto.randomUUID();
       await Effect.runPromise(pi.startSession(sessionId, buildSpec(FIRST_ID), ctx));
       await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
-      expect(readFileSync(join(ctx.home, "models.json"), "utf8")).toContain(FIRST_ID);
 
       // The model list refresh would call pi.dev, so the probe's stand-in for it
       // does nothing. Everything else is the real pi.
@@ -219,7 +240,7 @@ describe.skipIf(binary === undefined)("a real pi on OpenRouter models it does no
     async () => {
       // A prefix of a model id pi ships: pi matches it to that model.
       const asked = "openai/gpt-4o-min";
-      const { upstream, ctx } = buildOpenRouterContext([]);
+      const { upstream, ctx, pi } = buildOpenRouterContext([]);
 
       const failed = await Effect.runPromise(
         Effect.flip(pi.startSession(crypto.randomUUID(), buildSpec(asked), ctx)),
