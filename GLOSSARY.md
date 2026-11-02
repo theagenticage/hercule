@@ -118,7 +118,11 @@ _Avoid_: existing thread, materialized thread, live thread
 
 **Done (Thread)**:
 A mark the user puts on a Thread they have finished with (`session.markDone`), recording when and by whom. A Done Thread leaves its project's list for the Done shelf; nothing about the session itself changes, and a running one keeps running. It is taken off by `session.reopen`, or by any new input to the Thread, and the Thread then sorts as if started at that moment. Only a Thread can be Done; a session spawned from an Agent cannot.
-_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), archived (nothing is hidden or frozen; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
+_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), archived (a separate, final state: see Archived; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
+
+**Archived (Thread)**:
+A final state the user puts a Thread in when they want it gone (`session.archive`), recording when and by whom. An archived Thread can never be resumed, sent input or reopened; its transcript stays readable on the controller. Archiving marks the Thread Done first, and the Agent sessions the Thread started in its workspace are archived with it. It leaves the sidebar and the Done shelf. Once every Thread of a workspace is archived, automatic cleanup may remove the workspace. Only the user archives, and a running Thread cannot be archived. There is no undo.
+_Avoid_: Done (reversible and changes nothing about the session), deleted (the transcript stays), closed, hidden
 
 **Thread Config**:
 What a thread runs with: Provider Account, harness, model and its options, access mode, runner, permission profile, workspace, checkout and branch. Set by the draft at start.
@@ -247,7 +251,7 @@ The user-facing word for a primary is **main workspace**: `primary` is the kind 
 _Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them); attachment, attached checkout (an Attachment is an image in a prompt; say adopted checkout and adoption); bench, crew, piece of work (for the sessions working in one workspace there is no noun: say the workspace's threads, or its sessions)
 
 **Workspace Lease**:
-A holder's use of a workspace - a session or a run - recorded on the workspace when the holder opens or joins it. It is active until the holder releases it. At release the holder picks a retention window, fixed then. Active leases protect current use; a workspace's separate retention policy decides whether automatic cleanup is allowed. A Thread makes its workspace manually retained, including after the Thread exits.
+A holder's use of a workspace - a session or a run - recorded on the workspace when the holder opens or joins it. It is active until the holder releases it. At release the holder picks a retention window, fixed then. Active leases protect current use; a workspace's separate retention policy decides whether automatic cleanup is allowed. A Thread makes its workspace manually retained, including after the Thread exits, until every Thread of the workspace is Archived.
 _Avoid_: claim (a Subscription is a claim), pin (a run is pinned to a runner), reference count
 
 **Checkout**:
@@ -336,8 +340,12 @@ A fact about a runner used for placement: a probed toolchain or a user-applied l
 _Avoid_: bare "capability" where the kind isn't obvious
 
 **Runner Facts**:
-The probed facts a runner self-reports about itself: OS and architecture, RAM, toolchains, and which harnesses are on PATH. Reported at hello, refreshed hourly with a report only on change, and refreshed unconditionally on demand via `runner.refreshFacts`.
+The probed facts a runner self-reports about itself: OS and architecture, RAM, disk size, toolchains, and which harnesses are on PATH. Reported at hello, refreshed hourly with a report only on change, and refreshed unconditionally on demand via `runner.refreshFacts`.
 _Avoid_: re-probe
+
+**Runner Metrics**:
+What a runner measures about its machine every minute, because it changes: free disk, available memory, and CPU use (the minute's average and peak). The controller keeps a history of them with the minute's session counts, for the Fleet graphs. The disk limit a runner's free disk is checked against is its **watermark**; the metrics are not.
+_Avoid_: watermark (the old name of the report; now only the disk limit), readings, stats, telemetry
 
 **Promotion**:
 Moving the controller to another machine by migrating its state bundle. A migration, never a live handoff; the old controller ends up sealed.
