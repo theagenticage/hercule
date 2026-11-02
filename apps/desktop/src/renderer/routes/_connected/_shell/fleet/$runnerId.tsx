@@ -1,7 +1,7 @@
 import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { describeRunnerFacts, resolveDisplayTimezone } from "@hercule/client-core";
+import { resolveDisplayTimezone } from "@hercule/client-core";
 import {
   buildFleetMachines,
   decideMachineKind,
@@ -10,6 +10,7 @@ import {
 } from "@hercule/client-core/fleet";
 import {
   countOpenThreads,
+  describeMachineFacts,
   describeOfflineBanner,
   isRunnerBehind,
 } from "@hercule/client-core/machine-page";
@@ -123,7 +124,6 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   );
   const now = useFleetNow(machine === undefined ? [] : [machine], timezone);
   const room = machine === undefined ? null : describeRoom(machine);
-  const reading = describeRunnerFacts(runner);
 
   return (
     <>
@@ -141,7 +141,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
             name={runner.name}
             kind={kind}
             status={describeMachineStatus(runner, timezone, now)}
-            facts={[reading.machine, reading.memory].filter((fact) => fact !== null)}
+            facts={runner.facts === null ? [] : describeMachineFacts(runner.facts)}
             runnerVersion={runner.version}
             isRunnerBehind={isRunnerBehind(runner.version, controllerRecord.version)}
           />

@@ -1939,7 +1939,7 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 - **The pixel reference** is the prototype on branch [`prototype/fleet-page`](https://github.com/theagenticage/hercule/tree/prototype/fleet-page), variant G: `pnpm prototype:fleet`, then `specimens/fleet-prototype.html?variant=G` (`&view=list` for the list, `&theme=` for any theme). Its **Data check** toggle marks what needs data the controller did not have when it was drawn. Where this text and the prototype disagree, the prototype decides a measurement and this text decides a behaviour, until slice 50 records the Fleet goldens. From then on the goldens and `tokens.css` decide a measurement, as for every screen ([ADR 0047](../adr/0047-the-desktop-app-is-its-own-pixel-reference.md)), and the prototype is only the record of the design. The prototype draws buttons v1 does not build (Update, Install, "Review and update"); they stay there as the reference for [#974](https://github.com/theagenticage/hercule/issues/974), and v1 draws none of them.
 - **Desktop only.** The web app's Fleet screen keeps what it shows today; giving it the new data is [#977](https://github.com/theagenticage/hercule/issues/977).
 - **Retired machines are not shown,** anywhere on the screen.
-- **Sizes are in GB of 10⁹ bytes,** as macOS's Finder counts them, with one decimal under 100 GB. So the default disk limit, 10 GiB, shows as 10.7 GB.
+- **Sizes are in GB of 10⁹ bytes,** as macOS's Finder counts them, with one decimal under 100 GB. So the default disk limit, 10 GiB, shows as 10.7 GB. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* Memory is the exception: it follows Apple's About This Mac and Activity Monitor, which count binary gigabytes (2³⁰ bytes), so a Mac with 64 GiB of RAM shows "64 GB memory".
 
 ### The routes and the way in
 
@@ -1953,7 +1953,7 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 ### The Fleet page
 
 - **The lead** is one sentence in two or three parts, such as "Three machines need you. 93 sessions running on 5 machines, 3 waiting. Room for 40 more right now." With nothing that needs the user, it starts "Every machine is healthy." The count of machines that need the user is in words up to ten, in `--you-ink`; the rest is in `--ink`. `describeFleet` in `@hercule/client-core` builds it.
-- **Machines** is the first section: a heading, and a segmented control, **Grid | List**, at its right. The choice is kept for the window's life; a launch opens Grid. Machines are in the order they joined, which never changes while the page is open, so nothing jumps when a state changes.
+- **Machines** is the first section: a heading, and a segmented control, **Grid | List**, at its right. The choice is kept for the window's life; a launch opens Grid. Machines are in the order they joined, which never changes while the page is open, so nothing jumps when a state changes. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* The order is the runners' ids, which are UUIDv7 and sort by creation time ([spec 04](04-state-store.md)).
 - **An empty fleet** (only the controller's own runner, or none online yet) shows one card for each machine it has, and under them a dashed card: "Add a machine. Run one command on another computer and it joins your fleet.", which opens Add a machine.
 - **Software** is the second section (below).
 
@@ -1963,7 +1963,7 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 - **sessions against the cap**, drawn by the rule below, with "12 of 16" beside them;
 - **Disk** and **Memory** as two gauges with their percentages, coloured by the rules below; a click on a gauge opens the machine's page at that gauge's section;
 - the small faces of who works there: one per Thread row, run and assistant running on the machine, at most 5, then "+n";
-- **Room** for more: "Room for 4", "Full", or "Takes no new work";
+- **Room** for more: "Room for 4", "Full", or ~~"Takes no new work"~~ "Takes no new work" while the disk is below its limit; *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* A machine told to take no new work shows no Room, because its status word already says so;
 - **what needs the user,** at most one line, the most serious first (below), with the button that fixes it.
 
 A click anywhere else on the card opens the machine's page.
@@ -1978,12 +1978,12 @@ A click anywhere else on the card opens the machine's page.
 |---|---|---|---|
 | `--fail` | offline or unreachable | "Offline since 09:12" or "Not heard from since 09:12" | none; the machine's page shows what to do |
 | `--fail` | free disk below the disk limit | "Disk below its limit. It takes no new sessions." | Clean up… |
-| `--you` | Threads waiting for a slot | "3 threads wait for a slot" | Allow 15 |
+| `--you` | ~~Threads~~ sessions waiting for a slot, when running plus waiting is above the cap *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* | "3 threads wait for a slot", or "3 sessions wait for a slot" unless every waiting session is a Thread | Allow 15 |
 | `--you` | disk 85% full or more | "Disk 87% full" | Clean up… |
 | `--you` | the forecast reaches the limit within 21 days | "Disk reaches its limit in about 12 days" | Clean up… |
 
 - A machine needs the user when any row applies. The card's line is the first that applies, in the table's order.
-- **Allow N** sets the session cap to the sessions running plus the sessions waiting (`runner.update { maxConcurrentSessions }`), so every waiting Thread starts. Its tooltip explains it: "Lets 15 sessions run here at once: the 12 running and the 3 waiting."
+- **Allow N** sets the session cap to the sessions running plus the sessions waiting (`runner.update { maxConcurrentSessions }`), so every waiting ~~Thread~~ session starts. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* Every session queued for a slot counts, of any kind, and the row applies only when running plus waiting is above the cap, so Allow never lowers the cap. Its tooltip explains it: "Lets 15 sessions run here at once: the 12 running and the 3 waiting."
 - **Clean up…** opens the cleanup dialog for that machine (below).
 - **The gauges.** Disk is `--you` from 85% and `--fail` below its limit. Memory is `--you` from 80% and `--fail` from 92%, but memory never makes a machine need the user: a session's tools, a `dotnet build` or a container, use memory the session cannot be blamed for, and the number swings.
 - **Software updates are quiet:** "2 updates" in `--muted` under the line, never a hue, and never counted in the lead. It counts the harnesses and the runner older than their latest release ([Software](#software)); toolchains are not counted.
@@ -2010,7 +2010,7 @@ Tools down, machines across, in two groups: **Harnesses** (the Hercule runner fi
 
 One centred column, in this order. The jump links of the header follow the sections.
 
-1. **The head:** the icon, the name, the status dot and word, and under the name its OS and architecture, RAM and disk size, and "Runner 0.9.3", with "update available" in `--muted` when the controller is newer. Then the **room line**, which says how many more sessions can start and what limits it: "Room for 4 more, under its cap of 16", "No room: its disk is below its limit, so it takes no new sessions", "No room: it takes no new work". `describeRoom` builds it.
+1. **The head:** the icon, the name, the status dot and word, and under the name its ~~OS and architecture, RAM~~ OS ("macOS", "Linux", "Windows"), its architecture, its memory ("64 GB memory") *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* and disk size, and "Runner 0.9.3", with "update available" in `--muted` when the controller is newer. Then the **room line**, which says how many more sessions can start and what limits it: "Room for 4 more, under its cap of 16", "No room: its disk is below its limit, so it takes no new sessions", "No room: it takes no new work". `describeRoom` builds it.
 2. **An offline or unreachable machine** shows a banner under the head instead: "atlas has not been heard from since 09:12. It may be asleep, off the network, or without power. Its 3 threads can carry on once it is back, and work waiting for it starts then. If it does not come back by itself, start Hercule on it again: `hercule service start`. What you see below is from 09:12.", with Retire… at its right. `hercule service start` starts the runner's Service Unit (spec 15); a machine that runs `hercule runner` in a terminal is started the same way it was.
 3. **The instruments,** four graphs drawn from the stored metrics ([Graphs and the forecast](#graphs-and-the-forecast)):
    - **Sessions**, the last 24 hours: the sessions running in each 5 minutes, with the minutes in which Threads waited in marigold, and the cap as a line;

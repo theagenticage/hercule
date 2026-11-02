@@ -434,26 +434,34 @@ describe("describeFleet", () => {
 });
 
 describe("describeRoom", () => {
-  it("counts the room under the cap", () => {
-    expect(describeRoom(buildMachine({ maxConcurrentSessions: 16 }, { running: 12 }))).toEqual({
-      room: 4,
-      short: "Room for 4",
-      line: "Room for 4 more, under its cap of 16",
-    });
+  const readLine = (machine: FleetMachine): string | undefined =>
+    describeRoom(machine)
+      .line?.map((part) => part.text)
+      .join("");
+
+  it("counts the room under the cap, with the number apart from the words", () => {
+    const room = describeRoom(buildMachine({ maxConcurrentSessions: 16 }, { running: 12 }));
+
+    expect(room.room).toBe(4);
+    expect(room.short).toBe("Room for 4");
+    expect(room.line).toEqual([
+      { text: "Room for ", kind: "plain" },
+      { text: "4", kind: "number" },
+      { text: " more, under its cap of 16", kind: "plain" },
+    ]);
   });
 
   it("says Full when every slot is taken", () => {
-    expect(describeRoom(buildMachine({ maxConcurrentSessions: 16 }, { running: 16 }))).toEqual({
-      room: 0,
-      short: "Full",
-      line: "No room: it runs its cap of 16 sessions",
-    });
+    const machine = buildMachine({ maxConcurrentSessions: 16 }, { running: 16 });
+
+    expect(describeRoom(machine).short).toBe("Full");
+    expect(readLine(machine)).toBe("No room: it runs its cap of 16 sessions");
   });
 
   it("uses the singular for a cap of one", () => {
-    const { line } = describeRoom(buildMachine({ maxConcurrentSessions: 1 }, { running: 1 }));
+    const machine = buildMachine({ maxConcurrentSessions: 1 }, { running: 1 });
 
-    expect(line).toBe("No room: it runs its cap of 1 session");
+    expect(readLine(machine)).toBe("No room: it runs its cap of 1 session");
   });
 
   it("names a disk below its limit", () => {
@@ -461,19 +469,30 @@ describe("describeRoom", () => {
       watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
-    expect(describeRoom(machine)).toEqual({
-      room: 0,
-      short: "Takes no new work",
-      line: "No room: its disk is below its limit, so it takes no new sessions",
-    });
+    expect(describeRoom(machine).short).toBe("Takes no new work");
+    expect(readLine(machine)).toBe(
+      "No room: its disk is below its limit, so it takes no new sessions",
+    );
   });
 
-  it("names a machine told to take no new work", () => {
-    expect(describeRoom(buildMachine({ lifecycle: "draining" }))).toEqual({
-      room: 0,
-      short: "Takes no new work",
-      line: "No room: it takes no new work",
+  it("leaves the short text out for a machine told to take no new work, because its status word says so", () => {
+    const machine = buildMachine({ lifecycle: "draining" });
+
+    expect(describeRoom(machine).room).toBe(0);
+    expect(describeRoom(machine).short).toBeNull();
+    expect(readLine(machine)).toBe("No room: it takes no new work");
+  });
+
+  it("still names the disk in the line, and leaves the short text out, when both apply", () => {
+    const machine = buildMachine({
+      lifecycle: "draining",
+      watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
+
+    expect(describeRoom(machine).short).toBeNull();
+    expect(readLine(machine)).toBe(
+      "No room: its disk is below its limit, so it takes no new sessions",
+    );
   });
 
   it.each(["offline", "unreachable"] as const)("has no text while the machine is %s", (state) => {
@@ -668,6 +687,13 @@ describe("summarizeMachine", () => {
     expect(summary.disk?.level).toBe("fail");
     expect(summary.need?.kind).toBe("disk-below-limit");
     expect(summary.room).toBe("Takes no new work");
+  });
+
+  it("has no room text for a machine told to take no new work, because its status word says so", () => {
+    const summary = summarizeMachine(buildMachine({ lifecycle: "draining" }), TIMEZONE, NOW);
+
+    expect(summary.status.word).toBe("Takes no new work");
+    expect(summary.room).toBeNull();
   });
 
   it("has no disk, memory or room for an offline machine that never reported", () => {

@@ -15,6 +15,7 @@ import {
   type Provider,
   type ProviderAccount,
   type Runner,
+  type RunnerFacts,
   type Session,
 } from "@hercule/contract";
 import { listProviderAccountMachines } from "../provider-account-machines";
@@ -48,6 +49,31 @@ export const isRunnerBehind = (
   }
   return false;
 };
+
+const OS_NAMES: Readonly<Record<string, string>> = {
+  darwin: "macOS",
+  linux: "Linux",
+  win32: "Windows",
+};
+
+const BYTES_PER_GIBIBYTE = 1024 ** 3;
+
+/**
+ * Describes a machine for the head of its page, as the pieces drawn between
+ * dots: the operating system's name, the architecture as the runner reported
+ * it, and the memory, such as "macOS", "arm64", "64 GB memory". An operating
+ * system the table does not know is shown as the runner reported it.
+ *
+ * The memory is counted in binary gigabytes (2^30 bytes), the way Apple's
+ * About This Mac and Activity Monitor count it, and rounded to a whole number.
+ * The disk sizes elsewhere follow Finder instead, which counts in units of
+ * 10^9 bytes; each is the number its own tool shows the user.
+ */
+export const describeMachineFacts = (facts: RunnerFacts): readonly string[] => [
+  OS_NAMES[facts.os] ?? facts.os,
+  facts.arch,
+  `${String(Math.round(facts.totalMemoryBytes / BYTES_PER_GIBIBYTE))} GB memory`,
+];
 
 /**
  * Counts the Thread sessions on the runner `runnerId` that have not exited.

@@ -105,27 +105,27 @@ const buildMachine = (
 
 /** The harness versions each machine reports, by harness id. */
 const ATLAS_VERSIONS: HarnessVersions = {
-  "claude-code/claude-code": "2.1.84",
+  "claude-code/claude-code": "2.0.84",
   "codex/codex": BELOW_FLOOR_VERSION,
   "pi/pi": null,
 };
 const BEELINK_VERSIONS: HarnessVersions = {
-  "claude-code/claude-code": "2.1.84",
+  "claude-code/claude-code": "2.0.84",
   "codex/codex": "0.46.0",
   "pi/pi": "0.9.2",
 };
 const BOSGAME_VERSIONS: HarnessVersions = {
-  "claude-code/claude-code": "2.1.84",
+  "claude-code/claude-code": "2.0.84",
   "codex/codex": null,
   "pi/pi": null,
 };
 const MINI_VERSIONS: HarnessVersions = {
-  "claude-code/claude-code": "2.1.78",
+  "claude-code/claude-code": "2.0.78",
   "codex/codex": "0.46.0",
   "pi/pi": null,
 };
 const STUDIO_VERSIONS: HarnessVersions = {
-  "claude-code/claude-code": "2.1.84",
+  "claude-code/claude-code": "2.0.84",
   "codex/codex": "0.46.0",
   "pi/pi": "0.9.2",
 };

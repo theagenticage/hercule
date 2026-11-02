@@ -3,8 +3,9 @@ import { isMotionReduced } from "../workflows/change-motion";
 
 /**
  * How far the floating header covers the top of the scroll area. A section
- * only counts as in view below it, and the sections' `scroll-margin-top` must
- * be the same, so a section that was jumped to starts just under the header.
+ * only counts as in view below it, so a section that was jumped to starts just
+ * under the header. It must equal `--fleet-header-clearance` in
+ * fleet-scroll.css, which the sections' `scroll-margin-top` reads.
  */
 export const FLEET_HEADER_CLEARANCE_PX = 80;
 

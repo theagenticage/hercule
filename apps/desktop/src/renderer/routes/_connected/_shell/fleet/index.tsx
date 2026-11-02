@@ -20,7 +20,7 @@ import {
 } from "../../../../app/queries";
 import { AddMachineDialog } from "../../../../screens/fleet/add-machine-dialog";
 import { FleetHeader, type FleetSection } from "../../../../screens/fleet/fleet-header";
-import { FleetLead } from "../../../../screens/fleet/fleet-lead";
+import { FleetPageLead } from "../../../../screens/fleet/fleet-lead";
 import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { useFleetNow } from "../../../../screens/fleet/use-fleet-now";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
@@ -104,7 +104,7 @@ function FleetPage(): JSX.Element {
       />
       <FleetScroll scrollRef={scrollRef}>
         <div className="fleet-col">
-          <FleetLead lead={describeFleet(machines)} />
+          <FleetPageLead lead={describeFleet(machines)} />
           <MachinesSection
             machines={machines}
             timezone={timezone}

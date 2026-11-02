@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Harness, Runner, Session } from "@hercule/contract";
+import type { Harness, Runner, RunnerFacts, Session } from "@hercule/contract";
 import {
   ANTHROPIC_IDENTITY,
   BARE,
@@ -14,6 +14,7 @@ import {
 import {
   changeRunnerLabels,
   countOpenThreads,
+  describeMachineFacts,
   describeOfflineBanner,
   formatDiskLimit,
   isRunnerBehind,
@@ -54,6 +55,36 @@ describe("isRunnerBehind", () => {
     expect(isRunnerBehind(null, "0.9.3")).toBe(false);
     expect(isRunnerBehind("0.9.3-rc.1", "0.9.3")).toBe(false);
     expect(isRunnerBehind("0.9.2", "edge")).toBe(false);
+  });
+});
+
+describe("describeMachineFacts", () => {
+  const facts = (over: Partial<RunnerFacts>): RunnerFacts => ({
+    os: "darwin",
+    arch: "arm64",
+    totalMemoryBytes: 64 * GIB,
+    toolchains: [],
+    docker: false,
+    harnesses: [],
+    adapters: [],
+    identityPort: 7000,
+    ...over,
+  });
+
+  it("names the operating system, keeps the architecture, and counts memory in binary gigabytes", () => {
+    expect(describeMachineFacts(facts({}))).toEqual(["macOS", "arm64", "64 GB memory"]);
+    expect(
+      describeMachineFacts(facts({ os: "linux", arch: "x64", totalMemoryBytes: 32 * GIB })),
+    ).toEqual(["Linux", "x64", "32 GB memory"]);
+    expect(describeMachineFacts(facts({ os: "win32" }))[0]).toBe("Windows");
+  });
+
+  it("shows an operating system it does not know as the runner reported it", () => {
+    expect(describeMachineFacts(facts({ os: "freebsd" }))[0]).toBe("freebsd");
+  });
+
+  it("rounds memory to a whole gigabyte", () => {
+    expect(describeMachineFacts(facts({ totalMemoryBytes: 15.6 * GIB }))[2]).toBe("16 GB memory");
   });
 });
 

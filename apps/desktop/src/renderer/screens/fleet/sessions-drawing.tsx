@@ -15,7 +15,7 @@ const SESSIONS_PER_CUT = 10;
  * - When the cap was lowered below the sessions running, the running part runs
  *   past the cap and the cap is marked by a rule inside it.
  * - A bar is cut every 10 sessions, so a cap of 100 stays countable.
- * - `away` draws the cap's part as an outline with nothing running in it, for
+ * - `isAway` draws the cap's part as an outline with nothing running in it, for
  *   a machine whose sessions cannot be known. The waiting sessions stay marigold.
  *
  * The numbers are drawn beside it, so the drawing is hidden from assistive
@@ -24,15 +24,15 @@ const SESSIONS_PER_CUT = 10;
 export function SessionsFigure({
   drawing,
   size,
-  away = false,
+  isAway = false,
 }: {
   readonly drawing: SessionsDrawing;
   readonly size: "card" | "list";
-  readonly away?: boolean;
+  readonly isAway?: boolean;
 }): JSX.Element {
-  const running = away ? 0 : drawing.running;
-  const free = away ? drawing.cap : drawing.free;
-  const className = `fleet-sessions fleet-sessions--${drawing.shape} fleet-sessions--${size}${away ? " is-away" : ""}`;
+  const running = isAway ? 0 : drawing.running;
+  const free = isAway ? drawing.cap : drawing.free;
+  const className = `fleet-sessions fleet-sessions--${drawing.shape} fleet-sessions--${size}${isAway ? " is-away" : ""}`;
 
   if (drawing.shape === "blocks") {
     return (

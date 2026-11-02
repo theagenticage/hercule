@@ -21,7 +21,7 @@
   flex: none;
   width: 48px;
   height: 48px;
-  border-radius: 14px;
+  border-radius: var(--r-md);
   background: color-mix(in oklab, var(--ink) 6%, transparent);
   color: var(--muted);
 }
@@ -102,8 +102,7 @@
 /* ---------- A section ---------- */
 .machine-page-section {
   margin-top: 48px;
-  /* The floating header's clearance, see FLEET_HEADER_CLEARANCE_PX. */
-  scroll-margin-top: 80px;
+  scroll-margin-top: var(--fleet-header-clearance);
 }
 .machine-page-section > h3 {
   margin: 0 0 14px;
@@ -121,6 +120,7 @@
   text-transform: uppercase;
 }
 .machine-page-sw {
+  container: machine-page-sw / inline-size;
   margin: 6px 0 0;
   padding: 0;
   list-style: none;
@@ -172,6 +172,37 @@
 .machine-page-sw-action {
   display: flex;
   justify-content: flex-end;
+}
+/* In a narrow section the note moves under the name, where it has the whole
+   row to wrap in, instead of being cut off. */
+@container machine-page-sw (width < 600px) {
+  .machine-page-sw-row {
+    grid-template-columns: minmax(0, 1fr) 110px auto;
+    grid-template-areas:
+      "name version action"
+      "note note note";
+    row-gap: 0;
+  }
+  .machine-page-sw-name {
+    grid-area: name;
+  }
+  .machine-page-sw-version {
+    grid-area: version;
+  }
+  .machine-page-sw-action {
+    grid-area: action;
+  }
+  .machine-page-sw-note {
+    grid-area: note;
+    /* Starts under the name's text, after its 13px logo and 9px gap, and
+       sits close to it. */
+    margin-top: -8px;
+    padding: 0 0 8px 22px;
+    white-space: normal;
+  }
+  .machine-page-sw-note:empty {
+    display: none;
+  }
 }
 .machine-page-sw-footnote {
   margin: 8px 0 0;

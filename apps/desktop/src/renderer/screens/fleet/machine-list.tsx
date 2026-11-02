@@ -49,7 +49,7 @@ function MachineRow({
         </span>
       </span>
       <span role="cell" className="fleet-cell">
-        <SessionsFigure drawing={drawing} size="list" away={isAway} />
+        <SessionsFigure drawing={drawing} size="list" isAway={isAway} />
         <small className={drawing.waiting > 0 ? "is-you" : undefined}>
           {isAway ? "–" : drawing.running} of {drawing.cap}
           {drawing.waiting > 0 && ` · ${String(drawing.waiting)} waiting`}
@@ -58,7 +58,7 @@ function MachineRow({
       <span role="cell" className="fleet-cell fleet-col-room">
         <b>{room ?? "–"}</b>
       </span>
-      <span role="cell" className="fleet-cell">
+      <span role="cell" className="fleet-cell fleet-cell--line fleet-col-disk">
         {disk === null ? (
           <b>–</b>
         ) : (
@@ -92,10 +92,10 @@ function MachineRow({
 
 /**
  * Renders the machines as a table with one row per machine, its columns
- * lining up: Machine, Sessions, Room, Disk, Memory and Needs you. Under 900px
+ * lining up: Machine, Sessions, Room, Disk, Memory and Needs you. Under 1030px
  * of width the Room and Memory columns go, because the machine's page shows
- * them. The rows draw what a card draws, with the sessions smaller and the disk
- * as its free space alone.
+ * them, and under 720px the Disk column goes too. The rows draw what a card
+ * draws, with the sessions smaller and the disk as its free space alone.
  *
  * - `onOpen` is called with the runner id when the user presses a row. The
  *   machine's name is the row's one way to open the machine: its button covers
@@ -130,7 +130,9 @@ export function MachineList({
         <span role="columnheader" className="fleet-col-room">
           Room
         </span>
-        <span role="columnheader">Disk</span>
+        <span role="columnheader" className="fleet-col-disk">
+          Disk
+        </span>
         <span role="columnheader" className="fleet-col-mem">
           Memory
         </span>

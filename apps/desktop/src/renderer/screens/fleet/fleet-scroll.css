@@ -2,20 +2,25 @@
    machine's page. What scrolls under the header is hidden across the header
    row and fades in below it, as a thread's transcript does. A strip as wide as
    a classic scroll bar stays unmasked, so the top of the thumb is not hidden.
-   The top padding starts the first line 78px down, clear of the header's
-   pills. The measurements are the fleet prototype's (`fxg-scroll`). */
+   The top padding starts the first line 2px above the header's clearance,
+   clear of the header's pills. The measurements are the fleet prototype's
+   (`fxg-scroll`). */
 .fleet-scroll {
+  /* How far the floating header covers the top of the area. A section jumped
+     to stops this far down (`scroll-margin-top`), and FLEET_HEADER_CLEARANCE_PX
+     in use-section-in-view.ts must be the same number. */
+  --fleet-header-clearance: 80px;
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 78px 32px 140px;
+  padding: calc(var(--fleet-header-clearance) - 2px) 32px 140px;
   mask-image:
     linear-gradient(
       to bottom,
-      transparent 50px,
-      rgb(0 0 0 / 0.15) 60px,
-      rgb(0 0 0 / 0.6) 70px,
-      #000 80px
+      transparent calc(var(--fleet-header-clearance) - 30px),
+      rgb(0 0 0 / 0.15) calc(var(--fleet-header-clearance) - 20px),
+      rgb(0 0 0 / 0.6) calc(var(--fleet-header-clearance) - 10px),
+      #000 var(--fleet-header-clearance)
     ),
     linear-gradient(#000 0 0);
   mask-size:

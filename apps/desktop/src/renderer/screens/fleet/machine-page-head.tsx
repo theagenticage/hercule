@@ -1,5 +1,6 @@
 import { Fragment, type JSX } from "react";
-import type { MachineKind } from "@hercule/client-core/fleet";
+import type { FleetTextPart, MachineKind, MachineSummary } from "@hercule/client-core/fleet";
+import { FleetText } from "./fleet-text";
 import { buildMachineTransitionName } from "./machine-transition";
 import { StatusDot } from "./machine-parts";
 import { MachineIcon } from "./machine-icon";
@@ -11,8 +12,8 @@ import "./machine-page.css";
  *
  * - `status` is the dot and the word beside it. A machine that is simply
  *   online has no word of its own (`null`), and the head says "Online".
- * - `facts` are the pieces of text after the status, such as "darwin · arm64"
- *   and "16 GiB", drawn with a dot between them. The runner's own line comes
+ * - `facts` are the pieces of text after the status, such as "macOS", "arm64"
+ *   and "16 GB memory", drawn with a dot between them. The runner's own line comes
  *   last: "Runner 0.9.3", and "update available" in the muted colour after
  *   it when `isRunnerBehind`.
  * - The head carries the view-transition name that the machine's card on the
@@ -30,10 +31,7 @@ export function MachinePageHead({
   readonly runnerId: string;
   readonly name: string;
   readonly kind: MachineKind;
-  readonly status: {
-    readonly tone: "online" | "offline" | "draining";
-    readonly word: string | null;
-  };
+  readonly status: MachineSummary["status"];
   readonly facts: readonly string[];
   readonly runnerVersion: string | null;
   readonly isRunnerBehind: boolean;
@@ -73,22 +71,17 @@ export function MachinePageHead({
 
 /**
  * Renders the room line under the head: what the machine can still start and
- * what limits it, such as "Room for 4 more, under its cap of 16". The number
- * after "Room for" is bold.
+ * what limits it, such as "Room for 4 more, under its cap of 16". Its numbers
+ * are bold.
  */
-export function MachinePageRoomLine({ line }: { readonly line: string }): JSX.Element {
-  const room = /^(Room for )(\d+)(.*)$/s.exec(line);
+export function MachinePageRoomLine({
+  line,
+}: {
+  readonly line: readonly FleetTextPart[];
+}): JSX.Element {
   return (
     <p className="machine-page-room">
-      {room === null ? (
-        line
-      ) : (
-        <>
-          {room[1]}
-          <b>{room[2]}</b>
-          {room[3]}
-        </>
-      )}
+      <FleetText parts={line} />
     </p>
   );
 }

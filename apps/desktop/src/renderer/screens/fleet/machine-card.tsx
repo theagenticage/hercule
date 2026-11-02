@@ -15,7 +15,7 @@ import "./fleet-page.css";
  * Renders the grid the Fleet page's cards sit in: 4 cards per row when the
  * page column is wide, 1 when it is narrow. The columns follow the width of
  * the grid's own box (a container query), not the window's, so a card is never
- * narrower than about 250px.
+ * narrower than 264px.
  */
 export function MachineGrid({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
@@ -29,16 +29,16 @@ export function MachineGrid({ children }: { readonly children: ReactNode }): JSX
 function Gauge({
   label,
   level = "normal",
-  wide = false,
+  isWide = false,
   children,
 }: {
   readonly label: string;
   readonly level?: GaugeLevel | undefined;
-  readonly wide?: boolean;
+  readonly isWide?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <div className={`fleet-gauge fleet-gauge--${level}${wide ? " fleet-gauge--wide" : ""}`}>
+    <div className={`fleet-gauge fleet-gauge--${level}${isWide ? " fleet-gauge--wide" : ""}`}>
       <span className="fleet-gauge-label">{label}</span>
       {children}
     </div>
@@ -95,13 +95,13 @@ export function MachineCard({
         </span>
       </div>
       <div className="fleet-gauges">
-        <Gauge label="Sessions" wide>
+        <Gauge label="Sessions" isWide>
           <div className="fleet-sessions-line">
             <b>
               {isAway ? "–" : drawing.running}
               <small> of {drawing.cap}</small>
             </b>
-            <SessionsFigure drawing={drawing} size="card" away={isAway} />
+            <SessionsFigure drawing={drawing} size="card" isAway={isAway} />
           </div>
         </Gauge>
         <Gauge label="Disk" level={disk?.level}>

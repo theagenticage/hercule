@@ -188,7 +188,7 @@ describe("a machine's head", () => {
 
     const head = screen.getByRole("heading", { level: 2, name: "atlas" }).closest("header")!;
     expect(head.textContent).toBe(
-      "atlasOnline·darwin · arm64·16 GiB·Runner 0.9.3·update available",
+      "atlasOnline·macOS·arm64·16 GB memory·Runner 0.9.3·update available",
     );
     expect(screen.getByText(/^Room for/).textContent).toBe("Room for 4 more, under its cap of 8");
     expect(screen.getByText("4").tagName).toBe("B");

@@ -203,18 +203,19 @@ export const findMachineNeeds = (
 };
 
 /**
- * A piece of the Fleet lead. A renderer draws `count` in the "you" ink (the
- * number of machines that need the user), `number` in bold, and `plain` as is.
+ * A piece of a sentence the Fleet screen builds, such as the lead or a
+ * machine's room line. A renderer draws `count` in the "you" ink (the number
+ * of machines that need the user), `number` in bold, and `plain` as is.
  */
-export interface FleetLeadPart {
+export interface FleetTextPart {
   readonly text: string;
   readonly kind: "plain" | "count" | "number";
 }
 
 /** The Fleet page's lead: a headline, and under it one line of totals. */
 export interface FleetLead {
-  readonly headline: readonly FleetLeadPart[];
-  readonly detail: readonly FleetLeadPart[];
+  readonly headline: readonly FleetTextPart[];
+  readonly detail: readonly FleetTextPart[];
 }
 
 /** Counts the machines with at least one need. */
@@ -223,8 +224,8 @@ const countMachinesNeedingUser = (machines: readonly FleetMachine[]): number =>
 
 const COUNT_WORDS = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
 
-const plain = (text: string): FleetLeadPart => ({ text, kind: "plain" });
-const number = (value: number): FleetLeadPart => ({ text: String(value), kind: "number" });
+const plain = (text: string): FleetTextPart => ({ text, kind: "plain" });
+const number = (value: number): FleetTextPart => ({ text: String(value), kind: "number" });
 
 /**
  * Builds the lead of the Fleet page from its machines, such as "Three
@@ -245,7 +246,7 @@ export const describeFleet = (machines: readonly FleetMachine[]): FleetLead => {
   if (machines.length === 0) return { headline: [plain("No machine has joined yet.")], detail: [] };
 
   const needing = countMachinesNeedingUser(machines);
-  const headline: readonly FleetLeadPart[] =
+  const headline: readonly FleetTextPart[] =
     needing === 0
       ? [plain("Every machine is healthy.")]
       : [
@@ -262,7 +263,7 @@ export const describeFleet = (machines: readonly FleetMachine[]): FleetLead => {
   const running = online.reduce((sum, machine) => sum + machine.running, 0);
   const waiting = online.reduce((sum, machine) => sum + machine.waiting, 0);
   const room = online.reduce((sum, machine) => sum + countRoom(machine), 0);
-  const detail: readonly FleetLeadPart[] = [
+  const detail: readonly FleetTextPart[] = [
     number(running),
     plain(` ${plural(running, "session", "sessions")} running on `),
     number(online.length),
@@ -279,43 +280,51 @@ export const describeFleet = (machines: readonly FleetMachine[]): FleetLead => {
 /**
  * Describes how much room a machine has. `room` is `countRoom`. `short` is
  * the text of a card or a list row ("Room for 4", "Full", "Takes no new
- * work"). `line` is the machine page's sentence about it. Both are `null`
- * while the machine is offline or unreachable, because the screen shows that
- * state instead.
+ * work"). `line` is the machine page's sentence about it, in parts so the
+ * number can be drawn in bold.
  *
- * When the disk is below its limit and the machine is also set to take no new
- * work, the line names the disk, because that is the one the user can fix by
- * cleaning up.
+ * - Both are `null` while the machine is offline or unreachable, because the
+ *   screen shows that state instead.
+ * - `short` is also `null` while the machine is told to take no new work,
+ *   because its status word already says so.
+ * - When the disk is below its limit and the machine is also set to take no
+ *   new work, the line names the disk, because that is the one the user can
+ *   fix by cleaning up.
  */
 export const describeRoom = (
   machine: FleetMachine,
-): { readonly room: number; readonly short: string | null; readonly line: string | null } => {
+): {
+  readonly room: number;
+  readonly short: string | null;
+  readonly line: readonly FleetTextPart[] | null;
+} => {
   const { runner } = machine;
   const room = countRoom(machine);
   if (runner.connectivity !== "online") return { room, short: null, line: null };
 
   const cap = runner.maxConcurrentSessions;
+  const isDraining = runner.lifecycle === "draining";
   if (isDiskBelowLimit(runner)) {
     return {
       room,
-      short: "Takes no new work",
-      line: "No room: its disk is below its limit, so it takes no new sessions",
+      short: isDraining ? null : "Takes no new work",
+      line: [plain("No room: its disk is below its limit, so it takes no new sessions")],
     };
   }
-  if (runner.lifecycle === "draining") {
-    return { room, short: "Takes no new work", line: "No room: it takes no new work" };
-  }
+  if (isDraining) return { room, short: null, line: [plain("No room: it takes no new work")] };
   if (room === 0) {
     return {
       room,
       short: "Full",
-      line: `No room: it runs its cap of ${String(cap)} ${plural(cap, "session", "sessions")}`,
+      line: [
+        plain(`No room: it runs its cap of ${String(cap)} ${plural(cap, "session", "sessions")}`),
+      ],
     };
   }
   return {
     room,
     short: `Room for ${String(room)}`,
-    line: `Room for ${String(room)} more, under its cap of ${String(cap)}`,
+    line: [plain("Room for "), number(room), plain(` more, under its cap of ${String(cap)}`)],
   };
 };
 
@@ -460,7 +469,10 @@ export interface MachineSummary {
   /** Whether the machine is offline or unreachable, which a card shows dimmed. */
   readonly isAway: boolean;
   readonly drawing: SessionsDrawing;
-  /** "Room for 4", "Full" or "Takes no new work"; `null` while the machine is away. */
+  /**
+   * "Room for 4", "Full" or "Takes no new work" (a disk below its limit); `null`
+   * while the machine is away or draining, because its status word says so.
+   */
   readonly room: string | null;
   /** The most serious need, or `undefined` when the machine needs nothing. */
   readonly need: MachineNeed | undefined;

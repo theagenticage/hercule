@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { describeFleet, drawSessions, type FleetMachine } from "@hercule/client-core/fleet";
 import type { Runner } from "@hercule/contract";
 import { EmptyFleetCard } from "./empty-fleet-card";
-import { FleetLead } from "./fleet-lead";
+import { FleetPageLead } from "./fleet-lead";
 import { MachineCard } from "./machine-card";
 import { MachineList } from "./machine-list";
 import { buildMachineTransitionName } from "./machine-transition";
@@ -61,6 +61,14 @@ const FULL_DISK: FleetMachine = {
 const OFFLINE: FleetMachine = {
   runner: buildRunner({ id: "runner-off", name: "nomad", connectivity: "offline" }),
   running: 0,
+  waiting: 0,
+  waitingThreads: 0,
+};
+
+/** Is online but told to take no new work. */
+const DRAINING: FleetMachine = {
+  runner: buildRunner({ id: "runner-drain", name: "dock", lifecycle: "draining" }),
+  running: 1,
   waiting: 0,
   waitingThreads: 0,
 };
@@ -146,6 +154,12 @@ describe("MachineCard", () => {
     expect(onAllow).not.toHaveBeenCalled();
   });
 
+  it("says a machine told to take no new work once, in its status, and not again as its room", () => {
+    const { card } = renderCard(DRAINING);
+
+    expect(within(card).getAllByText("Takes no new work")).toHaveLength(1);
+  });
+
   it("shows an offline machine's word and when it was last heard from, with no room and no button", () => {
     const { card } = renderCard(OFFLINE);
 
@@ -204,6 +218,16 @@ describe("MachineList", () => {
     await user.click(within(busy!).getByRole("button", { name: "atlas" }));
     expect(onOpen).toHaveBeenCalledExactlyOnceWith("runner-busy");
   });
+
+  it("shows the free disk on one line, and a dash for the room of a machine told to take no new work", () => {
+    renderList([BUSY, DRAINING]);
+
+    const [busy, draining] = screen.getAllByRole("row").slice(1);
+    expect(within(busy!).getByText("21.5 GB").nextElementSibling?.textContent).toBe("free");
+    expect(within(draining!).getAllByText("Takes no new work")).toHaveLength(1);
+    // The cells are the dot, Machine, Sessions, Room: the fourth.
+    expect(within(draining!).getAllByRole("cell")[3]?.textContent).toBe("–");
+  });
 });
 
 describe("SessionsFigure", () => {
@@ -244,9 +268,9 @@ describe("SessionsFigure", () => {
   });
 });
 
-describe("FleetLead", () => {
+describe("FleetPageLead", () => {
   it("draws the count of machines that need the user in the you ink and the numbers in bold", () => {
-    render(<FleetLead lead={describeFleet([BUSY, FULL_DISK, OFFLINE])} />);
+    render(<FleetPageLead lead={describeFleet([BUSY, FULL_DISK, OFFLINE])} />);
 
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Three machines need you.");
     expect(screen.getByText("Three").classList.contains("is-you")).toBe(true);
