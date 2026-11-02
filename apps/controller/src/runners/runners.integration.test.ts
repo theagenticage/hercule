@@ -137,10 +137,10 @@ const expireJoinToken = async (sql: ServerHarness["sql"], id: string): Promise<v
 const mintJoinToken = async (
   base: string,
   token: string,
-): Promise<{ readonly token: string; readonly expiresAt: string }> => {
+): Promise<{ readonly id: string; readonly token: string; readonly expiresAt: string }> => {
   const response = await post(base, "/api/v1/runners/join-tokens", {}, token);
   expect(response.status, await response.clone().text()).toBe(201);
-  return (await response.json()) as { token: string; expiresAt: string };
+  return (await response.json()) as { id: string; token: string; expiresAt: string };
 };
 
 interface ListedJoinToken {
@@ -591,6 +591,11 @@ describe("POST /runners/join-tokens", () => {
       const second = await mintJoinToken(harness.base, token);
 
       expect(first.token).not.toBe(second.token);
+      // The id answered is the one the list of open tokens shows, so a client
+      // can tell its own token among them.
+      expect((await listJoinTokens(harness.base, token)).map((one) => one.id).sort()).toEqual(
+        [first.id, second.id].sort(),
+      );
       for (const minted of [first, second]) {
         expect(typeof minted.token).toBe("string");
         expect(minted.token.length).toBeGreaterThan(0);

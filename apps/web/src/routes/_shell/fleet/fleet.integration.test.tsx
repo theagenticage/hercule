@@ -97,7 +97,11 @@ const buildController = (
   "GET /api/v1/runners": { body: { items: runners } },
   "POST /api/v1/runners/join-tokens": {
     status: 201,
-    body: { token: TOKEN, expiresAt: "2026-09-05T10:14:00.000Z" },
+    body: {
+      id: "01a06d02-7400-7000-8000-00000000fe5a",
+      token: TOKEN,
+      expiresAt: "2026-09-05T10:14:00.000Z",
+    },
   },
   // No unused tokens unless a test adds some; the screen fetches them either way.
   "GET /api/v1/runners/join-tokens": { body: [] },
