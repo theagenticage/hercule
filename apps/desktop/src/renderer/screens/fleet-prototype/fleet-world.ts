@@ -66,9 +66,17 @@ export interface Workspace {
   readonly lastUsedDays: number;
   /** NEW: the size of the workspace's folder. */
   readonly sizeGB: number;
+  /**
+   * NEW: what removing it frees: the files nothing else links to. A
+   * webshop workspace's node_modules is hard-linked to pnpm's store, so it
+   * frees much less than its size.
+   */
+  readonly freesGB: number;
   /** NEW: how many files hold uncommitted changes. */
   readonly changes: number;
   readonly inUse: boolean;
+  /** Whether every Thread in it is Done. Removing it archives them. */
+  readonly threadsDone: boolean;
 }
 
 export interface Project {
@@ -104,6 +112,8 @@ export interface Installed {
 }
 
 export interface FleetState {
+  /** Keys `<machineId>:<instanceId>` of the provider instances logged in. */
+  readonly logins: ReadonlySet<string>;
   readonly machines: ReadonlyArray<Machine>;
   /** NEW as one read: what runs on each machine, grouped by workspace. */
   readonly workloads: ReadonlyArray<Workload>;
@@ -293,6 +303,15 @@ export const TOOLS: ReadonlyArray<Tool> = [
     needs: [{ project: "ops", range: "1.13", source: ".terraform-version" }],
     via: { macos: "mise", linux: "mise" },
     blurb: "Infrastructure as code.",
+  },
+  {
+    id: "dotnet",
+    name: "dotnet",
+    kind: "toolchain",
+    target: "9.0.302",
+    needs: [],
+    via: { macos: "mise", linux: "mise" },
+    blurb: "The .NET SDK.",
   },
 ];
 
@@ -581,6 +600,12 @@ const INSTALLED: FleetState["installed"] = {
     "studio-mac": at("0.9.2", "hercule", "~/.local/share/mise/installs/uv/0.9.2"),
     "hetzner-ax": at("0.9.2", "hercule", "~/.local/share/mise/installs/uv/0.9.2"),
   },
+  dotnet: {
+    atlas: at("9.0.302", "machine", "/usr/local/share/dotnet/dotnet"),
+    beelink: at("9.0.302", "machine", "/usr/lib/dotnet/dotnet"),
+    "studio-mac": at("8.0.411", "machine", "/usr/local/share/dotnet/dotnet"),
+    foundry: at("9.0.302", "machine", "/usr/lib/dotnet/dotnet"),
+  },
   terraform: {
     foundry: at("1.13.4", "hercule", "~/.local/share/mise/installs/terraform/1.13.4"),
     atlas: at("1.13.4", "hercule", "~/.local/share/mise/installs/terraform/1.13.4"),
@@ -687,13 +712,23 @@ const buildWorkspaces = (
       thread,
       lastUsedDays,
       sizeGB: low + random() * (high - low),
+      freesGB: 0,
       changes: kind === "idleDirty" ? 1 + Math.floor(random() * 9) : 0,
       inUse: kind === "inUse",
+      threadsDone: random() > 0.22,
     };
   };
+  // pnpm hard-links a webshop's node_modules to its store, so removing one frees about 40%.
   const scale = (list: Workspace[], total: number): Workspace[] => {
     const sum = list.reduce((acc, each) => acc + each.sizeGB, 0);
-    return list.map((each) => ({ ...each, sizeGB: (each.sizeGB / sum) * total }));
+    return list.map((each) => {
+      const sizeGB = (each.sizeGB / sum) * total;
+      return {
+        ...each,
+        sizeGB,
+        freesGB: each.project === "webshop" ? sizeGB * 0.4 : sizeGB * 0.97,
+      };
+    });
   };
   const range = (count: number) => Array.from({ length: count }, (_, index) => index);
   return [
@@ -750,6 +785,38 @@ const IDLE_WORKSPACES: ReadonlyArray<Workspace> = [
     { inUseGB: 0, idleCleanGB: 12, idleDirtyGB: 4 },
   ),
 ];
+
+// ---------- Provider logins ----------
+
+export interface ProviderInstance {
+  readonly id: string;
+  readonly toolId: "claude-code" | "codex" | "pi";
+  readonly name: string;
+  /** How it logs in: through the vendor's page, or with a key typed in. */
+  readonly login: "browser" | "key";
+}
+
+export const PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [
+  { id: "claude", toolId: "claude-code", name: "Claude", login: "browser" },
+  { id: "codex", toolId: "codex", name: "Codex", login: "browser" },
+  { id: "pi-openrouter", toolId: "pi", name: "Pi · OpenRouter", login: "key" },
+];
+
+/** Which provider instances are logged in on which machine; missing means not logged in. */
+const LOGINS: ReadonlySet<string> = new Set([
+  "atlas:claude",
+  "atlas:codex",
+  "atlas:pi-openrouter",
+  "beelink:claude",
+  "beelink:codex",
+  "beelink:pi-openrouter",
+  "studio-mac:claude",
+  "hetzner-ax:claude",
+  "foundry:claude",
+  "foundry:codex",
+  "foundry:pi-openrouter",
+  "office-mini:claude",
+]);
 
 // ---------- What runs where ----------
 
@@ -1133,8 +1200,10 @@ const WORKSPACES: ReadonlyArray<Workspace> = [
     thread: workload.title,
     lastUsedDays: 0,
     sizeGB: workload.sizeGB,
+    freesGB: workload.project === "webshop" ? workload.sizeGB * 0.4 : workload.sizeGB * 0.97,
     changes: 0,
     inUse: true,
+    threadsDone: false,
   })),
 ];
 
@@ -1153,7 +1222,7 @@ const LOADED_MACHINES: ReadonlyArray<Machine> = MACHINES.map((machine) => {
 });
 
 /** How long an idle workspace waits before the page offers to remove it. */
-export const IDLE_DAYS = 14;
+export const IDLE_DAYS = 7;
 
 // ---------- The store ----------
 
@@ -1173,6 +1242,7 @@ const POLICIES: FleetState["policies"] = Object.fromEntries(
     "python",
     "uv",
     "terraform",
+    "dotnet",
   ].map((id) => [id, "newest" as const]),
 );
 
@@ -1489,6 +1559,7 @@ const ACTIVITY: FleetState["activity"] = Object.fromEntries(
 ) as unknown as FleetState["activity"];
 
 let state: FleetState = {
+  logins: LOGINS,
   machines: LOADED_MACHINES,
   workloads: WORKLOADS,
   workspaces: WORKSPACES,
@@ -1580,7 +1651,7 @@ export async function removeWorkspaces(
   startPending([key]);
   await wait(1800);
   const removed = state.workspaces.filter((each) => workspaceIds.has(each.id));
-  const freed = removed.reduce((sum, each) => sum + each.sizeGB, 0);
+  const freed = removed.reduce((sum, each) => sum + each.freesGB, 0);
   endPending(
     [key],
     {
@@ -1595,7 +1666,7 @@ export async function removeWorkspaces(
           : each,
       ),
     },
-    `Removed ${removed.length} workspaces from ${machineId}. ${formatGB(freed)} freed`,
+    `Archived ${removed.length} threads and removed their workspaces from ${machineId}. ${formatGB(freed)} freed`,
   );
   logActivity([machineId], {
     category: "workspaces",
@@ -1739,7 +1810,8 @@ export const buildDiskParts = (
   workspaces: ReadonlyArray<Workspace>,
 ): DiskParts => {
   const own = workspaces.filter((each) => each.machineId === machine.id);
-  const sum = (list: ReadonlyArray<Workspace>) => list.reduce((acc, each) => acc + each.sizeGB, 0);
+  // The bar shows what each part holds on its own: shared, hard-linked files are counted where they live.
+  const sum = (list: ReadonlyArray<Workspace>) => list.reduce((acc, each) => acc + each.freesGB, 0);
   const inUse = sum(own.filter((each) => each.inUse || each.lastUsedDays < IDLE_DAYS));
   const idleClean = sum(
     own.filter((each) => !each.inUse && each.lastUsedDays >= IDLE_DAYS && each.changes === 0),
@@ -1890,8 +1962,7 @@ export const findIssues = (fleet: FleetState): Issue[] => {
     if (disk !== "ok") issues.push({ machineId: machine.id, level: disk, kind: "disk" });
     if (slotsLevel(machine) === "warn")
       issues.push({ machineId: machine.id, level: "warn", kind: "slots" });
-    const memory = memoryLevel(machine);
-    if (memory !== "ok") issues.push({ machineId: machine.id, level: memory, kind: "memory" });
+    // Memory only colours its gauge: it moves too much to say a machine needs you.
   }
   return issues.sort((a, b) => (a.level === b.level ? 0 : a.level === "crit" ? -1 : 1));
 };
@@ -1900,8 +1971,7 @@ export const findIssues = (fleet: FleetState): Issue[] => {
  * The session cap that lets every waiting thread start, kept to what the free
  * memory allows at about 6 GB a session.
  */
-export const suggestSlots = (machine: Machine): number =>
-  Math.min(machine.slots + machine.queued, machine.slots + Math.floor(machine.memoryFreeGB / 6));
+export const suggestSlots = (machine: Machine): number => machine.running + machine.queued;
 
 export const machineById = (fleet: FleetState, id: MachineId): Machine =>
   fleet.machines.find((each) => each.id === id)!;
@@ -2004,35 +2074,31 @@ export const DISK_PER_WORKSPACE_GB = 3;
 export interface Headroom {
   /** Free slots under the session cap. */
   readonly slots: number;
-  /** Sessions the free memory would hold. */
-  readonly memory: number;
-  /** Workspaces the disk would hold before its limit. */
-  readonly disk: number;
-  /** How many more sessions the machine can start now: the smallest of the three. */
+  /** How many more sessions the machine can start now. */
   readonly room: number;
-  readonly limit: "slots" | "memory" | "disk";
+  /**
+   * What decides it: the cap, the disk being below its limit, or the
+   * machine taking no new work. Memory is not part of it, because what a
+   * session's tools use (a dotnet build, a container) is not the session's.
+   */
+  readonly limit: "slots" | "disk" | "draining";
 }
 
-/** Works out how many more sessions `machine` can take, and what stops it taking more. */
+/** Works out how many more sessions `machine` can start, and what stops it taking more. */
 export const computeHeadroom = (machine: Machine): Headroom => {
   const slots = Math.max(0, machine.slots - machine.running);
-  const memory = Math.floor(machine.memoryFreeGB / MEMORY_PER_SESSION_GB);
-  const disk = Math.max(
-    0,
-    Math.floor((machine.diskFreeGB - machine.diskWatermarkGB) / DISK_PER_WORKSPACE_GB),
-  );
-  const room = Math.min(slots, memory, disk);
-  const limit = room === slots ? "slots" : room === memory ? "memory" : "disk";
-  return { slots, memory, disk, room, limit };
+  if (machine.lifecycle === "draining") return { slots, room: 0, limit: "draining" };
+  if (machine.diskFreeGB <= machine.diskWatermarkGB) return { slots, room: 0, limit: "disk" };
+  return { slots, room: slots, limit: "slots" };
 };
 
 /** Words for what limits a machine, as a sentence ends. */
-export const describeLimit = (headroom: Headroom): string =>
-  headroom.limit === "slots"
-    ? "its session cap is the limit"
-    : headroom.limit === "memory"
-      ? "memory runs out before its slots do"
-      : "its disk runs out first";
+export const describeLimit = (machine: Machine, headroom: Headroom): string =>
+  headroom.limit === "draining"
+    ? "it takes no new work"
+    : headroom.limit === "disk"
+      ? "its disk is below its limit, so it takes no new sessions"
+      : `under its cap of ${machine.slots}`;
 
 export interface ToolNews {
   /** NEW: the vendor's newest version, which can be newer than what this Hercule supports. */
@@ -2192,3 +2258,29 @@ export function setAutoClean(autoClean: AutoClean): void {
 
 /** Checks that the machine is away, offline or unreachable. */
 export const isAway = (machine: Machine): boolean => machine.connectivity !== "online";
+
+/** Logs `instanceId` in on `machineId`: in the app, the existing provider login row runs it. */
+export async function logIn(machineId: MachineId, instanceId: string): Promise<void> {
+  const key = `login:${machineId}:${instanceId}`;
+  startPending([key]);
+  await wait(1200);
+  const instance = PROVIDER_INSTANCES.find((each) => each.id === instanceId)!;
+  endPending(
+    [key],
+    { logins: new Set([...state.logins, `${machineId}:${instanceId}`]) },
+    `${instance.name} is logged in on ${machineId}`,
+  );
+  logActivity([machineId], {
+    category: "settings",
+    problem: false,
+    text: `Logged in to ${instance.name}`,
+    actor: "you",
+    source: "provider.loggedIn",
+  });
+}
+
+/** The last time Hercule removed workspaces on `machineId` by itself, or null. */
+export const findLastSweep = (fleet: FleetState, machineId: MachineId): ActivityEntry | null =>
+  fleet.activity[machineId].find(
+    (entry) => entry.source === "workspace.deleted" && entry.actor === "Hercule",
+  ) ?? null;

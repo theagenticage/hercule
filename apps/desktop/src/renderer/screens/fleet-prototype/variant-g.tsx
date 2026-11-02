@@ -393,8 +393,14 @@ function MachineRow({
         <b className={headroom.room === 0 && !away ? "is-you" : undefined}>
           {away ? "—" : headroom.room === 0 ? "None" : `${headroom.room} more`}
         </b>
-        <small className={!away && headroom.limit === "memory" ? "is-you" : undefined}>
-          {away ? "" : `Limit: ${headroom.limit === "slots" ? "cap" : headroom.limit}`}
+        <small>
+          {away
+            ? ""
+            : headroom.limit === "draining"
+              ? "Takes no new work"
+              : headroom.limit === "disk"
+                ? "Below disk limit"
+                : `Cap of ${machine.slots}`}
         </small>
       </span>
       <span className="fxg-cell">

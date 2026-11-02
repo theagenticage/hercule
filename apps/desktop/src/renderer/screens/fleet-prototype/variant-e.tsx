@@ -252,13 +252,7 @@ function LensLead({
             <i className="fx-key" /> Free
           </span>
           <span>
-            <i className="fx-key is-starved" /> No memory for it
-          </span>
-          <span>
             <i className="fx-key is-wait" /> Waiting
-          </span>
-          <span>
-            <i className="fx-key is-could" /> Would fit past the cap
           </span>
         </div>
       </header>
@@ -385,17 +379,17 @@ function CapacityBody({
           {away ? "—" : machine.running}
           {!away && <small> of {machine.slots}</small>}
         </b>
-        <span className={headroom.limit === "memory" && !away ? "is-you" : undefined}>
+        <span>
           {away
             ? `Away since ${machine.lastSeen}`
             : headroom.room === 0
               ? machine.queued > 0
                 ? `${machine.queued} waiting`
                 : "Full"
-              : `${headroom.limit === "slots" ? "Cap" : headroom.limit === "memory" ? "Memory" : "Disk"} allows ${headroom.room} more`}
+              : `${headroom.room} free`}
         </span>
       </div>
-      <Ladder machine={machine} max={6} />
+      <Ladder machine={machine} />
       <div className="fxe-day">
         <DayStrip machine={machine} tall />
         <span>

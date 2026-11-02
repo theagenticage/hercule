@@ -155,10 +155,6 @@ const NEEDS: ReadonlyArray<readonly [string, string]> = [
   ],
   ["workspace changes", "Uncommitted files are only found when a removal is refused."],
   ["CPU", "Not read today. One more field, the load average."],
-  [
-    "harness versions",
-    "The runner reports only whether a harness is installed, and where. It would run `--version`, as it does for git.",
-  ],
   ["new probe", "The runner probes git and gh. Each other tool needs adding to the probe."],
   ["API: filter the log by machine", "The log can be read one kind at a time, not by machine."],
 ];

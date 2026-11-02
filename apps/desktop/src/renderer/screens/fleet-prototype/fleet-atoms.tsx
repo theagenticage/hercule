@@ -360,10 +360,17 @@ export function ProjectDot({ project }: { readonly project: Workspace["project"]
 const SHOWN_ROWS = 6;
 
 /**
- * Renders the dialog that removes a machine's idle workspaces. Clean ones are
- * picked at first; ones with uncommitted changes are listed apart, unpicked,
- * and picking one says that its changes go with it. Workspaces in use are
- * never offered.
+ * Renders the dialog that removes a machine's idle workspaces. Removing a
+ * workspace archives the threads that worked in it, which is final. When it
+ * opens, the runner re-checks the idle workspaces for uncommitted files.
+ *
+ * - Threads Done: picked at first.
+ * - Threads not Done: listed apart, not picked, because removing one also
+ *   marks its threads Done and archives them.
+ * - Uncommitted changes: not picked; removing one discards them.
+ *
+ * Workspaces in use are never offered, and neither is a run's workspace,
+ * which Hercule removes by itself.
  */
 export function CleanupDialog({
   machineId,
@@ -377,19 +384,25 @@ export function CleanupDialog({
   const machine = fleet.machines.find((each) => each.id === machineId)!;
   // The list as the dialog opened: a removal closes the dialog.
   const [idle] = useState(() =>
-    idleWorkspaces(machineId, fleet.workspaces).toSorted((a, b) => b.sizeGB - a.sizeGB),
+    idleWorkspaces(machineId, fleet.workspaces).toSorted((a, b) => b.freesGB - a.freesGB),
   );
-  const clean = idle.filter((each) => each.changes === 0);
+  const [checking, setChecking] = useState(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setChecking(false), 800);
+    return () => clearTimeout(timer);
+  }, []);
+  const done = idle.filter((each) => each.changes === 0 && each.threadsDone);
+  const notDone = idle.filter((each) => each.changes === 0 && !each.threadsDone);
   const dirty = idle.filter((each) => each.changes > 0);
   const inUse = fleet.workspaces.filter(
     (each) => each.machineId === machineId && !idle.includes(each),
   );
   const [picked, setPicked] = useState<ReadonlySet<string>>(
-    () => new Set(clean.map((each) => each.id)),
+    () => new Set(done.map((each) => each.id)),
   );
   const pending = fleet.pending.has(`cleanup:${machineId}`);
   const pickedList = idle.filter((each) => picked.has(each.id));
-  const pickedGB = pickedList.reduce((sum, each) => sum + each.sizeGB, 0);
+  const pickedGB = pickedList.reduce((sum, each) => sum + each.freesGB, 0);
   const pickedDirty = pickedList.filter((each) => each.changes > 0).length;
   const parts = buildDiskParts(machine, fleet.workspaces);
   const freeAfter = machine.diskFreeGB + pickedGB;
@@ -412,42 +425,61 @@ export function CleanupDialog({
     >
       <div className="pop-h fp-cleanup-h">
         <b>Clean up {machine.name}</b>
-        <span>
-          <span data-needs="workspace sizes">
-            {formatGB(parts.idle)} in {idle.length} idle workspaces
-          </span>
+        <span data-needs="workspace sizes">
+          Frees up to {formatGB(parts.idle)} from {idle.length} idle workspaces
         </span>
       </div>
       <div className="fp-cleanup-body">
         <p className="fp-cleanup-lead">
-          Removing a workspace deletes its folder on {machine.name}. Pushed branches stay on GitHub,
-          and the threads that worked in it keep their transcripts.
+          Removing a workspace deletes its folder and <b>archives the threads</b> that worked in it.
+          They stay readable, but can never run again. Pushed branches stay on GitHub.
         </p>
-        <CleanupGroup
-          title="Idle, no changes"
-          hint={`Not used for ${2} weeks or more. Nothing would be lost.`}
-          rows={clean}
-          picked={picked}
-          onToggle={toggle}
-        />
-        {dirty.length > 0 && (
-          <CleanupGroup
-            title="Idle, with uncommitted changes"
-            hint="Their changes were never committed. Removing one discards them."
-            rows={dirty}
-            picked={picked}
-            onToggle={toggle}
-          />
+        {checking ? (
+          <p className="fp-cleanup-checking">
+            <span className="spin" /> Checking {idle.length} workspaces for uncommitted files…
+          </p>
+        ) : (
+          <>
+            <CleanupGroup
+              title="Threads Done"
+              hint="Not used for a week or more, and every thread in them is Done."
+              rows={done}
+              picked={picked}
+              onToggle={toggle}
+            />
+            {notDone.length > 0 && (
+              <CleanupGroup
+                title="Threads not Done"
+                hint="Some threads here are not Done. Removing marks them Done and archives them."
+                rows={notDone}
+                picked={picked}
+                onToggle={toggle}
+              />
+            )}
+            {dirty.length > 0 && (
+              <CleanupGroup
+                title="Uncommitted changes"
+                hint="Their changes were never committed. Removing one discards them."
+                rows={dirty}
+                picked={picked}
+                onToggle={toggle}
+              />
+            )}
+            <p className="fp-cleanup-kept">
+              <CheckIcon size={14} /> {inUse.length} workspaces used this week stay, and so do the
+              workspaces of runs, which Hercule removes by itself.
+            </p>
+          </>
         )}
-        <p className="fp-cleanup-kept">
-          <CheckIcon size={14} /> {inUse.length} workspaces used in the last two weeks stay (
-          {formatGB(parts.inUse)}).
-        </p>
       </div>
       <div className="fp-cleanup-foot">
         <span className="fp-cleanup-sum">
-          <b>{formatGB(pickedGB)}</b> from {pickedList.length} workspaces
-          <span className="faint"> · {formatGB(freeAfter)} free after</span>
+          Frees <b>{formatGB(pickedGB)}</b>
+          <span className="faint">
+            {" "}
+            · archives {pickedList.length} {pickedList.length === 1 ? "thread" : "threads"} · can't
+            be undone
+          </span>
         </span>
         <span className="spacer" />
         <button type="button" className="btn btn--quiet" onClick={() => dialogRef.current?.close()}>
@@ -456,10 +488,11 @@ export function CleanupDialog({
         <button
           type="button"
           className="btn btn--danger"
-          data-unready={pickedList.length === 0 || undefined}
+          data-unready={checking || pickedList.length === 0 || undefined}
           aria-disabled={pending || undefined}
+          title={`${formatGB(machine.diskFreeGB)} free now, ${formatGB(freeAfter)} after`}
           onClick={async () => {
-            if (pending || pickedList.length === 0) return;
+            if (pending || checking || pickedList.length === 0) return;
             await removeWorkspaces(machineId, picked);
             dialogRef.current?.close();
           }}
@@ -469,9 +502,9 @@ export function CleanupDialog({
               <span className="spin" /> Removing…
             </>
           ) : pickedDirty > 0 ? (
-            `Remove ${pickedList.length}, discarding changes in ${pickedDirty}`
+            `Archive and remove ${pickedList.length}, discarding changes in ${pickedDirty}`
           ) : (
-            `Remove ${pickedList.length} workspaces`
+            `Archive and remove ${pickedList.length}`
           )}
         </button>
       </div>
@@ -496,7 +529,7 @@ function CleanupGroup({
   const shown = open ? rows : rows.slice(0, SHOWN_ROWS);
   const pickedHere = rows.filter((each) => picked.has(each.id));
   const allPicked = pickedHere.length === rows.length;
-  const size = rows.reduce((sum, each) => sum + each.sizeGB, 0);
+  const frees = rows.reduce((sum, each) => sum + each.freesGB, 0);
   return (
     <section className="fp-cg">
       <label className="fp-cg-h">
@@ -521,7 +554,7 @@ function CleanupGroup({
           <span>{hint}</span>
         </span>
         <span className="fp-cg-size">
-          {rows.length} · {formatGB(size)}
+          {rows.length} · frees {formatGB(frees)}
         </span>
       </label>
       <div className="fp-cg-rows">
@@ -543,12 +576,17 @@ function CleanupGroup({
               </span>
             </span>
             {each.changes > 0 && (
-              <span className="chip chip--you">
+              <span className="chip chip--you" data-needs="workspace changes">
                 {each.changes} {each.changes === 1 ? "file" : "files"} changed
               </span>
             )}
             <span className="fp-cg-age">{formatDays(each.lastUsedDays)}</span>
-            <span className="fp-cg-gb">{formatGB(each.sizeGB)}</span>
+            <span
+              className="fp-cg-gb"
+              title={`${formatGB(each.sizeGB)} on disk; removing it frees ${formatGB(each.freesGB)}`}
+            >
+              {formatGB(each.freesGB)}
+            </span>
           </label>
         ))}
         {rows.length > SHOWN_ROWS && (

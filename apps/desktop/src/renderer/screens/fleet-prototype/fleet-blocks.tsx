@@ -28,6 +28,7 @@ import { flushSync } from "react-dom";
 import { Face } from "../../faces";
 import { buildAssistantLook, buildSessionLook } from "../../faces/look";
 import { WorkflowsIcon } from "../../icons/workflows";
+import { QuestionIcon } from "../../icons/question";
 import { CheckIcon } from "../../icons/check";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { ExternalIcon } from "../../icons/external";
@@ -91,6 +92,9 @@ import {
   type Workload,
   installTool,
   canInstall,
+  findLastSweep,
+  logIn,
+  PROVIDER_INSTANCES,
 } from "./fleet-world";
 import "../session/floating-header.css";
 import "../settings/settings.css";
@@ -135,15 +139,11 @@ export function FleetLead({ fleet }: { readonly fleet: FleetState }): JSX.Elemen
 
 /**
  * Returns what the controller lacks today to show `tool`'s version: the
- * runner reports git's and gh's versions, and only whether each harness is
- * installed, so the rest needs a new probe.
+ * runner reports git's and gh's versions, and the provider probe each
+ * harness's, so the other toolchains need a new probe.
  */
 const readsNeeds = (tool: Tool): string | undefined =>
-  tool.kind === "harness"
-    ? "harness versions"
-    : tool.kind === "toolchain" && tool.id !== "git" && tool.id !== "gh"
-      ? "new probe"
-      : undefined;
+  tool.kind === "toolchain" && tool.id !== "git" && tool.id !== "gh" ? "new probe" : undefined;
 
 // ---------- Small drawings ----------
 
@@ -241,41 +241,23 @@ export function DayStrip({
 }
 
 /**
- * A machine's sessions against what it could hold. Filled pips run, hollow
- * pips are free, a hatched pip is free under the cap but has no memory for a
- * session. After the cap's rule: marigold pips are threads waiting, and
- * dotted pips are sessions the memory would hold if the cap were raised.
+ * A machine's sessions against its cap. Filled pips run and hollow pips are
+ * free; after the cap's rule, marigold pips are threads waiting for a slot.
+ * Past 16 slots it is one bar, cut every 10 sessions.
  */
-export function Ladder({
-  machine,
-  max = 6,
-}: {
-  readonly machine: Machine;
-  readonly max?: number;
-}): JSX.Element {
+export function Ladder({ machine }: { readonly machine: Machine }): JSX.Element {
   const away = isAway(machine);
-  const headroom = computeHeadroom(machine);
   const free = Math.max(0, machine.slots - machine.running);
-  const starved = away ? 0 : Math.max(0, free - Math.min(headroom.memory, headroom.disk));
-  const beyond = away ? 0 : Math.max(0, Math.min(headroom.memory, headroom.disk) - free);
-  const waiting = Math.min(machine.queued, beyond);
-  const potential = Math.max(0, Math.min(beyond, max) - waiting);
-  const more = beyond - waiting - potential;
   if (machine.slots > MAX_SLOT_BLOCKS) {
-    // Past the cap, the bar draws at most a quarter of the cap again.
-    const could = Math.min(beyond - waiting, Math.round(machine.slots / 4));
     return (
       <span className="fx-ladder is-bar">
         <SessionBar
           slots={machine.slots}
           running={away ? 0 : machine.running}
-          waiting={waiting}
-          starved={starved}
-          could={could}
+          waiting={machine.queued}
           away={away}
           height={18}
         />
-        {beyond - waiting - could > 0 && <small>+{beyond - waiting - could}</small>}
       </span>
     );
   }
@@ -284,20 +266,13 @@ export function Ladder({
       {Array.from({ length: machine.running }, (_, index) => (
         <i key={`r${index}`} className="is-run" />
       ))}
-      {Array.from({ length: free - starved }, (_, index) => (
+      {Array.from({ length: free }, (_, index) => (
         <i key={`f${index}`} />
       ))}
-      {Array.from({ length: starved }, (_, index) => (
-        <i key={`s${index}`} className="is-starved" />
-      ))}
-      <b className="fx-cap" />
-      {Array.from({ length: waiting }, (_, index) => (
+      {machine.queued > 0 && <b className="fx-cap" />}
+      {Array.from({ length: machine.queued }, (_, index) => (
         <i key={`w${index}`} className="is-wait" />
       ))}
-      {Array.from({ length: potential }, (_, index) => (
-        <i key={`p${index}`} className="is-could" />
-      ))}
-      {more > 0 && <small>+{more}</small>}
     </span>
   );
 }
@@ -391,7 +366,7 @@ export function AttentionLine({
     return (
       <>
         <span className="fx-attn is-you">
-          {compact ? "Memory has room for more" : `${machine.queued} threads waiting for a slot`}
+          {compact ? `${machine.queued} waiting` : `${machine.queued} threads waiting for a slot`}
         </span>
         <button
           type="button"
@@ -650,22 +625,14 @@ export function CapacityPanel({
 }): JSX.Element {
   const online = fleet.machines.filter((each) => !isAway(each));
   const room = online.reduce((sum, each) => sum + computeHeadroom(each).room, 0);
-  const tight = online.filter(
-    (each) =>
-      computeHeadroom(each).limit === "memory" &&
-      computeHeadroom(each).memory < computeHeadroom(each).slots,
-  );
   return (
     <section className="fx-panel" id="fx-capacity">
       <PanelHead
         title="Capacity"
         lead={
           <>
-            Room for <b>{room}</b> more sessions right now.
-            {tight.length > 0 &&
-              ` On ${tight.map((each) => each.name).join(" and ")}, memory runs out before the slots do.`}{" "}
-            A thread resumes where it started, so a full machine makes its threads wait even when
-            others are free.
+            Room for <b>{room}</b> more sessions right now. A thread resumes where it started, so a
+            full machine makes its threads wait even when others are free.
           </>
         }
       />
@@ -677,13 +644,7 @@ export function CapacityPanel({
           <i className="fx-key" /> Free
         </span>
         <span>
-          <i className="fx-key is-starved" /> Free, but no memory for it
-        </span>
-        <span>
           <i className="fx-key is-wait" /> Waiting
-        </span>
-        <span>
-          <i className="fx-key is-could" /> Would fit if you raised the cap
         </span>
       </div>
       <div className="fx-rows">
@@ -749,13 +710,8 @@ export function CapacityPanel({
                     </button>
                   </>
                 ) : (
-                  <span className={headroom.limit === "memory" ? "fx-why is-you" : "fx-why"}>
-                    {headroom.limit === "slots"
-                      ? "Cap"
-                      : headroom.limit === "memory"
-                        ? "Memory"
-                        : "Disk"}{" "}
-                    allows {headroom.room} more
+                  <span className="fx-why">
+                    {headroom.room === 0 ? "No room" : `${headroom.room} free`}
                   </span>
                 )}
               </span>
@@ -1596,8 +1552,8 @@ export function MachinePage({
               All {machine.slots} sessions are in use, and {machine.queued} threads are waiting.
             </p>
             <span>
-              They resume here, where they started. Memory would hold {headroom.memory} more, so
-              raising the cap is safe.
+              They resume here, where they started. Memory is at{" "}
+              {Math.round(memoryShare(machine) * 100)}%.
             </span>
           </div>
           <button
@@ -1621,14 +1577,14 @@ export function MachinePage({
         {!away && (
           <p className="fx-room-line">
             Room for <b>{headroom.room}</b> more {headroom.room === 1 ? "session" : "sessions"}:{" "}
-            {describeLimit(headroom)}.
+            {describeLimit(machine, headroom)}.
           </p>
         )}
         <div className="fx-instruments">
           <div className={`fx-inst fx-gauge--${machine.queued > 0 ? "warn" : "ok"}`}>
             <span className="fx-gauge-label">Sessions</span>
             <b>{away ? "—" : `${machine.running} of ${machine.slots}`}</b>
-            <Ladder machine={machine} max={6} />
+            <Ladder machine={machine} />
             <DayStrip machine={machine} tall />
             <span className="fx-inst-note">
               Last 24 hours
@@ -1698,6 +1654,7 @@ export function MachinePage({
           />
           <LegendItem part="other" label="Not Hercule's" gb={parts.other} />
         </div>
+        <AutoCleanupLine fleet={fleet} machine={machine} />
         {idle.length > 0 && (
           <div className="fx-idle" data-needs="workspace sizes">
             <div className="fx-idle-h">
@@ -1723,7 +1680,13 @@ export function MachinePage({
                   </span>
                 )}
                 <span className="fx-idle-age">{formatDays(each.lastUsedDays)}</span>
-                <span className="fx-idle-gb">{formatGB(each.sizeGB)}</span>
+                <span
+                  className="fx-idle-gb"
+                  title={`${formatGB(each.sizeGB)} on disk; removing it frees ${formatGB(each.freesGB)}`}
+                >
+                  {formatGB(each.freesGB)}
+                  {each.freesGB < each.sizeGB * 0.9 && <small>of {formatGB(each.sizeGB)}</small>}
+                </span>
               </div>
             ))}
           </div>
@@ -1750,8 +1713,10 @@ export function MachinePage({
             </button>
           </div>
         )}
+        <ProviderRows fleet={fleet} machine={machine} />
+        <h4 className="fx-sw-h">Tools</h4>
         <div className="fx-sw">
-          {TOOLS.map((tool) => {
+          {TOOLS.filter((tool) => tool.kind !== "harness").map((tool) => {
             const status = readToolStatus(fleet, tool, machine);
             const policy = fleet.policies[tool.id]!;
             const change = changes.find((each) => each.tool === tool);
@@ -1826,10 +1791,7 @@ export function MachinePage({
         <div className="set-row">
           <div className="set-label">
             <b>Session cap</b>
-            <span>
-              How many sessions run here at once. Memory would hold{" "}
-              {computeHeadroom(machine).memory + machine.running}.
-            </span>
+            <span>How many sessions run here at once.</span>
           </div>
           <span className="fx-stepper">
             <button
@@ -2307,5 +2269,148 @@ export function ActivityView({
         ))
       )}
     </div>
+  );
+}
+
+// ---------- Automatic cleanup, and provider logins ----------
+
+/**
+ * Renders the one line that says Hercule cleans up by itself, with what it
+ * last removed, and an info button whose popover lists the exact rules.
+ */
+function AutoCleanupLine({
+  fleet,
+  machine,
+}: {
+  readonly fleet: FleetState;
+  readonly machine: Machine;
+}): JSX.Element {
+  const last = findLastSweep(fleet, machine.id);
+  const popoverId = `fx-auto-${machine.id}`;
+  return (
+    <div className="fx-auto-line">
+      <span>Hercule cleans up by itself.</span>
+      {last !== null && (
+        <span className="faint">
+          Last: {last.text.charAt(0).toLowerCase() + last.text.slice(1)},{" "}
+          {last.day === "Today" || last.day === "Yesterday" ? last.day.toLowerCase() : last.day}{" "}
+          {last.time}.
+        </span>
+      )}
+      <button
+        type="button"
+        className="icon-btn icon-btn--sm fx-info"
+        popoverTarget={popoverId}
+        aria-label="When Hercule removes a workspace by itself"
+        style={{ anchorName: `--${popoverId}` } as CSSProperties}
+      >
+        <QuestionIcon size={14} />
+      </button>
+      <div
+        id={popoverId}
+        popover="auto"
+        className="pop fx-auto-pop"
+        style={{ positionAnchor: `--${popoverId}` } as CSSProperties}
+      >
+        <b>When Hercule removes a workspace by itself</b>
+        <ul>
+          <li>
+            A workflow run's workspace: as soon as the run finishes, or 14 days after it failed.
+          </li>
+          <li>
+            A thread's workspace: once every thread in it is archived, nobody has used it for 7
+            days, and it has no uncommitted files.
+          </li>
+        </ul>
+        <span>Everything else stays until you clean it up.</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Renders a row per provider instance on `machine`: whether it is logged in,
+ * its harness's version, and the login the first run already uses. In the
+ * app this is the existing provider login row.
+ */
+function ProviderRows({
+  fleet,
+  machine,
+}: {
+  readonly fleet: FleetState;
+  readonly machine: Machine;
+}): JSX.Element {
+  const away = isAway(machine);
+  return (
+    <>
+      <h4 className="fx-sw-h">Providers</h4>
+      <div className="fx-sw">
+        {PROVIDER_INSTANCES.map((instance) => {
+          const tool = TOOLS.find((each) => each.id === instance.toolId)!;
+          const installed = fleet.installed[tool.id]?.[machine.id];
+          const loggedIn = fleet.logins.has(`${machine.id}:${instance.id}`);
+          const pending = fleet.pending.has(`login:${machine.id}:${instance.id}`);
+          return (
+            <div key={instance.id} className="fx-sw-row fx-provider">
+              <span className="fx-sw-name">
+                <ToolMark tool={tool} size={13} />
+                {instance.name}
+              </span>
+              <span className="fx-sw-ver">
+                {installed === undefined ? (
+                  <span className="faint">Not installed</span>
+                ) : (
+                  <span className="fp-ver">{installed.version}</span>
+                )}
+              </span>
+              <span
+                className={loggedIn || installed === undefined ? "fx-sw-src" : "fx-sw-src is-you"}
+              >
+                {away
+                  ? ""
+                  : installed === undefined
+                    ? ""
+                    : loggedIn
+                      ? "Logged in"
+                      : "Not logged in"}
+              </span>
+              <span />
+              <span className="fx-sw-act">
+                {away ? null : installed === undefined ? (
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--quiet"
+                    title="Installing comes after v1"
+                  >
+                    Install
+                  </button>
+                ) : loggedIn ? (
+                  <button type="button" className="btn btn--sm btn--quiet">
+                    Probe now
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    aria-disabled={pending || undefined}
+                    onClick={() => void logIn(machine.id, instance.id)}
+                  >
+                    {pending ? (
+                      <>
+                        <span className="spin" /> Waiting…
+                      </>
+                    ) : instance.login === "key" ? (
+                      "Enter key"
+                    ) : (
+                      "Log in"
+                    )}
+                  </button>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }

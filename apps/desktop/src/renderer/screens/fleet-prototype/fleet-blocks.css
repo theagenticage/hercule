@@ -1156,7 +1156,7 @@ button.fx-mx-machine:hover {
 }
 .fx-sw-row {
   display: grid;
-  grid-template-columns: minmax(140px, 190px) 90px minmax(0, 1fr) 120px 76px;
+  grid-template-columns: minmax(140px, 190px) 90px minmax(0, 1fr) 120px 96px;
   gap: 16px;
   min-height: 40px;
 }
@@ -1716,4 +1716,61 @@ button.fx-cell {
 .fx-activity-empty {
   margin: 28px 0;
   color: var(--muted);
+}
+
+/* ---------- Automatic cleanup and providers ---------- */
+.fx-auto-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.fx-info {
+  margin: -4px 0;
+  color: var(--faint);
+}
+.fx-auto-pop {
+  inset: auto;
+  position-area: block-end span-inline-end;
+  width: 380px;
+  margin: 6px 0 0 -8px;
+  padding: 12px 14px 13px;
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.fx-auto-pop b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--t-13);
+}
+.fx-auto-pop ul {
+  margin: 0 0 6px;
+  padding-left: 16px;
+  color: var(--muted);
+}
+.fx-auto-pop > span {
+  color: var(--muted);
+}
+.fx-idle-gb small {
+  display: block;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.fx-idle-gb {
+  width: 76px;
+}
+.fx-sw-h {
+  margin: 16px 0 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.fx-sw-src.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
 }

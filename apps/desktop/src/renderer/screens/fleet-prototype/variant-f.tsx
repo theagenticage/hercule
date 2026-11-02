@@ -342,7 +342,7 @@ function NeedsYou({
               <b>{machine.name}</b> has {machine.queued} threads waiting for a slot.
             </>
           }
-          detail={`Its memory would hold ${computeHeadroom(machine).memory} more sessions, so a higher cap is safe.`}
+          detail={`They resume there, where they started. Its memory is at ${Math.round(memoryShare(machine) * 100)}%.`}
         >
           <button
             type="button"
