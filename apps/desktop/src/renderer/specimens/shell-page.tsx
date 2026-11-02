@@ -15,6 +15,7 @@
  * - settings-providers.tsx, which opens Settings > Providers;
  * - intake.tsx, which opens Intake, with or without a signal's pane;
  * - workflows.tsx, which opens Workflows;
+ * - fleet.tsx, which opens the Fleet page or a machine's page;
  * - run.tsx, which opens a run's page;
  * - discussions.tsx and wiki.tsx, which open Discussions and the Wiki, a
  *   list with an open Discussion or page.
@@ -107,6 +108,7 @@ import {
   discussionsQuery,
   eventQuery,
   eventsEverythingQuery,
+  fleetSessionsQuery,
   eventCountsQuery,
   ignoreRulesQuery,
   liveAgentSessionsQuery,
@@ -182,6 +184,8 @@ import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
 import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settings/intake";
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
+import { Route as FleetRoute } from "../routes/_connected/_shell/fleet/index";
+import { Route as MachineRoute } from "../routes/_connected/_shell/fleet/$runnerId";
 import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
 import { Route as OpenWorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
 import { Route as RunRoute } from "../routes/_connected/_shell/runs/$runId";
@@ -194,6 +198,7 @@ import { applySheetAppearance, readSheetAppearance } from "./sheet-page";
 import type { DiscussionsRecords } from "./discussions-fixture";
 import type { RunRecords } from "./run-fixture";
 import type { WikiRecords } from "./wiki-fixture";
+import type { FleetRecords } from "./fleet-fixture";
 import type { WorkflowsRecords } from "./workflows-fixture";
 
 /**
@@ -433,6 +438,7 @@ interface OpenScreens {
   readonly intake?: IntakeRecords;
   readonly intakeSettings?: IntakeSettingsRecords;
   readonly workflows?: WorkflowsRecords;
+  readonly fleet?: FleetRecords;
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
@@ -591,6 +597,7 @@ const seedQueryCache = (
     intake,
     intakeSettings,
     workflows,
+    fleet,
     run,
     discussions,
     wiki,
@@ -776,6 +783,12 @@ const seedQueryCache = (
       controller: {},
       user: { timezone: "UTC" },
     });
+  }
+  if (fleet !== undefined) {
+    // The runners and the accounts are the sidebar's lists, seeded above.
+    queryClient.setQueryData(harnessesQuery(client).queryKey, fleet.harnesses);
+    queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
+    queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -1048,6 +1061,18 @@ const buildRouter = (
     getParentRoute: () => shellRoute,
     loader: undefined,
   } as never);
+  const fleetRoute = FleetRoute.update({
+    id: "/fleet/",
+    path: "/fleet/",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
+  const machineRoute = MachineRoute.update({
+    id: "/fleet/$runnerId",
+    path: "/fleet/$runnerId",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
   const openWorkflowRoute = OpenWorkflowRoute.update({
     id: "/$workflowId",
     path: "/$workflowId",
@@ -1103,6 +1128,8 @@ const buildRouter = (
         }),
         intakeRoute,
         workflowsRoute.addChildren([openWorkflowRoute]),
+        fleetRoute,
+        machineRoute,
         discussionsRoute.addChildren([openDiscussionRoute]),
         wikiRoute.addChildren([openWikiPageRoute]),
         runRoute,
@@ -1150,6 +1177,14 @@ const findWorkflowsDrawnSelector = (path: string): string => {
     ? ".open-pane .run-bar, .open-pane .lanes-empty"
     : ".open-pane .table-row, .open-pane .table-empty";
 };
+
+/**
+ * Returns the selector of what the Fleet page draws last at `path`, the
+ * app's address: a machine's card or row, or, on a machine's page, the
+ * Software section's last rows.
+ */
+const findFleetDrawnSelector = (path: string): string =>
+  path === "/fleet" ? ".fleet-card, .fleet-row" : ".machine-page .machine-page-sw-row";
 
 /**
  * Returns the selector of what Discussions or the Wiki draws last at `path`,
@@ -1262,6 +1297,12 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
     );
   }
   if (
+    screens.fleet !== undefined &&
+    document.querySelector(findFleetDrawnSelector(path)) === null
+  ) {
+    throw new Error("Fleet drew no machine. Check the page's console for the error.");
+  }
+  if (
     screens.discussions !== undefined &&
     document.querySelector(findListDrawnSelector(path, OPEN_DISCUSSION_PART)) === null
   ) {
@@ -1371,6 +1412,7 @@ async function mountShellSpecimen(
   if (screens.workflows !== undefined) {
     await waitForElement(findWorkflowsDrawnSelector(path));
   }
+  if (screens.fleet !== undefined) await waitForElement(findFleetDrawnSelector(path));
   if (screens.discussions !== undefined) {
     await waitForElement(findListDrawnSelector(path, OPEN_DISCUSSION_PART));
   }
@@ -1590,6 +1632,24 @@ export async function mountWorkflowsSpecimen(
       : `/workflows/${workflows.openWorkflow.workflow.id}` +
         (search.size === 0 ? "" : `?${search.toString()}`);
   await mountShellSpecimen(records, path, { workflows });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Fleet open at `path`: `/fleet` for the Fleet page, or `/fleet/<id>`
+ * for the page of the machine with that id. The main pane shows the app's
+ * real page, drawn from the machines in `records` and the sessions,
+ * harnesses and controller of `fleet`. Returns once a machine's card or row,
+ * or the machine page's Software rows, are in the document. Fails when the
+ * page has no `#root`, draws no sidebar row and no machine, or tries to read
+ * a record the cache does not hold.
+ */
+export async function mountFleetSpecimen(
+  records: SidebarRecords,
+  fleet: FleetRecords,
+  path: string,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { fleet });
 }
 
 /**
