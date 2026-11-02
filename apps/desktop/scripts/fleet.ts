@@ -98,10 +98,16 @@ export interface Fleet {
    *   endpoint. A test that wants the app to find this runner on its own
    *   machine serves `/identity` on that port itself. Without it, the runner
    *   reports a port nothing serves.
+   * - `joinToken` is the join token the runner joins with, such as the one an
+   *   Add a machine dialog showed. Without it, a token is minted.
    */
   readonly enlistRunner: (
     name: string,
-    options?: { readonly maxConcurrentSessions?: number; readonly identityPort?: number },
+    options?: {
+      readonly maxConcurrentSessions?: number;
+      readonly identityPort?: number;
+      readonly joinToken?: string;
+    },
   ) => Promise<ScriptedRunner>;
   readonly createProject: (name: string) => Promise<Project>;
   /** Creates a repository resource for `remote`, filed under the given projects. */
@@ -251,9 +257,13 @@ export async function connectFleet(url: string): Promise<Fleet> {
   return {
     token,
     call,
-    enlistRunner: async (name, { identityPort = UNSERVED_IDENTITY_PORT, ...settings } = {}) => {
-      const joinToken = await call<{ readonly token: string }>("POST", "/runners/join-tokens");
-      const runner = await enlistScriptedRunner(url, joinToken.token, identityPort);
+    enlistRunner: async (
+      name,
+      { identityPort = UNSERVED_IDENTITY_PORT, joinToken, ...settings } = {},
+    ) => {
+      const joinSecret =
+        joinToken ?? (await call<{ readonly token: string }>("POST", "/runners/join-tokens")).token;
+      const runner = await enlistScriptedRunner(url, joinSecret, identityPort);
       runners.push(runner);
       await call("PATCH", `/runners/${runner.runnerId}`, { name, ...settings });
       providerAccountId = await waitForSignedInProbe(call, runner.runnerId);
