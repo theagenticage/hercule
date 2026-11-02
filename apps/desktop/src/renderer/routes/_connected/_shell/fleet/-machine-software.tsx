@@ -34,7 +34,7 @@ export function MachineSoftware({
         id={id}
         harnesses={listMachineHarnesses(harnesses, runner.id)}
         accounts={listMachineAccounts(runner, accounts, providers, harnesses)}
-        isOffline={runner.connectivity !== "online"}
+        isAway={runner.connectivity !== "online"}
         onSignIn={setSignInAccountId}
       />
       {signInAccountId !== null && (

@@ -27,8 +27,10 @@ import "./add-machine-dialog.css";
  *   machine only runs work sent to it by name (spec 03, section 5.5).
  * - A token is used once and lasts an hour. The dialog says when the command
  *   stops working from the token's own expiry, not from a number of its own.
- * - Creating or revoking a token reads the open tokens again. Revoking the
- *   token the command carries takes the command away: it would not work.
+ * - Creating (whether it succeeds or not) or revoking a token reads the open
+ *   tokens again, so the list is current once the dialog has opened. Revoking
+ *   the token the command carries takes the command away: it would not work,
+ *   and revoking other tokens afterwards does not bring it back.
  *
  * `timezone` is the zone the token times are shown in: the user's own, as on
  * the rest of the Fleet pages.
@@ -59,13 +61,21 @@ export function AddMachineDialog({
   const readTokensAgain = () => queryClient.invalidateQueries({ queryKey: queryKeys.joinTokens() });
   const create = useMutation({
     mutationFn: () => client.runner.createJoinToken(),
-    onSuccess: readTokensAgain,
+    // The mutation cache would keep the result, with the token's secret, for
+    // a while after the dialog closes. Zero drops it as soon as no dialog
+    // shows it.
+    gcTime: 0,
+    // A refused mint also reads the list, which may be older than the last
+    // opening.
+    onSettled: readTokensAgain,
   });
-  const [revokedId, setRevokedId] = useState<string | null>(null);
+  // Whether the command's own token was revoked. A fact of its own, not the
+  // last token revoked: revoking an earlier token afterwards leaves it true.
+  const [commandRevoked, setCommandRevoked] = useState(false);
   const revoke = useMutation({
     mutationFn: (id: string) => client.runner.revokeJoinToken({ params: { id } }),
     onSuccess: (_, id) => {
-      setRevokedId(id);
+      if (id === create.data?.id) setCommandRevoked(true);
       return readTokensAgain();
     },
   });
@@ -82,7 +92,6 @@ export function AddMachineDialog({
   }, [createToken]);
 
   const minted = create.data;
-  const commandRevoked = minted !== undefined && minted.id === revokedId;
   const command =
     minted === undefined || commandRevoked
       ? undefined
@@ -140,13 +149,12 @@ export function AddMachineDialog({
         </div>
         {minted !== undefined &&
           (commandRevoked ? (
-            <p className="fleet-add-wait">
+            <p className="fleet-add-note">
               This command's token was revoked. Close and open the dialog again for a new one.
             </p>
           ) : (
-            <p className="fleet-add-wait">
-              <span className="spin" /> Waiting for the machine. The command works once, until{" "}
-              {formatStamp(new Date(minted.expiresAt), timezone)}.
+            <p className="fleet-add-note">
+              The command works once, until {formatStamp(new Date(minted.expiresAt), timezone)}.
             </p>
           ))}
         {error !== null && (

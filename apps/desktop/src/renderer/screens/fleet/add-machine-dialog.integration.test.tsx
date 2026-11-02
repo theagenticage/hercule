@@ -103,6 +103,8 @@ describe("the Add a machine dialog", () => {
       calls.filter((call) => call.method === "POST" && call.path === TOKENS_PATH),
     ).toHaveLength(1);
     expect(within(dialog).getByText(/The command works once, until 2 Nov /)).toBeTruthy();
+    // Nothing waits on a timer here, so nothing spins (spec 17, rule 2).
+    expect(dialog.querySelector(".spin")).toBeNull();
   });
 
   it("adds --reserved to the command for a personal machine", async () => {
@@ -176,6 +178,36 @@ describe("the Add a machine dialog", () => {
     expect(revoked).toEqual([FRESH.id]);
     expect(within(dialog).queryByText(/hercule runner join/)).toBeNull();
     expect(within(dialog).queryByText(/Waiting for the machine/)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Copy" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+  });
+
+  it("keeps the command away when an earlier token is revoked after the command's own", async () => {
+    const { revoked } = stubController([EARLIER]);
+    const dialog = await renderDialog();
+    const list = await within(dialog).findByRole("list", { name: "Open join tokens" });
+    await waitFor(() => {
+      expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    });
+    await userEvent.click(
+      within(list).getByRole("button", { name: `Revoke token ${toIdTail(FRESH.id)}` }),
+    );
+    await within(dialog).findByText(/This command's token was revoked/);
+    // Revoke is ignored while another revoke is saving, which lasts until the list is read again.
+    await waitFor(() => {
+      expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    });
+
+    await userEvent.click(
+      within(list).getByRole("button", { name: `Revoke token ${toIdTail(EARLIER.id)}` }),
+    );
+    await waitFor(() => {
+      expect(revoked).toEqual([FRESH.id, EARLIER.id]);
+    });
+
+    expect(within(dialog).getByText(/This command's token was revoked/)).toBeTruthy();
+    expect(within(dialog).queryByText(/hercule runner join/)).toBeNull();
     expect(within(dialog).getByRole("button", { name: "Copy" }).hasAttribute("disabled")).toBe(
       true,
     );

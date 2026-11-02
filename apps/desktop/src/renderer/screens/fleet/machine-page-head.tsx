@@ -1,5 +1,5 @@
 import { Fragment, type JSX } from "react";
-import type { FleetTextPart, MachineKind, MachineSummary } from "@hercule/client-core/fleet";
+import type { FleetTextPart, MachineKind, MachineStatus } from "@hercule/client-core/fleet";
 import { FleetText } from "./fleet-text";
 import { buildMachineTransitionName } from "./machine-transition";
 import { StatusDot } from "./machine-parts";
@@ -31,7 +31,7 @@ export function MachinePageHead({
   readonly runnerId: string;
   readonly name: string;
   readonly kind: MachineKind;
-  readonly status: MachineSummary["status"];
+  readonly status: MachineStatus;
   readonly facts: readonly string[];
   readonly runnerVersion: string | null;
   readonly isRunnerBehind: boolean;

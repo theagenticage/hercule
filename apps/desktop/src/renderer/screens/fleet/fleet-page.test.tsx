@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describeFleet, drawSessions, type FleetMachine } from "@hercule/client-core/fleet";
+import { describeFleet, buildSessionsDrawing, type FleetMachine } from "@hercule/client-core/fleet";
 import type { Runner } from "@hercule/contract";
 import { EmptyFleetCard } from "./empty-fleet-card";
 import { FleetPageLead } from "./fleet-lead";
@@ -43,6 +43,7 @@ const BUSY: FleetMachine = {
   running: 12,
   waiting: 5,
   waitingThreads: 5,
+  openThreads: 5,
 };
 
 /** Has 5 GiB of free disk under a 10 GiB limit. */
@@ -55,6 +56,7 @@ const FULL_DISK: FleetMachine = {
   running: 2,
   waiting: 0,
   waitingThreads: 0,
+  openThreads: 0,
 };
 
 /** Is offline, and was last heard from at 09:12. */
@@ -63,6 +65,7 @@ const OFFLINE: FleetMachine = {
   running: 0,
   waiting: 0,
   waitingThreads: 0,
+  openThreads: 0,
 };
 
 /** Is online but told to take no new work. */
@@ -71,6 +74,7 @@ const DRAINING: FleetMachine = {
   running: 1,
   waiting: 0,
   waitingThreads: 0,
+  openThreads: 0,
 };
 
 /** Returns the element that draws exactly `text`, such as the "12 of 16" a card splits into a number and a small unit. */
@@ -234,13 +238,15 @@ describe("SessionsFigure", () => {
   const draw = (cap: number, running: number, waiting: number) =>
     render(
       <SessionsFigure
-        drawing={drawSessions({
+        drawing={buildSessionsDrawing({
           runner: buildRunner({ maxConcurrentSessions: cap }),
           running,
           waiting,
           waitingThreads: waiting,
+          openThreads: waiting,
         })}
         size="card"
+        isAway={false}
       />,
     ).container.firstElementChild!;
 
@@ -252,6 +258,12 @@ describe("SessionsFigure", () => {
     expect(figure.querySelectorAll("i.is-wait")).toHaveLength(5);
   });
 
+  it("draws at most 16 waiting blocks", () => {
+    const figure = draw(16, 16, 40);
+
+    expect(figure.querySelectorAll("i.is-wait")).toHaveLength(16);
+  });
+
   it("draws one bar above a cap of 16", () => {
     const figure = draw(17, 12, 5);
 
@@ -260,11 +272,41 @@ describe("SessionsFigure", () => {
     expect(figure.querySelectorAll("i.is-wait")).toHaveLength(1);
   });
 
-  it("lets the running part pass a cap that was lowered", () => {
-    const figure = draw(4, 6, 0);
+  it("draws one bar when 17 sessions run under a cap of 4", () => {
+    expect(draw(4, 16, 0).classList.contains("fleet-sessions--blocks")).toBe(true);
+    expect(draw(4, 17, 0).classList.contains("fleet-sessions--bar")).toBe(true);
+  });
+
+  it("marks the cap after its last block when more sessions run than it allows", () => {
+    const figure = draw(4, 6, 2);
+    const children = [...figure.children];
 
     expect(figure.querySelectorAll("i.is-run")).toHaveLength(6);
-    expect(figure.querySelectorAll("i")).toHaveLength(6);
+    expect(figure.querySelectorAll(".fleet-sessions-mark")).toHaveLength(1);
+    // Four blocks, the mark, then the other two running ones.
+    expect(children.slice(0, 4).every((child) => child.tagName === "I")).toBe(true);
+    expect(children[4]?.className).toBe("fleet-sessions-mark");
+    expect(children[5]?.tagName).toBe("I");
+  });
+
+  it("marks no cap while the sessions fit under it", () => {
+    expect(draw(4, 4, 2).querySelectorAll(".fleet-sessions-mark")).toHaveLength(0);
+  });
+
+  it("cuts a bar every 10 sessions in the cap part and in the waiting part", () => {
+    const figure = draw(100, 100, 30);
+    const cap = figure.querySelector<HTMLElement>(".fleet-sessions-cap")!;
+    const waiting = figure.querySelector<HTMLElement>("i.is-wait")!;
+
+    expect(cap.style.getPropertyValue("--fleet-cut")).toBe("10%");
+    expect(waiting.style.getPropertyValue("--fleet-cut")).toBe(`${(10 / 30) * 100}%`);
+  });
+
+  it("draws the cap's rule in a bar that runs past a lowered cap", () => {
+    const figure = draw(4, 100, 0);
+
+    expect(figure.classList.contains("fleet-sessions--bar")).toBe(true);
+    expect(figure.querySelector(".fleet-sessions-rule")).not.toBeNull();
   });
 });
 

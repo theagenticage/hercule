@@ -3,7 +3,11 @@ import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
 import type { Runner, RunnerUpdateInput } from "@hercule/contract";
 import { runnersQuery } from "../../../../app/queries";
 import type { SavedField } from "../../../../app/saved-field";
-import { useSavedRecordField } from "../../../../app/saved-record-field";
+import {
+  buildRecordScope,
+  keepSavedRecord,
+  useSavedRecordField,
+} from "../../../../app/saved-record-field";
 
 /**
  * Returns one field of the machine `runnerId`, whose control saves on every
@@ -33,22 +37,6 @@ export function useSavedRunnerField<Value, Change>(
 }
 
 /**
- * Returns a function that keeps a runner the controller returned from a save:
- * it puts the runner in the cached list, so the screen shows the saved values
- * at once, and then reads the list again.
- */
-export function useKeepSavedRunner(client: HerculeClient): (saved: Runner) => Promise<void> {
-  const queryClient = useQueryClient();
-  const { queryKey } = runnersQuery(client);
-  return async (saved) => {
-    queryClient.setQueryData(queryKey, (runners) =>
-      runners?.map((each) => (each.id === saved.id ? saved : each)),
-    );
-    await queryClient.invalidateQueries({ queryKey });
-  };
-}
-
-/**
  * Returns the Stop new work switch of a machine: `value` is true while the
  * machine is draining, and `save(true)` and `save(false)` call `runner.drain`
  * and `runner.undrain`.
@@ -56,18 +44,24 @@ export function useKeepSavedRunner(client: HerculeClient): (saved: Runner) => Pr
  * While a call runs, `value` is the state it asks for. A refused call puts
  * the switch back, and `error` says why. When a call succeeds, the runner it
  * returns replaces the cached one and the list is read again.
+ *
+ * The calls share the mutation scope of the machine's other saves (the
+ * settings rows and Allow), so they reach the controller in the order the
+ * user made them: Stop new work switched on and straight off again ends with
+ * the machine taking work.
  */
 export function useSavedRunnerDrain(
   client: HerculeClient,
   runner: Runner,
 ): SavedField<boolean, boolean> {
-  const keepSavedRunner = useKeepSavedRunner(client);
+  const queryClient = useQueryClient();
   const call = useMutation({
+    scope: buildRecordScope(runner.id),
     mutationFn: (drain: boolean) =>
       drain
         ? client.runner.drain({ params: { id: runner.id } })
         : client.runner.undrain({ params: { id: runner.id } }),
-    onSuccess: keepSavedRunner,
+    onSuccess: (saved) => keepSavedRecord(queryClient, runnersQuery(client).queryKey, saved),
   });
   return {
     value: call.isPending ? call.variables : runner.lifecycle === "draining",

@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { GaugeLevel, MachineNeed, MachineSummary } from "@hercule/client-core/fleet";
+import type { GaugeLevel, MachineNeed, MachineStatus } from "@hercule/client-core/fleet";
 import "./fleet-page.css";
 
 /**
@@ -8,7 +8,7 @@ import "./fleet-page.css";
  * work. The dot names its state itself ("Online") only when no word is drawn
  * beside it.
  */
-export function StatusDot({ status }: { readonly status: MachineSummary["status"] }): JSX.Element {
+export function StatusDot({ status }: { readonly status: MachineStatus }): JSX.Element {
   const className = `fleet-dot fleet-dot--${status.tone}`;
   return status.word === null ? (
     <i className={className} role="img" aria-label="Online" />

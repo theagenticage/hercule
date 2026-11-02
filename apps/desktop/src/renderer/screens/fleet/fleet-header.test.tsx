@@ -85,7 +85,7 @@ describe("FleetHeader", () => {
     });
     expect(screen.queryByRole("heading")).toBeNull();
     expect(screen.getByRole("link", { name: "Fleet" }).getAttribute("href")).toBe("/fleet");
-    expect(screen.getByText("atlas").getAttribute("aria-current")).toBe("page");
+    expect(screen.getByText("atlas").closest(".ptab")?.getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("button", { name: "Capacity" })).toBeTruthy();
   });
 });

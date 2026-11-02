@@ -24,7 +24,7 @@ function MachineRow({
   readonly onAllow: (runnerId: string, cap: number) => void;
 }): JSX.Element {
   const { runner } = machine;
-  const { status, isAway, drawing, disk, memory, room, need } = summarizeMachine(
+  const { status, isAway, drawing, disk, memory, roomText, need } = summarizeMachine(
     machine,
     timezone,
     now,
@@ -56,7 +56,7 @@ function MachineRow({
         </small>
       </span>
       <span role="cell" className="fleet-cell fleet-col-room">
-        <b>{room ?? "–"}</b>
+        <b>{roomText ?? "–"}</b>
       </span>
       <span role="cell" className="fleet-cell fleet-cell--line fleet-col-disk">
         {disk === null ? (

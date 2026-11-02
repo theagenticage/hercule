@@ -9,8 +9,8 @@ import "./machine-page.css";
  * its version and what the version means for this Hercule, then one row per
  * account that signs in on each machine, with who is signed in here.
  *
- * - An offline machine shows the versions it last reported in the muted
- *   colour (`isOffline`).
+ * - A machine that is away shows the versions it last reported in the muted
+ *   colour (`isAway`).
  * - An account that is not signed in has Sign in when its row allows it.
  *   Pressing it calls `onSignIn` with the account's id.
  * - Nothing is installed or updated from here.
@@ -20,13 +20,13 @@ export function MachinePageSoftware({
   id,
   harnesses,
   accounts,
-  isOffline,
+  isAway,
   onSignIn,
 }: {
   readonly id: string;
   readonly harnesses: readonly MachineHarnessRow[];
   readonly accounts: readonly MachineAccountRow[];
-  readonly isOffline: boolean;
+  readonly isAway: boolean;
   readonly onSignIn: (providerAccountId: string) => void;
 }): JSX.Element {
   return (
@@ -42,7 +42,7 @@ export function MachinePageSoftware({
             <span
               className={
                 row.isInstalled
-                  ? isOffline
+                  ? isAway
                     ? "machine-page-sw-version is-muted"
                     : "machine-page-sw-version"
                   : "machine-page-sw-version is-faint"

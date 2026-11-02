@@ -10,87 +10,111 @@
  */
 import type { Runner, RunnerFacts, Session } from "@hercule/contract";
 import { RUNNING_STATUSES } from "../runner-capacity";
-import { formatShortMoment } from "../time-context";
+import { formatLastSeen } from "./last-seen";
 
 const holdsSlot = new Set<string>(RUNNING_STATUSES);
 
-/** One machine of the Fleet: its runner and the counts of its open sessions. */
-export interface FleetMachine {
-  readonly runner: Runner;
+/** How many sessions a runner holds, by what they are doing. */
+export interface RunnerSessionCounts {
   /** Sessions starting, idle or busy on it. */
   readonly running: number;
   /** Sessions queued on it. */
   readonly waiting: number;
   /** Of the waiting sessions, the Threads. */
   readonly waitingThreads: number;
+  /** Threads on it that have not exited, queued or not. */
+  readonly openThreads: number;
 }
 
-/**
- * Returns the machines the Fleet screen shows: one per runner that is not
- * retired, with the counts of the sessions open on it. Sessions on a runner
- * that is not in `runners` are ignored.
- *
- * The machines are sorted by runner id. A runner id is a UUIDv7, which starts
- * with its creation time, so this is the order the machines joined. That order
- * never changes while the page is open, so no card jumps when a state changes.
- * The sessions are read once, however many runners there are.
- */
-export const buildFleetMachines = (
-  runners: readonly Runner[],
-  sessions: readonly Session[],
-): readonly FleetMachine[] => {
-  const counts = new Map<string, { running: number; waiting: number; waitingThreads: number }>();
-  const shown = runners
-    .filter((runner) => runner.lifecycle !== "retired")
-    .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  for (const runner of shown) counts.set(runner.id, { running: 0, waiting: 0, waitingThreads: 0 });
+/** The counts of every runner that has a session, by runner id. */
+export type SessionCountsByRunner = Readonly<Record<string, RunnerSessionCounts>>;
 
+const NO_SESSIONS: RunnerSessionCounts = {
+  running: 0,
+  waiting: 0,
+  waitingThreads: 0,
+  openThreads: 0,
+};
+
+/**
+ * Counts the sessions of every runner by what they are doing. A runner with
+ * no session has no entry. Sessions that have exited count as nothing.
+ *
+ * The Fleet pages read their sessions through this function as a query's
+ * `select`, so a component gets these counts and never the session list. A
+ * push that only changes a session's usage or last activity then changes no
+ * count, TanStack's structural sharing hands back the object it returned
+ * before, and nothing on the page renders again.
+ */
+export const countRunnerSessions = (sessions: readonly Session[]): SessionCountsByRunner => {
+  const counts: Record<string, { -readonly [K in keyof RunnerSessionCounts]: number }> = {};
   for (const session of sessions) {
-    const count = counts.get(session.runnerId);
-    if (count === undefined) continue;
+    const count = (counts[session.runnerId] ??= { ...NO_SESSIONS });
     if (holdsSlot.has(session.status)) count.running += 1;
     else if (session.status === "queued") {
       count.waiting += 1;
       if (session.kind === "thread") count.waitingThreads += 1;
     }
+    if (session.kind === "thread" && session.status !== "exited") count.openThreads += 1;
   }
-
-  return shown.map((runner) => ({ runner, ...counts.get(runner.id)! }));
+  return counts;
 };
+
+/** One machine of the Fleet: its runner and the counts of its sessions. */
+export interface FleetMachine extends RunnerSessionCounts {
+  readonly runner: Runner;
+}
+
+/** Returns the machine of `runner` with its entry in `counts`, or no sessions when it has none. */
+export const buildFleetMachine = (runner: Runner, counts: SessionCountsByRunner): FleetMachine => ({
+  runner,
+  ...(counts[runner.id] ?? NO_SESSIONS),
+});
+
+/**
+ * Returns the machines the Fleet screen shows: one per runner that is not
+ * retired, with the counts of its sessions. Counts of a runner that is not in
+ * `runners` are ignored.
+ *
+ * The machines are sorted by runner id. A runner id is a UUIDv7, which starts
+ * with its creation time, so this is the order the machines joined. That order
+ * never changes while the page is open, so no card jumps when a state changes.
+ */
+export const buildFleetMachines = (
+  runners: readonly Runner[],
+  counts: SessionCountsByRunner,
+): readonly FleetMachine[] =>
+  runners
+    .filter((runner) => runner.lifecycle !== "retired")
+    .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((runner) => buildFleetMachine(runner, counts));
 
 /**
  * Checks whether the machine's free disk is below its disk limit, which is
  * when the controller places no new session on it. Equal is not below. False
  * when the runner has not reported its disk yet.
  */
-export const isDiskBelowLimit = (runner: Runner): boolean =>
+const isDiskBelowLimit = (runner: Runner): boolean =>
   runner.watermark !== null && runner.watermark.diskFreeBytes < runner.diskWatermarkBytes;
 
 /**
- * Counts the sessions the machine can still start: the free slots under its
- * session cap. It is 0 when the machine is not online, when the user told it
- * to take no new work (draining), and when its disk is below its limit. Memory
- * takes no part.
+ * Checks whether the controller places new sessions on the machine: it is
+ * online, the user has not told it to take no new work (draining), and its
+ * disk is not below its limit. Memory takes no part.
  */
-export const countRoom = (machine: FleetMachine): number => {
-  const { runner } = machine;
-  if (runner.connectivity !== "online" || runner.lifecycle === "draining") return 0;
-  if (isDiskBelowLimit(runner)) return 0;
-  return Math.max(0, runner.maxConcurrentSessions - machine.running);
-};
-
-const plural = (count: number, one: string, many: string): string => (count === 1 ? one : many);
+const canTakeNewSessions = (runner: Runner): boolean =>
+  runner.connectivity === "online" && runner.lifecycle === "active" && !isDiskBelowLimit(runner);
 
 /**
- * Formats when the runner was last heard from, as short as a card allows
- * ("09:12" today, "Mon 09:12" within a week, "4 Nov 09:12" before that).
- * Returns `null` when the runner was never seen or the time cannot be
- * formatted.
+ * Counts the sessions the machine can still start: the free slots under its
+ * session cap. It is 0 when the machine cannot take new sessions.
  */
-const formatLastSeen = (runner: Runner, timezone: string, now: Date): string | null => {
-  if (runner.lastSeenAt === null) return null;
-  return formatShortMoment(new Date(runner.lastSeenAt), now, timezone) ?? null;
-};
+const countRoom = (machine: FleetMachine): number =>
+  canTakeNewSessions(machine.runner)
+    ? Math.max(0, machine.runner.maxConcurrentSessions - machine.running)
+    : 0;
+
+const plural = (count: number, one: string, many: string): string => (count === 1 ? one : many);
 
 /** Words an unreachable machine: "Not heard from since 09:12", or "Unreachable" when it was never seen. */
 const describeUnreachable = (seen: string | null): string =>
@@ -120,12 +144,15 @@ type NeedKind = MachineNeed["kind"];
  * Lists the kinds of need that apply to a machine, in the order the card
  * shows them.
  *
- * Sessions wait for a slot only when the cap is what holds them back, which is
- * when running plus waiting is above the cap. A queued session that would fit
- * under the cap waits for something else (a workspace, an account, the
- * machine's connection), and raising the cap would not start it. This also
- * keeps the Allow button from ever lowering the cap: its value, running plus
- * waiting, is above the cap by construction.
+ * Sessions wait for a slot only when the cap is what holds them back. That is
+ * when the machine takes new sessions (online, not draining, disk not below its
+ * limit) and running plus waiting is above the cap. Otherwise raising the cap
+ * would start nothing: a queued session that would fit under the cap waits for
+ * something else (a workspace, an account), and a machine that is away, told to
+ * take no new work, or low on disk starts no session whatever its cap. The
+ * first two needs already name the machine's state. The rule also keeps the
+ * Allow button from ever lowering the cap: its value, running plus waiting, is
+ * above the cap by construction.
  */
 const listNeedKinds = (machine: FleetMachine): readonly NeedKind[] => {
   const { runner } = machine;
@@ -133,9 +160,11 @@ const listNeedKinds = (machine: FleetMachine): readonly NeedKind[] => {
   if (runner.connectivity === "offline") kinds.push("offline");
   if (runner.connectivity === "unreachable") kinds.push("unreachable");
   if (isDiskBelowLimit(runner)) kinds.push("disk-below-limit");
-  if (machine.waiting > 0 && machine.running + machine.waiting > runner.maxConcurrentSessions) {
-    kinds.push("waiting");
-  }
+  const isCapHoldingSessionsBack =
+    canTakeNewSessions(runner) &&
+    machine.waiting > 0 &&
+    machine.running + machine.waiting > runner.maxConcurrentSessions;
+  if (isCapHoldingSessionsBack) kinds.push("waiting");
   return kinds;
 };
 
@@ -224,8 +253,8 @@ const countMachinesNeedingUser = (machines: readonly FleetMachine[]): number =>
 
 const COUNT_WORDS = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
 
-const plain = (text: string): FleetTextPart => ({ text, kind: "plain" });
-const number = (value: number): FleetTextPart => ({ text: String(value), kind: "number" });
+const buildPlainPart = (text: string): FleetTextPart => ({ text, kind: "plain" });
+const buildNumberPart = (value: number): FleetTextPart => ({ text: String(value), kind: "number" });
 
 /**
  * Builds the lead of the Fleet page from its machines, such as "Three
@@ -243,45 +272,47 @@ const number = (value: number): FleetTextPart => ({ text: String(value), kind: "
  * - With no machine online the detail is "No machine is online.".
  */
 export const describeFleet = (machines: readonly FleetMachine[]): FleetLead => {
-  if (machines.length === 0) return { headline: [plain("No machine has joined yet.")], detail: [] };
+  if (machines.length === 0)
+    return { headline: [buildPlainPart("No machine has joined yet.")], detail: [] };
 
   const needing = countMachinesNeedingUser(machines);
   const headline: readonly FleetTextPart[] =
     needing === 0
-      ? [plain("Every machine is healthy.")]
+      ? [buildPlainPart("Every machine is healthy.")]
       : [
           {
             text: COUNT_WORDS[needing - 1] ?? String(needing),
             kind: "count",
           },
-          plain(` ${plural(needing, "machine needs", "machines need")} you.`),
+          buildPlainPart(` ${plural(needing, "machine needs", "machines need")} you.`),
         ];
 
   const online = machines.filter((machine) => machine.runner.connectivity === "online");
-  if (online.length === 0) return { headline, detail: [plain("No machine is online.")] };
+  if (online.length === 0) return { headline, detail: [buildPlainPart("No machine is online.")] };
 
   const running = online.reduce((sum, machine) => sum + machine.running, 0);
   const waiting = online.reduce((sum, machine) => sum + machine.waiting, 0);
   const room = online.reduce((sum, machine) => sum + countRoom(machine), 0);
   const detail: readonly FleetTextPart[] = [
-    number(running),
-    plain(` ${plural(running, "session", "sessions")} running on `),
-    number(online.length),
-    plain(` ${plural(online.length, "machine", "machines")}`),
-    ...(waiting > 0 ? [plain(", "), number(waiting), plain(" waiting")] : []),
-    plain(". "),
+    buildNumberPart(running),
+    buildPlainPart(` ${plural(running, "session", "sessions")} running on `),
+    buildNumberPart(online.length),
+    buildPlainPart(` ${plural(online.length, "machine", "machines")}`),
+    ...(waiting > 0
+      ? [buildPlainPart(", "), buildNumberPart(waiting), buildPlainPart(" waiting")]
+      : []),
+    buildPlainPart(". "),
     ...(room > 0
-      ? [plain("Room for "), number(room), plain(" more right now.")]
-      : [plain("No room right now.")]),
+      ? [buildPlainPart("Room for "), buildNumberPart(room), buildPlainPart(" more right now.")]
+      : [buildPlainPart("No room right now.")]),
   ];
   return { headline, detail };
 };
 
 /**
- * Describes how much room a machine has. `room` is `countRoom`. `short` is
- * the text of a card or a list row ("Room for 4", "Full", "Takes no new
- * work"). `line` is the machine page's sentence about it, in parts so the
- * number can be drawn in bold.
+ * Describes how much room a machine has. `short` is the text of a card or a
+ * list row ("Room for 4", "Full", "Takes no new work"). `line` is the machine
+ * page's sentence about it, in parts so the number can be drawn in bold.
  *
  * - Both are `null` while the machine is offline or unreachable, because the
  *   screen shows that state instead.
@@ -294,50 +325,59 @@ export const describeFleet = (machines: readonly FleetMachine[]): FleetLead => {
 export const describeRoom = (
   machine: FleetMachine,
 ): {
-  readonly room: number;
   readonly short: string | null;
   readonly line: readonly FleetTextPart[] | null;
 } => {
   const { runner } = machine;
-  const room = countRoom(machine);
-  if (runner.connectivity !== "online") return { room, short: null, line: null };
+  if (runner.connectivity !== "online") return { short: null, line: null };
 
+  const room = countRoom(machine);
   const cap = runner.maxConcurrentSessions;
   const isDraining = runner.lifecycle === "draining";
   if (isDiskBelowLimit(runner)) {
     return {
-      room,
       short: isDraining ? null : "Takes no new work",
-      line: [plain("No room: its disk is below its limit, so it takes no new sessions")],
+      line: [buildPlainPart("No room: its disk is below its limit, so it takes no new sessions")],
     };
   }
-  if (isDraining) return { room, short: null, line: [plain("No room: it takes no new work")] };
+  if (isDraining) return { short: null, line: [buildPlainPart("No room: it takes no new work")] };
   if (room === 0) {
     return {
-      room,
       short: "Full",
       line: [
-        plain(`No room: it runs its cap of ${String(cap)} ${plural(cap, "session", "sessions")}`),
+        buildPlainPart(
+          `No room: it runs its cap of ${String(cap)} ${plural(cap, "session", "sessions")}`,
+        ),
       ],
     };
   }
   return {
-    room,
     short: `Room for ${String(room)}`,
-    line: [plain("Room for "), number(room), plain(` more, under its cap of ${String(cap)}`)],
+    line: [
+      buildPlainPart("Room for "),
+      buildNumberPart(room),
+      buildPlainPart(` more, under its cap of ${String(cap)}`),
+    ],
   };
 };
 
-/** The most slots drawn one block each. A higher cap is drawn as one bar. */
-const MAX_BLOCKS_CAP = 16;
+/** The most slots, and the most waiting sessions, drawn one block each. */
+const MAX_BLOCKS = 16;
 
 /**
  * How to draw a machine's sessions against its cap. `blocks` is one block per
  * slot, `bar` is one bar cut every 10 sessions. `running` slots are filled,
- * `free` slots are empty, and `waiting` is one marigold block per session
- * after the cap. The drawn total is `max(cap, running) + waiting`: after the
- * user lowers the cap below the sessions running, `free` is 0 and `running`
- * runs past the cap. The renderer needs `cap` to mark where the cap ends.
+ * `free` slots are empty, and `waiting` is the number of sessions waiting for
+ * a slot, drawn as marigold after the cap. The drawn total is
+ * `max(cap, running) + waiting`: after the user lowers the cap below the
+ * sessions running, `free` is 0 and `running` runs past the cap. The renderer
+ * needs `cap` to mark where the cap ends in that case, and where the waiting
+ * part starts.
+ *
+ * `waitingBlocks` is how many waiting blocks the `blocks` shape draws: at most
+ * 16, because the drawing is clipped to its place anyway and the text beside it
+ * carries the count. It is 0 for a `bar`, which draws one stretch for all of
+ * `waiting`.
  */
 export interface SessionsDrawing {
   readonly shape: "blocks" | "bar";
@@ -345,23 +385,27 @@ export interface SessionsDrawing {
   readonly running: number;
   readonly free: number;
   readonly waiting: number;
+  readonly waitingBlocks: number;
 }
 
 /**
- * Returns the counts to draw a machine's sessions from: blocks while the cap
- * is at most 16, a bar above. It takes the machine rather than three numbers
- * so the card cannot pass the counts in the wrong order. A machine running
- * more sessions than its cap (the cap was lowered) has 0 free slots, never a
- * negative number.
+ * Returns the counts to draw a machine's sessions from: blocks while both the
+ * cap and the sessions running are at most 16, a bar otherwise. A cap lowered
+ * from 100 to 4 under 100 running sessions is therefore a bar, not 100
+ * blocks. It takes the machine rather than several numbers so the card cannot
+ * pass the counts in the wrong order. A machine running more sessions than its
+ * cap has 0 free slots, never a negative number.
  */
-export const drawSessions = (machine: FleetMachine): SessionsDrawing => {
+export const buildSessionsDrawing = (machine: FleetMachine): SessionsDrawing => {
   const cap = machine.runner.maxConcurrentSessions;
+  const shape = cap <= MAX_BLOCKS && machine.running <= MAX_BLOCKS ? "blocks" : "bar";
   return {
-    shape: cap <= MAX_BLOCKS_CAP ? "blocks" : "bar",
+    shape,
     cap,
     running: machine.running,
     free: Math.max(0, cap - machine.running),
     waiting: machine.waiting,
+    waitingBlocks: shape === "blocks" ? Math.min(machine.waiting, MAX_BLOCKS) : 0,
   };
 };
 
@@ -385,8 +429,8 @@ export const decideMachineKind = (facts: RunnerFacts | null): MachineKind => {
 };
 
 /**
- * Measures a size in bytes the way Finder does, in units of 10^9 bytes, as a
- * number and a unit:
+ * Splits a size in bytes into a number and a unit, the way Finder shows it, in
+ * units of 10^9 bytes:
  *
  * - under a gigabyte, whole megabytes: "420" "MB";
  * - from a gigabyte, gigabytes with one decimal under 100 GB: "10.7" "GB";
@@ -396,21 +440,13 @@ export const decideMachineKind = (facts: RunnerFacts | null): MachineKind => {
  * The tier is picked from the rounded number, so 99.96 GB reads "100 GB" and
  * not "100.0 GB".
  */
-export const measureDiskSize = (
-  bytes: number,
-): { readonly amount: string; readonly unit: "MB" | "GB" } => {
+const splitDiskSize = (bytes: number): { readonly amount: string; readonly unit: "MB" | "GB" } => {
   const megabytes = Math.round(bytes / 1e6);
   if (megabytes < 1000) return { amount: String(megabytes), unit: "MB" };
   const gigabytes = bytes / 1e9;
   const tenths = Math.round(gigabytes * 10) / 10;
   if (tenths < 100) return { amount: tenths.toFixed(1), unit: "GB" };
   return { amount: Math.round(gigabytes).toLocaleString("en-US"), unit: "GB" };
-};
-
-/** Formats a size in bytes as text, such as "420 MB" or "10.7 GB". See `measureDiskSize` for the rules. */
-export const formatDiskSize = (bytes: number): string => {
-  const { amount, unit } = measureDiskSize(bytes);
-  return `${amount} ${unit}`;
 };
 
 /** How full a gauge is: `normal`, `you` (getting high), or `fail` (too high). */
@@ -426,7 +462,7 @@ const MEMORY_FAIL_FROM = 0.92;
  * memory or its available memory. A high level is only a colour: memory never
  * makes a machine need the user.
  */
-export const measureMemory = (
+const measureMemory = (
   runner: Runner,
 ): { readonly share: number; readonly level: GaugeLevel } | null => {
   if (runner.facts === null || runner.watermark === null) return null;
@@ -436,6 +472,12 @@ export const measureMemory = (
   const level = share >= MEMORY_FAIL_FROM ? "fail" : share >= MEMORY_YOU_FROM ? "you" : "normal";
   return { share, level };
 };
+
+/** The status dot of a machine and the word beside it. See `describeMachineStatus`. */
+export interface MachineStatus {
+  readonly tone: "online" | "offline" | "draining";
+  readonly word: string | null;
+}
 
 /**
  * Describes the status dot of a machine. `tone` is the dot: `offline` for an
@@ -449,7 +491,7 @@ export const describeMachineStatus = (
   runner: Runner,
   timezone: string,
   now: Date,
-): { readonly tone: "online" | "offline" | "draining"; readonly word: string | null } => {
+): MachineStatus => {
   if (runner.connectivity === "offline") return { tone: "offline", word: "Offline" };
   if (runner.connectivity === "unreachable") {
     const seen = formatLastSeen(runner, timezone, now);
@@ -465,7 +507,7 @@ export const describeMachineStatus = (
 /** What a card or a list row of the Fleet draws for one machine. See `summarizeMachine`. */
 export interface MachineSummary {
   /** The status dot and its word, which is `null` while the machine is simply online. */
-  readonly status: ReturnType<typeof describeMachineStatus>;
+  readonly status: MachineStatus;
   /** Whether the machine is offline or unreachable, which a card shows dimmed. */
   readonly isAway: boolean;
   readonly drawing: SessionsDrawing;
@@ -473,7 +515,7 @@ export interface MachineSummary {
    * "Room for 4", "Full" or "Takes no new work" (a disk below its limit); `null`
    * while the machine is away or draining, because its status word says so.
    */
-  readonly room: string | null;
+  readonly roomText: string | null;
   /** The most serious need, or `undefined` when the machine needs nothing. */
   readonly need: MachineNeed | undefined;
   /**
@@ -504,14 +546,14 @@ export const summarizeMachine = (
   return {
     status: describeMachineStatus(runner, timezone, now),
     isAway: runner.connectivity !== "online",
-    drawing: drawSessions(machine),
-    room: describeRoom(machine).short,
+    drawing: buildSessionsDrawing(machine),
+    roomText: describeRoom(machine).short,
     need: findMachineNeeds(machine, timezone, now)[0],
     disk:
       runner.watermark === null
         ? null
         : {
-            ...measureDiskSize(runner.watermark.diskFreeBytes),
+            ...splitDiskSize(runner.watermark.diskFreeBytes),
             level: isDiskBelowLimit(runner) ? "fail" : "normal",
           },
     memory:
@@ -524,7 +566,7 @@ export const summarizeMachine = (
  * you" with `isYou` set while some machines need the user, else the number of
  * machines.
  */
-export const describeMachinesTab = (
+export const describeMachinesSection = (
   machines: readonly FleetMachine[],
 ): { readonly text: string; readonly isYou: boolean } => {
   const needing = countMachinesNeedingUser(machines);

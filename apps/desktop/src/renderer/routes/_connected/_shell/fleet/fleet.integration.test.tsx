@@ -5,7 +5,7 @@
  * empty, and a card opening its machine's page.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Runner, RunnerFacts, Session } from "@hercule/contract";
 import {
@@ -14,6 +14,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   renderApp,
+  setVisibility,
   SIDEBAR_FIXTURE,
   stubApi,
   stubIntersectionObserver,
@@ -33,6 +34,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  setVisibility("visible");
 });
 
 const FACTS: RunnerFacts = {
@@ -268,5 +270,67 @@ describe("the Fleet page", () => {
     await openFleet({ localRunnerId: ATLAS.id });
 
     expect(screen.queryByRole("button", { name: /Add a machine\./ })).toBeNull();
+  });
+
+  describe("keeping the sessions current", () => {
+    /** Counts the reads of the Fleet's session list in `calls` from `from` on: every status but exited, of every kind. */
+    const countFleetReads = (calls: readonly Call[], from: number): number =>
+      calls
+        .slice(from)
+        .filter(
+          (call) =>
+            call.method === "GET" &&
+            call.path === "/api/v1/sessions" &&
+            call.search.includes("status") &&
+            !call.search.includes("kind"),
+        ).length;
+
+    /** Opens Fleet with a session list the test can change, once the live connection holds the `session` topic. */
+    const openFleetWithLiveSessions = async () => {
+      let served: readonly Session[] = SESSIONS;
+      const app = await openFleet({
+        handlers: { "GET /api/v1/sessions": () => ({ body: { items: served } }) },
+      });
+      await waitFor(() => expect(app.live.readTopics()).toContain("session"));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      await waitFor(() => expect(app.context.queryClient.isFetching()).toBe(0));
+      return {
+        ...app,
+        serve: (next: readonly Session[]): void => {
+          served = next;
+        },
+      };
+    };
+
+    it("reads the sessions again on a push and shows the new counts", async () => {
+      const { calls, live, serve } = await openFleetWithLiveSessions();
+      const before = calls.length;
+
+      serve([...SESSIONS, buildSessionOn(FORGE, "busy"), buildSessionOn(FORGE, "busy")]);
+      act(() => live.pushInvalidation("session"));
+
+      await waitFor(() => expect(getValue(getCard("forge"), "4 of 16")).toBeTruthy());
+      expect(countFleetReads(calls, before)).toBe(1);
+    });
+
+    it("reads nothing on a push while the window is hidden, and reads the sessions once when it shows", async () => {
+      const { calls, live, serve, context } = await openFleetWithLiveSessions();
+      const before = calls.length;
+
+      setVisibility("hidden");
+      serve([...SESSIONS, buildSessionOn(FORGE, "busy"), buildSessionOn(FORGE, "busy")]);
+      act(() => live.pushInvalidation("session"));
+      act(() => live.pushInvalidation("session"));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      await waitFor(() => expect(context.queryClient.isFetching()).toBe(0));
+
+      expect(countFleetReads(calls, before)).toBe(0);
+      expect(getValue(getCard("forge"), "2 of 16")).toBeTruthy();
+
+      setVisibility("visible");
+
+      await waitFor(() => expect(getValue(getCard("forge"), "4 of 16")).toBeTruthy());
+      expect(countFleetReads(calls, before)).toBe(1);
+    });
   });
 });

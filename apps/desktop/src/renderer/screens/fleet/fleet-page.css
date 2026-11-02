@@ -144,6 +144,18 @@
 .fleet-sessions-gap {
   width: 2px;
 }
+/* Where the cap ends when more sessions run than it allows: the bar's rule,
+   in the flow between two blocks. It is taller than the blocks, so it reaches
+   past them as the bar's does. */
+.fleet-sessions-mark {
+  flex: none;
+  width: 1.5px;
+  height: 16px;
+  background: color-mix(in oklab, var(--ink) 50%, transparent);
+}
+.fleet-sessions--list .fleet-sessions-mark {
+  height: 14px;
+}
 
 /* One bar, for a cap above 16. */
 .fleet-sessions--bar {
@@ -163,7 +175,12 @@
   overflow: hidden;
   border-radius: var(--r-xs);
   background: color-mix(in oklab, var(--ink) 9%, transparent);
-  /* A thin cut every 10 sessions, through whatever is drawn. */
+}
+/* A thin cut every 10 sessions, through whatever is drawn, in the cap's part
+   and in the waiting part. Each sets --fleet-cut to 10 sessions of its own
+   width. */
+.fleet-sessions-cap,
+.fleet-sessions--bar > i.is-wait {
   mask-image: repeating-linear-gradient(
     90deg,
     #000 0,

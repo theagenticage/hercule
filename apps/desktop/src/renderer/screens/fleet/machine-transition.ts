@@ -9,9 +9,10 @@ export const buildMachineTransitionName = (runnerId: string): string => `fleet-m
 /**
  * The type of the view transition that runs between the Fleet page and a
  * machine's page. `machine-transition.css` styles the transition by this
- * type, so no other view transition picks up its rules.
+ * type, written there as the same literal "fleet-machine", so no other view
+ * transition picks up its rules. Change both together.
  */
-export const MACHINE_TRANSITION_TYPE = "fleet-machine";
+const MACHINE_TRANSITION_TYPE = "fleet-machine";
 
 /** The two places a navigation moves between, as far as the transition cares. */
 interface NavigationPlaces {

@@ -28,8 +28,8 @@ export function MachineGrid({ children }: { readonly children: ReactNode }): JSX
 /** Renders one gauge: a label, a value, and what draws it (a meter, or the sessions). */
 function Gauge({
   label,
-  level = "normal",
-  isWide = false,
+  level,
+  isWide,
   children,
 }: {
   readonly label: string;
@@ -38,7 +38,9 @@ function Gauge({
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <div className={`fleet-gauge fleet-gauge--${level}${isWide ? " fleet-gauge--wide" : ""}`}>
+    <div
+      className={`fleet-gauge fleet-gauge--${level ?? "normal"}${isWide === true ? " fleet-gauge--wide" : ""}`}
+    >
       <span className="fleet-gauge-label">{label}</span>
       {children}
     </div>
@@ -135,7 +137,7 @@ export function MachineCard({
         </Gauge>
       </div>
       <div className="fleet-card-crew">
-        {summary.room !== null && <span className="fleet-room">{summary.room}</span>}
+        {summary.roomText !== null && <span className="fleet-room">{summary.roomText}</span>}
       </div>
       <div className="fleet-card-foot">
         <NeedLine

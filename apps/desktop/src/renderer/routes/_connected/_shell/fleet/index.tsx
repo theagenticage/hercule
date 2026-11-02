@@ -5,15 +5,12 @@ import { resolveDisplayTimezone } from "@hercule/client-core";
 import {
   buildFleetMachines,
   describeFleet,
-  describeMachinesTab,
+  describeMachinesSection,
   isFleetEmpty,
 } from "@hercule/client-core/fleet";
 import {
   controllerQuery,
   fleetSessionsQuery,
-  harnessesQuery,
-  providerAccountsQuery,
-  providersQuery,
   readOnOpen,
   runnersQuery,
   settingsQuery,
@@ -26,13 +23,14 @@ import { useFleetNow } from "../../../../screens/fleet/use-fleet-now";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
 import { useAllowSessions } from "./-allow-sessions";
 import { MachinesSection } from "./-machines-section";
+import { useRunnerSessionCounts } from "./-session-counts";
 
 /**
  * Fleet: every machine at a glance (spec 17 §Fleet). Its loader reads
  * everything the page draws before it renders:
  *
- * - the runners, the harnesses, the providers and the Provider Accounts,
- *   which the shell reads and keeps current, so they are cached already;
+ * - the runners, which the shell reads and keeps current, so they are cached
+ *   already;
  * - every session that has not exited, which a push on the `session` topic
  *   keeps current while Fleet is open. `fetchQuery` reads it again on open
  *   only when a push marked the cached read out of date while Fleet was
@@ -47,9 +45,6 @@ export const Route = createFileRoute("/_connected/_shell/fleet/")({
     const { client } = controller;
     await Promise.all([
       queryClient.ensureQueryData(runnersQuery(client)),
-      queryClient.ensureQueryData(harnessesQuery(client)),
-      queryClient.ensureQueryData(providersQuery(client)),
-      queryClient.ensureQueryData(providerAccountsQuery(client)),
       queryClient.fetchQuery(fleetSessionsQuery(client)),
       readOnOpen(queryClient, controllerQuery(client)),
       readOnOpen(queryClient, settingsQuery(client)),
@@ -71,27 +66,21 @@ function FleetPage(): JSX.Element {
   const { controller } = Route.useRouteContext();
   const { client, url } = controller;
   const { data: runners } = useSuspenseQuery(runnersQuery(client));
-  const { data: sessions } = useSuspenseQuery(fleetSessionsQuery(client));
+  const sessionCounts = useRunnerSessionCounts(client);
   const { data: record } = useSuspenseQuery(controllerQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
   const { activeSectionId, scrollToSection } = useSectionInView(scrollRef, SECTION_IDS);
-  const { allow, pendingRunnerIds, failure } = useAllowSessions(client);
+  const { allow, pendingRunnerIds, failureMessage } = useAllowSessions(client);
   const [isAdding, setIsAdding] = useState(false);
 
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-  const machines = buildFleetMachines(runners, sessions);
+  const machines = buildFleetMachines(runners, sessionCounts);
   const now = useFleetNow(machines, timezone);
   const sections: ReadonlyArray<FleetSection> = [
-    { id: "machines", label: "Machines", count: describeMachinesTab(machines) },
+    { id: "machines", label: "Machines", count: describeMachinesSection(machines) },
   ];
-  const failedMachine =
-    failure === null ? undefined : machines.find(({ runner }) => runner.id === failure.runnerId);
-  const failedAllow =
-    failure === null || failedMachine === undefined
-      ? null
-      : `Could not allow ${String(failure.cap)} sessions on ${failedMachine.runner.name}: ${failure.message}`;
 
   return (
     <div className="fleet-page">
@@ -111,7 +100,7 @@ function FleetPage(): JSX.Element {
             now={now}
             isEmpty={isFleetEmpty(machines, record.localRunnerId)}
             pendingAllowRunnerIds={pendingRunnerIds}
-            failedAllow={failedAllow}
+            failedAllow={failureMessage}
             onOpen={(runnerId) => void navigate({ to: "/fleet/$runnerId", params: { runnerId } })}
             onAllow={allow}
             onAddMachine={() => setIsAdding(true)}

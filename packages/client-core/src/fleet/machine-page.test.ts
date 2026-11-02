@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Harness, Runner, RunnerFacts, Session } from "@hercule/contract";
+import type { Harness, Runner, RunnerFacts } from "@hercule/contract";
 import {
   ANTHROPIC_IDENTITY,
   BARE,
@@ -13,7 +13,6 @@ import {
 } from "../providers.testing";
 import {
   changeRunnerLabels,
-  countOpenThreads,
   describeMachineFacts,
   describeOfflineBanner,
   formatDiskLimit,
@@ -24,6 +23,7 @@ import {
   parseSessionCap,
   validateRunnerLabel,
 } from "./machine-page";
+import type { FleetMachine } from "./fleet";
 
 const GIB = 1024 ** 3;
 const TIMEZONE = "UTC";
@@ -83,28 +83,15 @@ describe("describeMachineFacts", () => {
     expect(describeMachineFacts(facts({ os: "freebsd" }))[0]).toBe("freebsd");
   });
 
+  it.each(["__proto__", "constructor", "toString", "hasOwnProperty"])(
+    "shows the operating system %s as the runner reported it",
+    (os) => {
+      expect(describeMachineFacts(facts({ os }))[0]).toBe(os);
+    },
+  );
+
   it("rounds memory to a whole gigabyte", () => {
     expect(describeMachineFacts(facts({ totalMemoryBytes: 15.6 * GIB }))[2]).toBe("16 GB memory");
-  });
-});
-
-describe("countOpenThreads", () => {
-  const session = (runnerId: string, kind: Session["kind"], status: Session["status"]) =>
-    ({ runnerId, kind, status }) as Session;
-
-  it("counts the threads on the runner that have not exited", () => {
-    expect(
-      countOpenThreads(
-        [
-          session("a", "thread", "queued"),
-          session("a", "thread", "busy"),
-          session("a", "thread", "exited"),
-          session("a", "agent", "busy"),
-          session("b", "thread", "busy"),
-        ],
-        "a",
-      ),
-    ).toBe(2);
   });
 });
 
@@ -116,34 +103,41 @@ describe("describeOfflineBanner", () => {
     lastSeenAt: "2026-11-02T09:12:00.000Z",
     ...overrides,
   });
+  const machine = (openThreads: number, overrides: Partial<Runner> = {}): FleetMachine => ({
+    runner: runner(overrides),
+    running: 0,
+    waiting: 0,
+    waitingThreads: 0,
+    openThreads,
+  });
   const join = (banner: ReturnType<typeof describeOfflineBanner>) =>
     `${banner.headline} ${banner.before}${banner.command}${banner.after}`;
 
   it("words the spec's banner, with the time the runner was last heard from", () => {
-    expect(join(describeOfflineBanner(runner(), 3, TIMEZONE, NOW))).toBe(
+    expect(join(describeOfflineBanner(machine(3), TIMEZONE, NOW))).toBe(
       "atlas has not been heard from since 09:12. It may be asleep, off the network, or without power. Its 3 threads can carry on once it is back, and work waiting for it starts then. If it does not come back by itself, start Hercule on it again: hercule service start. What you see below is from 09:12.",
     );
   });
 
   it("names the command to draw as code", () => {
-    expect(describeOfflineBanner(runner(), 3, TIMEZONE, NOW).command).toBe("hercule service start");
+    expect(describeOfflineBanner(machine(3), TIMEZONE, NOW).command).toBe("hercule service start");
   });
 
   it("says 1 thread in the singular", () => {
-    expect(join(describeOfflineBanner(runner(), 1, TIMEZONE, NOW))).toContain(
+    expect(join(describeOfflineBanner(machine(1), TIMEZONE, NOW))).toContain(
       "Its 1 thread can carry on",
     );
   });
 
   it("leaves the sentence about threads out at 0", () => {
-    const text = join(describeOfflineBanner(runner(), 0, TIMEZONE, NOW));
+    const text = join(describeOfflineBanner(machine(0), TIMEZONE, NOW));
 
     expect(text).not.toContain("thread");
     expect(text).toContain("without power. If it does not come back by itself");
   });
 
   it("words a runner that was never heard from without a time", () => {
-    expect(join(describeOfflineBanner(runner({ lastSeenAt: null }), 0, TIMEZONE, NOW))).toBe(
+    expect(join(describeOfflineBanner(machine(0, { lastSeenAt: null }), TIMEZONE, NOW))).toBe(
       "atlas has not been heard from. It may be asleep, off the network, or without power. If it does not come back by itself, start Hercule on it again: hercule service start.",
     );
   });

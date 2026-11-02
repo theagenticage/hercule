@@ -5,7 +5,8 @@
    such transition then, and base.css sets the duration tokens to 0s.
 
    Every rule is scoped to this transition's type, so a view transition that
-   something else starts later is not restyled. */
+   something else starts later is not restyled. The type, "fleet-machine", is
+   the one machine-transition.ts returns. */
 :root:active-view-transition-type(fleet-machine)::view-transition-group(*) {
   animation-duration: var(--dur-3);
   animation-timing-function: var(--ease-out);

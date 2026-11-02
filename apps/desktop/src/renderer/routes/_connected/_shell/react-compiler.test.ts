@@ -29,6 +29,7 @@ const PATHS = [
   join(HERE, "discussions"),
   join(HERE, "wiki"),
   join(HERE, "fleet"),
+  join(SCREENS, "fleet"),
   join(SCREENS, "workflows"),
   join(SCREENS, "discussions"),
   join(SCREENS, "wiki"),

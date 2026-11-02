@@ -3,13 +3,12 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import {
-  buildFleetMachines,
+  buildFleetMachine,
   decideMachineKind,
   describeMachineStatus,
   describeRoom,
 } from "@hercule/client-core/fleet";
 import {
-  countOpenThreads,
   describeMachineFacts,
   describeOfflineBanner,
   isRunnerBehind,
@@ -37,6 +36,7 @@ import { NotFound } from "../../../../screens/not-found";
 import { MachineRetireDialog } from "./-machine-retire-dialog";
 import { MachineSettings } from "./-machine-settings";
 import { MachineSoftware } from "./-machine-software";
+import { useRunnerSessionCounts } from "./-session-counts";
 
 /** The ids of the page's sections, which the header's jump links scroll to. */
 const SOFTWARE_ID = "machine-software";
@@ -108,8 +108,7 @@ function MachinePage(): JSX.Element {
 function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   const { controller } = Route.useRouteContext();
   const { client } = controller;
-  const { data: runners } = useSuspenseQuery(runnersQuery(client));
-  const { data: sessions } = useSuspenseQuery(fleetSessionsQuery(client));
+  const sessionCounts = useRunnerSessionCounts(client);
   const { data: controllerRecord } = useSuspenseQuery(controllerQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -119,11 +118,9 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
 
   const timezone = resolveDisplayTimezone(settings.user.timezone);
   const kind = decideMachineKind(runner.facts);
-  const machine = buildFleetMachines(runners, sessions).find(
-    (each) => each.runner.id === runner.id,
-  );
-  const now = useFleetNow(machine === undefined ? [] : [machine], timezone);
-  const room = machine === undefined ? null : describeRoom(machine);
+  const machine = buildFleetMachine(runner, sessionCounts);
+  const now = useFleetNow([machine], timezone);
+  const room = describeRoom(machine);
 
   return (
     <>
@@ -145,14 +142,9 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
             runnerVersion={runner.version}
             isRunnerBehind={isRunnerBehind(runner.version, controllerRecord.version)}
           />
-          {room === null || room.line === null ? (
+          {room.line === null ? (
             <MachinePageBanner
-              banner={describeOfflineBanner(
-                runner,
-                countOpenThreads(sessions, runner.id),
-                timezone,
-                now,
-              )}
+              banner={describeOfflineBanner(machine, timezone, now)}
               onRetire={() => setRetiring(true)}
             />
           ) : (

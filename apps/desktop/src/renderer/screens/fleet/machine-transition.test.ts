@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideMachineTransitionTypes, MACHINE_TRANSITION_TYPE } from "./machine-transition";
+import { decideMachineTransitionTypes } from "./machine-transition";
 
 const move = (from: string | undefined, to: string, isMotionReduced = false) =>
   decideMachineTransitionTypes(
@@ -16,7 +16,8 @@ describe("decideMachineTransitionTypes", () => {
     ["going back to Fleet", "/fleet/runner-1", "/fleet"],
     ["a path with a trailing slash", "/fleet/", "/fleet/runner-1/"],
   ])("runs the machine transition for %s", (_, from, to) => {
-    expect(move(from, to)).toEqual([MACHINE_TRANSITION_TYPE]);
+    // "fleet-machine" is the type machine-transition.css selects on, spelled out there too.
+    expect(move(from, to)).toEqual(["fleet-machine"]);
   });
 
   it.each([

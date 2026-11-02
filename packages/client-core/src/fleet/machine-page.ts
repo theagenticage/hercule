@@ -16,12 +16,12 @@ import {
   type ProviderAccount,
   type Runner,
   type RunnerFacts,
-  type Session,
 } from "@hercule/contract";
 import { listProviderAccountMachines } from "../provider-account-machines";
 import { buildProviderAccountName } from "../provider-accounts";
-import { formatShortMoment } from "../time-context";
 import { parseWholeNumber } from "../whole-number";
+import type { FleetMachine } from "./fleet";
+import { formatLastSeen } from "./last-seen";
 
 /** A release version: three numbers, with optional build metadata after a plus. */
 const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/;
@@ -50,11 +50,13 @@ export const isRunnerBehind = (
   return false;
 };
 
-const OS_NAMES: Readonly<Record<string, string>> = {
-  darwin: "macOS",
-  linux: "Linux",
-  win32: "Windows",
-};
+// A Map, not an object: the operating system is text the runner reported, and
+// an object would answer "__proto__" or "constructor" with a value of its own.
+const OS_NAMES: ReadonlyMap<string, string> = new Map([
+  ["darwin", "macOS"],
+  ["linux", "Linux"],
+  ["win32", "Windows"],
+]);
 
 const BYTES_PER_GIBIBYTE = 1024 ** 3;
 
@@ -70,20 +72,10 @@ const BYTES_PER_GIBIBYTE = 1024 ** 3;
  * 10^9 bytes; each is the number its own tool shows the user.
  */
 export const describeMachineFacts = (facts: RunnerFacts): readonly string[] => [
-  OS_NAMES[facts.os] ?? facts.os,
+  OS_NAMES.get(facts.os) ?? facts.os,
   facts.arch,
   `${String(Math.round(facts.totalMemoryBytes / BYTES_PER_GIBIBYTE))} GB memory`,
 ];
-
-/**
- * Counts the Thread sessions on the runner `runnerId` that have not exited.
- * These are the threads that carry on once an offline machine is back.
- */
-export const countOpenThreads = (sessions: readonly Session[], runnerId: string): number =>
-  sessions.filter(
-    (session) =>
-      session.runnerId === runnerId && session.kind === "thread" && session.status !== "exited",
-  ).length;
 
 /**
  * The words of the banner an offline or unreachable machine shows. `headline`
@@ -103,23 +95,19 @@ export interface OfflineBanner {
  * Builds the offline banner of a machine: when it was last heard from, what
  * may have happened, how many threads wait for it, and how to start it again.
  *
- * - `openThreads` is the number of Thread sessions that have not exited on it
- *   (`countOpenThreads`). The sentence about them is left out at 0.
+ * - The machine's `openThreads` are the Threads that carry on once it is back.
+ *   The sentence about them is left out at 0.
  * - A runner never heard from has no time to name: the banner says it has not
  *   been heard from, and drops the closing sentence that dates what the page
  *   shows.
  * - Times are shown in `timezone`, relative to `now`.
  */
 export const describeOfflineBanner = (
-  runner: Runner,
-  openThreads: number,
+  { runner, openThreads }: FleetMachine,
   timezone: string,
   now: Date,
 ): OfflineBanner => {
-  const seen =
-    runner.lastSeenAt === null
-      ? undefined
-      : formatShortMoment(new Date(runner.lastSeenAt), now, timezone);
+  const seen = formatLastSeen(runner, timezone, now) ?? undefined;
   const threads =
     openThreads === 0
       ? ""

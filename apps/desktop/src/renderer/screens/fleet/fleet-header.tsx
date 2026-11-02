@@ -106,7 +106,7 @@ function FleetHeaderTitle({ place }: { readonly place: FleetHeaderPlace }): JSX.
           <FleetCrumb />
           <span className="ptab is-name" aria-current="page">
             <MachineIcon kind={place.machine.kind} size={14} />
-            {place.machine.name}
+            <span className="fleet-header-name">{place.machine.name}</span>
           </span>
         </>
       );

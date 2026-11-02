@@ -7,7 +7,7 @@ import { isMotionReduced } from "../workflows/change-motion";
  * under the header. It must equal `--fleet-header-clearance` in
  * fleet-scroll.css, which the sections' `scroll-margin-top` reads.
  */
-export const FLEET_HEADER_CLEARANCE_PX = 80;
+const FLEET_HEADER_CLEARANCE_PX = 80;
 
 /** The result of `useSectionInView`. */
 export interface SectionInView {
