@@ -459,15 +459,16 @@ Invariants: at most one primary workspace per (resource, runner). Primaries are 
 
 *(Amended 2026-09-27, [#263](https://github.com/theagenticage/hercule/issues/263), [ADR 0036](../adr/0036-a-workspace-is-kept-by-leases-its-holders-release.md).)* **A workspace is kept by its leases.** Each session and each run that opens or joins a workspace holds a Workspace Lease on it, active until the holder releases it; at release the holder picks a retention (`none`, `orphan`, `idle`, `inspection`) and the time the workspace is kept until is fixed then. `sessionIds` lists the sessions holding an active lease. `keptUntil` (`Timestamp | null`) is the latest kept-until time of the workspace's leases, set only for an ephemeral workspace that is not deleted and has no active lease; a later settings change does not move it.
 
-*(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* **A workspace records what it holds on disk.** `measurement` is `{ sizeBytes, freesBytes, uncommittedFiles, measuredAt, error } | null`, as the workspace's runner last measured it ([03-controller-and-runners.md](./03-controller-and-runners.md) section 6.9):
+*(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* **A workspace records what it holds on disk.** `measurement` is `{ sizeBytes, freesBytes, uncommittedFiles, measuredAt } | null`, as the workspace's runner last measured it ([03-controller-and-runners.md](./03-controller-and-runners.md) section 6.9):
 
 - `sizeBytes`: the disk space the workspace's files take, counted in allocated blocks, not file lengths.
 - `freesBytes`: the part of `sizeBytes` that removing the workspace gives back: the files no other path links to. pnpm hard-links `node_modules` to its store, so those files take space but removing them frees none.
 - `uncommittedFiles`: how many files hold work Git does not have: tracked files with changes and untracked files, in every checkout, plus files at a multi-repo root. Ignored files are not counted.
 - `measuredAt`: when the runner measured it.
-- `error`: why the newest attempt to measure it failed, such as "Measuring took longer than 10 minutes", or null. A failed attempt keeps the earlier numbers and their `measuredAt`.
 
-`measurement` is null until the first measurement, and always null for an adopted main workspace, which is the user's own checkout and is never measured. Idle time is read from the existing `lastUsedAt`, which a session's start and exit set. These are properties of a workspace, with no term of their own.
+`measurementError` (`string | null`) is why the newest attempt to measure it failed, such as "Measuring took longer than 10 minutes", or null when it succeeded. It is a field of its own so a first attempt can fail with no numbers to keep: a failed attempt leaves `measurement` as it was, null included.
+
+`measurement` is null until the first successful measurement, and always null for an adopted main workspace, which is the user's own checkout and is never measured. Idle time is read from the existing `lastUsedAt`, which a session's start and exit set. These are properties of a workspace, with no term of their own.
 
 *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* The user-facing word for a primary is **main workspace**. `primary` is the kind in code, on the wire and in the database; "main workspace" is what every label, menu row and help text a person reads calls it. "Current checkout", "shared checkout" and "main checkout" are retired.
 
