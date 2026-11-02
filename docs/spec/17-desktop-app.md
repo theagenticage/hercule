@@ -638,15 +638,15 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - A done row ~~is drawn at 60% opacity~~ *(Amended 2026-10-27, [#867](https://github.com/theagenticage/hercule/issues/867).)* recedes through colour, as a working row does: its title is drawn in `--muted`, and in `--ink` under the pointer or with focus. Its detail is the time since it was marked done, its status slot holds a Reopen button, and ~~it has no hover card~~ *(Amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828).)* it has a hover card, the same as a row in a project: the full title, the project, the machine and the branch, then each session of the row, Agent sessions too. Reopening puts the row back at the top of its project. *(Amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828).)* Reopen reopens every Thread of the row, with one Undo ("Reopened" or "Reopened 3"). The row climbs to the top of its project because reopening moves when the row last started.
   - The selected thread, when it is done, always has a row on the shelf, even when the shelf is closed or the row is past the ones shown.
   - The shelf's rows are part of the virtualized list, so a shelf of hundreds of threads mounts no more rows than fit.
-- *(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972), [ADR 0050](../adr/0050-archived-threads-and-their-workspaces.md).)* **Archiving a row.** Archived is final, where Done can be undone ([GLOSSARY](../../GLOSSARY.md) Archived). It acts on a row, as Done does: every Thread of the row, and the Agent sessions they started, in one `session.archive` call.
+- *(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972), [ADR 0050](../adr/0050-archived-threads-and-their-workspaces.md).)* **Archiving a row.** Archived is final, where Done can be undone ([GLOSSARY](../../GLOSSARY.md) Archived). It acts on a row, as Done does: every Thread of the row in one `session.archive` call, and with them, because the call archives the workspace's last Threads, every Agent session of the row.
   - **From the thread's header:** More (⋯) is no longer inert. It opens a menu with one entry, "Archive…". *(Open for Rogier's review: the decision put archiving in the header; More is the place for a rare act that cannot be undone, so Done keeps its button.)*
   - **From the Done shelf:** a shelf row's status slot holds Reopen and, beside it, Archive. The shelf's header, while the shelf is open, has "Archive all", which archives every row the shelf holds.
   - **From the Fleet screen's cleanup dialog**, which archives the Threads of the workspaces it removes ([The cleanup dialog](#the-cleanup-dialog)).
-  - **The confirmation** is a glass dialog: "Archive Ship v2.4?" (or "Archive 12 rows?"), then "Its threads leave the sidebar for good and can never be resumed. Their transcripts stay readable. Hercule removes the workspace once nobody has used it for 7 days, unless it holds uncommitted files.", with Keep it and Archive. There is no Undo, and the toast says only "Archived" or "Archived 12".
-  - **A row that works cannot be archived:** while one of its sessions is queued, starting or busy, the menu entry and the shelf's Archive are disabled, with the reason as their tooltip ("Ship v2.4 is working. Stop it first."). "Archive all" skips such rows and says how many it skipped.
-  - **An archived row leaves the sidebar,** the Done shelf, Waiting on you and the Office at once: their reads pass `archived: false`. There is no list of archived threads in v1.
+  - **The confirmation** is a glass dialog: "Archive Ship v2.4?" (or "Archive 12 rows?"), then "Its threads leave the sidebar for good and can never be resumed. Their transcripts stay readable. Hercule removes the workspace once nobody has used it for 7 days, unless it holds uncommitted files.", with Keep it and Archive. There is no Undo, and the toast reads only "Archived" or "Archived 12".
+  - **A row that works cannot be archived:** while one of its sessions is queued, starting or busy, the menu entry and the shelf's Archive are disabled, with the reason as their tooltip ("Ship v2.4 is working. Stop it first."). "Archive all" skips such rows and shows how many it skipped. It archives at most 500 Threads in one call, the oldest rows first; with more on the shelf, its toast shows how many are left.
+  - **An archived row leaves the sidebar,** the Done shelf, Waiting on you and the Office at once: their reads pass `archived: false`. There is no list of archived threads in v1. This is the one exception to "the selected thread, when it is done, always has a row on the shelf": an archived thread that is open has no row anywhere in the sidebar.
   - **An archived thread opened from a link,** such as a notification, a run's page or a Discussion, shows its transcript, a header with "Archived 2 Nov" in place of Done and More, and in place of the composer the line "This thread is archived. Start a new thread to carry on." with New thread.
-  - **A thread that cannot be resumed says why.** The composer's placeholder of an exited Thread that cannot be resumed names the real reason, from `findResumeBlockedReason` with the session and its workspace: "it is archived", "its workspace was removed", "its transcript is gone" or "its runner was retired". Until now every such Thread with a transcript said its runner was retired.
+  - **A thread that cannot be resumed shows why.** The composer's placeholder of an exited Thread that cannot be resumed names the real reason, from `findResumeBlockedReason` with the session and its workspace: "it is archived", "its workspace was removed", "its transcript is gone" or "its runner was retired". Until now every such Thread with a transcript said its runner was retired.
   - **What archiving costs:** no process, no timer, no new read; the sidebar's one read gains the `archived: false` filter, and a move reads the list again once the controller answers, as Done does. Bundle bytes: the confirmation dialog, in the shell's chunk.
 - *(Added 2026-10-13, [#626](https://github.com/theagenticage/hercule/issues/626).)* **What the rows and the Done moves cost.** No process, no polling, no live topic and no new read: a move writes the thread list already read and reads it again once the controller answers. The only timer is the toast's five seconds, running only while a toast shows. The Done button's crossfade changes only opacity. ~~A working row's recede changes only opacity.~~ *(Amended 2026-10-27, [#867](https://github.com/theagenticage/hercule/issues/867).)* A row's recede changes only the colour of its title. A row shrinks from 59px to 52px, so the virtualized list mounts a few more rows for the same height. Bundle bytes: two small modules in the shell's chunk, the Done moves and the toast, and the shelf's and the status slot's functions in `@hercule/client-core`. No number is recorded in [Measured](#measured): the perf script measures launch, memory, streaming and the sidebar's hide, show and drag, but not how many rows a list of 500 threads mounts or how many rows a live push redraws. Measuring those needs a new scenario in the perf script. *(Amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828).)* "What rows of sessions cost", below, states the cost of the grouped rows, and the read that feeds them replaces the one this bullet names.
 - *(Added 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828).)* **A row is the sessions of one workspace in which a Thread works.** Until now a row was one Thread. The sidebar now holds Threads and Agent sessions (`Session.kind` `thread` and `agent`, [spec 02](./02-domain-model.md) Session), and `buildSessionGroups` in `@hercule/client-core` makes the rows. Where this document says "thread row", read "row": a row of one session is exactly the row described above, with no dots, no unfold, the same hover card and the same Done button.
@@ -1936,9 +1936,10 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 
 *(Added 2026-11-02, [Desktop Fleet: the design and its tickets (#972)](https://github.com/theagenticage/hercule/issues/972).)* The Fleet screen shows every machine at a glance: what needs the user, how full each machine is getting, what runs where, and the software on all of them. It is where the user acts on what they see: allow more sessions, clean up a disk, sign an account in. The book does not draw it.
 
-- **The pixel reference** is the prototype on branch [`prototype/fleet-page`](https://github.com/theagenticage/hercule/tree/prototype/fleet-page), variant G: `pnpm prototype:fleet`, then `specimens/fleet-prototype.html?variant=G` (`&view=list` for the list, `&theme=` for any theme). Its **Data check** toggle marks what needs data the controller did not have when it was drawn. Where this text and the prototype disagree, the prototype decides a measurement and this text decides a behaviour. The prototype draws buttons v1 does not build (Update, Install, "Review and update"); they stay there as the reference for [#974](https://github.com/theagenticage/hercule/issues/974), and v1 draws none of them.
+- **The pixel reference** is the prototype on branch [`prototype/fleet-page`](https://github.com/theagenticage/hercule/tree/prototype/fleet-page), variant G: `pnpm prototype:fleet`, then `specimens/fleet-prototype.html?variant=G` (`&view=list` for the list, `&theme=` for any theme). Its **Data check** toggle marks what needs data the controller did not have when it was drawn. Where this text and the prototype disagree, the prototype decides a measurement and this text decides a behaviour, until slice 50 records the Fleet goldens. From then on the goldens and `tokens.css` decide a measurement, as for every screen ([ADR 0047](../adr/0047-the-desktop-app-is-its-own-pixel-reference.md)), and the prototype is only the record of the design. The prototype draws buttons v1 does not build (Update, Install, "Review and update"); they stay there as the reference for [#974](https://github.com/theagenticage/hercule/issues/974), and v1 draws none of them.
 - **Desktop only.** The web app's Fleet screen keeps what it shows today; giving it the new data is [#977](https://github.com/theagenticage/hercule/issues/977).
 - **Retired machines are not shown,** anywhere on the screen.
+- **Sizes are in GB of 10⁹ bytes,** as macOS's Finder counts them, with one decimal under 100 GB. So the default disk limit, 10 GiB, shows as 10.7 GB.
 
 ### The routes and the way in
 
@@ -1946,7 +1947,7 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 - **The Hercule face's Fleet row opens `/fleet`,** and is selected while any Fleet route is open. It no longer leads to Settings › Machines. The Fleet screen shows the Hercule face, as Workflows does.
 - **Settings › Machines stays in the Settings list, drawn and inert** ("Not built yet"). The machine page holds everything it was to hold. What it becomes, the home of settings for runners as a whole, is [#979](https://github.com/theagenticage/hercule/issues/979). It replaces [#417](https://github.com/theagenticage/hercule/issues/417) and slice 18.
 - **The header** is the pill the Workflows pages use: the title "Fleet", then the jump links of the open page, which scroll to its sections and light the one in view (Machines, Software on the Fleet page; the machine page's sections on a machine's page). On a machine's page the title is the crumb "Fleet / atlas", and on its activity "Fleet / atlas / Activity", each part a link. The primary button, on every Fleet route, is "Add a machine".
-- **Add a machine** opens a glass dialog with the join command and the open join tokens, each with Revoke, as the web's Add a machine has them (`runner.createJoinToken`, `runner.queryJoinTokens`, `runner.revokeJoinToken`).
+- **Add a machine** opens a glass dialog with the join command and the open join tokens, each with Revoke, as the web's Add a machine shows them (`runner.createJoinToken`, `runner.queryJoinTokens`, `runner.revokeJoinToken`).
 - **Moving between pages** is a view transition: the card or row the user pressed grows into the machine page's head, and back. Under Reduce Motion it is a cut.
 
 ### The Fleet page
@@ -1975,14 +1976,14 @@ A click anywhere else on the card opens the machine's page.
 
 | Hue | When | The line | Its button |
 |---|---|---|---|
-| `--fail` | offline or unreachable | "Offline since 09:12" or "Not heard from since 09:12" | none; the machine's page says what to do |
+| `--fail` | offline or unreachable | "Offline since 09:12" or "Not heard from since 09:12" | none; the machine's page shows what to do |
 | `--fail` | free disk below the disk limit | "Disk below its limit. It takes no new sessions." | Clean up… |
 | `--you` | Threads waiting for a slot | "3 threads wait for a slot" | Allow 15 |
 | `--you` | disk 85% full or more | "Disk 87% full" | Clean up… |
 | `--you` | the forecast reaches the limit within 21 days | "Disk reaches its limit in about 12 days" | Clean up… |
 
 - A machine needs the user when any row applies. The card's line is the first that applies, in the table's order.
-- **Allow N** sets the session cap to the sessions running plus the sessions waiting (`runner.update { maxConcurrentSessions }`), so every waiting Thread starts. Its tooltip says so: "Lets 15 sessions run here at once: the 12 running and the 3 waiting."
+- **Allow N** sets the session cap to the sessions running plus the sessions waiting (`runner.update { maxConcurrentSessions }`), so every waiting Thread starts. Its tooltip explains it: "Lets 15 sessions run here at once: the 12 running and the 3 waiting."
 - **Clean up…** opens the cleanup dialog for that machine (below).
 - **The gauges.** Disk is `--you` from 85% and `--fail` below its limit. Memory is `--you` from 80% and `--fail` from 92%, but memory never makes a machine need the user: a session's tools, a `dotnet build` or a container, use memory the session cannot be blamed for, and the number swings.
 - **Software updates are quiet:** "2 updates" in `--muted` under the line, never a hue, and never counted in the lead.
@@ -1993,7 +1994,7 @@ A click anywhere else on the card opens the machine's page.
 
 Tools down, machines across, in two groups: **Harnesses** (the Hercule runner first, then each harness) and **Toolchains** (the fixed list of [./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.6). A column per online or recently seen machine, in the order of the cards, and a **Newest** column after the tool's name.
 
-- **Newest** is, for a harness, the version this Hercule release pins, `harness.query`'s `pinnedVersion`; for the Hercule runner, the controller's own version; for a toolchain, the newest version found on any online machine. Its tooltip says which rule it follows. There are no pins of the user's own in v1.
+- **Newest** is, for a harness, the version this Hercule release pins, `harness.query`'s `pinnedVersion`; for the Hercule runner, the controller's own version; for a toolchain, the newest version found on any online machine. Its tooltip names the rule it follows. There are no pins of the user's own in v1.
 - **A cell** is a check in `--ok` where the machine has the newest version or a newer one, the older version in `--you-ink` where it does not, and a short dash in `--faint` where the tool is not installed. A machine that is offline shows its last known versions in `--muted`.
 - **A key line** under the grid explains the three cells: the check icon and "newest", "1.2.3 older", and the dash and "not installed".
 - **A tool's name opens its row's detail,** in place under the row: one line on what the tool is (from a fixed list in `@hercule/client-core`), Newest and its rule, and the machines by version. The prototype's release notes are left out: nothing reads them.
@@ -2005,7 +2006,7 @@ Tools down, machines across, in two groups: **Harnesses** (the Hercule runner fi
 One centred column, in this order. The jump links of the header follow the sections.
 
 1. **The head:** the icon, the name, the status dot and word, and under the name its OS and architecture, RAM and disk size, and "Runner 0.9.3", with "update available" in `--muted` when the controller is newer. Then the **room line**, which says how many more sessions can start and what limits it: "Room for 4 more, under its cap of 16", "No room: its disk is below its limit, so it takes no new sessions", "No room: it takes no new work". `describeRoom` builds it.
-2. **An offline or unreachable machine** shows a banner under the head instead: "atlas has not been heard from since 09:12. It may be asleep, off the network, or without power. 3 threads that started there wait for it, and resume when it is back. If it does not reconnect by itself, run `hercule runner start` on it. What you see below is from 09:12.", with Retire… at its right.
+2. **An offline or unreachable machine** shows a banner under the head instead: "atlas has not been heard from since 09:12. It may be asleep, off the network, or without power. Its 3 threads can carry on once it is back, and work waiting for it starts then. If it does not come back by itself, start Hercule on it again: `hercule service start`. What you see below is from 09:12.", with Retire… at its right. `hercule service start` starts the runner's Service Unit (spec 15); a machine that runs `hercule runner` in a terminal is started the same way it was.
 3. **The instruments,** four graphs drawn from the stored metrics ([Graphs and the forecast](#graphs-and-the-forecast)):
    - **Sessions**, the last 24 hours: the sessions running in each 5 minutes, with the minutes in which Threads waited in marigold, and the cap as a line;
    - **CPU**, the last 24 hours: the average as a line and the peak as a band;
@@ -2013,8 +2014,8 @@ One centred column, in this order. The jump links of the header follow the secti
    - **Disk**, the last 14 days: space in use, the limit as a line, and the forecast as a dashed line when it shows ("Reaches its limit in about 12 days").
 4. **Running here,** the work on this machine now (below).
 5. **Storage:** the disk as one bar in parts, each with its size: Workspaces in use, Idle without changes, Idle with changes, Repository caches, Session data (the Harness Homes), Not Hercule's, and Free. Under the bar:
-   - **one line on automatic cleanup**, "Hercule cleans up by itself. Last: removed 2 workspaces of finished runs, yesterday.", with an info button whose popover lists the rules: "When Hercule removes a workspace by itself: a workflow run's workspace, as soon as the run finishes, or 14 days after it failed; a thread's workspace, once every thread in it is archived, nobody has used it for 7 days, and it has no uncommitted files. Everything else stays until you clean it up." The last removal is the newest `workspace.deleted` with a sweep's reason in the machine's activity;
-   - **Largest idle workspaces:** the five largest workspaces idle for 7 days or more, each with its name (the row's name for a Thread workspace, the run's for a run's), its size, what removing it frees, when it was last used, and "4 uncommitted files" in `--you-ink` when it has some;
+   - **one line on automatic cleanup**, "Hercule cleans up by itself. Last: removed 2 workspaces of finished runs, yesterday.", with an info button whose popover lists the rules: "When Hercule removes a workspace by itself: a workflow run's workspace, as soon as the run finishes, or 14 days after it failed, if it holds no uncommitted or ignored files; a thread's workspace, once every thread in it is archived, nobody has used it for 7 days, and it has no uncommitted files. Everything else stays until you clean it up." The last removal is the newest `workspace.deleted` with a sweep's reason in the machine's activity;
+   - **Largest idle workspaces:** the five largest ephemeral workspaces that a Thread used and that have been idle for 7 days or more, each with its name (the row's name for a Thread workspace, the run's for a run's), its size, what removing it frees, when it was last used, and "4 uncommitted files" in `--you-ink` when it has some. A workspace whose last measuring failed shows the numbers' age and why, in `--muted`: "Sizes from 3 days ago: measuring took longer than 10 minutes.";
    - **Clean up…**, which opens the cleanup dialog.
 
    A machine whose runner does not measure storage shows the bar's Free part and the line "This machine's runner is too old to measure its storage. Update it to see what fills the disk." in place of the rest.
@@ -2035,18 +2036,18 @@ One centred column, in this order. The jump links of the header follow the secti
 
 ### The cleanup dialog
 
-A glass dialog, "Clean up atlas", opened by every Clean up… button. It lists the machine's managed workspaces that are idle (7 days without a session starting or exiting in them) and held by no session or run, in three groups:
+A glass dialog, "Clean up atlas", opened by every Clean up… button. It lists the machine's ephemeral workspaces that a Thread used, that are idle (7 days without a session starting or exiting in them) and that no session or run holds, at most 200, largest first, in three groups. Main workspaces and workflow runs' workspaces are never listed: a main workspace is removed on its own, and a run's workspace goes by its run's rules.
 
 - **Threads Done**, "Not used for a week or more, and every thread in them is Done." Ticked when the dialog opens.
 - **Threads not Done**, "Some threads here are not Done. Removing marks them Done and archives them."
 - **Uncommitted changes**, "Their changes were never committed. Removing one discards them." A workspace with uncommitted files is in this group whatever its threads.
 
-A workflow run's idle workspace, kept for inspection, is in the first group, named by its run. Each row has a checkbox, the name, what removing it frees, when it was last used, and in the third group the number of files. The groups' heads tick all of a group.
+Each row has a checkbox, the name, what removing it frees, when it was last used, and in the third group the number of files. The groups' heads tick all of a group.
 
 - **Opening it re-checks** the listed workspaces (`workspace.measure`). While the runner answers, the list shows "Checking…" in place of the numbers, and the button waits. A workspace that changed group moves to its new group, unticked if it moved into Uncommitted changes.
-- **The button** reads "Archive and remove 6, frees 41 GB", or "Archive and remove 6, discarding changes in 2, frees 41 GB" when it would throw changes away. It calls `session.archive` for the Threads of the ticked workspaces that are not archived yet, then `workspace.disposeMany` with `discardChanges` for the ticked ones in the third group. `archiveAndRemoveWorkspaces` in `@hercule/client-core` makes the two calls. A refused archive (a Thread started working again) removes nothing, and the dialog shows the controller's message.
+- **The button** reads "Archive and remove 6, frees 41 GB", or "Archive and remove 6, discarding changes in 2, frees 41 GB" when it would throw changes away. It calls `session.archive` for the Threads of the ticked workspaces that are not archived yet, then `workspace.disposeMany` with `discardChanges` for the ticked ones in the third group. `archiveAndRemoveWorkspaces` in `@hercule/client-core` makes the two calls. A refused archive (a Thread started working again) removes nothing, and the dialog shows the controller's message. When the ticked workspaces hold more than 500 Threads, the button is disabled with the hint "Tick fewer: one cleanup archives at most 500 threads."
 - **The result.** Each ticked row shows "Removing…" until the `workspace` topic reports its workspace deleted or back with a reason. When every row has an outcome, the dialog closes and the page's toast reads "Archived 9 threads and removed 6 workspaces. 41 GB freed." A workspace that was refused, at once or by its runner, keeps the dialog open, with its row marked and the reason under it. Closing the dialog while rows are still removing leaves the removals running; the toast follows when they end.
-- **Removing deletes everything in the workspace,** ignored files such as `node_modules` and `.env` included, because its Threads are then archived. The dialog's foot says so in one line.
+- **Removing deletes everything in the workspace,** ignored files such as `node_modules` and `.env` included, because its Threads are then archived. One line at the dialog's foot states it.
 - A machine with nothing idle shows "Nothing to clean up. Every workspace here was used in the last 7 days." and Close.
 - **Clean up… is disabled while the machine is offline or unreachable,** with the tooltip "atlas is offline. Cleaning up needs it online."
 
@@ -2056,21 +2057,24 @@ A workflow run's idle workspace, kept for inspection, is in the first group, nam
 
 - **What is in it:** the machine connecting, going offline or unreachable, and coming back (`runner.stateChanged`); joining (`runner.joined`); its settings changing (`runner.updated`, `runner.drained`, `runner.undrained`); taking or refusing new sessions on its disk limit (`runner.placementsChanged`); workspaces removed, refused or asked to be removed (`workspace.deleted` and its kin); sessions spawned, stopped, reconciled and archived; an account signed in here (`providerAccount.signedIn`).
 - **Problems** are the entries in `--fail`: going offline or unreachable, a removal refused, a session reconciled as lost, and the disk falling below its limit.
-- **Each entry** is its time, one sentence (`describeMachineActivity` in `@hercule/client-core`), and who did it: "you", a session's face and title, or "Hercule" for the controller's own acts. Several entries of one kind in one minute, such as 12 sessions spawned by one run, fold into one entry, "12 sessions spawned for Ship release", which unfolds.
+- **Each entry** is its time, one sentence (`describeMachineActivity` in `@hercule/client-core`) per kind of [./04-state-store.md](./04-state-store.md#events-by-runner)'s list, and who did it: "you", a session's face and title, or "Hercule" for the controller's own acts. Several entries of one kind in one minute, such as 12 sessions spawned by one run, fold into one entry, "12 sessions spawned for Ship release", which unfolds.
 - It reads a page at a time as it scrolls, and the list is virtualized (rule 1).
-- **Nothing is invented:** harness installs, version changes and probes are not in the audit log, so they never show. The page makes no promise of how far back it reaches, and says nothing about it ([#101](https://github.com/theagenticage/hercule/issues/101) prunes the log).
+- **Nothing is invented:** harness installs, version changes and probes are not in the audit log, so they never show. The page makes no promise of how far back it reaches, and does not mention it ([#101](https://github.com/theagenticage/hercule/issues/101) prunes the log).
 
 ### Graphs and the forecast
 
-- **The reads.** The Fleet page reads every runner's hour points of the last 7 days once as it opens, for the forecasts, and again on a `runner` nudge at most once an hour. A machine's page reads its five-minute points of the last 24 hours and its hour points of the last 14 days as it opens, then, on each `runner` nudge naming the machine, only the points after the newest it holds ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 4.3). Nothing polls.
+- **The reads.** The Fleet routes subscribe to `runnerMetrics` while open ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 4.3).
+  - The Fleet page reads every runner's hour points of the last 7 days once as it opens, for the forecasts, and again on a nudge at most once an hour. On each nudge it reads `runner.query` again, for the latest metrics on the cards.
+  - A machine's page reads its five-minute points of the last 24 hours and its hour points of the last 14 days as it opens. On each nudge naming the machine, it reads from the start of its newest five-minute point, replaces that point, which was still filling, and appends the rest; the hour points the same way, at most once an hour.
+  - Nothing polls.
 - **Gaps** are drawn as gaps: a point the controller has no row for is missing, never zero. A machine with less history than the graph's range draws what it has from the right.
 - **The graphs are SVG paths** in the page's own component, with no chart library. One path per series, rebuilt only when a point arrives.
 - **The forecast** (`forecastDiskLimit` in `@hercule/client-core`): a least-squares straight line through the free space of the hourly points of the last 7 days, extended to the disk limit.
-  - It is shown only when the line reaches the limit within 60 days.
+  - It is shown when the line reaches the limit within 60 days. It makes the machine need the user only within 21 days (the table above).
   - It needs 2 days of points.
   - It starts again after a jump in free space of more than 10% of the disk between two hours, such as a cleanup: only the points after the jump count, and the 2 days start again.
   - It is worded as an estimate, in days ("in about 12 days"), never a date.
-- **A machine whose runner reports no CPU** shows the CPU graph's frame with "This machine's runner is too old to report CPU. Update it." A machine without `diskTotalBytes` shows free space without a percentage, and its disk gauge is empty.
+- **A machine whose runner reports no CPU** shows the CPU graph's frame with "This machine's runner is too old to report CPU. Update it." A machine without `diskTotalBytes` shows free space without a percentage, and its disk gauge is empty. Each of these lines names what to do; none is a silent blank.
 
 ### What the Fleet pages read
 
@@ -2083,13 +2087,13 @@ A workflow run's idle workspace, kept for inspection, is in the first group, nam
 | Harness versions and Newest | `harness.query`, with each harness's `pinnedVersion`; the runner's Newest is `controller.read`'s version |
 | Accounts signed in here | `providerAccount.query`, per runner sign-in state |
 | Toolchain versions | the runners' facts |
-| Storage, idle workspaces | `workspace.query({ runnerId })`, with `measurement` |
+| Storage, idle workspaces | `workspace.query({ runnerId })`, with `measurement`, every page of it (500 a page) |
 | Cleanup | `workspace.measure`, `session.archive`, `workspace.disposeMany` |
 | Activity | `event.query({ runnerId })` |
 | Settings | `runner.update`, `runner.drain`, `runner.undrain`, `runner.retire` |
 | Add a machine | `runner.createJoinToken`, `runner.queryJoinTokens`, `runner.revokeJoinToken` |
 
-Live topics while a Fleet route is open: `runner`, `session`, `provider` and `workspace`. The shell already holds `session`.
+Live topics while a Fleet route is open: `runner`, `runnerMetrics`, `session`, `provider` and `workspace`. The shell already holds `session`.
 
 ### What Fleet costs
 
@@ -2099,11 +2103,12 @@ Stated before the slices build it ([Performance](#performance), as ADR 0037 asks
 |---|---|---|
 | Processes | none added | the perf script's process count, with Fleet open |
 | Memory | the page's reads: one record per runner, its open sessions, and 168 hour points per runner (about 20 KB of JSON each). A machine's page adds 288 five-minute points and 336 hour points (about 60 KB) | the perf script, with the Fleet page and then a machine's page open |
-| Idle | no timer, no polling, no animation. Each `runner` nudge, one a minute per machine, costs one small read on a machine's page and nothing on the Fleet page between its hourly reads | the perf script's idle sample, with a machine's page open |
+| Idle | no timer, no polling, no animation. Each `runnerMetrics` nudge, one a minute per machine, coalesced, costs one `runner.query` on the Fleet page, and one small points read on a machine's page. No other screen subscribes to it | the perf script's idle sample, with the Fleet page and then a machine's page open |
 | Per streamed token | nothing: the pages hold no `tap` and draw no transcript | the perf script's streaming sample, with Fleet open while a thread streams |
 | The first screen's JavaScript | grows by the Fleet row's link only; the three routes are chunks of their own | `pnpm build:desktop`'s bundle check, before and after |
 | The controller | one row written per runner per minute, one deleted per runner per minute by the hourly prune, and one index range read per graph | the slice's own measurement of `runnerMetrics.query` over 14 days of 5 runners |
 | The runner | one CPU read a second; one storage walk at a time, at low priority, only after a workspace's setup or its last session's exit | the slice's measurement of a walk over a workspace with `node_modules` |
+| Storage reports | at most one `StorageReport` every 10 seconds per runner, at most 2,000 entries (about 250 KB). The controller writes only the entries that changed, in one transaction, and nudges `workspace` for them | the slice's measurement of a report of 2,000 entries with 50 changed |
 
 ### Fleet's tests
 
@@ -5302,10 +5307,10 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 
 50. **The Fleet page on today's data.** `/fleet` and `/fleet/$runnerId`; the Hercule face's Fleet row leading there; the lead; Grid and List; the cards and rows with sessions against the cap, free disk, memory and room; what needs the user for offline, unreachable, disk below its limit and Threads waiting, with Allow N and Clean up… (inert until slice 56, with "Not built yet"); the empty fleet; Add a machine; and the machine page's head, room line, offline banner, harness rows and accounts signed in here with Sign in, and Settings. Records: the route chunks, and that the first screen did not grow.
 51. **Disk percentage and CPU.** The runner reports `diskTotalBytes`, CPU per minute, and macOS's available memory checked against Activity Monitor; `RunnerWatermark` becomes `RunnerMetrics` in code and docs, with the wire unchanged. The cards' disk percentage, the 85% rule, and the machine page's CPU and memory numbers. Blocked by slice 50.
-52. **Graphs.** The `runner_metrics` table with its retention and hourly prune, `runnerMetrics.query` with its CLI row, the machine page's four graphs with live points, the forecast with its 21-day rule, and "Limit in 12 days" on cards and rows. Blocked by slice 51. Records: [What Fleet costs](#what-fleet-costs)' controller row.
+52. **Graphs.** The `runner_metrics` table with its retention and hourly prune, the `runnerMetrics` topic, `runnerMetrics.query` with its CLI row, the machine page's four graphs with live points, the forecast with its 21-day rule, and "Limit in 12 days" on cards and rows. Blocked by slice 51. Records: [What Fleet costs](#what-fleet-costs)' controller row.
 53. **Running here.** `buildMachineWork`, the machine page's Running here with Work and Sessions, and the cards' faces. Blocked by slice 50.
 54. **Software, view only.** The longer toolchain probe, `harness.query`'s `pinnedVersion`, the Software grid with its detail rows, and the machine page's Tools. Blocked by slice 50.
-55. **Archived threads.** `session.archive` with its CLI row and audit, the `archived` retention and the sweep's rule, `discardIgnored` and `deleteSessionFiles` on the runner, the header's More menu, the shelf's Archive and Archive all, an archived thread's page, and the blocked-resume reasons. Blocked by slice 50.
+55. **Archived threads.** `session.archive` with its CLI row and audit, the `archived` retention and the sweep's rule, the `workspace_leases` rebuild with its upgrade fixture, `discardIgnored`, `harnessHome` and `deleteSessionFiles` on the runner, the header's More menu, the shelf's Archive and Archive all, an archived thread's page, and the blocked-resume reasons. Blocked by slice 50.
 56. **Storage and cleanup.** The `storage` capability, measuring and `StorageReport`, `workspace.measure` and `workspace.disposeMany` with their CLI rows, the machine page's Storage with its bar, its cleanup line and popover, and Largest idle workspaces, and the cleanup dialog; Clean up… stops being inert. Blocked by slice 55. Records: [What Fleet costs](#what-fleet-costs)' runner row.
 57. **Activity.** `event.query`'s `runnerId` with its migration and upgrade fixture, the machine page's Recent, and `/fleet/$runnerId/activity` with its filters and folding. Blocked by slice 50.
 

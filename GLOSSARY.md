@@ -121,7 +121,7 @@ A mark the user puts on a Thread they have finished with (`session.markDone`), r
 _Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), archived (a separate, final state: see Archived; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
 
 **Archived (Thread)**:
-A final state the user puts a Thread in when they want it gone (`session.archive`), recording when and by whom. An archived Thread can never be resumed, sent input or reopened; its transcript stays readable on the controller. Archiving marks the Thread Done first, and the Agent sessions the Thread started in its workspace are archived with it. It leaves the sidebar and the Done shelf. Once every Thread of a workspace is archived, automatic cleanup may remove the workspace. Only the user archives, and a running Thread cannot be archived. There is no undo.
+A final state the user puts a Thread in when they want it gone (`session.archive`), recording when and by whom. An archived Thread can never be resumed, sent input or reopened; its transcript stays readable on the controller. Archiving marks the Thread Done first. Once every Thread of a workspace is archived, its Agent sessions are archived too, so a sidebar row goes whole, and automatic cleanup may remove the workspace. An archived Thread leaves the sidebar and the Done shelf. Only the user archives, and a working Thread (queued, starting or busy) cannot be archived. There is no undo.
 _Avoid_: Done (reversible and changes nothing about the session), deleted (the transcript stays), closed, hidden
 
 **Thread Config**:

@@ -23,10 +23,10 @@ Two more facts shaped the decision:
 
 - **Archived is final.** An archived Thread can never be resumed, sent input or reopened. Its transcript stays readable on the controller. Done stays the user's reversible mark; archiving marks a Thread Done first.
 - **Only the user archives,** from the thread's header, from the Done shelf, or from the Fleet screen's cleanup dialog. A session is refused whatever its grants, because an agent could otherwise make the user's work unresumable without the user seeing it. A Thread that is working cannot be archived. There is no undo.
-- **Archiving acts on a row:** the Threads of a workspace, and the Agent sessions they started there, together.
+- **Archiving acts on a row:** the Threads of a workspace together, and once all of them are archived, every Agent session in the workspace too, so a sidebar row is never left half archived.
 - **Archived Threads leave every list.** There is no list of them in v1; one comes with search.
-- **Cleanup.** When no Thread of a workspace is left unarchived, its retention goes back to automatic, and its leases are released again with the new retention `archived`: 7 days from the last session's exit, `workspace.archivedTtlDays`. The sweep then removes it like any automatic workspace, unless it has uncommitted changes or something else still holds it.
-- **Ignored files do not block removing an archived workspace** *(proposed; for Rogier's review)*. Archiving is the user's explicit, final act on that work, and an archived workspace can never be used again by anything in Hercule. Its ignored files are dependencies, build output, and copies that `.workspaceinclude` made from the main workspace. Tracked changes and untracked files still block, and only the user's explicit discard removes them.
+- **Cleanup.** When a workspace that has Threads has no Thread left unarchived, its retention goes back to automatic, and its leases are released again with the new retention `archived`: 7 days from the last session's exit, `workspace.archivedTtlDays`. The sweep then removes it like any automatic workspace, unless it has uncommitted changes or something else still holds it.
+- **Ignored files do not block removing an archived workspace** *(proposed; for Rogier's review)*: one with at least one Thread, every one archived. A workspace no Thread used, such as a workflow run's, keeps ADR 0039's rule. Archiving is the user's explicit, final act on that work, and an archived workspace can never be used again by anything in Hercule. Its ignored files are dependencies, build output, and copies that `.workspaceinclude` made from the main workspace. Tracked changes and untracked files still block, and only the user's explicit discard removes them.
 - **The harness's files go with the workspace.** When an archived workspace is removed, the runner also deletes those sessions' files in their Harness Homes. A file it cannot delete becomes a warning on the removed workspace, never an error that keeps the workspace.
 
 ## Considered options
@@ -41,7 +41,8 @@ Two more facts shaped the decision:
 
 - A new final state on Sessions, set by one operation, `session.archive`, with its own audit entry.
 - The sidebar, the Done shelf, Waiting on you and the Office read with `archived: false`.
-- Every input path refuses an archived session with a message that says so, and an ended Thread's composer names the real reason it cannot be resumed.
+- Every input path refuses an archived session with a message that names the reason, and an ended Thread's composer names the real reason it cannot be resumed.
 - Thread workspaces stop growing without bound once their work is archived.
 - Harness Adapters gain one method, `deleteSessionFiles`.
-- A Thread in a main workspace keeps its harness files when archived, because a main workspace is never removed.
+- A Thread in a main workspace keeps its harness files when archived, because the sweep never removes a main workspace and the Fleet screen never offers to.
+- A workflow run's workspace that installed dependencies is still kept by ADR 0039's rule after its run ends. That is outside this decision; [#973](https://github.com/theagenticage/hercule/issues/973) has the related bug.
