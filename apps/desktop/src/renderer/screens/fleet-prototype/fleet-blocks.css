@@ -1774,3 +1774,8 @@ button.fx-cell {
   color: var(--you-ink);
   font-weight: var(--w-medium);
 }
+.fx-accounts-note {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}

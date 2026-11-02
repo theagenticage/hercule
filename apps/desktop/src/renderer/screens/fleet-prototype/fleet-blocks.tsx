@@ -93,8 +93,8 @@ import {
   installTool,
   canInstall,
   findLastSweep,
-  logIn,
-  PROVIDER_INSTANCES,
+  signIn,
+  PROVIDER_ACCOUNTS,
 } from "./fleet-world";
 import "../session/floating-header.css";
 import "../settings/settings.css";
@@ -2272,7 +2272,7 @@ export function ActivityView({
   );
 }
 
-// ---------- Automatic cleanup, and provider logins ----------
+// ---------- Automatic cleanup, harnesses and accounts ----------
 
 /**
  * Renders the one line that says Hercule cleans up by itself, with what it
@@ -2329,9 +2329,11 @@ function AutoCleanupLine({
 }
 
 /**
- * Renders a row per provider instance on `machine`: whether it is logged in,
- * its harness's version, and the login the first run already uses. In the
- * app this is the existing provider login row.
+ * Renders the machine's harnesses (installed or not, the version, and its
+ * verdict against the version this Hercule pins), then each per-machine
+ * Provider Account, signed in here or not. Sign in opens the account's own
+ * sign-in dialog for this runner, as Settings › Providers does (ADR 0048).
+ * Install and Update are drawn for #974; v1 builds neither.
  */
 function ProviderRows({
   fleet,
@@ -2341,68 +2343,96 @@ function ProviderRows({
   readonly machine: Machine;
 }): JSX.Element {
   const away = isAway(machine);
+  const harnesses = TOOLS.filter((tool) => tool.kind === "harness");
   return (
     <>
-      <h4 className="fx-sw-h">Providers</h4>
+      <h4 className="fx-sw-h">Harnesses</h4>
       <div className="fx-sw">
-        {PROVIDER_INSTANCES.map((instance) => {
-          const tool = TOOLS.find((each) => each.id === instance.toolId)!;
-          const installed = fleet.installed[tool.id]?.[machine.id];
-          const loggedIn = fleet.logins.has(`${machine.id}:${instance.id}`);
-          const pending = fleet.pending.has(`login:${machine.id}:${instance.id}`);
+        {harnesses.map((tool) => {
+          const status = readToolStatus(fleet, tool, machine);
           return (
-            <div key={instance.id} className="fx-sw-row fx-provider">
+            <div key={tool.id} className="fx-sw-row">
               <span className="fx-sw-name">
                 <ToolMark tool={tool} size={13} />
-                {instance.name}
+                {tool.name}
               </span>
               <span className="fx-sw-ver">
-                {installed === undefined ? (
+                {status.kind === "missing" ? (
                   <span className="faint">Not installed</span>
+                ) : status.kind === "unknown" ? (
+                  <span className="faint">{status.installed?.version ?? "—"}</span>
                 ) : (
-                  <span className="fp-ver">{installed.version}</span>
+                  <span className={status.kind === "older" ? "fp-ver is-older" : "fp-ver"}>
+                    {status.installed.version}
+                  </span>
                 )}
               </span>
+              <span className={status.kind === "older" ? "fx-sw-src is-you" : "fx-sw-src"}>
+                {status.kind === "older"
+                  ? `Older than ${tool.target}, the version this Hercule supports`
+                  : status.kind === "current"
+                    ? "The version this Hercule supports"
+                    : ""}
+              </span>
+              <span className="fx-sw-policy">{tool.target} newest</span>
+              <span className="fx-sw-act">
+                {!away && status.kind === "missing" && (
+                  <button type="button" className="btn btn--sm btn--quiet" title="After v1 (#974)">
+                    Install
+                  </button>
+                )}
+                {!away && status.kind === "older" && (
+                  <button type="button" className="btn btn--sm btn--quiet" title="After v1 (#974)">
+                    Update
+                  </button>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <h4 className="fx-sw-h">Accounts signed in here</h4>
+      <div className="fx-sw">
+        {PROVIDER_ACCOUNTS.filter((account) => account.perMachine).map((account) => {
+          const tool = TOOLS.find((each) => each.id === account.harnessId)!;
+          const installed = fleet.installed[tool.id]?.[machine.id];
+          const signedIn = fleet.logins.has(`${machine.id}:${account.id}`);
+          const pending = fleet.pending.has(`login:${machine.id}:${account.id}`);
+          return (
+            <div key={account.id} className="fx-sw-row fx-account">
+              <span className="fx-sw-name">
+                <ToolMark tool={tool} size={13} />
+                {account.name}
+              </span>
+              <span className="fx-sw-ver faint">{tool.name}</span>
               <span
-                className={loggedIn || installed === undefined ? "fx-sw-src" : "fx-sw-src is-you"}
+                className={
+                  signedIn || installed === undefined || away ? "fx-sw-src" : "fx-sw-src is-you"
+                }
               >
                 {away
                   ? ""
-                  : installed === undefined
-                    ? ""
-                    : loggedIn
-                      ? "Logged in"
-                      : "Not logged in"}
+                  : signedIn
+                    ? `Signed in as ${account.identity}`
+                    : installed === undefined
+                      ? `Needs ${tool.name} on this machine`
+                      : "Not signed in"}
               </span>
               <span />
               <span className="fx-sw-act">
-                {away ? null : installed === undefined ? (
-                  <button
-                    type="button"
-                    className="btn btn--sm btn--quiet"
-                    title="Installing comes after v1"
-                  >
-                    Install
-                  </button>
-                ) : loggedIn ? (
-                  <button type="button" className="btn btn--sm btn--quiet">
-                    Probe now
-                  </button>
-                ) : (
+                {!away && !signedIn && installed !== undefined && (
                   <button
                     type="button"
                     className="btn btn--sm"
                     aria-disabled={pending || undefined}
-                    onClick={() => void logIn(machine.id, instance.id)}
+                    onClick={() => void signIn(machine.id, account.id)}
                   >
                     {pending ? (
                       <>
                         <span className="spin" /> Waiting…
                       </>
-                    ) : instance.login === "key" ? (
-                      "Enter key"
                     ) : (
-                      "Log in"
+                      "Sign in"
                     )}
                   </button>
                 )}
@@ -2411,6 +2441,9 @@ function ProviderRows({
           );
         })}
       </div>
+      <p className="fx-accounts-note">
+        Accounts with a key, such as OpenRouter, work on every machine and need no sign-in here.
+      </p>
     </>
   );
 }

@@ -112,7 +112,7 @@ export interface Installed {
 }
 
 export interface FleetState {
-  /** Keys `<machineId>:<instanceId>` of the provider instances logged in. */
+  /** Keys `<machineId>:<accountId>` of the per-machine Provider Accounts signed in. */
   readonly logins: ReadonlySet<string>;
   readonly machines: ReadonlyArray<Machine>;
   /** NEW as one read: what runs on each machine, grouped by workspace. */
@@ -786,36 +786,51 @@ const IDLE_WORKSPACES: ReadonlyArray<Workspace> = [
   ),
 ];
 
-// ---------- Provider logins ----------
+// ---------- Provider Accounts ----------
 
-export interface ProviderInstance {
+/**
+ * A Provider Account: who pays for the models (ADR 0048). A per-machine
+ * account is signed in on each runner with its harness's own login; a key
+ * account works on every runner and needs no sign-in there.
+ */
+export interface ProviderAccount {
   readonly id: string;
-  readonly toolId: "claude-code" | "codex" | "pi";
   readonly name: string;
-  /** How it logs in: through the vendor's page, or with a key typed in. */
-  readonly login: "browser" | "key";
+  readonly harnessId: "claude-code" | "codex" | "pi";
+  readonly perMachine: boolean;
+  /** Who the account is, once it was first signed in. */
+  readonly identity: string;
 }
 
-export const PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [
-  { id: "claude", toolId: "claude-code", name: "Claude", login: "browser" },
-  { id: "codex", toolId: "codex", name: "Codex", login: "browser" },
-  { id: "pi-openrouter", toolId: "pi", name: "Pi · OpenRouter", login: "key" },
+export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
+  {
+    id: "claude-max",
+    name: "Claude Max",
+    harnessId: "claude-code",
+    perMachine: true,
+    identity: "rogier@gmail.com",
+  },
+  {
+    id: "chatgpt-plus",
+    name: "ChatGPT Plus",
+    harnessId: "codex",
+    perMachine: true,
+    identity: "rogier@gmail.com",
+  },
+  { id: "openrouter", name: "OpenRouter", harnessId: "pi", perMachine: false, identity: "key" },
 ];
 
-/** Which provider instances are logged in on which machine; missing means not logged in. */
+/** The per-machine accounts signed in on each machine, as `<machineId>:<accountId>`. */
 const LOGINS: ReadonlySet<string> = new Set([
-  "atlas:claude",
-  "atlas:codex",
-  "atlas:pi-openrouter",
-  "beelink:claude",
-  "beelink:codex",
-  "beelink:pi-openrouter",
-  "studio-mac:claude",
-  "hetzner-ax:claude",
-  "foundry:claude",
-  "foundry:codex",
-  "foundry:pi-openrouter",
-  "office-mini:claude",
+  "atlas:claude-max",
+  "atlas:chatgpt-plus",
+  "beelink:claude-max",
+  "beelink:chatgpt-plus",
+  "studio-mac:claude-max",
+  "hetzner-ax:claude-max",
+  "foundry:claude-max",
+  "foundry:chatgpt-plus",
+  "office-mini:claude-max",
 ]);
 
 // ---------- What runs where ----------
@@ -2259,21 +2274,25 @@ export function setAutoClean(autoClean: AutoClean): void {
 /** Checks that the machine is away, offline or unreachable. */
 export const isAway = (machine: Machine): boolean => machine.connectivity !== "online";
 
-/** Logs `instanceId` in on `machineId`: in the app, the existing provider login row runs it. */
-export async function logIn(machineId: MachineId, instanceId: string): Promise<void> {
-  const key = `login:${machineId}:${instanceId}`;
+/**
+ * Signs `accountId` in on `machineId`. In the app this opens the account's
+ * own sign-in dialog for that runner (Settings › Providers, spec 17); the
+ * machine page only offers the way in.
+ */
+export async function signIn(machineId: MachineId, accountId: string): Promise<void> {
+  const key = `login:${machineId}:${accountId}`;
   startPending([key]);
   await wait(1200);
-  const instance = PROVIDER_INSTANCES.find((each) => each.id === instanceId)!;
+  const account = PROVIDER_ACCOUNTS.find((each) => each.id === accountId)!;
   endPending(
     [key],
-    { logins: new Set([...state.logins, `${machineId}:${instanceId}`]) },
-    `${instance.name} is logged in on ${machineId}`,
+    { logins: new Set([...state.logins, `${machineId}:${accountId}`]) },
+    `${account.name} is signed in on ${machineId}`,
   );
   logActivity([machineId], {
     category: "settings",
     problem: false,
-    text: `Logged in to ${instance.name}`,
+    text: `Signed in to ${account.name}`,
     actor: "you",
     source: "provider.loggedIn",
   });
