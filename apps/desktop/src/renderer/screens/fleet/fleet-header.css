@@ -1,0 +1,39 @@
+/* The Fleet header's parts that no other header has: the machine's name in
+   the crumbs, the rule between it and the jump links, and the "you" colour of
+   a count. The pill, the tabs and the crumbs are the Workflows pages'. */
+
+/* Pulls the plus 2px toward the button's edge: the icon has air inside its
+   own box, so without this the gap before it looks wider than the 10px
+   after the label. */
+.fleet-header-add .ic {
+  margin-left: -2px;
+}
+/* A count that asks something of the user, as "3 need you" does. */
+.fleet-header-pill .ptab small.is-you {
+  color: var(--you-ink);
+}
+/* The machine's own tab in the crumbs: the page the user is on, drawn in ink
+   rather than as a tab to press, with its icon one step quieter. */
+.fleet-header-pill .ptab.is-name {
+  color: var(--ink);
+}
+.fleet-header-pill .ptab.is-name .ic {
+  color: var(--muted);
+}
+.fleet-header-pill .pill-crumb > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--dur-1);
+}
+.fleet-header-pill .pill-crumb > a:hover {
+  color: var(--ink);
+}
+/* Separates the machine's name from the jump links that follow it. */
+.fleet-header-rule {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--divider);
+}
