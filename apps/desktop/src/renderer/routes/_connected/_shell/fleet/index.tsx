@@ -1,6 +1,13 @@
-import type { JSX } from "react";
+import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { resolveDisplayTimezone } from "@hercule/client-core";
+import {
+  buildFleetMachines,
+  describeFleet,
+  describeMachinesTab,
+  isFleetEmpty,
+} from "@hercule/client-core/fleet";
 import {
   controllerQuery,
   fleetSessionsQuery,
@@ -9,7 +16,17 @@ import {
   providersQuery,
   readOnOpen,
   runnersQuery,
+  settingsQuery,
 } from "../../../../app/queries";
+import { AddMachineDialog } from "../../../../screens/fleet/add-machine-dialog";
+import { FleetHeader, type FleetSection } from "../../../../screens/fleet/fleet-header";
+import { FleetLead } from "../../../../screens/fleet/fleet-lead";
+import { useFleetNow } from "../../../../screens/fleet/use-fleet-now";
+import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
+import { useShowsClassicScrollbar } from "../../../../screens/session/classic-scrollbar";
+import { isMotionReduced } from "../../../../screens/workflows/change-motion";
+import { useAllowSessions } from "./-allow-sessions";
+import { MachinesSection } from "./-machines-section";
 
 /**
  * Fleet: every machine at a glance (spec 17 §Fleet). Its loader reads
@@ -22,7 +39,8 @@ import {
  *   only when a push marked the cached read out of date while Fleet was
  *   closed;
  * - the controller's record, whose `localRunnerId` the page needs when the
- *   fleet is empty. No topic covers it, so it is read each time the page opens.
+ *   fleet is empty, and the settings, whose time zone the times are shown in.
+ *   No topic covers either, so they are read each time the page opens.
  */
 export const Route = createFileRoute("/_connected/_shell/fleet/")({
   staticData: { title: "Fleet" },
@@ -35,22 +53,87 @@ export const Route = createFileRoute("/_connected/_shell/fleet/")({
       queryClient.ensureQueryData(providerAccountsQuery(client)),
       queryClient.fetchQuery(fleetSessionsQuery(client)),
       readOnOpen(queryClient, controllerQuery(client)),
+      readOnOpen(queryClient, settingsQuery(client)),
     ]);
   },
   component: FleetPage,
 });
 
-/** Draws the name of each machine that is not retired. */
+/** The jump links' section ids, in the order the sections are on the page. */
+const SECTION_IDS = ["machines"];
+
+/**
+ * Draws the Fleet page: the floating header, the lead and the Machines
+ * section. Pressing a machine opens its page as a view transition, unless
+ * Reduce motion is on. Allow saves the machine's session cap.
+ *
+ * Back from a machine's page does not animate: the router starts a view
+ * transition only for a navigation that asks for one, and Back does not.
+ */
 function FleetPage(): JSX.Element {
-  const { client } = Route.useRouteContext().controller;
+  const { controller } = Route.useRouteContext();
+  const { client, url } = controller;
   const { data: runners } = useSuspenseQuery(runnersQuery(client));
+  const { data: sessions } = useSuspenseQuery(fleetSessionsQuery(client));
+  const { data: record } = useSuspenseQuery(controllerQuery(client));
+  const { data: settings } = useSuspenseQuery(settingsQuery(client));
+  const navigate = useNavigate();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const showsScrollbar = useShowsClassicScrollbar(scrollRef);
+  const { activeSectionId, scrollToSection } = useSectionInView(scrollRef, SECTION_IDS);
+  const { allow, pendingRunnerIds, failure } = useAllowSessions(client);
+  const [isAdding, setIsAdding] = useState(false);
+
+  const timezone = resolveDisplayTimezone(settings.user.timezone);
+  const machines = buildFleetMachines(runners, sessions);
+  const now = useFleetNow(machines, timezone);
+  const sections: ReadonlyArray<FleetSection> = [
+    { id: "machines", label: "Machines", count: describeMachinesTab(machines) },
+  ];
+  const failedMachine =
+    failure === null ? undefined : machines.find(({ runner }) => runner.id === failure.runnerId);
+  const failedAllow =
+    failure === null || failedMachine === undefined
+      ? null
+      : `Could not allow ${String(failure.cap)} sessions on ${failedMachine.runner.name}: ${failure.message}`;
+
   return (
-    <ul>
-      {runners
-        .filter((runner) => runner.lifecycle !== "retired")
-        .map((runner) => (
-          <li key={runner.id}>{runner.name}</li>
-        ))}
-    </ul>
+    <div className="fleet-page">
+      <FleetHeader
+        place={{ page: "fleet" }}
+        sections={sections}
+        activeSectionId={activeSectionId}
+        onJump={scrollToSection}
+        onAddMachine={() => setIsAdding(true)}
+      />
+      <div
+        ref={scrollRef}
+        className={showsScrollbar ? "fleet-scroll has-scrollbar" : "fleet-scroll"}
+      >
+        <div className="fleet-col">
+          <FleetLead lead={describeFleet(machines)} />
+          <MachinesSection
+            machines={machines}
+            timezone={timezone}
+            now={now}
+            isEmpty={isFleetEmpty(machines, record.localRunnerId)}
+            pendingAllowRunnerIds={pendingRunnerIds}
+            failedAllow={failedAllow}
+            onOpen={(runnerId) =>
+              void navigate({
+                to: "/fleet/$runnerId",
+                params: { runnerId },
+                viewTransition: !isMotionReduced(),
+              })
+            }
+            onAllow={allow}
+            onAddMachine={() => setIsAdding(true)}
+          />
+        </div>
+      </div>
+      {isAdding ? (
+        <AddMachineDialog client={client} origin={url} onClose={() => setIsAdding(false)} />
+      ) : null}
+    </div>
   );
 }

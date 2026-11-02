@@ -217,6 +217,10 @@ export interface FleetLead {
   readonly detail: readonly FleetLeadPart[];
 }
 
+/** Counts the machines with at least one need. */
+const countMachinesNeedingUser = (machines: readonly FleetMachine[]): number =>
+  machines.filter((machine) => listNeedKinds(machine).length > 0).length;
+
 const COUNT_WORDS = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
 
 const plain = (text: string): FleetLeadPart => ({ text, kind: "plain" });
@@ -240,7 +244,7 @@ const number = (value: number): FleetLeadPart => ({ text: String(value), kind: "
 export const describeFleet = (machines: readonly FleetMachine[]): FleetLead => {
   if (machines.length === 0) return { headline: [plain("No machine has joined yet.")], detail: [] };
 
-  const needing = machines.filter((machine) => listNeedKinds(machine).length > 0).length;
+  const needing = countMachinesNeedingUser(machines);
   const headline: readonly FleetLeadPart[] =
     needing === 0
       ? [plain("Every machine is healthy.")]
@@ -372,19 +376,32 @@ export const decideMachineKind = (facts: RunnerFacts | null): MachineKind => {
 };
 
 /**
- * Formats a size in bytes the way Finder does, in units of 10^9 bytes:
- * "420 MB" under a gigabyte, "10.7 GB" with one decimal under 100 GB, and
- * whole gigabytes from 100 GB with a thousands separator from 1,000 GB:
- * "245 GB", "1,953 GB". There is no terabyte unit. The tier is picked from the
- * rounded number, so 99.96 GB reads "100 GB" and not "100.0 GB".
+ * Measures a size in bytes the way Finder does, in units of 10^9 bytes, as a
+ * number and a unit:
+ *
+ * - under a gigabyte, whole megabytes: "420" "MB";
+ * - from a gigabyte, gigabytes with one decimal under 100 GB: "10.7" "GB";
+ * - from 100 GB, whole gigabytes, with a thousands separator from 1,000 GB:
+ *   "245" "GB", "1,953" "GB". There is no terabyte unit.
+ *
+ * The tier is picked from the rounded number, so 99.96 GB reads "100 GB" and
+ * not "100.0 GB".
  */
-export const formatDiskSize = (bytes: number): string => {
+export const measureDiskSize = (
+  bytes: number,
+): { readonly amount: string; readonly unit: "MB" | "GB" } => {
   const megabytes = Math.round(bytes / 1e6);
-  if (megabytes < 1000) return `${String(megabytes)} MB`;
+  if (megabytes < 1000) return { amount: String(megabytes), unit: "MB" };
   const gigabytes = bytes / 1e9;
   const tenths = Math.round(gigabytes * 10) / 10;
-  if (tenths < 100) return `${tenths.toFixed(1)} GB`;
-  return `${Math.round(gigabytes).toLocaleString("en-US")} GB`;
+  if (tenths < 100) return { amount: tenths.toFixed(1), unit: "GB" };
+  return { amount: Math.round(gigabytes).toLocaleString("en-US"), unit: "GB" };
+};
+
+/** Formats a size in bytes as text, such as "420 MB" or "10.7 GB". See `measureDiskSize` for the rules. */
+export const formatDiskSize = (bytes: number): string => {
+  const { amount, unit } = measureDiskSize(bytes);
+  return `${amount} ${unit}`;
 };
 
 /** How full a gauge is: `normal`, `you` (getting high), or `fail` (too high). */
@@ -435,3 +452,82 @@ export const describeMachineStatus = (
   if (runner.lifecycle === "draining") return { tone: "draining", word: "Takes no new work" };
   return { tone: "online", word: null };
 };
+
+/** What a card or a list row of the Fleet draws for one machine. See `summarizeMachine`. */
+export interface MachineSummary {
+  /** The status dot and its word, which is `null` while the machine is simply online. */
+  readonly status: ReturnType<typeof describeMachineStatus>;
+  /** Whether the machine is offline or unreachable, which a card shows dimmed. */
+  readonly isAway: boolean;
+  readonly drawing: SessionsDrawing;
+  /** "Room for 4", "Full" or "Takes no new work"; `null` while the machine is away. */
+  readonly room: string | null;
+  /** The most serious need, or `undefined` when the machine needs nothing. */
+  readonly need: MachineNeed | undefined;
+  /**
+   * The free disk space as a number and a unit, or `null` before the runner has
+   * reported its disk. `level` is `fail` while the free space is below the
+   * machine's disk limit, else `normal`.
+   */
+  readonly disk: {
+    readonly amount: string;
+    readonly unit: "MB" | "GB";
+    readonly level: GaugeLevel;
+  } | null;
+  /** The memory in use as a whole percentage, or `null` before the runner has reported it. */
+  readonly memory: { readonly percent: number; readonly level: GaugeLevel } | null;
+}
+
+/**
+ * Computes everything the Fleet's card and list row draw for a machine, so the
+ * two cannot disagree. Times are shown in `timezone`, relative to `now`.
+ */
+export const summarizeMachine = (
+  machine: FleetMachine,
+  timezone: string,
+  now: Date,
+): MachineSummary => {
+  const { runner } = machine;
+  const memory = measureMemory(runner);
+  return {
+    status: describeMachineStatus(runner, timezone, now),
+    isAway: runner.connectivity !== "online",
+    drawing: drawSessions(machine),
+    room: describeRoom(machine).short,
+    need: findMachineNeeds(machine, timezone, now)[0],
+    disk:
+      runner.watermark === null
+        ? null
+        : {
+            ...measureDiskSize(runner.watermark.diskFreeBytes),
+            level: isDiskBelowLimit(runner) ? "fail" : "normal",
+          },
+    memory:
+      memory === null ? null : { percent: Math.round(memory.share * 100), level: memory.level },
+  };
+};
+
+/**
+ * Describes the Machines section for its jump link in the page header: "2 need
+ * you" with `isYou` set while some machines need the user, else the number of
+ * machines.
+ */
+export const describeMachinesTab = (
+  machines: readonly FleetMachine[],
+): { readonly text: string; readonly isYou: boolean } => {
+  const needing = countMachinesNeedingUser(machines);
+  return needing > 0
+    ? { text: `${String(needing)} need you`, isYou: true }
+    : { text: String(machines.length), isYou: false };
+};
+
+/**
+ * Checks whether the fleet is still empty: no machine other than the
+ * controller's own runner (`localRunnerId`, `null` when it has none) is
+ * online. The screen then invites the user to add a machine.
+ */
+export const isFleetEmpty = (
+  machines: readonly FleetMachine[],
+  localRunnerId: string | null,
+): boolean =>
+  !machines.some(({ runner }) => runner.id !== localRunnerId && runner.connectivity === "online");

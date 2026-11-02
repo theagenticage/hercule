@@ -5,12 +5,16 @@ import {
   countRoom,
   decideMachineKind,
   describeFleet,
+  describeMachinesTab,
   describeMachineStatus,
   describeRoom,
   drawSessions,
   findMachineNeeds,
   formatDiskSize,
+  isFleetEmpty,
+  measureDiskSize,
   measureMemory,
+  summarizeMachine,
   type FleetLead,
   type FleetMachine,
 } from "./fleet";
@@ -552,6 +556,17 @@ describe("formatDiskSize", () => {
   });
 });
 
+describe("measureDiskSize", () => {
+  it.each([
+    [42.14e9, { amount: "42.1", unit: "GB" }],
+    [99.96e9, { amount: "100", unit: "GB" }],
+    [1000e9, { amount: "1,000", unit: "GB" }],
+    [420e6, { amount: "420", unit: "MB" }],
+  ])("splits %d bytes into %j", (bytes, size) => {
+    expect(measureDiskSize(bytes)).toEqual(size);
+  });
+});
+
 describe("measureMemory", () => {
   const withMemory = (totalGib: number, availableGib: number): Runner =>
     buildRunner({
@@ -619,5 +634,83 @@ describe("describeMachineStatus", () => {
       tone: "draining",
       word: "Takes no new work",
     });
+  });
+});
+
+describe("summarizeMachine", () => {
+  it("gathers what a card draws for a healthy machine", () => {
+    const machine = buildMachine(
+      {
+        facts: buildFacts({ totalMemoryBytes: 16 * GIB }),
+        watermark: { diskFreeBytes: 42.14e9, availableMemoryBytes: 4 * GIB },
+      },
+      { running: 12 },
+    );
+
+    expect(summarizeMachine(machine, TIMEZONE, NOW)).toEqual({
+      status: { tone: "online", word: null },
+      isAway: false,
+      drawing: drawSessions(machine),
+      room: "Room for 4",
+      need: undefined,
+      disk: { amount: "42.1", unit: "GB", level: "normal" },
+      memory: { percent: 75, level: "normal" },
+    });
+  });
+
+  it("marks a disk below its limit as failing and takes its first need", () => {
+    const machine = buildMachine({
+      watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
+    });
+
+    const summary = summarizeMachine(machine, TIMEZONE, NOW);
+
+    expect(summary.disk?.level).toBe("fail");
+    expect(summary.need?.kind).toBe("disk-below-limit");
+    expect(summary.room).toBe("Takes no new work");
+  });
+
+  it("has no disk, memory or room for an offline machine that never reported", () => {
+    const machine = buildMachine({ connectivity: "offline", watermark: null });
+
+    expect(summarizeMachine(machine, TIMEZONE, NOW)).toMatchObject({
+      isAway: true,
+      room: null,
+      disk: null,
+      memory: null,
+      need: { kind: "offline" },
+    });
+  });
+});
+
+describe("describeMachinesTab", () => {
+  it("counts the machines that need the user, or else all machines", () => {
+    const calm = buildMachine({ id: "a" });
+    const offline = buildMachine({ id: "b", connectivity: "offline" });
+
+    expect(describeMachinesTab([calm, offline, buildFullMachine(2, { id: "c" })])).toEqual({
+      text: "2 need you",
+      isYou: true,
+    });
+    expect(describeMachinesTab([calm, buildMachine({ id: "d" })])).toEqual({
+      text: "2",
+      isYou: false,
+    });
+  });
+});
+
+describe("isFleetEmpty", () => {
+  const local = buildMachine({ id: "local" });
+  const remote = buildMachine({ id: "remote" });
+  const remoteOffline = buildMachine({ id: "remote", connectivity: "offline" });
+
+  it.each([
+    ["no machine", [], "local", true],
+    ["only the controller's own runner", [local], "local", true],
+    ["a remote machine that is offline", [local, remoteOffline], "local", true],
+    ["a remote machine that is online", [local, remote], "local", false],
+    ["an online machine while the controller has no runner of its own", [remote], null, false],
+  ] as const)("with %s the fleet is empty: %s", (_, machines, localRunnerId, expected) => {
+    expect(isFleetEmpty(machines, localRunnerId)).toBe(expected);
   });
 });

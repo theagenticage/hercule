@@ -1,0 +1,665 @@
+/* The Fleet page's cards, list, lead and sessions drawing. The measurements
+   are the fleet prototype's, variant G. Every class starts with `fleet-`. */
+
+/* ---------- The page ---------- */
+.fleet-page {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+/* What scrolls under the floating header is hidden across the header row and
+   fades in below it, as a thread's transcript does. A strip as wide as a
+   classic scroll bar stays unmasked, so the top of the thumb is not hidden.
+   The padding starts the lead 78px down, clear of the header's pills. */
+.fleet-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 78px 32px 140px;
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 50px,
+      rgb(0 0 0 / 0.15) 60px,
+      rgb(0 0 0 / 0.6) 70px,
+      #000 80px
+    ),
+    linear-gradient(#000 0 0);
+  mask-size:
+    100% 100%,
+    var(--scrollbar-width) 100%;
+  mask-position: right;
+  mask-repeat: no-repeat;
+}
+.fleet-col {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.fleet-machines {
+  scroll-margin-top: 80px;
+}
+/* The Machines heading, with the view switch at its far end. */
+.fleet-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 30px 0 12px;
+}
+.fleet-sec-h h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.fleet-sec-h .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+/* A failed Allow, under the heading. */
+.fleet-err {
+  margin: 0 0 12px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* ---------- The lead ---------- */
+.fleet-lead h2 {
+  margin: 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+}
+.fleet-lead p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+.fleet-lead b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.fleet-lead .is-you {
+  color: var(--you-ink);
+}
+
+/* ---------- Status dots ---------- */
+.fleet-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.fleet-dot--offline {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fail);
+}
+.fleet-dot--draining {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+
+/* ---------- Meters ---------- */
+.fleet-meter {
+  position: relative;
+  display: block;
+  flex: none;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  overflow: hidden;
+}
+.fleet-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--ink) 42%, transparent);
+}
+.fleet-meter--you i {
+  background: var(--you);
+}
+.fleet-meter--fail i {
+  background: var(--fail);
+}
+
+/* ---------- Sessions against the cap ---------- */
+.fleet-sessions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* One block per slot. Sixteen blocks are 110px wide, which fits the list's
+   128px column in one row. */
+.fleet-sessions--blocks {
+  flex-wrap: wrap;
+}
+.fleet-sessions--blocks i {
+  width: 5px;
+  height: 10px;
+  border-radius: 1.5px;
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+}
+.fleet-sessions--blocks i.is-run {
+  background: color-mix(in oklab, var(--ink) 52%, transparent);
+}
+.fleet-sessions--blocks i.is-wait {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--you);
+}
+.fleet-sessions--list.fleet-sessions--blocks i {
+  height: 8px;
+}
+.fleet-sessions-gap {
+  width: 2px;
+}
+
+/* One bar, for a cap above 16. */
+.fleet-sessions--bar {
+  position: relative;
+  flex: 1 1 80px;
+  align-items: stretch;
+  gap: 0;
+  min-width: 60px;
+  height: 10px;
+}
+.fleet-sessions--bar.fleet-sessions--list {
+  height: 8px;
+}
+.fleet-sessions-cap {
+  display: flex;
+  flex: none;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+  /* A thin cut every 10 sessions, through whatever is drawn. */
+  mask-image: repeating-linear-gradient(
+    90deg,
+    #000 0,
+    #000 calc(var(--fleet-cut) - 1.5px),
+    transparent calc(var(--fleet-cut) - 1.5px),
+    transparent var(--fleet-cut)
+  );
+}
+.fleet-sessions-cap i {
+  flex: none;
+  height: 100%;
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+}
+/* The rule marks where the cap ends. It reaches past the bar's edges and sits
+   in the 4px between the cap's part and the waiting part. */
+.fleet-sessions-rule {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1.5px;
+  margin-left: 1.25px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--ink) 50%, transparent);
+}
+.fleet-sessions--bar > i.is-wait {
+  flex: 1;
+  margin-left: 4px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1.5px var(--you);
+}
+
+/* A machine that is away: the cap's part is an outline with nothing in it. */
+.fleet-sessions.is-away i:not(.is-wait) {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+}
+.fleet-sessions.is-away .fleet-sessions-cap {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+  mask-image: none;
+}
+
+/* ---------- What needs the user ---------- */
+.fleet-attn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fleet-attn.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fleet-attn.is-fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+/* The button of a card or row keeps its pointer events while it cannot act,
+   so its tooltip shows and a press on it does not fall through to the card
+   behind it. It neither brightens nor sinks. */
+.btn.fleet-attn-btn {
+  position: relative;
+  z-index: 2;
+  flex: none;
+}
+.btn.fleet-attn-btn[aria-disabled="true"] {
+  pointer-events: auto;
+}
+.btn.fleet-attn-btn[aria-disabled="true"]:hover {
+  background: var(--btn-fill);
+}
+.btn.fleet-attn-btn[aria-disabled="true"]:active {
+  transform: none;
+}
+
+/* ---------- The machine's name, which opens the machine ---------- */
+/* The name is a button whose ::after covers the whole card or row, the nearest
+   positioned ancestor, so a press anywhere opens the machine while the name
+   is the only stop for a keyboard. It sits above everything in the card
+   except the buttons, which have z-index 2. Each card and row sets the cover's
+   radius, because "inherit" would take the button's. */
+.fleet-open {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+  font-size: inherit;
+  font-weight: var(--w-bold);
+}
+.fleet-open > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fleet-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+/* The ring is drawn around the whole card or row, not around the name. */
+.fleet-open:focus-visible {
+  outline: none;
+}
+
+/* ---------- The grid and its cards ---------- */
+/* The columns follow the grid's own width, so a card is never narrower than
+   about 250px: 1 column, 2 from 520px, 3 from 790px, 4 from 1060px. */
+.fleet-grid-box {
+  container: fleet-grid / inline-size;
+}
+.fleet-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+@container fleet-grid (width >= 520px) {
+  .fleet-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container fleet-grid (width >= 790px) {
+  .fleet-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container fleet-grid (width >= 1060px) {
+  .fleet-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.fleet-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px 14px;
+  border-radius: var(--r-lg);
+  background: color-mix(in oklab, var(--ink) 3.5%, var(--surface));
+  transition: background var(--dur-1);
+}
+.fleet-card:hover {
+  background: color-mix(in oklab, var(--ink) 5.5%, var(--surface));
+}
+.fleet-card:has(.fleet-open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.fleet-card .fleet-open::after {
+  border-radius: var(--r-lg);
+}
+.fleet-card-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.fleet-card-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.fleet-card-head .fleet-open {
+  flex: 1;
+  font-size: var(--t-14);
+}
+.fleet-card-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.fleet-card-state .fleet-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.fleet-gauges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.fleet-card.is-away .fleet-gauges {
+  opacity: 0.5;
+}
+.fleet-gauge {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.fleet-gauge--wide {
+  grid-column: 1 / -1;
+}
+.fleet-gauge-label {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.fleet-gauge b {
+  font-size: var(--t-20);
+  font-weight: var(--w-medium);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fleet-gauge b small {
+  color: var(--faint);
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+}
+.fleet-gauge--you b {
+  color: var(--you-ink);
+}
+.fleet-gauge--fail b {
+  color: var(--fail-ink);
+}
+.fleet-gauge .fleet-meter {
+  width: 100%;
+  margin-top: 4px;
+}
+/* The sessions' number, then the drawing beside it; the drawing drops under
+   the number when the card is too narrow for both. */
+.fleet-sessions-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+/* The row keeps its height while a card has no faces yet. */
+.fleet-card-crew {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 24px;
+  margin-top: 12px;
+}
+.fleet-room {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.fleet-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+  margin-top: 10px;
+}
+
+/* ---------- The card that adds a machine ---------- */
+/* A row of its own under the machines, the full width of the grid or the
+   list. Its icon and text sit side by side in the middle, so a wide card
+   reads as a card with an invitation in it, not as a banner. */
+.fleet-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 84px;
+  padding: 18px;
+  border: 1.5px dashed var(--divider);
+  border-radius: var(--r-lg);
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-align: left;
+  transition:
+    background var(--dur-1),
+    border-color var(--dur-1);
+}
+.fleet-list + .fleet-empty {
+  width: 100%;
+  margin-top: 14px;
+}
+.fleet-empty:hover {
+  border-color: var(--faint);
+  background: color-mix(in oklab, var(--ink) 3.5%, transparent);
+}
+.fleet-empty:focus-visible {
+  border-radius: var(--r-lg);
+}
+.fleet-empty-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.fleet-empty b {
+  color: var(--ink);
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.fleet-empty-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+
+/* ---------- The list ---------- */
+.fleet-list {
+  container: fleet-list / inline-size;
+}
+.fleet-heads,
+.fleet-row {
+  display: grid;
+  grid-template-columns:
+    8px minmax(190px, 1.3fr) 128px 104px 136px 112px
+    minmax(230px, 1.5fr) 14px;
+  align-items: center;
+  gap: 18px;
+  padding: 0 12px;
+}
+.fleet-heads {
+  height: 30px;
+  box-shadow: inset 0 -1px 0 var(--divider);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.fleet-row {
+  position: relative;
+  min-height: 64px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.fleet-row + .fleet-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 12px auto;
+  border-top: 1px solid var(--divider);
+}
+.fleet-row:hover {
+  background: var(--hover);
+}
+.fleet-row:hover::before,
+.fleet-row:hover + .fleet-row::before {
+  border-top-color: transparent;
+}
+.fleet-row:has(.fleet-open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.fleet-row .fleet-open::after {
+  border-radius: var(--r-md);
+}
+.fleet-row > .ic {
+  color: var(--faint);
+}
+.fleet-row-name {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.fleet-row-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.fleet-row-name-text {
+  display: grid;
+  min-width: 0;
+}
+.fleet-row-name-text .fleet-open {
+  justify-self: start;
+}
+.fleet-row-name-text small,
+.fleet-cell small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.fleet-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.fleet-cell > b {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fleet-cell :is(b, small).is-you {
+  color: var(--you-ink);
+}
+.fleet-cell small.is-you {
+  font-weight: var(--w-medium);
+}
+.fleet-cell b.is-fail {
+  color: var(--fail-ink);
+}
+.fleet-row-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fleet-row-meter .fleet-meter {
+  width: 56px;
+}
+.fleet-row-meter b {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fleet-row-meter b.is-you {
+  color: var(--you-ink);
+}
+.fleet-row-meter b.is-fail {
+  color: var(--fail-ink);
+}
+.fleet-row-need {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.fleet-row.is-away .fleet-open {
+  color: var(--muted);
+}
+.fleet-row.is-away .fleet-cell {
+  opacity: 0.55;
+}
+
+/* A narrow list drops room and memory, which the machine's page shows. */
+@container fleet-list (width < 900px) {
+  .fleet-heads,
+  .fleet-row {
+    grid-template-columns: 8px minmax(160px, 1fr) 118px 120px minmax(200px, 1.3fr) 14px;
+    gap: 14px;
+  }
+  .fleet-col-room,
+  .fleet-col-mem {
+    display: none;
+  }
+}
+
+/* ---------- Moving between Fleet and a machine's page ---------- */
+/* The card or row that was pressed grows into the head of the machine's page,
+   and back, because both carry the machine's view transition name. The page
+   around them cross-fades quickly. With Reduce motion the router starts no
+   transition, and these rules stop any that starts anyway. */
+::view-transition-group(*) {
+  animation-duration: var(--dur-3);
+  animation-timing-function: var(--ease-out);
+}
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: var(--dur-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
+  }
+}
