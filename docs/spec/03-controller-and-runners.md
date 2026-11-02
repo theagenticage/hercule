@@ -236,6 +236,14 @@ Versions are still not compared, and section 2.4 is unchanged: the only hard ref
 - **`PROTOCOL_VERSION` does not change.** The capability keeps the frames away from a runner built before it, and that runner stays online for everything else.
 - **`SessionStart` carries nothing about repository skills.** The runner lists and stages them from its own disk at every start and resume ([06-providers](./06-providers.md) section 9.4). The capability only covers reading them for a client.
 
+*(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* **Runner Metrics and disk usage.** The Fleet screen ([17-desktop-app.md](./17-desktop-app.md#fleet)) renames one frame, adds one, and adds one optional field to the dispose frame, with two capabilities, all in `@hercule/protocol`. Section 4.1 has the metrics report, section 6.9 the rest.
+
+- **`MetricsReport { metrics }`**, runner to controller, is the old `WatermarkReport { watermark }` under the name of what it carries ([GLOSSARY](../../GLOSSARY.md) Runner Metrics). On the wire it keeps the old tag, `watermarkReport`, and the old key, `watermark`, so a runner and a controller of either age read each other's report. The next raise of `PROTOCOL_VERSION` renames them on the wire too.
+- **`DiskUsageReport { diskUsage }`**, runner to controller, latest-wins like the facts and the metrics: unsequenced, never buffered.
+- **The dispose frame gains `archivedSessions`**, optional: the archived sessions whose harness files the runner deletes with the workspace.
+- **This amends the capability list above: it also holds `diskUsage`**, `DISK_USAGE_CAPABILITY`, and **`archivedSessionFiles`**, `ARCHIVED_SESSION_FILES_CAPABILITY`. Both sides list each. The runner sends `DiskUsageReport` only when the controller's hello lists `diskUsage`, and the controller sends `archivedSessions` only to a runner whose hello lists `archivedSessionFiles`.
+- **`PROTOCOL_VERSION` does not change.** The new fields of `RunnerFacts` and `RunnerMetrics` are optional, a protocol struct drops a key it does not know when it decodes, and the capabilities keep the new frame and field away from a side built before them. A runner without them stays online for everything else.
+
 ### 2.3 Sequencing, acks and the outbox
 
 - Every runner-to-controller event carries a monotonic sequence number. The controller acknowledges sequence numbers.
@@ -334,11 +342,39 @@ The controller stores each whole, as one JSON document on the runner row, and ha
 
 *(Amended 2026-09-10, [#67](https://github.com/theagenticage/hercule/issues/67).)* `RunnerWatermark` is `{ diskFreeBytes, availableMemoryBytes }`; ~~`acceptingPlacements: boolean`~~ leaves the wire. Whether a machine accepts placements is the controller's decision, made from the reported free bytes against a per-runner watermark it holds (10 GiB unless overridden by `runner.update { diskWatermarkBytes }`), checked at every placement and on every report. The `runner.placementsChanged` audit entry is recorded on the crossing, from a report or from an update.
 
+*(Amended 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* **The facts gain the disk's size, and the watermark report becomes the Runner Metrics.**
+
+- `RunnerFacts` gains `diskTotalBytes`: the size of the file system that holds the runner's storage directory, the same file system `diskFreeBytes` is read from. It is optional on the wire, because a runner built before it does not send it; the Fleet screen then shows free space without a percentage.
+- `RunnerWatermark` is renamed `RunnerMetrics`, in code and in these documents: the report is not the watermark, which is only the disk limit the controller holds (`diskWatermarkBytes`). Section 2.2 has the frame.
+- `RunnerMetrics` is `{ diskFreeBytes, availableMemoryBytes, cpu? }`:
+  - `cpu` is `{ averagePercent, peakPercent }` for the minute before the report. The runner reads the machine's CPU use once a second, as the share of all cores busy since the previous read (0 to 100), and keeps only the minute's sum, count and highest read. `averagePercent` is the minute's mean and `peakPercent` its highest read. It is absent on the report right after hello, before a minute has been read, and from a runner built before it.
+  - `availableMemoryBytes` is what the operating system can give a new process without swapping. On Linux that is `MemAvailable`. On macOS it is the free, inactive and purgeable pages together, because free pages alone are close to zero on a Mac that has run for a while. A Mac's number is checked against Activity Monitor before the slice that builds it is merged.
+- The report is still sent right after hello and on the 60-second check. Per-second CPU reads are the runner's only new timer: one small read of the kernel's counters, with no process started.
+- The controller still decides placement from `diskFreeBytes` against `diskWatermarkBytes`, as below. CPU and memory take no part in placement.
+- Where this document says "the watermark report", "the 60-second watermark check" or "facts and the watermark", read the metrics report: those passages were written before the rename.
+
+
 ### 4.2 Capability snapshots
 
 ~~Per provider instance x runner, the controller keeps a `CapabilitySnapshot` (auth state, harness version, model catalog). It is probed runner-side, side-effect-free, stored in the controller DB, and re-probed on interval, on demand, on config change and when the placement target changes.~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Per Provider Account x harness x runner, the controller keeps a `CapabilitySnapshot`: sign-in state, who is signed in and on which plan, and the models the account lists there. It is probed runner-side, side-effect-free, stored in the controller DB, and probed again on interval, on demand, after a sign-in, when a credential changes, and when the runner's facts show a harness appeared or disappeared. *(Amended 2026-10-31, [#934](https://github.com/theagenticage/hercule/issues/934).)* That last probe covers every pair of an account and a harness the account can run in that is installed on the runner, and it runs when a facts report changes a harness's presence or path, or the runner's `adapters` list. A report that changes nothing about its harnesses causes no probe. The account's Model Catalog is built from the latest successful probe on any runner ([06-providers](./06-providers.md)). Shape and probe methods in [06-providers](./06-providers.md).
 
 Probed facts refresh at hello, on demand ("Re-probe" on the runner page), and hourly; disk free and RAM ride the 60-second watermark check (section 6.2). (Resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43).)
+
+### 4.3 Keeping Runner Metrics
+
+*(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972), [ADR 0049](../adr/0049-the-controller-keeps-runner-metrics.md).)* The controller keeps a history of each runner's metrics, so the Fleet screen can draw how a machine was used and when its disk will reach its limit.
+
+- **One row per runner per minute.** When a `MetricsReport` arrives, the controller writes a row keyed by the runner and the minute the report arrived in: the report's three values, and the runner's sessions at that moment, counted from its own records: those `starting`, `idle` or `busy` (they take a slot) and those `queued` for it. A second report in the same minute, such as the one after a reconnect, replaces the first. A minute with no report has no row: the history shows a gap, never an invented value.
+- **Kept 14 days.** The controller setting `retention.runnerMetrics` holds the number of days, 14 by default, with no screen to change it in v1. Once an hour the controller deletes the rows older than that. Five machines make about 100,000 rows, about 15 MB with the index.
+- **A retired runner's rows** stay until they age out, like any other.
+- **Reading the history** is `runnerMetrics.query` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#runner-plugin-provider-controller-grant-family-infra)). It answers points of five minutes or of one hour, never single minutes. Each point is computed from the rows inside it:
+  - the mean of `diskFreeBytes`, `availableMemoryBytes` and the CPU averages;
+  - `availableMemoryLowestBytes`, the lowest available memory, and `cpuPeakPercent`, the highest CPU read, for the graphs' peak bands;
+  - the most sessions running and the most queued at any minute;
+  - `minutes`, how many rows it was computed from, so a client can tell a gap from a quiet machine.
+- **Live.** Every row written publishes an `invalidate` naming the runner on a new topic, `runnerMetrics`, in the mutable records family ([14-web-app.md](./14-web-app.md) Live model). It is not the `runner` topic: a routine report changes no Runner record a screen lists, and publishing every report there would make every client that holds a runner read read it again once a minute per runner (a comment in `apps/controller/src/runners/connections.ts` explains why it does not). Only a screen that draws metrics subscribes to `runnerMetrics`. On a nudge it reads again from the start of the newest point it holds, replaces that point, which was still filling, and appends the rest. Nothing polls.
+- **The disk forecast** is the client's ([17-desktop-app.md](./17-desktop-app.md#fleet)): a straight line through the hourly points of the last 7 days. The controller computes none.
+
 
 ## 5. Placement
 
@@ -525,6 +561,9 @@ Toolchains (node, python, go, docker, ...) are the machine owner's responsibilit
 
 The probed toolchain list is deliberately minimal in v1 (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)): **`git` and `gh`** only, reported as `{ name, version, path }` (raw `--version` output, parsed to semver where it parses). Anything else the owner installs by hand and, if placement needs it, expresses as a user label (`node`, `gpu`); the fuller answer is the post-v1 Environment concept. Placement filters match toolchain names (optionally a semver range) and labels.
 
+*(Amended 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* **The probed list is longer:** `git`, `gh`, `node`, `pnpm`, `bun`, `go`, `rustc`, `python3`, `uv`, `docker`, `terraform` and `dotnet`, each reported as above, so the Fleet screen can show which machine has which version. The list is fixed in the runner's code; there is no setting for it, and Hercule installs none of them. `docker` is now also a toolchain with its version, beside the `docker` fact, which stays for placement. Each probe is one `--version` (`dotnet --version`, `go version`) with the deadline the other probes have, run at hello and hourly, as before. What a project needs installed is post-v1 ([#976](https://github.com/theagenticage/hercule/issues/976)).
+
+
 ### 6.7 Teardown
 
 *(Superseded 2026-10-07, [#459](https://github.com/theagenticage/hercule/issues/459), section 6.8.)* The tables below retain historical cleanup rules. Lease windows still apply to automatic workflow workspaces, but Thread use makes retention manual. Expiry authorizes only safe cleanup; it does not prove files were deleted. Every removal reserves `disposing` before runner I/O and reaches `deleted` only after a matching successful outcome.
@@ -572,6 +611,7 @@ Reaper TTLs (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule
 | `orphan` | `workspace.orphanTtlHours` (default **24 hours**) | a session that exited and cannot be resumed; a session whose conversation is deleted, again |
 | `idle` | `workspace.idleTtlDays` (default **30 days**) | a session that exited and can be resumed |
 | `inspection` | `workspace.inspectionTtlDays` (default **14 days**) | a run that failed, or was cancelled with `keepWorkspace` |
+| `archived` | `workspace.archivedTtlDays` (default **7 days**) *(added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972), section 6.9)* | `session.archive`, again, for every archived session of the workspace, once no Thread of it is left unarchived; an archived session that exits |
 
 - **The rule.** The sweep deletes an ephemeral workspace on an online runner once it has no active lease and every lease's kept-until time has passed. ~~The latest lease wins: a thread that joined a failed run's workspace keeps it for its own window, even after the run's window has ended.~~ *(Superseded 2026-10-07, [#459](https://github.com/theagenticage/hercule/issues/459), section 6.8.)* The latest released lease window applies to automatic workspaces. A Thread joining makes the workspace manual before releasing its lease. Every workspace gets its first lease in the transaction that opens it; a workspace with no lease at all would be a fault, and the sweep leaves it alone rather than delete files it cannot account for.
 - **Releasing again.** A release also applies to a lease that is already released, and recomputes its kept-until time from the lease's own release time. Deleting an assistant releases each exited session of its conversations again as `orphan`, because nothing can resume those sessions any more.
@@ -602,11 +642,63 @@ Setup runs once per newly created managed working copy, including a newly create
 
 Automatic cleanup removes only clean generated paths and never uses force. Tracked changes, untracked files, ignored files and files at a multi-repo root all block cleanup with an actionable retained reason. This includes ignored dependencies and private configuration; no implicit disposable-file list exists. Single-repo worktrees use non-forced Git removal; refusal cannot be followed by recursive deletion. Multi-repo cleanup preflights every checkout and root file, preserves remaining files on refusal, and truthfully records partial removal. The one root file that does not block cleanup is the empty `.git` file the runner writes at the root of a workspace with no single checkout, so Claude Code's search for project settings stops there ([06-providers](./06-providers.md) section 9.4, "The root boundary"). Cleanup removes it only when it is exactly that: a regular file with no bytes. A `.git` that is a directory or holds anything blocks cleanup like any other root file. Committed branches and source repositories survive removal.
 
+*(Amended 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972), [ADR 0050](../adr/0050-archived-threads-and-their-workspaces.md).)* **Two kinds of workspace are now removed whole by automatic cleanup,** with `discardChanges: true` and no look at their files, by the path of section 6.9: an archived Thread workspace, and a workflow run's workspace once its run's window has passed (completed or cancelled: the next sweep; failed or kept: `workspace.inspectionTtlDays`). Nothing can use either again, and a Git check here would tie workspace removal to Git, which workspaces are kept free of (Rogier, 2026-11-02). Every other workspace keeps the rules above. The preflight that refuses on tracked changes, untracked and ignored files still runs for those, and for `workspace.dispose` without `discardChanges`.
+
 Explicit `workspace.dispose { id, discardChanges? }` may force-remove only known managed workspace paths when the user explicitly chooses `discardChanges: true`; automated cleanup cannot set it. Active holders refuse disposal. `workspace.detach { id }` forgets an attached primary registration with no filesystem deletion, refuses active holders, and explains existing derived worktrees. Those worktrees retain their source binding and remain usable while that Git repository exists.
 
 Reserve `disposing` in the database transaction that checks leases, retention and ownership. Admission, join and resume recheck readiness in their lease-acquisition transaction and refuse `disposing`. Filesystem I/O happens outside transactions. Mark `deleted` only after confirmed removal; refusal restores an available record with its reason, and interrupted transport leaves durable idempotently retriable intent. Detachment uses the same admission protection but never removes files.
 
 **Compatibility.** Add migrations without editing old ones. Preserve IDs, file contents, branches, Git topology and harness transcript associations. Existing standalone main clones remain the selected repository for new local work; cache-derived ephemerals retain the old cache, and a cache-only selection stays bare. No branch copying, moving, resetting or clone conversion occurs. Bind each new Checkout to its actual repository. Capability/version negotiation rejects unsupported adoption, revision, inspection and safe disposal visibly; never send an older runner unsafe substitute semantics. Legacy reads remain available.
+
+### 6.9 Workspaces' disk usage, and archived Threads' workspaces
+
+*(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972), [ADR 0050](../adr/0050-archived-threads-and-their-workspaces.md).)* The Fleet screen shows what fills a machine's disk and lets the user clean it up. The runner measures; the controller stores what it is told and decides nothing from it. Nothing here reads Git: a workspace is measured and removed as files, so the rules hold for a workspace whatever its checkouts are.
+
+**What the runner measures.** The `diskUsage` of a `DiskUsageReport` is:
+
+- `workspaces`: one entry per managed workspace the runner holds, `{ workspaceId, diskUsage, error }`, where `diskUsage` is the latest successful measurement or null and `error` the newest attempt's failure or null, as [02-domain-model.md](./02-domain-model.md) Workspace `diskUsage` and `diskUsageError` define them. At most 2,000 entries (`MAX_MEASURED_WORKSPACES`); past that the runner sends the 2,000 most recently used and `truncated: true`, and the controller leaves the disk usage of every workspace not in the report as it was.
+- `repositoryCacheBytes`: the runner's managed repositories, the bare storage new worktrees come from (section 6.8).
+- `harnessHomeBytes`: every Harness Home on the runner, where the harnesses keep their logins and their session files ([06-providers.md](./06-providers.md) section 9.1).
+- `measuredAt`: when the newest of these was measured.
+
+**The parts never overlap.** A file with more than one link, such as one pnpm hard-linked from its store, takes its blocks once however many workspaces link it. So the disk's parts are counted from blocks only one path holds: each workspace's `freesBytes`, and `repositoryCacheBytes` and `harnessHomeBytes`, which count only files whose link count is 1. Everything else in use is **Other**: `diskTotalBytes` minus `diskFreeBytes` minus those parts. It holds the package stores workspaces link to, the user's own files, and adopted main workspaces, which the runner never measures. It cannot be negative, because no block is counted twice. `sizeBytes` is shown only beside one workspace, as how big it looks, never added up.
+
+**How it measures.** A walk of the workspace's folder that adds up allocated blocks, not file lengths. `freesBytes` counts only files whose link count is 1, so a file that pnpm hard-linked from its store is in `sizeBytes` and not in `freesBytes`. The walk follows no symbolic link and does not cross into another file system.
+
+**When.**
+
+- A workspace is measured when it becomes `ready`, and when the last session working in it exits.
+- A workspace no session has started or exited in since its last measurement is not measured again, because nothing in it can have changed through Hercule. So an idle workspace's numbers are current, and the cleanup dialog needs no fresh measurement before it removes anything.
+- The repository caches and the Harness Homes are measured at the same moments, at most once every 10 minutes.
+- The runner measures one thing at a time, at a lower CPU and disk priority than sessions (`nice` and, on Linux, the idle I/O class). A walk that runs longer than 10 minutes stops and keeps the earlier numbers, if there are any, and its entry's `error` holds why, "Measuring took longer than 10 minutes", which the Fleet screen shows beside the numbers' age, or in their place. A walk that succeeds clears `error`.
+- After each measurement the runner sends a `DiskUsageReport`, at most one every 10 seconds, and one right after hello.
+
+**The controller stores** each workspace's entry on the workspace row (`diskUsage`, `diskUsageError`), and the runner's totals on the runner row (`diskUsage`). It writes only the entries whose values changed since the last report, in one transaction per report, and publishes the changed workspaces on the `workspace` topic. An entry for a workspace the controller does not know is dropped.
+
+**Idle.** A workspace is idle when no session has started or exited in it for 7 days: its `lastUsedAt` is older than that. The Fleet screen lists the largest idle ephemeral workspaces that a Thread used. Idle is a fact for the screen; it removes nothing by itself. A managed main workspace is measured, so the disk's parts add up, but the Fleet screen never offers to remove one: that stays `workspace.dispose`'s, one at a time.
+
+**Removing a workspace, and the checkouts in it.** A workspace is not a Git worktree. It is a folder that holds zero or more checkouts, and a checkout is what may be a worktree of a repository (section 6.8; [02-domain-model.md](./02-domain-model.md) Workspace). A multi-repo workspace holds several. The new removal path below keeps the two apart, and the code is modelled the same way:
+
+1. The runner removes each checkout through that checkout's own removal. For a Git checkout that unregisters its worktree from its repository (`git worktree remove --force`), so the repository keeps no record of a folder that is gone.
+2. Then it deletes the workspace's folder, whatever is still in it.
+
+Only step 1 knows Git; the workspace's removal does not. Step 1 is where a later **workspace removal hook** would sit, such as a Git plugin that refuses while a checkout holds uncommitted work, so that non-Git workspaces can be supported later without workspace code growing Git rules (Rogier, 2026-11-02). No hook is built now, and no Git check is added. Section 6.8's existing check before an unforced removal stays as it is for `workspace.dispose`, and is not extended.
+
+**Archived Threads give their workspace back to automatic cleanup.** A Thread workspace is retained by hand (section 6.8) because a Thread may be picked up again. An archived Thread never is ([GLOSSARY](../../GLOSSARY.md) Archived). An **archived workspace** is one with at least one Thread, every one of them archived. So:
+
+- When `session.archive` leaves a workspace archived, the same transaction sets its `retentionPolicy` back to `automatic`, and releases again, with the new retention `archived`, every **released** lease of an archived session in the workspace, those archived by earlier calls included. It never releases an active lease: an idle session that the archive stops keeps its lease, and so keeps its workspace safe from removal, until it exits. A primary keeps its policy: the sweep never deletes a primary.
+- An archived session that exits later, such as an idle one that the archive stopped, releases its lease with `archived` then, not with `orphan`.
+- **The stop survives a lost frame.** The controller sends `SessionStop` after the archive commits. When that frame is lost, by a controller restart or a dropped socket, the session is still live on its runner and archived on the controller. So whenever a runner's `sessionsReport` lists a live session that is archived, the controller stops it again. Until it exits, its active lease keeps the workspace.
+- `archived` keeps the workspace for `workspace.archivedTtlDays` (default **7 days**) from the lease's release, which is the session's exit. So an archived workspace is removed by the sweep once nothing has started or exited in it for 7 days, unless a later lease, such as a run's, keeps it longer.
+- The sweep's other rules hold: an active lease protects the workspace, and only an online runner removes anything.
+- **An archived workspace is removed whole**, by the path above, with no look at its files: changed, untracked and ignored files all go. The controller sends the dispose frame's existing `discardChanges: true` for it, from the sweep, `workspace.dispose` and `workspace.disposeMany` alike. Archiving was the user's explicit, final act on that work, and the archive confirmation says that the workspace and everything in it go ([17-desktop-app.md](./17-desktop-app.md#fleet)). This is the one case where automatic cleanup sets `discardChanges`, besides a finished run's workspace (section 6.8, as amended).
+- **The harness's own files go with the workspace.** When a workspace with archived sessions is removed, by any of the three, the dispose frame also lists them: `archivedSessions: [{ harnessId, harnessHome, nativeSessionId }]`, where `harnessHome` is the session's Harness Home as the controller names it in a session's start, because a home is not always found from the account's id ([06-providers.md](./06-providers.md) section 9.1). After the files are removed, the runner asks each session's Harness Adapter to delete that session's files in its Harness Home (`deleteSessionFiles`, [06-providers.md](./06-providers.md) section 4). The transcript the controller holds is not touched. A file the adapter cannot delete does not stop the removal: it becomes a warning on the deleted workspace, such as "Claude Code kept the files of 2 sessions: permission denied", which the workspace's page shows.
+- An archived Thread in a main workspace keeps its harness files, because the sweep never removes a main workspace and the Fleet screen never offers to.
+
+**Compatibility.** Two capabilities, each listed by both sides, because they ship in different slices:
+
+- **`archivedSessionFiles`** (`ARCHIVED_SESSION_FILES_CAPABILITY`) means the runner honours `archivedSessions` on the dispose frame. The controller sends it only to a runner whose hello lists it. Without it, the removal goes ahead, because `discardChanges` is an old field every runner knows, and the controller adds the warning "This machine's runner is too old to delete the harness's files. Update it."
+- **`diskUsage`** (`DISK_USAGE_CAPABILITY`) means the runner measures and sends `DiskUsageReport`. Without it, its workspaces have no `diskUsage`, and the Fleet screen shows that its runner is too old to measure.
 
 ## 7. Runner lifecycle and connectivity
 
