@@ -9,30 +9,6 @@
   flex-direction: column;
   min-height: 0;
 }
-/* What scrolls under the floating header is hidden across the header row and
-   fades in below it, as a thread's transcript does. A strip as wide as a
-   classic scroll bar stays unmasked, so the top of the thumb is not hidden.
-   The padding starts the lead 78px down, clear of the header's pills. */
-.fleet-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 78px 32px 140px;
-  mask-image:
-    linear-gradient(
-      to bottom,
-      transparent 50px,
-      rgb(0 0 0 / 0.15) 60px,
-      rgb(0 0 0 / 0.6) 70px,
-      #000 80px
-    ),
-    linear-gradient(#000 0 0);
-  mask-size:
-    100% 100%,
-    var(--scrollbar-width) 100%;
-  mask-position: right;
-  mask-repeat: no-repeat;
-}
 .fleet-col {
   max-width: 1120px;
   margin: 0 auto;
@@ -640,26 +616,5 @@
   .fleet-col-room,
   .fleet-col-mem {
     display: none;
-  }
-}
-
-/* ---------- Moving between Fleet and a machine's page ---------- */
-/* The card or row that was pressed grows into the head of the machine's page,
-   and back, because both carry the machine's view transition name. The page
-   around them cross-fades quickly. With Reduce motion the router starts no
-   transition, and these rules stop any that starts anyway. */
-::view-transition-group(*) {
-  animation-duration: var(--dur-3);
-  animation-timing-function: var(--ease-out);
-}
-::view-transition-old(*),
-::view-transition-new(*) {
-  animation-duration: var(--dur-2);
-}
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-group(*),
-  ::view-transition-old(*),
-  ::view-transition-new(*) {
-    animation: none;
   }
 }

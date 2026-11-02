@@ -33,6 +33,22 @@ export function useSavedRunnerField<Value, Change>(
 }
 
 /**
+ * Returns a function that keeps a runner the controller returned from a save:
+ * it puts the runner in the cached list, so the screen shows the saved values
+ * at once, and then reads the list again.
+ */
+export function useKeepSavedRunner(client: HerculeClient): (saved: Runner) => Promise<void> {
+  const queryClient = useQueryClient();
+  const { queryKey } = runnersQuery(client);
+  return async (saved) => {
+    queryClient.setQueryData(queryKey, (runners) =>
+      runners?.map((each) => (each.id === saved.id ? saved : each)),
+    );
+    await queryClient.invalidateQueries({ queryKey });
+  };
+}
+
+/**
  * Returns the Stop new work switch of a machine: `value` is true while the
  * machine is draining, and `save(true)` and `save(false)` call `runner.drain`
  * and `runner.undrain`.
@@ -45,19 +61,13 @@ export function useSavedRunnerDrain(
   client: HerculeClient,
   runner: Runner,
 ): SavedField<boolean, boolean> {
-  const queryClient = useQueryClient();
-  const { queryKey } = runnersQuery(client);
+  const keepSavedRunner = useKeepSavedRunner(client);
   const call = useMutation({
     mutationFn: (drain: boolean) =>
       drain
         ? client.runner.drain({ params: { id: runner.id } })
         : client.runner.undrain({ params: { id: runner.id } }),
-    onSuccess: async (updated) => {
-      queryClient.setQueryData(queryKey, (runners) =>
-        runners?.map((each) => (each.id === updated.id ? updated : each)),
-      );
-      await queryClient.invalidateQueries({ queryKey });
-    },
+    onSuccess: keepSavedRunner,
   });
   return {
     value: call.isPending ? call.variables : runner.lifecycle === "draining",

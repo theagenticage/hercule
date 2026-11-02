@@ -77,7 +77,12 @@ const renderDialog = async () => {
   render(
     <StrictMode>
       <QueryClientProvider client={createQueryClient()}>
-        <AddMachineDialog client={client} origin="http://atlas.test:4937" onClose={() => {}} />
+        <AddMachineDialog
+          client={client}
+          origin="http://atlas.test:4937"
+          timezone="UTC"
+          onClose={() => {}}
+        />
       </QueryClientProvider>
     </StrictMode>,
   );

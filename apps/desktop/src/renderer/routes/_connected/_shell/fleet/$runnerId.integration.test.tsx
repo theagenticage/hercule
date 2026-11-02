@@ -227,6 +227,18 @@ describe("a machine that is away", () => {
     ).toContain("Offline");
   });
 
+  it("shows the time in the user's time zone from the settings, as the Fleet page does", async () => {
+    await openMachine({
+      runner: OFFLINE,
+      overrides: {
+        "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "Asia/Tokyo" } } },
+      },
+    });
+
+    // The browser's zone is UTC here, where the runner was last heard from at 09:12.
+    expect(screen.getByText(/^atlas has not been heard from since 18:12\./)).toBeTruthy();
+  });
+
   it("asks the same retire question from the banner as from Settings", async () => {
     const { calls } = await openMachine({ runner: OFFLINE });
 

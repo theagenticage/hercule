@@ -8,7 +8,9 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
+import { decideMachineTransitionTypes } from "../screens/fleet/machine-transition";
 import { RenderFailure } from "../screens/render-failure";
+import { isMotionReduced } from "../screens/workflows/change-motion";
 import type { RouterContext } from "./context";
 import { openLaunchScreen, trackLastScreen } from "./last-screen";
 
@@ -19,6 +21,10 @@ import { openLaunchScreen, trackLastScreen } from "./last-screen";
  * it starts at `/`.
  * It renders the query cache's provider around every route, so the app and a
  * test render the router alone. A route that fails shows `RenderFailure`.
+ *
+ * A navigation between the Fleet page and a machine's page runs as a view
+ * transition, whatever starts it: a card, the header's Fleet crumb, or Back.
+ * No other navigation does.
  *
  * The router also empties the query cache and its own cache of past screens
  * when the user is signed out. It does so when a navigation ends with no
@@ -59,6 +65,11 @@ export const createAppRouter = (context: RouterContext) => {
     context,
     history: createMemoryHistory(),
     defaultErrorComponent: RenderFailure,
+    // Only the move between Fleet and a machine's page is a view transition;
+    // see `decideMachineTransitionTypes`.
+    defaultViewTransition: {
+      types: (places) => decideMachineTransitionTypes(places, isMotionReduced()),
+    },
     Wrap: ({ children }) => (
       <QueryClientProvider client={context.queryClient}>{children}</QueryClientProvider>
     ),

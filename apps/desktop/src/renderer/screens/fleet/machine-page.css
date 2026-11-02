@@ -4,26 +4,6 @@
    `machine-page-`. Each departure from the prototype is explained in a
    comment. */
 
-/* The scroll area under the floating header. Not in the prototype, which has
-   no header: the page starts 76px down so its first line clears the header's
-   pills (80px, as the section jump links do), and what scrolls under the
-   header fades out as the thread's transcript does (the header would
-   otherwise float over half a line). A strip as wide as a classic scroll bar
-   stays unmasked, so the top of the thumb is not hidden. */
-.machine-page-pane {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 76px 32px 72px;
-  mask-image:
-    linear-gradient(to bottom, transparent 40px, rgb(0 0 0 / 0.5) 60px, #000 80px),
-    linear-gradient(#000 0 0);
-  mask-size:
-    100% 100%,
-    var(--scrollbar-width) 100%;
-  mask-position: right;
-  mask-repeat: no-repeat;
-}
 .machine-page {
   max-width: 900px;
   margin: 0 auto;

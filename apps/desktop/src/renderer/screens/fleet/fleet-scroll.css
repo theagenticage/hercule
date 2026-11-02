@@ -1,0 +1,26 @@
+/* The area under the floating header that scrolls, on the Fleet page and on a
+   machine's page. What scrolls under the header is hidden across the header
+   row and fades in below it, as a thread's transcript does. A strip as wide as
+   a classic scroll bar stays unmasked, so the top of the thumb is not hidden.
+   The top padding starts the first line 78px down, clear of the header's
+   pills. The measurements are the fleet prototype's (`fxg-scroll`). */
+.fleet-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 78px 32px 140px;
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 50px,
+      rgb(0 0 0 / 0.15) 60px,
+      rgb(0 0 0 / 0.6) 70px,
+      #000 80px
+    ),
+    linear-gradient(#000 0 0);
+  mask-size:
+    100% 100%,
+    var(--scrollbar-width) 100%;
+  mask-position: right;
+  mask-repeat: no-repeat;
+}

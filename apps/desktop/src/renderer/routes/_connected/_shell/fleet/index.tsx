@@ -21,10 +21,9 @@ import {
 import { AddMachineDialog } from "../../../../screens/fleet/add-machine-dialog";
 import { FleetHeader, type FleetSection } from "../../../../screens/fleet/fleet-header";
 import { FleetLead } from "../../../../screens/fleet/fleet-lead";
+import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { useFleetNow } from "../../../../screens/fleet/use-fleet-now";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
-import { useShowsClassicScrollbar } from "../../../../screens/session/classic-scrollbar";
-import { isMotionReduced } from "../../../../screens/workflows/change-motion";
 import { useAllowSessions } from "./-allow-sessions";
 import { MachinesSection } from "./-machines-section";
 
@@ -64,11 +63,9 @@ const SECTION_IDS = ["machines"];
 
 /**
  * Draws the Fleet page: the floating header, the lead and the Machines
- * section. Pressing a machine opens its page as a view transition, unless
- * Reduce motion is on. Allow saves the machine's session cap.
- *
- * Back from a machine's page does not animate: the router starts a view
- * transition only for a navigation that asks for one, and Back does not.
+ * section. Pressing a machine opens its page; the router runs that as a view
+ * transition (see `decideMachineTransitionTypes`). Allow saves the machine's
+ * session cap.
  */
 function FleetPage(): JSX.Element {
   const { controller } = Route.useRouteContext();
@@ -79,7 +76,6 @@ function FleetPage(): JSX.Element {
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const { activeSectionId, scrollToSection } = useSectionInView(scrollRef, SECTION_IDS);
   const { allow, pendingRunnerIds, failure } = useAllowSessions(client);
   const [isAdding, setIsAdding] = useState(false);
@@ -106,10 +102,7 @@ function FleetPage(): JSX.Element {
         onJump={scrollToSection}
         onAddMachine={() => setIsAdding(true)}
       />
-      <div
-        ref={scrollRef}
-        className={showsScrollbar ? "fleet-scroll has-scrollbar" : "fleet-scroll"}
-      >
+      <FleetScroll scrollRef={scrollRef}>
         <div className="fleet-col">
           <FleetLead lead={describeFleet(machines)} />
           <MachinesSection
@@ -119,20 +112,19 @@ function FleetPage(): JSX.Element {
             isEmpty={isFleetEmpty(machines, record.localRunnerId)}
             pendingAllowRunnerIds={pendingRunnerIds}
             failedAllow={failedAllow}
-            onOpen={(runnerId) =>
-              void navigate({
-                to: "/fleet/$runnerId",
-                params: { runnerId },
-                viewTransition: !isMotionReduced(),
-              })
-            }
+            onOpen={(runnerId) => void navigate({ to: "/fleet/$runnerId", params: { runnerId } })}
             onAllow={allow}
             onAddMachine={() => setIsAdding(true)}
           />
         </div>
-      </div>
+      </FleetScroll>
       {isAdding ? (
-        <AddMachineDialog client={client} origin={url} onClose={() => setIsAdding(false)} />
+        <AddMachineDialog
+          client={client}
+          origin={url}
+          timezone={timezone}
+          onClose={() => setIsAdding(false)}
+        />
       ) : null}
     </div>
   );

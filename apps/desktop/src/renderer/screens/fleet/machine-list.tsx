@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX } from "react";
+import type { JSX } from "react";
 import { decideMachineKind, summarizeMachine, type FleetMachine } from "@hercule/client-core/fleet";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { MachineIcon } from "./machine-icon";
@@ -34,7 +34,7 @@ function MachineRow({
     <div
       role="row"
       className={`fleet-row${isAway ? " is-away" : ""}`}
-      style={{ viewTransitionName: buildMachineTransitionName(runner.id) } as CSSProperties}
+      style={{ viewTransitionName: buildMachineTransitionName(runner.id) }}
     >
       <span role="cell" className="fleet-row-dot">
         <StatusDot status={status} />

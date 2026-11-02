@@ -1,4 +1,4 @@
-import type { CSSProperties, JSX, ReactNode } from "react";
+import type { JSX, ReactNode } from "react";
 import {
   decideMachineKind,
   summarizeMachine,
@@ -82,7 +82,7 @@ export function MachineCard({
   return (
     <div
       className={`fleet-card${isAway ? " is-away" : ""}`}
-      style={{ viewTransitionName: buildMachineTransitionName(runner.id) } as CSSProperties}
+      style={{ viewTransitionName: buildMachineTransitionName(runner.id) }}
     >
       <div className="fleet-card-head">
         <span className="fleet-card-icon">

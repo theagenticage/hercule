@@ -1,7 +1,7 @@
 import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { resolveBrowserTimezone, describeRunnerFacts } from "@hercule/client-core";
+import { describeRunnerFacts, resolveDisplayTimezone } from "@hercule/client-core";
 import {
   buildFleetMachines,
   decideMachineKind,
@@ -23,13 +23,15 @@ import {
   providersQuery,
   readOnOpen,
   runnersQuery,
+  settingsQuery,
 } from "../../../../app/queries";
 import { AddMachineDialog } from "../../../../screens/fleet/add-machine-dialog";
 import { FleetHeader } from "../../../../screens/fleet/fleet-header";
+import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { MachinePageBanner } from "../../../../screens/fleet/machine-page-banner";
 import { MachinePageHead, MachinePageRoomLine } from "../../../../screens/fleet/machine-page-head";
+import { useFleetNow } from "../../../../screens/fleet/use-fleet-now";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
-import { useShowsClassicScrollbar } from "../../../../screens/session/classic-scrollbar";
 import { NotFound } from "../../../../screens/not-found";
 import { MachineRetireDialog } from "./-machine-retire-dialog";
 import { MachineSettings } from "./-machine-settings";
@@ -63,6 +65,7 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
       queryClient.ensureQueryData(providerAccountsQuery(client)),
       queryClient.fetchQuery(fleetSessionsQuery(client)),
       readOnOpen(queryClient, controllerQuery(client)),
+      readOnOpen(queryClient, settingsQuery(client)),
     ]);
     if (!runners.some((runner) => runner.id === runnerId && runner.lifecycle !== "retired")) {
       throwScreenNotFound(location);
@@ -94,7 +97,7 @@ function MachinePage(): JSX.Element {
 
 /**
  * Draws the Fleet header over the page of the machine `runner`, and the page
- * in its own scroll area. The head and its line are drawn here; the Software
+ * in the Fleet scroll area. The head and its line are drawn here; the Software
  * and Settings sections read what they draw themselves.
  *
  * Retire… on the banner and in Settings ask the same question, so the dialog
@@ -107,18 +110,18 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   const { data: runners } = useSuspenseQuery(runnersQuery(client));
   const { data: sessions } = useSuspenseQuery(fleetSessionsQuery(client));
   const { data: controllerRecord } = useSuspenseQuery(controllerQuery(client));
+  const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const scrollRef = useRef<HTMLDivElement>(null);
-  const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const { activeSectionId, scrollToSection } = useSectionInView(scrollRef, SECTION_IDS);
   const [isRetiring, setRetiring] = useState(false);
   const [isAdding, setAdding] = useState(false);
-  const [timezone] = useState(() => resolveBrowserTimezone());
-  const now = new Date();
 
+  const timezone = resolveDisplayTimezone(settings.user.timezone);
   const kind = decideMachineKind(runner.facts);
   const machine = buildFleetMachines(runners, sessions).find(
     (each) => each.runner.id === runner.id,
   );
+  const now = useFleetNow(machine === undefined ? [] : [machine], timezone);
   const room = machine === undefined ? null : describeRoom(machine);
   const reading = describeRunnerFacts(runner);
 
@@ -131,10 +134,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
         onJump={scrollToSection}
         onAddMachine={() => setAdding(true)}
       />
-      <div
-        ref={scrollRef}
-        className={showsScrollbar ? "machine-page-pane has-scrollbar" : "machine-page-pane"}
-      >
+      <FleetScroll scrollRef={scrollRef}>
         <div className="machine-page">
           <MachinePageHead
             runnerId={runner.id}
@@ -161,7 +161,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
           <MachineSoftware id={SOFTWARE_ID} runner={runner} />
           <MachineSettings id={SETTINGS_ID} runner={runner} onRetire={() => setRetiring(true)} />
         </div>
-      </div>
+      </FleetScroll>
       {isRetiring && (
         <MachineRetireDialog
           runner={runner}
@@ -173,6 +173,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
         <AddMachineDialog
           client={client}
           origin={controller.url}
+          timezone={timezone}
           onClose={() => setAdding(false)}
         />
       )}

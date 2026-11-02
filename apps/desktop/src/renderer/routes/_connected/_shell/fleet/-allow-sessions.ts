@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useMutationState } from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
-import { runnersQuery } from "../../../../app/queries";
+import { useKeepSavedRunner } from "./-saved-runner-field";
 
 const ALLOW_MUTATION_KEY = ["fleet", "allow-sessions"] as const;
 
@@ -40,8 +40,7 @@ export interface AllowSessions {
  *   hook keeps it. The next Allow clears it.
  */
 export function useAllowSessions(client: HerculeClient): AllowSessions {
-  const queryClient = useQueryClient();
-  const { queryKey } = runnersQuery(client);
+  const keepSavedRunner = useKeepSavedRunner(client);
   const [failure, setFailure] = useState<AllowFailure | null>(null);
   const pendingRunnerIds = useMutationState({
     filters: { mutationKey: ALLOW_MUTATION_KEY, status: "pending" },
@@ -54,12 +53,7 @@ export function useAllowSessions(client: HerculeClient): AllowSessions {
     onError: (error, allowance) => {
       setFailure({ ...allowance, message: readErrorMessage(error) });
     },
-    onSuccess: async (updated) => {
-      queryClient.setQueryData(queryKey, (runners) =>
-        runners?.map((each) => (each.id === updated.id ? updated : each)),
-      );
-      await queryClient.invalidateQueries({ queryKey });
-    },
+    onSuccess: keepSavedRunner,
   });
   return {
     allow: (runnerId, cap) => {

@@ -1,0 +1,16 @@
+/* Moving between the Fleet page and a machine's page. The card or row that
+   was pressed grows into the head of the machine's page, and back, because
+   both carry the machine's view transition name. The page around them
+   cross-fades quickly. Reduce motion needs no rule here: the router starts no
+   such transition then, and base.css sets the duration tokens to 0s.
+
+   Every rule is scoped to this transition's type, so a view transition that
+   something else starts later is not restyled. */
+:root:active-view-transition-type(fleet-machine)::view-transition-group(*) {
+  animation-duration: var(--dur-3);
+  animation-timing-function: var(--ease-out);
+}
+:root:active-view-transition-type(fleet-machine)::view-transition-old(*),
+:root:active-view-transition-type(fleet-machine)::view-transition-new(*) {
+  animation-duration: var(--dur-2);
+}

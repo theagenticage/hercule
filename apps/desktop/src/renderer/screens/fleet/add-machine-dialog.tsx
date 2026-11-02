@@ -5,7 +5,6 @@ import {
   joinCommand,
   queryKeys,
   readErrorMessage,
-  resolveBrowserTimezone,
   toIdTail,
   type HerculeClient,
 } from "@hercule/client-core";
@@ -31,6 +30,9 @@ import "./add-machine-dialog.css";
  * - Creating or revoking a token reads the open tokens again. Revoking the
  *   token the command carries takes the command away: it would not work.
  *
+ * `timezone` is the zone the token times are shown in: the user's own, as on
+ * the rest of the Fleet pages.
+ *
  * `origin` is the address of the controller the app is connected to, such as
  * `http://127.0.0.1:4937`. The new machine joins that address, so the command
  * must carry it and not the address of the page.
@@ -40,15 +42,16 @@ import "./add-machine-dialog.css";
 export function AddMachineDialog({
   client,
   origin,
+  timezone,
   onClose,
 }: {
   readonly client: HerculeClient;
   readonly origin: string;
+  readonly timezone: string;
   readonly onClose: () => void;
 }): JSX.Element {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const queryClient = useQueryClient();
-  const [timezone] = useState(() => resolveBrowserTimezone());
   const [reserved, setReserved] = useState(false);
   const { result: copyResult, copy } = useCopyResult();
 
