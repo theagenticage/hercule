@@ -56,6 +56,7 @@ const SCREEN_PARAM_CHECKS = {
   runId: isId,
   discussionId: isId,
   pageId: isId,
+  runnerId: isId,
 } satisfies Record<ScreenParamName, (value: string) => boolean>;
 
 /** Returns the `localStorage` key that holds the last screen for `controllerUrl`. */

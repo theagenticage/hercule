@@ -255,6 +255,32 @@ export const liveAgentSessionsQuery = (client: HerculeClient) => {
   });
 };
 
+/**
+ * Reads every session that has not exited, of every kind and on every runner,
+ * for the Fleet screens: what runs where, and how many sessions each machine
+ * holds. The Fleet pages group them by runner themselves, so one read serves
+ * the Fleet page and every machine's page. The read follows the cursor to the
+ * last page, and its key sits under the `sessions` prefix, so a push on the
+ * `session` topic, which the shell holds, reads it again while a Fleet screen
+ * is open.
+ *
+ * While no Fleet screen is open, a push only marks the read out of date and
+ * sends no request (`invalidateWithoutCancelling` reads only active queries).
+ * The read keeps `staleTime: Infinity`, so nothing else reads it either. The
+ * Fleet loaders call `fetchQuery`, not `ensureQueryData`, so opening Fleet
+ * waits for a new read exactly when a push marked the cached one out of date,
+ * and shows the cached one at once otherwise. The default `gcTime` of five
+ * minutes only bounds memory: after it, the next open reads the list again.
+ */
+export const fleetSessionsQuery = (client: HerculeClient) => {
+  const filter = { status: LIVE_SESSION_STATUSES } as const;
+  return queryOptions({
+    queryKey: queryKeys.sessions(filter),
+    queryFn: () => readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+};
+
 /** Reads every project, for the sidebar's project headers. */
 export const projectsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -618,6 +644,19 @@ export const controllerQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.controller(),
     queryFn: () => client.controller.read(),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Reads the join tokens that are still unused, for the Add a machine dialog.
+ * No live topic covers them, and a token lasts an hour, so the dialog reads
+ * them each time it opens (`readOnOpen`) and again after it creates or
+ * revokes one.
+ */
+export const joinTokensQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.joinTokens(),
+    queryFn: () => client.runner.queryJoinTokens(),
     ...READ_ON_OPEN_OPTIONS,
   });
 

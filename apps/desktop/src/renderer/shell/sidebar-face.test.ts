@@ -11,7 +11,7 @@ describe("decideScreenFace", () => {
     expect(decideScreenFace(pathname)).toBe("threads");
   });
 
-  it("shows the orchestration face on Intake, Workflows, a run's page, Discussions and the Wiki", () => {
+  it("shows the orchestration face on Intake, Workflows, a run's page, Discussions, the Wiki and Fleet", () => {
     expect(decideScreenFace("/intake")).toBe("orchestration");
     expect(decideScreenFace("/workflows")).toBe("orchestration");
     expect(decideScreenFace("/workflows/wf_1")).toBe("orchestration");
@@ -20,6 +20,9 @@ describe("decideScreenFace", () => {
     expect(decideScreenFace("/discussions/dis_1")).toBe("orchestration");
     expect(decideScreenFace("/wiki")).toBe("orchestration");
     expect(decideScreenFace("/wiki/getting-started")).toBe("orchestration");
+    expect(decideScreenFace("/fleet")).toBe("orchestration");
+    expect(decideScreenFace("/fleet/run_1")).toBe("orchestration");
+    expect(decideScreenFace("/fleet/run_1/activity")).toBe("orchestration");
   });
 
   it.each([

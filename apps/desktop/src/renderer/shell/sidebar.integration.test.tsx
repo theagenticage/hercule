@@ -1104,21 +1104,30 @@ describe("the sidebar's faces", () => {
     expect(row.classList.contains("is-on")).toBe(true);
   });
 
-  it("draws Fleet as a row that does nothing yet", async () => {
-    const { calls, router, live } = await startSidebar({
+  it("opens Fleet from its row, and marks the row on the Fleet page and on a machine's page", async () => {
+    const { router, live } = await startSidebar({
       path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
     });
     await live.waitForFirstPushes();
     await userEvent.click(getSegment("Hercule"));
     const nav = screen.getByRole("navigation", { name: "Hercule" });
-    const sent = calls.length;
 
-    const row = within(nav).getByRole("button", { name: "Fleet" });
-    expect(row.getAttribute("aria-disabled")).toBe("true");
-    expect(row.getAttribute("title")).toBe("Not built yet");
+    const row = within(nav).getByRole("link", { name: "Fleet" });
+    expect(row.getAttribute("href")).toBe("/fleet");
+    expect(row.getAttribute("aria-current")).toBeNull();
+
     await userEvent.click(row);
-    expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    expect(calls).toHaveLength(sent);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/fleet");
+    });
+    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(row.classList.contains("is-on")).toBe(true);
+
+    const runnerId = SINGLE_THREADS_FIXTURE.runners[0]!.id;
+    await act(() => router.navigate({ to: "/fleet/$runnerId", params: { runnerId } }));
+    expect(router.state.location.pathname).toBe(`/fleet/${runnerId}`);
+    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(row.classList.contains("is-on")).toBe(true);
   });
 
   it("marks the Connections row while a Connection needs attention", async () => {
@@ -1134,7 +1143,7 @@ describe("the sidebar's faces", () => {
 
     const row = within(nav).getByRole("link", { name: /Connections/ });
     expect(within(row).getByRole("img", { name: "A Connection needs attention" })).toBeTruthy();
-    expect(within(nav).getByRole("button", { name: "Fleet" })).toBeTruthy();
+    expect(within(nav).getByRole("link", { name: "Fleet" })).toBeTruthy();
   });
 
   it("keeps the app on screen when the Hercule face opens long after the Connections were last drawn", async () => {
