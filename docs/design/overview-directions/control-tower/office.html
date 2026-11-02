@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440" />
+    <!-- PROTOTYPE - Control Tower's Office, the Aerodrome, alone and full window, with a small
+         switcher for state and theme. The window mounts the same module in desktop.html.
+         ?state=everyday|open|swarm|away|slots|conflict|landing|moving  ?theme=whitehaven|orient-express
+         ?select=<thread id>  ?zone=field|holding|approach|conflict|stand|parked|hangar|mail
+         ?motion=off (Reduce Motion: every plane parks in its phase, no frame while nothing moves)
+         ?at=<seconds> (jumps a landing or a touch-and-go that far in, for still pictures)
+         ?switch=off (hides the switcher, for the book's captures) -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="control-tower-office.css" />
+    <title>The Aerodrome · Control Tower · Hercule</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--surface);
+        font-family: var(--font-ui);
+      }
+      #office {
+        position: fixed;
+        inset: 0;
+      }
+      .ctof-switch {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 4px;
+        border-radius: var(--r-pill);
+        background: var(--raised);
+        box-shadow:
+          var(--shadow-2),
+          inset 0 0 0 1px var(--line-soft);
+        color: var(--ink);
+        font-size: var(--t-12);
+      }
+      .ctof-switch[hidden] {
+        display: none;
+      }
+      .ctof-switch b {
+        padding: 0 8px 0 10px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-bold);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .ctof-switch button {
+        height: 24px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: var(--r-pill);
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        cursor: pointer;
+      }
+      .ctof-switch button:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      .ctof-switch button[aria-pressed="true"] {
+        background: var(--selected);
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .ctof-switch i {
+        width: 1px;
+        height: 16px;
+        margin: 0 6px;
+        background: var(--line);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="office"></div>
+    <nav class="ctof-switch" aria-label="State and theme">
+      <b>State</b>
+      <button type="button" data-state="everyday">Everyday</button>
+      <button type="button" data-state="open">Open</button>
+      <button type="button" data-state="swarm">Swarm</button>
+      <button type="button" data-state="away">Away</button>
+      <button type="button" data-state="landing">Landing</button>
+      <button type="button" data-state="conflict">Conflict</button>
+      <button type="button" data-state="slots">Slots</button>
+      <i></i>
+      <button type="button" data-theme-choice="whitehaven">Whitehaven</button>
+      <button type="button" data-theme-choice="orient-express">Orient Express</button>
+    </nav>
+
+    <script src="../../sidebar-directions/shared/world.js"></script>
+    <script src="../shared/world-plus.js"></script>
+    <script src="control-tower-data.js"></script>
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script src="../vendor/office-kit.js"></script>
+    <script src="control-tower-office.js"></script>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var root = document.documentElement;
+        if (params.get("switch") === "off") document.querySelector(".ctof-switch").hidden = true;
+        var state = params.get("state") || "everyday";
+        var selected = params.get("select") || (state === "open" ? "t3ds" : null);
+        var handle = window.OfficeModes["control-tower"].mount(document.getElementById("office"), {
+          world: window.WORLD,
+          theme: root.dataset.theme,
+          state: state,
+          selected: selected,
+          reducedMotion: params.get("motion") === "off" || matchMedia("(prefers-reduced-motion: reduce)").matches,
+          onSelect: function (id) {
+            selected = id;
+          },
+          onOpen: function (id) {
+            console.log("open", id);
+          },
+        });
+        if (params.get("zone")) handle.frameZone(params.get("zone"), true);
+        if (params.get("at")) {
+          setTimeout(function () {
+            handle.seek(Number(params.get("at")));
+          }, 1000);
+        }
+
+        var stateButtons = document.querySelectorAll(".ctof-switch button[data-state]");
+        var themeButtons = document.querySelectorAll(".ctof-switch button[data-theme-choice]");
+        function show() {
+          var evening = root.dataset.theme === "orient-express" || root.dataset.theme === "dark";
+          stateButtons.forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.state === state));
+          });
+          themeButtons.forEach(function (b) {
+            b.setAttribute("aria-pressed", String((b.dataset.themeChoice === "orient-express") === evening));
+          });
+        }
+        stateButtons.forEach(function (b) {
+          b.addEventListener("click", function () {
+            state = b.dataset.state;
+            handle.setState(state);
+            if (state === "open") handle.select("t3ds");
+            show();
+          });
+        });
+        themeButtons.forEach(function (b) {
+          b.addEventListener("click", function () {
+            root.dataset.theme = b.dataset.themeChoice;
+            show();
+          });
+        });
+        show();
+        window.aerodrome = handle;
+      })();
+    </script>
+  </body>
+</html>

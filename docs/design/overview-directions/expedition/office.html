@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440" />
+    <!-- PROTOTYPE - Expedition's Office, the Range, alone in a full window, with a small switcher
+         for the state and the theme. The live window (desktop.html) mounts the same module.
+         URL: ?state=everyday|open|swarm|away|stuck|grew  ?theme=whitehaven|orient-express
+              ?select=<thread id>  ?motion=off (no ambient life, for captures) -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="expedition-office.css" />
+    <title>The Range · Expedition · Hercule</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--surface);
+        overflow: hidden;
+      }
+      #office {
+        position: fixed;
+        inset: 0;
+      }
+      .exo-switch {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px;
+        border-radius: var(--r-pill);
+        background: var(--raised);
+        box-shadow:
+          var(--shadow-1),
+          inset 0 0 0 1px var(--line-soft);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        font-size: var(--t-12);
+      }
+      .exo-switch b {
+        padding: 0 8px 0 10px;
+        font-weight: var(--w-bold);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .exo-switch b span {
+        color: var(--faint);
+        font-weight: var(--w-medium);
+      }
+      .exo-switch i {
+        width: 1px;
+        height: 16px;
+        margin: 0 4px;
+        background: var(--line);
+      }
+      .exo-switch button {
+        height: 24px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--r-pill);
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        cursor: pointer;
+      }
+      .exo-switch button:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      .exo-switch button[aria-pressed="true"] {
+        background: var(--selected);
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      html[data-chrome="off"] .exo-switch {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="office"></div>
+    <nav class="exo-switch" aria-label="State and theme">
+      <b>The Range <span>· Expedition</span></b>
+      <button type="button" data-state-choice="everyday">Everyday</button>
+      <button type="button" data-state-choice="open">Open</button>
+      <button type="button" data-state-choice="swarm">Swarm</button>
+      <button type="button" data-state-choice="away">Away</button>
+      <button type="button" data-state-choice="stuck">Stuck</button>
+      <button type="button" data-state-choice="grew">Grew</button>
+      <i></i>
+      <button type="button" data-theme-choice="whitehaven">Whitehaven</button>
+      <button type="button" data-theme-choice="orient-express">Orient Express</button>
+    </nav>
+
+    <script src="../../sidebar-directions/shared/world.js"></script>
+    <script src="../shared/world-plus.js"></script>
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script src="../vendor/office-kit.js"></script>
+    <script src="expedition-office.js"></script>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var root = document.documentElement;
+        if (params.get("chrome") === "off") root.dataset.chrome = "off";
+        var state = params.get("state") || "everyday";
+        var host = document.getElementById("office");
+        var handle = window.OfficeModes.expedition.mount(host, {
+          world: window.WORLD,
+          theme: root.dataset.theme,
+          state: state,
+          selected: params.get("select"),
+          reducedMotion: params.get("motion") === "off" || matchMedia("(prefers-reduced-motion: reduce)").matches,
+          onSelect: function (id) {
+            handle && handle.select(id);
+          },
+          onOpen: function (id) {
+            console.log("open", id);
+          },
+        });
+        var stateButtons = document.querySelectorAll("[data-state-choice]");
+        var themeButtons = document.querySelectorAll("[data-theme-choice]");
+        function showPressed() {
+          var evening = root.dataset.theme === "orient-express" || root.dataset.theme === "dark";
+          stateButtons.forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.stateChoice === state));
+          });
+          themeButtons.forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.themeChoice === (evening ? "orient-express" : "whitehaven")));
+          });
+        }
+        stateButtons.forEach(function (b) {
+          b.addEventListener("click", function () {
+            state = b.dataset.stateChoice;
+            handle.setState(state);
+            showPressed();
+          });
+        });
+        themeButtons.forEach(function (b) {
+          b.addEventListener("click", function () {
+            root.dataset.theme = b.dataset.themeChoice;
+            showPressed();
+          });
+        });
+        document.addEventListener("visibilitychange", function () {
+          if (document.hidden) handle.pause();
+          else handle.resume();
+        });
+        showPressed();
+        window.range = handle;
+      })();
+    </script>
+  </body>
+</html>

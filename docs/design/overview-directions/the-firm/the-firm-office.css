@@ -1,0 +1,737 @@
+/*
+ * PROTOTYPE - The Firm's Office, the Dollhouse: the labels and the HUD the module draws over its
+ * canvas. Every rule is scoped under .ov-the-firm-office, and every class starts with tfo-.
+ *
+ * Levels of detail: the module puts one of tfo-lod-tiny, -far, -mid or -near on its container
+ * from the scale (CSS pixels per metre, also in --tfo-ppm). Far away the floors' nameplates and
+ * the rooms' plaques show; close up the beans' name tags take over.
+ *
+ * Nothing here blurs what is behind it: a backdrop-filter over the canvas would make the browser
+ * composite the whole window on every frame (OFFICE-KIT.md, Performance rules).
+ */
+
+.ov-the-firm-office {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+  outline: none;
+  --tfo-ppm: 30;
+  font-family: var(--font-ui);
+}
+
+.ov-the-firm-office .tfo-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.ov-the-firm-office .tfo-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ov-the-firm-office .tfo-hud > * {
+  pointer-events: auto;
+}
+
+/* ------------------------------------------------------------------ floor nameplates */
+
+.ov-the-firm-office .tfo-floor-label {
+  translate: -100% -50%;
+  pointer-events: none;
+}
+
+.ov-the-firm-office .tfo-floor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 10px;
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  text-align: right;
+}
+
+.ov-the-firm-office .tfo-floor__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  order: 0;
+}
+
+.ov-the-firm-office .tfo-floor__num {
+  order: 1;
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: var(--r-xs);
+  background: var(--ink);
+  color: var(--raised);
+  font-family: var(--font-deco);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.ov-the-firm-office .tfo-floor__name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  line-height: 16px;
+}
+
+.ov-the-firm-office .tfo-floor__tint {
+  width: 8px;
+  height: 8px;
+  rotate: 45deg;
+  border-radius: 1.5px;
+  background: var(--tfo-tint, var(--line));
+}
+
+.ov-the-firm-office .tfo-floor__tint.proj--webshop {
+  --tfo-tint: var(--proj-webshop);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--proj-webshop) 60%, var(--ink) 25%);
+}
+
+.ov-the-firm-office .tfo-floor__tint.proj--payments {
+  --tfo-tint: var(--proj-payments);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--proj-payments) 60%, var(--ink) 25%);
+}
+
+.ov-the-firm-office .tfo-floor__tint.proj--ops {
+  --tfo-tint: var(--proj-ops);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--proj-ops) 60%, var(--ink) 25%);
+}
+
+.ov-the-firm-office .tfo-floor__meta {
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-the-firm-office .tfo-floor.is-you {
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 55%, transparent);
+}
+
+.ov-the-firm-office .tfo-floor.is-you .tfo-floor__num {
+  background: var(--you);
+  color: oklch(0.25 0.04 70);
+}
+
+.ov-the-firm-office .tfo-floor.is-you .tfo-floor__meta {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* In a portrait container the building fills the width: the nameplates sit on the left pier,
+   over the slab, number first. */
+.ov-the-firm-office.is-portrait .tfo-floor-label {
+  translate: 0 -50%;
+}
+
+.ov-the-firm-office.is-portrait .tfo-floor {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+}
+
+.ov-the-firm-office.is-portrait .tfo-floor__num {
+  order: 0;
+  min-width: 18px;
+  height: 18px;
+  font-size: 11px;
+  box-shadow: var(--shadow-1);
+}
+
+.ov-the-firm-office.is-portrait .tfo-floor__text {
+  display: none;
+}
+
+.ov-the-firm-office.tfo-lod-near .tfo-floor-label,
+.ov-the-firm-office.tfo-lod-mid .tfo-floor__meta {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ room plaques */
+
+.ov-the-firm-office .tfo-plaque-label {
+  translate: -50% -50%;
+}
+
+.ov-the-firm-office .tfo-plaque {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  max-width: max(18px, calc(var(--w) * var(--tfo-ppm) * 1px - 8px));
+  height: 18px;
+  padding: 0 7px 0 6px;
+  border-radius: var(--r-xs);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-11);
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.ov-the-firm-office .tfo-plaque__light {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+
+.ov-the-firm-office .tfo-plaque.is-working .tfo-plaque__light {
+  background: var(--ok);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ok) 22%, transparent);
+}
+
+.ov-the-firm-office .tfo-plaque.is-waiting .tfo-plaque__light {
+  background: var(--you);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--you) 30%, transparent);
+}
+
+.ov-the-firm-office .tfo-plaque.is-paused .tfo-plaque__light {
+  border-radius: 1px;
+  background: var(--faint);
+  box-shadow: none;
+  width: 6px;
+}
+
+.ov-the-firm-office .tfo-plaque.is-waiting {
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 55%, transparent);
+}
+
+.ov-the-firm-office .tfo-plaque__name,
+.ov-the-firm-office .tfo-plaque__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--w-bold);
+}
+
+.ov-the-firm-office .tfo-plaque__title {
+  display: none;
+}
+
+.ov-the-firm-office .tfo-plaque__count {
+  flex: none;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-the-firm-office .tfo-plaque__news {
+  flex: none;
+  margin-left: 1px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--raised);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  line-height: 13px;
+}
+
+.ov-the-firm-office .tfo-plaque__news.is-quiet {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+}
+
+/* Far: the plaques tighten, so a lone office's name fits under it. A run's bench is narrow, so
+   its plaque keeps only its light and its step until the camera comes closer. */
+.ov-the-firm-office.tfo-lod-far .tfo-plaque {
+  gap: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.ov-the-firm-office.tfo-lod-far .tfo-plaque--run .tfo-plaque__name {
+  display: none;
+}
+
+.ov-the-firm-office.tfo-lod-far .tfo-plaque--run .tfo-plaque__count,
+.ov-the-firm-office.tfo-lod-mid .tfo-plaque--run .tfo-plaque__count {
+  font-size: 10px;
+}
+
+.ov-the-firm-office .tfo-plaque--run .tfo-short,
+.ov-the-firm-office.tfo-lod-far .tfo-plaque--run .tfo-long {
+  display: none;
+}
+
+.ov-the-firm-office.tfo-lod-far .tfo-plaque--run .tfo-short {
+  display: inline;
+}
+
+.ov-the-firm-office.tfo-lod-far .tfo-plaque--run.is-waiting .tfo-plaque__count {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+
+/* A plaque under a room too narrow for its name keeps its light, its count and its away chip;
+   hover shows the title. */
+.ov-the-firm-office .tfo-plaque.is-cramped .tfo-plaque__name,
+.ov-the-firm-office .tfo-plaque.is-cramped .tfo-long {
+  display: none;
+}
+
+.ov-the-firm-office .tfo-plaque.is-cramped {
+  gap: 4px;
+  padding: 0 5px;
+}
+
+/* Tiny: the plaques fold to their lights. */
+.ov-the-firm-office.tfo-lod-tiny .tfo-plaque {
+  gap: 0;
+  width: auto;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: var(--r-pill);
+}
+
+.ov-the-firm-office.tfo-lod-tiny .tfo-plaque > :not(.tfo-plaque__light) {
+  display: none;
+}
+
+/* Near: the plaque carries the team's full title. */
+.ov-the-firm-office.tfo-lod-near .tfo-plaque__name {
+  display: none;
+}
+
+.ov-the-firm-office.tfo-lod-near .tfo-plaque__title {
+  display: block;
+}
+
+/* ------------------------------------------------------------------ name tags and bubbles */
+
+.ov-the-firm-office .tfo-tag {
+  display: none;
+}
+
+.ov-the-firm-office.tfo-lod-near .tfo-tag,
+.ov-the-firm-office.tfo-lod-mid .tfo-tag--always,
+.ov-the-firm-office .tfo-tag.is-selected,
+.ov-the-firm-office .tfo-tag.is-hovered {
+  display: flex;
+}
+
+.ov-the-firm-office .tfo-tag--desk {
+  translate: -50% 4px;
+}
+
+/* In the queue, past the first in line, a tag folds to the app's marigold pip until you come close. */
+.ov-the-firm-office:not(.tfo-lod-near) .tfo-tag--queue:not(.is-hovered):not(.is-selected) {
+  gap: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  background: var(--you);
+  box-shadow:
+    var(--shadow-1),
+    0 0 0 1.5px var(--raised);
+  translate: -50% -100%;
+}
+
+.ov-the-firm-office:not(.tfo-lod-near) .tfo-tag--queue:not(.is-hovered):not(.is-selected) > * {
+  display: none;
+}
+
+.ov-the-firm-office .tfo-tag--upstairs {
+  opacity: 0.92;
+}
+
+.ov-the-firm-office.tfo-lod-mid .tfo-tag--upstairs {
+  display: flex;
+}
+
+.ov-the-firm-office.tfo-lod-near .tfo-tag.is-remote:not(.is-selected):not(.is-hovered) {
+  display: none;
+}
+
+.ov-the-firm-office .tfo-tag.is-speaking:not(.is-selected) {
+  display: none;
+}
+
+.ov-the-firm-office .tfo-bubble-label {
+  translate: -30% -100%;
+}
+
+.ov-the-firm-office .tfo-bubble {
+  position: relative;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 230px;
+  margin-bottom: 8px;
+  padding: 6px 10px 7px;
+  border-radius: 10px;
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 1.38;
+  white-space: normal;
+  text-wrap: pretty;
+}
+
+.ov-the-firm-office .tfo-bubble::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  rotate: 45deg;
+  translate: -50% 0;
+  background: inherit;
+  box-shadow: 1px 1px 0 0 var(--line-soft);
+}
+
+.ov-the-firm-office .tfo-bubble__head {
+  display: block;
+  margin-bottom: 1px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+
+.ov-the-firm-office .tfo-bubble.is-you {
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 55%, transparent);
+}
+
+.ov-the-firm-office .tfo-bubble.is-you .tfo-bubble__head {
+  color: var(--you-ink);
+}
+
+.ov-the-firm-office .tfo-bubble.is-you::after {
+  box-shadow: 1px 1px 0 0 color-mix(in oklab, var(--you) 55%, transparent);
+}
+
+/* Far away the bubbles shrink to their first line. */
+.ov-the-firm-office.tfo-lod-far .tfo-bubble,
+.ov-the-firm-office.tfo-lod-tiny .tfo-bubble {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ the lift panel */
+
+.ov-the-firm-office .tfo-lift {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  translate: 0 -50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+}
+
+.ov-the-firm-office .tfo-lift button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 70%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-family: var(--font-deco);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+
+.ov-the-firm-office .tfo-lift button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ov-the-firm-office .tfo-lift button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.ov-the-firm-office .tfo-lift button.is-lit {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--raised);
+}
+
+.ov-the-firm-office .tfo-lift .tfo-lift__all {
+  margin-bottom: 2px;
+  box-shadow: none;
+  color: var(--muted);
+}
+
+.ov-the-firm-office .tfo-lift button.has-wait::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  translate: 0 -50%;
+  border-radius: 50%;
+  background: var(--you);
+}
+
+.ov-the-firm-office .tfo-lift__badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: var(--r-pill);
+  background: var(--you);
+  color: oklch(0.25 0.04 70);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  line-height: 16px;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ the legend and the caption */
+
+.ov-the-firm-office .tfo-legend {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  display: flex;
+  gap: 12px;
+  padding: 5px 11px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 16px;
+  pointer-events: none;
+}
+
+.ov-the-firm-office .tfo-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ov-the-firm-office .tfo-legend__light {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.ov-the-firm-office .tfo-legend__light.is-waiting {
+  background: var(--you);
+}
+
+.ov-the-firm-office .tfo-legend__light.is-working {
+  background: var(--ok);
+}
+
+.ov-the-firm-office .tfo-legend__light.is-quiet {
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+
+.ov-the-firm-office .tfo-caption {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ov-the-firm-office .tfo-caption[hidden] {
+  display: none;
+}
+
+.ov-the-firm-office .tfo-caption span {
+  color: var(--muted);
+}
+
+.ov-the-firm-office.is-portrait .tfo-legend {
+  display: none;
+}
+
+.ov-the-firm-office.is-portrait .tfo-lift {
+  top: auto;
+  bottom: 14px;
+  right: 50%;
+  translate: 50% 0;
+  flex-direction: row;
+  gap: 5px;
+  padding: 5px 7px;
+}
+
+.ov-the-firm-office.is-portrait .tfo-lift button {
+  width: 30px;
+  height: 30px;
+}
+
+.ov-the-firm-office.is-portrait .tfo-lift .tfo-lift__all {
+  margin: 0 2px 0 0;
+}
+
+.ov-the-firm-office.is-portrait .tfo-lift button.has-wait::after {
+  left: 50%;
+  top: auto;
+  bottom: -4px;
+  translate: -50% 0;
+}
+
+/* ------------------------------------------------------------------ the directory (portrait) */
+
+.ov-the-firm-office .tfo-directory {
+  display: none;
+}
+
+.ov-the-firm-office.is-portrait.tfo-lod-tiny .tfo-directory,
+.ov-the-firm-office.is-portrait.tfo-lod-far .tfo-directory {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 8px 6px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+}
+
+.ov-the-firm-office .tfo-directory__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 4px 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+.ov-the-firm-office .tfo-directory__firm {
+  color: var(--ink);
+  font-family: var(--font-deco);
+  font-size: var(--t-16);
+  line-height: 20px;
+}
+
+.ov-the-firm-office .tfo-directory__row {
+  display: grid;
+  grid-template-columns: 20px auto 1fr;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-12);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ov-the-firm-office .tfo-directory__row:hover {
+  background: var(--hover);
+}
+
+.ov-the-firm-office .tfo-directory__num {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--ink);
+  color: var(--raised);
+  font-family: var(--font-deco);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ov-the-firm-office .tfo-directory__name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+}
+
+.ov-the-firm-office .tfo-directory__meta {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-the-firm-office .tfo-directory__row.is-you .tfo-directory__num {
+  background: var(--you);
+  color: oklch(0.25 0.04 70);
+}
+
+.ov-the-firm-office .tfo-directory__row.is-you .tfo-directory__meta {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}

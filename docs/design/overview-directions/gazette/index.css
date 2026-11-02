@@ -1,0 +1,891 @@
+/* PROTOTYPE - Gazette's story page. Loads after ../shared/book.css; every rule is gzs-, and the
+   phone mock of the Front Page is gzp-. */
+
+.gzs {
+  width: min(1080px, 100% - 64px);
+  margin: 0 auto;
+  padding-bottom: 120px;
+}
+.gzs [id] {
+  scroll-margin-top: 80px;
+}
+
+/* ---------- the hero, set like a masthead ---------- */
+.gzs-hero {
+  padding: 72px 0 28px;
+}
+.gzs-mast {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 0 0 6px;
+}
+.gzs-mast h1 {
+  margin: 0;
+  font-family: var(--font-deco);
+  font-size: clamp(56px, 9vw, 104px);
+  font-weight: 400;
+  letter-spacing: 0.005em;
+  line-height: 1;
+}
+.gzs-orn {
+  position: relative;
+  flex: 1;
+  height: 9px;
+  border-top: 1px solid var(--brass);
+  border-bottom: 1px solid var(--brass);
+}
+.gzs-orn::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 13px;
+  height: 13px;
+  margin-left: -6.5px;
+  background: var(--brass);
+  transform: rotate(45deg);
+}
+.gzs-dateline {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin: 10px 0 30px;
+  padding: 6px 2px 5px;
+  border-top: 3px double var(--ink);
+  border-bottom: 1px solid var(--ink);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.gzs-lever {
+  max-width: 820px;
+  margin: 0 0 18px;
+  font-size: clamp(26px, 3.6vw, 40px);
+  font-weight: 740;
+  font-stretch: 80%;
+  letter-spacing: -0.015em;
+  line-height: 1.12;
+  text-wrap: balance;
+}
+.gzs-lede {
+  max-width: 740px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.65;
+}
+.gzs-lede + .gzs-lede {
+  margin-top: 14px;
+}
+.gzs-lede b {
+  color: var(--ink);
+}
+.gzs-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+/* ---------- images ---------- */
+.gzs-shot {
+  margin: 0;
+  min-width: 0;
+}
+.gzs-shot img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent), 0 2px 4px oklch(0.2 0.02 165 / 0.06), 0 26px 60px -24px oklch(0.2 0.02 165 / 0.34);
+}
+.gzs-shot--crop img {
+  border-radius: 10px;
+}
+.gzs-shot figcaption {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.gzs-shot figcaption b {
+  display: block;
+  color: var(--ink);
+  font-size: var(--t-14);
+}
+.gzs-hero-shot {
+  margin-top: 40px;
+}
+
+/* ---------- sections ---------- */
+.gzs-sec {
+  padding-top: 92px;
+}
+.gzs-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.gzs-sec > h2,
+.gzs-mode h3 {
+  margin: 0 0 14px;
+  max-width: 860px;
+  font-size: clamp(28px, 3.4vw, 38px);
+  font-weight: 720;
+  font-stretch: 82%;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+.gzs-mode h3 {
+  font-size: clamp(24px, 2.8vw, 30px);
+}
+.gzs-sec > .gzs-lede {
+  margin-bottom: 34px;
+}
+.gzs-body {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15.5px;
+  line-height: 1.65;
+}
+.gzs-body + .gzs-body {
+  margin-top: 10px;
+}
+.gzs-body b {
+  color: var(--ink);
+}
+.gzs-body code,
+.gzs-list code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 0.86em;
+}
+.gzs-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.gzs-list li + li {
+  margin-top: 6px;
+}
+.gzs-list b {
+  color: var(--ink);
+}
+
+/* The huh: the inverted block, with the paper inside it. */
+.gzs-huh {
+  margin-top: 64px;
+  padding: 40px 44px 44px;
+  border-radius: var(--r-xl);
+  background: var(--ink);
+  color: var(--surface);
+}
+.gzs-huh .gzs-kicker {
+  color: color-mix(in oklab, var(--surface) 60%, transparent);
+}
+.gzs-huh h2 {
+  margin: 0 0 12px;
+  max-width: 820px;
+  font-size: clamp(28px, 3.6vw, 42px);
+  font-weight: 740;
+  font-stretch: 80%;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+.gzs-huh p {
+  max-width: 720px;
+  margin: 0 0 28px;
+  color: color-mix(in oklab, var(--surface) 78%, transparent);
+  font-size: 16px;
+  line-height: 1.6;
+}
+.gzs-huh-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 690fr) minmax(0, 332fr);
+  gap: 20px;
+  align-items: start;
+}
+.gzs-huh .gzs-shot img {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--surface) 12%, transparent), 0 24px 50px -20px oklch(0 0 0 / 0.5);
+}
+.gzs-huh .gzs-shot figcaption {
+  color: color-mix(in oklab, var(--surface) 70%, transparent);
+}
+.gzs-huh .gzs-shot figcaption b {
+  color: var(--surface);
+}
+.gzs-huh-mast {
+  margin-bottom: 20px;
+}
+
+/* The modes: an image and its words, side by side on a desk, stacked on a phone. */
+.gzs-mode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 36px;
+  align-items: start;
+  padding: 40px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.gzs-mode:first-of-type {
+  border-top: 0;
+}
+.gzs-mode--flip > :first-child {
+  order: 2;
+}
+.gzs-pics {
+  display: grid;
+  gap: 20px;
+}
+.gzs-pics--2 {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
+.gzs-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.gzs-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.gzs-keys kbd {
+  font-size: 11.5px;
+}
+.gzs-slot {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  padding: 24px;
+  border-radius: 12px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-13);
+  text-align: center;
+}
+
+/* The Office: a heading, the dial big, three details, then the Office in the window. */
+.gzs-office {
+  padding: 40px 0 0;
+  border-top: 1px solid var(--line-soft);
+}
+.gzs-office-head {
+  max-width: 760px;
+}
+.gzs-office-head h3,
+.gzs-office-window h3 {
+  margin: 0 0 14px;
+  font-size: clamp(24px, 2.8vw, 30px);
+  font-weight: 720;
+  font-stretch: 82%;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+.gzs-office-big {
+  margin-top: 28px;
+}
+.gzs-office-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+  margin-top: 28px;
+}
+.gzs-office-window {
+  margin-top: 36px;
+}
+.gzs-shot picture {
+  display: block;
+}
+
+/* Holding up: four full windows in a grid. */
+.gzs-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px 24px;
+}
+
+/* The walk-through. */
+.gzs-walk {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gzs-step {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 28px;
+  align-items: start;
+  padding: 30px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.gzs-step-at {
+  font-family: var(--font-deco);
+  font-size: 30px;
+  line-height: 1;
+}
+.gzs-step h3 {
+  margin: 2px 0 8px;
+  font-size: 19px;
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.gzs-step .gzs-shot img {
+  margin-left: auto;
+}
+
+/* Needs, costs, risks. */
+.gzs-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+.gzs-card {
+  padding: 22px 24px 24px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.gzs-card h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.gzs-card--quiet {
+  background: var(--sunken);
+  box-shadow: none;
+}
+.gzs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-14);
+}
+.gzs-table th,
+.gzs-table td {
+  padding: 12px 16px 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+.gzs-table th {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.gzs-table td {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.gzs-table td:first-child {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.gzs-scroll {
+  overflow-x: auto;
+}
+.gzs-risk {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 24px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.gzs-risk h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: var(--w-bold);
+  line-height: 1.35;
+}
+.gzs-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.gzs-links a {
+  display: block;
+  padding: 14px 16px 15px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-soft);
+  text-decoration: none;
+  transition: box-shadow var(--dur-1), transform var(--dur-1);
+}
+.gzs-links a:hover {
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-2);
+  transform: translateY(-1px);
+}
+.gzs-links b {
+  display: block;
+  font-size: 15px;
+}
+.gzs-links span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.gzs-note {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: var(--t-13);
+}
+
+/* ================================================================== the phone: the Front Page on Android */
+
+.gzs-phones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 40px;
+  margin-top: 8px;
+}
+.gzp {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  height: 760px;
+  overflow: hidden;
+  border-radius: 34px;
+  background: var(--bg);
+  box-shadow: 0 0 0 9px oklch(0.2 0.01 60), 0 0 0 10px oklch(0.35 0.01 60), 0 40px 80px -30px oklch(0.15 0.02 60 / 0.55);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.gzp-status {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 4px 22px 0 24px;
+  flex: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: var(--w-medium);
+}
+.gzp-cam {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: #0a0a0a;
+}
+.gzp-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.gzp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 52px;
+  padding: 0 16px 0 20px;
+  flex: none;
+}
+.gzp-bar b {
+  font-size: 20px;
+  font-weight: var(--w-bold);
+}
+.gzp-bar .seg button {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.gzp-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 12px;
+}
+.gzp-paper {
+  position: relative;
+  padding: 36px 16px 18px;
+  border-radius: 6px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.gzp-paper--low {
+  margin-top: -260px;
+}
+.gzp-title {
+  margin: 0;
+  font-family: var(--font-deco);
+  font-size: 27px;
+  font-weight: 400;
+  line-height: 34px;
+  text-align: center;
+  white-space: nowrap;
+}
+.gzp-orns {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.gzp-orns i {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  border-top: 1px solid var(--brass);
+  border-bottom: 1px solid var(--brass);
+}
+.gzp-orns b {
+  width: 7px;
+  height: 7px;
+  background: var(--brass);
+  transform: rotate(45deg);
+}
+.gzp-date {
+  margin-top: 6px;
+  padding: 4px 0 3px;
+  border-top: 3px double var(--ink);
+  border-bottom: 1px solid var(--ink);
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.gzp-stamp {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  padding: 3px 8px 4px;
+  border: 1.5px solid var(--accent-ink);
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1.5px var(--raised), inset 0 0 0 2.5px var(--accent-ink);
+  background: var(--raised);
+  color: var(--accent-ink);
+  font-size: 9px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  text-align: center;
+  text-transform: uppercase;
+  transform: rotate(6deg);
+}
+.gzp-kick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.gzp-kick .proj {
+  font-size: 10px;
+}
+.gzp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.gzp-h1 {
+  margin: 6px 0 6px;
+  font-size: 27px;
+  font-weight: 760;
+  font-stretch: 76%;
+  letter-spacing: -0.01em;
+  line-height: 30px;
+}
+.gzp-deck {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+.gzp-by {
+  color: var(--faint);
+  font-size: 9.5px;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.gzp-fig {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  border-radius: 4px;
+}
+.gzp-fig--dark,
+[data-theme="orient-express"] .gzp-fig--light,
+[data-theme="dark"] .gzp-fig--light {
+  display: none;
+}
+[data-theme="orient-express"] .gzp-fig--dark,
+[data-theme="dark"] .gzp-fig--dark {
+  display: block;
+}
+.gzp-sign {
+  margin-top: 14px;
+  padding: 10px 12px 2px;
+  box-shadow: inset 0 0 0 1px var(--ink), inset 0 0 0 4px var(--raised), inset 0 0 0 5px var(--ink);
+}
+.gzp-sign-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 7px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.gzp-sign-h .count {
+  letter-spacing: 0;
+}
+.gzp-item {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 9px;
+  padding: 10px 2px 11px;
+}
+.gzp-item + .gzp-item {
+  border-top: 1px solid var(--line-soft);
+}
+.gzp-item b {
+  display: block;
+  overflow: hidden;
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gzp-q {
+  color: var(--you-ink);
+  font-size: 12.5px;
+  line-height: 17px;
+}
+.gzp-q code {
+  font-size: 11px;
+}
+.gzp-acts {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.gzp-acts .btn {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.gzp-h2 {
+  margin: 4px 0 4px;
+  font-size: 19px;
+  font-weight: 720;
+  font-stretch: 80%;
+  line-height: 23px;
+}
+.gzp-sect {
+  margin-top: 16px;
+  padding-top: 6px;
+  border-top: 2px solid var(--ink);
+}
+.gzp-sect-h {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.gzp-sect-h span {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.gzp-p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+}
+.gzp-at {
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.gzp-brief {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.gzp-brief li {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  line-height: 17px;
+}
+.gzp .tabbar {
+  height: 66px;
+  padding-top: 8px;
+}
+.gzp .tb-intake,
+.gzp .tb-new {
+  opacity: 0.45;
+}
+.gzp-gesture {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  width: 108px;
+  height: 4px;
+  margin-left: -54px;
+  border-radius: 2px;
+  background: var(--ink);
+  opacity: 0.7;
+}
+.gzp-cap {
+  max-width: 360px;
+  margin: 18px auto 0;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+  text-align: center;
+}
+.gzp-cap b {
+  color: var(--ink);
+}
+
+/* ================================================================== narrow screens */
+
+@media (max-width: 900px) {
+  .gzs {
+    width: calc(100% - 36px);
+  }
+  .gzs-hero {
+    padding-top: 40px;
+  }
+  .gzs-mast {
+    gap: 10px;
+  }
+  .gzs-sec {
+    padding-top: 64px;
+  }
+  .gzs-huh {
+    margin-top: 48px;
+    padding: 26px 18px 22px;
+  }
+  .gzs-huh-grid,
+  .gzs-gallery,
+  .gzs-office-3,
+  .gzs-mode,
+  .gzs-cols,
+  .gzs-risk,
+  .gzs-links {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gzs-mode {
+    gap: 20px;
+    padding: 30px 0;
+  }
+  .gzs-mode--flip > :first-child {
+    order: 0;
+  }
+  .gzs-pics--2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gzs-step {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 24px 0;
+  }
+  .gzs-step-at {
+    font-size: 26px;
+  }
+  .gzs-step .gzs-shot img {
+    margin-left: 0;
+  }
+  .gzs-risk {
+    gap: 6px;
+  }
+  /* The needs table stacks on a phone: the need, then what it is, then where it lands. */
+  .gzs-table thead {
+    display: none;
+  }
+  .gzs-table tr,
+  .gzs-table td {
+    display: block;
+  }
+  .gzs-table tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .gzs-table td {
+    padding: 0;
+    border: 0;
+  }
+  .gzs-table td + td {
+    margin-top: 4px;
+  }
+  .gzs-table td:last-child {
+    color: var(--faint);
+    font-size: var(--t-13);
+  }
+  .gzs-phones {
+    gap: 32px;
+  }
+}
+/* A phone narrower than the mock: zoom shrinks the mock and its layout box, so the bezel keeps a margin. */
+@media (max-width: 420px) {
+  .gzp {
+    zoom: 0.92;
+  }
+}
+@media (max-width: 380px) {
+  .gzp {
+    zoom: 0.84;
+  }
+}

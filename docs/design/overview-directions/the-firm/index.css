@@ -1,0 +1,332 @@
+/* PROTOTYPE - The Firm's story page, on top of ../shared/book.css. Classes are prefixed tf-. */
+
+.tf-story .bk-hero h1 .bk-num {
+  color: var(--brass);
+}
+.tf-story code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 0.9em;
+}
+
+/* ---------- figures: a shot with a quiet frame and a caption ---------- */
+.tf-fig {
+  margin: 0;
+}
+.tf-fig a {
+  display: block;
+}
+.tf-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-2);
+}
+.tf-fig figcaption {
+  max-width: 720px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.tf-fig figcaption b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.tf-fig--hero {
+  margin-top: 8px;
+}
+.tf-fig--narrow .tf-shot {
+  width: auto;
+  max-width: 100%;
+}
+.tf-fig--strip {
+  margin-top: 36px;
+}
+
+/* The huh sits on the inverted block: its captions follow it. */
+.bk-huh .tf-fig figcaption {
+  color: color-mix(in oklab, var(--surface) 72%, transparent);
+}
+.bk-huh .tf-fig figcaption b {
+  color: var(--surface);
+}
+.tf-huh-room {
+  margin-top: 28px;
+}
+.tf-huh-chain {
+  max-width: 700px;
+  margin-top: 28px;
+}
+.bk-huh .tf-shot {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--surface) 18%, transparent);
+}
+
+/* ---------- the modes ---------- */
+.tf-mode {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+.tf-mode + .tf-mode {
+  margin-top: 72px;
+}
+.tf-mode--side {
+  grid-template-columns: 272px minmax(0, 1fr);
+}
+/* A mode whose picture takes the whole column: the picture, the words, then more pictures. */
+.tf-mode--stack {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+}
+.tf-mode-text {
+  max-width: 820px;
+}
+.tf-fig--span {
+  grid-column: 1 / -1;
+}
+.tf-fig--half {
+  max-width: 700px;
+}
+.tf-pair.tf-pair--wide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+/* The hero is the window on a wide screen and the Dollhouse drawn upright on a phone. */
+.tf-fig .tf-only-phone,
+.tf-only-phone-inline {
+  display: none;
+}
+.tf-shot--portrait {
+  max-width: 412px;
+  margin: 0 auto;
+}
+.tf-mode-name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 22px !important;
+}
+.tf-mode-name small {
+  color: var(--faint);
+  font-size: 14px;
+  font-weight: var(--w-medium);
+}
+.tf-when {
+  margin-top: 14px !important;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.tf-when b {
+  color: var(--ink);
+}
+
+/* ---------- stand-up and the moments ---------- */
+.tf-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  align-items: flex-start;
+}
+.tf-pair .tf-fig {
+  flex: 0 1 272px;
+}
+.tf-note {
+  max-width: 720px;
+  margin-top: 24px !important;
+}
+/* A moment drawn twice: the window's crop on the left, the Dollhouse on the right, one caption. */
+.tf-moment {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px 28px;
+  align-items: start;
+}
+.tf-moment + .tf-moment {
+  margin-top: 48px;
+}
+.tf-fig--small .tf-shot {
+  width: auto;
+  max-width: 100%;
+  max-height: 520px;
+}
+.tf-moment-cap {
+  grid-column: 1 / -1;
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.tf-moment-cap b {
+  color: var(--ink);
+}
+
+/* ---------- walk, costs, risks ---------- */
+.tf-steps {
+  max-width: 760px;
+}
+.tf-steps code {
+  font-size: 0.86em;
+}
+.tf-costs {
+  margin-top: 40px;
+}
+.tf-costs .bk-card h3 {
+  margin-top: 2px;
+}
+.tf-risks {
+  row-gap: 28px;
+}
+
+/* ---------- the links ---------- */
+.tf-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.tf-link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  text-decoration: none;
+  transition: box-shadow var(--dur-1);
+}
+.tf-link:hover {
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-2);
+}
+.tf-link b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.tf-link span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.tf-link--main {
+  grid-column: 1 / -1;
+  background: var(--accent);
+  box-shadow: none;
+}
+.tf-link--main b,
+.tf-link--main span {
+  color: var(--accent-fg);
+}
+
+/* ---------- the phone ---------- */
+@media (max-width: 900px) {
+  .tf-mode,
+  .tf-mode--side,
+  .tf-moment,
+  .tf-pair.tf-pair--wide {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .tf-fig .tf-only-wide,
+  .tf-only-wide-inline {
+    display: none;
+  }
+  .tf-fig .tf-only-phone {
+    display: block;
+  }
+  .tf-only-phone-inline {
+    display: inline;
+  }
+  .tf-fig--small {
+    justify-self: center;
+  }
+  .tf-mode + .tf-mode {
+    margin-top: 56px;
+  }
+  .tf-mode--side .tf-fig--narrow {
+    justify-self: center;
+  }
+  .tf-pair .tf-fig {
+    flex: 1 1 100%;
+  }
+  .tf-pair .tf-shot {
+    margin: 0 auto;
+  }
+  .tf-moment-cap {
+    margin-top: -8px;
+    font-size: 13.5px;
+  }
+  /* The needs table reads as one block per piece on a phone. */
+  .tf-needs thead {
+    display: none;
+  }
+  .tf-needs tr {
+    display: block;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .tf-needs td {
+    display: block;
+    padding: 2px 0;
+    border: 0;
+  }
+  .tf-needs td:first-child {
+    margin-bottom: 4px;
+    white-space: normal;
+  }
+  .tf-needs td:nth-child(2)::before,
+  .tf-needs td:nth-child(3)::before {
+    color: var(--faint);
+    font-size: var(--t-11);
+    font-weight: var(--w-bold);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .tf-needs td:nth-child(2)::before {
+    content: "Today · ";
+  }
+  .tf-needs td:nth-child(3)::before {
+    content: "Needed · ";
+  }
+  .tf-needs td:nth-child(3) {
+    color: var(--ink);
+  }
+  .tf-links {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tf-fig figcaption {
+    font-size: 13.5px;
+  }
+}
+
+/* ---------- wide shots pan sideways on the phone, at a size that reads ---------- */
+.tf-swipe {
+  display: none;
+}
+@media (max-width: 900px) {
+  .tf-fig--pan .tf-pan {
+    overflow-x: auto;
+    margin: 0 -18px;
+    padding: 4px 18px 10px;
+    scrollbar-width: thin;
+  }
+  .tf-fig--pan .tf-shot {
+    width: var(--w);
+    max-width: none;
+  }
+  .tf-swipe {
+    display: inline;
+    color: var(--faint);
+  }
+  .bk-huh .tf-fig--pan .tf-pan {
+    margin: 0 -24px;
+    padding: 4px 24px 10px;
+  }
+}

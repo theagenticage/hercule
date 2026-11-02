@@ -1,0 +1,2062 @@
+/* PROTOTYPE - Gazette, the window. Every rule is scoped under .ov-gazette (the window's root, from
+   Stage.direction({ rootClass })), and every class is gz-. The Office module brings its own
+   stylesheet (gazette-office.css, scoped under .ov-gazette-office).
+
+   The newspaper's display type: Limelight (the Deco face) sets the masthead, the drop caps and the
+   end card; headlines use Bricolage Grotesque condensed (font-stretch), at sizes only the Front
+   Page uses. Everything else is the token scale. */
+
+.ov-gazette.app {
+  position: relative;
+}
+
+/* ================================================================== the Wire: sidebar rows */
+
+.ov-gazette .gz-row {
+  position: relative;
+}
+.ov-gazette .gz-row.is-unread .side-name {
+  font-weight: var(--w-bold);
+}
+.ov-gazette .gz-row .st-detail {
+  min-width: 0;
+}
+.ov-gazette .gz-row.has-crew .st-detail {
+  padding-right: 34px;
+}
+.ov-gazette .gz-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-gazette .gz-row.is-unread .gz-line {
+  color: var(--muted);
+}
+.ov-gazette .gz-line--ask {
+  color: var(--you-ink);
+}
+.ov-gazette .gz-row.is-unread .gz-line--ask {
+  color: var(--you-ink);
+}
+.ov-gazette .gz-asker,
+.ov-gazette .gz-role {
+  font-weight: var(--w-bold);
+}
+.ov-gazette .gz-role {
+  color: var(--muted);
+}
+
+/* The right edge: what waits on you in marigold, the time of unread news in ink. */
+.ov-gazette .gz-end--you {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.ov-gazette .gz-end--time {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.ov-gazette .gz-end--working {
+  color: var(--accent-ink);
+}
+.ov-gazette .gz-end--faint {
+  color: var(--faint);
+}
+
+/* The ink dot: news since you looked. It hangs in the margin, like a printer's mark, so a row
+   costs no width for it. Marigold stays for what waits on you. */
+.ov-gazette .gz-ink {
+  position: absolute;
+  top: 12px;
+  left: -9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.ov-gazette .gz-ink--inline {
+  position: static;
+  display: inline-block;
+  flex: none;
+  margin-right: 7px;
+  vertical-align: 2px;
+}
+
+/* Crew dots, as today's row draws them (spec 17, #828). */
+.ov-gazette .gz-dots {
+  position: absolute;
+  top: 27px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  pointer-events: none;
+}
+.ov-gazette .gz-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.ov-gazette .gz-dot--waiting {
+  background: var(--you);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--you-ink) 35%, transparent);
+}
+.ov-gazette .gz-dot--working {
+  background: var(--accent-ink);
+}
+.ov-gazette .gz-dot--queued {
+  border: 1.5px solid var(--accent-ink);
+}
+.ov-gazette .gz-dot--quiet {
+  border: 1.5px solid var(--faint);
+}
+
+/* Quiet is read and idle: it steps back. */
+.ov-gazette .gz-row.is-quiet {
+  opacity: 0.72;
+}
+.ov-gazette .gz-row.is-quiet:hover,
+.ov-gazette .gz-row.is-quiet:focus-within {
+  opacity: 1;
+}
+
+/* A row that just arrived or moved, once the pointer left: one soft flash. */
+@media (prefers-reduced-motion: no-preference) {
+  .ov-gazette .gz-row.is-fresh > .side-row,
+  .ov-gazette .gz-wrow.is-fresh {
+    animation: gz-fresh 1200ms var(--ease-out);
+  }
+}
+@keyframes gz-fresh {
+  0%,
+  30% {
+    background: color-mix(in oklab, var(--ink) 9%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.ov-gazette .gz-sec .side-h {
+  gap: 6px;
+}
+.ov-gazette .gz-h-note {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.ov-gazette .gz-catch-link {
+  flex: none;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--accent-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.ov-gazette .gz-catch-link:hover {
+  background: var(--hover);
+}
+.ov-gazette .gz-sub {
+  padding-left: 10px;
+}
+.ov-gazette .gz-more {
+  gap: 8px;
+  padding-left: 10px;
+  color: var(--faint);
+}
+.ov-gazette .gz-done-row span {
+  flex: 1;
+}
+.ov-gazette .gz-done-row b {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "3 new": stories held back while the pointer is in a list, in the header of News where they
+   will land. The header sticks while the list scrolls inside News, so the pill stays in view. */
+.ov-gazette .side-h.has-pill,
+.ov-gazette .gz-wsec-h.has-pill {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+}
+.ov-gazette .gz-wsec-h.has-pill {
+  background: var(--surface);
+}
+.ov-gazette .gz-pill {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px 0 9px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  box-shadow: var(--shadow-1);
+}
+.ov-gazette .gz-pill:hover {
+  background: color-mix(in oklab, var(--ink) 86%, var(--surface));
+}
+.ov-gazette .gz-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-gazette .gz-pill {
+    animation: gz-drop var(--dur-3) var(--ease-spring);
+  }
+}
+@keyframes gz-drop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+/* Keyboard hints: a quiet footer that shows while the pointer or focus is in the list. */
+.ov-gazette .gz-keys {
+  position: sticky;
+  bottom: -12px;
+  display: flex;
+  gap: 10px;
+  margin: 8px -12px -12px;
+  padding: 7px 12px 8px 22px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg);
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur-2);
+}
+.ov-gazette .stage-list:hover .gz-keys,
+.ov-gazette .stage-list:focus-within .gz-keys {
+  opacity: 1;
+}
+.ov-gazette .gz-keys kbd + kbd {
+  margin-left: 2px;
+}
+
+/* ================================================================== the overview */
+
+.ov-gazette .gz-ov {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 272px;
+  z-index: 6;
+  background: var(--surface);
+  box-shadow: -1px 0 0 var(--line-soft);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-2) var(--ease-out), visibility 0s linear var(--dur-2);
+}
+.ov-gazette .gz-ov.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.ov-gazette .gz-top {
+  position: absolute;
+  z-index: 7;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.ov-gazette .gz-top > * {
+  pointer-events: auto;
+}
+.ov-gazette .gz-switch {
+  gap: 2px;
+}
+.ov-gazette .gz-sw {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.ov-gazette .gz-sw:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ov-gazette .gz-sw[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ov-gazette .gz-own {
+  gap: 6px;
+  padding: 0 4px;
+}
+.ov-gazette .gz-own .btn kbd {
+  margin-left: 2px;
+}
+.ov-gazette .gz-own-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-editions {
+  box-shadow: none;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.ov-gazette .gz-editions button {
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-counts {
+  gap: 14px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-c {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ov-gazette .gz-c b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette .gz-c--you,
+.ov-gazette .gz-c--you b {
+  color: var(--you-ink);
+}
+.ov-gazette .gz-c .gz-ink--inline {
+  margin-right: 1px;
+  vertical-align: 0;
+}
+.ov-gazette .gz-top .pill-btn kbd {
+  margin-left: 2px;
+}
+
+/* The three panes, stacked; the one shown fades in. */
+.ov-gazette .gz-pane {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-2) var(--ease-out), visibility 0s linear var(--dur-2);
+}
+.ov-gazette .gz-ov[data-mode="office"] .gz-pane--office,
+.ov-gazette .gz-ov[data-mode="threads"] .gz-pane--threads,
+.ov-gazette .gz-ov[data-mode="front-page"] .gz-pane--front {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+
+/* ================================================================== Threads mode */
+
+.ov-gazette .gz-pane--threads {
+  display: grid;
+  grid-template-columns: 412px minmax(0, 1fr);
+}
+.ov-gazette .gz-wire {
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+  padding: 58px 12px 0 16px;
+  border-right: 1px solid var(--line-soft);
+  scrollbar-width: thin;
+}
+.ov-gazette .gz-back {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 6px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.4;
+}
+.ov-gazette .gz-back b {
+  color: var(--ink);
+}
+.ov-gazette .gz-back .cr-you {
+  flex: none;
+}
+.ov-gazette .gz-wsec {
+  padding-bottom: 6px;
+}
+.ov-gazette .gz-wsec-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 6px 0 0;
+  padding: 0 12px 0 14px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-wsec-h .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+.ov-gazette .gz-wsub {
+  padding: 6px 14px 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-gazette .gz-wrow {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--dur-1);
+}
+.ov-gazette .gz-wrow:hover {
+  background: var(--hover);
+}
+.ov-gazette .gz-wrow.is-on {
+  background: var(--selected);
+}
+.ov-gazette .gz-wrow .gz-ink {
+  top: 19px;
+  left: 4px;
+}
+.ov-gazette .gz-wrow.is-quiet {
+  opacity: 0.72;
+}
+.ov-gazette .gz-wrow.is-quiet:hover,
+.ov-gazette .gz-wrow.is-quiet.is-on {
+  opacity: 1;
+}
+.ov-gazette .gz-wrow.is-reading::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: -6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+.ov-gazette .gz-wrow-face {
+  flex: none;
+  padding-top: 1px;
+}
+.ov-gazette .gz-wrow-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.ov-gazette .gz-wrow-1 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.ov-gazette .gz-wrow-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-gazette .gz-wrow.is-unread .gz-wrow-title {
+  font-weight: var(--w-bold);
+}
+.ov-gazette .gz-wrow-slot {
+  flex: none;
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette .gz-wrow-2 {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-13);
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ov-gazette .gz-wrow-2 .gz-line {
+  white-space: normal;
+}
+.ov-gazette .gz-wrow.is-unread .gz-wrow-2 {
+  color: var(--muted);
+}
+.ov-gazette .gz-wrow-3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 18px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-proj {
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-stack .cr {
+  --badge-ring: var(--surface);
+}
+.ov-gazette .gz-stack > * + * {
+  margin-left: -5px;
+}
+.ov-gazette .gz-newcount {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.ov-gazette .gz-wkeys {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 12px -12px 0 -16px;
+  padding: 10px 16px 12px 30px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--surface);
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+/* ---------------------------------------------------------------- the story pane */
+
+.ov-gazette .gz-read {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 52px;
+  scrollbar-width: thin;
+}
+.ov-gazette .gz-read-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  margin: auto;
+  color: var(--faint);
+}
+.ov-gazette .gz-progress {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 8px 40px 10px;
+  background: var(--surface);
+}
+.ov-gazette .gz-progress-1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  font-size: var(--t-12);
+  color: var(--muted);
+}
+.ov-gazette .gz-progress-1 b {
+  color: var(--ink);
+  font-size: var(--t-13);
+}
+.ov-gazette .gz-progress-time {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette .gz-progress-bar {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.ov-gazette .gz-progress-bar i {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  transition: background var(--dur-2);
+}
+.ov-gazette .gz-progress-bar i.is-done {
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+}
+.ov-gazette .gz-progress-bar i.is-now {
+  background: var(--ink);
+}
+.ov-gazette .gz-story {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px 40px 28px;
+}
+.ov-gazette .gz-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-kick {
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-kicker-note {
+  margin-left: auto;
+}
+.ov-gazette .gz-noproj::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+.ov-gazette .gz-story-head {
+  margin: 10px 0 6px;
+  font-size: var(--t-num);
+  font-weight: 720;
+  font-stretch: 84%;
+  line-height: 32px;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.ov-gazette .gz-byline {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-ask {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--you-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 45%, transparent);
+}
+.ov-gazette .gz-ask > .cr {
+  flex: none;
+}
+.ov-gazette .gz-ask-body {
+  flex: 1;
+  min-width: 0;
+}
+.ov-gazette .gz-ask-who {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-ask-q {
+  margin-top: 2px;
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+  line-height: 1.45;
+}
+.ov-gazette .gz-ask--done {
+  align-items: flex-start;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ok);
+}
+.ov-gazette .gz-ask--done .gz-ask-q {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--muted) 50%, transparent);
+}
+.ov-gazette .gz-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.ov-gazette .gz-answered {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--ok);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.ov-gazette .gz-block {
+  margin-top: 26px;
+}
+.ov-gazette .gz-block-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.ov-gazette .gz-tl {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-gazette .gz-tl-i {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px 20px minmax(0, 1fr);
+  gap: 10px;
+  padding: 7px 0;
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.ov-gazette .gz-tl-i + .gz-tl-i::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 63px;
+  height: 14px;
+  border-left: 1px solid var(--line);
+}
+.ov-gazette .gz-tl-at {
+  position: relative;
+  padding-top: 1px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette .gz-tl-i.is-unread .gz-tl-at {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.ov-gazette .gz-tl-i.is-unread .gz-tl-at::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: -12px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.ov-gazette .gz-tl-who {
+  padding-top: 1px;
+}
+.ov-gazette .gz-tl-text {
+  color: var(--ink);
+}
+.ov-gazette .gz-tl-meta {
+  display: block;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-tl-i--sofar .gz-tl-text {
+  color: var(--muted);
+}
+.ov-gazette .gz-tl-i--request .gz-tl-text {
+  color: var(--you-ink);
+}
+.ov-gazette .gz-tl-i--you .gz-tl-text {
+  color: var(--muted);
+}
+.ov-gazette .gz-src {
+  margin-left: 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+.ov-gazette .gz-src:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+.ov-gazette .gz-older {
+  margin: 4px 0 0 54px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-quote {
+  position: relative;
+  margin: 28px 0 0;
+  padding: 2px 0 0 34px;
+}
+.ov-gazette .gz-quote::before {
+  content: "\201C";
+  position: absolute;
+  top: -6px;
+  left: 0;
+  color: var(--faint);
+  font-family: var(--font-deco);
+  font-size: 48px;
+  line-height: 1;
+}
+.ov-gazette .gz-quote blockquote {
+  margin: 0;
+  font-size: var(--t-16);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+.ov-gazette .gz-quote figcaption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-quote figcaption .gz-src {
+  margin-left: auto;
+}
+.ov-gazette .gz-diff-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: var(--t-13);
+}
+.ov-gazette .gz-diff-br {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+}
+.ov-gazette .gz-diff-pr {
+  margin-left: auto;
+  color: var(--muted);
+}
+.ov-gazette .gz-files {
+  margin-top: 10px;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.ov-gazette .gz-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-file + .gz-file {
+  border-top: 1px solid var(--line-soft);
+}
+.ov-gazette .gz-file > :first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-gazette .gz-file--more {
+  color: var(--faint);
+}
+.ov-gazette .gz-read-foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 720px;
+  margin: auto auto 0;
+  padding: 12px 40px 14px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--surface);
+}
+.ov-gazette .gz-read-foot .btn kbd {
+  margin-left: 2px;
+}
+.ov-gazette .gz-next {
+  max-width: 320px;
+  height: 34px;
+}
+.ov-gazette .gz-next-label {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-gazette .gz-next-label .faint {
+  flex: none;
+}
+
+/* ---------------------------------------------------------------- Catch up's end card */
+
+.ov-gazette .gz-end {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 520px;
+  margin: auto;
+  padding: 24px 32px 56px;
+  text-align: center;
+}
+.ov-gazette .gz-end-svg {
+  width: 240px;
+  height: 140px;
+}
+.ov-gazette .gz-end-h {
+  margin: 8px 0 4px;
+  font-family: var(--font-deco);
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 40px;
+}
+.ov-gazette .gz-end-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+}
+.ov-gazette .gz-end-sub b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette .gz-end-tally {
+  margin: 4px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-end-next {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin-top: 24px;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--sunken);
+  font-size: var(--t-13);
+}
+.ov-gazette .gz-end-next > span:nth-child(2) {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.ov-gazette .gz-end-wait {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin-top: 24px;
+  padding: 12px 10px 8px;
+  border-radius: var(--r-lg);
+  background: var(--you-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 45%, transparent);
+}
+.ov-gazette .gz-end-wait .gz-end-next-h {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ov-gazette .gz-end-wait .count {
+  letter-spacing: 0;
+}
+.ov-gazette .gz-end-ask {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-13);
+  text-align: left;
+}
+.ov-gazette .gz-end-ask:hover {
+  background: color-mix(in oklab, var(--you) 16%, transparent);
+}
+.ov-gazette .gz-end-ask b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-gazette .gz-end-ask span {
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-end-wait + .gz-end-next {
+  margin-top: 10px;
+}
+.ov-gazette .gz-end-next-h {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-end-acts {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* ================================================================== the Front Page */
+
+.ov-gazette .gz-press {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 62px 32px 64px;
+  scrollbar-width: thin;
+}
+.ov-gazette .gz-back--paper {
+  justify-content: center;
+  max-width: 1104px;
+  margin: 0 auto 12px;
+  padding: 0;
+  background: none;
+}
+.ov-gazette .gz-paper {
+  position: relative;
+  max-width: 1104px;
+  margin: 0 auto;
+  padding: 26px 44px 30px;
+  border-radius: 3px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+  font-size: var(--t-13);
+  hyphens: auto;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-gazette .gz-paper.is-printing {
+    animation: gz-print 900ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
+  }
+  .ov-gazette .gz-paper.is-printing .gz-stamp {
+    animation: gz-stamp 420ms var(--ease-spring) 900ms both;
+  }
+}
+@keyframes gz-print {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(-6px);
+  }
+  to {
+    clip-path: inset(-60px -60px -60px -60px);
+    transform: none;
+  }
+}
+@keyframes gz-stamp {
+  from {
+    opacity: 0;
+    transform: rotate(7deg) scale(1.7);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(7deg) scale(1);
+  }
+}
+/* The rubber stamp of an edition printed for your return. */
+.ov-gazette .gz-stamp {
+  position: absolute;
+  z-index: 2;
+  top: -18px;
+  right: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 5px 12px 6px;
+  border: 2px solid var(--accent-ink);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 2px var(--raised), inset 0 0 0 3px var(--accent-ink);
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  color: var(--accent-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.1em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  transform: rotate(7deg);
+}
+.ov-gazette .gz-stamp b {
+  font-size: var(--t-13);
+  letter-spacing: 0.08em;
+}
+.ov-gazette .gz-stamp span {
+  font-size: 9.5px;
+  font-weight: var(--w-medium);
+}
+
+/* The masthead: two ears, the title in Limelight between brass ornaments. */
+.ov-gazette .gz-mast {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) 168px;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 10px;
+}
+.ov-gazette .gz-ear {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px 8px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 15px;
+  text-align: center;
+}
+.ov-gazette .gz-ear b {
+  margin-bottom: 2px;
+  color: var(--ink);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-ear span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.ov-gazette .gz-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-deco);
+  font-size: 48px;
+  font-weight: 400;
+  line-height: 58px;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+}
+.ov-gazette .gz-orn {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 7px;
+  border-top: 1px solid var(--brass);
+  border-bottom: 1px solid var(--brass);
+}
+.ov-gazette .gz-orn::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  background: var(--brass);
+  transform: rotate(45deg);
+}
+.ov-gazette .gz-dateline {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 2px 4px;
+  border-top: 3px double var(--ink);
+  border-bottom: 1px solid var(--ink);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ov-gazette .gz-dateline > :nth-child(2) {
+  color: var(--ink);
+}
+
+/* Any story on the page: a link to its thread. */
+.ov-gazette .gz-st {
+  display: block;
+  margin: -4px;
+  padding: 4px;
+  border-radius: 4px;
+  color: inherit;
+  transition: background var(--dur-1);
+}
+.ov-gazette a.gz-st:hover {
+  background: var(--hover);
+}
+.ov-gazette a.gz-st:hover :is(.gz-h1, .gz-h2, b) {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.ov-gazette .gz-st.is-sel {
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+  box-shadow: inset 3px 0 0 var(--ink);
+}
+.ov-gazette .gz-st--plain {
+  cursor: default;
+}
+
+/* Row 1: the lead story, and the box of what needs your signature. */
+.ov-gazette .gz-row1 {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  margin-top: 18px;
+}
+.ov-gazette .gz-lead {
+  padding-right: 24px;
+  border-right: 1px solid var(--line);
+}
+.ov-gazette .gz-kick--lead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-gazette .gz-kick--lead .proj {
+  font-size: var(--t-11);
+  letter-spacing: 0.08em;
+}
+.ov-gazette .gz-h1 {
+  margin: 8px 0 10px;
+  font-size: 40px;
+  font-weight: 760;
+  font-stretch: 76%;
+  line-height: 44px;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+}
+.ov-gazette .gz-h1 .gz-ink--inline {
+  width: 10px;
+  height: 10px;
+  margin-right: 12px;
+  vertical-align: 7px;
+}
+.ov-gazette .gz-deck {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--t-16);
+  line-height: 24px;
+  text-wrap: pretty;
+}
+.ov-gazette .gz-byline--lead {
+  padding-bottom: 2px;
+}
+.ov-gazette .gz-lead-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.ov-gazette .gz-archive {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 19px;
+}
+.ov-gazette .gz-archive .ic {
+  flex: none;
+  margin-top: 3px;
+}
+.ov-gazette .gz-fig {
+  margin: 0;
+}
+.ov-gazette .gz-fig-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  background: var(--sunken);
+}
+.ov-gazette .gz-fig figcaption {
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 17px;
+}
+.ov-gazette .gz-fig figcaption b {
+  margin-right: 4px;
+  color: var(--ink);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-fig-code {
+  fill: var(--ink);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 8.5px;
+}
+.ov-gazette .gz-fig-t {
+  fill: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 640;
+}
+.ov-gazette .gz-fig-btn {
+  fill: var(--accent-fg);
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 640;
+}
+.ov-gazette .gz-fig-fail {
+  fill: var(--fail-ink);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 640;
+}
+.ov-gazette .gz-fig-cap {
+  fill: var(--faint);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 640;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-fig-ask {
+  fill: var(--you-ink);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 10px;
+  font-weight: 640;
+}
+.ov-gazette .gz-lead-body {
+  font-size: 13.5px;
+  line-height: 20px;
+  text-align: justify;
+}
+.ov-gazette .gz-lead-body p {
+  margin: 0 0 8px;
+}
+.ov-gazette .gz-drop::first-letter {
+  float: left;
+  margin: 3px 8px 0 0;
+  color: var(--ink);
+  font-family: var(--font-deco);
+  font-size: 56px;
+  line-height: 48px;
+}
+.ov-gazette .gz-cont {
+  text-align: right;
+}
+.ov-gazette .gz-newmark {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  color: var(--ink);
+}
+.ov-gazette .gz-newmark .gz-ink--inline {
+  margin-right: 6px;
+  vertical-align: 0;
+}
+.ov-gazette .gz-kick .gz-ink--inline {
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.ov-gazette .gz-block.is-old .gz-tl-text {
+  color: var(--muted);
+}
+.ov-gazette .gz-more-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.ov-gazette .gz-more-link:hover {
+  text-decoration: underline;
+}
+
+.ov-gazette .gz-sign {
+  align-self: start;
+  margin-left: 24px;
+  padding: 14px 16px 6px;
+  box-shadow: inset 0 0 0 1px var(--ink), inset 0 0 0 4px var(--raised), inset 0 0 0 5px var(--ink);
+}
+.ov-gazette .gz-sign-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2px 0 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-sign-h .count {
+  letter-spacing: 0;
+}
+.ov-gazette .gz-sign-i {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  padding: 11px 0 12px;
+  border-radius: 4px;
+}
+.ov-gazette .gz-sign-i + .gz-sign-i {
+  border-top: 1px solid var(--line-soft);
+}
+.ov-gazette .gz-sign-i.is-sel {
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+  box-shadow: 0 0 0 6px color-mix(in oklab, var(--ink) 4%, transparent), -9px 0 0 -6px var(--ink);
+}
+.ov-gazette .gz-sign-face {
+  padding-top: 1px;
+}
+.ov-gazette .gz-sign-t {
+  display: block;
+  overflow: hidden;
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-gazette .gz-sign-t:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ov-gazette .gz-sign-q {
+  margin-top: 1px;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  line-height: 17px;
+}
+.ov-gazette .gz-sign-q code {
+  font-size: 11px;
+}
+.ov-gazette .gz-sign-i.is-signed .gz-sign-q {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.ov-gazette .gz-sign-acts {
+  margin-top: 8px;
+}
+.ov-gazette .gz-sign-sub {
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-gazette .gz-sign-sub + .gz-sign-i {
+  padding-top: 6px;
+}
+.ov-gazette .gz-sign-empty {
+  margin: 10px 0 12px;
+  color: var(--muted);
+}
+
+/* The fold: a crease across the sheet, with its name in the margin. */
+.ov-gazette .gz-fold {
+  position: relative;
+  height: 3px;
+  margin: 24px -44px 20px;
+  border-top: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.ov-gazette .gz-fold span {
+  position: absolute;
+  top: -8px;
+  right: 10px;
+  padding: 0 6px;
+  background: var(--raised);
+  color: var(--faint);
+  font-size: 9.5px;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Row 3: a section front per project. */
+.ov-gazette .gz-row3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+.ov-gazette .gz-row3 > * + *,
+.ov-gazette .gz-row4 > * + *,
+.ov-gazette .gz-row5 > * + * {
+  margin-left: -12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.ov-gazette .gz-sect-h,
+.ov-gazette .gz-box-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding-top: 7px;
+  border-top: 2px solid var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-sect-h .proj {
+  color: var(--ink);
+  letter-spacing: 0.1em;
+}
+.ov-gazette .gz-sect-n {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.ov-gazette .gz-h2 {
+  margin: 4px 0 6px;
+  font-size: var(--t-20);
+  font-weight: 720;
+  font-stretch: 80%;
+  line-height: 24px;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+.ov-gazette .gz-h2 .gz-ink--inline {
+  vertical-align: 4px;
+}
+.ov-gazette .gz-body {
+  margin: 0 0 6px;
+  font-size: var(--t-13);
+  line-height: 19px;
+  text-align: justify;
+}
+.ov-gazette .gz-body-at {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.ov-gazette .gz-by {
+  display: block;
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-items {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-gazette .gz-items li {
+  border-top: 1px solid var(--line-soft);
+}
+.ov-gazette .gz-items .gz-st {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  margin: 0 -4px;
+  padding: 7px 4px;
+  font-size: 12.5px;
+  line-height: 17px;
+}
+.ov-gazette .gz-items b {
+  font-weight: var(--w-medium);
+}
+.ov-gazette .gz-items-at {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette .gz-items-text .gz-ink--inline {
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.ov-gazette .gz-sect-more {
+  margin: 6px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* Rows 4 and 5: In brief, Figures, Corrections; then the Weather and what comes next. */
+.ov-gazette .gz-row4,
+.ov-gazette .gz-row5 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 26px;
+}
+.ov-gazette .gz-row5 {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+.ov-gazette .gz-brief-l,
+.ov-gazette .gz-corr-l,
+.ov-gazette .gz-tom-l {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-gazette .gz-brief-l li + li,
+.ov-gazette .gz-corr-l li + li {
+  border-top: 1px solid var(--line-soft);
+}
+.ov-gazette .gz-brief-l .gz-st {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 -4px;
+  padding: 6px 4px;
+  font-size: 12.5px;
+  line-height: 17px;
+}
+.ov-gazette .gz-brief-at,
+.ov-gazette .gz-corr-at,
+.ov-gazette .gz-tom-at {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
+}
+.ov-gazette .gz-corr-l .gz-st {
+  display: grid;
+  grid-template-columns: 54px 16px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 -4px;
+  padding: 6px 4px;
+  font-size: 12.5px;
+  line-height: 17px;
+}
+.ov-gazette .gz-corr-l .gz-st > svg {
+  margin-top: 1px;
+}
+.ov-gazette .gz-figs-g {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 16px;
+}
+.ov-gazette .gz-fg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ov-gazette .gz-fg b {
+  color: var(--ink);
+  font-size: 28px;
+  line-height: 32px;
+}
+.ov-gazette .gz-fg span {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.ov-gazette .gz-fg small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 15px;
+}
+.ov-gazette .gz-fg:last-child {
+  grid-column: 1 / -1;
+}
+.ov-gazette .gz-figs-g--two .gz-fg:last-child {
+  grid-column: auto;
+}
+.ov-gazette .gz-fg-lines .plus,
+.ov-gazette .gz-fg-lines .minus {
+  font-size: 28px;
+}
+.ov-gazette .gz-wx {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-areas: "ic name n" "ic meter word";
+  gap: 3px 10px;
+  align-items: center;
+  padding: 8px 0;
+  font-size: 12.5px;
+}
+.ov-gazette .gz-wx + .gz-wx {
+  border-top: 1px solid var(--line-soft);
+}
+.ov-gazette .gz-wx-ic {
+  grid-area: ic;
+  color: var(--muted);
+}
+.ov-gazette .gz-wx-ic--cap {
+  color: var(--ink);
+}
+.ov-gazette .gz-wx-name {
+  grid-area: name;
+  font-weight: var(--w-medium);
+}
+.ov-gazette .gz-wx-n {
+  grid-area: n;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette .gz-wx-meter {
+  grid-area: meter;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.ov-gazette .gz-wx-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 70%, transparent);
+}
+.ov-gazette .gz-wx-word {
+  grid-area: word;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-gazette .gz-forecast {
+  display: flex;
+  gap: 7px;
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 17px;
+}
+.ov-gazette .gz-forecast .ic {
+  margin-top: 1px;
+}
+.ov-gazette .gz-forecast b {
+  margin-right: 4px;
+  color: var(--ink);
+}
+.ov-gazette .gz-tom-g {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.ov-gazette .gz-tom-h {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ov-gazette .gz-tom-l li {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  line-height: 17px;
+}
+.ov-gazette .gz-tom-l li[data-pick] {
+  cursor: pointer;
+}
+.ov-gazette .gz-tom-l li[data-pick]:hover b {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ov-gazette .gz-tom-l b {
+  font-weight: var(--w-medium);
+}
+.ov-gazette .gz-tilde {
+  margin-right: 1px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+}
+.ov-gazette .gz-colophon {
+  margin-top: 26px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 16px;
+  text-align: center;
+}
+.ov-gazette .gz-row4--evening {
+  margin-top: 30px;
+}
+
+/* ================================================================== the selection card */
+
+.ov-gazette .gz-card {
+  position: absolute;
+  z-index: 8;
+  left: 16px;
+  bottom: 16px;
+  width: 384px;
+  padding: 14px 14px 12px 16px;
+  border-radius: var(--r-lg);
+  background: var(--glass-fill-raised);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-gazette .gz-card:not([hidden]) {
+    animation: gz-rise var(--dur-2) var(--ease-out);
+  }
+}
+@keyframes gz-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.ov-gazette .gz-card-1 {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ov-gazette .gz-card-1 > .cr {
+  flex: none;
+}
+.ov-gazette .gz-card-t {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.ov-gazette .gz-card-t b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-gazette .gz-card-t > span {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-card-new {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.ov-gazette .gz-card-new .gz-ink--inline {
+  margin-right: 5px;
+  vertical-align: 0;
+}
+.ov-gazette .gz-card-ask {
+  margin-top: 10px;
+  color: var(--you-ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.ov-gazette .gz-card-line {
+  display: -webkit-box;
+  margin: 10px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ov-gazette .gz-card-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.ov-gazette .gz-card-acts .gz-acts,
+.ov-gazette .gz-card-acts .gz-answered {
+  margin-top: 0;
+}
+.ov-gazette .gz-card-acts .btn .ic {
+  margin-right: -3px;
+}
+.ov-gazette .gz-card-at {
+  font-size: var(--t-12);
+}
+
+/* ================================================================== the Office */
+
+.ov-gazette .gz-office-host {
+  position: absolute;
+  inset: 0;
+}
+.ov-gazette .gz-oph {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 72px 32px 32px;
+}
+.ov-gazette .gz-oph-in {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 420px;
+  text-align: center;
+}
+.ov-gazette .gz-oph-svg {
+  width: 260px;
+  height: 142px;
+}
+.ov-gazette .gz-oph-h {
+  margin: 14px 0 6px;
+  font-family: var(--font-deco);
+  font-size: 26px;
+  font-weight: 400;
+}
+.ov-gazette .gz-oph-p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+  line-height: 1.5;
+}
+.ov-gazette .gz-oph-note {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ================================================================== the open thread */
+
+/* A headline in the transcript, where the Wire's line comes from. */
+.ov-gazette .gz-hrule {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: -10px 0 0 46px;
+  padding: 6px 12px;
+  border-left: 2px solid var(--brass);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 17px;
+}
+.ov-gazette .gz-hrule .ic {
+  flex: none;
+  margin-top: 2px;
+}
+.ov-gazette .gz-hrule b {
+  margin-right: 4px;
+  color: var(--ink);
+}
+.ov-gazette .gz-runpage {
+  flex: 1;
+  overflow: auto;
+  padding: 72px 32px 32px;
+}
+.ov-gazette .gz-runpage-in {
+  max-width: 600px;
+  margin: 0 auto;
+}
+.ov-gazette .gz-runpage-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ov-gazette .gz-runpage-h div {
+  display: flex;
+  flex-direction: column;
+}
+.ov-gazette .gz-runpage-h b {
+  font-size: var(--t-18);
+}
+.ov-gazette .gz-steps {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-gazette .gz-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  border-top: 1px solid var(--line-soft);
+}
+.ov-gazette .gz-step .you-ink {
+  margin-left: auto;
+  font-size: var(--t-12);
+}
+.ov-gazette .gz-step--pending {
+  color: var(--faint);
+}
+.ov-gazette .gz-step-todo {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+}
+
+/* ================================================================== the toast */
+
+.ov-gazette .gz-toast {
+  position: absolute;
+  z-index: 9;
+  bottom: 72px;
+  left: calc(272px + (100% - 272px) / 2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-3);
+  transform: translateX(-50%);
+}
+.ov-gazette .gz-toast-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-gazette .gz-toast button {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  font-weight: var(--w-bold);
+}
+.ov-gazette .gz-toast button:hover {
+  background: color-mix(in oklab, var(--surface) 14%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-gazette .gz-toast.is-new {
+    animation: gz-toast var(--dur-2) var(--ease-out);
+  }
+}
+@keyframes gz-toast {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}

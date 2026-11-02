@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- PROTOTYPE - Gazette's story page: the pitch, the huh, the three modes, a walk-through of
+         09:41, the phone, what Hercule would need, and the links. Images are 2x captures in shots/. -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <link rel="stylesheet" href="index.css" />
+    <link rel="icon" href="data:," />
+    <script src="../shared/book.js"></script>
+    <title>Gazette · Seeing all the work · Hercule</title>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="../index.html#gazette"><i data-logo="24"></i><span>Gazette</span><small>direction 4 of 5</small></a>
+      <nav class="bk-links" aria-label="Sections">
+        <a href="#huh">The huh</a>
+        <a href="#modes">Three modes</a>
+        <a href="#walk">09:41</a>
+        <a href="#phone">On the phone</a>
+        <a href="#more">Holding up</a>
+        <a href="#needs">What it needs</a>
+        <a href="#open">Open it</a>
+        <a href="../index.html">The book</a>
+      </nav>
+      <div class="bk-themes" role="group" aria-label="Theme">
+        <button type="button" data-theme-option="whitehaven">Whitehaven</button>
+        <button type="button" data-theme-option="orient-express">Orient Express</button>
+      </div>
+    </header>
+
+    <main class="gzs">
+      <!-- ============================================================ 1. the pitch -->
+      <section class="gzs-hero" aria-labelledby="gzs-title">
+        <div class="gzs-kicker">Direction 4 · organized by what changed since you looked</div>
+        <div class="gzs-mast"><span class="gzs-orn" aria-hidden="true"></span><h1 id="gzs-title">Gazette</h1><span class="gzs-orn" aria-hidden="true"></span></div>
+        <div class="gzs-dateline"><span>News, and the past</span><span>Office · Threads · Front Page</span><span>Tuesday 29 September 2026</span></div>
+        <p class="gzs-lever">The morning paper of your agents.</p>
+        <p class="gzs-lede">Every thread keeps a mark of <b>when you last looked</b> at it, and every turn ends with a <b>one-line headline</b>, written the way a title is. Put the two together and the overview becomes a newspaper of your work: the Wire lists what changed, like mail; <b>Catch up</b> walks it in order of importance; and when you come back after half an hour, a <b>front page</b> has been printed about your morning, with the four Requests that need your signature in a box on the right.</p>
+        <p class="gzs-lede">It answers the job nobody answers today: <b>"I was away for 40 minutes. What changed, and what matters?"</b> Today that is opening threads one by one.</p>
+        <div class="gzs-cta">
+          <a class="btn btn--accent" href="desktop.html?state=edition" target="_blank" rel="noopener">Open the live window<i data-i="external" data-size="14"></i></a>
+          <a class="btn" href="#huh">See the paper</a>
+        </div>
+        <figure class="gzs-shot gzs-hero-shot">
+          <picture><source media="(max-width: 600px)" srcset="shots/hero-phone.webp" width="720" height="900" /><img src="shots/hero.webp" width="1440" height="900" alt="The Gazette window: the sidebar lists stories with ink dots; the main pane shows The Bureau Gazette, a newspaper front page printed at 09:41 for Rogier's return, with the 3-D Secure fix as its lead and a box of Requests that need his signature." /></picture>
+          <figcaption><b>09:41, back at the desk.</b> The overview opens on the edition printed for your return. Stories new to you carry a dot; the Requests wait in the box on the right.</figcaption>
+        </figure>
+      </section>
+
+      <!-- ============================================================ 2. the huh -->
+      <section id="huh" class="gzs-huh" aria-labelledby="gzs-huh-h">
+        <div class="gzs-kicker">The huh</div>
+        <h2 id="gzs-huh-h">You come back from lunch, and the first thing you see is a newspaper written about your morning.</h2>
+        <p>Not a feed and not a dashboard: a ranked, edited front page. The outcome that matters most is the lead, set big, with a drawing of what happened. Everything that needs you is in one box, and one tap signs it.</p>
+        <figure class="gzs-shot gzs-shot--crop gzs-huh-mast">
+          <img loading="lazy" src="shots/front-mast.webp" width="1103" height="172" alt="The masthead: The Bureau Gazette in Limelight between brass ornaments, the morning edition ear, the fleet ear, a dateline, and a green rubber stamp: Printed 09:41 for your return." />
+        </figure>
+        <div class="gzs-huh-grid">
+          <figure class="gzs-shot gzs-shot--crop">
+            <picture><source media="(max-width: 600px)" srcset="shots/front-lead-phone.webp" width="464" height="615" /><img loading="lazy" src="shots/front-lead.webp" width="690" height="545" alt="The lead story: 3-D Secure fix is ready, and waits on your push. A deck, a byline in small caps, a drawn figure of a card, the 3-D Secure check and the bean asking git push, and two columns of text with a drop cap." /></picture>
+            <figcaption><b>The lead.</b> The edition's one Text Generation ranks the morning and writes the headline. The figures in the text are the world's: 412 errors, 188 customers, 24 tests.</figcaption>
+          </figure>
+          <figure class="gzs-shot gzs-shot--crop">
+            <img loading="lazy" src="shots/front-sign.webp" width="332" height="500" alt="Needs your signature: four Requests with their answer buttons: Run git push, Keep the old Grafana folder, Settlement or payout date, and from runs, Publish to npm." />
+            <figcaption><b>Needs your signature.</b> Every Request, with its answers. Signing one leaves it in place, struck through, with Undo.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ 3. the three modes -->
+      <section id="modes" class="gzs-sec" aria-labelledby="gzs-modes-h">
+        <div class="gzs-kicker">Three modes, one idea</div>
+        <h2 id="gzs-modes-h">Office, Threads and Front Page all sort the work by what changed since you looked.</h2>
+        <p class="gzs-lede">The overview opens from the sidebar's Office button or <kbd>⌘⇧O</kbd>. Its top bar switches modes with <kbd>⌥1</kbd> <kbd>⌥2</kbd> <kbd>⌥3</kbd> (⌘1 to ⌘9 belong to Go). A thread you select stays selected in every mode: its row lights in the sidebar, the camera flies to its bean, the paper marks its story. While the overview is open the sidebar stays the Wire: a click on a row selects that story in the overview instead of leaving it; <kbd>↩</kbd> or a double click opens the thread.</p>
+
+        <article class="gzs-mode">
+          <div>
+            <div class="gzs-tag"><i data-i="threads" data-size="14"></i>Threads · The Wire</div>
+            <h3>Rows read like mail.</h3>
+            <p class="gzs-body">The sidebar is today's 52px row with one change: <b>line 2 is the latest headline</b> ("Review found 3 issues; 1 blocks"), not the machine. A story with news since you looked is <b>bold, with an ink dot</b> hanging in the margin; marigold stays for what waits on you. Sections: <b>Needs you</b>, <b>News</b> (newest first; still-working stories in regular weight) and <b>Quiet</b> (read and idle, a little dimmer).</p>
+            <p class="gzs-body">Only Needs you is counted. There is no unread badge anywhere: Quiet is not a debt. A lone thread with nothing new costs nothing: same height, same words, just its last headline.</p>
+            <div class="gzs-keys"><span><kbd>J</kbd> <kbd>K</kbd> walk the stories</span><span><kbd>↩</kbd> open</span><span><kbd>E</kbd> Done</span><span><kbd>S</kbd> snooze until something new</span><span><kbd>C</kbd> Catch up</span></div>
+          </div>
+          <div class="gzs-pics gzs-pics--2">
+            <figure class="gzs-shot gzs-shot--crop"><img loading="lazy" src="shots/wire-away.webp" width="272" height="720" alt="The sidebar in the away reading: Needs you with four rows, News since 09:01 with bold rows and ink dots, each with its latest headline on line 2." /></figure>
+            <figure class="gzs-shot gzs-shot--crop"><img loading="lazy" src="shots/pill.webp" width="272" height="460" alt="The News header carries a dark pill: 3 new. The rows below have not moved." /><figcaption><b>Nothing moves under the pointer.</b> Stories that end while you hover wait in a "3 new" pill in the News header, where they will land.</figcaption></figure>
+          </div>
+        </article>
+
+        <article class="gzs-mode gzs-mode--flip">
+          <div>
+            <div class="gzs-tag"><i data-i="threads" data-size="14"></i>Threads, full width · the reading pane</div>
+            <h3>The story of one piece of work, since you looked.</h3>
+            <p class="gzs-body">Full width, the Wire becomes an inbox with a reading pane. Pick a story and the pane tells it: the edition's headline, the <b>ask with its answers</b>, every headline and report <b>since your mark</b> with its time and a link to its source, <b>the message that matters</b> quoted, and the diff. "Next story (J)" names what comes next.</p>
+            <p class="gzs-body"><b>Catch up</b> (<kbd>C</kbd>) walks every story that matters, most important first: what waits on you, oldest ask first; then blocking findings, failures, outcomes. A strip reads "Story 4 of 9" with the clock running.</p>
+          </div>
+          <div class="gzs-pics">
+            <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/read-away-phone.webp" width="452" height="678" /><img loading="lazy" src="shots/read-away.webp" width="720" height="580" alt="The reading pane: 3-D Secure fix is ready, and waits on your push. The ask Run git push with Allow once, Allow always and Deny; then a timeline New to you of six lines from the lead, research and review partners." /></picture></figure>
+            <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/catchup-phone.webp" width="480" height="345" /><img loading="lazy" src="shots/catchup.webp" width="720" height="620" alt="Catch up, story 4 of 9, 1m 13s: September payout report waits on a refunds rule, with the check partner's question and two answer buttons." /></picture><figcaption><b>Catch up, part way.</b> Three Requests answered, the fourth asks how to count refunds.</figcaption></figure>
+          </div>
+        </article>
+
+        <article class="gzs-mode">
+          <div>
+            <div class="gzs-tag"><i data-i="sparkle" data-size="14"></i>The end of Catch up</div>
+            <h3>"You're caught up", and it is true.</h3>
+            <p class="gzs-body">The end card says how many stories and how long it took, what you did with them, and what will likely need you next, as a prediction with a range. If a Request is still open, the card lists it under "Still waiting on you" instead of pretending you are done.</p>
+          </div>
+          <figure class="gzs-shot gzs-shot--crop"><img loading="lazy" src="shots/caughtup.webp" width="480" height="390" alt="You're caught up: 9 stories in 3m 05s. 4 answered, 2 marked Done, 1 snoozed, 2 read. Next to likely need you: Migrate payout endpoints to Result types, about 10:03 to 10:06." /></figure>
+        </article>
+
+        <article class="gzs-mode gzs-mode--flip">
+          <div>
+            <div class="gzs-tag"><i data-i="wiki" data-size="14"></i>Front Page · The Bureau Gazette</div>
+            <h3>A real front page, in Crew Bureau.</h3>
+            <p class="gzs-body">A masthead in Limelight between brass rules, a dateline, the lead with a drawn figure and a drop cap, and <b>Needs your signature</b> above the fold. Below it: a <b>section front per project</b>, <b>In brief</b>, <b>Figures of the morning</b> (tokens counted, with Codex "not reported"; tests; PRs; lines), <b>Corrections</b> (failures, reverts, and a story the evening edition got wrong), <b>Weather</b> (the fleet: build-box-1 at cap) and <b>Later today, and tomorrow</b>.</p>
+            <p class="gzs-body">Every story links to its thread: a click selects it, a double click or "Open thread" opens it. An edition is printed when you come back after 30 minutes, or when you press Print now; old editions are kept ("Yesterday evening 18:20").</p>
+          </div>
+          <div class="gzs-pics">
+            <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/front-sections-phone.webp" width="354" height="427" /><img loading="lazy" src="shots/front-sections.webp" width="1050" height="470" alt="Below the fold: three section fronts, webshop, payments-api and ops, each with a headline, a body of timed headlines and a list of smaller stories." /></picture></figure>
+            <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/front-figures-phone.webp" width="354" height="456" /><img loading="lazy" src="shots/front-figures.webp" width="1050" height="860" alt="In brief, Figures of the morning (9.3M tokens, Codex not reported, 15 turns, 24 tests, 4,000 property cases, 2 PRs, +1,104 -934 lines), Corrections, Weather for the fleet and Later today and tomorrow." /></picture><figcaption><b>Honest figures.</b> Counted from the world, never written by a model. A prediction carries a ~ and a range.</figcaption></figure>
+          </div>
+        </article>
+
+        <article class="gzs-office" id="office">
+          <div class="gzs-office-head">
+            <div class="gzs-tag"><i data-i="office" data-size="14"></i>Office · the Bureau, rewindable</div>
+            <h3>The Bureau remembers the morning.</h3>
+            <p class="gzs-body">It is today's Bureau, built from the app's own Office kit: a room per project along the Gallery, the Lounge, the Secretariat, Your Office with the beans that wait on you queued at your desk, and the Lobby. Three new layers make it tell the news. Drag <b>the time dial</b> from 07:00 to now and the Bureau replays the morning from the turn history, while a wire of captions above the dial reads out what happened.</p>
+          </div>
+          <figure class="gzs-shot gzs-office-big">
+            <picture><source media="(max-width: 600px)" srcset="shots/office-dial-phone.webp" width="620" height="450" /><img loading="lazy" src="shots/office-dial-big.jpg" width="1290" height="810" alt="The Office replaying the morning at 09:21: the Bureau in a light sepia, bubbles over the beans at work (writing a failing test, reading totals.ts, running npm pack, tracing PayoutError, firing test alerts), and above the time dial three captions: 09:19 Cart refactor started; 09:21 Stripe research reported to the 3-D Secure fix; 09:21 Stripe research: Four Stripe v14 changes touch checkout." /></picture>
+            <figcaption><b>09:21, replaying at 30x.</b> The past is drawn in a light sepia and the Lobby's longcase clock keeps the dial's time. The Stripe research has just reported to the 3-D Secure fix: its paper plane is in the air, and its headline is on the wire.</figcaption>
+          </figure>
+          <div class="gzs-office-3">
+            <figure class="gzs-shot gzs-shot--crop"><img loading="lazy" src="shots/office-hero-crop.webp" width="645" height="430" alt="The Bureau at 09:41: thought bubbles over every bean at work, such as editing totals.ts, running checkout status tests and rotating secret 10 of 14, and four beans queued at your desk." /><figcaption><b>Thought bubbles.</b> What each bean does now, in a few words, from its latest tool call. A message between threads flies desk to desk as a paper plane, and its first words wait in the receiver's bubble.</figcaption></figure>
+            <figure class="gzs-shot gzs-shot--crop"><img loading="lazy" src="shots/office-desks-crop.webp" width="735" height="490" alt="Webshop's desks close up: a ream of paper for the diff, sticky notes for findings, a brass cup for PR 1281, a red folder for the failing property, each desk labelled in words such as +48 -12 · 1 finding." /><figcaption><b>Desks remember the day.</b> A ream grows with the diff, sticky notes land in the finder's colour, a brass cup stands for an open PR, a red folder for a failure. Close up, each desk says it in words.</figcaption></figure>
+            <figure class="gzs-shot gzs-shot--crop"><img loading="lazy" src="shots/office-dark-crop.webp" width="600" height="400" alt="The Bureau in Orient Express: the lamps are lit, the bubbles and labels are dark, and Your Office shows 4 waiting." /><figcaption><b>Orient Express.</b> The same morning by lamplight. Every count agrees with the window: 4 waiting at your desk.</figcaption></figure>
+          </div>
+          <div class="gzs-mode gzs-office-window">
+            <div>
+              <div class="gzs-tag">In the window</div>
+              <h3>Back at 09:41, the newsboy has been.</h3>
+              <p class="gzs-body">In the away state a newsboy in a flat cap walks from the front door to your desk and puts down the 09:41 edition, the same paper the Front Page prints. Then the camera pulls back and 09:01 to 09:41 replays at 30x, with captions, and rests on now.</p>
+              <p class="gzs-body">The selection card at the bottom left is the window's, shared by all three modes: pick a bean and the card shows its face, what is new, the ask with its answers, and Open thread. The dial starts where the card ends. Double-click a bean to open its thread; esc or the crumb flies home.</p>
+            </div>
+            <div class="gzs-pics">
+              <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/window-office-away-phone.webp" width="560" height="355" /><img loading="lazy" src="shots/window-office-away.jpg" width="1440" height="900" alt="The Office inside the Gazette window in the away state: the dial has rewound to 09:01, The past, 40 min ago; your desk is empty as it was when you left, and the newsboy stands in the Lobby under a label: The Gazette, 09:41 edition." /></picture><figcaption><b>The newsboy, in the window.</b> The dial has rewound to 09:01 and your desk is empty, as it was when you left; the newsboy comes in with the 09:41 edition. The sidebar and the card stay at 09:41.</figcaption></figure>
+              <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/window-office-phone.webp" width="480" height="430" /><img loading="lazy" src="shots/window-office.jpg" width="1440" height="900" alt="The Office at 09:41 inside the window, flown to Your Office: four beans queue at your desk with their asks in marigold, and the selection card answers the first." /></picture><figcaption><b>Selected in every mode.</b> The thread picked in the sidebar is the bean the camera flies to: the 3-D Secure fix, first in the queue at your desk, with three more asks behind it.</figcaption></figure>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============================================================ 4. the walk-through -->
+      <section id="walk" class="gzs-sec" aria-labelledby="gzs-walk-h">
+        <div class="gzs-kicker">A walk-through</div>
+        <h2 id="gzs-walk-h">Forty minutes away, three minutes to catch up.</h2>
+        <p class="gzs-lede">Tuesday 29 September. Rogier steps away from his desk at 09:01. From his phone he starts four threads, the 3-D Secure fix first, at 09:02. He is back at 09:41.</p>
+        <ol class="gzs-walk">
+          <li class="gzs-step">
+            <span class="gzs-step-at">09:41</span>
+            <div><h3>The paper is on the desk.</h3><p class="gzs-body">The overview opens on the morning edition, stamped "Printed 09:41 for your return". The lead says what matters most: the 3-D Secure fix is ready and waits on your push. Nine stories carry a dot. In the Office, a newsboy has just put the same edition on your desk.</p></div>
+            <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/front-lead-phone.webp" width="464" height="615" /><img src="shots/front-lead.webp" width="690" height="545" alt="The lead story of the morning edition." loading="lazy" /></picture></figure>
+          </li>
+          <li class="gzs-step">
+            <span class="gzs-step-at">09:42</span>
+            <div><h3>Three signatures, without leaving the page.</h3><p class="gzs-body">Allow once on the push. Keep the old Grafana folder. Allow the npm publish. Each answer is one tap, with Undo for five seconds; the signed Request stays in place, struck through, so nothing jumps.</p></div>
+            <figure class="gzs-shot gzs-shot--crop"><img src="shots/front-signed.webp" width="332" height="500" alt="The Needs your signature box after three answers: each signed Request stays in place, struck through, with what was answered and when; the payout question still waits." loading="lazy" /></figure>
+          </li>
+          <li class="gzs-step">
+            <span class="gzs-step-at">09:43</span>
+            <div><h3>C for Catch up.</h3><p class="gzs-body">The Threads mode walks the rest in order. Story 4 of 9: the payout check asks whether refunds count by settlement date or payout date. One tap. J for the next: the Result migration's blocking finding, quoted, with its diff of 23 files.</p></div>
+            <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/catchup-5-phone.webp" width="480" height="648" /><img src="shots/catchup-5.webp" width="720" height="700" alt="Catch up at story 5 of 9: Result migration held up by one blocking finding, its timeline since 08:58, the review's finding quoted, and the diff of 23 files." loading="lazy" /></picture></figure>
+          </li>
+          <li class="gzs-step">
+            <span class="gzs-step-at">09:44</span>
+            <div><h3>Caught up.</h3><p class="gzs-body">Nine stories in 3m 05s. The card says what comes next: the Result migration will likely ask before its git push, around 10:03 to 10:06. Rogier goes back to his own work.</p></div>
+            <figure class="gzs-shot gzs-shot--crop"><img src="shots/caughtup.webp" width="480" height="390" alt="The end card of Catch up." loading="lazy" /></figure>
+          </li>
+          <li class="gzs-step">
+            <span class="gzs-step-at">09:51</span>
+            <div><h3>News arrives quietly.</h3><p class="gzs-body">Three turns end while his pointer rests in the sidebar, the review of the 3-D Secure fix among them. They wait in a "3 new" pill in the News header and slide in when the pointer leaves, so nothing moved under it. The 3-D Secure row gets its ink dot back.</p></div>
+            <figure class="gzs-shot gzs-shot--crop"><img src="shots/pill.webp" width="272" height="460" alt="The 3 new pill in the News header." loading="lazy" /></figure>
+          </li>
+          <li class="gzs-step">
+            <span class="gzs-step-at">Later</span>
+            <div><h3>Every line has a source.</h3><p class="gzs-body">Open a thread and each headline sits in the transcript, under the message it came from. A wrong summary is one click from the words it summarised, and the next edition prints a Correction.</p></div>
+            <figure class="gzs-shot gzs-shot--crop"><picture><source media="(max-width: 600px)" srcset="shots/open-headline-phone.webp" width="458" height="165" /><img src="shots/open-headline.webp" width="790" height="130" alt="In the open thread, under the agent's 09:31 message, a brass-ruled line: Headline 09:31, Fix and a failing-first test written; 24 checkout tests pass." loading="lazy" /></picture></figure>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ============================================================ 5. the phone -->
+      <section id="phone" class="gzs-sec" aria-labelledby="gzs-phone-h">
+        <div class="gzs-kicker">On the phone</div>
+        <h2 id="gzs-phone-h">A front page reads naturally on a phone.</h2>
+        <p class="gzs-lede">On the Android app the Office tab gets a second view, Paper, beside the Bureau. One column: the masthead, the lead, then the box of signatures with thumb-sized answers, then the section fronts. It is the same edition the desktop printed, so it is ready when you open the app on the train.</p>
+        <div class="gzs-phones">
+          <div>
+            <div class="gzp" role="img" aria-label="An Android phone showing the Office tab's Paper view: The Bureau Gazette, the morning edition, and the lead story with its figure.">
+              <div class="gzp-status"><span>9:41</span><i class="gzp-cam"></i><span class="gzp-icons"><svg width="15" height="12" viewBox="0 0 16 12" aria-hidden="true"><path d="M8 2.6c2.2 0 4.2.8 5.8 2.2l1.2-1.3C13.1 1.7 10.7.8 8 .8S2.9 1.7 1 3.5l1.2 1.3C3.8 3.4 5.8 2.6 8 2.6zm0 3.6c1.3 0 2.5.5 3.4 1.3l1.2-1.3C11.4 5 9.8 4.4 8 4.4S4.6 5 3.4 6.2l1.2 1.3c.9-.8 2.1-1.3 3.4-1.3zm0 3.6c-.5 0-.9.2-1.2.5L8 11.6l1.2-1.3c-.3-.3-.7-.5-1.2-.5z" fill="currentColor"/></svg><svg width="11" height="15" viewBox="0 0 11 15" aria-hidden="true"><rect x="1" y="2" width="9" height="12.5" rx="1.6" fill="none" stroke="currentColor"/><rect x="3.5" y=".5" width="4" height="1.5" rx=".5" fill="currentColor"/><rect x="2.6" y="5" width="5.8" height="8" rx=".8" fill="currentColor"/></svg></span></div>
+              <div class="gzp-bar"><b>Office</b><div class="seg"><button type="button" aria-pressed="false">Bureau</button><button type="button" aria-pressed="true">Paper</button></div></div>
+              <div class="gzp-scroll">
+                <article class="gzp-paper">
+                  <div class="gzp-stamp">Printed 09:41<br />for your return</div>
+                  <div class="gzp-orns"><i></i><b></b><i></i></div>
+                  <h3 class="gzp-title">The Bureau Gazette</h3>
+                  <div class="gzp-date">Tue 29 Sep · Morning · 09:41</div>
+                  <div class="gzp-kick"><span class="gzp-dot"></span>New · <span class="proj proj--webshop">webshop</span> · The hotfix</div>
+                  <h4 class="gzp-h1">3-D Secure fix is ready, and waits on your push</h4>
+                  <p class="gzp-deck">Since Stripe SDK v14, EU cards that need 3-D Secure were told “Card declined”. Claude Code found why, wrote a test that fails first, then the fix. 24 checkout tests pass.</p>
+                  <div class="gzp-by">By Claude Code · Opus 5.5</div>
+                  <img loading="lazy" class="gzp-fig gzp-fig--light" src="shots/fig-lead.webp" width="314" height="196" alt="" /><img loading="lazy" class="gzp-fig gzp-fig--dark" src="shots/fig-lead-dark.webp" width="314" height="196" alt="" />
+                </article>
+              </div>
+              <nav class="tabbar" aria-hidden="true">
+                <span class="tb"><span class="tb-ic"><i data-i="threads" data-size="22"></i><b class="tb-badge">4</b></span><span>Threads</span></span>
+                <span class="tb tb-intake"><span class="tb-ic"><i data-i="intake" data-size="22"></i></span><span>Intake</span></span>
+                <span class="tb-new"><i data-i="plus" data-size="22"></i></span>
+                <span class="tb is-on"><span class="tb-ic"><i data-i="office" data-size="22"></i></span><span>Office</span></span>
+                <span class="tb"><span class="tb-ic"><i data-i="user" data-size="22"></i></span><span>You</span></span>
+              </nav>
+              <i class="gzp-gesture"></i>
+            </div>
+            <p class="gzp-cap"><b>The top of the page.</b> The lead and its figure fill the first screen.</p>
+          </div>
+          <div>
+            <div class="gzp" role="img" aria-label="The same phone scrolled down: Needs your signature with four Requests and large answer buttons, then the payments-api section front.">
+              <div class="gzp-status"><span>9:41</span><i class="gzp-cam"></i><span class="gzp-icons"><svg width="15" height="12" viewBox="0 0 16 12" aria-hidden="true"><path d="M8 2.6c2.2 0 4.2.8 5.8 2.2l1.2-1.3C13.1 1.7 10.7.8 8 .8S2.9 1.7 1 3.5l1.2 1.3C3.8 3.4 5.8 2.6 8 2.6zm0 3.6c1.3 0 2.5.5 3.4 1.3l1.2-1.3C11.4 5 9.8 4.4 8 4.4S4.6 5 3.4 6.2l1.2 1.3c.9-.8 2.1-1.3 3.4-1.3zm0 3.6c-.5 0-.9.2-1.2.5L8 11.6l1.2-1.3c-.3-.3-.7-.5-1.2-.5z" fill="currentColor"/></svg><svg width="11" height="15" viewBox="0 0 11 15" aria-hidden="true"><rect x="1" y="2" width="9" height="12.5" rx="1.6" fill="none" stroke="currentColor"/><rect x="3.5" y=".5" width="4" height="1.5" rx=".5" fill="currentColor"/><rect x="2.6" y="5" width="5.8" height="8" rx=".8" fill="currentColor"/></svg></span></div>
+              <div class="gzp-bar"><b>Office</b><div class="seg"><button type="button" aria-pressed="false">Bureau</button><button type="button" aria-pressed="true">Paper</button></div></div>
+              <div class="gzp-scroll">
+                <article class="gzp-paper" style="border-radius: 0 0 6px 6px; padding-top: 2px">
+                  <section class="gzp-sign">
+                    <div class="gzp-sign-h"><span>Needs your signature</span><b class="count count--you">4</b></div>
+                    <div class="gzp-item"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="26"></i><div><b>Fix 3-D Secure checkout for EU cards</b><div class="gzp-q">Run <code>git push</code>?</div><div class="gzp-acts"><span class="btn btn--accent">Allow once</span><span class="btn btn--quiet">Deny</span></div></div></div>
+                    <div class="gzp-item"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="26"></i><div><b>Migrate ops dashboards</b><div class="gzp-q">Keep the old Grafana folder?</div><div class="gzp-acts"><span class="btn btn--accent">Keep it</span><span class="btn btn--danger">Delete it</span></div></div></div>
+                    <div class="gzp-item"><i data-face="Check payout totals against Stripe" data-pose="waiting" data-size="26"></i><div><b>Payout report for September</b><div class="gzp-q"><b style="display: inline">check</b> asks · Settlement or payout date?</div><div class="gzp-acts"><span class="btn">Settlement</span><span class="btn">Payout</span></div></div></div>
+                    <div class="gzp-item"><i data-face="Ship release v2.15" data-pose="waiting" data-size="26"></i><div><b>Ship release v2.15 · publish</b><div class="gzp-q">Publish to npm?</div><div class="gzp-acts"><span class="btn btn--accent">Allow once</span><span class="btn btn--quiet">Deny</span></div></div></div>
+                  </section>
+                  <section class="gzp-sect">
+                    <div class="gzp-sect-h"><span class="proj proj--payments">payments-api</span><span>4 stories</span></div>
+                    <div class="gzp-kick" style="margin-top: 8px"><span class="gzp-dot"></span>Result types</div>
+                    <h4 class="gzp-h2">Result migration held up by one blocking finding</h4>
+                    <p class="gzp-p"><span class="gzp-at">09:34</span> Review found 3 issues; 1 blocks: PayoutError escapes GET /v1/payouts/:id.</p>
+                  </section>
+                </article>
+              </div>
+              <nav class="tabbar" aria-hidden="true">
+                <span class="tb"><span class="tb-ic"><i data-i="threads" data-size="22"></i><b class="tb-badge">4</b></span><span>Threads</span></span>
+                <span class="tb tb-intake"><span class="tb-ic"><i data-i="intake" data-size="22"></i></span><span>Intake</span></span>
+                <span class="tb-new"><i data-i="plus" data-size="22"></i></span>
+                <span class="tb is-on"><span class="tb-ic"><i data-i="office" data-size="22"></i></span><span>Office</span></span>
+                <span class="tb"><span class="tb-ic"><i data-i="user" data-size="22"></i></span><span>You</span></span>
+              </nav>
+              <i class="gzp-gesture"></i>
+            </div>
+            <p class="gzp-cap"><b>One thumb signs the box.</b> The answers are the desktop's, at 34 dp.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ 5b. both themes, editions, the swarm -->
+      <section id="more" class="gzs-sec" aria-labelledby="gzs-more-h">
+        <div class="gzs-kicker">Holding up</div>
+        <h2 id="gzs-more-h">On dark stock, in an older edition, and on a heavy day.</h2>
+        <div class="gzs-gallery">
+          <figure class="gzs-shot"><picture><source media="(max-width: 600px)" srcset="shots/front-dark-phone.webp" width="464" height="615" /><img loading="lazy" src="shots/front-dark.webp" width="1440" height="900" alt="The edition in Orient Express: the paper on warm dark stock with ivory ink, brass ornaments and the green stamp." /></picture><figcaption><b>Orient Express.</b> The paper is drawn from the theme's tokens, so the evening reads as well as the morning.</figcaption></figure>
+          <figure class="gzs-shot"><picture><source media="(max-width: 600px)" srcset="shots/evening-phone.webp" width="464" height="333" /><img loading="lazy" src="shots/evening.webp" width="1103" height="640" alt="Yesterday evening's edition, 18:20: Stripe SDK v14 is live in checkout; nothing waits on you tonight." /></picture><figcaption><b>Yesterday evening, 18:20.</b> Old editions are kept as printed. This one reported the SDK bump that broke checkout; the morning's Corrections say so.</figcaption></figure>
+          <figure class="gzs-shot"><picture><source media="(max-width: 600px)" srcset="shots/swarm-phone.webp" width="272" height="720" /><img loading="lazy" src="shots/swarm.webp" width="1440" height="900" alt="The swarm: 35 threads in view; Needs you holds 8 Requests oldest first; the reading pane says nothing new since 09:41." /></picture><figcaption><b>The swarm.</b> Eight Requests rise to the top, oldest first; News and Quiet sort the rest, and 67 quiet threads fold into one line.</figcaption></figure>
+          <figure class="gzs-shot"><picture><source media="(max-width: 600px)" srcset="shots/swarm-front-phone.webp" width="334" height="917" /><img loading="lazy" src="shots/swarm-front.webp" width="1440" height="900" alt="The swarm's front page: the same lead, and a longer Needs your signature box with eight Requests." /></picture><figcaption><b>The swarm's paper.</b> The lead stays the lead. The box grows, because what needs you always rises; the sections get more selective, not longer.</figcaption></figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ 6. what it needs, costs, risks -->
+      <section id="needs" class="gzs-sec" aria-labelledby="gzs-needs-h">
+        <div class="gzs-kicker">What Hercule would need</div>
+        <h2 id="gzs-needs-h">Two small records, two cheap calls, and nothing per token.</h2>
+        <p class="gzs-lede">Gazette is built from what Hercule already keeps (turns, Requests, messages between threads, the diff) plus a few things it does not.</p>
+        <div class="gzs-scroll">
+          <table class="gzs-table">
+            <thead><tr><th>Need</th><th>What it is</th><th>Where it lands</th></tr></thead>
+            <tbody>
+              <tr><td>A "since you looked" mark</td><td>Per user and thread: when you last had it open, on any device. Opening a thread, answering it, or reading it in Catch up moves the mark.</td><td>A small table; <code>lastSeenAt</code> on the Session's contract; synced to the phone.</td></tr>
+              <tr><td>A headline per turn</td><td>One plain sentence at each turn's end, written by a Text Generation the way a title is. A running turn may carry a "so far" line from its latest report or plan change.</td><td>Stored on the turn; read by the Wire, Catch up and the paper.</td></tr>
+              <tr><td>An edition</td><td>One Text Generation over the headlines since the last edition: a headline, kicker and rank per story. Figures are counted, never generated. Printed after 30 minutes away, or on demand; kept.</td><td>A new record, immutable once printed.</td></tr>
+              <tr><td>Answers on a question</td><td>The options a question offers (Claude's questions carry them; where an agent offers none, "Answer in the thread").</td><td>On the Request.</td></tr>
+              <tr><td>Snooze</td><td>Per user and story: hidden until the next headline.</td><td>Beside the mark.</td></tr>
+              <tr><td>For the Office</td><td>A current-activity line per busy session, read only while the Office is visible, and kept per tool call so the replay can show past minutes (the prototype's past lines are written by hand); the morning's turns by time, for the time dial.</td><td>Spec 18 turned the activity line down for the phone, for cost; here it is desktop-only and visible-only.</td></tr>
+              <tr><td>Words</td><td>Proposed for GLOSSARY.md: <b>Headline</b> (one line per turn), <b>Edition</b> (a printed front page). "News", "Quiet" and "Wire" are section names, not domain nouns.</td><td>GLOSSARY.md, spec 17 §The sidebar.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="gzs-cols" style="margin-top: 36px">
+          <div class="gzs-card">
+            <h3>What it costs</h3>
+            <ul class="gzs-list">
+              <li><b>Per token: nothing.</b> The Wire redraws when a turn ends, a Request arrives or a thread is opened, never while text streams.</li>
+              <li><b>Per turn:</b> one short Text Generation for the headline, on the cheapest model you choose; it can be switched off.</li>
+              <li><b>Per edition:</b> one Text Generation over the headlines, when you return after 30 minutes or press Print now.</li>
+              <li><b>While idle:</b> nothing runs. The paper is static; Catch up keeps a one-second clock only while it runs.</li>
+              <li><b>The Office:</b> draws on demand and nothing while idle, except the kit's ambient breathing (capped at 30 fps, off under Reduce Motion). It pauses when another mode is shown. Bubbles are static text, rewritten only when their words change; the replay reads the turn history once.</li>
+            </ul>
+          </div>
+          <div class="gzs-card gzs-card--quiet">
+            <h3>What it changes elsewhere</h3>
+            <ul class="gzs-list">
+              <li><b>The sidebar's line 2</b> becomes the latest headline. The branch moves to the reading pane and the thread's header.</li>
+              <li><b>The Waiting on you section</b> is now Needs you, with the same count and the same "From runs".</li>
+              <li><b>Notifications</b> can carry the headline instead of "turn finished".</li>
+              <li><b>The phone's Office tab</b> gains a Paper view.</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3 style="margin: 48px 0 6px; font-size: 22px; font-weight: 720; font-stretch: 85%">Risks, and answers</h3>
+        <div class="gzs-risk"><h3>Summaries can be wrong.</h3><p class="gzs-body">Every headline links to the message it came from, and sits under it in the transcript. The paper prints Corrections, including its own. Numbers on the page are counted from the record, never written by the model.</p></div>
+        <div class="gzs-risk"><h3>Unread turns into email guilt.</h3><p class="gzs-body">Only Needs you is counted. There is no unread badge in the app icon, the tab or the foot. Quiet is not a debt, and S snoozes a story until it has something new.</p></div>
+        <div class="gzs-risk"><h3>Another place to look.</h3><p class="gzs-body">The paper is printed only when you come back after a while, or ask. The rest of the day the Wire is the sidebar you already use, one line richer.</p></div>
+        <div class="gzs-risk"><h3>The ranking feels arbitrary.</h3><p class="gzs-body">The rule is short and shown: what waits on you first, oldest ask first; then blocking findings, failures and outcomes. J and K walk any order you like.</p></div>
+        <div class="gzs-risk"><h3>Forty threads, forty headlines a morning.</h3><p class="gzs-body">The paper gets more selective, not longer: section fronts keep a top story and a few lines, and "and 31 quiet threads, nothing new" covers the rest. The swarm state shows it.</p></div>
+      </section>
+
+      <!-- ============================================================ 7. links -->
+      <section id="open" class="gzs-sec" aria-labelledby="gzs-open-h">
+        <div class="gzs-kicker">Open it</div>
+        <h2 id="gzs-open-h">The live window, and every moment by link.</h2>
+        <p class="gzs-lede">Best on a laptop, or on a phone held sideways: the window is a 1440 by 900 design.</p>
+        <div class="gzs-links">
+          <a href="desktop.html?state=edition" target="_blank" rel="noopener"><b>The edition</b><span>Back at 09:41: the front page printed for your return.</span></a>
+          <a href="desktop.html?state=away" target="_blank" rel="noopener"><b>The Wire, away</b><span>The inbox and reading pane, nine stories new to you.</span></a>
+          <a href="desktop.html?state=catchup" target="_blank" rel="noopener"><b>Catch up</b><span>Story 4 of 9, part way.</span></a>
+          <a href="desktop.html?state=caughtup" target="_blank" rel="noopener"><b>You're caught up</b><span>The end card.</span></a>
+          <a href="desktop.html?state=arrivals" target="_blank" rel="noopener"><b>3 new</b><span>Stories held while the pointer is in the list.</span></a>
+          <a href="desktop.html?state=everyday" target="_blank" rel="noopener"><b>Everyday</b><span>A normal morning; three stories arrive after a few seconds.</span></a>
+          <a href="desktop.html?state=away&amp;mode=office" target="_blank" rel="noopener"><b>The Office, away</b><span>The Bureau replays 09:01 to 09:41.</span></a>
+          <a href="desktop.html?state=swarm" target="_blank" rel="noopener"><b>The swarm</b><span>35 threads in view and 67 more behind.</span></a>
+          <a href="desktop.html?state=everyday&amp;mode=front-page&amp;edition=evening" target="_blank" rel="noopener"><b>Yesterday evening</b><span>An older edition, kept as printed.</span></a>
+          <a href="desktop.html?state=edition&amp;theme=orient-express" target="_blank" rel="noopener"><b>The edition, Orient Express</b><span>The paper on dark stock.</span></a>
+          <a href="desktop.html?state=open" target="_blank" rel="noopener"><b>A thread open</b><span>Headlines in the transcript, under their source.</span></a>
+          <a href="../index.html"><b>Back to the book</b><span>The brief and the other four directions.</span></a>
+        </div>
+        <p class="gzs-note">Keys in the window: ⌘⇧O overview · ⌥1 Office · ⌥2 Threads · ⌥3 Front Page · J K stories · ↩ open · E Done · S snooze · C Catch up · esc back.</p>
+      </section>
+    </main>
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

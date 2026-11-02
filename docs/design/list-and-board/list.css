@@ -1,0 +1,1057 @@
+/* PROTOTYPE - the overview window of round 2 (list.js). Every rule is scoped under .lb-list and
+   every class is prefixed lbl-, so the board's and the book's styles never meet these.
+
+   The quiet budget, in short: one colored thing per row (marigold for what waits on you; the face
+   is the only other color), no chips or bars on rows, two weights, hairlines rather than boxes,
+   no animation except short fades and the peek sliding in. Every row's text starts at one x
+   (46px from the row's edge), so the eye runs down one edge in every variant. */
+
+/* ---------- the window ---------- */
+.lb-list .lbl-main {
+  overflow: hidden;
+}
+/* The pane holds the floating header, the find band and the list. It gives the peek its room. */
+.lb-list .lbl-pane {
+  position: absolute;
+  inset: 0;
+  transition: right var(--dur-2) var(--ease-out);
+}
+.lb-list .lbl-main.is-peeking .lbl-pane {
+  right: 360px;
+}
+/* Faces and marks hold their pose but do not move: 28 colleagues typing at once is not calm. */
+.lb-list .lbl-main .cr,
+.lb-list .lbl-main .cr *,
+.lb-list .lbl-main .mark circle {
+  animation: none !important;
+}
+
+/* ---------- the floating header ---------- */
+.lb-list .lbl-modes .ptab[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+.lb-list .lbl-modes .ptab {
+  padding: 0 12px;
+}
+.lb-list .lbl-sum {
+  gap: 14px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-sum span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lb-list .lbl-sum b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.lb-list .lbl-sum .lbl-sum-you,
+.lb-list .lbl-sum .lbl-sum-you b {
+  color: var(--you-ink);
+}
+
+/* ---------- the find band: the field, the lenses, View ---------- */
+.lb-list .lbl-band {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 56px 14px 0;
+  background: var(--surface);
+  transition: box-shadow var(--dur-1);
+}
+.lb-list .lbl-band.is-scrolled {
+  box-shadow: 0 1px 0 var(--line-soft);
+}
+.lb-list .lbl-find {
+  flex: none;
+  width: 296px;
+}
+.lb-list .lbl-find > input {
+  width: auto;
+}
+.lb-list .lbl-find > input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.lb-list .lbl-find .ic {
+  color: var(--faint);
+}
+.lb-list .lbl-lenses .tab {
+  height: 28px;
+}
+.lb-list .lbl-view-btn {
+  color: var(--muted);
+}
+.lb-list .lbl-view-btn .ic {
+  color: var(--faint);
+}
+
+/* ---------- the modes ---------- */
+.lb-list .lbl-office {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+.lb-list .lbl-office [data-office] {
+  position: absolute;
+  inset: 0;
+}
+.lb-list .lbl-main[data-lbl-mode="office"] .lbl-office {
+  display: block;
+}
+.lb-list .lbl-main[data-lbl-mode="office"] :is(.lbl-band, .lbl-scroll, .lbl-board-host) {
+  display: none;
+}
+.lb-list .lbl-main[data-lbl-mode="list"] .lbl-board-host,
+.lb-list .lbl-main[data-lbl-mode="kanban"] .lbl-scroll {
+  display: none;
+}
+.lb-list .lbl-scroll,
+.lb-list .lbl-board-host {
+  position: absolute;
+  top: 100px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+.lb-list .lbl-scroll {
+  container-type: inline-size;
+  overflow: auto;
+  padding: 0 14px 96px;
+  scrollbar-width: thin;
+}
+.lb-list .lbl-board-host {
+  overflow: hidden;
+}
+.lb-list .lbl-board-wait {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding-bottom: 80px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- shared parts of the three variants ---------- */
+.lb-list .lbl-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-list .lbl-line {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-list .lbl-line--you,
+.lb-list .lbl-you {
+  color: var(--you-ink);
+}
+.lb-list .lbl-age {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A found word, marked in the title by a tint of ink, never in a color. */
+.lb-list .lbl-hit {
+  margin: 0 -1px;
+  padding: 0 1px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 11%, transparent);
+  color: inherit;
+}
+.lb-list .lbl-proj--none::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+/* A lead shown only because one of its partners matched: not a result, so it is drawn as a small
+   faint label over its partners, with no face, line or time. */
+.lb-list .is-context {
+  min-height: 26px;
+  height: auto;
+}
+.lb-list .is-context :is(.cr, .mark, .lbl-line, .lbl-end, .lbl-age, .lbl-task, .lbl-tprog, .lbl-twhere, .lbl-tmach, .lbl-ttime) {
+  visibility: hidden;
+}
+.lb-list .is-context .lbl-name {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.lb-list .lbl-row.is-context .lbl-line {
+  display: none;
+}
+.lb-list :is(.lbl-row, .lbl-oline).is-context {
+  min-height: 26px;
+  padding-top: 4px;
+  padding-bottom: 0;
+}
+.lb-list .lbl-trow.is-context {
+  height: 28px;
+}
+.lb-list [data-key] {
+  cursor: default;
+  transition: background var(--dur-1);
+}
+.lb-list [data-key]:hover {
+  background: var(--hover);
+}
+.lb-list [data-key].is-on,
+.lb-list [data-key].is-cursor {
+  background: var(--selected);
+}
+
+/* Group heads: a fold chevron in the face column, then the project's rug where titles start. */
+.lb-list .lbl-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  height: 34px;
+  margin-top: 18px;
+  padding: 0 12px 0 13px;
+}
+.lb-list .lbl-head.is-first {
+  margin-top: 4px;
+}
+.lb-list .lbl-head .proj,
+.lb-list .lbl-head-name {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.lb-list .lbl-head--you {
+  gap: 8px;
+  padding-left: 46px;
+}
+.lb-list .lbl-head .count {
+  height: 17px;
+}
+.lb-list .lbl-head-sum {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.lb-list .lbl-head--you .lbl-head-sum {
+  margin-left: 2px;
+}
+.lb-list .lbl-chev {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.lb-list button.lbl-chev:hover {
+  background: var(--hover);
+  color: var(--muted);
+}
+.lb-list .lbl-chev.is-shut {
+  transform: rotate(-90deg);
+}
+.lb-list .lbl-note {
+  padding: 8px 12px 0 46px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-note-act {
+  color: var(--muted);
+  font-size: inherit;
+  font-weight: var(--w-medium);
+}
+.lb-list .lbl-note-act:hover {
+  color: var(--ink);
+}
+.lb-list .lbl-empty {
+  padding: 28px 12px 0 46px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- Rows: today's row, full width ---------- */
+.lb-list .lbl-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 46px;
+  padding: 4px 14px 4px 12px;
+  border-radius: var(--r-sm);
+}
+.lb-list .lbl-row.is-partner {
+  padding-left: 36px;
+}
+.lb-list .lbl-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.32;
+}
+.lb-list .lbl-title {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.lb-list .lbl-plus {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 5px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.lb-list .lbl-plus:hover {
+  background: var(--hover);
+  color: var(--muted);
+}
+.lb-list .lbl-end {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.lb-list .lbl-end .proj {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.lb-list .lbl-fold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 14px 4px 12px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-fold-faces {
+  display: flex;
+  flex: none;
+}
+.lb-list .lbl-fold-act {
+  color: var(--faint);
+}
+.lb-list .lbl-fold:hover .lbl-fold-act {
+  color: var(--ink);
+}
+/* Compact: one line per thread, the digest line beside the title. */
+.lb-list .lbl-main[data-lbl-density="compact"] .lbl-row {
+  min-height: 32px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.lb-list .lbl-main[data-lbl-density="compact"] .lbl-row .cr {
+  width: 18px;
+  height: 18px;
+}
+.lb-list .lbl-main[data-lbl-density="compact"] .lbl-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 14px;
+}
+.lb-list .lbl-main[data-lbl-density="compact"] .lbl-title {
+  flex: 0 1 auto;
+  max-width: 56%;
+}
+.lb-list .lbl-main[data-lbl-density="compact"] .lbl-text .lbl-line {
+  flex: 1 1 0;
+}
+.lb-list .lbl-main[data-lbl-density="compact"] .lbl-fold {
+  min-height: 34px;
+}
+
+/* ---------- Table: one quiet line per thread ---------- */
+.lb-list .lbl-theads,
+.lb-list .lbl-trow {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 156px 200px 104px 56px;
+  align-items: center;
+  column-gap: 12px;
+}
+.lb-list .lbl-theads {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  height: 30px;
+  margin: 0 -14px;
+  padding: 0 28px 0 26px;
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.lb-list .lbl-th {
+  justify-self: start;
+  display: inline-flex;
+  gap: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.lb-list .lbl-th:hover,
+.lb-list .lbl-th.is-on {
+  color: var(--muted);
+}
+.lb-list .lbl-th.is-num {
+  justify-self: end;
+}
+.lb-list .lbl-th-dir {
+  font-size: var(--t-11);
+}
+.lb-list .lbl-trow {
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.lb-list .lbl-trow > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lb-list .lbl-tmark {
+  display: grid;
+  place-items: center;
+}
+.lb-list .lbl-tthread {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.lb-list .lbl-trow.is-partner .lbl-tthread {
+  padding-left: 24px;
+}
+.lb-list .lbl-tthread .lbl-name {
+  flex: 0 1 auto;
+  font-weight: var(--w-regular);
+}
+.lb-list .lbl-task {
+  flex: 0 1 auto;
+  min-width: 60px;
+  overflow: hidden;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+}
+.lb-list .lbl-tprog,
+.lb-list .lbl-tmach {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.lb-list .lbl-tprog.is-plan {
+  color: var(--ink);
+}
+.lb-list .lbl-twhere {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-ttime {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.lb-list .lbl-main[data-lbl-density="compact"] .lbl-trow {
+  height: 30px;
+}
+
+/* ---------- Outline: five lines at rest, then zoom ---------- */
+.lb-list .lbl-ogroup {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 58px;
+  padding: 0 14px 0 13px;
+  border-radius: var(--r-md);
+}
+.lb-list .lbl-ogroup ~ .lbl-ogroup {
+  margin-top: 2px;
+}
+.lb-list .lbl-ogroup.is-open {
+  margin-bottom: 2px;
+}
+.lb-list .lbl-ogroup-name,
+.lb-list .lbl-ogroup-name .proj {
+  color: var(--ink);
+  font-size: var(--t-16);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.lb-list .lbl-ogroup-name .proj::before {
+  width: 12px;
+  height: 12px;
+}
+.lb-list .lbl-ogroup-sum {
+  color: var(--muted);
+  font-size: var(--t-13);
+  white-space: nowrap;
+}
+.lb-list .lbl-oline {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 34px;
+  padding: 2px 14px 2px 46px;
+  border-radius: var(--r-sm);
+}
+.lb-list .lbl-oline.is-partner {
+  padding-left: 70px;
+}
+.lb-list .lbl-otext {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+.lb-list .lbl-otext .lbl-title {
+  flex: 0 1 auto;
+  max-width: 58%;
+}
+.lb-list .lbl-otext .lbl-line {
+  flex: 1 1 0;
+}
+.lb-list .lbl-plus-quiet {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-digest {
+  padding: 1px 14px 9px 76px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 20px;
+  animation: lbl-fade var(--dur-2) var(--ease-out);
+}
+.lb-list .lbl-digest.is-partner {
+  padding-left: 100px;
+}
+.lb-list .lbl-digest > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-list .lbl-ofold {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 14px 0 76px;
+  border-radius: var(--r-sm);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-ohint {
+  padding: 22px 46px 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+@keyframes lbl-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---------- the peek panel ---------- */
+.lb-list .lbl-peek {
+  position: absolute;
+  z-index: 6;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  background: var(--surface);
+  box-shadow: inset 1px 0 0 var(--line-soft);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform var(--dur-2) var(--ease-out), visibility 0s linear var(--dur-2);
+}
+.lb-list .lbl-main.is-peeking .lbl-peek {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--dur-2) var(--ease-out), visibility 0s;
+}
+.lb-list .lbl-pscroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px 16px 21px;
+  scrollbar-width: thin;
+}
+.lb-list .lbl-phead {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 22px;
+  align-items: start;
+  gap: 12px;
+}
+.lb-list .lbl-ptitle {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+  line-height: 1.3;
+}
+.lb-list .lbl-pmeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-pmeta .proj {
+  font-size: var(--t-12);
+}
+.lb-list .lbl-pclose {
+  color: var(--faint);
+}
+.lb-list .lbl-pask {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.lb-list .lbl-pask-q {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.lb-list .lbl-pask-since {
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-pask-a {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.lb-list .lbl-pask-field {
+  height: 32px;
+  margin-top: 10px;
+}
+.lb-list .lbl-pask-field input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+.lb-list .lbl-pask-field input::placeholder {
+  color: var(--faint);
+}
+.lb-list .lbl-psec {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.lb-list .lbl-ph {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 7px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.lb-list .lbl-ph-note {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.lb-list .lbl-steps,
+.lb-list .lbl-ladder,
+.lb-list .lbl-files,
+.lb-list .lbl-crew {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lb-list .lbl-steps li,
+.lb-list .lbl-ladder li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 21px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-steps li.is-doing {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.lb-list .lbl-steps li.is-todo,
+.lb-list .lbl-ladder li.is-todo,
+.lb-list .lbl-ladder li.is-unknown {
+  color: var(--faint);
+}
+.lb-list .lbl-ladder li.is-done {
+  color: var(--ink);
+}
+.lb-list .lbl-ladder li.is-failed {
+  color: var(--fail-ink);
+}
+.lb-list .lbl-ladder-at {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.lb-list .lbl-tick {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.lb-list .lbl-tick--fail {
+  color: var(--fail-ink);
+}
+.lb-list .lbl-dot {
+  justify-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.25px var(--faint);
+}
+.lb-list .lbl-dot--now {
+  width: 7px;
+  height: 7px;
+  background: var(--ink);
+  box-shadow: none;
+}
+.lb-list .lbl-dot--unknown {
+  background: color-mix(in oklab, var(--faint) 45%, transparent);
+  box-shadow: none;
+}
+.lb-list .lbl-psentence {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.lb-list .lbl-pfocus {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: var(--t-12);
+}
+.lb-list .lbl-pfocus-file {
+  margin-left: auto;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.lb-list .lbl-files {
+  margin-top: 5px;
+}
+.lb-list .lbl-files li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 19px;
+}
+.lb-list .lbl-files li.is-read {
+  color: var(--faint);
+}
+.lb-list .lbl-files .mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-list .lbl-files-how,
+.lb-list .lbl-files-more {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.lb-list .lbl-pplace {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-pplace > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lb-list .lbl-pplace .ic {
+  color: var(--faint);
+}
+.lb-list .lbl-pcheck {
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.lb-list .lbl-pcheck.is-failed {
+  color: var(--fail-ink);
+}
+.lb-list .lbl-pcheck.is-unknown {
+  color: var(--muted);
+}
+.lb-list .lbl-pcmd {
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-crew li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 25px;
+  margin: 0 -5px;
+  padding: 0 5px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--t-12);
+  cursor: default;
+}
+.lb-list .lbl-crew li:hover {
+  background: var(--hover);
+}
+.lb-list .lbl-crew li.is-self {
+  color: var(--ink);
+}
+.lb-list .lbl-crew-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-list .lbl-crew-role {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.lb-list .lbl-pwhy {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.lb-list .lbl-pfoot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 12px 21px;
+  border-top: 1px solid var(--line-soft);
+}
+.lb-list .lbl-pfoot-note {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-list .lbl-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.lb-list .lbl-follow .toggle {
+  width: 30px;
+  height: 18px;
+}
+.lb-list .lbl-follow .toggle::after {
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+}
+.lb-list .lbl-follow .toggle[aria-checked="true"]::after {
+  transform: translateX(12px);
+}
+
+/* ---------- the View menu and the toast ---------- */
+.lb-list .lbl-view-pop {
+  position: fixed;
+  z-index: 30;
+  width: 200px;
+  padding: 2px 0;
+  border-radius: var(--r-md);
+}
+.lb-list .lbl-view-pop .pop-sec:first-child {
+  border-top: 0;
+}
+.lb-list .lbl-pop-check {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  color: var(--ink);
+}
+.lb-list .lbl-toast {
+  position: fixed;
+  z-index: 35;
+  left: calc(272px + (100vw - 272px) / 2);
+  bottom: 60px;
+  max-width: 520px;
+  padding: 8px 14px;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  transition: opacity var(--dur-2);
+}
+.lb-list .lbl-toast.is-out {
+  opacity: 0;
+}
+
+/* ---------- the design-review bar: tool chrome, not product ---------- */
+/* A fixed graphite bar in a system typeface, the same in every theme, so it never reads as Hercule. */
+.lb-list .lbl-review {
+  position: fixed;
+  z-index: 40;
+  left: 50%;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 6px 5px 12px;
+  border-radius: 10px;
+  background: oklch(0.24 0.008 260 / 0.94);
+  box-shadow: 0 0 0 1px oklch(0.7 0.01 260 / 0.35), 0 6px 18px oklch(0 0 0 / 0.22);
+  color: oklch(0.78 0.006 260);
+  font: 500 11px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.lb-list .lbl-review-label {
+  color: oklch(0.86 0.12 95);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lb-list .lbl-review-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.lb-list .lbl-review-k {
+  margin-right: 5px;
+  color: oklch(0.62 0.006 260);
+}
+.lb-list .lbl-review button {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: oklch(0.8 0.006 260);
+  font: inherit;
+}
+.lb-list .lbl-review button:hover {
+  background: oklch(1 0 0 / 0.08);
+}
+.lb-list .lbl-review button[aria-pressed="true"] {
+  background: oklch(1 0 0 / 0.16);
+  color: oklch(0.98 0 0);
+}
+
+/* ---------- small overrides ---------- */
+/* Small faces overlap less than the book's 28px stack, so each one still reads as someone. */
+.lb-list .lbl-stack > * + * {
+  margin-left: -5px;
+}
+/* In the Table the marks are shapes in ink; the ask carries the row's one color. */
+.lb-list .lbl-tmark .mark {
+  color: var(--faint);
+}
+.lb-list .lbl-tmark .mark--working {
+  color: var(--muted);
+}
+/* With the peek open the Table gives up its Machine column, which the peek shows, so titles keep
+   their room. */
+.lb-list .lbl-main.is-peeking :is(.lbl-theads, .lbl-trow) {
+  grid-template-columns: 22px minmax(0, 1fr) 112px 150px 52px;
+}
+.lb-list .lbl-main.is-peeking :is(.lbl-tmach, .lbl-th--machine) {
+  display: none;
+}
+.lb-list .lbl-ogroup--you {
+  gap: 10px;
+}
+.lb-list .lbl-ogroup--you .lbl-chev {
+  margin-right: 3px;
+}
+.lb-list .lbl-ogroup .count {
+  height: 18px;
+}
+/* A narrow window: Outline's lines stack like Rows, and its group lines drop their faces. */
+@container (width < 640px) {
+  .lb-list .lbl-otext {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    line-height: 1.32;
+  }
+  .lb-list .lbl-otext .lbl-title {
+    max-width: none;
+  }
+  .lb-list .lbl-otext .lbl-line {
+    flex: none;
+  }
+  .lb-list .lbl-oline {
+    min-height: 44px;
+  }
+  .lb-list .lbl-ogroup .lbl-stack {
+    display: none;
+  }
+  .lb-list .lbl-ogroup {
+    gap: 11px;
+  }
+  .lb-list .lbl-ogroup--you {
+    gap: 8px;
+  }
+  .lb-list .lbl-ogroup-name,
+  .lb-list .lbl-ogroup-name .proj {
+    font-size: 15px;
+  }
+  .lb-list .lbl-digest > div {
+    white-space: normal;
+  }
+  .lb-list .lbl-ogroup-sum {
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--t-12);
+    text-overflow: ellipsis;
+  }
+}
+/* Rows and Outline cap their lines at 820px, left-aligned, so a row's age or a group's faces sit
+   near its title instead of a full window away. Heads, fold lines and notes share the cap. The
+   Table keeps the full width: its columns need it. */
+.lb-list .lbl-main:is([data-lbl-list="rows"], [data-lbl-list="outline"]) .lbl-body {
+  max-width: 820px;
+}
+/* The Office keeps its own morning; one faint line says so. */
+.lb-list .lbl-office-note {
+  position: absolute;
+  z-index: 1;
+  top: 58px;
+  left: 26px;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}

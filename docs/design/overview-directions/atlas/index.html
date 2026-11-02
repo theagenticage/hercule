@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- PROTOTYPE - Atlas's story page: the pitch, the huh, the three modes, a walk through the
+         morning, what Hercule would need, and the links. Images are captures in shots/, each with a
+         -dark twin that the theme switch swaps in. -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <link rel="stylesheet" href="index.css" />
+    <script src="../shared/book.js"></script>
+    <title>3 · Atlas · Seeing all the work · Hercule</title>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="../index.html"><i data-logo="24"></i>Seeing all the work <small>3 of 5 · Atlas</small></a>
+      <nav class="bk-links" aria-label="Sections">
+        <a href="#huh">The huh</a>
+        <a href="#modes">Three modes</a>
+        <a href="#walk">A walk through</a>
+        <a href="#needs">What it needs</a>
+        <a href="#links">Open it</a>
+      </nav>
+      <div class="bk-themes" role="group" aria-label="Theme">
+        <button type="button" data-theme-option="whitehaven">Whitehaven</button>
+        <button type="button" data-theme-option="orient-express">Orient Express</button>
+      </div>
+    </header>
+
+    <main class="bk">
+      <!-- ================================================================ 1. the pitch -->
+      <section class="bk-hero">
+        <div class="bk-eyebrow">Direction 3 of 5 · organized by where in the code</div>
+        <h1><span class="bk-num">3</span>Atlas</h1>
+        <p class="bk-lever">Your agents, on the map of your code.</p>
+        <p class="bk-lede">
+          A thread lives where it works: the <b>area</b> of a repository it edits most, read from the edits Hercule already watches for Edit
+          Overlap. So the sidebar groups threads by folder, a minimap shows where everyone is, and each row says the file it is in and its diff.
+        </p>
+        <p class="bk-lede">
+          Because Hercule knows which files every branch changes, it can see two agents heading for the same lines <b>before</b> they become a
+          merge conflict. Atlas draws every branch as a metro line running toward <b>main</b>, marks where two lines cross, and suggests the
+          order to land them in.
+        </p>
+      </section>
+      <figure class="as-shot bk-wide as-hero-shot">
+        <a href="desktop.html?mode=office" target="_blank" rel="noopener"
+          ><img src="shots/hero.webp" data-dark="shots/hero-dark.webp" alt="The Atlas window: the minimap and territories in the sidebar, and the Office as a city of the code, three repositories round a square with the town hall, where four beans wait on you" width="2880" height="1800"
+        /></a>
+        <figcaption><b>Tuesday 09:41, the overview open on the Office.</b>Each repository is a city, each file a building. Four beans queue at the town hall for you, and a red label by the square says two agents changed <code>payment.ts</code> in ways that would conflict. The card at the bottom left says it too.</figcaption>
+      </figure>
+
+      <!-- ================================================================ 2. the huh -->
+      <section class="bk-sec" id="huh">
+        <div class="bk-huh">
+          <div class="bk-eyebrow">The huh</div>
+          <h2>A merge forecast across every agent's branch.</h2>
+          <p>
+            Every agent tool tells you a branch conflicts when you try to merge it. Atlas tells you at 09:41, while both agents are still working,
+            and tells you which one to land first.
+          </p>
+          <p>And in the Office you can see it coming: <code>payment.ts</code> is a building both agents changed, ringed in dashed red.</p>
+        </div>
+
+        <figure class="as-shot bk-wide as-huh-wide">
+          <a href="desktop.html?state=crossing&amp;mode=lines" target="_blank" rel="noopener"><img loading="lazy" src="shots/lines-crossing.webp" data-dark="shots/lines-crossing-dark.webp" alt="Lines with the crossing lit: the 3-D Secure line and the cart refactor line meet at payment.ts, the dry-run merge's verdict below them, and both branches marked in the landing order" width="2880" height="1800" /></a>
+          <figcaption><b>09:41, the crossing lit in Lines.</b>Everything else steps back. The card says what the dry-run merge found and suggests the order; the board on the right marks both branches.</figcaption>
+        </figure>
+
+        <div class="bk-pair as-huh-pair">
+          <figure class="as-shot as-shot--crop">
+            <a href="desktop.html?state=crossing&amp;mode=lines" target="_blank" rel="noopener"><img loading="lazy" src="shots/huh-map.webp" data-dark="shots/huh-map-dark.webp" alt="The crossing on the map: the 3-D Secure line and the cart refactor line meet at an interchange named payment.ts, with the dry-run merge's verdict below" width="1080" height="800" /></a>
+            <figcaption><b>The crossing, in Lines.</b>An interchange where two lines share a file, and what the dry-run merge found: lines 138-146.</figcaption>
+          </figure>
+          <figure class="as-shot as-shot--crop">
+            <a href="desktop.html?state=crossing&amp;mode=office" target="_blank" rel="noopener"><img loading="lazy" src="shots/office-crossing.webp" alt="The same crossing in the Office: the 3-D Secure bean queues at the town hall, the cart refactor types on its roof next door, and payment.ts is ringed in dashed red with the dry-run merge's verdict" width="2880" height="1800" /></a>
+            <figcaption><b>The same crossing, in the Office.</b>The 3-D Secure fix queues at the town hall for your push while the cart refactor types on a roof next door. <code>payment.ts</code>, which both changed, wears a dashed red ring: red because a conflict is a failure that has not happened yet, dashed because it is a prediction.</figcaption>
+          </figure>
+        </div>
+
+        <h3 class="as-h3">How to read a line</h3>
+        <ol class="bk-steps as-legend">
+          <li><h4><span class="as-key as-key--badge">fix/3ds-eu-cards</span> The branch</h4><p>Each line is one branch, in its lead thread's colour. Colour is who.</p></li>
+          <li><h4><span class="as-key as-key--station"></span> Stations</h4><p>What happened on the branch: commits, tests, the pull request, review, CI. Red means a failing test or a blocking finding.</p></li>
+          <li><h4><span class="as-key as-key--ahead"></span> The track to come</h4><p>The checks Hercule will see before it can land: review clean, PR open, CI green.</p></li>
+          <li><h4><span class="as-key as-key--train"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="18"></i></span> The train</h4><p>The lead stands where its work is, its partners riding behind. A marigold word means it waits on you.</p></li>
+          <li><h4><span class="as-key as-key--x"></span> A crossing</h4><p>Two lines that change one file. Red when a dry-run merge says they would conflict; quiet when both only edit it.</p></li>
+          <li><h4><span class="as-key as-key--main">main</span> The terminus</h4><p>Every line runs into main. The number before it is the line's place in the suggested landing order.</p></li>
+        </ol>
+      </section>
+
+      <!-- ================================================================ 3. the three modes -->
+      <section class="bk-sec" id="modes">
+        <div class="bk-eyebrow">Three modes, one idea</div>
+        <h2>Where in the code: as a list, as a city, as a metro map.</h2>
+        <p class="bk-lede">
+          The overview opens from the sidebar's Office button or <kbd>⌘⇧O</kbd>. Its switch reads <b>Office · Threads · Lines</b>. <kbd>O</kbd>,
+          <kbd>T</kbd> and <kbd>L</kbd> pick a mode, <kbd>↑</kbd> <kbd>↓</kbd> walk the selection, <kbd>↩</kbd> opens it and <kbd>esc</kbd> closes
+          the overview. What you select stays selected in every mode, and one card answers it: floating at the bottom left over the Office, docked
+          under the right-hand column in Threads and Lines, gliding between the two when you switch.
+        </p>
+
+        <article class="as-mode">
+          <div class="as-mode-text">
+            <div class="bk-eyebrow">The sidebar · Territories, folded</div>
+            <h3>A minimap on top, then project, area, thread.</h3>
+            <p class="bk-body">
+              The minimap is a treemap of each repository: folders sized by lines, shaded by today's edits, a dot per agent in its colour and a
+              marigold dot for each that waits on you. Tap a folder to filter the list, and every mode, to that area.
+            </p>
+            <p class="bk-body">
+              Below it: Waiting on you, three and then "n more", as today. Then each project's areas, busiest first: a path, a heat bar, and a
+              crossing chip when two sessions share a file there. A row keeps today's 52px; its second line says the file the thread is in now and
+              its diff. Threads that only read sit in the <b>Library</b>.
+            </p>
+            <p class="bk-body">While the overview is open the sidebar is its index: a tap selects, a second tap opens.</p>
+          </div>
+          <div class="as-mode-shots as-mode-shots--side">
+            <figure class="as-shot as-shot--narrow">
+              <a href="desktop.html?mode=threads" target="_blank" rel="noopener"><img loading="lazy" src="shots/sidebar.webp" data-dark="shots/sidebar-dark.webp" alt="The sidebar: the minimap, Waiting on you, then webshop's areas src/cart and styles with their threads" width="544" height="1800" /></a>
+            </figure>
+            <figure class="as-shot as-shot--crop">
+              <img loading="lazy" src="shots/minimap.webp" data-dark="shots/minimap-dark.webp" alt="The minimap close up: webshop, payments-api and ops as treemaps, with a dot per agent" width="816" height="360" />
+              <figcaption><b>The minimap, close up.</b>Webshop's checkout and cart are warm today; the marigold dots wait on you.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="as-mode as-mode--office">
+          <div class="as-mode-text">
+            <div class="bk-eyebrow">Office · the City</div>
+            <h3>Each repository is a city.</h3>
+            <p class="bk-body">
+              Three cities on tinted plinths round a square: folders are districts, files are buildings. A building is as tall as its file is long,
+              and the lines changed today light its windows. Its roof trim is the colour of the thread that changed it; a chequered roof is a test
+              file.
+            </p>
+            <p class="bk-body">
+              Scaffolding stands on changes that have not landed, as high as the share of the file that changed, and a crane stands over the big
+              refactor: the Result migration, 23 files. A brass ring marks a file two threads both edit; a dashed red ring, one a merge would
+              break.
+            </p>
+            <p class="bk-body">
+              Working beans type at a desk on the roof of the file they are in now; idle ones sit on a bench at their door. Waiting beans queue on
+              the town hall's steps, palms up, and the threads that only read sit in the library under the glass dome.
+            </p>
+            <p class="bk-body">
+              Far away you see cities, busy districts and a pin per bean; closer, name tags with the file each one is in; up close, file names under
+              the pointer. Click a building for who changed it today. In the window, the top bar's <b>crossings</b> count flies to the next one.
+            </p>
+          </div>
+          <div class="as-mode-shots">
+            <div class="bk-pair">
+              <figure class="as-shot">
+                <a href="desktop.html?mode=office" target="_blank" rel="noopener"><img loading="lazy" src="shots/office-hero.webp" alt="The City by day: ops, payments-api and webshop as districts of buildings round a square with the town hall and the library dome" width="2880" height="1800" /></a>
+                <figcaption><b>The establishing shot, by day.</b>Three repositories, 108 buildings, the town hall in the middle.</figcaption>
+              </figure>
+              <figure class="as-shot">
+                <a href="desktop.html?mode=office&amp;theme=orient-express" target="_blank" rel="noopener"><img loading="lazy" src="shots/office-dark.webp" alt="The City at night, in Orient Express: lit windows show the lines changed today" width="2880" height="1800" /></a>
+                <figcaption><b>And at night.</b>In Orient Express the lit windows are the day's work.</figcaption>
+              </figure>
+            </div>
+            <div class="bk-pair">
+              <figure class="as-shot">
+                <img loading="lazy" src="shots/office-crane.webp" alt="payments-api close up: a crane over the Result migration, scaffolding on every file it changed, and beans typing on their roofs" width="2880" height="1800" />
+                <figcaption><b>A crane over the big refactor.</b>The Result migration changed 23 files; each one stands in scaffolding until it lands.</figcaption>
+              </figure>
+              <figure class="as-shot">
+                <img loading="lazy" src="shots/office-queue.webp" alt="The town hall's steps: four beans queue with their hands up, each with its question" width="2880" height="1800" />
+                <figcaption><b>The queue at the town hall.</b>Four wait on you, oldest first, each with its question.</figcaption>
+              </figure>
+            </div>
+          </div>
+        </article>
+
+        <article class="as-mode">
+          <div class="as-mode-text">
+            <div class="bk-eyebrow">Threads · Territories</div>
+            <h3>The sidebar's list, at full width, with every file.</h3>
+            <p class="bk-body">
+              Each area shows its heat, today's diff and the faces of everyone editing there, visitors from other areas included. Each thread
+              lists the files it touched: edits in its colour with their diff, reads as outlines, and a crossing in red.
+            </p>
+            <p class="bk-body">
+              Beside the list, the <b>crossings</b>: every Edit Overlap and every predicted conflict, with the two threads, what the dry run found,
+              and two answers: <b>Open a Discussion</b> or <b>Tell both</b>.
+            </p>
+          </div>
+          <div class="as-mode-shots">
+            <figure class="as-shot">
+              <a href="desktop.html?mode=threads" target="_blank" rel="noopener"><img loading="lazy" src="shots/threads.webp" data-dark="shots/threads-dark.webp" alt="Threads mode: Waiting on you with its answers, then webshop's areas and threads with their files as chips, and the crossings on the right" width="2880" height="1800" /></a>
+            </figure>
+            <div class="bk-pair">
+              <figure class="as-shot as-shot--crop">
+                <img loading="lazy" src="shots/threads-area.webp" data-dark="shots/threads-area-dark.webp" alt="The src/checkout area: its heat bar, four faces editing there, two crossing chips, and the 3-D Secure thread's files" width="1580" height="384" />
+                <figcaption><b>One area.</b>Four faces edit in <code>src/checkout</code>; two of them are visitors from other areas.</figcaption>
+              </figure>
+              <figure class="as-shot as-shot--crop">
+                <img loading="lazy" src="shots/crossings.webp" data-dark="shots/crossings-dark.webp" alt="The crossings panel: the predicted conflict at src/checkout/payment.ts in full, then three overlaps folded to one line each" width="704" height="1040" />
+                <figcaption><b>The crossings.</b>A predicted conflict shows in full: the two threads, their branches, what to do. An overlap is advisory, so it folds to one line until you open it.</figcaption>
+              </figure>
+            </div>
+          </div>
+        </article>
+
+        <article class="as-mode">
+          <div class="as-mode-text">
+            <div class="bk-eyebrow">Lines · the view of its own</div>
+            <h3>Every branch, heading for main.</h3>
+            <p class="bk-body">
+              One system per repository, one line per branch and per run that edits code. The trains show how far each one is from landing, by
+              how many stations are still to come. Interchanges show the crossings.
+            </p>
+            <p class="bk-body">
+              On the right, the <b>landing order</b>, a departures board in the Bureau's Art Deco: ready branches first, then the ones others must
+              rebase onto, then the ones that wait on you, each with its reason. <b>Land in this order</b> merges what is ready, rebases what is
+              behind it, and stops at the first conflict. It asks before every push.
+            </p>
+            <p class="bk-body">Tap a station for its card. Hover a row of the board and its line lights up.</p>
+          </div>
+          <div class="as-mode-shots">
+            <figure class="as-shot">
+              <a href="desktop.html?mode=lines" target="_blank" rel="noopener"><img loading="lazy" src="shots/lines.webp" data-dark="shots/lines-dark.webp" alt="Lines: three systems, webshop, payments-api and ops, each with its branches running into main, and the landing order on the right" width="2880" height="1800" /></a>
+            </figure>
+            <div class="bk-pair">
+              <figure class="as-shot as-shot--crop">
+                <img loading="lazy" src="shots/board.webp" data-dark="shots/board-dark.webp" alt="The landing order: 1 tidy/checkout-css, ready; 2 fix/3ds-eu-cards, waits on you; and five more, with Land in this order" width="704" height="1180" />
+                <figcaption><b>The landing order.</b>Seven branches, each with its state and reason.</figcaption>
+              </figure>
+              <figure class="as-shot as-shot--crop">
+                <img loading="lazy" src="shots/swarm-lines.webp" data-dark="shots/swarm-lines-dark.webp" alt="Lines in the swarm: seventeen lines and seven crossings across three repositories" width="1632" height="1688" />
+                <figcaption><b>The swarm.</b>Seventeen lines. Labels fold away until you select a line; what waits on you still speaks.</figcaption>
+              </figure>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ================================================================ 4. a walk through -->
+      <section class="bk-sec" id="walk">
+        <div class="bk-eyebrow">A walk through</div>
+        <h2>09:41. You are back from the school run.</h2>
+        <p class="bk-lede">You left your desk at 09:01. The threads that started after that, you started from your phone. Here is the next minute.</p>
+
+        <ol class="as-walk">
+          <li>
+            <div class="as-walk-text">
+              <h4>The sidebar briefs you</h4>
+              <p>On top of the list: back after 40 minutes, 3 new crossings, 1 of them would conflict, and 14 new stations on 5 branches. You tap <b>See it on the map</b>.</p>
+            </div>
+            <figure class="as-shot as-shot--crop as-shot--small"><a href="desktop.html?state=away&amp;mode=threads" target="_blank" rel="noopener"><img loading="lazy" src="shots/away-strip.webp" data-dark="shots/away-strip-dark.webp" alt="The sidebar's briefing: Back after 40m, 3 new crossings, 1 would conflict, 14 new stations on 5 branches" width="544" height="248" /></a></figure>
+          </li>
+          <li>
+            <div class="as-walk-text">
+              <h4>Lines shows what moved</h4>
+              <p>With <b>New since 09:01</b> on, the track laid before you left fades back. The 3-D Secure fix laid four stations, the cart refactor two, and their crossing at <code>payment.ts</code> is new.</p>
+            </div>
+            <div class="as-walk-shots">
+              <figure class="as-shot as-shot--crop"><a href="desktop.html?state=away&amp;mode=lines" target="_blank" rel="noopener"><img loading="lazy" src="shots/away-map.webp" data-dark="shots/away-map-dark.webp" alt="Lines with New since 09:01: the new stations stand out, the older track fades, and the payment.ts crossing is tagged new" width="1640" height="680" /></a></figure>
+              <figure class="as-shot"><a href="desktop.html?state=away&amp;mode=office" target="_blank" rel="noopener"><img loading="lazy" src="shots/office-away.webp" alt="The City after you were away: the windows of the 52 files changed since 09:01 are the bright ones" width="2880" height="1800" /></a><figcaption>In the City, the 52 files changed while you were away have the bright windows.</figcaption></figure>
+            </div>
+          </li>
+          <li>
+            <div class="as-walk-text">
+              <h4>You tap the crossing</h4>
+              <p>The dry-run merge on the runner found it: both branches change the amount passed to <code>confirmPayment</code>, at lines 138-146. Suggested: land the 3-D Secure fix first, then rebase the cart. You tap <b>Tell both</b>, and both agents know.</p>
+            </div>
+            <figure class="as-shot as-shot--crop"><a href="desktop.html?state=crossing&amp;mode=lines" target="_blank" rel="noopener"><img loading="lazy" src="shots/huh-map.webp" data-dark="shots/huh-map-dark.webp" alt="The crossing's card: would conflict at merge, src/checkout/payment.ts, with the suggestion" width="1080" height="800" /></a></figure>
+          </li>
+          <li>
+            <div class="as-walk-text">
+              <h4>You answer the push</h4>
+              <p>The 3-D Secure fix is selected, and its card asks: <b>Run git push?</b> You allow it once. It leaves Waiting on you with a short toast and an Undo, and its train moves on toward review.</p>
+            </div>
+            <figure class="as-shot as-shot--crop as-shot--small"><a href="desktop.html?mode=lines" target="_blank" rel="noopener"><img loading="lazy" src="shots/card.webp" data-dark="shots/card-dark.webp" alt="The selection card: Fix 3-D Secure checkout for EU cards, waiting 10m, crosses Refactor cart totals, Run git push, Allow once" width="704" height="504" /></a></figure>
+          </li>
+          <li>
+            <div class="as-walk-text">
+              <h4>You land in order</h4>
+              <p><b>Land in this order</b>: Tidy checkout CSS is ready and crosses nothing, so it reaches main at 09:42. The two other webshop branches are now one behind main, with no conflict. The queue waits for the 3-D Secure review to come back clean.</p>
+            </div>
+            <div class="bk-pair as-walk-pair">
+              <figure class="as-shot as-shot--crop"><a href="desktop.html?state=land&amp;mode=lines" target="_blank" rel="noopener"><img loading="lazy" src="shots/land-map.webp" data-dark="shots/land-map-dark.webp" alt="The webshop system after landing: tidy/checkout-css runs solid into main, landed 09:42" width="1080" height="660" /></a></figure>
+              <figure class="as-shot"><a href="desktop.html?state=land&amp;mode=office" target="_blank" rel="noopener"><img loading="lazy" src="shots/office-land.webp" alt="The City after the landing: Tidy checkout CSS's buildings flag Merged #1281 and their scaffolding has come down" width="2880" height="1800" /></a><figcaption>In the City, the scaffolding on its four files comes down.</figcaption></figure>
+            </div>
+          </li>
+          <li>
+            <div class="as-walk-text">
+              <h4>Inside the thread, it still knows</h4>
+              <p>Open the 3-D Secure fix and its header carries its territory: <code>src/checkout/payment.ts</code>, +48 −12, and a red pill: it crosses Refactor cart totals. One tap goes back to the map.</p>
+            </div>
+            <figure class="as-shot as-shot--crop"><a href="desktop.html?state=open" target="_blank" rel="noopener"><img loading="lazy" src="shots/open.webp" data-dark="shots/open-dark.webp" alt="Under the open thread's header: the file it is in, and a pill saying it crosses Refactor cart totals and would conflict" width="680" height="180" /></a></figure>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ================================================================ 5. what it needs -->
+      <section class="bk-sec" id="needs">
+        <div class="bk-eyebrow">What Hercule would need</div>
+        <h2>Most of it is git and the edit watch.</h2>
+        <div class="bk-scroll">
+          <table class="bk-table as-table">
+            <thead>
+              <tr><th>Need</th><th>Where it comes from</th><th>Today</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Files each session edits</td><td>The edit watch behind Edit Overlap (spec 19 §4.1), best effort</td><td>Observed, not on the contract</td></tr>
+              <tr><td>Files each session reads</td><td>Its read and search tool calls, already in the transcript</td><td>New reading</td></tr>
+              <tr><td>An area per session</td><td>The folder it edits most; the Library when it only reads</td><td>Derived, no storage</td></tr>
+              <tr><td>The file tree with line counts</td><td>The runner reads it once per workspace and again on change</td><td>New, cached per workspace</td></tr>
+              <tr><td>Diff stats per workspace and per session</td><td><code>git diff --numstat</code> against the base; per session from the edit watch</td><td>New</td></tr>
+              <tr><td>A branch's stations</td><td>Commits from <code>git log</code>; test runs from tool calls; PR, review and CI from the GitHub Connection</td><td>Partly new</td></tr>
+              <tr><td>Predicted conflicts</td><td>A dry-run merge on the runner (<code>git merge-tree</code>, no checkout) between branches that share a file, when a branch moves</td><td>New</td></tr>
+              <tr><td>The landing order</td><td>A rule, not a model: ready first, then what others rebase onto, then what waits on you</td><td>New</td></tr>
+              <tr><td>Land in this order</td><td>A merge queue that merges, rebases the next, stops at a conflict, and asks before every push</td><td>New, a moonshot</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="bk-body as-gloss">
+          <b>Words.</b> Atlas proposes three for GLOSSARY.md: an <b>area</b> (the folder of a repository a session works in), a <b>crossing</b>
+          (two sessions that change one file; an Edit Overlap is one kind, a predicted conflict the other) and the <b>landing order</b>. It needs no
+          noun for the sessions of a workspace: partners simply ride their lead's line.
+        </p>
+
+        <div class="bk-grid">
+          <div class="bk-card">
+            <div class="bk-eyebrow">What it costs</div>
+            <ul class="bk-list">
+              <li><b>While idle: nothing.</b> The minimap, the territories and the map are drawn when something changes, never on a timer.</li>
+              <li><b>Per edit event:</b> one area's heat and, at most, one crossing are recounted.</li>
+              <li><b>Per branch move:</b> one <code>git merge-tree</code> per branch that shares a file with it, on the runner. Milliseconds on a normal repository.</li>
+              <li><b>Per streamed token: nothing.</b></li>
+              <li><b>The City</b>: 18 instanced meshes hold 108 buildings and 9,520 window panes, built once per state, never per event or token. It draws only while visible: 30 fps while beans breathe, nothing at rest under Reduce Motion. Tilt-shift runs only in the far view.</li>
+            </ul>
+          </div>
+          <div class="bk-card">
+            <div class="bk-eyebrow">Risks, and answers</div>
+            <ul class="bk-list">
+              <li><b>Big repositories.</b> The minimap folds to top folders, the City folds districts into blocks until you zoom, and Lines draws branches, never files.</li>
+              <li><b>Threads that do not edit.</b> They sit in the Library, and a partner rides its lead's line.</li>
+              <li><b>The edit watch is best effort.</b> A crossing it misses is missing, never invented; the dry-run merge is exact for committed work.</li>
+              <li><b>A forecast can be wrong.</b> The order is a suggestion with its reasons; landing asks before every push and stops at the first conflict.</li>
+              <li><b>The metaphor is cute.</b> Strip the scenery and Lines is a sorted list of branches with their checks and a merge forecast.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ 6. links -->
+      <section class="bk-sec" id="links">
+        <div class="bk-eyebrow">Open it</div>
+        <h2>The live window</h2>
+        <p class="bk-lede">Best on a laptop, or a phone held sideways. Every moment above has its own address.</p>
+        <p class="as-open"><a class="btn btn--accent btn--lg" href="desktop.html" target="_blank" rel="noopener">Open the live window<i data-i="external" data-size="15"></i></a></p>
+        <div class="as-links">
+          <a href="desktop.html?state=crossing&amp;mode=lines" target="_blank" rel="noopener"><b>The crossing</b><span>Lines, payment.ts lit</span></a>
+          <a href="desktop.html?state=land&amp;mode=lines" target="_blank" rel="noopener"><b>Land in this order</b><span>Tidy checkout CSS reaches main</span></a>
+          <a href="desktop.html?state=away&amp;mode=lines" target="_blank" rel="noopener"><b>Back after 40 minutes</b><span>What moved since 09:01</span></a>
+          <a href="desktop.html?mode=threads" target="_blank" rel="noopener"><b>Territories</b><span>Threads mode and crossings</span></a>
+          <a href="desktop.html?mode=office" target="_blank" rel="noopener"><b>The City</b><span>The Office mode</span></a>
+          <a href="desktop.html?state=crossing&amp;mode=office" target="_blank" rel="noopener"><b>The crossing in the City</b><span>payment.ts in dashed red</span></a>
+          <a href="desktop.html?state=swarm&amp;mode=lines" target="_blank" rel="noopener"><b>The swarm</b><span>Seventeen lines</span></a>
+          <a href="desktop.html?state=open" target="_blank" rel="noopener"><b>A thread open</b><span>Its header knows its territory</span></a>
+          <a href="office.html" target="_blank" rel="noopener"><b>The City alone</b><span>The Office module, full window</span></a>
+        </div>
+        <p class="bk-body as-back"><a href="../index.html">Back to the book</a></p>
+      </section>
+    </main>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script>
+      // Swaps every capture for its dark twin while the book is in Orient Express.
+      (function () {
+        "use strict";
+        function syncImages() {
+          var dark = document.documentElement.dataset.theme === "orient-express";
+          document.querySelectorAll("img[data-dark]").forEach(function (img) {
+            if (!img.dataset.light) img.dataset.light = img.getAttribute("src");
+            img.setAttribute("src", dark ? img.dataset.dark : img.dataset.light);
+          });
+        }
+        syncImages();
+        new MutationObserver(syncImages).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+      })();
+    </script>
+  </body>
+</html>

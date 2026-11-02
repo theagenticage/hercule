@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- PROTOTYPE - Expedition's story page: the pitch, the huh, the three modes, a walk through
+         the morning, what Hercule would need, and the links. Images are captures in shots/ (each
+         with a -dark twin the theme switch swaps in); the route specimens are drawn live by
+         expedition-route.js, the same code the window uses. -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <link rel="stylesheet" href="expedition.css" />
+    <link rel="stylesheet" href="index.css" />
+    <script src="../shared/book.js"></script>
+    <title>1 · Expedition · Seeing all the work · Hercule</title>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="../index.html"><i data-logo="24"></i>Seeing all the work <small>1 of 5 · Expedition</small></a>
+      <nav class="bk-links" aria-label="Sections">
+        <a href="#huh">The huh</a>
+        <a href="#modes">Three modes</a>
+        <a href="#walk">A walk through</a>
+        <a href="#needs">What it needs</a>
+        <a href="#links">Open it</a>
+      </nav>
+      <div class="bk-themes" role="group" aria-label="Theme">
+        <button type="button" data-theme-option="whitehaven">Whitehaven</button>
+        <button type="button" data-theme-option="orient-express">Orient Express</button>
+      </div>
+    </header>
+
+    <main class="bk">
+      <!-- ================================================================ 1. the pitch -->
+      <section class="bk-hero">
+        <div class="bk-eyebrow">Direction 1 of 5 · organized by how far from done</div>
+        <h1><span class="bk-num">1</span>Expedition</h1>
+        <p class="bk-lever">Every piece of work has a summit.</p>
+        <p class="bk-lede">
+          Every lead thread gets a <b>goal</b> with a <b>summit</b>: what done means, in a few words, like “PR merged with CI green”. Its
+          <b>route</b> is the plan the agent already keeps, Claude's todo list or Codex's plan, and its last <b>camps</b> are checks Hercule sees
+          itself: tests pass, review clean, PR open, CI green, merged.
+        </p>
+        <p class="bk-lede">
+          One small line, the route, now says how far each thing is from done, what waits on you and what is stuck. It sits on today's sidebar
+          row, fills a ledger, rides a Board that moves by itself, and climbs a mountain range in the Office.
+        </p>
+      </section>
+      <figure class="xs-shot bk-wide xs-hero-shot">
+        <a href="desktop.html?mode=office" target="_blank" rel="noopener"
+          ><img src="shots/hero.webp" data-dark="shots/hero-dark.webp" alt="The Range: three mountains in their projects' tints, every goal a trail up one of them, Base camp in the valley" width="2160" height="1350"
+        /></a>
+        <figcaption><b>Tuesday 09:41, the Office as a mountain range.</b>Each project is a mountain; each goal climbs its own peak, and every summit stands at the same height, so altitude is progress. The marigold flags are the three questions waiting on you.</figcaption>
+      </figure>
+
+      <!-- ================================================================ 2. the huh -->
+      <section class="bk-sec" id="huh">
+        <div class="bk-huh">
+          <div class="bk-eyebrow">The huh</div>
+          <h2>A progress bar that is not a lie.</h2>
+          <p>
+            Every agent tool shows a todo list. None of them tells you how far the work is from done. Expedition draws the agent's own plan as a
+            route, and ends it with checks Hercule sees for itself. The agent can tick its own boxes. It cannot tick “CI green”.
+          </p>
+          <p>So the bar can go backwards, and says so. And when it stops, a small cloud says that too.</p>
+        </div>
+
+        <div class="xs-anatomy ov-expedition">
+          <div class="xs-anatomy-head" data-anatomy-head></div>
+          <div class="xs-anatomy-scroll"><div class="xs-anatomy-route" data-anatomy></div></div>
+          <div class="xs-anatomy-phone" data-anatomy-phone></div>
+          <ul class="xs-key" data-key></ul>
+        </div>
+
+        <h3 style="margin-top: 56px">The same line in eight moments, at the sidebar's 272px</h3>
+        <p class="bk-body" style="max-width: 720px">Line 1 is today's row: the title and its status word. Line 2 was the machine; now it is the route, with where it stands at the right. A lone thread costs nothing: same 52px, no extra word.</p>
+        <div class="xs-specimens ov-expedition" data-specimens></div>
+      </section>
+
+      <!-- ================================================================ 3. the three modes -->
+      <section class="bk-sec" id="modes">
+        <div class="bk-eyebrow">Three modes, one idea</div>
+        <h2>The sidebar, the Office, the ledger and the Board all draw the route.</h2>
+        <p class="bk-lede">
+          The overview opens from the sidebar's Office button or <kbd>⌘⇧O</kbd>. Its switch reads <b>Office · Threads · Board</b>; <kbd>O</kbd>,
+          <kbd>T</kbd> and <kbd>B</kbd> pick one, <kbd>↑</kbd> <kbd>↓</kbd> walk the selection, <kbd>↩</kbd> opens it, <kbd>esc</kbd> closes. What you
+          select stays selected in every mode, and one card answers it: it floats at the bottom left over the Office, and docks under the
+          ledger and the Board, so it never covers a row.
+        </p>
+        <figure class="xs-shot bk-wide xs-window">
+          <a href="desktop.html?mode=office" target="_blank" rel="noopener"><img src="shots/window.webp" data-dark="shots/window-dark.webp" alt="The whole window: the sidebar's routes, the Range, and the selected thread's card" width="2880" height="1800" /></a>
+          <figcaption><b>The whole window.</b>The sidebar on the left draws every route as a line; the overview on the right shows the same routes as a range. The card answers the push that waits on you.</figcaption>
+        </figure>
+
+        <div class="xs-mode xs-mode--side">
+          <figure class="xs-shot xs-shot--crop xs-shot--narrow">
+            <a href="shots/sidebar.webp" data-dark-href="shots/sidebar-dark.webp"><img src="shots/sidebar.webp" data-dark="shots/sidebar-dark.webp" alt="The sidebar: Waiting on you, then each project's routes" width="544" height="1800" /></a>
+          </figure>
+          <div class="xs-mode-text">
+            <h3>The sidebar: Routes, folded <span class="bk-chip">always there</span></h3>
+            <p class="bk-body">Today's 52px row, with the route as line 2. Waiting on you stays on top. Projects keep their order, newest first, five rows each. The words at the right say where a route stands: <b>2 of 5</b>, <b>+2 camps</b>, a cloud and <b>34m</b>, <b>landed</b>.</p>
+            <p class="bk-body">Partners do not get rows of their own. They ride on their lead's rope, as dots behind its head; a click on the route unfolds their own small routes. The lens above the list groups it <b>by project</b> or <b>by stage</b>, and the ledger follows.</p>
+            <p class="bk-body">While the overview is open, a click on a row selects that thread in the overview (the Office flies to it); a double click, <kbd>↩</kbd> or “Open thread” opens it. The Office button stays pressed.</p>
+          </div>
+        </div>
+
+        <div class="xs-office">
+          <h3>Office: the Range <span class="bk-chip">spatial</span></h3>
+          <figure class="xs-shot bk-wide">
+            <a href="office.html?select=t3ds" target="_blank" rel="noopener"><picture><source media="(max-width: 900px)" srcset="shots/office-phone.webp" /><img src="shots/office-team.webp" alt="The 3-D Secure rope team at camp 4 of 9: the lead waving by its marigold flag, review and research roped behind" width="2880" height="1800" /></picture></a>
+            <figcaption><b>A rope team, close up.</b>The 3-D Secure lead stands at camp 4 of 9 and raises its hand by a marigold flag: it wants to push. Its review and research partners are roped behind it. Tents mark the camps: in its colour once reached, pale canvas ahead.</figcaption>
+          </figure>
+          <div class="xs-office-text">
+            <p class="bk-body">Each project is a low-poly massif in its tint, and every lead's goal is its own peak. <b>Every summit stands at the same height</b>, so altitude is progress: the contour lines at a quarter, half and three quarters are the chart's gridlines, and snow starts near the top. Strip the scenery and a bar chart remains.</p>
+            <p class="bk-body">A trail zigzags up to each summit, climbed in the lead's colour and faint beyond. Working climbers walk uphill; idle ones sit on a rock. A team that waits on you plants a marigold flag and waves, a stuck one sits under a grey cloud, a landed one sits by its summit flag. Base camp holds your desk and the assistants, and the runs are a mule caravan on the valley road.</p>
+            <p class="bk-body">Labels follow the camera: far away, one pill per mountain and only the asks; closer, every team's tag with its camp and its ask. Click a climber and the card opens; click again to open the thread. Drawn by the Office's own builder: see <a href="office.html" target="_blank" rel="noopener">the Range alone</a>.</p>
+          </div>
+          <figure class="xs-shot bk-wide xs-office-alt">
+            <a href="office.html?theme=orient-express" target="_blank" rel="noopener" data-dark-href="office.html"><img src="shots/office-dark.webp" data-dark="shots/office-hero.webp" alt="The Range in the other theme" width="2880" height="1800" /></a>
+            <figcaption><b class="xs-light-only">The same morning in Orient Express.</b><b class="xs-dark-only">The same morning in Whitehaven.</b><span class="xs-light-only">In the dark theme the climbers wear headlamps, the tents glow and the lodge is lit.</span><span class="xs-dark-only">In the light theme the massifs show their tints most clearly: sandstone, lavender, sage.</span></figcaption>
+          </figure>
+          <div class="bk-grid xs-office-grid">
+            <figure class="xs-shot"><a href="office.html?state=stuck" target="_blank" rel="noopener"><img src="shots/office-stuck.webp" alt="Migrate ops dashboards under a grey cloud" width="2880" height="1800" loading="lazy" /></a><figcaption><b>Stuck.</b>Migrate ops dashboards sits under a grey cloud: no progress in 34 minutes.</figcaption></figure>
+            <figure class="xs-shot"><a href="office.html?state=grew" target="_blank" rel="noopener"><img src="shots/office-grew.webp" alt="The Result migration with two new camps glowing" width="2880" height="1800" loading="lazy" /></a><figcaption><b>Grew.</b>The Result migration's two new camps pulse: “+2 camps”.</figcaption></figure>
+            <figure class="xs-shot"><a href="office.html?state=away" target="_blank" rel="noopener"><img src="shots/office-away.webp" alt="Ghost rings where each route stood at 09:01" width="2880" height="1800" loading="lazy" /></a><figcaption><b>Back at 09:41.</b>A ghost ring marks where each route stood at 09:01; the trail climbed since is drawn brighter.</figcaption></figure>
+            <figure class="xs-shot"><a href="office.html?state=swarm" target="_blank" rel="noopener"><img src="shots/office-swarm.webp" alt="The swarm: 19 routes on three massifs" width="2880" height="1800" loading="lazy" /></a><figcaption><b>The swarm.</b>Massifs narrow their peaks to keep their width; the pills say how many more wait behind.</figcaption></figure>
+          </div>
+        </div>
+
+        <div class="xs-mode">
+          <figure class="xs-shot">
+            <a href="shots/threads.webp" data-dark-href="shots/threads-dark.webp"><img src="shots/threads.webp" data-dark="shots/threads-dark.webp" alt="Threads mode: the ledger of routes" width="2880" height="1800" /></a>
+          </figure>
+          <div class="xs-mode-text">
+            <h3>Threads: Routes <span class="bk-chip">precise</span></h3>
+            <p class="bk-body">The expedition ledger. One row per goal: its summit, its stage and how long it has been there, its summit predicted as a range (“~10:06-10:26, once you answer”), its rope team, its last camp. Under it, the route at full width with every camp named and the next one in bold.</p>
+            <p class="bk-body">Hover a camp to see when it was reached and who saw it. Waiting on you comes first, each ask with its answer buttons. Group by project or stage; sort by newest, furthest along or soonest summit. A run's route is its workflow: each step is a camp.</p>
+          </div>
+        </div>
+
+        <div class="xs-mode">
+          <figure class="xs-shot">
+            <a href="shots/board.webp" data-dark-href="shots/board-dark.webp"><img src="shots/board.webp" data-dark="shots/board-dark.webp" alt="The Board: six columns from Scoping to Landed and the morning's flow" width="2880" height="1800" /></a>
+          </figure>
+          <div class="xs-mode-text">
+            <h3>Board: a kanban that moves itself <span class="bk-chip">analytical</span></h3>
+            <p class="bk-body">Scoping, Building, Proving, Reviewing, Shipping, Landed: the stages every coding journey passes. A card moves when Hercule sees the signal (a first edit, a first test run, a review partner starting, a PR, CI, the merge), and it says what moved it. Nobody drags a card; the Board says so in its top bar.</p>
+            <p class="bk-body">Each column shows its count and the median time goals spent in it. Where work piles up, a callout says so in words: “Reviewing holds 3. 2 of them wait on you.” Along the bottom, the morning's flow from 07:00.</p>
+          </div>
+        </div>
+        <div class="xs-mode-extra">
+          <figure class="xs-shot xs-shot--crop xs-shot--neck">
+            <a href="shots/neck.webp" data-dark-href="shots/neck-dark.webp"><img src="shots/neck.webp" data-dark="shots/neck-dark.webp" alt="The Reviewing column with its bottleneck callout" width="392" height="1160" /></a>
+          </figure>
+          <figure class="xs-shot xs-shot--crop">
+            <a href="shots/flow.webp" data-dark-href="shots/flow-dark.webp"><img src="shots/flow.webp" data-dark="shots/flow-dark.webp" alt="The morning's cumulative flow, by stage" width="2336" height="300" /></a>
+            <figcaption><b>The morning, by stage.</b>An ink ramp, darker as work lands. Hover reads the exact minute. A card that would move under your pointer waits until the pointer leaves the Board.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- ================================================================ 4. a walk through -->
+      <section class="bk-sec" id="walk">
+        <div class="bk-eyebrow">A walk through</div>
+        <h2>09:41. You are back from the school run.</h2>
+        <p class="bk-lede">You left your desk at 09:01 and started four threads from your phone on the way. Forty minutes later, this is what changed, in the order it matters.</p>
+        <ol class="xs-walk">
+          <li>
+            <div class="xs-walk-text"><span class="xs-walk-time">09:41 · ⌘⇧O</span><h3>The overview opens on the catch-up.</h3><p class="bk-body">“6 routes climbed 14 camps.” Four chips say what needs you, what is stuck, what grew and who reported back. Nothing to read twice.</p></div>
+            <figure class="xs-shot xs-shot--crop"><a href="shots/away.webp" data-dark-href="shots/away-dark.webp"><picture><source media="(max-width: 900px)" srcset="shots/away-m.webp" data-dark="shots/away-m-dark.webp" /><img src="shots/away.webp" data-dark="shots/away-dark.webp" alt="Back at 09:41: the catch-up" width="2300" height="640" /></picture></a></figure>
+          </li>
+          <li>
+            <div class="xs-walk-text"><span class="xs-walk-time">The sidebar, for free</span><h3>Bright is new.</h3><p class="bk-body">Every route keeps the part it climbed before you left faded, and a small notch where it stood. What moved while you were out is the bright part. The sidebar does the catch-up without a single extra row.</p></div>
+            <figure class="xs-shot xs-shot--crop xs-shot--narrow"><a href="shots/rows-away.webp" data-dark-href="shots/rows-away-dark.webp"><img src="shots/rows-away.webp" data-dark="shots/rows-away-dark.webp" alt="Sidebar rows in the away state, with notches" width="544" height="640" /></a></figure>
+          </li>
+          <li>
+            <div class="xs-walk-text"><span class="xs-walk-time">One move</span><h3>Allow the push.</h3><p class="bk-body">The 3-D Secure fix waits at its fifth camp for your OK to push. The card answers it: the flag comes down, the head moves on to “Review clean”, and a toast offers Undo.</p></div>
+            <figure class="xs-shot xs-shot--crop xs-shot--card"><a href="shots/card.webp" data-dark-href="shots/card-dark.webp"><img src="shots/card.webp" data-dark="shots/card-dark.webp" alt="The selection card with the push request, over the Range" width="840" height="432" /></a></figure>
+          </li>
+          <li>
+            <div class="xs-walk-text"><span class="xs-walk-time">The cloud</span><h3>The dashboards are stuck, and it is partly on you.</h3><p class="bk-body">No camp in 34 minutes. The cloud tells the story since its last camp, and how to unblock it: the folder question.</p></div>
+            <figure class="xs-shot xs-shot--crop"><a href="shots/stuck.webp" data-dark-href="shots/stuck-dark.webp"><picture><source media="(max-width: 900px)" srcset="shots/stuck-m.webp" data-dark="shots/stuck-m-dark.webp" /><img src="shots/stuck.webp" data-dark="shots/stuck-dark.webp" alt="The stuck route and its story" width="2300" height="820" /></picture></a></figure>
+          </li>
+          <li>
+            <div class="xs-walk-text"><span class="xs-walk-time">+2 camps</span><h3>The Result migration grew.</h3><p class="bk-body">Its review found a blocking issue, and the agent added two camps. The route went from 6 of 7 to 6 of 9: the bar moved back, honestly, and says why.</p></div>
+            <figure class="xs-shot xs-shot--crop"><a href="shots/grew.webp" data-dark-href="shots/grew-dark.webp"><picture><source media="(max-width: 900px)" srcset="shots/grew-m.webp" data-dark="shots/grew-m-dark.webp" /><img src="shots/grew.webp" data-dark="shots/grew-dark.webp" alt="A route that grew two camps" width="2300" height="590" /></picture></a></figure>
+          </li>
+          <li>
+            <div class="xs-walk-text"><span class="xs-walk-time">B, the Board</span><h3>The Board moves a card by itself.</h3><p class="bk-body">The cart refactor runs its first test, and its card glides from Building to Proving. The top bar says what moved it. You never dragged anything.</p></div>
+            <figure class="xs-shot xs-shot--crop"><a href="shots/move.webp" data-dark-href="shots/move-dark.webp"><picture><source media="(max-width: 900px)" srcset="shots/move-m.webp" data-dark="shots/move-m-dark.webp" /><img src="shots/move.webp" data-dark="shots/move-dark.webp" alt="The Board after a card moved itself" width="2336" height="840" /></picture></a></figure>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ================================================================ 5. needs, costs, risks -->
+      <section class="bk-sec" id="needs">
+        <div class="bk-eyebrow">Honest about the cost</div>
+        <h2>What Hercule would need</h2>
+        <p class="bk-lede">The first slice is one route line on today's row, read from the agent's own todo list, before a single mountain is drawn.</p>
+        <div class="bk-grid bk-grid--3 xs-needs">
+          <div class="bk-card"><h4>Threads linked to Tasks</h4><p class="bk-body">A goal is a Task, a unit of human intent. Spec 02 lists <code>taskId</code> on a Session; the contract does not have it yet.</p></div>
+          <div class="bk-card"><h4>A summit per goal</h4><p class="bk-body">Written by a Text Generation from the first prompt, the way a title is, and editable. One small call per goal, once.</p></div>
+          <div class="bk-card"><h4>The plan, read</h4><p class="bk-body">The latest <code>plan</code> transcript item (Claude's todo list, Codex's plan) read into done, total and current at each turn's end. A parse, no model call.</p></div>
+          <div class="bk-card"><h4>Checks Hercule sees</h4><p class="bk-body">Test runs from tool calls and their exit codes; the PR and CI from the GitHub Connection; the merge. These are the rings.</p></div>
+          <div class="bk-card"><h4>A stage and its signal</h4><p class="bk-body">Rules on signals (first edit, first test run, a review partner starting, a PR, the merge) give the stage, when it began and what moved it, kept as a history.</p></div>
+          <div class="bk-card"><h4>Who started whom, and when you looked</h4><p class="bk-body"><code>startedBy</code> on the contract for rope teams (it is stored already), and a last-seen mark per user per thread for the catch-up. The summit ETA is arithmetic over camps left and past camp times, shown as a range.</p></div>
+        </div>
+        <p class="bk-body" style="margin-top: 22px; max-width: 760px">New words it proposes for GLOSSARY.md: <b>goal</b> (a lead's Task, seen as a climb), <b>summit</b> (what done means), <b>route</b> and <b>camp</b> (the plan plus the checks), and <b>stage</b> (the Board's six columns).</p>
+
+        <h3 style="margin-top: 56px">What it costs</h3>
+        <div class="bk-scroll">
+          <table class="bk-table">
+            <tbody>
+              <tr><td>Per streamed token</td><td>Nothing. A route redraws when a turn ends or a check arrives.</td></tr>
+              <tr><td>While idle</td><td>Nothing. The sidebar's routes are about twenty small static elements per row; nothing animates.</td></tr>
+              <tr><td>Per event</td><td>One parse of the plan item at a turn's end; one stage rule run on a signal; the ETA's arithmetic.</td></tr>
+              <tr><td>Per open of the overview</td><td>The ledger and the Board draw once. The flow strip reads the morning's stage history once. A move waits for the pointer to leave.</td></tr>
+              <tr><td>The Office</td><td>Measured: one merged terrain mesh (about 65k triangles); 221 draw calls for the whole range (303 in the swarm), 33 for a team close-up. It draws only while shown and pauses when another mode is, at most 30 fps for ambient life, and <b>0 frames</b> once settled under Reduce Motion. With no WebGL the flat Range (one SVG) tells the same truth.</td></tr>
+              <tr><td>Model calls</td><td>One Text Generation per goal, for its summit. Nothing else.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 56px">Risks, and the answers</h3>
+        <div class="bk-scroll">
+          <table class="bk-table xs-risk">
+            <tbody>
+              <tr><td>Plans change, and progress goes backwards.</td><td>Shown, not hidden: the route grows, the bar moves back, and the row says <b>+2 camps</b> until you look.</td></tr>
+              <tr><td>An agent ticks its own plan too early.</td><td>Ticks are the agent's word; the last camps are rings Hercule sees. A tick can be wrong; a ring cannot.</td></tr>
+              <tr><td>An agent keeps no plan (pi has no todo list).</td><td>Its route is only the checks Hercule sees, and it reads “setting out” until a plan exists.</td></tr>
+              <tr><td>A question has no route.</td><td>Its summit is “Question answered”, a short route that lands when the answer does.</td></tr>
+              <tr><td>The stage rules misfile a card.</td><td>Every card says what moved it (“first test run 09:22”), so a wrong move is visible, and a rule can be fixed.</td></tr>
+              <tr><td>ETAs are wrong.</td><td>Ranges, “once you answer” when the clock waits on you, and “can't tell” when a route is stuck.</td></tr>
+              <tr><td>Mountains are a gimmick.</td><td>Strip the scenery and the altitude is still a true chart: the flat Range draws exactly that.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================================================================ 6. links -->
+      <section class="bk-sec" id="links">
+        <div class="bk-eyebrow">Open it</div>
+        <h2>The live window</h2>
+        <div class="xs-open">
+          <a class="btn btn--accent" href="desktop.html" target="_blank" rel="noopener">Open the live window</a>
+          <small>Best on a laptop, or a phone held sideways: it is a 1440px window.</small>
+        </div>
+        <ul class="xs-links">
+          <li><a href="desktop.html?mode=office" target="_blank" rel="noopener"><b>The Office: the Range</b><span>Everyday, 09:41. Click a climber; the card follows.</span></a></li>
+          <li><a href="desktop.html?mode=threads" target="_blank" rel="noopener"><b>Threads: Routes</b><span>The ledger. Hover a camp; try the Group and Sort lenses.</span></a></li>
+          <li><a href="desktop.html?mode=board" target="_blank" rel="noopener"><b>The Board</b><span>Six stages, the bottleneck, the morning's flow.</span></a></li>
+          <li><a href="desktop.html?state=away" target="_blank" rel="noopener"><b>Back at 09:41</b><span>The away state: the catch-up, bright and faded routes.</span></a></li>
+          <li><a href="desktop.html?state=stuck" target="_blank" rel="noopener"><b>The stuck route</b><span>The cloud over the dashboards, explained.</span></a></li>
+          <li><a href="desktop.html?state=grew" target="_blank" rel="noopener"><b>A route grows</b><span>Two camps appear and the bar moves back.</span></a></li>
+          <li><a href="desktop.html?state=move" target="_blank" rel="noopener"><b>The Board moves a card</b><span>Building to Proving, with Replay.</span></a></li>
+          <li><a href="desktop.html?state=open" target="_blank" rel="noopener"><b>A thread open</b><span>Its route under the tabs; a click opens the overview.</span></a></li>
+          <li><a href="desktop.html?state=swarm&amp;mode=board" target="_blank" rel="noopener"><b>The swarm</b><span>35 threads in view. Try every mode.</span></a></li>
+          <li><a href="desktop.html?mode=threads&amp;theme=orient-express" target="_blank" rel="noopener"><b>Orient Express</b><span>The ledger in the dark theme.</span></a></li>
+          <li><a href="office.html?select=t3ds" target="_blank" rel="noopener"><b>The Range alone</b><span>The Office full window, on the 3-D Secure rope team; its own switch has every state.</span></a></li>
+          <li><a href="../index.html"><b>Back to the book</b><span>Seeing all the work: five directions.</span></a></li>
+        </ul>
+      </section>
+    </main>
+
+    <script src="../../sidebar-directions/shared/world.js"></script>
+    <script src="../shared/world-plus.js"></script>
+    <script src="expedition-data.js"></script>
+    <script src="expedition-route.js"></script>
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script>
+      // Draws the page's live pieces: the big route and its key, the eight specimens, and the
+      // theme's images. The routes come from expedition-route.js, the code the window uses.
+      (function () {
+        "use strict";
+        var W = window.WORLD;
+        var R = window.ExpeditionRoute;
+        var T = W.helpers.thread;
+
+        function esc(s) {
+          return String(s).replace(/[&<>"]/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+          });
+        }
+
+        /** Returns the threads roped to a lead in the morning. */
+        function listPartners(id) {
+          return W.threads.filter(function (t) { return t.lead === id; });
+        }
+
+        /** Returns a thread's route model as the window builds it. */
+        function buildRoute(id, extra) {
+          var t = T(id);
+          var ctx = { thread: t, partners: t.lead ? [] : listPartners(id) };
+          for (var k in extra || {}) ctx[k] = extra[k];
+          return R.buildModel(W.goals[id], ctx);
+        }
+
+        function drawAnatomy() {
+          var t = T("t3ds");
+          var m = buildRoute("t3ds");
+          document.querySelector("[data-anatomy-head]").innerHTML =
+            Crew.face(t.title, { pose: "waiting", size: 30 }) + "<b>" + esc(t.title) + '</b><span class="xs-summit"><span class="ex-r-summit" style="position:static;display:inline-block;margin:0 4px 0 0">' + R.icons.peak + "</span>" + esc(W.goals.t3ds.summit) + "</span>";
+          document.querySelector("[data-anatomy]").innerHTML = R.drawRoute(m, { variant: "wide", tips: false });
+          // On a phone the camps are numbered on the route and named in a list under it, so no label is cut.
+          var word = function (c, i) {
+            if (c.state === "done") return "reached " + c.at;
+            if (c.state === "waiting") return "waits on you";
+            if (c.state === "current") return "on the way";
+            return "";
+          };
+          document.querySelector("[data-anatomy-phone]").innerHTML =
+            '<div class="xs-anatomy-num">' + R.drawRoute(m, { variant: "wide", tips: false, numbers: true }) + "</div>" +
+            '<ol class="xs-camps">' + m.camps.map(function (c, i) {
+              return '<li class="is-' + c.state + (c.observed ? " is-obs" : "") + '"><span class="xs-camp-n">' + (i + 1) + '</span><span class="xs-camp-l">' + esc(c.label) + "</span><small>" + word(c, i) + "</small></li>";
+            }).join("") + "</ol>";
+          var dot = function (style) { return '<span class="xs-glyph">' + style + "</span>"; };
+          var key = [
+            [dot('<svg width="12" height="12"><rect x="5.5" y="1" width="1.5" height="10" rx=".75" style="fill:var(--ex-tick)"/></svg>'), "<b>A tick</b> is a step of the agent's own plan: its todo list."],
+            [dot('<svg width="12" height="12"><circle cx="6" cy="6" r="4" style="fill:var(--surface);stroke:var(--ex-tick);stroke-width:1.4"/></svg>'), "<b>A ring</b> is a check Hercule sees itself: the tests ran and passed, the review came back clean, the PR opened, CI went green, it merged."],
+            [dot('<span class="ex-r-head" style="position:static;margin:0;--hue:var(--hue-peach)">' + R.icons.egg + "</span>"), "<b>The head</b> is the bean, where the work stands now. Its partners ride the rope as dots behind it."],
+            [dot('<span class="ex-r-flag" style="position:static;margin:0">' + R.icons.flag + "</span>"), "<b>A marigold flag</b> marks the camp that waits on you: the one thing on the line in your colour."],
+            [dot('<span class="ex-r-cloud" style="position:static;margin:0">' + R.icons.cloud + "</span>"), "<b>A cloud</b> means no camp was reached in 30 minutes, though the thread is not idle."],
+            [dot('<span class="ex-r-summit" style="position:static;margin:0">' + R.icons.peak + "</span>"), "<b>The summit</b> is what done means. It fills with the thread's colour, and gets a flag, when the route lands."],
+          ];
+          document.querySelector("[data-key]").innerHTML = key.map(function (k) { return "<li>" + k[0] + "<span>" + k[1] + "</span></li>"; }).join("");
+        }
+
+        function drawSpecimens() {
+          var setOut = { summit: "Load test reported", camps: [] };
+          var specs = [
+            { id: "tCart", end: ["Working", "working"], text: "<b>Under way.</b> Camp 1 of 7 reached; the head is on its way to the next, the property tests partner on its rope." },
+            { id: "t3ds", end: ["Approval", "you"], text: "<b>Waits on you.</b> Four camps reached; the flag stands on the fifth, the push only you can allow." },
+            { id: "tPayout", end: ["Question", "you"], text: "<b>A partner waits.</b> The lead is still working; the flag ahead is its check partner's question." },
+            { id: "tDash", end: ["Question", "you"], stuck: true, text: "<b>Stuck.</b> No camp in 34 minutes: the cloud, and 34m at the right." },
+            { id: "tResult", end: ["Working", "working"], grew: true, text: "<b>Grew.</b> A review added two camps; the row says +2 camps until you look." },
+            { id: "tIdeal", end: ["1h", ""], text: "<b>Landed.</b> The summit fills with the thread's colour and gets its flag." },
+            { title: "Load-test the payouts rate limiter", goal: setOut, end: ["Queued", ""], text: "<b>Setting out.</b> No plan yet: a short dashed start, and no summit to draw until there is one." },
+            { id: "tResult", end: ["Working", "working"], since: "09:01", text: "<b>Back from away.</b> The faded part was climbed before you left at 09:01; the notch is where it stood. Bright is new." },
+          ];
+          document.querySelector("[data-specimens]").innerHTML = specs.map(function (s) {
+            var title = s.title || T(s.id).title;
+            var m = s.goal ? R.buildModel(s.goal, { thread: { title: title, pose: "working" } }) : buildRoute(s.id, { showGrew: !!s.grew, since: s.since || null });
+            var right = m.stuckMin ? R.icons.cloud + m.stuckMin + "m" : m.grew ? "+" + m.grew + " camps" : R.describeProgress(m);
+            var cls = m.stuckMin ? " is-stuck" : m.grew ? " is-grew" : "";
+            return (
+              '<div class="xs-spec">' +
+              '<div class="xs-spec-row"><div class="xs-spec-l1"><span>' + esc(title) + '</span><span class="xs-end' + (s.end[1] ? " xs-end--" + s.end[1] : "") + '">' + s.end[0] + "</span></div>" +
+              '<div class="xs-spec-l2">' + R.drawRoute(m, { variant: "row" }) + '<span class="ex-prog' + cls + '">' + right + "</span></div></div>" +
+              "<p>" + s.text + "</p></div>"
+            );
+          }).join("");
+        }
+
+        /** Swaps every image to its theme's capture when the book's theme changes. */
+        function syncImages() {
+          var dark = document.documentElement.dataset.theme === "orient-express";
+          document.querySelectorAll("source[data-dark]").forEach(function (src) {
+            if (!src.dataset.light) src.dataset.light = src.getAttribute("srcset");
+            src.setAttribute("srcset", dark ? src.dataset.dark : src.dataset.light);
+          });
+          document.querySelectorAll("img[data-dark]").forEach(function (img) {
+            if (!img.dataset.light) img.dataset.light = img.getAttribute("src");
+            img.setAttribute("src", dark ? img.dataset.dark : img.dataset.light);
+            var a = img.closest("a[data-dark-href]");
+            if (a) {
+              if (!a.dataset.lightHref) a.dataset.lightHref = a.getAttribute("href");
+              a.setAttribute("href", dark ? a.dataset.darkHref : a.dataset.lightHref);
+            }
+          });
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+          drawAnatomy();
+          drawSpecimens();
+          syncImages();
+          new MutationObserver(syncImages).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+        });
+      })();
+    </script>
+  </body>
+</html>

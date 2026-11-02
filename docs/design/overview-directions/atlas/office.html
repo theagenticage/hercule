@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440" />
+    <!-- PROTOTYPE - Atlas's Office mode alone, full window: the City. The window (desktop.html)
+         mounts the same module. URL: ?state=everyday|crossing|land|away|swarm|open
+         &theme=whitehaven|orient-express &select=<thread id>
+         &view=home|webshop|payments-api|ops|crossing|refactor|landed &motion=off -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="atlas-office.css" />
+    <title>Atlas · the City · Hercule</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--surface);
+      }
+      #office {
+        position: fixed;
+        inset: 0;
+      }
+      .aod-bar {
+        position: fixed;
+        z-index: 10;
+        bottom: 16px;
+        left: 50%;
+        translate: -50% 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 4px 4px 12px;
+        border-radius: var(--r-pill);
+        background: var(--raised);
+        box-shadow:
+          var(--shadow-1),
+          inset 0 0 0 1px var(--line-soft);
+        color: var(--ink);
+        font-size: var(--t-12);
+      }
+      .aod-bar[hidden] {
+        display: none;
+      }
+      .aod-bar b {
+        font-family: var(--font-deco);
+        font-size: 15px;
+        font-weight: 400;
+        letter-spacing: 0.04em;
+      }
+      .aod-bar small {
+        color: var(--faint);
+        font-size: var(--t-11);
+      }
+      .aod-group {
+        display: flex;
+        gap: 2px;
+      }
+      .aod-sep {
+        width: 1px;
+        height: 18px;
+        background: var(--line);
+      }
+      .aod-bar button {
+        height: 26px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--r-pill);
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        cursor: pointer;
+      }
+      .aod-bar button:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      .aod-bar button[aria-pressed="true"] {
+        background: var(--selected);
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      /* A stand-in for the window's selection card, so this page shows what a click selects. */
+      .aod-card {
+        position: fixed;
+        z-index: 10;
+        left: 16px;
+        bottom: 16px;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 4px 12px;
+        align-items: center;
+        width: 352px;
+        padding: 14px 14px 12px;
+        border-radius: var(--r-lg);
+        background: var(--raised);
+        box-shadow:
+          var(--shadow-2),
+          inset 0 0 0 1px var(--line-soft);
+        color: var(--ink);
+      }
+      .aod-card[hidden] {
+        display: none;
+      }
+      .aod-card i[data-face],
+      .aod-card svg {
+        grid-row: span 2;
+      }
+      .aod-card b {
+        overflow: hidden;
+        font-size: var(--t-13);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .aod-card span {
+        color: var(--faint);
+        font-size: var(--t-12);
+      }
+      .aod-card small {
+        grid-column: 1 / -1;
+        padding-top: 6px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--faint);
+        font-size: var(--t-11);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="office"></div>
+    <div class="aod-bar">
+      <b>The City</b>
+      <div class="aod-group" data-group="state">
+        <button type="button" data-state-choice="everyday">Everyday</button>
+        <button type="button" data-state-choice="crossing">Crossing</button>
+        <button type="button" data-state-choice="land">Land</button>
+        <button type="button" data-state-choice="away">Away</button>
+        <button type="button" data-state-choice="swarm">Swarm</button>
+      </div>
+      <span class="aod-sep"></span>
+      <div class="aod-group" data-group="theme">
+        <button type="button" data-theme-choice="whitehaven">Day</button>
+        <button type="button" data-theme-choice="orient-express">Night</button>
+      </div>
+    </div>
+    <div class="aod-card" hidden></div>
+
+    <script src="../../sidebar-directions/shared/world.js"></script>
+    <script src="../shared/world-plus.js"></script>
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script src="../vendor/office-kit.js"></script>
+    <script src="atlas-office.js"></script>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var root = document.documentElement;
+        // ?bar=off hides this page's switcher, for clean captures of the module alone.
+        if (params.get("bar") === "off") document.querySelector(".aod-bar").hidden = true;
+        var state = params.get("state") || "everyday";
+        var card = document.querySelector(".aod-card");
+        var handle = null;
+
+        function findSession(id) {
+          var W = window.WORLD;
+          var t = W.helpers.thread(id);
+          if (t) return t;
+          if (W.runSessions[id]) return Object.assign({ id: id }, W.runSessions[id]);
+          return null;
+        }
+
+        // Shows a plain card where the window draws its own selection card.
+        function showCard(id) {
+          var t = id ? findSession(id) : null;
+          if (!t) {
+            card.hidden = true;
+            return;
+          }
+          var words = t.pose === "waiting" ? t.ask || t.askShort : (WORLD.files[id] && WORLD.files[id].now) || t.result || "";
+          card.innerHTML = "";
+          card.insertAdjacentHTML("beforeend", Crew.face(t.title, { pose: t.pose, size: 40 }));
+          var title = document.createElement("b");
+          title.textContent = t.title;
+          var sub = document.createElement("span");
+          sub.textContent = words;
+          var note = document.createElement("small");
+          note.textContent = "Stand-in for the window's selection card. Double-click a bean to open its thread.";
+          card.append(title, sub, note);
+          card.hidden = false;
+        }
+
+        function mark() {
+          document.querySelectorAll("[data-state-choice]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.stateChoice === state));
+          });
+          var evening = root.dataset.theme === "orient-express" || root.dataset.theme === "dark";
+          document.querySelectorAll("[data-theme-choice]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.themeChoice === (evening ? "orient-express" : "whitehaven")));
+          });
+        }
+
+        function remember() {
+          var next = new URLSearchParams(location.search);
+          next.set("state", state);
+          next.set("theme", root.dataset.theme);
+          history.replaceState(null, "", "?" + next.toString());
+        }
+
+        handle = OfficeModes.atlas.mount(document.getElementById("office"), {
+          world: window.WORLD,
+          theme: root.dataset.theme,
+          state: state,
+          selected: params.get("select"),
+          keyOpen: params.get("key") === "open",
+          reducedMotion: params.get("motion") === "off" || matchMedia("(prefers-reduced-motion: reduce)").matches,
+          onSelect: function (id) {
+            showCard(id);
+            handle.select(id);
+          },
+          onOpen: function (id) {
+            var t = findSession(id);
+            card.querySelector("small").textContent = "The window would open " + (t ? "“" + t.title + "”" : id) + " now.";
+          },
+        });
+        if (params.get("select")) showCard(params.get("select"));
+        if (params.get("view")) handle.show(params.get("view"), true);
+
+        document.querySelectorAll("[data-state-choice]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            state = b.dataset.stateChoice;
+            handle.setState(state);
+            mark();
+            remember();
+          });
+        });
+        document.querySelectorAll("[data-theme-choice]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            root.dataset.theme = b.dataset.themeChoice;
+            mark();
+            remember();
+          });
+        });
+        mark();
+        window.atlasOffice = handle;
+      })();
+    </script>
+  </body>
+</html>

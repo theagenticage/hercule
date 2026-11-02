@@ -1,0 +1,522 @@
+/*
+ * PROTOTYPE - Control Tower's Office, the Aerodrome: the HUD and the tags over the 3D field.
+ * Every rule sits under .ov-control-tower-office and every class starts with ctof-. Nothing here
+ * blurs what is behind it: a blur over a live canvas composites the whole window every frame.
+ */
+
+.ov-control-tower-office {
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: var(--surface);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------------ the HUD */
+
+.ov-control-tower-office .ctof-hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.ov-control-tower-office .ctof-hud > * {
+  pointer-events: auto;
+}
+
+.ov-control-tower-office .ctof-stops {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+}
+
+.ov-control-tower-office .ctof-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  cursor: pointer;
+}
+
+.ov-control-tower-office .ctof-stop:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ov-control-tower-office .ctof-stop--field {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ov-control-tower-office .ctof-stop__you {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--you);
+  box-shadow: 0 0 0 2.5px color-mix(in oklab, var(--you) 28%, transparent);
+}
+
+/* A state's note under the HUD: away, the conflict, slots, a cleared Request. */
+.ov-control-tower-office .ctof-note {
+  position: absolute;
+  top: 54px;
+  left: 12px;
+  z-index: 3;
+  display: grid;
+  gap: 4px;
+  width: 272px;
+  padding: 12px 14px 13px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+.ov-control-tower-office .ctof-note[hidden] {
+  display: none;
+}
+
+.ov-control-tower-office .ctof-note__h {
+  margin-bottom: 2px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+
+.ov-control-tower-office .ctof-note__h span {
+  margin-left: 4px;
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-control-tower-office .ctof-note__h--you {
+  color: var(--you-ink);
+}
+
+.ov-control-tower-office .ctof-note__row {
+  color: var(--muted);
+}
+
+.ov-control-tower-office .ctof-note__row b {
+  display: inline-block;
+  min-width: 18px;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-control-tower-office .ctof-note__row--you b {
+  color: var(--you-ink);
+}
+
+.ov-control-tower-office .ctof-note__text {
+  color: var(--muted);
+}
+
+.ov-control-tower-office .ctof-note__foot {
+  margin-top: 4px;
+  color: var(--faint);
+}
+
+/* ------------------------------------------------------------------ a plane's tag */
+
+.ov-control-tower-office .ctof-l-plane {
+  translate: -38% calc(-100% - 2px);
+}
+
+.ov-control-tower-office .ctof-tag {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 8px 3px 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 92%, transparent);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-11);
+  line-height: 1.35;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ov-control-tower-office .ctof-tag__dot {
+  flex: none;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--who);
+}
+
+.ov-control-tower-office .ctof-tag__call {
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-control-tower-office .ctof-tag__title {
+  color: var(--muted);
+}
+
+.ov-control-tower-office .ctof-tag__meta {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Inbound: the ETA is the news, so it reads in ink. */
+.ov-control-tower-office .ctof-tag--approach .ctof-tag__meta {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* On stand: a result unread, the ink dot of the strips. */
+.ov-control-tower-office .ctof-tag__ink {
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  margin-left: 1px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.ov-control-tower-office .ctof-tag--stand .ctof-tag__meta {
+  color: var(--muted);
+}
+
+.ov-control-tower-office .ctof-tag--parked,
+.ov-control-tower-office .ctof-tag--mail.is-still {
+  background: color-mix(in oklab, var(--raised) 78%, transparent);
+}
+
+.ov-control-tower-office .ctof-tag--parked .ctof-tag__call,
+.ov-control-tower-office .ctof-tag--mail .ctof-tag__call {
+  font-weight: var(--w-medium);
+}
+
+.ov-control-tower-office .ctof-tag.is-hovered {
+  z-index: 1;
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px color-mix(in oklab, var(--who) 70%, transparent);
+}
+
+.ov-control-tower-office .ctof-tag.is-selected,
+.ov-control-tower-office .ctof-hold.is-selected {
+  z-index: 2;
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1.5px var(--who);
+}
+
+.ov-control-tower-office .office-kit-label:has(.is-selected) {
+  z-index: 2;
+}
+
+/* ------------------------------------------------------------------ the holding stack's levels */
+
+/* Pinned beside the stack, to the right, one per level, so the asks read as a column. */
+.ov-control-tower-office .ctof-l-hold {
+  translate: 0 -50%;
+}
+
+.ov-control-tower-office .ctof-hold {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 10px 4px 4px;
+  border-radius: var(--r-pill);
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 60%, transparent);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 1.35;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ov-control-tower-office .ctof-hold::before {
+  /* the leader to the ring */
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 14px;
+  height: 1px;
+  background: color-mix(in oklab, var(--you) 70%, transparent);
+}
+
+.ov-control-tower-office .ctof-hold__level {
+  flex: none;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--you);
+  color: oklch(0.25 0.03 70);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+
+
+.ov-control-tower-office .ctof-hold__ask {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+.ov-control-tower-office .ctof-hold__meta {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Landing slots: a held Request circles quietly until its slot. */
+.ov-control-tower-office .ctof-hold.is-quiet {
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+}
+
+.ov-control-tower-office .ctof-hold.is-quiet .ctof-hold__level {
+  background: var(--sunken);
+  color: var(--muted);
+}
+
+.ov-control-tower-office .ctof-hold.is-quiet .ctof-hold__ask {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+
+.ov-control-tower-office .ctof-hold.is-quiet::before {
+  background: var(--line);
+}
+
+.ov-control-tower-office .ctof-hold.is-urgent .ctof-hold__meta {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* ------------------------------------------------------------------ places: hangars, the stack, the approach */
+
+.ov-control-tower-office .ctof-hangar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px 3px 9px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 18px;
+}
+
+.ov-control-tower-office .ctof-hangar b {
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ov-control-tower-office .ctof-hangar__tab {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 18%, transparent);
+  rotate: 45deg;
+}
+
+.ov-control-tower-office .ctof-hangar__n {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-control-tower-office .ctof-hangar__sub {
+  margin-left: -2px;
+  padding-right: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+.ov-control-tower-office .ctof-hangar__you {
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--you-tint);
+  color: var(--you-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+
+.ov-control-tower-office .ctof-hangar__more {
+  padding-right: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+.ov-control-tower-office .ctof-hangar--mail b {
+  letter-spacing: 0.04em;
+}
+
+.ov-control-tower-office .ctof-stack {
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 60%, transparent);
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+
+.ov-control-tower-office .ctof-stack b {
+  font-weight: var(--w-bold);
+}
+
+.ov-control-tower-office .ctof-stack--approach {
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+}
+
+.ov-control-tower-office .ctof-gate {
+  display: block;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 80%, transparent);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-control-tower-office .ctof-l-gate {
+  translate: 4px -50%;
+}
+
+/* Inbound planes line up down the glide path; their tags hang to the left of each plane. */
+.ov-control-tower-office .ctof-l-plane--inbound {
+  translate: calc(-100% - 16px) -50%;
+}
+
+.ov-control-tower-office .ctof-alert {
+  display: grid;
+  gap: 1px;
+  padding: 6px 12px 7px;
+  border-radius: var(--r-sm);
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 70%, transparent);
+  font-size: var(--t-12);
+  text-align: center;
+}
+
+.ov-control-tower-office .ctof-alert b {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+
+.ov-control-tower-office .ctof-alert span {
+  color: var(--muted);
+  font-size: var(--t-11);
+}
+
+/* ------------------------------------------------------------------ semantic zoom */
+
+/* The hangars' labels at their shortest unless the camera is close: name, count, holding. */
+.ov-control-tower-office:not(.is-near) .ctof-hangar__more,
+.ov-control-tower-office:not(.is-near) .ctof-hangar__word {
+  display: none;
+}
+
+.ov-control-tower-office:not(.is-near) .ctof-hangar__you {
+  min-width: 18px;
+  padding: 0 6px;
+  text-align: center;
+}
+
+.ov-control-tower-office.is-far .ctof-l-plane,
+.ov-control-tower-office.is-far .ctof-l-hold,
+.ov-control-tower-office.is-far .ctof-l-gate {
+  display: none;
+}
+
+/* Mid: call signs and what each brings; the stack's and approach's summaries give way to their planes. */
+.ov-control-tower-office.is-mid .ctof-tag__title,
+.ov-control-tower-office.is-mid .ctof-tag--stand .ctof-tag__meta,
+.ov-control-tower-office.is-mid .ctof-l-stack,
+.ov-control-tower-office.is-mid .ctof-l-plane--mail,
+.ov-control-tower-office.is-mid .ctof-l-plane--parked,
+.ov-control-tower-office.is-near .ctof-l-stack {
+  display: none;
+}
+
+.ov-control-tower-office.is-mid .ctof-tag.is-selected .ctof-tag__title,
+.ov-control-tower-office.is-mid .ctof-tag.is-hovered .ctof-tag__title {
+  display: inline;
+}
+
+/* A tag that would cover a more urgent one steps back until there is room. */
+.ov-control-tower-office .office-kit-label.is-hushed {
+  visibility: hidden;
+}
+
+/* Away: the stands say when each result landed, even from the overview. */
+.ov-control-tower-office.is-mid[data-ctof-state="away"] .ctof-tag--stand .ctof-tag__meta {
+  display: inline;
+}
+
+/* The assistants' tags on the terminal's roof: close up only. */
+.ov-control-tower-office:not(.is-near) .ctof-l-crew {
+  display: none;
+}

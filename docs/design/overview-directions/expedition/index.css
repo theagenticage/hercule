@@ -1,0 +1,501 @@
+/* PROTOTYPE - Expedition's story page: the pieces book.css does not have. Every class is
+   prefixed xs-; the route specimens reuse expedition.css under .ov-expedition. */
+
+.xs-hero-shot {
+  margin-top: 40px;
+}
+/* book.css's wide block shifts by its own left margin, which .xs-shot would reset. */
+.xs-shot.bk-wide {
+  margin-left: 50%;
+}
+.xs-shot {
+  display: block;
+  margin: 0;
+  min-width: 0;
+}
+.xs-shot a {
+  display: block;
+}
+.xs-shot picture {
+  display: block;
+}
+.xs-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent),
+    0 2px 4px oklch(0.2 0.02 165 / 0.06),
+    0 30px 70px -24px oklch(0.2 0.02 165 / 0.38);
+}
+.xs-shot--crop img {
+  border-radius: 14px;
+}
+.xs-shot--narrow {
+  max-width: 300px;
+}
+.xs-shot--neck {
+  max-width: 200px;
+}
+.xs-shot--card {
+  max-width: 420px;
+}
+.xs-shot figcaption {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.xs-shot figcaption b {
+  display: block;
+  color: var(--ink);
+  font-size: var(--t-14);
+}
+.xs-slot {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 10;
+  padding: 24px;
+  border-radius: 14px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+  font-size: var(--t-13);
+  text-align: center;
+}
+
+/* ---------- the huh: a big route, then the eight ways it reads ---------- */
+.xs-anatomy {
+  margin-top: 28px;
+  padding: 26px 28px 22px;
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.xs-anatomy-scroll {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.xs-anatomy-route {
+  min-width: 640px;
+  padding: 8px 4px 0;
+}
+.xs-anatomy-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.xs-anatomy-head b {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+}
+.xs-anatomy-head .xs-summit {
+  flex: none;
+}
+.xs-anatomy-head .xs-summit {
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.xs-key {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 28px;
+  margin: 18px 0 0;
+  padding: 18px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--line-soft);
+}
+.xs-key li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: start;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.xs-key li b {
+  color: var(--ink);
+}
+.xs-glyph {
+  display: grid;
+  place-items: center;
+  height: 22px;
+}
+
+.xs-specimens {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 26px 22px;
+  margin-top: 30px;
+}
+.xs-spec {
+  min-width: 0;
+}
+.xs-spec-row {
+  width: 100%;
+  max-width: 300px;
+  padding: 7px 10px 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line-soft);
+  --ex-ground: var(--bg);
+}
+.xs-spec-l1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 18px;
+  font-size: var(--t-13);
+  line-height: 18px;
+}
+.xs-spec-l1 span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.xs-spec-l1 .xs-end {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.xs-spec-l1 .xs-end--working {
+  color: var(--accent-ink);
+}
+.xs-spec-l1 .xs-end--you {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.xs-spec-l2 {
+  display: flex;
+  align-items: center;
+  height: 16px;
+  margin-top: 6px;
+}
+.xs-spec p {
+  margin-top: 10px !important;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.xs-spec p b {
+  color: var(--ink);
+}
+
+/* ---------- the modes ---------- */
+.xs-mode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 40px;
+  align-items: start;
+  margin-top: 64px;
+}
+.xs-mode:first-of-type {
+  margin-top: 0;
+}
+.xs-mode--side {
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+.xs-mode-text h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.xs-mode-text .bk-chip {
+  font-weight: var(--w-medium);
+}
+.xs-mode-text .bk-body + .bk-body {
+  margin-top: 12px !important;
+}
+.xs-mode-text kbd {
+  font-size: 12px;
+}
+.xs-mode-extra {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  margin-top: 26px;
+}
+
+/* ---------- the walk-through ---------- */
+.xs-walk {
+  display: flex;
+  flex-direction: column;
+  gap: 60px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: xs-walk;
+}
+.xs-walk > li {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 36px;
+  align-items: start;
+  counter-increment: xs-walk;
+}
+.xs-walk-text {
+  position: relative;
+  padding-left: 44px;
+}
+.xs-walk-text::before {
+  content: counter(xs-walk);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.xs-walk-time {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ---------- needs, costs, risks ---------- */
+.xs-needs {
+  counter-reset: xs-need;
+}
+.xs-needs .bk-card h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.xs-needs .bk-card h4::before {
+  counter-increment: xs-need;
+  content: counter(xs-need);
+  color: var(--faint);
+  font-family: var(--font-deco);
+  font-size: 22px;
+  font-weight: 400;
+}
+.xs-risk td:first-child {
+  width: 34%;
+  white-space: normal !important;
+}
+
+/* ---------- links ---------- */
+.xs-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.xs-links a {
+  display: block;
+  height: 100%;
+  padding: 14px 16px 16px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-soft);
+  text-decoration: none;
+  transition: box-shadow var(--dur-1);
+}
+.xs-links a:hover {
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-2);
+}
+.xs-links b {
+  display: block;
+  font-size: 14.5px;
+}
+.xs-links span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.xs-open {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin: 0 0 26px;
+}
+.xs-open .btn {
+  height: 38px;
+  padding: 0 16px;
+  font-size: 14px;
+  text-decoration: none;
+}
+.xs-open .btn--accent {
+  color: var(--accent-fg);
+}
+.xs-open small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- the phone ---------- */
+@media (max-width: 900px) {
+  .xs-specimens {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .xs-spec-row {
+    max-width: none;
+  }
+  .xs-key {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .xs-anatomy {
+    padding: 20px 16px 18px;
+  }
+  .xs-anatomy-head {
+    flex-wrap: wrap;
+  }
+  .xs-anatomy-head .xs-summit {
+    flex-basis: 100%;
+    padding-left: 40px;
+  }
+
+  .xs-mode,
+  .xs-mode--side,
+  .xs-mode-extra,
+  .xs-walk > li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .xs-mode--side .xs-shot {
+    order: 2;
+  }
+  .xs-shot--narrow {
+    max-width: 272px;
+  }
+  .xs-links {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (min-width: 901px) and (max-width: 1180px) {
+  .xs-specimens {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ---------- the anatomy on a phone: numbers on the route, names in a list ---------- */
+.xs-anatomy-phone {
+  display: none;
+}
+.xs-anatomy-num {
+  padding: 4px 2px 0;
+}
+.xs-anatomy-num .ex-route--wide {
+  height: 34px;
+}
+.xs-camps {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.xs-camps li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+}
+.xs-camp-n {
+  color: var(--faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.xs-camps li.is-done .xs-camp-l {
+  color: var(--ink);
+}
+.xs-camps li.is-waiting .xs-camp-l,
+.xs-camps li.is-waiting small {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.xs-camps li.is-current .xs-camp-l {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.xs-camps small {
+  color: var(--faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .xs-anatomy-scroll {
+    display: none;
+  }
+  .xs-anatomy-phone {
+    display: block;
+  }
+}
+
+/* ---------- the Office section ---------- */
+.xs-window {
+  margin: 8px 0 72px;
+}
+.xs-office {
+  margin-top: 64px;
+}
+.xs-office > h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.xs-office-text {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+  margin: 26px 0 44px;
+}
+.xs-office-text .bk-body {
+  margin: 0 !important;
+}
+.xs-office-alt {
+  margin-bottom: 40px;
+}
+.xs-office-grid {
+  gap: 28px 22px;
+}
+html[data-theme="orient-express"] .xs-light-only,
+html:not([data-theme="orient-express"]) .xs-dark-only {
+  display: none;
+}
+@media (max-width: 900px) {
+  .xs-office-text {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+
+/* A wide figure's caption lines up with the page column, not with the figure's edge. */
+.xs-shot.bk-wide figcaption {
+  width: min(1240px, 100vw - 64px);
+  margin: 12px auto 0;
+}
+@media (max-width: 900px) {
+  .xs-shot.bk-wide figcaption {
+    width: auto;
+  }
+}

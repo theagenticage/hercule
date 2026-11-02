@@ -1,0 +1,1911 @@
+/* PROTOTYPE - Atlas: the window, the sidebar's Territories and minimap, the overview's Threads and
+   Lines modes, the selection card, and the Office's placeholder. Every rule is scoped under
+   .ov-atlas, the window's root (Stage.direction({ rootClass })); every class starts with at-.
+   Load after tokens.css, system.css and stage.css. */
+
+/* ---------- shared: heat, diffs, crossings ---------- */
+
+/* Heat is a place's colour: the project's tint, deepened toward the ink as today's edits grow. */
+.ov-atlas .proj--webshop,
+.ov-atlas .proj--payments,
+.ov-atlas .proj--ops {
+  --heat-cold: color-mix(in oklab, var(--rug) 45%, var(--sunken));
+  --heat-hot: oklch(from var(--rug) calc(l - 0.24) calc(c * 2.1) h);
+}
+[data-theme="orient-express"] .ov-atlas .proj--webshop,
+[data-theme="orient-express"] .ov-atlas .proj--payments,
+[data-theme="orient-express"] .ov-atlas .proj--ops {
+  --heat-cold: color-mix(in oklab, var(--rug) 50%, var(--sunken));
+  --heat-hot: oklch(from var(--rug) calc(l + 0.2) calc(c * 1.9) h);
+}
+.ov-atlas .at-diff {
+  display: inline-flex;
+  gap: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ov-atlas .at-heat {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 26px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+}
+.ov-atlas .at-heat b {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: var(--heat-hot);
+}
+.ov-atlas .at-heat--lg {
+  width: 72px;
+  height: 5px;
+  border-radius: 3px;
+}
+.ov-atlas .at-xglyph {
+  flex: none;
+  overflow: visible;
+}
+.ov-atlas .at-xglyph path {
+  fill: none;
+  stroke: var(--who);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+/* A crossing, as a chip: a predicted conflict in the failure tint, an overlap in quiet ink.
+   Neither is marigold: a crossing is a warning, not something addressed to you. */
+.ov-atlas .at-xchip {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px 0 4px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  transition: box-shadow var(--dur-1);
+}
+.ov-atlas .at-xchip .mono {
+  font-size: 11px;
+}
+.ov-atlas .at-xchip--conflict {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+.ov-atlas .at-xchip--overlap {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.ov-atlas .at-xchip:hover,
+.ov-atlas .at-xchip.is-on {
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.ov-atlas .at-new {
+  display: inline-grid;
+  place-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+}
+
+/* ---------- the sidebar: the minimap ---------- */
+
+.ov-atlas .at-mm {
+  flex: none;
+  padding: 6px 0 4px;
+}
+.ov-atlas .at-mm-map {
+  position: relative;
+}
+.ov-atlas .at-mm-block {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+.ov-atlas .at-mm-name {
+  display: block;
+  height: 14px;
+  padding-left: 1px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-mm-tiles {
+  position: absolute;
+  top: 16px;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--bg);
+}
+.ov-atlas .at-mm-tile {
+  position: absolute;
+  border-radius: 2.5px;
+  background: color-mix(in oklab, var(--heat-hot) calc(var(--h) * 100%), var(--heat-cold));
+  transition: opacity var(--dur-1), box-shadow var(--dur-1);
+}
+.ov-atlas .at-mm-tile:hover {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.ov-atlas .at-mm-tile.is-on {
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.ov-atlas .at-mm-tile.is-dim {
+  opacity: 0.4;
+}
+.ov-atlas .at-mm-dots {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-auto-rows: 6px;
+  gap: 2px;
+  place-content: center;
+  pointer-events: none;
+}
+.ov-atlas .at-mm-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--who);
+  box-shadow: 0 0 0 1.25px var(--raised);
+}
+.ov-atlas .at-mm-dot.is-you {
+  background: var(--you);
+}
+.ov-atlas .at-mm-dot.is-reader {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.75px var(--who-shade);
+}
+.ov-atlas .at-mm-dot.is-sel {
+  box-shadow: 0 0 0 1.25px var(--raised), 0 0 0 2.75px var(--ink);
+}
+.ov-atlas .at-mm-foot {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.ov-atlas .at-mm-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ov-atlas .at-mm-lg-tile {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--heat-cold), var(--heat-hot));
+}
+.ov-atlas .at-mm-lg-you {
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--you);
+}
+.ov-atlas .at-mm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 20px;
+  padding: 0 2px 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--selected);
+  color: var(--ink);
+}
+.ov-atlas .at-mm-chip .mono {
+  font-size: 11px;
+}
+
+/* ---------- the sidebar: Territories ---------- */
+
+/* The list fades out above the assistants, so a row cut by the edge never reads as a broken one. */
+.ov-atlas .stage-list {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+.ov-atlas .at-s-proj {
+  padding-top: 10px;
+}
+.ov-atlas .at-noproj::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ov-atlas .at-s-area + .at-s-area {
+  margin-top: 4px;
+}
+/* An area's header: its path, a heat bar, and a crossing chip. Muted and medium, so it reads as a
+   place and never as a row's line 2, which is faint and regular. */
+.ov-atlas .at-s-ah {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+  padding: 0 4px 0 10px;
+}
+.ov-atlas .at-s-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-s-ah--lib {
+  gap: 8px;
+}
+.ov-atlas .at-s-lib {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-s-sub {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-atlas .at-s-row .st-detail .at-file {
+  flex: 0 1 auto;
+  color: var(--muted);
+}
+.ov-atlas .at-s-row .st-detail .at-file.is-x {
+  color: var(--fail-ink);
+}
+.ov-atlas .at-s-row .at-tail {
+  margin-left: 8px;
+}
+.ov-atlas .at-reads {
+  color: var(--faint);
+}
+.ov-atlas .st-thread.is-xing > .side-row,
+.ov-atlas .at-s-wrow.is-xing {
+  background: color-mix(in oklab, var(--fail-tint) 70%, transparent);
+  box-shadow: inset 2.5px 0 0 var(--fail-ink);
+}
+.ov-atlas .at-s-done {
+  padding-top: 10px;
+}
+.ov-atlas .at-s-done .side-row {
+  gap: 9px;
+  color: var(--muted);
+}
+.ov-atlas [data-office-btn].is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ov-atlas .at-s-away {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0 2px;
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.ov-atlas .at-s-away-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--t-13);
+}
+.ov-atlas .at-s-away-h .faint {
+  font-size: var(--t-11);
+}
+.ov-atlas .at-s-away-t {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.ov-atlas .at-s-away-btn {
+  align-self: flex-start;
+  margin-top: 6px;
+}
+
+/* ---------- the open thread's header: its territory ---------- */
+
+/* The open thread's territory, floating under the header on the right. */
+.ov-atlas .at-hd-terr-wrap {
+  position: absolute;
+  z-index: 5;
+  top: 54px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.ov-atlas .at-hd-terr-wrap .pill {
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+}
+.ov-atlas .at-hd-x--conflict.pill {
+  background: color-mix(in oklab, var(--fail-tint) 92%, transparent);
+}
+.ov-atlas .at-hd-terr {
+  gap: 7px;
+  padding: 0 12px 0 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-atlas .at-hd-terr .mono {
+  font-size: 11.5px;
+}
+.ov-atlas .at-hd-x--conflict .pill-btn {
+  color: var(--fail-ink);
+}
+.ov-atlas .at-hd-x .pill-btn {
+  gap: 7px;
+  font-size: var(--t-12);
+}
+
+/* ---------- the overview ---------- */
+
+.ov-atlas .at-ov {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.ov-atlas .at-top {
+  z-index: 9;
+}
+.ov-atlas .at-switch {
+  gap: 2px;
+}
+.ov-atlas .at-switch .ptab {
+  padding: 0 11px 0 9px;
+}
+.ov-atlas .at-switch .ptab[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ov-atlas .at-filter {
+  gap: 4px;
+  padding: 0 4px 0 12px;
+  font-size: var(--t-12);
+}
+.ov-atlas .at-filter-l {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.ov-atlas .at-since {
+  gap: 9px;
+  padding-right: 5px;
+}
+.ov-atlas .at-since[aria-checked="true"] .toggle {
+  background: var(--accent);
+}
+.ov-atlas .at-since[aria-checked="true"] .toggle::after {
+  transform: translateX(12px);
+}
+.ov-atlas .at-sum {
+  gap: 14px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-atlas .at-sum > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ov-atlas .at-sum b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-atlas .at-sum .at-sum-you,
+.ov-atlas .at-sum .at-sum-you b {
+  color: var(--you-ink);
+}
+.ov-atlas .at-sum-x .ic {
+  color: var(--faint);
+}
+.ov-atlas .at-top .pill-btn kbd {
+  margin-left: 2px;
+  font-size: var(--t-11);
+}
+
+.ov-atlas .at-panes {
+  position: absolute;
+  inset: 0;
+}
+.ov-atlas .at-pane {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur-2) var(--ease-out), visibility 0s linear var(--dur-2);
+}
+.ov-atlas .at-ov[data-mode="office"] .at-pane--office,
+.ov-atlas .at-ov[data-mode="threads"] .at-pane--threads,
+.ov-atlas .at-ov[data-mode="lines"] .at-pane--lines {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* The right-hand column of Threads and Lines: the crossings, or the landing order, with the
+   selection card docked at its foot. */
+.ov-atlas .at-side {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 344px;
+  padding: 58px 16px 0 0;
+}
+.ov-atlas .at-side-body,
+.ov-atlas .at-bd {
+  height: calc(100% - var(--card-h, 0px) - 28px);
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 6px 2px 12px;
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 20px), transparent);
+}
+.ov-atlas .at-side-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin: 0;
+  padding-left: 2px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-side-h .faint {
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.ov-atlas .at-side-lede {
+  margin: 0 0 12px;
+  padding-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* ---------- Threads mode: Territories at full width ---------- */
+
+.ov-atlas .at-tl {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 344px;
+  overflow: auto;
+  padding: 60px 28px 48px 30px;
+  scrollbar-width: thin;
+}
+.ov-atlas .at-tl-sec + .at-tl-sec {
+  margin-top: 26px;
+}
+.ov-atlas .at-tl-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  margin: 0 0 4px;
+  padding-left: 6px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-tl-h .proj {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-tl-h .faint {
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.ov-atlas .at-tl-today {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+
+.ov-atlas .at-tl-wrow {
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 190px 34px auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 54px;
+  padding: 6px 10px 6px 6px;
+  border-radius: var(--r-lg);
+
+  transition: background var(--dur-1);
+}
+.ov-atlas .at-tl-wrow + .at-tl-wrow {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.ov-atlas .at-tl-wrow:hover,
+.ov-atlas .at-tl-row:hover {
+  background: var(--hover);
+}
+.ov-atlas .at-tl-wrow.is-on,
+.ov-atlas .at-tl-row.is-on {
+  background: var(--selected);
+  box-shadow: none;
+}
+.ov-atlas .at-tl-wmain {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+.ov-atlas .at-tl-wmain b,
+.ov-atlas .at-tl-l1 b {
+  overflow: hidden;
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-tl-ask {
+  overflow: hidden;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-tl-where {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+  font-size: var(--t-12);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.ov-atlas .at-tl-where .proj {
+  font-size: var(--t-12);
+}
+.ov-atlas .at-tl-wpath {
+  color: var(--faint);
+  font-size: 11px;
+}
+.ov-atlas .at-tl-age {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.ov-atlas .at-tl-ans {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 176px;
+}
+
+.ov-atlas .at-tl-area {
+  margin-top: 6px;
+}
+.ov-atlas .at-tl-ah {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 8px 0 8px;
+}
+.ov-atlas .at-tl-path {
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.ov-atlas .at-tl-path b {
+  font-weight: 600;
+}
+.ov-atlas .at-tl-ah .at-diff {
+  font-size: 11.5px;
+}
+.ov-atlas .at-tl-editors {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+}
+.ov-atlas .at-tl-ed {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.ov-atlas .at-tl-ed:first-child {
+  margin-left: 0;
+}
+.ov-atlas .at-tl-ed.is-visitor {
+  box-shadow: inset 0 0 0 1.25px var(--line);
+  background: var(--raised);
+}
+.ov-atlas .at-tl-ah--lib {
+  gap: 10px;
+}
+.ov-atlas .at-tl-lib {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-tl-ah--lib .faint {
+  font-size: var(--t-12);
+}
+.ov-atlas .at-tl-ah .at-xchip {
+  height: 22px;
+  padding: 0 9px 0 6px;
+  font-size: var(--t-12);
+}
+
+.ov-atlas .at-tl-row {
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 330px) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 56px;
+  padding: 7px 10px 7px 8px;
+  border-radius: var(--r-lg);
+
+  transition: background var(--dur-1), opacity var(--dur-1);
+}
+.ov-atlas .at-tl-row + .at-tl-row {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.ov-atlas .at-tl-row:hover + .at-tl-row,
+.ov-atlas .at-tl-row.is-on + .at-tl-row {
+  box-shadow: none;
+}
+.ov-atlas .at-tl-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ov-atlas .at-tl-l1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ov-atlas .at-tl-l1 b {
+  flex: 0 1 auto;
+}
+.ov-atlas .at-tl-slot {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-atlas .at-tl-l2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ov-atlas .at-tl-l2 .br,
+.ov-atlas .at-tl-l2 .pi {
+  flex: none;
+  color: var(--faint);
+}
+.ov-atlas .at-tl-file {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+}
+.ov-atlas .at-now {
+  color: var(--accent-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-tl-l3 {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-tl-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ov-atlas .at-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 7px 0 8px;
+  border-radius: var(--r-xs);
+  background: var(--sunken);
+  box-shadow: inset 2.5px 0 0 var(--who);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ov-atlas .at-chip .mono {
+  font-size: 11px;
+}
+.ov-atlas .at-chip .at-diff {
+  font-size: 10.5px;
+}
+.ov-atlas .at-chip--read {
+  padding-left: 6px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--faint);
+}
+.ov-atlas .at-chip.is-now {
+  color: var(--ink);
+}
+.ov-atlas .at-chip.is-now .mono {
+  font-weight: 600;
+}
+.ov-atlas .at-chip--x {
+  padding-left: 5px;
+  cursor: pointer;
+}
+.ov-atlas .at-chip--conflict {
+  background: var(--fail-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fail-ink) 32%, transparent);
+  color: var(--fail-ink);
+}
+.ov-atlas .at-chip--overlap {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.ov-atlas .at-chip--more {
+  padding: 0 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-atlas .at-tl-row.is-xing,
+.ov-atlas .at-tl-wrow.is-xing {
+  background: color-mix(in oklab, var(--fail-tint) 70%, transparent);
+  box-shadow: inset 2.5px 0 0 var(--fail-ink);
+}
+.ov-atlas .at-tl-more {
+  padding: 10px 14px 0 54px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* The return briefing, at the top of Threads after Rogier was away. */
+.ov-atlas .at-away {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px 24px;
+  margin: 0 0 26px;
+  padding: 18px 20px 18px 22px;
+  border-radius: var(--r-xl);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.ov-atlas .at-away-h {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--t-16);
+}
+.ov-atlas .at-away-k {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-atlas .at-away-facts {
+  display: flex;
+  gap: 32px;
+}
+.ov-atlas .at-away-facts span {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 0 8px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-away-facts small {
+  grid-column: 1 / -1;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+
+/* ---------- the crossings panel ---------- */
+
+.ov-atlas .at-xc {
+  margin-bottom: 10px;
+  padding: 12px 12px 10px 14px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  transition: box-shadow var(--dur-1);
+}
+.ov-atlas .at-xc--conflict {
+  box-shadow: inset 3px 0 0 var(--fail-ink), inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.ov-atlas .at-xc.is-on {
+  box-shadow: inset 0 0 0 1.5px var(--fail-ink), var(--shadow-2);
+}
+.ov-atlas .at-xc--overlap.is-on {
+  box-shadow: inset 0 0 0 1.5px var(--ink), var(--shadow-2);
+}
+.ov-atlas .at-xc-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--t-12);
+}
+.ov-atlas .at-xc-kind {
+  flex: none;
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+}
+.ov-atlas .at-xc--conflict .at-xc-kind {
+  color: var(--fail-ink);
+}
+.ov-atlas .at-xc--overlap .at-xc-kind {
+  color: var(--muted);
+}
+.ov-atlas .at-xc-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.ov-atlas .at-xc-pair {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 6px -4px;
+}
+.ov-atlas .at-xc-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 6px 3px 3px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.ov-atlas .at-xc-who:hover {
+  background: var(--hover);
+}
+.ov-atlas .at-xc-who > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.ov-atlas .at-xc-who b {
+  overflow: hidden;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-xc-who small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-xc-who small.mono {
+  font-size: 10.5px;
+}
+.ov-atlas .at-xc-note {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.ov-atlas .at-xc-f {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: -2px;
+}
+.ov-atlas .at-xc-f .btn .ic {
+  margin-left: -2px;
+}
+
+/* ---------- Lines: the transit map ---------- */
+
+.ov-atlas .at-map {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 344px;
+}
+.ov-atlas .at-svg {
+  display: block;
+  font-family: var(--font-ui);
+}
+.ov-atlas .at-sys-band {
+  fill: color-mix(in oklab, var(--rug) 16%, transparent);
+}
+[data-theme="orient-express"] .ov-atlas .at-sys-band {
+  fill: color-mix(in oklab, var(--rug) 18%, transparent);
+}
+.ov-atlas .at-sys-name {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-sys-sub {
+  fill: var(--faint);
+  font-size: 11px;
+}
+.ov-atlas .at-ln,
+.ov-atlas .at-train,
+.ov-atlas .at-xg {
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.ov-atlas .at-ln path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ov-atlas .at-ln-hit {
+  stroke: transparent;
+  stroke-width: 22;
+  pointer-events: stroke;
+}
+.ov-atlas .at-ln-halo {
+  stroke: var(--who);
+  stroke-width: 18;
+  opacity: 0;
+  transition: opacity var(--dur-2);
+}
+.ov-atlas .at-ln.is-sel .at-ln-halo {
+  opacity: 0.2;
+}
+.ov-atlas .at-ln-built {
+  stroke: var(--who);
+  stroke-width: 6;
+}
+.ov-atlas .at-ln-ahead {
+  stroke: color-mix(in oklab, var(--who) 34%, var(--surface));
+  stroke-width: 6;
+}
+[data-theme="orient-express"] .ov-atlas .at-ln-ahead {
+  stroke: color-mix(in oklab, var(--who) 30%, var(--surface));
+}
+.ov-atlas .at-ln-core {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.ov-atlas .at-ln--run .at-ln-built {
+  stroke-width: 7;
+}
+.ov-atlas .at-ln-cap {
+  fill: var(--who);
+}
+.ov-atlas .at-ln-behind {
+  fill: var(--faint);
+  font-size: 11px;
+}
+.ov-atlas .is-compact .at-ln-built,
+.ov-atlas .is-compact .at-ln-ahead {
+  stroke-width: 5;
+}
+.ov-atlas .at-badge {
+  cursor: pointer;
+}
+.ov-atlas .at-badge rect {
+  fill: var(--who);
+}
+.ov-atlas .at-badge-t {
+  fill: var(--face-ink);
+  font-size: 11px;
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-badge-t.mono {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 11px;
+}
+.ov-atlas .at-badge--run rect {
+  fill: var(--raised);
+  stroke: var(--who);
+  stroke-width: 2;
+}
+.ov-atlas .at-badge--run .at-badge-t {
+  fill: var(--ink);
+}
+.ov-atlas .at-badge-k {
+  fill: var(--who-ink);
+  font-size: 11px;
+  font-weight: var(--w-bold);
+}
+
+/* Stations: white dots with dark rims, as on a metro map; stations still to come are hollow in the line's colour. */
+.ov-atlas .at-st {
+  cursor: pointer;
+}
+.ov-atlas .at-st-hit {
+  fill: transparent;
+}
+.ov-atlas .at-st-dot {
+  fill: var(--raised);
+  stroke: var(--ink);
+  stroke-width: 2.25;
+  transition: r var(--dur-1);
+}
+.ov-atlas .at-st--ahead .at-st-dot {
+  fill: var(--surface);
+  stroke: color-mix(in oklab, var(--who-ink) 70%, var(--surface));
+  stroke-width: 1.75;
+}
+.ov-atlas .at-st.is-fail .at-st-dot {
+  fill: var(--fail-tint);
+  stroke: var(--fail-ink);
+}
+.ov-atlas .at-st.is-you .at-st-dot {
+  fill: var(--you-tint);
+  stroke: var(--you);
+  stroke-width: 2.5;
+}
+.ov-atlas .at-st:hover .at-st-dot {
+  stroke-width: 3;
+}
+.ov-atlas .at-st-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: var(--w-medium);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.ov-atlas .at-st--ahead .at-st-label {
+  fill: var(--faint);
+  font-weight: var(--w-regular);
+}
+.ov-atlas .at-st.is-fail .at-st-label {
+  fill: var(--fail-ink);
+}
+.ov-atlas .at-st.is-you .at-st-label {
+  fill: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-st-new {
+  fill: color-mix(in oklab, var(--who) 55%, transparent);
+}
+.ov-atlas .is-compact .at-st-label {
+  opacity: 0;
+}
+.ov-atlas .is-compact .at-ln.is-sel .at-st-label,
+.ov-atlas .is-compact .at-ln.is-hot .at-st-label,
+.ov-atlas .is-compact .at-ln.is-focus .at-st-label {
+  opacity: 1;
+}
+
+/* The landing order, as a roundel on each line just before main. */
+.ov-atlas .at-ord circle {
+  fill: var(--raised);
+  stroke: var(--ink);
+  stroke-width: 1.75;
+}
+.ov-atlas .at-ord text {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: var(--w-bold);
+  text-anchor: middle;
+}
+.ov-atlas .at-ord.is-small text {
+  font-size: 11px;
+}
+.ov-atlas .at-ord.is-done circle {
+  fill: var(--ok);
+  stroke: var(--ok);
+}
+.ov-atlas .at-ord.is-done text {
+  fill: var(--raised);
+}
+
+/* The trains: each lead's face in a roundel of its colour, its partners riding behind. */
+.ov-atlas .at-train {
+  cursor: pointer;
+}
+.ov-atlas .at-train-ring {
+  fill: var(--raised);
+  stroke: var(--who);
+  stroke-width: 3;
+}
+.ov-atlas .at-train.is-sel .at-train-ring {
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+.ov-atlas .at-car circle {
+  fill: var(--raised);
+  stroke: var(--who);
+  stroke-width: 2;
+}
+.ov-atlas .at-car.is-sel circle {
+  stroke: var(--ink);
+}
+.ov-atlas .at-train-word {
+  fill: var(--muted);
+  font-size: 11px;
+  text-anchor: start;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.ov-atlas .at-train-you {
+  fill: var(--you);
+}
+.ov-atlas .at-train-word.is-you {
+  fill: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-train-word.is-ok {
+  fill: var(--ok);
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-train-word.is-faint {
+  fill: var(--faint);
+}
+
+/* Crossings: an interchange ring on each line, joined, and the file they share. */
+.ov-atlas .at-xg {
+  cursor: pointer;
+}
+.ov-atlas .at-xg-link,
+.ov-atlas .at-xg-ring {
+  fill: var(--raised);
+  stroke: var(--ink);
+  stroke-width: 2.25;
+}
+.ov-atlas .at-xg-chip rect {
+  fill: var(--raised);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.ov-atlas .at-xg-chip text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-xg-chip .mono {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+}
+.ov-atlas .at-xg--conflict .at-xg-chip rect {
+  fill: var(--fail-tint);
+  stroke: color-mix(in oklab, var(--fail-ink) 40%, transparent);
+}
+.ov-atlas .at-xg--conflict .at-xg-chip text {
+  fill: var(--fail-ink);
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-xg:hover .at-xg-chip rect,
+.ov-atlas .at-xg.is-on .at-xg-chip rect {
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.ov-atlas .at-xg--conflict {
+  color: var(--fail-ink);
+}
+.ov-atlas .at-xg--overlap {
+  color: var(--ink);
+}
+.ov-atlas .at-xg .at-xg-chip rect.at-xg-new {
+  fill: var(--ink);
+  stroke: none;
+}
+.ov-atlas .at-xg .at-xg-chip text.at-xg-newt {
+  fill: var(--surface);
+  font-size: 11px;
+  font-weight: var(--w-bold);
+  text-anchor: middle;
+}
+.ov-atlas .is-compact .at-xg-chip text {
+  font-size: 11px;
+}
+
+.ov-atlas .at-term rect {
+  fill: var(--raised);
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+.ov-atlas .at-term-name {
+  fill: var(--ink);
+  font-family: var(--font-deco);
+  font-size: 17px;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+/* Focus, hover and filter: what is not involved steps back. */
+.ov-atlas .at-svg.has-focus .at-ln:not(.is-focus),
+.ov-atlas .at-svg.has-focus .at-train:not(.is-focus-train),
+.ov-atlas .at-svg.has-focus .at-xg:not(.is-on) {
+  opacity: 0.22;
+}
+.ov-atlas .at-svg.has-hot .at-ln:not(.is-hot),
+.ov-atlas .at-svg.has-hot .at-train:not(.is-hot) {
+  opacity: 0.3;
+}
+.ov-atlas .at-svg .is-out {
+  opacity: 0.18;
+}
+.ov-atlas .at-svg.is-since .at-ln-built.is-old {
+  opacity: 0.25;
+}
+.ov-atlas .at-svg.is-since .at-st--built:not(.is-new) {
+  opacity: 0.35;
+}
+.ov-atlas .at-svg.is-since .at-st.is-new .at-st-label {
+  fill: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+.ov-atlas .at-legend {
+  position: absolute;
+  left: 28px;
+  right: 16px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.ov-atlas .at-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-atlas .at-legend i {
+  display: inline-block;
+}
+.ov-atlas .at-lg-built,
+.ov-atlas .at-lg-ahead,
+.ov-atlas .at-lg-run {
+  width: 18px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--ink);
+}
+.ov-atlas .at-lg-ahead {
+  background: color-mix(in oklab, var(--ink) 22%, var(--surface));
+}
+.ov-atlas .at-lg-run {
+  height: 7px;
+  background: var(--ink);
+  box-shadow: inset 0 2.5px 0 var(--ink), inset 0 -2.5px 0 var(--ink);
+  background-image: linear-gradient(var(--surface), var(--surface));
+  background-size: 100% 2px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.ov-atlas .at-lg-station {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.ov-atlas .at-lg-x {
+  width: 10px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.ov-atlas .at-lg-off {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The station card and the crossing callout. */
+.ov-atlas .at-pop {
+  position: absolute;
+  z-index: 8;
+  width: 280px;
+  padding: 10px 12px 11px;
+  border-radius: var(--r-md);
+  font-size: var(--t-12);
+}
+.ov-atlas .at-pop-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+.ov-atlas .at-pop-sw {
+  width: 14px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--who);
+}
+.ov-atlas .at-pop-t {
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: 1.4;
+}
+.ov-atlas .at-pop-s {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ov-atlas .at-pop-s .mono {
+  font-size: 11px;
+}
+.ov-atlas .at-pop-you {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-callout {
+  position: absolute;
+  z-index: 7;
+  width: 318px;
+  padding: 12px 14px 12px;
+  border-radius: var(--r-lg);
+}
+.ov-atlas .at-callout-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fail-ink);
+}
+.ov-atlas .at-callout-h b {
+  flex: 1;
+}
+.ov-atlas .at-callout-path {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.ov-atlas .at-callout-note,
+.ov-atlas .at-callout-plan {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.ov-atlas .at-callout-plan {
+  color: var(--ink);
+}
+.ov-atlas .at-callout-plan .mono {
+  font-size: 11px;
+}
+.ov-atlas .at-callout-a {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+/* ---------- the landing order: a station's board ---------- */
+
+.ov-atlas .at-bd-h {
+  padding: 2px 4px 12px;
+  margin-bottom: 4px;
+  border-bottom: 3px double var(--brass);
+}
+.ov-atlas .at-bd-title-h {
+  margin: 0;
+  font-family: var(--font-deco);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+.ov-atlas .at-bd-sub {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-atlas .at-bd-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-atlas .at-bd-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 7px 8px 7px 4px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--dur-1);
+}
+.ov-atlas .at-bd-row + .at-bd-row {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.ov-atlas .at-bd-row:hover {
+  background: var(--hover);
+  box-shadow: none;
+}
+.ov-atlas .at-bd-row.is-on {
+  background: var(--selected);
+  box-shadow: none;
+}
+.ov-atlas .at-bd-row.is-focus {
+  background: color-mix(in oklab, var(--fail-tint) 80%, transparent);
+  box-shadow: inset 2.5px 0 0 var(--fail-ink);
+}
+.ov-atlas .at-bd-row:hover + .at-bd-row,
+.ov-atlas .at-bd-row.is-on + .at-bd-row,
+.ov-atlas .at-bd-row.is-focus + .at-bd-row {
+  box-shadow: none;
+}
+.ov-atlas .at-bd-n {
+  color: var(--who-ink);
+  text-align: center;
+}
+.ov-atlas .at-bd-row.is-landed .at-bd-n {
+  color: var(--ok);
+}
+.ov-atlas .at-bd-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ov-atlas .at-bd-l1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ov-atlas .at-bd-badge {
+  min-width: 0;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--who);
+  color: var(--face-ink);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-bd-state {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+}
+.ov-atlas .at-bd-state--ok {
+  color: var(--ok);
+}
+.ov-atlas .at-bd-state--you {
+  color: var(--you-ink);
+}
+.ov-atlas .at-bd-state--x {
+  color: var(--fail-ink);
+}
+.ov-atlas .at-bd-state--work {
+  color: var(--accent-ink);
+}
+.ov-atlas .at-bd-state--idle {
+  color: var(--faint);
+}
+.ov-atlas .at-bd-title {
+  overflow: hidden;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-bd-why {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.ov-atlas .at-bd-list.is-compact .at-bd-row {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.ov-atlas .at-bd-list.is-compact .at-bd-n {
+  font-size: 20px;
+}
+.ov-atlas .at-bd {
+  display: flex;
+  flex-direction: column;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.ov-atlas .at-bd-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.ov-atlas .at-bd-foot {
+  flex: none;
+}
+.ov-atlas .at-bd-act {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 12px 4px 0;
+  border-top: 3px double var(--brass);
+}
+.ov-atlas .at-bd-act.is-on {
+  min-height: 46px;
+}
+.ov-atlas .at-bd-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-ink);
+  font-weight: var(--w-bold);
+}
+.ov-atlas .at-bd-note {
+  margin: 8px 4px 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.ov-atlas .at-bd-note .mono {
+  font-size: 11px;
+}
+
+/* ---------- the selection card ---------- */
+
+.ov-atlas .at-card {
+  position: absolute;
+  z-index: 6;
+  bottom: 16px;
+  padding: 14px 14px 12px;
+  border-radius: var(--r-xl);
+}
+.ov-atlas .at-card[data-dock="side"] {
+  right: 16px;
+  width: 328px;
+}
+.ov-atlas .at-card[data-dock="float"] {
+  left: 16px;
+  width: 384px;
+}
+.ov-atlas .at-card-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ov-atlas .at-card-ht {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.ov-atlas .at-card-title {
+  overflow: hidden;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-atlas .at-card-where {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ov-atlas .at-card-where .proj {
+  font-size: var(--t-12);
+}
+.ov-atlas .at-card-area {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ov-atlas .at-card-work {
+  color: var(--accent-ink);
+}
+.ov-atlas .at-card-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 4px;
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-card-of {
+  flex: none;
+  align-self: flex-start;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.ov-atlas .at-card-x {
+  align-self: flex-start;
+}
+.ov-atlas .at-card-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 10px;
+  font-size: var(--t-12);
+}
+.ov-atlas .at-card-file {
+  color: var(--ink);
+  font-size: 11.5px;
+}
+.ov-atlas .at-card-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+.ov-atlas .at-card-line i {
+  width: 14px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--who);
+}
+.ov-atlas .at-card-line .mono {
+  font-size: 11px;
+}
+.ov-atlas .at-card-xing {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 9px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-12);
+  text-align: left;
+  transition: box-shadow var(--dur-1);
+}
+.ov-atlas .at-card-xing > span {
+  min-width: 0;
+  line-height: 1.4;
+}
+.ov-atlas .at-card-xing .at-xglyph {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.ov-atlas .at-card-xing .mono {
+  font-size: 11px;
+}
+.ov-atlas .at-card-xing--conflict {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+.ov-atlas .at-card-xing--overlap {
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  color: var(--muted);
+}
+.ov-atlas .at-card-xing:hover {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.ov-atlas .at-card-ask {
+  margin-top: 10px;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: 1.4;
+}
+.ov-atlas .at-card-a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+/* ---------- the Office's placeholder ---------- */
+
+/* The Office starts under the overview's top bar, so its own controls (top right) never meet it. */
+.ov-atlas .at-office {
+  position: absolute;
+  inset: 54px 0 0;
+}
+.ov-atlas .at-city {
+  position: absolute;
+  inset: 0;
+}
+.ov-atlas .at-city-svg {
+  position: absolute;
+  inset: 40px 0 0 120px;
+  width: calc(100% - 120px);
+  height: calc(100% - 40px);
+}
+.ov-atlas .at-city-plot {
+  fill: color-mix(in oklab, var(--proj-webshop) 55%, var(--surface));
+}
+.ov-atlas .at-city-t {
+  fill: var(--room-desk);
+  stroke: color-mix(in oklab, var(--room-shade) 18%, transparent);
+  stroke-width: 0.6;
+}
+.ov-atlas .at-city-l {
+  fill: var(--room-wall);
+}
+.ov-atlas .at-city-r {
+  fill: color-mix(in oklab, var(--room-wall) 72%, var(--room-shade));
+}
+.ov-atlas .at-city-b.is-lit .at-city-t {
+  fill: var(--room-sun);
+}
+.ov-atlas .at-city-b.is-lit .at-city-l {
+  fill: color-mix(in oklab, var(--room-sun) 70%, var(--room-wall));
+}
+.ov-atlas .at-city-b.is-x polygon {
+  stroke: var(--fail-ink);
+  stroke-width: 1.4;
+}
+.ov-atlas .at-city-card {
+  position: absolute;
+  top: 70px;
+  left: 24px;
+  width: 340px;
+  padding: 16px 18px 16px;
+  border-radius: var(--r-xl);
+}
+.ov-atlas .at-city-k {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-atlas .at-city-card h2 {
+  margin: 2px 0 8px;
+  font-size: 28px;
+  font-weight: 400;
+}
+.ov-atlas .at-city-card p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.ov-atlas .at-city-card p.faint {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* Over the live Office nothing blurs: a blur over a canvas makes the browser composite the whole
+   window on every frame (OFFICE-KIT.md, Performance). The card and the pills turn solid there. */
+.ov-atlas .at-ov[data-mode="office"] .at-card,
+.ov-atlas .at-ov[data-mode="office"] .top .pill {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--raised);
+}
+
+/* Only a line's wide hit path, its stations, badge, train and crossings take the pointer. */
+.ov-atlas .at-ln-halo,
+.ov-atlas .at-ln-ahead,
+.ov-atlas .at-ln-built,
+.ov-atlas .at-ln-core,
+.ov-atlas .at-ln-cap,
+.ov-atlas .at-ord,
+.ov-atlas .at-sys,
+.ov-atlas .at-term {
+  pointer-events: none;
+}
+.ov-atlas .at-ln-hit {
+  cursor: pointer;
+}
+
+/* The top bar's crossings count is a button: the one crossings count of the window. */
+.ov-atlas .at-sum .at-sum-x {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  transition: background var(--dur-1);
+}
+.ov-atlas .at-sum .at-sum-x:hover {
+  background: var(--hover);
+}
+/* The City's own crossings chip repeats that count, so the window hides it. Its other controls stay. */
+.ov-atlas .ov-atlas-office__chip {
+  display: none;
+}
+
+/* A folded overlap: one line of who, under its header. */
+.ov-atlas .at-xc--fold {
+  display: block;
+  width: 100%;
+  padding: 10px 12px 10px 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.ov-atlas .at-xc--fold:hover {
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-2);
+}
+.ov-atlas .at-xc-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 7px;
+}
+.ov-atlas .at-xc-faces {
+  display: inline-flex;
+  flex: none;
+}
+.ov-atlas .at-xc-faces .cr + .cr {
+  margin-left: -4px;
+}
+.ov-atlas .at-xc-names {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

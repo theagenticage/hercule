@@ -1,0 +1,1404 @@
+/* PROTOTYPE - the story page of round 2 (index.html). Load after ../crew-bureau-2/tokens.css and
+   system.css. Every rule sits under .lb-book and every class starts with lbk-, because two other
+   builders style pages in this folder at the same time.
+
+   Phone first (412px), then a laptop. The page follows the quiet budget of BUILDERS.md: two
+   weights, hairlines instead of boxes, marigold only for what waits on you, and air between
+   ideas. Limelight appears only in the title and the big numerals. */
+
+/* system.css makes the page a window (height 100%, overflow hidden). This page is a document. */
+html:has(> body.lb-book),
+body.lb-book {
+  height: auto;
+  overflow: visible;
+}
+html:has(> body.lb-book) {
+  scroll-padding-top: 72px;
+}
+
+.lb-book {
+  --lbk-col: 640px;
+  --lbk-wide: 1200px;
+  --lbk-pad: 20px;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.lb-book p,
+.lb-book h1,
+.lb-book h2,
+.lb-book h3,
+.lb-book ol,
+.lb-book ul,
+.lb-book dl,
+.lb-book dd,
+.lb-book figure,
+.lb-book blockquote {
+  margin: 0;
+}
+.lb-book ol,
+.lb-book ul {
+  padding: 0;
+  list-style: none;
+}
+.lb-book b,
+.lb-book strong {
+  font-weight: var(--w-medium);
+}
+.lb-book code {
+  font-size: 0.9em;
+}
+.lb-book .lbk-p a,
+.lb-book .lbk-small a {
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+.lb-book .lbk-p a:hover,
+.lb-book .lbk-small a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* ---------------------------------------------------------------- the top bar */
+.lb-book .lbk-top {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 12px 0 16px;
+  background: color-mix(in oklab, var(--bg) 86%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.lb-book .lbk-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-brand span {
+  display: none;
+}
+.lb-book .lbk-nav {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.lb-book .lbk-nav::-webkit-scrollbar {
+  display: none;
+}
+@media (max-width: 400px) {
+  .lb-book .lbk-top {
+    gap: 8px;
+    padding-left: 12px;
+  }
+  .lb-book .lbk-nav {
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+  }
+  .lb-book .lbk-nav a {
+    padding: 4px 6px;
+  }
+  .lb-book .lbk-code {
+    padding: 12px 14px;
+    font-size: 11.5px;
+  }
+}
+.lb-book .lbk-nav a {
+  flex: none;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-13);
+  white-space: nowrap;
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.lb-book .lbk-nav a:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.lb-book .lbk-nav a[aria-current="true"] {
+  color: var(--ink);
+  background: var(--selected);
+}
+.lb-book .lbk-themes {
+  flex: none;
+}
+.lb-book .lbk-themes button {
+  padding: 0 7px;
+}
+.lb-book .lbk-themes button span {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- columns and sections */
+.lb-book .lbk-col,
+.lb-book .lbk-wide {
+  box-sizing: content-box;
+  margin-inline: auto;
+  padding-inline: var(--lbk-pad);
+}
+.lb-book .lbk-col {
+  max-width: var(--lbk-col);
+}
+.lb-book .lbk-wide {
+  max-width: var(--lbk-wide);
+}
+
+.lb-book .lbk-sec {
+  padding-block: 72px 8px;
+}
+.lb-book .lbk-sec + .lbk-sec > .lbk-col:first-child {
+  padding-top: 56px;
+  background: linear-gradient(var(--line), var(--line)) var(--lbk-pad) 0 / calc(100% - 2 * var(--lbk-pad)) 1px no-repeat;
+}
+.lb-book .lbk-sub {
+  margin-top: 88px;
+}
+
+.lb-book .lbk-eyebrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lb-book .lbk-num {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.lb-book .lbk-kicker {
+  color: var(--faint);
+  font-size: var(--t-13);
+}
+.lb-book .lbk-h2 {
+  margin: 10px 0 18px;
+  font-size: 30px;
+  font-weight: var(--w-medium);
+  line-height: 1.12;
+  letter-spacing: -0.018em;
+}
+.lb-book .lbk-h3 {
+  margin: 4px 0 14px;
+  font-size: 22px;
+  font-weight: var(--w-medium);
+  line-height: 1.22;
+  letter-spacing: -0.012em;
+}
+.lb-book .lbk-h3--gap {
+  margin-top: 48px;
+}
+.lb-book .lbk-h3-note {
+  margin-left: 8px;
+  color: var(--faint);
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+}
+.lb-book .lbk-lede {
+  font-size: 18px;
+  line-height: 1.5;
+  letter-spacing: -0.004em;
+}
+.lb-book .lbk-lede + .lbk-p,
+.lb-book .lbk-p + .lbk-p {
+  margin-top: 14px;
+}
+.lb-book .lbk-p {
+  color: color-mix(in oklab, var(--ink) 86%, var(--muted));
+}
+.lb-book .lbk-small {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.55;
+}
+.lb-book .lbk-hint {
+  color: var(--faint);
+}
+.lb-book .lbk-hint--mouse {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .lb-book .lbk-hint--touch {
+    display: none;
+  }
+  .lb-book .lbk-hint--mouse {
+    display: inline;
+  }
+}
+
+/* ---------------------------------------------------------------- the quiet row (today's anatomy) */
+/* The pane is a small piece of the main surface the List draws on; the row inside has no box. */
+.lb-book .lbk-pane {
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.lb-book .lbk-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  line-height: 1.32;
+}
+.lb-book .lbk-row > .cr,
+.lb-book .lbk-row > svg,
+.lb-book .lbk-row > [data-face] {
+  grid-row: span 2;
+}
+.lb-book .lbk-row-title {
+  overflow: hidden;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lb-book .lbk-row-end {
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 22px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.lb-book .lbk-row-line {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lb-book .lbk-row-line--ask {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-group {
+  padding: 4px 10px 2px;
+  font-size: var(--t-12);
+}
+
+/* ---------------------------------------------------------------- the cover */
+.lb-book .lbk-cover {
+  max-width: var(--lbk-col);
+  margin-inline: auto;
+  padding: 64px var(--lbk-pad) 24px;
+  text-align: center;
+}
+.lb-book .lbk-cover .lbk-eyebrow {
+  justify-content: center;
+}
+.lb-book .lbk-h1 {
+  margin: 18px 0 20px;
+  font-family: var(--font-deco);
+  font-size: 44px;
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: 0.005em;
+  text-wrap: balance;
+}
+.lb-book .lbk-cover-sub {
+  max-width: 34em;
+  margin-inline: auto;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.lb-book .lbk-cover-date {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 22px;
+  color: var(--faint);
+  font-size: var(--t-13);
+}
+.lb-book .lbk-cover-date::before,
+.lb-book .lbk-cover-date::after {
+  content: "";
+  width: 28px;
+  height: 1px;
+  background: var(--brass);
+}
+.lb-book .lbk-before {
+  max-width: 420px;
+  margin: 52px auto 0;
+  text-align: left;
+}
+.lb-book .lbk-before-label {
+  margin: 0 0 6px 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-book .lbk-before-label:not(:first-child) {
+  margin-top: 18px;
+}
+.lb-book .lbk-before figcaption {
+  margin: 18px 4px 0;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.55;
+}
+
+/* ---------------------------------------------------------------- 01 what you said */
+.lb-book .lbk-said {
+  margin-top: 22px;
+  counter-reset: said;
+}
+.lb-book .lbk-said li {
+  position: relative;
+  padding: 12px 0 12px 34px;
+  font-size: 17px;
+  line-height: 1.45;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  counter-increment: said;
+}
+.lb-book .lbk-said li:first-child {
+  box-shadow: inset 0 1px 0 var(--line-soft), inset 0 -1px 0 var(--line-soft);
+}
+.lb-book .lbk-said li::before {
+  content: counter(said);
+  position: absolute;
+  left: 2px;
+  top: 13px;
+  color: var(--faint);
+  font-size: var(--t-13);
+  font-variant-numeric: tabular-nums;
+}
+.lb-book .lbk-modes-seg {
+  margin-bottom: 18px;
+}
+.lb-book .lbk-modes-seg button {
+  height: 30px;
+  padding: 0 16px;
+  cursor: default;
+}
+.lb-book .lbk-modes-dl {
+  display: grid;
+  gap: 12px;
+}
+.lb-book .lbk-modes-dl div {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 12px;
+}
+.lb-book .lbk-modes-dl dt {
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-modes-dl dd {
+  color: var(--muted);
+}
+.lb-book .lbk-rule {
+  margin-top: 32px;
+  padding-left: 16px;
+  color: var(--muted);
+  box-shadow: inset 2px 0 0 var(--brass);
+}
+
+/* ---------------------------------------------------------------- the finding */
+.lb-book .lbk-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px 20px;
+  margin: 28px 0 30px;
+}
+.lb-book .lbk-stat b {
+  display: block;
+  font-size: 52px;
+  font-weight: var(--w-medium);
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+.lb-book .lbk-stat span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.lb-book .lbk-verdict {
+  margin-top: 28px;
+  font-size: 19px;
+  line-height: 1.5;
+  letter-spacing: -0.006em;
+  text-wrap: pretty;
+}
+
+/* A quiet disclosure for the detail a reader may want, folded by default. */
+.lb-book .lbk-more {
+  margin-top: 28px;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+.lb-book .lbk-more summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+  cursor: pointer;
+  list-style: none;
+}
+.lb-book .lbk-more summary::-webkit-details-marker {
+  display: none;
+}
+.lb-book .lbk-more summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin: 0 4px 2px 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-1);
+}
+.lb-book .lbk-more[open] summary::before {
+  transform: rotate(45deg);
+}
+.lb-book .lbk-more summary:hover {
+  color: var(--ink);
+}
+.lb-book .lbk-more[open] {
+  padding-bottom: 18px;
+}
+.lb-book .lbk-scroll {
+  margin-inline: calc(-1 * var(--lbk-pad));
+  padding-inline: var(--lbk-pad);
+  overflow-x: auto;
+}
+.lb-book .lbk-table {
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.lb-book .lbk-table th,
+.lb-book .lbk-table td {
+  padding: 8px 14px 8px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line-soft);
+}
+.lb-book .lbk-table thead th {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-table tbody th {
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.lb-book .lbk-table td {
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- the flow: events, digest, row */
+.lb-book .lbk-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: var(--lbk-col);
+  margin-top: 36px;
+}
+.lb-book .lbk-flow-label {
+  margin: 0 0 10px 2px;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-flow-label span {
+  margin-left: 6px;
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.lb-book .lbk-flow-label--then {
+  margin-top: 22px;
+}
+.lb-book .lbk-turn {
+  margin: 0 0 6px 2px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.lb-book .lbk-turn i {
+  font-style: normal;
+  color: var(--ink);
+}
+
+.lb-book .lbk-ev {
+  display: grid;
+  grid-template-columns: 38px 34px minmax(0, 1fr);
+  column-gap: 8px;
+  padding: 9px 2px;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-13);
+  line-height: 1.4;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.lb-book .lbk-ev:last-child {
+  border-bottom: 1px solid var(--line-soft);
+}
+.lb-book .lbk-ev-t {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
+}
+.lb-book .lbk-ev-k {
+  color: var(--muted);
+  font-size: var(--t-12);
+  padding-top: 1px;
+}
+.lb-book .lbk-ev-x {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lb-book .lbk-ev-x > code {
+  display: block;
+}
+.lb-book code.lbk-ev-x {
+  font-size: 12.5px;
+}
+.lb-book .lbk-ev-x > code:first-child {
+  font-size: 12.5px;
+}
+.lb-book .lbk-ev-out {
+  display: block;
+  margin-top: 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-book .lbk-ev-f {
+  grid-column: 3;
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.lb-book .lbk-ev-f em {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: var(--w-medium);
+}
+
+/* The digest: the one card on the page, because it is the one new record. */
+.lb-book .lbk-digest {
+  display: grid;
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.lb-book .lbk-field {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  line-height: 1.4;
+  transition: background var(--dur-1);
+}
+.lb-book .lbk-field + .lbk-field::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 0;
+  height: 1px;
+  background: var(--line-soft);
+}
+.lb-book .lbk-field:hover {
+  background: var(--hover);
+}
+.lb-book .lbk-field[aria-pressed="true"] {
+  background: var(--selected);
+}
+.lb-book .lbk-field:hover::before,
+.lb-book .lbk-field[aria-pressed="true"]::before,
+.lb-book .lbk-field:hover + .lbk-field::before,
+.lb-book .lbk-field[aria-pressed="true"] + .lbk-field::before {
+  opacity: 0;
+}
+.lb-book .lbk-field-k {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 11.5px;
+}
+.lb-book .lbk-field-v {
+  font-size: var(--t-13);
+  overflow-wrap: anywhere;
+}
+
+/* Fields light the events behind them; every other event steps back. */
+.lb-book .lbk-flow[data-lit="activity"] .lbk-ev:not([data-feeds~="activity"]),
+.lb-book .lbk-flow[data-lit="phase"] .lbk-ev:not([data-feeds~="phase"]),
+.lb-book .lbk-flow[data-lit="plan"] .lbk-ev:not([data-feeds~="plan"]),
+.lb-book .lbk-flow[data-lit="milestones"] .lbk-ev:not([data-feeds~="milestones"]),
+.lb-book .lbk-flow[data-lit="focus"] .lbk-ev:not([data-feeds~="focus"]),
+.lb-book .lbk-flow[data-lit="lastCheck"] .lbk-ev:not([data-feeds~="lastCheck"]) {
+  opacity: 0.28;
+}
+
+/* The connectors: one thin arrow between the three parts, with what crosses it. Vertical on a
+   phone, horizontal once the parts sit side by side. */
+.lb-book .lbk-conn {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 14px;
+  height: 64px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.35;
+}
+.lb-book .lbk-conn svg {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lb-book .lbk-conn-v {
+  grid-column: 2;
+}
+.lb-book .lbk-conn-h {
+  display: none;
+}
+.lb-book .lbk-conn > span {
+  grid-column: 3;
+  max-width: 13em;
+}
+.lb-book .lbk-flow-note {
+  margin: 12px 2px 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- phase */
+.lb-book .lbk-phases {
+  margin: 24px 0 22px;
+}
+.lb-book .lbk-phases-h {
+  display: none;
+}
+.lb-book .lbk-phase {
+  display: grid;
+  gap: 2px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-14);
+  line-height: 1.5;
+}
+.lb-book .lbk-phase:last-child {
+  border-bottom: 1px solid var(--line-soft);
+}
+.lb-book .lbk-phase b {
+  font-size: 15px;
+}
+.lb-book .lbk-phase span:last-child {
+  color: var(--muted);
+}
+.lb-book .lbk-phase em {
+  color: var(--ink);
+  font-style: normal;
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-classes {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+.lb-book .lbk-classes div {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 10px;
+  font-size: var(--t-13);
+}
+.lb-book .lbk-classes dt {
+  color: var(--muted);
+}
+.lb-book .lbk-classes dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+/* ---------------------------------------------------------------- focus */
+.lb-book .lbk-steps {
+  margin: 20px 0 32px;
+  counter-reset: step;
+}
+.lb-book .lbk-steps li {
+  position: relative;
+  padding: 0 0 12px 30px;
+  counter-increment: step;
+}
+.lb-book .lbk-steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 2px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.lb-book .lbk-focus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px;
+  margin-bottom: 26px;
+}
+.lb-book .lbk-weights {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-13);
+}
+.lb-book .lbk-weights td {
+  padding: 7px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.lb-book .lbk-weights td:first-child {
+  width: 44px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lb-book .lbk-weights td:last-child {
+  width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lb-book .lbk-weights tfoot td {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.lb-book .lbk-weights tfoot td:last-child {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+
+.lb-book .lbk-tree {
+  font-size: var(--t-13);
+}
+.lb-book .lbk-node {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px 72px 36px;
+  align-items: center;
+  column-gap: 12px;
+  height: 32px;
+  padding-left: calc(var(--d) * 18px);
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+}
+.lb-book .lbk-node:last-child {
+  border-bottom: 1px solid var(--line-soft);
+}
+.lb-book .lbk-node code {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lb-book .lbk-node--dir,
+.lb-book .lbk-node.is-hot {
+  color: var(--ink);
+}
+.lb-book .lbk-node-w {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lb-book .lbk-node-pct {
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* A share of the turn's weight: a hairline track, the share in ink, and a tick at 60%. */
+.lb-book .lbk-node-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-soft);
+}
+.lb-book .lbk-node-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--share);
+  border-radius: 2px;
+  background: var(--faint);
+}
+.lb-book .lbk-node-bar::after {
+  content: "";
+  position: absolute;
+  left: 60%;
+  top: -4px;
+  bottom: -4px;
+  width: 1px;
+  background: var(--muted);
+}
+.lb-book .lbk-node.is-focus {
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-node.is-focus .lbk-node-bar i {
+  background: var(--ink);
+}
+.lb-book .lbk-node.is-focus .lbk-node-pct {
+  color: var(--ink);
+}
+.lb-book .lbk-node-tag {
+  grid-column: 3 / 5;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------------------------------------------------------------- milestones */
+.lb-book .lbk-ladder {
+  position: relative;
+  margin: 28px 0 26px;
+}
+.lb-book .lbk-ladder li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 12px;
+  padding: 0 0 18px 30px;
+}
+/* The rail between two steps; ink where both are reached. */
+.lb-book .lbk-ladder li::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: -4px;
+  width: 1px;
+  background: var(--line);
+}
+.lb-book .lbk-ladder li.is-done:has(+ li.is-done)::before {
+  background: var(--ink);
+}
+.lb-book .lbk-ladder li:last-child::before {
+  display: none;
+}
+.lb-book .lbk-ladder li::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+  background: var(--bg);
+}
+.lb-book .lbk-ladder li.is-done::after {
+  background: var(--ink);
+  box-shadow: none;
+}
+/* Passing holds only when the output is recognised: a ring around the dot says "conditional". */
+.lb-book .lbk-ladder li.is-maybe::after {
+  box-shadow: 0 0 0 2.5px var(--bg), 0 0 0 3.5px var(--faint);
+}
+.lb-book .lbk-ladder b {
+  font-size: 15px;
+}
+.lb-book .lbk-ladder li:not(.is-done) b {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.lb-book .lbk-ladder time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  align-self: center;
+}
+.lb-book .lbk-ladder li.is-done time {
+  color: var(--muted);
+}
+.lb-book .lbk-ladder span {
+  grid-column: 1 / 3;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+
+/* ---------------------------------------------------------------- the progress tool */
+.lb-book .lbk-tool {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  margin: 26px 0 30px;
+}
+.lb-book .lbk-code {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+.lb-book .lbk-code code {
+  font-size: inherit;
+}
+.lb-book .lbk-plan {
+  padding: 2px 4px;
+}
+.lb-book .lbk-plan li {
+  position: relative;
+  padding: 4px 0 4px 26px;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.lb-book .lbk-plan li::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 10px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+.lb-book .lbk-plan li.is-done::before {
+  top: 8px;
+  left: 4px;
+  width: 5px;
+  height: 9px;
+  border-radius: 0;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  box-shadow: none;
+  transform: rotate(40deg);
+}
+.lb-book .lbk-plan li.is-doing {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-plan li.is-doing::before {
+  background: var(--ink);
+  box-shadow: none;
+}
+.lb-book .lbk-quote {
+  margin: 14px 0 18px;
+  padding: 2px 0 2px 16px;
+  font-size: 17px;
+  line-height: 1.5;
+  box-shadow: inset 2px 0 0 var(--brass);
+}
+
+/* ---------------------------------------------------------------- what the row says */
+.lb-book .lbk-cases {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 26px;
+  margin-top: 24px;
+  counter-reset: case;
+}
+.lb-book .lbk-cases li {
+  counter-increment: case;
+}
+.lb-book .lbk-case-h {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--t-14);
+  line-height: 1.5;
+}
+.lb-book .lbk-case-h::before {
+  content: counter(case) ".";
+  margin-right: 8px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.lb-book .lbk-case-h b {
+  margin-right: 4px;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- cost, changes, limits */
+.lb-book .lbk-costs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+  margin: 24px 0 26px;
+}
+.lb-book .lbk-costs div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  padding-left: 16px;
+  box-shadow: inset 1px 0 0 var(--line);
+}
+.lb-book .lbk-costs b {
+  font-size: 16px;
+}
+.lb-book .lbk-costs span {
+  color: var(--muted);
+  font-size: var(--t-14);
+  line-height: 1.5;
+}
+
+.lb-book .lbk-changes {
+  margin-top: 22px;
+}
+.lb-book .lbk-changes div {
+  display: grid;
+  gap: 2px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.lb-book .lbk-changes div:last-child {
+  border-bottom: 1px solid var(--line-soft);
+}
+.lb-book .lbk-changes dt {
+  font-weight: var(--w-medium);
+}
+.lb-book .lbk-changes dd {
+  color: var(--muted);
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+
+.lb-book .lbk-limits {
+  margin-top: 20px;
+}
+.lb-book .lbk-limits li {
+  position: relative;
+  padding: 0 0 14px 22px;
+  color: color-mix(in oklab, var(--ink) 86%, var(--muted));
+}
+.lb-book .lbk-limits li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.8em;
+  width: 9px;
+  height: 1px;
+  background: var(--faint);
+}
+
+/* ---------------------------------------------------------------- the List, find, Kanban */
+.lb-book .lbk-variant {
+  margin-top: 64px;
+}
+.lb-book .lbk-variant .lbk-keys {
+  margin-top: 14px;
+  color: var(--faint);
+  font-size: var(--t-13);
+}
+.lb-book .lbk-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 12px 0 16px;
+}
+.lb-book .lbk-tokens code {
+  font-size: 13px;
+}
+.lb-book kbd {
+  font-size: var(--t-12);
+}
+
+/* A capture slot. Until the capture exists it is a quiet frame that links to the live window. */
+.lb-book .lbk-shot {
+  margin-top: 26px;
+}
+.lb-book .lbk-shot-frame {
+  display: block;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.lb-book .lbk-shot.is-shot .lbk-shot-frame {
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-2);
+}
+.lb-book .lbk-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.lb-book .lbk-shot img[hidden] {
+  display: none;
+}
+.lb-book .lbk-shot-empty {
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  aspect-ratio: 16 / 10;
+  max-height: 320px;
+  width: 100%;
+  padding: 20px;
+  text-align: center;
+}
+.lb-book .lbk-shot.is-shot .lbk-shot-empty {
+  display: none;
+}
+.lb-book .lbk-shot-empty b {
+  color: var(--muted);
+}
+.lb-book .lbk-shot-empty span {
+  color: var(--faint);
+  font-size: var(--t-13);
+}
+.lb-book .lbk-shot-frame:hover .lbk-shot-empty b {
+  color: var(--ink);
+}
+.lb-book .lbk-shot figcaption {
+  margin-top: 10px;
+  font-size: var(--t-13);
+}
+.lb-book .lbk-shot figcaption a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.lb-book .lbk-shot figcaption a:hover {
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- try it */
+.lb-book .lbk-go {
+  margin-top: 26px;
+}
+.lb-book .lbk-go .btn {
+  gap: 8px;
+}
+.lb-book .lbk-links {
+  margin-top: 4px;
+}
+.lb-book .lbk-links a {
+  display: grid;
+  gap: 1px;
+  padding: 10px 2px;
+  border-top: 1px solid var(--line-soft);
+  transition: background var(--dur-1);
+}
+.lb-book .lbk-links li:last-child a {
+  border-bottom: 1px solid var(--line-soft);
+}
+.lb-book .lbk-links a:hover b {
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+.lb-book .lbk-links code,
+.lb-book .lbk-links span {
+  overflow-wrap: anywhere;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+.lb-book .lbk-foot {
+  max-width: var(--lbk-col);
+  margin: 96px auto 0;
+  padding: 24px var(--lbk-pad) 48px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: center;
+}
+
+/* ================================================================ wider screens */
+@media (min-width: 641px) {
+  .lb-book {
+    --lbk-pad: 32px;
+  }
+  .lb-book .lbk-brand span {
+    display: inline;
+  }
+  .lb-book .lbk-top {
+    padding: 0 16px 0 24px;
+    gap: 20px;
+  }
+  .lb-book .lbk-nav {
+    justify-content: center;
+  }
+  .lb-book .lbk-h1 {
+    font-size: 64px;
+  }
+  .lb-book .lbk-h2 {
+    font-size: 36px;
+  }
+  .lb-book .lbk-cover {
+    padding-top: 96px;
+  }
+  .lb-book .lbk-sec {
+    padding-top: 96px;
+  }
+  .lb-book .lbk-sec + .lbk-sec > .lbk-col:first-child {
+    padding-top: 72px;
+  }
+  .lb-book .lbk-sub {
+    margin-top: 112px;
+  }
+  .lb-book .lbk-stats {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .lb-book .lbk-phases-h {
+    display: grid;
+    grid-template-columns: 110px 1fr 1.15fr;
+    gap: 20px;
+    padding-bottom: 8px;
+    color: var(--faint);
+    font-size: var(--t-12);
+  }
+  .lb-book .lbk-phase {
+    grid-template-columns: 110px 1fr 1.15fr;
+    gap: 20px;
+  }
+  .lb-book .lbk-costs {
+    grid-template-columns: 1fr 1fr;
+    gap: 28px 32px;
+  }
+  .lb-book .lbk-changes div {
+    grid-template-columns: 150px 1fr;
+    gap: 20px;
+  }
+  .lb-book .lbk-ladder {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    column-gap: 10px;
+  }
+  .lb-book .lbk-ladder li {
+    display: flex;
+    flex-direction: column;
+    padding: 24px 0 0;
+  }
+  .lb-book .lbk-ladder li::before {
+    left: 6px;
+    right: -16px;
+    top: 5px;
+    bottom: auto;
+    width: auto;
+    height: 1px;
+  }
+  .lb-book .lbk-ladder li::after {
+    top: 0;
+  }
+  .lb-book .lbk-ladder time {
+    align-self: flex-start;
+    margin-top: 1px;
+  }
+  .lb-book .lbk-ladder span {
+    margin-top: 6px;
+    font-size: var(--t-12);
+  }
+  .lb-book .lbk-cases li {
+    display: grid;
+    grid-template-columns: 1fr 1.25fr;
+    gap: 24px;
+    align-items: start;
+  }
+  .lb-book .lbk-case-h {
+    margin: 10px 0 0;
+  }
+  .lb-book .lbk-themes button {
+    padding: 0 10px;
+  }
+}
+
+/* The flow spreads into three columns once they fit side by side. */
+@media (min-width: 1100px) {
+  .lb-book .lbk-themes button span {
+    display: inline;
+  }
+  .lb-book {
+    --lbk-wide: 1240px;
+  }
+  .lb-book .lbk-flow {
+    grid-template-columns: minmax(0, 1.2fr) 96px minmax(0, 0.95fr) 96px minmax(0, 1.15fr);
+    align-items: center;
+    margin-top: 48px;
+    max-width: var(--lbk-wide);
+  }
+  .lb-book .lbk-flow-digest,
+  .lb-book .lbk-flow-rows {
+    align-self: center;
+  }
+  .lb-book .lbk-conn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: auto;
+    padding: 0 8px;
+    text-align: center;
+  }
+  .lb-book .lbk-conn > span {
+    order: -1;
+  }
+  .lb-book .lbk-conn-v {
+    display: none;
+  }
+  .lb-book .lbk-conn-h {
+    display: block;
+  }
+  .lb-book .lbk-conn-more {
+    display: none;
+  }
+  .lb-book .lbk-focus {
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+  }
+  .lb-book .lbk-tool {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-areas: "run peek" "row row";
+    gap: 32px 36px;
+  }
+  .lb-book .lbk-tool-run {
+    grid-area: run;
+  }
+  .lb-book .lbk-tool-peek {
+    grid-area: peek;
+  }
+  .lb-book .lbk-tool-row {
+    grid-area: row;
+    max-width: 440px;
+  }
+  .lb-book .lbk-links:not(.lbk-links--docs) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 32px;
+  }
+  .lb-book .lbk-links:not(.lbk-links--docs) li:nth-last-child(2) a {
+    border-bottom: 1px solid var(--line-soft);
+  }
+}
+
+/* On a wide page the reading column and the focus example get a little more room. */
+@media (min-width: 1100px) {
+  .lb-book {
+    --lbk-col: 720px;
+  }
+}

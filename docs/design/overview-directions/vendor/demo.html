@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- PROTOTYPE - the Office kit's demo: one project room, laid out as the app's Bureau
+         lays one out. ?theme=orient-express (or dark) draws it in the evening. -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <title>Office kit demo · Hercule</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--surface);
+      }
+      #office {
+        position: fixed;
+        inset: 0;
+      }
+      .bar {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 4px 4px 14px;
+        border-radius: var(--r-pill);
+        background: var(--raised);
+        box-shadow:
+          var(--shadow-1),
+          inset 0 0 0 1px var(--line-soft);
+        color: var(--ink);
+        font-size: var(--t-12);
+      }
+      .bar b {
+        margin-right: 8px;
+        font-weight: var(--w-bold);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .bar button {
+        height: 24px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--r-pill);
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        cursor: pointer;
+      }
+      .bar button[aria-pressed="true"] {
+        background: var(--selected);
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="office"></div>
+    <div class="bar">
+      <b>Webshop</b>
+      <button type="button" data-theme-choice="whitehaven">Whitehaven</button>
+      <button type="button" data-theme-choice="orient-express">Orient Express</button>
+    </div>
+
+    <script src="office-kit.js"></script>
+    <script>
+      var K = OfficeKit;
+      var stage = K.stage.create(document.getElementById("office"));
+
+      // The room: 9.6 by 6.4 metres, its border inlaid in the Webshop project's tint, windows
+      // on the north wall and a door in the south one. The stage lowers the walls that stand
+      // between the camera and the room.
+      var W = 9.6;
+      var D = 6.4;
+      stage.add(K.buildRoom({ width: W, depth: D, tint: "webshop", door: { wall: "south", at: 2.4 } }));
+      var plaque = K.buildPlaque("Webshop");
+      plaque.rotation.y = Math.PI / 2;
+      plaque.position.set(-W / 2 + K.WALL_THICKNESS / 2 + 0.002, 1.42, -1.6);
+      stage.add(plaque);
+
+      // Two pieces of work at clerk's desks pushed together, as the app seats them: a run's two
+      // agent steps (in visors), then three threads. Each desk faces south, so its sitter faces
+      // the camera; desks of one piece of work stand 0.08 apart, and 0.5 apart between pieces.
+      // The waiting thread steps out beside its desk, at the east end where there is room.
+      var crew = [
+        { id: "run-nightly-build", kind: "run", name: "Nightly · build", state: "typing" },
+        { id: "run-nightly-tests", kind: "run", name: "Nightly · tests", state: "typing" },
+        { id: "thread-checkout-flow", name: "Checkout flow", state: "typing" },
+        { id: "thread-cart-totals", name: "Cart totals", state: "typing" },
+        { id: "thread-refund-rules", name: "Refund rules", state: "Run git push?", pose: "waiting" },
+      ];
+      var deskX = [-3.17, -1.89, -0.19, 1.09, 2.37];
+      var people = crew.map(function (who, index) {
+        var desk = K.buildDesk();
+        desk.object.rotation.y = Math.PI;
+        desk.object.position.set(deskX[index], 0, -1.15);
+        stage.add(desk.object);
+        var colleague = K.colleague({ id: who.id, kind: who.kind, pose: who.pose || "working" });
+        colleague.sitAt(desk);
+        stage.add(colleague);
+        var tag = K.tag({ name: who.name, state: who.state, hue: colleague.look.hue, waiting: who.pose === "waiting" });
+        stage.label(colleague, tag);
+        return { colleague: colleague, tag: tag };
+      });
+
+      // A reading corner: a rug, a club armchair with an idle thread sipping its tisane, and a
+      // standard lamp, which lights up in the evening.
+      var rug = K.buildRug(2.3, 1.7);
+      rug.position.set(-3.2, 0, 1.75);
+      stage.add(rug);
+      var armchair = K.buildArmchair();
+      armchair.object.rotation.y = Math.PI / 3;
+      armchair.object.position.set(-3.5, 0, 1.6);
+      stage.add(armchair.object);
+      var idle = K.colleague({ id: "thread-price-feed", pose: "idle" });
+      idle.sitAt(armchair);
+      stage.add(idle);
+      var idleTag = K.tag({ name: "Price feed", state: "idle 2h", hue: idle.look.hue });
+      stage.label(idle, idleTag);
+      people.push({ colleague: idle, tag: idleTag });
+      var lamp = K.buildFloorLamp();
+      lamp.object.position.set(-4.3, 0, 0.85);
+      stage.add(lamp.object);
+
+      // The app's dressing of a project room: a tall palm in the far east corner and a lamp
+      // near the door, plus a filing cabinet against the west wall.
+      var palm = K.buildPlant("tall");
+      palm.position.set(W / 2 - 0.5, 0, -D / 2 + 0.5);
+      stage.add(palm);
+      var doorLamp = K.buildFloorLamp();
+      doorLamp.object.position.set(W / 2 - 0.4, 0, D / 2 - 0.9);
+      stage.add(doorLamp.object);
+      var cabinet = K.buildCabinet();
+      cabinet.rotation.y = Math.PI / 2;
+      cabinet.position.set(-W / 2 + 0.4, 0, -0.1);
+      stage.add(cabinet);
+      var plant = K.buildPlant("small");
+      plant.position.set(3.9, 0, 2.2);
+      stage.add(plant);
+
+      // The room's view, as the app frames a room. A portrait phone looks from the east, so
+      // the long row of desks runs down the screen.
+      var portrait = innerHeight > innerWidth;
+      var overview = stage.frame(undefined, portrait ? { azimuth: 82, elevation: 58 } : {});
+      if (portrait) {
+        // Name tags hang to the right of their heads, so the room moves a little left on screen:
+        // from the east, the screen's right is north.
+        var t = overview.target;
+        overview = { target: [t.x, t.y, t.z - 0.4], distance: overview.distance, azimuth: 82, elevation: 58 };
+        stage.view(overview);
+      }
+
+      // A click on a colleague flies to it and selects it; a click on the room flies back. One
+      // picker over both, so the nearest thing under the pointer wins.
+      var selected = null;
+      var pickable = people.map(function (each) { return each.colleague; }).concat([stage.building]);
+      stage.onPick(pickable, function (picked) {
+        var colleague = picked === stage.building ? null : picked;
+        if (colleague === selected) return;
+        people.forEach(function (each) {
+          each.colleague.rig.setSelected(each.colleague === colleague);
+          each.tag.classList.toggle("is-selected", each.colleague === colleague);
+        });
+        selected = colleague;
+        if (colleague !== null) stage.flyTo(colleague, 6, { azimuth: 28, elevation: 30 });
+        else stage.flyTo(overview.target, overview.distance, overview);
+      });
+
+      // The theme switch: the kit repaints every material and switches the lamps live.
+      var buttons = document.querySelectorAll("[data-theme-choice]");
+      function showTheme() {
+        var theme = document.documentElement.dataset.theme;
+        var evening = theme === "orient-express" || theme === "dark";
+        buttons.forEach(function (button) {
+          var pressed = button.dataset.themeChoice === (evening ? "orient-express" : "whitehaven");
+          button.setAttribute("aria-pressed", String(pressed));
+        });
+      }
+      buttons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          document.documentElement.dataset.theme = button.dataset.themeChoice;
+          showTheme();
+        });
+      });
+      showTheme();
+
+      // For scripted checks and the browser console.
+      window.demo = { stage: stage, people: people };
+    </script>
+  </body>
+</html>

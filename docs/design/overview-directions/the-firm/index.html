@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- PROTOTYPE - The Firm's story page: the pitch, the huh, the three modes, the stand-up, a walk
+         through 09:41, and what it would take. Images are 2x captures of desktop.html (shots/), in
+         both themes: name.webp and name-dark.webp. -->
+    <script src="../../shared/page.js"></script>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <link rel="stylesheet" href="index.css" />
+    <script src="../shared/book.js"></script>
+    <script>
+      // The window's shots exist in both themes: name.webp and name-dark.webp. The page shows the one
+      // that matches the book's theme and swaps it when the theme buttons change it. The Office's
+      // 3D shots are mostly light only: data-dark names the dark shot when there is one, and
+      // data-dark="" keeps the light shot in both themes.
+      (function () {
+        function showTheme() {
+          var dark = /^(orient-express|dark|nile|end-house)$/.test(document.documentElement.dataset.theme || "");
+          document.querySelectorAll("img[data-shot]").forEach(function (img) {
+            var darkName = img.dataset.dark == null ? img.dataset.shot + "-dark" : img.dataset.dark;
+            var src = "shots/" + (dark && darkName ? darkName : img.dataset.shot) + ".webp";
+            if (img.getAttribute("src") !== src) img.setAttribute("src", src);
+          });
+        }
+        new MutationObserver(showTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+        document.addEventListener("DOMContentLoaded", showTheme);
+
+        // On a phone a wide shot pans sideways. data-pan says where it starts, as a fraction of the
+        // way across, so the part that matters is in view first.
+        function placePans() {
+          document.querySelectorAll(".tf-pan[data-pan]").forEach(function (pan) {
+            if (pan.dataset.placed || pan.scrollWidth <= pan.clientWidth) return;
+            pan.scrollLeft = (pan.scrollWidth - pan.clientWidth) * Number(pan.dataset.pan);
+            pan.dataset.placed = "1";
+          });
+        }
+        document.addEventListener("DOMContentLoaded", function () {
+          placePans();
+          document.querySelectorAll(".tf-pan img").forEach(function (img) {
+            img.addEventListener("load", placePans);
+          });
+        });
+      })();
+    </script>
+    <title>The Firm · Seeing all the work · Hercule</title>
+  </head>
+  <body class="tf-story">
+    <header class="bk-top">
+      <a class="bk-brand" href="../index.html"><i data-logo="22"></i>The Firm <small>Seeing all the work · 5 of 5</small></a>
+      <nav class="bk-links" aria-label="Sections">
+        <a href="#huh">The huh</a>
+        <a href="#modes">Three modes</a>
+        <a href="#standup">Stand-up</a>
+        <a href="#walk">09:41</a>
+        <a href="#needs">What it needs</a>
+        <a href="#risks">Risks</a>
+        <a href="#live">Live window</a>
+      </nav>
+      <div class="bk-themes" role="group" aria-label="Theme">
+        <button data-theme-option="whitehaven">Whitehaven</button>
+        <button data-theme-option="orient-express">Orient Express</button>
+      </div>
+    </header>
+
+    <main class="bk">
+      <!-- 1. The pitch -->
+      <section class="bk-hero">
+        <p class="bk-eyebrow">Direction 5 · organized by who works for whom</p>
+        <h1><span class="bk-num">5</span>The Firm</h1>
+        <p class="bk-lever">“You run a firm of agents.”</p>
+        <p class="bk-lede">
+          You start leads. Leads start partners. Assistants start threads of their own, and workflows
+          run their shifts while you sleep. Hercule already writes down <b>who started whom</b>
+          (<code>sessions.created_by</code>). It just never shows it.
+        </p>
+        <p class="bk-lede">
+          The Firm draws it. A <b>team</b> is a lead and everyone it started, wherever they work. Every
+          team gets its own block in the list, its own branch on the chart and its own room in the
+          Office, and every branch runs up to you. That is the one new word this direction asks for.
+        </p>
+      </section>
+      <figure class="tf-fig tf-fig--hero">
+        <a class="tf-only-wide" href="desktop.html?mode=office"><img class="tf-shot" data-shot="hero" src="shots/hero.webp" width="1440" height="900" alt="The Firm's window at 09:41 in the Office mode: the Dollhouse, a tall Art Deco building signed Rogier &amp; Co., cut open from the front, a floor per project and a room per team, four beans queuing in the penthouse; beside it the sidebar's chain of command." /></a>
+        <a class="tf-only-phone" href="desktop.html?mode=office"><img class="tf-shot tf-shot--portrait" data-shot="office-portrait" data-dark="" src="shots/office-portrait.webp" width="412" height="915" alt="The Dollhouse drawn for a phone held upright: a lobby directory card with Your office, 4 waiting on you, and a line per floor, over the whole building, with the lift's floor buttons along the bottom." /></a>
+        <figcaption><b>Tuesday 09:41, the Dollhouse.</b> Rogier &amp; Co. cut open from the front: a floor per project, a room per team, your office on top with four beans queuing for you. <span class="tf-only-phone-inline">On a phone held upright the building gets a lobby directory and the lift's buttons along the bottom.</span><span class="tf-only-wide-inline">Beside it, the sidebar is the same firm as a chain of command.</span></figcaption>
+      </figure>
+
+      <!-- 2. The huh -->
+      <section class="bk-sec" id="huh">
+        <div class="bk-huh">
+          <p class="bk-eyebrow">The huh</p>
+          <h2>“Why do all the beans sit in one room?” They don’t any more.</h2>
+          <p>
+            Today every thread of a project sits at the same kind of desk in the same room, and the
+            sidebar lists them by when they started. Nothing says the adversarial review belongs to
+            the 3-D Secure fix, or that Milo started the backup investigation at 09:35. In The Firm
+            <b>every team has its own room</b>: the lead at the head desk, its partners beside it, the
+            plan on the whiteboard and a light over the door. And you can see the whole firm on one
+            page, where every line runs up to you.
+          </p>
+          <figure class="tf-fig tf-fig--pan tf-huh-room">
+            <div class="tf-pan" data-pan="0.45" style="--w:760px"><img class="tf-shot" data-shot="office-room" data-dark="" src="shots/office-room.webp" width="1440" height="900" loading="lazy" alt="The 3-D Secure team's room in the Dollhouse: a whiteboard with the goal PR merged with CI green, 4 of 9, the ticks and Push the branch in marigold; research and review at their desks; the lead's desk empty with the tag lead, upstairs, waits on you; a marigold light over the door." /></div>
+            <figcaption><span class="tf-swipe">Swipe sideways · </span><b>The 3-D Secure team's room.</b> The whiteboard is the lead's plan, 4 of 9, with "Push the branch" in marigold. The lead's desk is empty: it is upstairs, queuing for you.</figcaption>
+          </figure>
+          <figure class="tf-fig tf-fig--pan tf-huh-chain">
+            <div class="tf-pan" data-pan="0.45" style="--w:700px"><img class="tf-shot" data-shot="org-chain" src="shots/org-chain.webp" width="700" height="600" loading="lazy" alt="On the Org Chart, the pointer on the review card: its line lights up through the 3-D Secure lead and the webshop plate to Rogier, and every other card steps back." /></div>
+            <figcaption><span class="tf-swipe">Swipe sideways · </span><b>The whole firm on one page.</b> On the Org Chart, point at anyone and their chain of command lights up, all the way to you.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- 3. The three modes -->
+      <section class="bk-sec" id="modes">
+        <p class="bk-eyebrow">One idea, three lenses</p>
+        <h2>The work, organized by who started whom.</h2>
+        <p class="bk-lede">
+          The Org Chart draws the firm on one page, Threads lists it as a chain of command, and the
+          Office cuts the building open like a doll's house. One selection runs through all three and
+          the sidebar: pick a row and the chart pans to its card, the table rings its row and the
+          Dollhouse's camera rides up to its room. Switch with the top bar or <kbd>1</kbd> <kbd>2</kbd>
+          <kbd>3</kbd>; fold to <b>Leads only</b> with <kbd>F</kbd>.
+        </p>
+
+        <article class="tf-mode tf-mode--stack" id="office">
+          <figure class="tf-fig">
+            <a href="desktop.html?mode=office"><img class="tf-shot" data-shot="office-hero" data-dark="office-dark" src="shots/office-hero.webp" width="1440" height="900" loading="lazy" alt="The Dollhouse, the whole building: the penthouse with your desk and the queue, three project floors with a room per team and a plaque under each, the Secretariat on the mezzanine, the runs' benches on the ground floor and the Café des Égarés in the basement; floor nameplates on the left and the lift's buttons on the right." /></a>
+          </figure>
+          <div class="tf-mode-text">
+            <h3 class="tf-mode-name">Office <small>the Dollhouse</small></h3>
+            <p class="bk-body">
+              The firm's building, cut open at the front, on a little street. <b>A storey per project</b>
+              in its tint; <b>a room per team</b>, sized by headcount, the lead at the head desk; a single
+              office for a thread on its own. Each room has a frosted door with a brass plaque, a
+              <b>door light</b> (marigold when anyone in it waits on you, green while it works, dark when
+              quiet) and a <b>whiteboard</b> with the lead's plan: ticks, an arrow where it stands, marigold
+              where it waits, and a row of dots per partner. Under each room a plaque gives its light,
+              a short name and its headcount.
+            </p>
+            <p class="bk-body">
+              <b>The penthouse is your office.</b> "Now serving 4": the four that wait on you queue at your
+              desk, oldest nearest, each with its ask; their desks downstairs keep a marigold note,
+              "upstairs, waits on you". A brass lift runs up the right side. The assistants have the
+              mezzanine, runs work the ground floor at a bench each with a card per step, and threads
+              with no project sit in the café in the basement.
+            </p>
+            <p class="bk-body">
+              The camera rides up and down like the lift: scroll or drag, <kbd>↑</kbd> <kbd>↓</kbd> a storey,
+              <kbd>0</kbd> the whole building, or the floor buttons on the right, where the penthouse
+              button carries the waiting count. Click a room to fly in. Labels come by distance: floor
+              nameplates far away, desk name tags ("review · Codex") up close.
+            </p>
+            <p class="tf-when"><b>You open it to show someone</b> what your agents are doing, which ones work together, and who is queuing for you.</p>
+          </div>
+          <div class="tf-pair tf-pair--wide">
+            <figure class="tf-fig">
+              <img class="tf-shot" data-shot="office-queue" data-dark="" src="shots/office-queue.webp" width="1440" height="900" loading="lazy" alt="The penthouse up close: your desk, a Now serving 4 sign, and four beans queuing with their hands up, each with its ask: 3-D Secure, Run git push?; Ship v2.15, Publish to npm?; Ops dashboards, Keep the old Grafana folder?; Payout report, check, Settlement or payout date?" />
+              <figcaption><b>The queue.</b> Waiting on you, as four beans at your desk with their hands up.</figcaption>
+            </figure>
+            <figure class="tf-fig">
+              <img class="tf-shot" data-shot="office-lift" data-dark="" src="shots/office-lift.webp" width="1440" height="900" loading="lazy" alt="The top of the building: the sign Rogier &amp; Co., est. 2026, the penthouse and the brass lift, and the ops floor below." />
+              <figcaption><b>Rogier &amp; Co., est. 2026.</b> The lift brings waiting beans up to you; the camera rides with it.</figcaption>
+            </figure>
+          </div>
+        </article>
+
+        <article class="tf-mode" id="threads">
+          <figure class="tf-fig tf-fig--pan">
+            <div class="tf-pan" style="--w:880px"><img class="tf-shot" data-shot="threads" src="shots/threads.webp" width="880" height="520" loading="lazy" alt="The Threads mode: Rogier as the root, Waiting on you with answer buttons on each row, then payments-api with the payout report's team: its lead and the check partner on build-box-2." /></div>
+            <figcaption><span class="tf-swipe">Swipe sideways · </span><b>Waiting on you on top</b>, with the answers on the row; then each project's teams.</figcaption>
+          </figure>
+          <div>
+            <h3 class="tf-mode-name">Threads <small>the chain of command</small></h3>
+            <p class="bk-body">
+              The same tree as a wide table. Each row says who, which model, the status and how long,
+              <b>who started it and when</b> ("the lead · 09:35", "you, added", "Milo", "its run"), and
+              its tokens; a lead's row adds up its team. A partner on another machine says so under its
+              model.
+            </p>
+            <p class="bk-body">
+              Waiting on you rises to the top, with the answer buttons on the row. A lead's row offers
+              the <b>team actions</b> under the pointer: <b>Stand-up</b>, <b>Brief</b> (to the lead, or
+              to all of them) and <b>Done</b> (the whole team). An answered row stays where it is,
+              marked, until the pointer leaves the table.
+            </p>
+            <p class="bk-body">
+              Here the selection card docks along the bottom of the pane, and the table ends above it,
+              so it never covers a row.
+            </p>
+            <p class="tf-when"><b>You open it to work through the firm:</b> answer, brief, close teams, in order.</p>
+          </div>
+          <figure class="tf-fig tf-fig--pan tf-fig--span">
+            <div class="tf-pan" style="--w:1000px"><img class="tf-shot" data-shot="threads-dock" src="shots/threads-dock.webp" width="1168" height="340" loading="lazy" alt="The bottom of the Threads table with the selection card docked under it: Fix 3-D Secure checkout for EU cards, lead of 3, waiting 10m, Run git push -u origin fix/3ds-eu-cards?, Allow once, Deny, Open thread." /></div>
+            <figcaption><span class="tf-swipe">Swipe sideways · </span><b>The card docks.</b> Who, the ask and the answers in one bar; the rows stay readable above it.</figcaption>
+          </figure>
+        </article>
+
+        <article class="tf-mode tf-mode--stack" id="org">
+          <figure class="tf-fig tf-fig--pan">
+            <div class="tf-pan" data-pan="0.25" style="--w:1000px"><a href="desktop.html?mode=org"><img class="tf-shot" data-shot="org" src="shots/org.webp" width="1440" height="900" loading="lazy" alt="The Org Chart at 09:41: the letterhead Rogier &amp; Co., Rogier as principal with 5 teams, 23 sessions, 9.42M tokens and four faces waiting on him, a column each for payments-api, ops with No project, webshop, the Assistants and the Workflows, and the selection card at the bottom left." /></a></div>
+            <figcaption><span class="tf-swipe">Swipe sideways · </span><b>The Org Chart.</b> The firm under its letterhead. The fit keeps every card clear of the selection card at the bottom left.</figcaption>
+          </figure>
+          <div class="tf-mode-text">
+            <h3 class="tf-mode-name">Org Chart <small>its own view</small></h3>
+            <p class="bk-body">
+              A live organogram under the firm's letterhead. <b>Rogier is the principal</b> at the top;
+              a bus runs to a column per project, one for the assistants and one for the workflows.
+              Leads hang off each column's trunk; partners hang off their lead. Lines are
+              <b>“started by”</b>: solid when the lead started the partner, dashed when you added it.
+            </p>
+            <p class="bk-body">
+              A card carries a face, the role (or the title, for a lead), the model, the status and how
+              long. <b>Tokens roll up the tree</b>: a lead's card adds up its team ("1.73M + 1
+              unreported", because Codex reports none), a plate its project, Rogier's card the firm.
+              Runs are small departments: their steps as dots, the session of the current step inside.
+              Pan by dragging, <kbd>⌘</kbd> scroll to zoom, <kbd>0</kbd> to fit.
+            </p>
+            <p class="tf-when"><b>You open it to see the firm:</b> who is on which team, who started what, where the tokens went.</p>
+          </div>
+          <figure class="tf-fig tf-fig--pan tf-fig--half">
+            <div class="tf-pan" data-pan="0.3" style="--w:700px"><img class="tf-shot" data-shot="leads" src="shots/leads.webp" width="700" height="420" loading="lazy" alt="The Org Chart folded to leads only: each lead card shows its team's faces, and a team speaks with its most urgent member's voice: check asks, Settlement or payout date?" /></div>
+            <figcaption><span class="tf-swipe">Swipe sideways · </span><b>Folded to Leads only.</b> One card per lead; a team speaks with its most urgent member's voice.</figcaption>
+          </figure>
+        </article>
+
+        <article class="tf-mode tf-mode--side" id="sidebar">
+          <figure class="tf-fig tf-fig--narrow">
+            <img class="tf-shot" data-shot="sidebar" src="shots/sidebar.webp" width="272" height="720" loading="lazy" alt="The sidebar as the chain of command: Rogier at the root with 5 teams and 23 sessions and the fold control, Waiting on you, then payments-api: the payout report's row with its faces and check asks, the check partner under it on an elbow, then the Result migration and its review, then iDEAL research as today's plain row." />
+          </figure>
+          <div>
+            <h3 class="tf-mode-name">The sidebar <small>the chain of command, at 272px</small></h3>
+            <p class="bk-body">
+              Rogier is the root: <b>5 teams · 23 sessions</b>, and the fold, <b>Everyone</b> or
+              <b>Leads only</b>. Waiting on you stays on top. Then the projects as quiet headers, and in
+              each a team is its lead's row with a small pile of the team's faces and its roles,
+              <b>“lead · research · review”</b>. When anyone in the team waits, the row speaks with that
+              member's voice: <b>“check asks · Settlement or payout date?”</b>
+            </p>
+            <p class="bk-body">
+              Partners hang under their lead on a hairline elbow, <b>role first</b> ("review · Codex");
+              the title is in the hover card, with who started it, where it works and its tokens.
+              <b>A thread on its own is today's row</b>, to the pixel: it costs nothing. The assistants
+              are managers with what they started under them, and the workflows list their runs.
+            </p>
+            <p class="bk-body">
+              The Firm <b>counts everyone in the firm</b>: threads, the partners they started, the
+              assistants' threads and the runs' step sessions. So its foot reads "10 working · 4 waiting
+              · 9 idle · everyone", where a count of threads alone says 6, 4 and 7. The top bar leads
+              with "23 sessions" for the same reason.
+            </p>
+            <p class="tf-when"><b>While the overview is open</b> the sidebar is its index: a click selects in whichever mode is showing, a double click or <kbd>↩</kbd> opens the thread. With the overview closed, a click opens, as today.</p>
+          </div>
+        </article>
+      </section>
+
+      <!-- 4. The stand-up -->
+      <section class="bk-sec" id="standup">
+        <p class="bk-eyebrow">The signature</p>
+        <h2>Stand-up: one key asks the whole team, and each member answers on its own row.</h2>
+        <p class="bk-lede">
+          Select a team and press <kbd>S</kbd>, or the button on its row. Within a second or two every
+          member answers <b>in place, in its own voice</b>, one line each, stamped "stand-up 09:41". The
+          lead says it waits on you to push; research says it finished at 09:21; review says it has
+          one finding so far and is still reading. You know where the team stands without opening
+          three transcripts.
+        </p>
+        <div class="tf-pair">
+          <figure class="tf-fig tf-fig--narrow">
+            <img class="tf-shot" data-shot="standup-side" src="shots/standup-side.webp" width="272" height="400" loading="lazy" alt="The 3-D Secure team in the sidebar after a stand-up: each member's row carries one line in its own hue, and the stamp says stand-up 09:41, everyone answered." />
+            <figcaption><b>In the sidebar.</b> Rows grow by one line; the stamp says when.</figcaption>
+          </figure>
+          <figure class="tf-fig tf-fig--narrow">
+            <img class="tf-shot" data-shot="standup-org" src="shots/standup-org.webp" width="238" height="474" loading="lazy" alt="The same stand-up on the Org Chart: the lead's card and its partners' cards each hold their answer." />
+            <figcaption><b>On the chart.</b> The cards grow; the cards below make room.</figcaption>
+          </figure>
+        </div>
+        <figure class="tf-fig tf-fig--pan tf-fig--strip">
+          <div class="tf-pan" data-pan="0.5" style="--w:760px"><img class="tf-shot" data-shot="office-standup" data-dark="" src="shots/office-standup.webp" width="1440" height="900" loading="lazy" alt="In the Dollhouse, the 3-D Secure team gathers at its whiteboard: research, the lead with its hand up and review, each with a speech bubble holding its stand-up line." /></div>
+          <figcaption><span class="tf-swipe">Swipe sideways · </span><b>In the Office.</b> The team gathers at its whiteboard and each says its line. The lead comes down with its hand still up: it still waits on you.</figcaption>
+        </figure>
+        <p class="bk-body tf-note">
+          It costs one model call per working member, and only when you ask. An idle member answers
+          from its last headline at once, with no call. The same stand-up is in the Threads table and
+          in the open thread's header.
+        </p>
+      </section>
+
+      <!-- 5. More moments -->
+      <section class="bk-sec" id="moments">
+        <p class="bk-eyebrow">The firm at work</p>
+        <h2>New hires, the morning's memo, and a lead that manages nine.</h2>
+        <div class="tf-moment">
+          <figure class="tf-fig tf-fig--small">
+            <img class="tf-shot" data-shot="spawn" src="shots/spawn.webp" width="232" height="340" loading="lazy" alt="On the Org Chart, Rotate staging secrets starts its first partner: the verify card grows out of the lead with a new hire 09:41 tag and the lead's brief inside." />
+          </figure>
+          <figure class="tf-fig tf-fig--pan">
+            <div class="tf-pan" data-pan="0.15" style="--w:760px"><img class="tf-shot" data-shot="office-spawn-seated" data-dark="" src="shots/office-spawn-seated.webp" width="1440" height="900" loading="lazy" alt="In the Dollhouse, the staging secrets room has grown to two desks; verify sits at the new one with the tag verify, Codex, new, and the lead's brief floats above: Restart each staging service one at a time." /></div>
+          </figure>
+          <p class="tf-moment-cap"><b>A new hire.</b> At 09:41 Rotate staging secrets starts verify. On the chart the card grows out of its lead with the brief it was given. In the Dollhouse the room's wall slides to make space, a desk drops in, and verify rides up in the lift to take it. <span class="tf-swipe">Swipe the Dollhouse sideways.</span></p>
+        </div>
+        <div class="tf-moment">
+          <figure class="tf-fig tf-fig--small">
+            <img class="tf-shot" data-shot="exchange" src="shots/exchange.webp" width="232" height="500" loading="lazy" alt="On the Org Chart, the tests partner reports to its lead: a marigold dot travels up the line, and the message sits in the tests card." />
+          </figure>
+          <figure class="tf-fig tf-fig--pan">
+            <div class="tf-pan" data-pan="0.45" style="--w:760px"><img class="tf-shot" data-shot="office-exchange" data-dark="" src="shots/office-exchange.webp" width="1440" height="900" loading="lazy" alt="In the Dollhouse, the cart tests partner has walked to its lead's desk and talks; the lead stands and listens; the bubble says tests reports to the lead, 09:40: 1 failing property." /></div>
+          </figure>
+          <p class="tf-moment-cap"><b>A message travels.</b> At 09:40 tests reports to its lead. On the chart a dot runs up the line and the words sit in the card; in the Dollhouse the partner walks over to the lead's desk and tells it.</p>
+        </div>
+        <div class="tf-moment">
+          <figure class="tf-fig tf-fig--small">
+            <img class="tf-shot" data-shot="away-side" src="shots/away-side.webp" width="272" height="520" loading="lazy" alt="The sidebar after 40 minutes away: a memo on top says 5 joined, 3 started by others, 5 reports, and partners that joined while away wear an ink dot." />
+          </figure>
+          <figure class="tf-fig tf-fig--pan">
+            <div class="tf-pan" data-pan="0.5" style="--w:760px"><img class="tf-shot" data-shot="office-away" data-dark="" src="shots/office-away.webp" width="1440" height="900" loading="lazy" alt="The Dollhouse after 40 minutes away: a caption Back at 09:41, away 40m, 5 new teams, 2 grew, 4 wait on you; plaques tagged new, +1 and news." /></div>
+          </figure>
+          <p class="tf-moment-cap"><b>While you were out.</b> The tree's memo, and an ink dot on everyone who joined since 09:01. In the Dollhouse the plaques say "new" for a team started since you left, "+1" for a team that grew and "news" for a result you have not read.</p>
+        </div>
+        <figure class="tf-fig tf-fig--pan tf-fig--strip">
+          <div class="tf-pan" style="--w:904px"><img class="tf-shot" data-shot="away" src="shots/away.webp" width="904" height="104" loading="lazy" alt="On the Org Chart, Rogier's card becomes a memo: While you were out, 09:01 to 09:41: 5 joined a team, 3 started by others, 5 reports to leads, 4 wait on you, each group with faces to click." /></div>
+          <figcaption><span class="tf-swipe">Swipe sideways · </span><b>On the chart, Rogier's card becomes the memo.</b> Who joined, what others started, which reports came in, what waits. Every face selects its card.</figcaption>
+        </figure>
+        <figure class="tf-fig tf-fig--pan tf-fig--strip">
+          <div class="tf-pan" style="--w:1160px"><img class="tf-shot" data-shot="open-header" src="shots/open-header.webp" width="1160" height="60" loading="lazy" alt="The open thread's header: webshop, Fix 3-D Secure checkout for EU cards, then its team as tabs: lead, research 20m, review, and on the right the team's faces with a Stand-up button." /></div>
+          <figcaption><span class="tf-swipe">Swipe sideways · </span><b>An open thread knows its team.</b> The header's tabs are the team by role, and the stand-up is one click away.</figcaption>
+        </figure>
+      </section>
+
+      <!-- 6. The walk-through -->
+      <section class="bk-sec" id="walk">
+        <p class="bk-eyebrow">A walk through the morning</p>
+        <h2>09:41. You’re back after forty minutes.</h2>
+        <p class="bk-lede">You left your desk at 09:01 and started a few threads from your phone between meetings. The firm kept working.</p>
+        <ol class="bk-steps tf-steps">
+          <li>
+            <h4>09:41 · The memo</h4>
+            <p>The sidebar's root holds a memo: <b>5 joined · 3 started by others · 5 reports</b>. On the Org Chart, Rogier's card has become "While you were out", and every card that joined since 09:01 wears a black "joined" tag.</p>
+          </li>
+          <li>
+            <h4>09:41 · Who is new</h4>
+            <p>You click the fourth face under "5 joined": the review the 3-D Secure lead started at 09:30. The chart pans to it and its chain lights: review, its lead, webshop, you.</p>
+          </li>
+          <li>
+            <h4>09:42 · Stand-up</h4>
+            <p>You press <kbd>S</kbd>. The lead: "Fix written, 24 checkout tests pass. I'm waiting on you to push." Research: "Done at 09:21." Review: "1 finding so far, still reading status handling." Three lines, no transcripts.</p>
+          </li>
+          <li>
+            <h4>09:42 · Answer</h4>
+            <p>The card at the bottom left asks <code>git push -u origin fix/3ds-eu-cards</code>. <b>Allow once.</b> The lead goes back to work, Waiting on you drops to 3, and a toast offers Undo.</p>
+          </li>
+          <li>
+            <h4>09:43 · A brief for the whole team</h4>
+            <p>On the cart refactor's row you press <b>Brief</b> and send to both: "Rebase after the 3-D Secure fix lands, then rerun the property tests." One message, the lead and its tests partner.</p>
+          </li>
+          <li>
+            <h4>09:43 · The whole firm, folded</h4>
+            <p><kbd>F</kbd> folds to leads only: one card per lead, each team's card with its faces and one voice. Two still ask for you in marigold, and the release run waits on its publish step. That is your next five minutes.</p>
+          </li>
+        </ol>
+      </section>
+
+      <!-- 7. What it needs, what it costs, risks -->
+      <section class="bk-sec" id="needs">
+        <p class="bk-eyebrow">What Hercule would need</p>
+        <h2>Most of it is stored already. It needs exposing, and one word.</h2>
+        <p class="bk-lede">The first slice is the sidebar's tree: it needs only <code>startedBy</code> on the contract. The chart and the stand-up come after.</p>
+        <div class="bk-scroll">
+          <table class="bk-table tf-needs">
+            <thead><tr><th>Piece</th><th>Today</th><th>Needed</th></tr></thead>
+            <tbody>
+              <tr><td>Who started whom</td><td>Stored as <code>sessions.created_by</code> (<code>user</code> or <code>session:&lt;id&gt;</code>), not on the contract.</td><td><code>startedBy</code> on the Session, plus "added by you" for a partner started with the header's +.</td></tr>
+              <tr><td>Assistants and runs as starters</td><td>An assistant's threads and a run's step sessions are stamped with their actor.</td><td>Read them the same way: <code>assistant:&lt;name&gt;</code>, <code>run:&lt;id&gt;</code>; a run's origin (you, a trigger, an assistant).</td></tr>
+              <tr><td>The word "team"</td><td>GLOSSARY.md gives the sessions of one workspace no noun, on purpose.</td><td>Propose <b>team</b>: a lead and every session it started, wherever they work. Lineage, not the workspace, so it is not the noun the glossary refuses.</td></tr>
+              <tr><td>Roles</td><td>Given at spawn or generated with the title.</td><td>Nothing new. A partner with no role shows its title.</td></tr>
+              <tr><td>Messages between threads</td><td>Inputs whose actor is <code>session:&lt;id&gt;</code>.</td><td>An event when one arrives, to send the pulse along the line.</td></tr>
+              <tr><td>Brief the team</td><td>One message to one session.</td><td>A team-level message: to the lead, or to every member.</td></tr>
+              <tr><td>Stand-up</td><td>Nothing.</td><td>One short model call per working member over its latest turn, only on demand; idle members answer from their last headline.</td></tr>
+              <tr><td>Token roll-ups</td><td>Usage per session; Codex reports none.</td><td>Sums in the client, always with "+ n unreported".</td></tr>
+              <tr><td>Short names</td><td>Titles only.</td><td>A short name per thread for the Dollhouse's plaques ("3-D Secure", "Cart totals"); hand-written in the drawing.</td></tr>
+              <tr><td>Mark the team done</td><td>Done one session at a time.</td><td>Done for a lead and its partners in one move, with Undo.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="bk-grid tf-costs">
+          <div class="bk-card">
+            <p class="bk-eyebrow">What it costs</p>
+            <h3>Nothing per token.</h3>
+            <p class="bk-body">The tree is rebuilt when a session starts, ends or changes state, never per streamed token. The Org Chart is plain cards, laid out once per change; a pulse is one compositor animation when a message arrives, and none under Reduce Motion. A stand-up costs one call per working member, only when you ask.</p>
+            <p class="bk-body">The Dollhouse is the app's Office stage: it draws only while something moves, at 30 fps for ambient life, and nothing while hidden or paused. About 740 draw calls and 440k triangles, mostly the kit's furniture; one canvas texture per room's whiteboard, redrawn only when its plan changes.</p>
+          </div>
+          <div class="bk-card">
+            <p class="bk-eyebrow">Keys</p>
+            <h3>Without the mouse</h3>
+            <p class="bk-body"><kbd>⌘⇧O</kbd> opens the overview. <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch modes. <kbd>↑</kbd> <kbd>↓</kbd> walk the tree, <kbd>↩</kbd> opens, <kbd>esc</kbd> clears. <kbd>S</kbd> asks the selected team for a stand-up, <kbd>F</kbd> folds. On the chart, <kbd>+</kbd> <kbd>−</kbd> zoom and <kbd>0</kbd> fits. In the Dollhouse, <kbd>↑</kbd> <kbd>↓</kbd> ride a storey and <kbd>0</kbd> shows the whole building. None clash with <kbd>⌘1</kbd>-<kbd>⌘9</kbd>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="bk-sec" id="risks">
+        <p class="bk-eyebrow">Risks and answers</p>
+        <h2>Where a firm of agents could go wrong.</h2>
+        <div class="bk-grid tf-risks">
+          <div><h3>Deep trees</h3><p class="bk-body">The list keeps two levels: a lead and its partners. A partner's own partners show in its hover card; the chart indents one more step.</p></div>
+          <div><h3>A team of ten</h3><p class="bk-body">The face pile stops at four and says "+6"; the chart adds a span-of-control note, the Dollhouse a bullpen, and Leads only folds the team to one card.</p></div>
+          <div><h3>A partner elsewhere</h3><p class="bk-body">Lineage wins: a partner on build-box-2 still sits with its lead on build-box-1, and its card says "on build-box-2, the lead on build-box-1".</p></div>
+          <div><h3>Two strangers, one workspace</h3><p class="bk-body">Tidy checkout CSS and the screen-reader audit share webshop's main workspace and nothing else, so they are two rows on their own. A workspace is not a team.</p></div>
+          <div><h3>It feels corporate</h3><p class="bk-body">The Firm speaks the Bureau's 1930s voice: a letterhead, brass rules, "Rogier &amp; Co.". Nobody is a "manager" or an "employee" in the UI; they keep their roles.</p></div>
+          <div><h3>Honest numbers</h3><p class="bk-body">Codex reports no usage, so every total says "+ n unreported". A stand-up line is stamped with its time, and an estimate in it is a range ("~21-24m").</p></div>
+        </div>
+        <div class="tf-moment tf-moment--even" style="margin-top: 40px">
+          <figure class="tf-fig tf-fig--small">
+            <img class="tf-shot" data-shot="swarm-span" src="shots/swarm-span.webp" width="196" height="396" loading="lazy" alt="In the swarm, a lead with nine partners: a brass-ruled note under it says Opus 5.5 is managing 9, 7 it started and 2 you added, most leads manage 1 or 2." />
+          </figure>
+          <figure class="tf-fig tf-fig--pan">
+            <div class="tf-pan" data-pan="0.5" style="--w:760px"><img class="tf-shot" data-shot="office-swarm" data-dark="" src="shots/office-swarm.webp" width="1440" height="900" loading="lazy" alt="The Dollhouse in the swarm: webshop and payments-api wrap onto two storeys each, the ten-person team gets a bullpen, nameplates say +31 more behind, and nine beans queue in the penthouse." /></div>
+          </figure>
+          <p class="tf-moment-cap"><b>A team of ten.</b> On the chart a note says "Opus 5.5 is managing 9", and Rogier's card links to it. In the Dollhouse that team gets a bullpen, a busy project wraps onto a second storey, and the nameplates say how many more wait behind.</p>
+        </div>
+        <figure class="tf-fig tf-fig--hero" style="margin-top: 40px">
+          <a href="desktop.html?state=swarm&amp;mode=org"><img class="tf-shot" data-shot="swarm" src="shots/swarm.webp" width="1440" height="900" loading="lazy" alt="The swarm: 45 threads in view on the Org Chart at 80%, twelve teams, nine waiting on you, and Rogier's card linking to the lead that manages nine." /></a>
+          <figcaption><b>The swarm still reads.</b> Twelve teams and 52 sessions, nine of them waiting on you. The chart fits at 80% and pans; the fold gets it to one card per team.</figcaption>
+        </figure>
+      </section>
+
+      <!-- 8. Links -->
+      <section class="bk-sec" id="live">
+        <p class="bk-eyebrow">Live</p>
+        <h2>Open the window.</h2>
+        <p class="bk-lede">It is a 1440x900 window: best on a laptop, or on a phone held sideways. Every moment above has its own link.</p>
+        <div class="tf-links">
+          <a class="tf-link tf-link--main" href="desktop.html?mode=office"><b>Open the live window</b><span>The Dollhouse, Tuesday 09:41</span></a>
+          <a class="tf-link" href="desktop.html?mode=threads"><b>Threads</b><span>the chain of command</span></a>
+          <a class="tf-link" href="desktop.html?mode=org"><b>Org Chart</b><span>the whole firm on one page</span></a>
+          <a class="tf-link" href="desktop.html?state=standup"><b>Stand-up</b><span>the 3-D Secure team answers</span></a>
+          <a class="tf-link" href="desktop.html?state=exchange"><b>A message on its way</b><span>tests reports to its lead</span></a>
+          <a class="tf-link" href="desktop.html?state=spawn"><b>A new hire</b><span>verify joins Rotate staging secrets</span></a>
+          <a class="tf-link" href="desktop.html?state=away&amp;mode=org"><b>While you were out</b><span>09:01 to 09:41</span></a>
+          <a class="tf-link" href="desktop.html?state=swarm&amp;mode=org&amp;select=xLead"><b>The swarm</b><span>a lead managing nine</span></a>
+          <a class="tf-link" href="desktop.html?state=open"><b>An open thread</b><span>the team in its header</span></a>
+          <a class="tf-link" href="desktop.html?mode=org&amp;theme=orient-express"><b>Orient Express</b><span>the dark theme</span></a>
+          <a class="tf-link" href="office.html"><b>The Dollhouse alone</b><span>the Office module, full window</span></a>
+          <a class="tf-link" href="../index.html"><b>Back to the book</b><span>Seeing all the work</span></a>
+        </div>
+      </section>
+    </main>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

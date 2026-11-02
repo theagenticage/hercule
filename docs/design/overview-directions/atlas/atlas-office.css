@@ -1,0 +1,887 @@
+/*
+ * PROTOTYPE - Atlas's Office mode: the City. Every rule is scoped under .ov-atlas-office, the
+ * class atlas-office.js puts on the container it mounts into, and every class it adds starts with
+ * ov-atlas-office__. The window builder's rules (.ov-atlas) never reach in here, and these never
+ * reach out.
+ *
+ * Nothing here blurs what lies behind it (no backdrop-filter): a blur over the live canvas would
+ * make the browser composite the whole window on every frame (OFFICE-KIT.md, Performance).
+ */
+
+.ov-atlas-office {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-12);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ov-atlas-office .office-canvas {
+  outline: none;
+}
+
+/* The far edges fade into the page, as the edge of a model city fades out of a tilt-shift photo. */
+.ov-atlas-office__haze {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--surface) 55%, transparent) 0%,
+      transparent 16%,
+      transparent 88%,
+      color-mix(in oklab, var(--surface) 45%, transparent) 100%
+    );
+}
+
+/* ------------------------------------------------------------------ labels in the scene */
+
+.ov-atlas-office .office-kit-label {
+  font-family: var(--font-ui);
+}
+
+.ov-atlas-office__mono {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 0.95em;
+  letter-spacing: -0.01em;
+}
+
+/* A bean's name tag: the app's tag, with the title kept to one short line. */
+.ov-atlas-office .office-tag__name {
+  max-width: 21ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-atlas-office .office-tag__state.ov-atlas-office__mono {
+  font-size: 10.5px;
+}
+
+.ov-atlas-office .office-tag.is-crossing {
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1.5px var(--fail);
+}
+
+/*
+ * The map's own lettering, seen from afar: a city's name and counts, and each busy district's
+ * folder, its heat and who works there. No pill: plain letters with a halo of the page's colour,
+ * as names are printed on a map.
+ */
+.ov-atlas-office__city,
+.ov-atlas-office__district {
+  --halo: var(--surface);
+  text-shadow:
+    0 0 1px var(--halo),
+    0 0 2px var(--halo),
+    0 0 3px var(--halo),
+    0 0 6px var(--halo);
+}
+
+.ov-atlas-office__city {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  translate: -50% -100%;
+  line-height: 1.2;
+}
+
+.ov-atlas-office__city b {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.01em;
+}
+
+.ov-atlas-office__city span {
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-atlas-office__city .is-fail {
+  color: var(--fail-ink);
+}
+
+.ov-atlas-office__diamond {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--rug);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 18%, transparent);
+  transform: rotate(45deg);
+}
+
+.ov-atlas-office__city .ov-atlas-office__diamond {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--ink) 18%, transparent),
+    0 0 0 2px var(--halo);
+}
+
+.ov-atlas-office__district {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 16px;
+  translate: -50% -50%;
+}
+
+.ov-atlas-office__heat {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 2px;
+  background: var(--halo, var(--surface));
+}
+
+/* Four lit windows: how many lines of the district changed today, on a log scale. */
+.ov-atlas-office__heat i {
+  width: 4px;
+  height: 7px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--ink) 16%, transparent);
+}
+
+.ov-atlas-office__heat i.is-lit {
+  background: var(--brass);
+}
+
+.ov-atlas-office__dots {
+  display: inline-flex;
+}
+
+.ov-atlas-office__dots i,
+.ov-atlas-office__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--who);
+  box-shadow: 0 0 0 1.5px var(--raised);
+}
+
+.ov-atlas-office__district .ov-atlas-office__dots i {
+  box-shadow: 0 0 0 1.5px var(--halo);
+}
+
+.ov-atlas-office__dots i + i {
+  margin-left: -1px;
+}
+
+/* The town hall and the library. */
+.ov-atlas-office__civic {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px 4px 11px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-12);
+  translate: -50% -100%;
+}
+
+.ov-atlas-office__civic b {
+  font-weight: var(--w-bold);
+}
+
+.ov-atlas-office__civic span {
+  color: var(--faint);
+}
+
+.ov-atlas-office__civic .ov-atlas-office__count {
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-atlas-office__civic .ov-atlas-office__count.is-you {
+  background: var(--you);
+  color: oklch(0.25 0.04 70);
+  font-weight: var(--w-bold);
+}
+
+.ov-atlas-office__civic.is-below {
+  translate: -50% 0;
+}
+
+.ov-atlas-office__civic.is-you {
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 55%, transparent);
+}
+
+.ov-atlas-office__civic.is-you span {
+  color: var(--you-ink);
+}
+
+/* A crossing: two threads change one file. Tomato and dashed when a dry-run merge conflicts. */
+.ov-atlas-office__cross {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 6px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line);
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 16px;
+  translate: -50% -100%;
+}
+
+.ov-atlas-office__cross.is-left {
+  translate: calc(-100% - 8px) -50%;
+}
+
+.ov-atlas-office__cross b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+.ov-atlas-office__cross .ov-atlas-office__dots i {
+  width: 8px;
+  height: 8px;
+}
+
+.ov-atlas-office__cross.is-conflict {
+  background: var(--fail-tint);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px color-mix(in oklab, var(--fail) 55%, transparent);
+  color: var(--fail-ink);
+}
+
+.ov-atlas-office__cross.is-conflict b {
+  color: var(--fail-ink);
+}
+
+.ov-atlas-office__cross em {
+  font-style: normal;
+  font-weight: var(--w-medium);
+}
+
+.ov-atlas-office__cross-note {
+  display: none;
+  max-width: 300px;
+  white-space: normal;
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 15px;
+}
+
+.ov-atlas-office__cross.is-open {
+  flex-wrap: wrap;
+  max-width: 330px;
+  padding: 7px 12px 8px 9px;
+  border-radius: var(--r-md);
+  white-space: normal;
+}
+
+.ov-atlas-office__cross.is-open .ov-atlas-office__cross-note {
+  display: block;
+  flex-basis: 100%;
+  padding-left: 22px;
+}
+
+/* The crane's sign: the big refactor and its size. */
+.ov-atlas-office__crane {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-11);
+  line-height: 16px;
+  translate: -50% -100%;
+}
+
+.ov-atlas-office__crane b {
+  font-weight: var(--w-bold);
+}
+
+.ov-atlas-office__crane span {
+  color: var(--faint);
+}
+
+.ov-atlas-office__plus {
+  color: var(--ok);
+}
+
+.ov-atlas-office__minus {
+  color: var(--fail-ink);
+}
+
+/* The flag over a branch that landed. */
+.ov-atlas-office__flag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px color-mix(in oklab, var(--ok) 45%, transparent);
+  font-size: var(--t-11);
+  line-height: 16px;
+  translate: -50% -100%;
+}
+
+.ov-atlas-office__flag b {
+  color: var(--ok);
+  font-weight: var(--w-bold);
+}
+
+/* A file's name under the pointer. */
+.ov-atlas-office__hover {
+  padding: 2px 7px;
+  border-radius: var(--r-xs);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-11);
+  line-height: 16px;
+  translate: -50% -100%;
+  margin-top: -6px;
+}
+
+.ov-atlas-office__hover span {
+  opacity: 0.66;
+}
+
+/*
+ * Semantic zoom: what each distance shows. The container's data-zoom is far, mid or near.
+ * - far: the map. Cities, busy districts, the Town hall, the Library, the crane, a conflict, and
+ *   a pin in its own colour for every bean in the streets (marigold for the queue).
+ * - mid: the threads. Name tags over the beans in the streets and the queue, every crossing.
+ * - near: everything, the readers in the Library and the assistants too.
+ */
+.ov-atlas-office[data-zoom="far"] .ov-atlas-office__tag.is-city:not(.is-selected):not(.is-hovered),
+.ov-atlas-office[data-zoom="far"] .ov-atlas-office__tag.is-queue:not(.is-selected):not(.is-hovered),
+.ov-atlas-office .ov-atlas-office__tag.is-pip:not(.is-selected):not(.is-hovered) {
+  gap: 0;
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  background: var(--who);
+  box-shadow:
+    var(--shadow-1),
+    0 0 0 1.5px var(--raised);
+  translate: -50% -100%;
+}
+
+.ov-atlas-office[data-zoom="far"] .ov-atlas-office__tag.is-queue:not(.is-selected):not(.is-hovered),
+.ov-atlas-office .ov-atlas-office__tag.is-pip.is-queue:not(.is-selected):not(.is-hovered) {
+  background: var(--you);
+}
+
+.ov-atlas-office[data-zoom="far"] .ov-atlas-office__tag.is-city:not(.is-selected):not(.is-hovered) > *,
+.ov-atlas-office[data-zoom="far"] .ov-atlas-office__tag.is-queue:not(.is-selected):not(.is-hovered) > *,
+.ov-atlas-office .ov-atlas-office__tag.is-pip:not(.is-selected):not(.is-hovered) > * {
+  display: none;
+}
+
+.ov-atlas-office[data-zoom="far"] .ov-atlas-office__tag.is-inside:not(.is-selected):not(.is-hovered),
+.ov-atlas-office[data-zoom="far"] .ov-atlas-office__cross:not(.is-conflict),
+.ov-atlas-office[data-zoom="far"] .ov-atlas-office__hover {
+  display: none;
+}
+
+.ov-atlas-office:not([data-zoom="far"]) .ov-atlas-office__district,
+.ov-atlas-office:not([data-zoom="far"]) .ov-atlas-office__city {
+  display: none;
+}
+
+.ov-atlas-office[data-zoom="mid"] .ov-atlas-office__tag.is-inside:not(.is-selected):not(.is-hovered) {
+  display: none;
+}
+
+/* The swarm at middle distance: only what waits on you, crosses another thread, or is pointed at. */
+.ov-atlas-office[data-zoom="mid"][data-swarm] .ov-atlas-office__tag:not(.is-queue):not(.is-crosser):not(.is-selected):not(.is-hovered) {
+  display: none;
+}
+
+/* A far label that would overlap one that matters more waits until the camera moves. */
+.ov-atlas-office .office-kit-label.is-cluttered {
+  display: none;
+}
+
+/* The crossing state: only the two threads that cross speak. */
+.ov-atlas-office[data-focus] .ov-atlas-office__tag:not(.is-focus):not(.is-selected):not(.is-hovered),
+.ov-atlas-office[data-focus] .ov-atlas-office__cross:not(.is-focus),
+.ov-atlas-office[data-focus] .ov-atlas-office__civic:not(.is-you) {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ the file card */
+
+.ov-atlas-office__card {
+  width: 292px;
+  padding: 12px 12px 10px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 17px;
+  white-space: normal;
+  pointer-events: auto;
+  cursor: default;
+  translate: -50% calc(-100% - 10px);
+}
+
+.ov-atlas-office__card-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-atlas-office__card-h b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-atlas-office__x {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ov-atlas-office__x:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ov-atlas-office__card-sub {
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+.ov-atlas-office__card-sec {
+  margin-top: 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+
+.ov-atlas-office__card-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 12px);
+  margin: 2px -6px 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ov-atlas-office__card-row:hover {
+  background: var(--hover);
+}
+
+.ov-atlas-office__card-row > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-atlas-office__card-reads {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.ov-atlas-office__card-warn {
+  margin-top: 10px;
+  padding: 7px 9px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 15px;
+}
+
+.ov-atlas-office__card-warn b {
+  display: block;
+  color: var(--ink);
+  font-size: var(--t-12);
+}
+
+.ov-atlas-office__card-warn.is-conflict {
+  background: var(--fail-tint);
+}
+
+.ov-atlas-office__card-warn.is-conflict b {
+  color: var(--fail-ink);
+}
+
+.ov-atlas-office__card-foot {
+  margin-top: 9px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+/* ------------------------------------------------------------------ the HUD */
+
+.ov-atlas-office__hud {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.ov-atlas-office__hud > * {
+  pointer-events: auto;
+}
+
+.ov-atlas-office__hud--top {
+  top: 12px;
+  right: 12px;
+}
+
+.ov-atlas-office__hud--key {
+  right: 12px;
+  bottom: 12px;
+  align-items: flex-end;
+}
+
+.ov-atlas-office__hud--note {
+  top: 12px;
+  left: 12px;
+}
+
+.ov-atlas-office__seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+}
+
+.ov-atlas-office__seg button,
+.ov-atlas-office__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ov-atlas-office__seg button:hover,
+.ov-atlas-office__chip:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ov-atlas-office__seg button[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+.ov-atlas-office__seg .ov-atlas-office__diamond {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.ov-atlas-office__chip {
+  height: 32px;
+  padding: 0 12px 0 10px;
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+}
+
+.ov-atlas-office__chip b {
+  font-weight: var(--w-bold);
+}
+
+.ov-atlas-office__chip .ov-atlas-office__ring {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border: 1.5px dashed var(--fail);
+  border-radius: 2px;
+}
+
+.ov-atlas-office__chip span {
+  color: var(--faint);
+}
+
+/* The key: what each part of the city means. */
+.ov-atlas-office__key {
+  width: 246px;
+  padding: 11px 12px 10px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 16px;
+}
+
+.ov-atlas-office__key[hidden] {
+  display: none;
+}
+
+.ov-atlas-office__key-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+
+.ov-atlas-office__key-h button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  cursor: pointer;
+}
+
+.ov-atlas-office__key-h button:hover {
+  color: var(--ink);
+}
+
+.ov-atlas-office__key ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-atlas-office__key li {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-atlas-office__key li > i {
+  justify-self: center;
+}
+
+.ov-atlas-office__key-foot {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+}
+
+/* The swatches of the key, drawn in the city's own materials. */
+.ov-atlas-office__sw-tower {
+  width: 9px;
+  height: 15px;
+  border-radius: 1px;
+  background: linear-gradient(to top, var(--room-inlay-2) 0 3px, var(--room-wall) 3px);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent);
+}
+
+.ov-atlas-office__sw-lit {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background:
+    linear-gradient(var(--room-screen), var(--room-screen)) 2px 2px / 3px 3px no-repeat,
+    linear-gradient(oklch(0.9 0.09 88), oklch(0.9 0.09 88)) 7px 2px / 3px 3px no-repeat,
+    linear-gradient(oklch(0.9 0.09 88), oklch(0.9 0.09 88)) 2px 7px / 3px 3px no-repeat,
+    linear-gradient(oklch(0.9 0.09 88), oklch(0.9 0.09 88)) 7px 7px / 3px 3px no-repeat,
+    var(--room-wall);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent);
+}
+
+.ov-atlas-office__sw-trim {
+  width: 14px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--room-wall);
+  box-shadow:
+    inset 0 3px 0 var(--who),
+    inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent);
+}
+
+.ov-atlas-office__sw-scaffold {
+  width: 14px;
+  height: 14px;
+  background:
+    repeating-linear-gradient(to right, var(--brass) 0 1.5px, transparent 1.5px 4.5px),
+    repeating-linear-gradient(to bottom, var(--room-wood) 0 1.5px, transparent 1.5px 4.5px);
+}
+
+.ov-atlas-office__sw-check {
+  width: 12px;
+  height: 12px;
+  border-radius: 1px;
+  background: repeating-conic-gradient(var(--room-inlay-2) 0 25%, var(--room-paper) 0 50%) 0 0 / 6px 6px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent);
+}
+
+.ov-atlas-office__sw-conflict {
+  width: 13px;
+  height: 13px;
+  border: 1.5px dashed var(--fail);
+  border-radius: 2px;
+}
+
+.ov-atlas-office__sw-overlap {
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--brass);
+  border-radius: 2px;
+}
+
+.ov-atlas-office__sw-hand {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--you);
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--you) 35%, transparent);
+}
+
+.ov-atlas-office__sw-dome {
+  width: 14px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 7px 7px 1px 1px;
+  background: color-mix(in oklab, var(--room-lamp) 55%, var(--raised));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent);
+}
+
+/* The notes over the top of the city: back from being away, or a branch that landed. */
+.ov-atlas-office__note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 14px 0 12px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+
+.ov-atlas-office__note span {
+  color: var(--faint);
+}
+
+.ov-atlas-office__note .ov-atlas-office__pulse {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: oklch(0.86 0.1 88);
+  box-shadow: 0 0 0 3px color-mix(in oklab, oklch(0.86 0.1 88) 35%, transparent);
+}
+
+.ov-atlas-office__note .is-ok {
+  color: var(--ok);
+  font-weight: var(--w-bold);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ov-atlas-office__note .ov-atlas-office__pulse {
+    animation: ov-atlas-office-pulse 2.6s var(--ease-out) infinite;
+  }
+}
+
+@keyframes ov-atlas-office-pulse {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in oklab, oklch(0.86 0.1 88) 0%, transparent);
+  }
+}
+
+.ov-atlas-office__note button {
+  height: 24px;
+  margin-right: -8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-11);
+  cursor: pointer;
+}
+
+.ov-atlas-office__note button:hover {
+  color: var(--ink);
+}

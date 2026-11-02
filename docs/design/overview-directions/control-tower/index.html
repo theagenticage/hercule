@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- PROTOTYPE - Control Tower's story page: the pitch, the huh, the three modes, a walk
+         through 09:41, and what it would take. Images are 2x captures of desktop.html (shots/). -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <link rel="stylesheet" href="index.css" />
+    <script src="../shared/book.js"></script>
+    <script>
+      // A shot marked data-shot exists in both themes: name.webp and name-dark.webp (or the file
+      // data-dark names). The page shows the one that matches the book's theme, and swaps when the
+      // theme buttons change it. Shots without data-shot exist in one theme only.
+      (function () {
+        function showTheme() {
+          var dark = /^(orient-express|dark|nile|end-house)$/.test(document.documentElement.dataset.theme || "");
+          document.querySelectorAll("[data-shot]").forEach(function (el) {
+            var name = dark ? el.dataset.dark || el.dataset.shot + "-dark" : el.dataset.shot;
+            var attr = el.tagName === "SOURCE" ? "srcset" : "src";
+            var src = "shots/" + name + ".webp";
+            if (el.getAttribute(attr) !== src) el.setAttribute(attr, src);
+          });
+        }
+        new MutationObserver(showTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+        document.addEventListener("DOMContentLoaded", showTheme);
+      })();
+    </script>
+    <title>Control Tower · Seeing all the work · Hercule</title>
+  </head>
+  <body class="ct-story">
+    <header class="bk-top">
+      <a class="bk-brand" href="../index.html"><i data-logo="22"></i>Control Tower <small>Seeing all the work · 2 of 5</small></a>
+      <nav class="bk-links" aria-label="Sections">
+        <a href="#huh">The huh</a>
+        <a href="#modes">Three modes</a>
+        <a href="#walk">09:41</a>
+        <a href="#needs">What it needs</a>
+        <a href="#risks">Risks</a>
+        <a href="#live">Live window</a>
+      </nav>
+      <div class="bk-themes" role="group" aria-label="Theme">
+        <button data-theme-option="whitehaven">Whitehaven</button>
+        <button data-theme-option="orient-express">Orient Express</button>
+      </div>
+    </header>
+
+    <main class="bk">
+      <!-- 1. The pitch -->
+      <section class="bk-hero">
+        <p class="bk-eyebrow">Direction 2 · organized by when it will need you</p>
+        <h1><span class="bk-num">2</span>Control Tower</h1>
+        <p class="bk-lever">“Every turn is a flight, and you are the tower.”</p>
+        <p class="bk-lede">
+          Every turn an agent takes is a flight. Your message is the take-off. Working is cruising. A
+          question or an approval is <b>holding</b>: the agent circles until you clear it. The turn
+          ending is the landing, and a result you have not read waits <b>on stand</b>.
+        </p>
+        <p class="bk-lede">
+          Hercule predicts when each flight will next need you, and shows it the honest way: as a
+          range, with what the guess rests on. Then it lets you choose when you can be interrupted.
+        </p>
+      </section>
+      <figure class="ct-fig ct-fig--hero">
+        <picture>
+          <source media="(max-width: 600px)" data-shot="phone-office-hero" srcset="shots/phone-office-hero.webp" />
+          <img class="ct-shot" data-shot="hero" src="shots/hero.webp" width="1440" height="900" alt="The Aerodrome at 09:41: a hangar per project, the terminal and its control tower, four planes circling in the holding stack with their asks numbered beside it, and three more lined up on the approach." />
+        </picture>
+        <figcaption><b>Tuesday 09:41, the Aerodrome.</b> Four requests circle the tower in the holding stack, oldest lowest. Three more threads line up on the approach, placed by when they will need you.</figcaption>
+      </figure>
+
+      <!-- 2. The huh -->
+      <section class="bk-sec" id="huh">
+        <div class="bk-huh">
+          <p class="bk-eyebrow">The huh</p>
+          <h2>An agent tool that predicts its own interruptions, and lets you schedule them.</h2>
+          <p>
+            Today an agent interrupts you whenever it is ready. Here, at 09:41, the tower already
+            sees three arrivals between 10:02 and 10:06 and offers to spread them out. The one that
+            will ask you something lands first, because holding a question stalls its agent. The two
+            that only bring results to read wait for 10:15 and 10:30. Neither agent stops working.
+          </p>
+          <div class="ct-huh-row">
+            <figure class="ct-fig">
+              <img class="ct-shot ct-shot--crop" data-shot="board-conflict" src="shots/board-conflict.webp" width="1112" height="744" loading="lazy" alt="The arrivals board's conflict alert: 3 arrivals 10:02-10:06, with the plan to stagger them." />
+              <figcaption><b>The conflict alert.</b> The plan says who lands when, and why.</figcaption>
+            </figure>
+            <figure class="ct-fig">
+              <img class="ct-shot ct-shot--crop" data-shot="staggered-scope" src="shots/staggered-scope.webp" width="820" height="660" loading="lazy" alt="After Stagger: on the Radar, WS·CART is held to 10:30 and PA·PAYOUT to 10:15; a dotted ghost marks where each would have landed." />
+              <figcaption><b>One click later.</b> The two blips move out to the rings of their new times, and a ghost marks where each would have called you.</figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. The three modes -->
+      <section class="bk-sec" id="modes">
+        <p class="bk-eyebrow">One idea, three lenses</p>
+        <h2>The work, organized by when it will need you.</h2>
+        <p class="bk-lede">
+          The Office shows it as an aerodrome, the Threads mode as a strip board, the Radar as a
+          scope. The same flights in each, the same counts, and one selection: pick a strip in the
+          sidebar and the Radar marks its blip, the board rings its strip, and the Aerodrome's camera
+          glides to its plane. Switch with the top bar or <kbd>⌥⌘1</kbd> <kbd>⌥⌘2</kbd> <kbd>⌥⌘3</kbd>.
+        </p>
+        <figure class="ct-fig" style="margin-bottom: 40px">
+          <img class="ct-shot" data-shot="window-radar" src="shots/window-radar.webp" width="1440" height="900" loading="lazy" alt="The whole window at 09:41: the strip board in the sidebar, the Radar with Rogier at its centre, and the arrivals board offering to stagger three arrivals." />
+          <figcaption><b>The whole window, on the Radar.</b> The sidebar keeps the strip board; the overview takes the main pane; the corner card offers the oldest request, Up next.</figcaption>
+        </figure>
+
+        <article class="ct-mode" id="radar">
+          <figure class="ct-fig">
+            <img class="ct-shot ct-shot--crop" data-shot="radar" src="shots/radar.webp" width="1160" height="1280" loading="lazy" alt="The Radar scope: Rogier at the centre, rings for now, 5 minutes, 15 minutes, an hour and later, sectors per project, and blips with their predicted ranges and trails." />
+          </figure>
+          <div>
+            <h3 class="ct-mode-name">Radar <small>its own view</small></h3>
+            <p class="bk-body">
+              <b>You are at the centre.</b> The rings are minutes until a thread needs you: now, 5m,
+              15m, an hour, later. The sectors are projects, always in the same place. Each blip is a
+              thread in its own colour, with its predicted range drawn as a bar along its bearing and
+              a short trail of where it was. Requests waiting on you sit on the centre ring and pulse
+              marigold.
+            </p>
+            <p class="bk-body">
+              Beside the scope, an Art Deco <b>arrivals board</b> lists the next ten things that need
+              you on split flaps: when, which flight, holding or expected, and what it brings. A flap
+              turns over only when its row changes.
+            </p>
+            <p class="ct-mode-when"><b>You open it to glance ahead:</b> what will need me in the next hour, and does anything collide?</p>
+          </div>
+        </article>
+
+        <article class="ct-mode" id="threads">
+          <figure class="ct-fig">
+            <img class="ct-shot ct-shot--crop" data-shot="threads-crop" src="shots/threads-crop.webp" width="1120" height="1080" loading="lazy" alt="The strip board: the arrivals of the next hour along the top, then the Holding and Approach bays with their flight strips." />
+          </figure>
+          <div>
+            <h3 class="ct-mode-name">Threads <small>the strip board</small></h3>
+            <p class="bk-body">
+              Each thread is a <b>flight strip</b>: its project's tab, a call sign
+              (<span class="ct-call">WS·3DS</span>, <span class="ct-call">PA·PAYOUT</span>), the title,
+              and the one thing its phase needs. A holding strip carries its question and the answers
+              that finish it. An approaching strip carries its ETA, <b>~4-9m</b>. A cruising one says
+              how long it has been airborne. A partner flies in its lead's formation:
+              <span class="ct-call">WS·3DS 2</span>, <span class="ct-call">WS·3DS 3</span>.
+            </p>
+            <ul class="ct-bays">
+              <li class="is-you"><b>Holding</b>needs you now</li>
+              <li><b>Approach</b>within ~15 min</li>
+              <li><b>Cruising</b>later</li>
+              <li><b>On stand</b>a result unread</li>
+              <li><b>Parked</b>quiet</li>
+              <li><b>Hangar</b>done</li>
+            </ul>
+            <p class="bk-body" style="margin-top: 14px">
+              Along the top run the arrivals of the next hour: a chip per thread, with its predicted
+              range as a bar along the chip's foot. Drag a strip onto Holding to <b>hold it back</b>: it keeps working and lands
+              when you say. Drag one onto <b>Priority</b> and it lands first, slot or not.
+            </p>
+            <p class="ct-mode-when"><b>You open it to plan:</b> triage a heavy morning, decide what can wait, see every strip at once.</p>
+          </div>
+        </article>
+
+        <article class="ct-office" id="office">
+          <div class="ct-office-head">
+            <h3 class="ct-mode-name">Office <small>the Aerodrome</small></h3>
+            <p class="bk-body">
+              The Bureau becomes an Art Deco airport of the 1930s. Each project has a hangar in its tint;
+              your desk is in the tower cab, under a “Now serving” sign that counts what holds for you.
+              Each thread is a small monoplane in its colleague's colour, with its bean in the open
+              cockpit. <b>Where a plane is says when its thread needs you.</b>
+            </p>
+          </div>
+          <figure class="ct-fig ct-fig--big">
+            <picture>
+              <source media="(max-width: 600px)" data-shot="phone-office-hero" srcset="shots/phone-office-hero.webp" />
+              <img class="ct-shot" data-shot="office-hero" data-dark="office-dark" src="shots/office-hero.webp" width="2880" height="1800" loading="lazy" alt="The Aerodrome from the south: three project hangars and an aéro-club for threads with no project, the terminal with its tower, eight numbered stands, the air-mail pylons for runs, and runway 18/36 with three planes on the approach." />
+            </picture>
+            <figcaption><b>The establishing shot.</b> Holding planes circle the tower; the approach comes in over the trees with brass gates at 5, 10 and 15 minutes; planes with an unread result wait at numbered stands; quiet ones sit on their hangar's apron; Done planes are inside, no pilot. Runs are mail planes circling race pylons, one per step.</figcaption>
+          </figure>
+          <figure class="ct-fig ct-fig--big">
+            <picture>
+              <source media="(max-width: 600px)" srcset="shots/phone-office-holding.webp" />
+              <img class="ct-shot" src="shots/office-holding.webp" width="2880" height="1800" loading="lazy" alt="The holding stack: four planes circle the tower at stacked heights, each with a marigold beacon on its fin; beside the stack, their asks in a numbered column, 1 the oldest." />
+            </picture>
+            <figure class="ct-fig ct-fig--asks">
+              <img class="ct-shot ct-shot--crop" src="shots/phone-office-asks.webp" width="690" height="450" loading="lazy" alt="The numbered asks beside the stack: 4 PA·PAYOUT 2, Settlement or payout date? 2m; 3 OP·DASH, Keep the old Grafana folder? 5m; 2 PA·SHIP, Publish to npm? 8m; 1 WS·3DS, Run git push? 10m." />
+            </figure>
+            <figcaption><b>The holding stack.</b> Four requests circle the tower at stacked heights, oldest lowest, each with a marigold beacon on its fin. Their asks hang in a numbered column beside the stack. Answer one in any mode and its plane does a touch-and-go: down to runway 18, then back up to its loop over its hangar, while the planes above step down a level.</figcaption>
+          </figure>
+          <div class="ct-office-states">
+            <figure class="ct-fig">
+              <picture>
+                <source media="(max-width: 600px)" srcset="shots/phone-office-conflict.webp" />
+                <img class="ct-shot" src="shots/story-office-conflict.webp" width="1440" height="900" loading="lazy" alt="The conflict on the Aerodrome: the extended approach past the 20 minute gate, where PA·RESULT, WS·CART and PA·PAYOUT fan out inside a soft marigold ring." />
+              </picture>
+              <figcaption><b>The conflict.</b> The three 10:02-10:06 arrivals fan out on the extended approach, inside a soft marigold ring.</figcaption>
+            </figure>
+            <figure class="ct-fig">
+              <picture><source media="(max-width: 600px)" srcset="shots/phone-office-slots.webp" /><img class="ct-shot" src="shots/story-office-slots.webp" width="1440" height="900" loading="lazy" alt="Landing slots on the Aerodrome: three asks turn grey and say lands 10:00; the urgent push stays marigold." /></picture>
+              <figcaption><b>Landing slots.</b> Held asks turn grey and say “lands 10:00”. The urgent push stays marigold.</figcaption>
+            </figure>
+            <figure class="ct-fig">
+              <picture><source media="(max-width: 600px)" srcset="shots/phone-office-away.webp" /><img class="ct-shot" src="shots/story-office-away.webp" width="1440" height="900" loading="lazy" alt="The away state on the Aerodrome: a card counts 14 take-offs, 6 landings and 4 new holds since 09:01, and dashed taxi tracks lead to the stands." /></picture>
+              <figcaption><b>Back at 09:41.</b> A card counts the take-offs, landings and new holds since 09:01; dashed taxi tracks show where the landings went.</figcaption>
+            </figure>
+            <figure class="ct-fig">
+              <picture><source media="(max-width: 600px)" srcset="shots/phone-office-swarm.webp" /><img class="ct-shot" src="shots/story-office-swarm.webp" width="1440" height="900" loading="lazy" alt="The swarm on the Aerodrome: eight planes in the holding stack with eight numbered asks, 43 planes in all." /></picture>
+              <figcaption><b>The swarm.</b> 43 planes; the stack grows to eight levels and still reads oldest lowest.</figcaption>
+            </figure>
+          </div>
+          <div class="ct-office-notes">
+            <div>
+              <h4>What it costs</h4>
+              <p class="bk-body">Measured in headless Chromium: 24 planes and 470 draw calls on an everyday morning, 43 planes and 718 in the swarm, drawn on one stage. Planes fly at the stage's 30 fps cap only while the Office is on screen; nothing draws while it is hidden. Under Reduce Motion every plane parks in its phase, and the stage drew 0 frames in 8 idle seconds.</p>
+            </div>
+            <div>
+              <h4>What it does not do yet</h4>
+              <p class="bk-body">An ask's number links it to its level of the stack, not to its plane. Planes do not steer around each other; their loops are tuned so they rarely cross. The 3D kit, 943 KiB, loads only the first time the Office opens.</p>
+            </div>
+          </div>
+          <p class="ct-mode-when"><b>You open it to show someone</b> what your agents are doing, or to feel the traffic of the morning. A click on a plane selects its thread in all three modes; a double click opens it.</p>
+        </article>
+
+        <article class="ct-mode" id="sidebar">
+          <figure class="ct-fig ct-fig--narrow">
+            <img class="ct-shot ct-shot--crop" data-shot="sidebar" src="shots/sidebar.webp" width="544" height="1800" loading="lazy" alt="The sidebar as a strip board at 272px: Holding with answer buttons on each strip, then Approach and Cruising." />
+          </figure>
+          <div>
+            <h3 class="ct-mode-name">The sidebar <small>the board, folded to 272px</small></h3>
+            <p class="bk-body">
+              The same bays, the same strips, one column. Holding always sits on top, and each holding
+              strip carries its answers, so <b>one move answers it</b>: Allow, Keep, Settlement. Under
+              New thread sits the landing slots control.
+            </p>
+            <p class="bk-body">
+              <b>Nothing moves under your pointer.</b> When a strip's bay changes while you point at
+              the list, it stays put, says where it is going, and its bay shows a pill. It moves when
+              the pointer leaves.
+            </p>
+            <figure class="ct-fig ct-fig--narrow" style="margin-top: 16px">
+              <img class="ct-shot ct-shot--crop" data-shot="moving" src="shots/moving.webp" width="544" height="400" loading="lazy" alt="The Approach bay with a 1 moving pill, and a strip that landed at 09:42 saying it will move to On stand." />
+            </figure>
+            <p class="ct-mode-when"><b>While the overview is open</b> the sidebar stays: a click selects a strip in whichever mode is showing, a double click or <kbd>↩</kbd> opens the thread. On the Radar and in the Office, with nothing selected, the corner card offers the oldest request, Up next. On the strip board it docks at the foot of the Holding column, which already starts with that request.</p>
+          </div>
+        </article>
+      </section>
+
+      <!-- 4. The walk-through -->
+      <section class="bk-sec" id="walk">
+        <p class="bk-eyebrow">A walk through the morning</p>
+        <h2>09:41. You are back from the school run.</h2>
+        <p class="bk-lede">You left your desk at 09:01 and started a few threads from your phone between drop-offs. Forty minutes of traffic happened without you.</p>
+        <ol class="ct-walk">
+          <li>
+            <div class="ct-walk-text">
+              <span class="ct-walk-time">09:41</span>
+              <h3>The handover</h3>
+              <p>As a controller hands a position to the next, the tower briefs you: 14 flights took off and 6 landed while you were out. Four hold for you, the oldest for ten minutes. Four results wait on stand.</p>
+              <p>On the arrivals board, a second list: what landed while you were away, newest first.</p>
+            </div>
+            <div class="ct-walk-shots">
+              <figure class="ct-fig ct-fig--narrow"><img class="ct-shot ct-shot--crop" data-shot="away" src="shots/away.webp" width="544" height="320" loading="lazy" alt="The handover card in the sidebar." /></figure>
+            </div>
+          </li>
+          <li>
+            <div class="ct-walk-text">
+              <span class="ct-walk-time">09:41</span>
+              <h3>Look ahead</h3>
+              <p>Every busy thread has an ETA, always a range, always with its basis: “4 of 6 statuses checked, ~2m each”. The adversarial review will bring a result between 09:45 and 09:50.</p>
+              <p>Further out, three threads will land between 10:02 and 10:06.</p>
+            </div>
+            <div class="ct-walk-shots">
+              <figure class="ct-fig ct-fig--narrow"><img class="ct-shot ct-shot--crop" data-shot="card-eta" src="shots/card-eta.webp" width="816" height="392" loading="lazy" alt="The selection card of the adversarial review: Approach, ETA ~4-9m, 09:45-09:50, based on 4 of 6 statuses checked." /></figure>
+            </div>
+          </li>
+          <li>
+            <div class="ct-walk-text">
+              <span class="ct-walk-time">09:42</span>
+              <h3>Stagger them</h3>
+              <p>The board raises the conflict and proposes a plan. One click: the Result migration still lands at 10:03-10:06, because it will ask before it pushes. The payout report waits for 10:15 and the cart refactor for 10:30. Results keep, and the agents never stop.</p>
+            </div>
+            <div class="ct-walk-shots">
+              <figure class="ct-fig"><img class="ct-shot ct-shot--crop" data-shot="staggered-board" src="shots/staggered-board.webp" width="1112" height="276" loading="lazy" alt="The board after staggering: Staggered. PA·PAYOUT lands 10:15, WS·CART lands 10:30, with Undo." /></figure>
+              <figure class="ct-fig"><img class="ct-shot ct-shot--crop" data-shot="staggered-rows" src="shots/staggered-rows.webp" width="1112" height="380" loading="lazy" alt="The last rows of the arrivals board: PA·RESULT expected 10:03-06, PA·PAYOUT held 10:15, WS·CART held 10:30." /></figure>
+            </div>
+          </li>
+          <li>
+            <div class="ct-walk-text">
+              <span class="ct-walk-time">09:43</span>
+              <h3>Protect the next half hour</h3>
+              <p>You have a review to write. Landing slots: land every 30 minutes. Requests now wait quietly and land together at 10:00. The badge and your phone count only what came through: the 3-D Secure push, marked urgent because EU checkout is failing.</p>
+            </div>
+            <div class="ct-walk-shots">
+              <figure class="ct-fig ct-fig--narrow"><img class="ct-shot ct-shot--crop" data-shot="walk-slots" src="shots/walk-slots.webp" width="800" height="984" loading="lazy" alt="The landing slots popover: let everything through, land every 20, 30 or 60 minutes, hold until 10:30, urgent comes through, and the dock badge preview: 3 holding, next slot 10:00, 1 urgent came through." /></figure>
+            </div>
+          </li>
+          <li>
+            <div class="ct-walk-text">
+              <span class="ct-walk-time">09:43</span>
+              <h3>Clear what came through, in one move</h3>
+              <p>Allow the push on its strip. It glides out of Holding, back in the air, and the toast offers Undo. The other three requests stay stacked like paper strips, stamped “lands 10:00”. You can still answer one early.</p>
+            </div>
+            <div class="ct-walk-shots">
+              <figure class="ct-fig ct-fig--narrow"><img class="ct-shot ct-shot--crop" data-shot="walk-clear" src="shots/walk-clear.webp" width="544" height="1200" loading="lazy" alt="The sidebar with slots on: Holding is a stack of three requests stamped lands 10:00, the two held-back flights below, and the toast: Cleared WS·3DS, back in the air, Undo." /></figure>
+            </div>
+          </li>
+          <li>
+            <div class="ct-walk-text">
+              <span class="ct-walk-time">10:00</span>
+              <h3>The slot</h3>
+              <p>On the Radar each slot is a ring. Everything inside it lands together when it opens: one interruption instead of five. Until then each blip sits where its thread will need you, and a ghost marks where it would have called.</p>
+            </div>
+            <div class="ct-walk-shots">
+              <figure class="ct-fig ct-fig--mid"><img class="ct-shot ct-shot--crop" data-shot="walk-slot-radar" src="shots/walk-slot-radar.webp" width="1160" height="1160" loading="lazy" alt="The Radar with slots on: rings for the 10:00 and 10:30 slots, blips labelled lands 10:00, PA·PAYOUT held to 10:15 and WS·CART held to 10:30." /></figure>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- 5. What it needs, what it costs, the risks -->
+      <section class="bk-sec" id="needs">
+        <p class="bk-eyebrow">What Hercule would need</p>
+        <h2>A prediction per busy thread, and a say over notifications.</h2>
+        <p class="bk-lede">Most of it is data Hercule already records and does not read. Two pieces are new behaviour: the estimate, and slots.</p>
+        <div class="bk-scroll">
+          <table class="bk-table ct-table">
+            <thead>
+              <tr><th>Need</th><th>Today</th><th>Change</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Busy since</td><td data-label="Today">The runner knows when a turn starts; the Session does not say.</td><td data-label="Change">Expose <code>busySince</code> on the Session.</td></tr>
+              <tr><td>An ETA per busy thread</td><td data-label="Today">Plans are transcript items nobody reads. Turn lengths are not kept.</td><td data-label="Change">At each turn event, read the latest plan into done of total, keep turn lengths per agent and model, and estimate a range with a one-line basis. Shown as a range, never a time.</td></tr>
+              <tr><td>What it brings next</td><td data-label="Today">Nothing.</td><td data-label="Change">A request or a result, from the plan and the thread's history of approvals (“it asks before every git push”).</td></tr>
+              <tr><td>Result read</td><td data-label="Today">No read marker.</td><td data-label="Change">A per-user last-seen mark per thread, synced to the phone. Drives On stand.</td></tr>
+              <tr><td>Call signs</td><td data-label="Today">None.</td><td data-label="Change">A two-letter code per Project, and one word picked by the Text Generation that writes the title. Partners take their lead's call sign and their place in the formation.</td></tr>
+              <tr><td>Landing slots</td><td data-label="Today">Every request notifies at once.</td><td data-label="Change">A user setting (off, every 20, 30 or 60 minutes, until a time) applied to desktop notifications, the dock badge and phone pushes (spec 18). A Request may be urgent, from its Task's priority or the agent, and urgent comes through.</td></tr>
+              <tr><td>Hold back, priority</td><td data-label="Today">None.</td><td data-label="Change">A per-thread clearance kept by the controller. It changes when Hercule tells you, never what the agent does.</td></tr>
+              <tr><td>Spec and glossary</td><td data-label="Today">Spec 17 draws Waiting on you and project groups.</td><td data-label="Change">Spec 17 §The sidebar: bays replace project groups, and Waiting on you becomes Holding. §The Office: the Aerodrome as an Office Map. New glossary words to agree: call sign, landing slot, hold back.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top: 56px">What it costs</h3>
+        <div class="ct-costs" style="margin-top: 16px">
+          <div class="ct-cost"><b>0</b><span><b>Per streamed token.</b> Strips, blips and flaps change at turn events only. ETAs count down on one shared minute timer.</span></div>
+          <div class="ct-cost"><b>1</b><span><b>Rotation while visible.</b> The sweep is one compositor-only CSS rotation, paused when Radar is hidden and absent under Reduce Motion. Holding halos are compositor-only pulses.</span></div>
+          <div class="ct-cost"><b>943</b><span><b>KiB, only on demand.</b> The 3D kit loads the first time the Office mode shows. The Radar and the board are plain DOM and SVG.</span></div>
+        </div>
+      </section>
+
+      <section class="bk-sec" id="risks">
+        <p class="bk-eyebrow">Risks, and answers</p>
+        <h2>What could go wrong.</h2>
+        <div class="ct-risks">
+          <div class="bk-card"><h4>The predictions are wrong.</h4><p>They will be, sometimes. So they are never a time: always a range with a “~” and the basis it rests on. A range wider than 20 minutes says “Wide” on the board. The estimate learns per agent and model.</p></div>
+          <div class="bk-card"><h4>Holding a question stalls an agent.</h4><p>That is why staggering lands questions first and holds back only results. A held result costs its agent nothing.</p></div>
+          <div class="bk-card"><h4>Slots hide something urgent.</h4><p>Urgent comes through. Held requests stay on top of the sidebar, stacked but answerable. A slot is never more than an hour away.</p></div>
+          <div class="bk-card"><h4>Strips jump around.</h4><p>A strip changes bay only when the pointer is outside the list. Until then its bay shows “1 moving”.</p></div>
+          <div class="bk-card"><h4>The metaphor is cute.</h4><p>Strip the airport away and the bays are Now, Soon, Later, Unread and Quiet. The words on screen stay plain: “Needs you now”, “Due within about 15 min”.</p></div>
+          <div class="bk-card"><h4>Forty threads, two hundred next year.</h4><p>Bays fold behind “n more”, Radar labels never overlap and go by urgency, and the board lists only the next ten. The swarm state shows 35 at once.</p></div>
+        </div>
+        <figure class="ct-fig" style="margin-top: 28px">
+          <img class="ct-shot" data-shot="swarm" src="shots/swarm.webp" width="1440" height="900" loading="lazy" alt="The swarm state: 35 threads, eight of them holding, on the Radar and in the sidebar." />
+          <figcaption><b>The swarm.</b> Eight hold, four approach, nine cruise. The scope still reads; the sidebar folds after four.</figcaption>
+        </figure>
+      </section>
+
+      <!-- 6. Links -->
+      <section class="bk-sec" id="live">
+        <p class="bk-eyebrow">See it live</p>
+        <h2>Open the tower.</h2>
+        <div class="ct-live">
+          <div class="ct-live-main">
+            <p class="bk-body">The live window is the real thing at 1440 × 900: answer, stagger, drag strips, switch modes, set slots. Best on a laptop, or on a phone held sideways.</p>
+            <a class="btn btn--accent" href="desktop.html">Open the live window<i data-i="external" data-size="14"></i></a>
+            <dl class="ct-keys">
+              <dt><kbd>⌘⇧O</kbd></dt><dd>Open and close the overview</dd>
+              <dt><kbd>⌥⌘1</kbd> <kbd>⌥⌘2</kbd> <kbd>⌥⌘3</kbd></dt><dd>Office, Threads, Radar</dd>
+              <dt><kbd>↩</kbd></dt><dd>Open the selected thread</dd>
+              <dt><kbd>esc</kbd></dt><dd>Close the popover, then the selection, then the overview</dd>
+            </dl>
+          </div>
+          <div>
+            <p class="bk-body" style="margin-bottom: 12px"><b>Every state, by link</b></p>
+            <ul class="ct-links">
+              <li><a href="desktop.html?state=everyday">Everyday <small>Radar</small></a></li>
+              <li><a href="desktop.html?mode=threads">Strip board</a></li>
+              <li><a href="desktop.html?mode=office">Office</a></li>
+              <li><a href="desktop.html?state=conflict">Conflict</a></li>
+              <li><a href="desktop.html?state=staggered">Staggered</a></li>
+              <li><a href="desktop.html?state=slots">Landing slots</a></li>
+              <li><a href="desktop.html?state=landing&amp;mode=threads">Clearing a request</a></li>
+              <li><a href="desktop.html?state=moving&amp;mode=threads">1 moving</a></li>
+              <li><a href="desktop.html?state=away">Away 40 min</a></li>
+              <li><a href="desktop.html?state=swarm">Swarm</a></li>
+              <li><a href="desktop.html?state=open">A thread open</a></li>
+              <li><a href="desktop.html?theme=orient-express">Orient Express</a></li>
+            </ul>
+            <p class="bk-body" style="margin-top: 22px"><a href="../index.html">← Back to the book</a></p>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

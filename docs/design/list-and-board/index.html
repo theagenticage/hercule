@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- PROTOTYPE - the story page of round 2, "List and Kanban, quietly": what Rogier said, the
+         technical answer to "how far along, and where" (SIGNALS.md, drawn), the List and Kanban
+         variants with their captures, and the links into the live window (desktop.html). -->
+    <script src="../shared/page.js"></script>
+    <script>
+      // page.js sets the theme from ?theme=. Without one, the last theme picked in any book wins,
+      // so the page never flashes the wrong theme before the script at the end runs.
+      (function () {
+        if (new URLSearchParams(location.search).get("theme")) return;
+        var saved = localStorage.getItem("sbd-theme");
+        document.documentElement.dataset.theme = saved === "orient-express" ? "orient-express" : "whitehaven";
+      })();
+    </script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="index.css" />
+    <title>List and Kanban, quietly · Hercule</title>
+  </head>
+  <body class="lb-book">
+    <!-- ================================================================ top bar -->
+    <header class="lbk-top">
+      <a class="lbk-brand" href="#top" aria-label="List and Kanban, quietly - back to the top"><i data-logo="22"></i><span>List and Kanban, quietly</span></a>
+      <nav class="lbk-nav" aria-label="Sections">
+        <a href="#said">You said</a>
+        <a href="#signals">Signals</a>
+        <a href="#list">List</a>
+        <a href="#kanban">Kanban</a>
+        <a href="#try">Try it</a>
+      </nav>
+      <div class="seg lbk-themes" role="group" aria-label="Theme">
+        <button type="button" data-theme-option="whitehaven" aria-pressed="true" title="Whitehaven, the light theme"><i data-i="sun" data-size="15"></i><span>Whitehaven</span></button>
+        <button type="button" data-theme-option="orient-express" aria-pressed="false" title="Orient Express, the dark theme"><i data-i="moon" data-size="15"></i><span>Orient Express</span></button>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- ================================================================ cover -->
+      <section class="lbk-cover" aria-labelledby="lbk-title">
+        <p class="lbk-eyebrow">Hercule · a design book · round 2</p>
+        <h1 class="lbk-h1" id="lbk-title">List and Kanban, quietly</h1>
+        <p class="lbk-cover-sub">Today's quiet thread list, made to carry 70 sessions. And an honest answer to your open question: how far along is a session, and where is it working?</p>
+        <p class="lbk-cover-date"><span>26 October 2026</span></p>
+
+        <figure class="lbk-before">
+          <div class="lbk-before-pair">
+            <p class="lbk-before-label">Today</p>
+            <div class="lbk-pane">
+              <div class="lbk-row">
+                <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="working" data-size="22"></i>
+                <span class="lbk-row-title">Fix 3-D Secure checkout for EU cards</span>
+                <span class="lbk-row-end"><i data-mark="working" data-size="14"></i></span>
+                <span class="lbk-row-line">fix/3ds-eu-cards · studio-mac</span>
+              </div>
+            </div>
+            <p class="lbk-before-label">This round</p>
+            <div class="lbk-pane">
+              <div class="lbk-row">
+                <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="working" data-size="22"></i>
+                <span class="lbk-row-title">Fix 3-D Secure checkout for EU cards</span>
+                <span class="lbk-row-end"><i data-mark="working" data-size="14"></i></span>
+                <span class="lbk-row-line" data-line="t3ds:working">4 of 6 · Pushing the branch</span>
+              </div>
+            </div>
+          </div>
+          <figcaption>The same row, with one new line. The line comes from events Hercule already receives. The rest of this page shows how.</figcaption>
+        </figure>
+      </section>
+
+      <!-- ================================================================ 01 what you said -->
+      <section class="lbk-sec" id="said" data-spy>
+        <div class="lbk-col">
+          <p class="lbk-eyebrow"><span class="lbk-num">01</span>What you said</p>
+          <h2 class="lbk-h2">Less on the page</h2>
+          <p class="lbk-lede">Your verdict on round 1, on 25 October, in four lines:</p>
+          <ol class="lbk-said">
+            <li>Too much on every page. Today's thread list is better, because it is quieter.</li>
+            <li>You like the Kanban board.</li>
+            <li>With many sessions, you want to find and zoom in on the ones that interest you, not only the ones that need you.</li>
+            <li>And the open question: how do we know how far along a session is, and where it works? There is no code map.</li>
+          </ol>
+
+          <h3 class="lbk-h3 lbk-h3--gap">So the overview gets three modes</h3>
+          <div class="lbk-modes">
+            <div class="seg lbk-modes-seg" aria-hidden="true"><button type="button" tabindex="-1" aria-pressed="false">Office</button><button type="button" tabindex="-1" aria-pressed="true">List</button><button type="button" tabindex="-1" aria-pressed="false">Kanban</button></div>
+            <dl class="lbk-modes-dl">
+              <div><dt>Office</dt><dd>As today. Untouched.</dd></div>
+              <div><dt>List</dt><dd>Today's quiet row, for every session. Three ways to lay it out.</dd></div>
+              <div><dt>Kanban</dt><dd>One small card per session, in columns by state or by phase.</dd></div>
+            </dl>
+          </div>
+          <p class="lbk-rule">The rule for both: one colored thing per row, words instead of bars, hairlines instead of boxes. When in doubt, leave it out.</p>
+        </div>
+      </section>
+
+      <!-- ================================================================ 02 how far along, and where -->
+      <section class="lbk-sec" id="signals" data-spy>
+        <div class="lbk-col">
+          <p class="lbk-eyebrow"><span class="lbk-num">02</span>How far along, and where</p>
+          <h2 class="lbk-h2">No code map needed</h2>
+          <p class="lbk-lede">Every command a session runs, and every file it reads, searches or edits, already reaches the controller as an event. Today the controller stores those events and reads none of them.</p>
+          <p class="lbk-p">The proposal: read each event once, as it arrives, into a small record on the session, the <b>digest</b>. Every list and board then reads one line from it.</p>
+        </div>
+
+        <!-- ---------------------------------------------------------- the finding -->
+        <div class="lbk-col lbk-sub" id="finding">
+          <p class="lbk-kicker">First, a finding</p>
+          <h3 class="lbk-h3">Agents keep no plan today</h3>
+          <p class="lbk-p">We counted what the sessions on this runner really did.</p>
+          <div class="lbk-stats">
+            <div class="lbk-stat"><b>0</b><span>todo or task calls in 496 Claude sessions</span></div>
+            <div class="lbk-stat"><b>0</b><span>plan updates in 188 Codex sessions</span></div>
+            <div class="lbk-stat"><b>0</b><span>plan tools in pi</span></div>
+            <div class="lbk-stat"><b>86%</b><span>of test commands piped, most into <code>tail</code>, <code>head</code> or <code>grep</code></span></div>
+          </div>
+          <p class="lbk-p">Claude's SDK turned its todo tools off by default for current models. Codex has a plan tool, and no session here used it. pi has none. And a test piped into <code>tail</code> reports the exit code of <code>tail</code>: only 2 of 240 test commands were marked failed.</p>
+          <p class="lbk-verdict">So Hercule asks for a plan, with a tool of its own: <code>hercule&nbsp;progress</code>. Where there is no plan, a row shows only facts: what the agent does, where, and for how long. Never a bar.</p>
+
+          <details class="lbk-more">
+            <summary>What each provider sends today</summary>
+            <div class="lbk-scroll">
+              <table class="lbk-table">
+                <thead><tr><th></th><th>Claude Code</th><th>Codex</th><th>pi</th></tr></thead>
+                <tbody>
+                  <tr><th>Commands</th><td>yes</td><td>yes</td><td>yes</td></tr>
+                  <tr><th>Command outcome</th><td>failed or not, no exit code</td><td>exit code, kept only in the raw event</td><td>failed or not</td></tr>
+                  <tr><th>File edits</th><td>yes, with paths</td><td>yes, with paths</td><td>yes, with paths</td></tr>
+                  <tr><th>File reads</th><td>a read tool, but many reads are shell commands</td><td>parsed from its own commands</td><td>a read tool, but most reads are shell commands</td></tr>
+                  <tr><th>The plan</th><td>todo tools off on current models</td><td>plan updates dropped by Hercule's normalizer</td><td>no plan tool</td></tr>
+                  <tr><th>Turn start and end</th><td>yes</td><td>yes</td><td>yes</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="lbk-small">pi ran 3,404 shell commands against 92 reads, so the runner needs a small shell parser that knows <code>cat</code>, <code>sed -n</code>, <code>rg</code> and <code>grep</code> are reads and searches. Git is reliable: commits, pushes and <code>gh pr create</code> match by their command text. The full evidence, with links: <a href="research/provider-signals.md">research/provider-signals.md</a>.</p>
+          </details>
+        </div>
+
+        <!-- ---------------------------------------------------------- one turn, end to end -->
+        <div class="lbk-sub" id="turn">
+          <div class="lbk-col">
+            <p class="lbk-kicker">The idea in one picture</p>
+            <h3 class="lbk-h3">One real turn, end to end</h3>
+            <p class="lbk-p">The 3-D Secure fix, its second turn. Nine events arrive. The controller folds each one into the digest as it lands. The row reads one line from the digest. <span class="lbk-hint lbk-hint--touch">Tap a field of the digest to light the events above it that made it.</span><span class="lbk-hint lbk-hint--mouse">Point at a field of the digest to light the events that made it; click to keep it lit.</span></p>
+          </div>
+
+          <div class="lbk-flow lbk-wide" data-lit="">
+            <div class="lbk-flow-events">
+              <p class="lbk-flow-label">Events <span>as they arrive</span></p>
+              <p class="lbk-turn">Turn 2 starts at 09:21, after a report from the thread <i>Read the Stripe v14 changelog</i>.</p>
+              <ol class="lbk-evs">
+                <li class="lbk-ev" data-feeds="phase focus"><span class="lbk-ev-t">09:22</span><span class="lbk-ev-k">read</span><code class="lbk-ev-x">src/checkout/payment.ts</code><span class="lbk-ev-f"><em>Exploring</em> · focus +1</span></li>
+                <li class="lbk-ev" data-feeds="focus"><span class="lbk-ev-t"></span><span class="lbk-ev-k">read</span><code class="lbk-ev-x">src/checkout/3ds-modal.tsx</code><span class="lbk-ev-f">focus +1</span></li>
+                <li class="lbk-ev" data-feeds="focus"><span class="lbk-ev-t"></span><span class="lbk-ev-k">read</span><code class="lbk-ev-x">src/lib/stripe.ts</code><span class="lbk-ev-f">focus +1</span></li>
+                <li class="lbk-ev" data-feeds="phase focus milestones"><span class="lbk-ev-t">09:24</span><span class="lbk-ev-k">edit</span><code class="lbk-ev-x">src/checkout/payment.ts</code><span class="lbk-ev-f"><em>Changing</em> · Changed · focus +3</span></li>
+                <li class="lbk-ev" data-feeds="focus"><span class="lbk-ev-t"></span><span class="lbk-ev-k">edit</span><code class="lbk-ev-x">src/checkout/payment.ts</code><span class="lbk-ev-f">focus +3</span></li>
+                <li class="lbk-ev" data-feeds="focus"><span class="lbk-ev-t"></span><span class="lbk-ev-k">edit</span><code class="lbk-ev-x">src/checkout/payment.test.ts</code><span class="lbk-ev-f">focus +3</span></li>
+                <li class="lbk-ev" data-feeds="phase milestones lastCheck"><span class="lbk-ev-t">09:28</span><span class="lbk-ev-k">run</span><span class="lbk-ev-x"><code>pnpm test checkout | tail -20</code><code class="lbk-ev-out">Tests  24 passed (24)</code></span><span class="lbk-ev-f"><em>Verifying</em> · Tested · Passing</span></li>
+                <li class="lbk-ev" data-feeds="plan"><span class="lbk-ev-t">09:29</span><span class="lbk-ev-k">plan</span><span class="lbk-ev-x"><code>hercule progress --step …</code><span class="lbk-ev-out">6 steps, 4 done, doing "Push the branch"</span></span><span class="lbk-ev-f">plan 4 of 6</span></li>
+                <li class="lbk-ev" data-feeds="phase milestones activity"><span class="lbk-ev-t">09:29</span><span class="lbk-ev-k">run</span><code class="lbk-ev-x">git commit -m "Fix 3-D Secure"</code><span class="lbk-ev-f"><em>Shipping</em> · Committed</span></li>
+              </ol>
+            </div>
+
+            <div class="lbk-conn" aria-hidden="true"><svg class="lbk-conn-v" width="12" height="44" viewBox="0 0 12 44"><path d="M6 1v41M2.5 38.5 6 42l3.5-3.5" /></svg><svg class="lbk-conn-h" width="64" height="12" viewBox="0 0 64 12"><path d="M1 6h61M58.5 2.5 62 6l-3.5 3.5" /></svg><span><span class="lbk-conn-more">Folded in </span>as each event lands</span></div>
+
+            <div class="lbk-flow-digest">
+              <p class="lbk-flow-label">The digest <span>at 09:30</span></p>
+              <div class="lbk-digest">
+                <button type="button" class="lbk-field" data-field="activity" aria-pressed="false"><span class="lbk-field-k">activity</span><span class="lbk-field-v">Running <code>git commit -m "Fix 3-D Secure"</code></span></button>
+                <button type="button" class="lbk-field" data-field="phase" aria-pressed="false"><span class="lbk-field-k">phase</span><span class="lbk-field-v">Shipping</span></button>
+                <button type="button" class="lbk-field" data-field="plan" aria-pressed="false"><span class="lbk-field-k">plan</span><span class="lbk-field-v">4 of 6 · Pushing the branch</span></button>
+                <button type="button" class="lbk-field" data-field="milestones" aria-pressed="false"><span class="lbk-field-k">milestones</span><span class="lbk-field-v">Changed · Tested · Passing · Committed</span></button>
+                <button type="button" class="lbk-field" data-field="focus" aria-pressed="false"><span class="lbk-field-k">focus</span><span class="lbk-field-v"><code>src/checkout</code>, hot file <code>payment.ts</code></span></button>
+                <button type="button" class="lbk-field" data-field="lastCheck" aria-pressed="false"><span class="lbk-field-k">lastCheck</span><span class="lbk-field-v" data-check="t3ds">Tests pass · 24 passed</span></button>
+              </div>
+            </div>
+
+            <div class="lbk-conn" aria-hidden="true"><svg class="lbk-conn-v" width="12" height="44" viewBox="0 0 12 44"><path d="M6 1v41M2.5 38.5 6 42l3.5-3.5" /></svg><svg class="lbk-conn-h" width="64" height="12" viewBox="0 0 64 12"><path d="M1 6h61M58.5 2.5 62 6l-3.5 3.5" /></svg><span><span class="lbk-conn-more">Sent with the session, </span>read by every list</span></div>
+
+            <div class="lbk-flow-rows">
+              <p class="lbk-flow-label">The row <span>at 09:30</span></p>
+              <div class="lbk-pane">
+                <p class="lbk-group"><span class="proj proj--webshop">webshop</span></p>
+                <div class="lbk-row">
+                  <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="working" data-size="22"></i>
+                  <span class="lbk-row-title">Fix 3-D Secure checkout for EU cards</span>
+                  <span class="lbk-row-end"><i data-mark="working" data-size="14"></i></span>
+                  <span class="lbk-row-line" data-line="t3ds:working">4 of 6 · Pushing the branch</span>
+                </div>
+              </div>
+              <p class="lbk-flow-label lbk-flow-label--then">At 09:31 <span>it asks to push</span></p>
+              <div class="lbk-pane">
+                <div class="lbk-row">
+                  <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="22"></i>
+                  <span class="lbk-row-title">Fix 3-D Secure checkout for EU cards</span>
+                  <span class="lbk-row-end"><i data-mark="waiting" data-size="14"></i></span>
+                  <span class="lbk-row-line lbk-row-line--ask" data-line="t3ds">Run git push?</span>
+                </div>
+              </div>
+              <p class="lbk-flow-note">The ask wins, as today. This is the row the live window shows at 09:41.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------------------------------------------------------- phase -->
+        <div class="lbk-col lbk-sub" id="phase">
+          <p class="lbk-kicker">What is it doing now?</p>
+          <h3 class="lbk-h3">Phase: the kind of work, right now</h3>
+          <p class="lbk-p">One word for the latest tool call of the turn. It says what the agent is doing in this turn, never a guess at the stage of the project.</p>
+          <div class="lbk-phases">
+            <div class="lbk-phases-h" aria-hidden="true"><span>Phase</span><span>When</span><span>How sure</span></div>
+            <div class="lbk-phase"><b>Exploring</b><span>Reads and searches, before any edit in this turn.</span><span><em>Good.</em> Codex parses its own commands; for Claude and pi the runner parses the shell commands.</span></div>
+            <div class="lbk-phase"><b>Changing</b><span>A file edit. Reads after an edit stay Changing.</span><span><em>Reliable.</em> Completed edits, and the edit watch.</span></div>
+            <div class="lbk-phase"><b>Verifying</b><span>A test, typecheck, lint or build command ran.</span><span><em>Reliable that it ran.</em> Whether it passed, only when the output is recognised.</span></div>
+            <div class="lbk-phase"><b>Shipping</b><span><code>git commit</code>, <code>git push</code>, <code>gh pr create</code> or <code>gh pr merge</code>, or a pull request through the GitHub Connection.</span><span><em>Reliable.</em> The command text.</span></div>
+          </div>
+          <p class="lbk-p">Two states win over the phase: <b>Waiting</b>, when a Request is open, and <b>Resting</b>, when the session is idle. The peek panel always says why a session sits where it does: "Verifying: ran <code>pnpm test checkout</code> 40s ago".</p>
+          <details class="lbk-more">
+            <summary>Which commands count as checks</summary>
+            <dl class="lbk-classes">
+              <div><dt>test</dt><dd><code>pnpm test</code> <code>npm test</code> <code>bun test</code> <code>vitest</code> <code>jest</code> <code>pytest</code> <code>go test</code> <code>cargo test</code> <code>rspec</code></dd></div>
+              <div><dt>typecheck</dt><dd><code>tsc</code> <code>bun check</code> <code>pnpm typecheck</code> <code>mypy</code> <code>pyright</code></dd></div>
+              <div><dt>lint</dt><dd><code>eslint</code> <code>oxlint</code> <code>pnpm lint</code> <code>ruff</code> <code>golangci-lint</code> <code>cargo clippy</code></dd></div>
+              <div><dt>build</dt><dd><code>pnpm build</code> <code>vite build</code> <code>cargo build</code> <code>go build</code> <code>make</code></dd></div>
+              <div><dt>git</dt><dd><code>git commit</code> <code>git push</code> <code>gh pr …</code></dd></div>
+            </dl>
+            <p class="lbk-small">A command is classed by its first real program, after <code>cd … &amp;&amp;</code> and <code>env</code>. The list is a setting with these defaults, so a project with its own <code>just test</code> can add it.</p>
+          </details>
+        </div>
+
+        <!-- ---------------------------------------------------------- focus -->
+        <div class="lbk-col lbk-sub" id="focus">
+          <p class="lbk-kicker">Where?</p>
+          <h3 class="lbk-h3">Focus: the folder it works in</h3>
+          <p class="lbk-p">No code map, only the paths of the files the turn touched.</p>
+          <ol class="lbk-steps">
+            <li>Take the turn's file paths, relative to the checkout. An edit weighs 3, a read 1, a search 0.5. Reads and searches count only while the turn has no edit yet. Root files every agent reads, such as <code>AGENTS.md</code> and <code>package.json</code>, do not count.</li>
+            <li>Add up the weight under every folder.</li>
+            <li>The focus is the deepest folder with at least 60% of the weight. The heaviest file is the hot file. When no folder reaches 60%, the focus is the two heaviest top folders.</li>
+          </ol>
+
+          <div class="lbk-focus">
+            <div class="lbk-focus-items">
+              <p class="lbk-flow-label">The turn's files</p>
+              <table class="lbk-weights">
+                <tbody>
+                  <tr><td>read</td><td><code>src/checkout/payment.ts</code></td><td>1</td></tr>
+                  <tr><td>read</td><td><code>src/checkout/3ds-modal.tsx</code></td><td>1</td></tr>
+                  <tr><td>read</td><td><code>src/lib/stripe.ts</code></td><td>1</td></tr>
+                  <tr><td>edit</td><td><code>src/checkout/payment.ts</code></td><td>3</td></tr>
+                  <tr><td>edit</td><td><code>src/checkout/payment.ts</code></td><td>3</td></tr>
+                  <tr><td>edit</td><td><code>src/checkout/payment.test.ts</code></td><td>3</td></tr>
+                </tbody>
+                <tfoot><tr><td></td><td>total</td><td>12</td></tr></tfoot>
+              </table>
+            </div>
+            <div class="lbk-focus-tree">
+              <p class="lbk-flow-label">Weight per folder <span>60% marked</span></p>
+              <div class="lbk-tree">
+                <div class="lbk-node lbk-node--dir" style="--d: 0; --share: 100%"><code>src/</code><span class="lbk-node-w">12</span><span class="lbk-node-bar"><i></i></span><span class="lbk-node-pct">100%</span></div>
+                <div class="lbk-node lbk-node--dir is-focus" style="--d: 1; --share: 91.67%"><code>checkout/</code><span class="lbk-node-w">11</span><span class="lbk-node-bar"><i></i></span><span class="lbk-node-pct">92%</span></div>
+                <div class="lbk-node is-hot" style="--d: 2"><code>payment.ts</code><span class="lbk-node-w">7</span><span class="lbk-node-tag">hot file</span></div>
+                <div class="lbk-node" style="--d: 2"><code>payment.test.ts</code><span class="lbk-node-w">3</span></div>
+                <div class="lbk-node" style="--d: 2"><code>3ds-modal.tsx</code><span class="lbk-node-w">1</span></div>
+                <div class="lbk-node lbk-node--dir" style="--d: 1; --share: 8.33%"><code>lib/</code><span class="lbk-node-w">1</span><span class="lbk-node-bar"><i></i></span><span class="lbk-node-pct">8%</span></div>
+                <div class="lbk-node" style="--d: 2"><code>stripe.ts</code><span class="lbk-node-w">1</span></div>
+              </div>
+            </div>
+          </div>
+          <p class="lbk-p"><code>src/checkout</code> holds 11 of 12, which is 92%, and no folder below it holds any. So the row's place is <b>src/checkout</b>, and the peek panel names <code>payment.ts</code> as the hot file.</p>
+        </div>
+
+        <!-- ---------------------------------------------------------- milestones -->
+        <div class="lbk-col lbk-sub" id="milestones">
+          <p class="lbk-kicker">How far along, without a plan</p>
+          <h3 class="lbk-h3">Milestones: what Hercule saw happen</h3>
+          <p class="lbk-p">Facts with a time, in the order a coding task usually meets them. They are evidence, not a plan: a research thread may reach none and still be done. Here is the 3-D Secure fix at 09:30.</p>
+          <ol class="lbk-ladder">
+            <li class="is-done"><b>Changed</b><time>09:24</time><span>the first file edit</span></li>
+            <li class="is-done"><b>Tested</b><time>09:28</time><span>the first test command</span></li>
+            <li class="is-done is-maybe"><b>Passing</b><time>09:28</time><span>when the output is recognised: "24 passed"</span></li>
+            <li class="is-done"><b>Committed</b><time>09:29</time><span><code>git commit</code> succeeded</span></li>
+            <li><b>Pushed</b><time>not yet</time><span><code>git push</code> succeeded</span></li>
+            <li><b>PR open</b><time>not yet</time><span><code>gh pr create</code>, or the GitHub Connection</span></li>
+          </ol>
+          <p class="lbk-p">Passing is the careful one. A failing summary clears it. An output Hercule does not recognise leaves it unknown, and the row then says "Tests ran", never "Tests pass".</p>
+        </div>
+
+        <!-- ---------------------------------------------------------- the progress tool -->
+        <div class="lbk-col lbk-sub" id="progress">
+          <p class="lbk-kicker">How far along, with a plan</p>
+          <h3 class="lbk-h3">The progress tool</h3>
+          <p class="lbk-p">Sessions already use the <code>hercule</code> command line. One new verb takes the whole list each time, the way Claude's old todo tool did.</p>
+          <div class="lbk-tool">
+            <div class="lbk-tool-run">
+              <p class="lbk-flow-label">What the agent runs</p>
+              <pre class="lbk-code"><code>hercule progress \
+  --step "Find the cause:done" \
+  --step "Write a failing test:done" \
+  --step "Fix handlePaymentResult:done" \
+  --step "Run the checkout tests:done" \
+  --step "Push the branch:doing" \
+  --step "Open a pull request"</code></pre>
+            </div>
+            <div class="lbk-tool-row">
+              <p class="lbk-flow-label">What the row shows</p>
+              <div class="lbk-pane">
+                <div class="lbk-row">
+                  <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="working" data-size="22"></i>
+                  <span class="lbk-row-title">Fix 3-D Secure checkout for EU cards</span>
+                  <span class="lbk-row-end"><i data-mark="working" data-size="14"></i></span>
+                  <span class="lbk-row-line" data-line="t3ds:working">4 of 6 · Pushing the branch</span>
+                </div>
+              </div>
+            </div>
+            <div class="lbk-tool-peek">
+              <p class="lbk-flow-label">What the peek panel shows</p>
+              <ol class="lbk-plan">
+                <li class="is-done">Find the cause</li>
+                <li class="is-done">Write a failing test</li>
+                <li class="is-done">Fix handlePaymentResult</li>
+                <li class="is-done">Run the checkout tests</li>
+                <li class="is-doing">Push the branch</li>
+                <li>Open a pull request</li>
+              </ol>
+            </div>
+          </div>
+          <p class="lbk-p">To get plans, Hercule's session instructions gain two sentences:</p>
+          <blockquote class="lbk-quote">Keep a progress list with <code>hercule progress</code> when a task has more than three steps. Update it when a step is done.</blockquote>
+          <p class="lbk-p">Short questions get no plan, and that is fine. When a provider keeps a plan of its own (Claude's todo tools, if turned on, or Codex's plan updates), Hercule reads that too, and the latest plan wins. A plan that grows shows as it is: "3 of 9", up from "3 of 7". The row never claims a percentage the agent did not give.</p>
+        </div>
+
+        <!-- ---------------------------------------------------------- the row's line -->
+        <div class="lbk-col lbk-sub" id="line">
+          <p class="lbk-kicker">Putting it together</p>
+          <h3 class="lbk-h3">What the row says</h3>
+          <p class="lbk-p">One muted line. Hercule tries four cases in order, and the first that fits wins. Real rows from the heavy morning:</p>
+          <ol class="lbk-cases">
+            <li>
+              <p class="lbk-case-h"><b>Waiting on you</b> The ask, as today.</p>
+              <div class="lbk-pane">
+                <div class="lbk-row">
+                  <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="22"></i>
+                  <span class="lbk-row-title">Fix 3-D Secure checkout for EU cards</span>
+                  <span class="lbk-row-end"><i data-mark="waiting" data-size="14"></i></span>
+                  <span class="lbk-row-line lbk-row-line--ask" data-line="t3ds">Run git push?</span>
+                </div>
+              </div>
+            </li>
+            <li>
+              <p class="lbk-case-h"><b>Working, with a plan</b> Steps done, and the current step.</p>
+              <div class="lbk-pane">
+                <div class="lbk-row">
+                  <i data-face="Refactor cart totals" data-pose="working" data-size="22"></i>
+                  <span class="lbk-row-title">Refactor cart totals</span>
+                  <span class="lbk-row-end"><i data-mark="working" data-size="14"></i></span>
+                  <span class="lbk-row-line" data-line="tCart">1 of 5 · Moving discount maths into computeTotals</span>
+                </div>
+              </div>
+            </li>
+            <li>
+              <p class="lbk-case-h"><b>Working, no plan</b> The phase and the place. With no files touched, the phase and the time, as in "Exploring · working 11m". Never a bar.</p>
+              <div class="lbk-pane">
+                <div class="lbk-row">
+                  <i data-face="Fix coupon stacking on sale items" data-pose="working" data-size="22"></i>
+                  <span class="lbk-row-title">Fix coupon stacking on sale items</span>
+                  <span class="lbk-row-end"><i data-mark="working" data-size="14"></i></span>
+                  <span class="lbk-row-line" data-line="sCoupon">Changing · src/cart</span>
+                </div>
+              </div>
+            </li>
+            <li>
+              <p class="lbk-case-h"><b>Resting</b> The last thing that surely happened. "Tests ran" when the output was not recognised.</p>
+              <div class="lbk-pane">
+                <div class="lbk-row">
+                  <i data-face="Tidy checkout CSS" data-pose="idle" data-size="22"></i>
+                  <span class="lbk-row-title">Tidy checkout CSS</span>
+                  <span class="lbk-row-end" data-age="tCss">2h</span>
+                  <span class="lbk-row-line" data-line="tCss">Pushed · PR #1281</span>
+                </div>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <!-- ---------------------------------------------------------- cost -->
+        <div class="lbk-col lbk-sub" id="cost">
+          <p class="lbk-kicker">Is it cheap?</p>
+          <h3 class="lbk-h3">What it costs</h3>
+          <div class="lbk-costs">
+            <div><b>A few comparisons per event</b><span>Done once, as each event is stored, where <code>Subagent.activity</code> is built today.</span></div>
+            <div><b>No extra read, no model call</b><span>The digest is folded from events the controller already stores.</span></div>
+            <div><b>One small column</b><span>On the session's row, written in the same transaction as the event that changed it.</span></div>
+            <div><b>Nothing per token</b><span>Sent with the session updates that already go out, batched over one second, like usage and tool counts.</span></div>
+          </div>
+          <p class="lbk-p">Clients read nothing new: the digest comes with the session query every list already makes. Spec 18 turned down an activity line on the phone because it cost one transcript read per row. The digest removes that cost.</p>
+        </div>
+
+        <!-- ---------------------------------------------------------- what changes where -->
+        <div class="lbk-col lbk-sub" id="changes">
+          <p class="lbk-kicker">The work</p>
+          <h3 class="lbk-h3">What changes, where</h3>
+          <dl class="lbk-changes">
+            <div><dt>Runner</dt><dd>Turns <code>hercule progress</code> into a plan event, and maps the providers' own plans. Copies the exit code, duration, folder and git details of each command out of the raw event into typed fields. A small shell parser classes reads, searches, checks and git. Read and search paths become checkout-relative, as edits already are.</dd></div>
+            <div><dt>Session instructions</dt><dd>Two sentences asking for <code>hercule progress</code>.</dd></div>
+            <div><dt>Protocol</dt><dd>The steps on plan events; the exit code on finished commands.</dd></div>
+            <div><dt>Controller</dt><dd><code>buildSessionDigest</code>, beside <code>buildSubagentActivity</code>. A <code>digest</code> column (a migration), the turn's start time and the turn count.</dd></div>
+            <div><dt>Contract</dt><dd><code>Session.digest</code> and <code>Session.turnStartedAt</code>.</dd></div>
+            <div><dt>Client-core</dt><dd>One function that turns a digest into the row's line, and one that groups sessions by phase for the Kanban, each with its own test.</dd></div>
+          </dl>
+          <p class="lbk-small">One choice to make on purpose: once Claude's todo calls become plan events, they stop counting as tool calls.</p>
+        </div>
+
+        <!-- ---------------------------------------------------------- limits -->
+        <div class="lbk-col lbk-sub" id="limits">
+          <p class="lbk-kicker">Honestly</p>
+          <h3 class="lbk-h3">What it does not do</h3>
+          <ul class="lbk-limits">
+            <li>It does not make agents keep a plan. Some will skip it, and their rows say less.</li>
+            <li>It gives no percentage without a plan. Phase and milestones say what happened, not how much is left.</li>
+            <li>The phase is this turn's work, not where the whole task stands. A thread that ran its tests and then reads more files is Exploring again, and that is true.</li>
+            <li>Focus needs files. A question or a web search has no focus, and the row says less.</li>
+            <li>The main checkout has no edit watch, but its tool calls still carry paths, so focus still works there.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ================================================================ 03 the list -->
+      <section class="lbk-sec" id="list" data-spy>
+        <div class="lbk-col">
+          <p class="lbk-eyebrow"><span class="lbk-num">03</span>The List</p>
+          <h2 class="lbk-h2">The List, three ways</h2>
+          <p class="lbk-lede">Each draws the same 70 sessions from the same digest, and each keeps Waiting on you on top.</p>
+        </div>
+
+        <div class="lbk-variant lbk-col">
+          <h3 class="lbk-h3">Rows</h3>
+          <p class="lbk-p">Today's sidebar row, full width, grouped by project. The second line becomes the digest line. A project folds to one line ("webshop · 14 working · 1 needs you"), and quiet threads fold into "9 resting".</p>
+        </div>
+        <figure class="lbk-shot lbk-wide" data-shot="list-rows" data-name="List · Rows">
+          <a class="lbk-shot-frame" href="desktop.html?mode=list&amp;list=rows" target="_blank" rel="noopener"><img alt="The List as Rows: one quiet row per thread, grouped by project" loading="lazy" decoding="async" hidden /><span class="lbk-shot-empty"><b>List · Rows</b><span>The capture is on its way. Open it live.</span></span></a>
+          <figcaption><a href="desktop.html?mode=list&amp;list=rows" target="_blank" rel="noopener">Open Rows live <i data-i="external" data-size="14"></i></a></figcaption>
+        </figure>
+
+        <div class="lbk-variant lbk-col">
+          <h3 class="lbk-h3">Table</h3>
+          <p class="lbk-p">One 36px line per thread, in quiet aligned columns: status, thread, progress, where, machine, age. Sort by any column. Made for scanning many rows fast, as in Linear.</p>
+        </div>
+        <figure class="lbk-shot lbk-wide" data-shot="list-table" data-name="List · Table">
+          <a class="lbk-shot-frame" href="desktop.html?mode=list&amp;list=table" target="_blank" rel="noopener"><img alt="The List as a Table: one line per thread in aligned columns" loading="lazy" decoding="async" hidden /><span class="lbk-shot-empty"><b>List · Table</b><span>The capture is on its way. Open it live.</span></span></a>
+          <figcaption><a href="desktop.html?mode=list&amp;list=table" target="_blank" rel="noopener">Open Table live <i data-i="external" data-size="14"></i></a></figcaption>
+        </figure>
+
+        <div class="lbk-variant lbk-col">
+          <h3 class="lbk-h3">Outline</h3>
+          <p class="lbk-p">Zoom levels. First one line per project, then its threads, then one thread's digest and crew. <kbd>→</kbd> zooms into the line you are on, <kbd>←</kbd> zooms out. At rest, the whole morning is five lines.</p>
+        </div>
+        <figure class="lbk-shot lbk-wide" data-shot="list-outline" data-name="List · Outline">
+          <a class="lbk-shot-frame" href="desktop.html?mode=list&amp;list=outline" target="_blank" rel="noopener"><img alt="The List as an Outline: one line per project, ready to zoom in" loading="lazy" decoding="async" hidden /><span class="lbk-shot-empty"><b>List · Outline</b><span>The capture is on its way. Open it live.</span></span></a>
+          <figcaption><a href="desktop.html?mode=list&amp;list=outline" target="_blank" rel="noopener">Open Outline live <i data-i="external" data-size="14"></i></a></figcaption>
+        </figure>
+      </section>
+
+      <!-- ================================================================ 04 finding and zooming -->
+      <section class="lbk-sec" id="find" data-spy>
+        <div class="lbk-col">
+          <p class="lbk-eyebrow"><span class="lbk-num">04</span>Finding and zooming</p>
+          <h2 class="lbk-h2">Find it, then look closer</h2>
+          <p class="lbk-lede">One field: "Find a thread". Type anywhere in the overview and the field fills.</p>
+          <p class="lbk-p">Plain words match titles, branches, folders and models. Words with a colon narrow further:</p>
+          <ul class="lbk-tokens">
+            <li><code>project:webshop</code></li>
+            <li><code>in:src/checkout</code></li>
+            <li><code>model:codex</code></li>
+            <li><code>on:build-box-1</code></li>
+            <li><code>by:me</code></li>
+            <li><code>is:waiting</code></li>
+          </ul>
+          <p class="lbk-p">Beside the field sit four lenses, as quiet text: <b>All · Following · Mine · Needs you</b>. Following is the threads you follow, with <kbd>F</kbd> or from the peek panel. Mine is the threads you started yourself, not the partners your agents started. A filter never hides a thread that waits on you without saying so: "1 waiting thread hidden".</p>
+        </div>
+        <figure class="lbk-shot lbk-wide" data-shot="list-find" data-name="Find and lenses">
+          <a class="lbk-shot-frame" href="desktop.html?mode=list&amp;q=cart" target="_blank" rel="noopener"><img alt="The find bar with a query typed and the lenses beside it" loading="lazy" decoding="async" hidden /><span class="lbk-shot-empty"><b>Find and lenses</b><span>The capture is on its way. Open it live.</span></span></a>
+          <figcaption><a href="desktop.html?mode=list&amp;q=cart" target="_blank" rel="noopener">Open "cart" live <i data-i="external" data-size="14"></i></a></figcaption>
+        </figure>
+
+        <div class="lbk-variant lbk-col">
+          <h3 class="lbk-h3">The peek panel</h3>
+          <p class="lbk-p">Select a thread and a panel slides in at the right, without leaving the list: the plan's steps, the milestones, the focus with its hot files, the last check, the crew, the ask with its buttons, and Open thread. It is the zoom on one thread.</p>
+          <p class="lbk-keys"><kbd>↑</kbd> <kbd>↓</kbd> walk · <kbd>space</kbd> peek · <kbd>↩</kbd> open · <kbd>F</kbd> follow · <kbd>esc</kbd> clear</p>
+        </div>
+        <figure class="lbk-shot lbk-wide" data-shot="list-peek" data-name="The peek panel">
+          <a class="lbk-shot-frame" href="desktop.html?mode=list&amp;select=t3ds" target="_blank" rel="noopener"><img alt="The peek panel open on the 3-D Secure fix: its plan, milestones, focus and ask" loading="lazy" decoding="async" hidden /><span class="lbk-shot-empty"><b>The peek panel</b><span>The capture is on its way. Open it live.</span></span></a>
+          <figcaption><a href="desktop.html?mode=list&amp;select=t3ds" target="_blank" rel="noopener">Open the peek live <i data-i="external" data-size="14"></i></a></figcaption>
+        </figure>
+      </section>
+
+      <!-- ================================================================ 05 the kanban -->
+      <section class="lbk-sec" id="kanban" data-spy>
+        <div class="lbk-col">
+          <p class="lbk-eyebrow"><span class="lbk-num">05</span>The Kanban</p>
+          <h2 class="lbk-h2">The Kanban, two ways</h2>
+          <p class="lbk-lede">Cards are small and calm: a face, the title, one muted line and the age. Within a column, cards group by project, and resting cards fold to a count.</p>
+        </div>
+
+        <div class="lbk-variant lbk-col">
+          <h3 class="lbk-h3">By state <span class="lbk-h3-note">the default</span></h3>
+          <p class="lbk-p"><b>Needs you · Working · To review · Resting · Done today.</b> To review holds the threads whose turn ended after you last looked. Every column comes from facts Hercule has, plus one small new field: when you last looked.</p>
+        </div>
+        <figure class="lbk-shot lbk-wide" data-shot="board-state" data-name="Kanban · By state">
+          <a class="lbk-shot-frame" href="desktop.html?mode=kanban&amp;board=state" target="_blank" rel="noopener"><img alt="The Kanban by state: Needs you, Working, To review, Resting and Done today" loading="lazy" decoding="async" hidden /><span class="lbk-shot-empty"><b>Kanban · By state</b><span>The capture is on its way. Open it live.</span></span></a>
+          <figcaption><a href="desktop.html?mode=kanban&amp;board=state" target="_blank" rel="noopener">Open By state live <i data-i="external" data-size="14"></i></a></figcaption>
+        </figure>
+
+        <div class="lbk-variant lbk-col">
+          <h3 class="lbk-h3">By phase</h3>
+          <p class="lbk-p"><b>Exploring · Changing · Verifying · Shipping</b>, with Needs you as a narrow lane on the left and Resting folded on the right. Cards move when the work does. Changing and Shipping are reliable; Exploring and Verifying are good but not certain, so every card can say why it sits where it does.</p>
+        </div>
+        <figure class="lbk-shot lbk-wide" data-shot="board-phase" data-name="Kanban · By phase">
+          <a class="lbk-shot-frame" href="desktop.html?mode=kanban&amp;board=phase" target="_blank" rel="noopener"><img alt="The Kanban by phase: Exploring, Changing, Verifying and Shipping" loading="lazy" decoding="async" hidden /><span class="lbk-shot-empty"><b>Kanban · By phase</b><span>The capture is on its way. Open it live.</span></span></a>
+          <figcaption><a href="desktop.html?mode=kanban&amp;board=phase" target="_blank" rel="noopener">Open By phase live <i data-i="external" data-size="14"></i></a></figcaption>
+        </figure>
+      </section>
+
+      <!-- ================================================================ 06 try it -->
+      <section class="lbk-sec" id="try" data-spy>
+        <div class="lbk-col">
+          <p class="lbk-eyebrow"><span class="lbk-num">06</span>Try it</p>
+          <h2 class="lbk-h2">Open the live window</h2>
+          <p class="lbk-lede">The window is 1440 pixels wide, like the app. It reads best on a laptop, or on a phone held sideways.</p>
+          <p class="lbk-go"><a class="btn btn--accent btn--lg" href="desktop.html">Open the live window <i data-i="external" data-size="16"></i></a></p>
+
+          <h3 class="lbk-h3 lbk-h3--gap">Straight to one view</h3>
+          <ul class="lbk-links">
+            <li><a href="desktop.html?mode=list&amp;list=rows"><b>List · Rows</b><code>?mode=list&amp;list=rows</code></a></li>
+            <li><a href="desktop.html?mode=list&amp;list=table"><b>List · Table</b><code>?mode=list&amp;list=table</code></a></li>
+            <li><a href="desktop.html?mode=list&amp;list=outline"><b>List · Outline</b><code>?mode=list&amp;list=outline</code></a></li>
+            <li><a href="desktop.html?mode=kanban&amp;board=state"><b>Kanban · By state</b><code>?mode=kanban&amp;board=state</code></a></li>
+            <li><a href="desktop.html?mode=kanban&amp;board=phase"><b>Kanban · By phase</b><code>?mode=kanban&amp;board=phase</code></a></li>
+            <li><a href="desktop.html?mode=list&amp;q=cart"><b>Find "cart"</b><code>?mode=list&amp;q=cart</code></a></li>
+            <li><a href="desktop.html?mode=list&amp;lens=following"><b>Only the threads you follow</b><code>?mode=list&amp;lens=following</code></a></li>
+            <li><a href="desktop.html?mode=list&amp;select=t3ds"><b>Peek at the 3-D Secure fix</b><code>?mode=list&amp;select=t3ds</code></a></li>
+          </ul>
+
+          <h3 class="lbk-h3 lbk-h3--gap">Read more</h3>
+          <ul class="lbk-links lbk-links--docs">
+            <li><a href="SIGNALS.md"><b>The technical proposal</b><span>SIGNALS.md</span></a></li>
+            <li><a href="research/provider-signals.md"><b>The evidence, with links</b><span>research/provider-signals.md</span></a></li>
+            <li><a href="BRIEF.md"><b>The brief for this round</b><span>BRIEF.md</span></a></li>
+            <li><a href="../overview-directions/index.html"><b>Back to round 1</b><span>Seeing all the work</span></a></li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="lbk-foot"><p>Prototype · round 2 of Seeing all the work · 26 October 2026</p></footer>
+
+    <script src="../sidebar-directions/shared/world.js"></script>
+    <script src="shared/heavy-world.js"></script>
+    <script src="shared/digest.js"></script>
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+    <script>
+      // The page's small behaviours, ES5:
+      //   - the theme switch, kept in ?theme= and localStorage, and carried onto the live-window links
+      //   - every example row's line, taken from the same Digest.line the List and the Kanban use
+      //   - the digest fields that light up the events behind them
+      //   - the capture slots, which pick the theme's twin and the phone crop when they exist
+      //   - the section you are reading, marked in the top bar
+      (function () {
+        "use strict";
+
+        var root = document.documentElement;
+        var STORE_KEY = "sbd-theme";
+        var PHONE = window.matchMedia("(max-width: 640px)");
+
+        /* ---------------------------------------------------------------- theme */
+
+        // Rewrites every link into the live window so it opens in the book's theme.
+        function carryThemeToLinks(theme) {
+          document.querySelectorAll('a[href*="desktop.html"]').forEach(function (a) {
+            if (!a.dataset.href) a.dataset.href = a.getAttribute("href");
+            var url = new URL(a.dataset.href, location.href);
+            url.searchParams.set("theme", theme);
+            a.href = url.href;
+          });
+        }
+
+        function setTheme(theme) {
+          root.dataset.theme = theme;
+          localStorage.setItem(STORE_KEY, theme);
+          var url = new URL(location.href);
+          url.searchParams.set("theme", theme);
+          history.replaceState(null, "", url.pathname + url.search + url.hash);
+          document.querySelectorAll("[data-theme-option]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.themeOption === theme));
+          });
+          carryThemeToLinks(theme);
+          refreshShots();
+        }
+
+        /* ---------------------------------------------------------------- example rows */
+
+        // Fills each [data-line] from Digest.line, so a row here reads exactly as it does in the
+        // List. "t3ds:working" draws the session as it was while still working, before its ask.
+        function fillLines() {
+          if (!window.HEAVY || !window.Digest) return;
+          document.querySelectorAll("[data-line]").forEach(function (el) {
+            var parts = el.dataset.line.split(":");
+            var session = HEAVY.session(parts[0]);
+            if (!session) return;
+            if (parts[1]) session = Object.assign({}, session, { pose: parts[1] });
+            el.textContent = Digest.line(session).text;
+          });
+          document.querySelectorAll("[data-check]").forEach(function (el) {
+            var session = HEAVY.session(el.dataset.check);
+            if (session) el.textContent = Digest.checkText(session, true);
+          });
+          document.querySelectorAll("[data-age]").forEach(function (el) {
+            var session = HEAVY.session(el.dataset.age);
+            if (session) el.textContent = Digest.ago(session.last);
+          });
+        }
+
+        /* ---------------------------------------------------------------- the flow */
+
+        // Lights the events that fed a digest field: on hover with a mouse, and pinned by a click
+        // or a tap, which is all a phone has.
+        function wireFlow() {
+          var flow = document.querySelector(".lbk-flow");
+          var pinned = "";
+          function light(field) {
+            flow.dataset.lit = field;
+            flow.querySelectorAll(".lbk-field").forEach(function (f) {
+              f.setAttribute("aria-pressed", String(f.dataset.field === pinned));
+            });
+          }
+          flow.querySelectorAll(".lbk-field").forEach(function (f) {
+            f.addEventListener("pointerenter", function (e) {
+              if (e.pointerType === "mouse") light(f.dataset.field);
+            });
+            f.addEventListener("pointerleave", function (e) {
+              if (e.pointerType === "mouse") light(pinned);
+            });
+            f.addEventListener("click", function () {
+              pinned = pinned === f.dataset.field ? "" : f.dataset.field;
+              light(pinned);
+            });
+          });
+        }
+
+        /* ---------------------------------------------------------------- captures */
+
+        var probes = {};
+
+        // Resolves to true when the image at `url` loads. Each URL is tried once per page.
+        function probe(url) {
+          if (!probes[url]) {
+            probes[url] = new Promise(function (resolve) {
+              var img = new Image();
+              img.onload = function () { resolve(true); };
+              img.onerror = function () { resolve(false); };
+              img.src = url;
+            });
+          }
+          return probes[url];
+        }
+
+        // The captures in shots/, written down when the book was finished (26 October 2026).
+        var SHOTS = ["board-lanes", "board-lanes-dark", "board-lanes-m", "board-lanes-m-dark", "board-lanes-phase", "board-lanes-phase-dark", "board-move", "board-move-dark", "board-move-m", "board-move-m-dark", "board-move-mid", "board-move-mid-dark", "board-move-mid-m", "board-move-mid-m-dark", "board-phase", "board-phase-dark", "board-phase-m", "board-phase-m-dark", "board-phase-window", "board-phase-window-dark", "board-state", "board-state-dark", "board-state-m", "board-state-m-dark", "list-find", "list-find-dark", "list-following", "list-following-dark", "list-outline", "list-outline-dark", "list-outline-m", "list-outline-m-dark", "list-outline-zoom", "list-outline-zoom-dark", "list-outline-zoom-m", "list-outline-zoom-m-dark", "list-peek", "list-peek-dark", "list-peek-m", "list-peek-m-dark", "list-rows", "list-rows-dark", "list-rows-m", "list-rows-m-dark", "list-table", "list-table-dark"];
+
+        // Returns the files to try for a capture, best first: on a phone the phone crop, in the
+        // dark theme the dark twin, and the plain capture last.
+        function listCandidates(name) {
+          var dark = root.dataset.theme === "orient-express";
+          var names = [];
+          if (PHONE.matches && dark) names.push(name + "-m-dark");
+          if (PHONE.matches) names.push(name + "-m");
+          if (dark) names.push(name + "-dark");
+          names.push(name);
+          // Only captures that exist (SHOTS), so a slot never asks the server for a missing file.
+          return names.filter(function (n) { return SHOTS.indexOf(n) >= 0; }).map(function (n) { return "shots/" + n + ".webp"; });
+        }
+
+        function showShot(fig) {
+          var candidates = listCandidates(fig.dataset.shot);
+          var img = fig.querySelector("img");
+          var frame = fig.querySelector(".lbk-shot-frame");
+          (function tryNext(i) {
+            if (i >= candidates.length) {
+              // No capture yet: the slot links to the live window, in the book's theme.
+              fig.classList.remove("is-shot");
+              img.hidden = true;
+              frame.setAttribute("href", frame.dataset.href);
+              carryThemeToLinks(root.dataset.theme);
+              return;
+            }
+            probe(candidates[i]).then(function (ok) {
+              if (!ok) return tryNext(i + 1);
+              img.src = candidates[i];
+              img.hidden = false;
+              frame.href = candidates[i];
+              fig.classList.add("is-shot");
+            });
+          })(0);
+        }
+
+        var seen = [];
+        function refreshShots() {
+          seen.forEach(showShot);
+        }
+
+        // Starts looking for a capture only when its slot comes near the screen.
+        function watchShots() {
+          var figs = document.querySelectorAll(".lbk-shot");
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (e) {
+                if (!e.isIntersecting) return;
+                io.unobserve(e.target);
+                seen.push(e.target);
+                showShot(e.target);
+              });
+            },
+            { rootMargin: "800px 0px" },
+          );
+          figs.forEach(function (f) { io.observe(f); });
+          PHONE.addEventListener("change", refreshShots);
+        }
+
+        /* ---------------------------------------------------------------- the top bar */
+
+        // Marks the top bar's link to the section under the bar.
+        function watchSections() {
+          var links = document.querySelectorAll(".lbk-nav a");
+          var sections = document.querySelectorAll("[data-spy]");
+          var queued = false;
+          function update() {
+            queued = false;
+            var active = null;
+            sections.forEach(function (sec) {
+              if (sec.getBoundingClientRect().top <= window.innerHeight * 0.3) active = sec.id;
+            });
+            links.forEach(function (a) {
+              if (a.getAttribute("href") === "#" + active) a.setAttribute("aria-current", "true");
+              else a.removeAttribute("aria-current");
+            });
+          }
+          window.addEventListener("scroll", function () {
+            if (queued) return;
+            queued = true;
+            requestAnimationFrame(update);
+          }, { passive: true });
+          update();
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+          document.querySelectorAll("[data-theme-option]").forEach(function (b) {
+            b.addEventListener("click", function () { setTheme(b.dataset.themeOption); });
+          });
+          var theme = root.dataset.theme === "orient-express" ? "orient-express" : "whitehaven";
+          setTheme(theme);
+          fillLines();
+          wireFlow();
+          watchShots();
+          watchSections();
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,2339 @@
+/* PROTOTYPE - Control Tower's window. Every rule sits under .ov-control-tower (the window root the
+   stage builds) and every class starts with ct-, so the office builder's .ov-control-tower-office
+   rules and ours never meet. Loads after tokens.css, system.css and stage.css.
+
+   Two objects stay dark in both themes, as instruments do: the Radar's scope (lacquer, a brass
+   bezel) and the arrivals board (a split-flap station board). Everything else follows the theme. */
+
+.ov-control-tower {
+  position: relative;
+  /* the instruments */
+  --scope-face: oklch(0.275 0.032 165);
+  --scope-bezel: oklch(0.215 0.026 165);
+  --scope-ink: oklch(0.95 0.012 90);
+  --board-bg: oklch(0.235 0.03 165);
+  --flap: oklch(0.355 0.032 165);
+  --flap-ink: oklch(0.96 0.012 90);
+  --sweep-glow: 13%;
+  --strip-shadow: 0 0 0 1px var(--line-soft), 0 1px 2px oklch(0.3 0.03 165 / 0.07);
+}
+[data-theme="orient-express"] .ov-control-tower,
+[data-theme="dark"] .ov-control-tower {
+  --scope-face: oklch(0.168 0.012 50);
+  --scope-bezel: oklch(0.13 0.01 50);
+  --board-bg: oklch(0.15 0.011 50);
+  --flap: oklch(0.255 0.014 50);
+  --sweep-glow: 8%;
+  --strip-shadow: 0 0 0 1px var(--line), 0 1px 2px oklch(0 0 0 / 0.3);
+}
+
+/* ================================================================== the sidebar */
+
+.ov-control-tower .stage-side .icon-btn.is-pressed {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* Landing slots: the control under New thread. */
+.ov-control-tower .ct-slots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  width: 100%;
+  height: 32px;
+  margin: 4px 0 4px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-align: left;
+  transition: background var(--dur-1), box-shadow var(--dur-1);
+}
+.ov-control-tower .ct-slots:hover,
+.ov-control-tower .ct-slots.is-open {
+  background: var(--hover);
+}
+.ov-control-tower .ct-slots.is-on {
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ov-control-tower .ct-slots-ic {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+}
+.ov-control-tower .ct-slots.is-on .ct-slots-ic {
+  color: var(--ink);
+}
+.ov-control-tower .ct-slots-text {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-slots-text b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-slots-text span {
+  color: var(--faint);
+}
+.ov-control-tower .ct-slots-wait {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-slots-chev {
+  display: inline-grid;
+  color: var(--faint);
+}
+
+/* Bays */
+.ov-control-tower .ct-bay {
+  padding-top: 10px;
+}
+.ov-control-tower .ct-bay-h {
+  height: 26px;
+  padding-right: 2px;
+}
+.ov-control-tower .ct-bay-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-control-tower .ct-bay-h .count {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  letter-spacing: 0;
+}
+.ov-control-tower .ct-bay-note,
+.ov-control-tower .ct-moving {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-moving {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-right: 6px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-link {
+  color: inherit;
+  font: inherit;
+  text-underline-offset: 2px;
+}
+.ov-control-tower .ct-link:hover {
+  text-decoration: underline;
+}
+.ov-control-tower .ct-link--you {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  margin: 6px 0 2px;
+  padding-left: 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+}
+.ov-control-tower .ct-sub span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-more {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding-left: 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-align: left;
+}
+.ov-control-tower .ct-more:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ov-control-tower .ct-empty {
+  margin: 0;
+  padding: 4px 10px 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ================================================================== the strip */
+
+.ov-control-tower .ct-strip {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-height: 52px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: var(--strip-shadow);
+  cursor: pointer;
+  transition: box-shadow var(--dur-1), background var(--dur-1), opacity var(--dur-1);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ov-control-tower .ct-strip:hover {
+  box-shadow: 0 0 0 1px var(--line), 0 2px 6px -2px oklch(0.3 0.03 165 / 0.16);
+}
+.ov-control-tower .ct-strip.is-on {
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--ink) 62%, transparent), 0 2px 6px -2px oklch(0.3 0.03 165 / 0.16);
+}
+.ov-control-tower .ct-strip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* The project's tab: the paper strip's coloured edge. */
+.ov-control-tower .ct-tab {
+  flex: none;
+  width: 5px;
+  border-radius: 8px 0 0 8px;
+  background: var(--tab);
+  box-shadow: inset -1px 0 0 color-mix(in oklab, var(--ink) 12%, transparent);
+}
+.ov-control-tower .ct-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px 6px 9px;
+}
+.ov-control-tower .ct-l1 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 18px;
+  min-width: 0;
+  font-size: var(--t-13);
+  line-height: 18px;
+}
+/* The call sign: caps, tracked, in the UI face (mono is for code only). */
+.ov-control-tower .ct-call {
+  flex: none;
+  color: var(--ink);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-grow {
+  flex: 1;
+}
+.ov-control-tower .ct-time {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-time--you {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-time--quiet {
+  font-style: normal;
+}
+.ov-control-tower .ct-l2 {
+  display: flex;
+  align-items: center;
+  height: 16px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  color: var(--faint);
+}
+.ov-control-tower .ct-glyph svg {
+  width: 12px;
+  height: 12px;
+}
+.ov-control-tower .ct-glyph .pi {
+  font-size: 12px !important;
+}
+.ov-control-tower .ct-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-control-tower .ct-unread {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 9px 0 3px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.ov-control-tower .ct-in-stand .ct-detail {
+  color: var(--muted);
+}
+
+/* The crew: one dot per thread of the formation, in its own colour. */
+.ov-control-tower .ct-crew {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  margin-left: 8px;
+}
+.ov-control-tower .ct-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--who);
+}
+.ov-control-tower .ct-dot--idle,
+.ov-control-tower .ct-dot--asleep {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.3px var(--who);
+}
+.ov-control-tower .ct-dot--waiting {
+  background: var(--you);
+}
+.ov-control-tower .ct-dot.is-self {
+  width: 8px;
+  height: 8px;
+}
+
+/* Holding: the ask, finished by its two quick answers. */
+.ov-control-tower .ct-in-holding {
+  min-height: 60px;
+  background: color-mix(in oklab, var(--you-tint) 46%, var(--raised));
+}
+.ov-control-tower .ct-strip--side.ct-in-holding .ct-body {
+  gap: 3px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.ov-control-tower .ct-l2--ask {
+  height: 24px;
+  gap: 8px;
+}
+.ov-control-tower .ct-ask {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+}
+.ov-control-tower .ct-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.ov-control-tower .btn.ct-xs {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  font-size: var(--t-12);
+}
+.ov-control-tower .btn.ct-xs.btn--quiet {
+  padding: 0 6px;
+}
+.ov-control-tower .btn.is-pressed {
+  transform: translateY(1px);
+  filter: brightness(0.92);
+}
+.ov-control-tower .ct-chip {
+  flex: none;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--you-tint);
+  color: var(--you-ink);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+  line-height: 16px;
+}
+.ov-control-tower .ct-run {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+/* A stamp: when a held flight lands. Ink, not marigold: a hold is quiet until it lands. */
+.ov-control-tower .ct-stamp {
+  flex: none;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.2px color-mix(in oklab, var(--muted) 80%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  line-height: 17px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transform: rotate(-2.5deg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Parked strips step back, as idle rows do today. */
+.ov-control-tower .ct-strip.is-quiet {
+  background: color-mix(in oklab, var(--raised) 55%, transparent);
+  opacity: 0.82;
+}
+.ov-control-tower .ct-strip.is-quiet:hover,
+.ov-control-tower .ct-strip.is-quiet.is-on {
+  opacity: 1;
+}
+.ov-control-tower .ct-in-held {
+  background: color-mix(in oklab, var(--raised) 70%, transparent);
+  box-shadow: none;
+  outline: 1.2px dashed color-mix(in oklab, var(--muted) 55%, transparent);
+  outline-offset: -1px;
+}
+.ov-control-tower .ct-in-held.is-on {
+  outline-color: var(--ink);
+}
+
+/* A strip whose bay changed while the pointer was in the list: it waits, saying where it goes. */
+.ov-control-tower .ct-strip.is-pending {
+  outline: 1.5px dashed color-mix(in oklab, var(--ink) 40%, transparent);
+  outline-offset: 1px;
+}
+.ov-control-tower .ct-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  margin-left: 6px;
+  padding: 0 6px 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  line-height: 16px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-control-tower .ct-strip.is-arriving {
+    animation: ct-arrive 360ms var(--ease-out);
+  }
+}
+@keyframes ct-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* The deck: requests that wait quietly for the next slot, stacked like paper strips. */
+.ov-control-tower .ct-deck {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 60px;
+  margin: 2px 0 12px;
+  text-align: left;
+}
+.ov-control-tower .ct-deck-sheet {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 52px;
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: var(--strip-shadow);
+}
+.ov-control-tower .ct-deck-sheet--2 {
+  top: 4px;
+  left: 4px;
+  right: 4px;
+}
+.ov-control-tower .ct-deck-sheet--3 {
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  opacity: 0.8;
+}
+.ov-control-tower .ct-deck-face {
+  position: absolute;
+  inset: 0 0 8px;
+  display: flex;
+  align-items: stretch;
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: var(--strip-shadow);
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-1);
+}
+.ov-control-tower .ct-deck:hover .ct-deck-face {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px var(--line), 0 3px 8px -3px oklch(0.3 0.03 165 / 0.2);
+}
+.ov-control-tower .ct-deck-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px 0 9px;
+}
+.ov-control-tower .ct-deck-calls {
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+}
+.ov-control-tower .ct-deck-sub {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-deck-l2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ov-control-tower .ct-deck-sub {
+  flex: 1;
+  min-width: 0;
+}
+.ov-control-tower .ct-deck-calls {
+  -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+  mask-image: linear-gradient(90deg, #000 85%, transparent);
+}
+.ov-control-tower .ct-deck.is-open {
+  height: auto;
+  margin-top: 2px;
+}
+.ov-control-tower .ct-deck-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0 4px 0 10px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-control-tower .ct-deck.is-open .ct-strip {
+  background: var(--raised);
+}
+
+/* The hangar: Done, folded. */
+.ov-control-tower .ct-hangar {
+  padding-top: 10px;
+}
+.ov-control-tower .ct-hangar-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 6px 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-control-tower .ct-hangar-h:hover {
+  background: var(--hover);
+  color: var(--muted);
+}
+.ov-control-tower .ct-hangar-ic,
+.ov-control-tower .ct-hangar-chev {
+  display: inline-grid;
+  color: var(--faint);
+}
+.ov-control-tower .ct-hangar .count {
+  height: 16px;
+  font-size: 10.5px;
+  letter-spacing: 0;
+}
+.ov-control-tower .ct-hangar.is-open .ct-hangar-chev {
+  transform: rotate(90deg);
+}
+.ov-control-tower .ct-done {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 28px;
+  padding-right: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-done .ct-tab {
+  align-self: center;
+  width: 4px;
+  height: 14px;
+  margin-left: 6px;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+.ov-control-tower .ct-done-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The handover, in the away state: what changed while Rogier was out. */
+.ov-control-tower .ct-handover {
+  margin: 8px 0 2px;
+  padding: 10px 12px 12px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: var(--strip-shadow);
+}
+.ov-control-tower .ct-handover-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+}
+.ov-control-tower .ct-handover-h b {
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-handover-h span {
+  flex: 1;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-handover-p {
+  margin: 4px 0 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.ov-control-tower .ct-handover-p b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-handover-p b.you-ink {
+  color: var(--you-ink);
+}
+
+/* The foot's counts in the tower's words. */
+.ov-control-tower .side-sum b.you-ink {
+  color: var(--you-ink);
+}
+.ov-control-tower .ct-toast .side-toast-text {
+  white-space: normal;
+  line-height: 1.35;
+  padding: 3px 0;
+}
+
+/* ================================================================== the overview */
+
+.ov-control-tower .ct-ov {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.ov-control-tower .ct-modes {
+  position: absolute;
+  inset: 0;
+}
+.ov-control-tower .ct-mode {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 180ms var(--ease-out), visibility 0s linear 180ms;
+}
+.ov-control-tower .ct-mode.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 180ms var(--ease-out);
+}
+.ov-control-tower .ct-top .pill {
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+}
+.ov-control-tower .ct-switch {
+  gap: 2px;
+  padding: 0 4px;
+}
+.ov-control-tower .ct-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.ov-control-tower .ct-switch-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ov-control-tower .ct-switch-btn[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ov-control-tower .ct-slots-pill .pill-btn {
+  gap: 7px;
+  color: var(--muted);
+}
+.ov-control-tower .ct-slots-pill .pill-btn span {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-slots-pill .pill-btn.is-open {
+  background: var(--hover);
+}
+.ov-control-tower .ct-sum {
+  gap: 14px;
+  padding: 0 4px 0 14px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-sum b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-sum-you,
+.ov-control-tower .ct-sum-you b {
+  color: var(--you-ink);
+}
+.ov-control-tower .ct-sum-clock {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: var(--sunken);
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================== Radar */
+
+.ov-control-tower .ct-radar {
+  position: absolute;
+  inset: 60px 20px 16px;
+  display: grid;
+  grid-template-columns: 560px minmax(0, 1fr);
+  gap: 28px;
+}
+.ov-control-tower .ct-scope-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ov-control-tower .ct-scope {
+  position: relative;
+  flex: none;
+  width: 560px;
+  height: 560px;
+  border-radius: 50%;
+  box-shadow: 0 18px 40px -18px oklch(0.2 0.03 165 / 0.45), 0 2px 6px oklch(0.2 0.03 165 / 0.12);
+}
+.ov-control-tower .ct-face,
+.ov-control-tower .ct-marks {
+  position: absolute;
+  inset: 0;
+  width: 560px;
+  height: 560px;
+  overflow: visible;
+}
+.ov-control-tower .ct-marks {
+  pointer-events: none;
+}
+.ov-control-tower .ct-bezel {
+  fill: var(--scope-bezel);
+}
+.ov-control-tower .ct-face-bg {
+  fill: var(--scope-face);
+}
+.ov-control-tower .ct-sector {
+  opacity: 0.17;
+}
+[data-theme="orient-express"] .ov-control-tower .ct-sector,
+[data-theme="dark"] .ov-control-tower .ct-sector {
+  opacity: 0.32;
+}
+.ov-control-tower .ct-sector.ct-sector--none,
+[data-theme="orient-express"] .ov-control-tower .ct-sector.ct-sector--none,
+[data-theme="dark"] .ov-control-tower .ct-sector.ct-sector--none {
+  opacity: 0.035;
+}
+.ov-control-tower .ct-sector-edge {
+  stroke: var(--scope-ink);
+  stroke-opacity: 0.16;
+  stroke-width: 1;
+}
+.ov-control-tower .ct-later {
+  fill: oklch(0 0 0 / 0.14);
+}
+.ov-control-tower .ct-ring {
+  fill: none;
+  stroke: var(--scope-ink);
+  stroke-opacity: 0.2;
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+.ov-control-tower .ct-ring--hour {
+  stroke-dasharray: none;
+  stroke-opacity: 0.24;
+}
+.ov-control-tower .ct-ring--now {
+  stroke: var(--you);
+  stroke-opacity: 0.6;
+  stroke-dasharray: 3 3;
+}
+.ov-control-tower .ct-tick {
+  stroke: var(--brass);
+  stroke-width: 1.2;
+}
+.ov-control-tower .ct-rim {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 1.4;
+}
+.ov-control-tower .ct-rim--outer {
+  stroke-width: 1;
+  stroke-opacity: 0.75;
+}
+.ov-control-tower .ct-sector-name {
+  fill: var(--scope-ink);
+  fill-opacity: 0.74;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.16em;
+}
+.ov-control-tower .ct-later-name {
+  fill: var(--scope-ink);
+  fill-opacity: 0.5;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.2em;
+}
+.ov-control-tower .ct-ring-label rect,
+.ov-control-tower .ct-slot-label rect {
+  fill: var(--scope-face);
+  stroke: var(--scope-ink);
+  stroke-opacity: 0.2;
+}
+.ov-control-tower .ct-ring-label text,
+.ov-control-tower .ct-slot-label text {
+  fill: var(--scope-ink);
+  fill-opacity: 0.74;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-slot-ring {
+  fill: none;
+  stroke: var(--scope-ink);
+  stroke-opacity: 0.55;
+  stroke-width: 1.3;
+  stroke-dasharray: 7 4;
+}
+.ov-control-tower .ct-slot-label rect {
+  stroke-opacity: 0.55;
+}
+.ov-control-tower .ct-slot-label text {
+  fill-opacity: 0.95;
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-conflict-band {
+  fill: var(--you);
+  fill-opacity: 0.1;
+}
+.ov-control-tower .ct-conflict-band.is-open {
+  fill-opacity: 0.2;
+}
+.ov-control-tower .ct-conflict-edge {
+  fill: none;
+  stroke: var(--you);
+  stroke-opacity: 0.6;
+  stroke-dasharray: 3 3;
+}
+.ov-control-tower .ct-range {
+  stroke: var(--who);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-opacity: 0.42;
+}
+.ov-control-tower .ct-trail {
+  fill: none;
+  stroke: var(--who);
+  stroke-opacity: 0.3;
+  stroke-width: 1.2;
+}
+.ov-control-tower .ct-trail-dot {
+  fill: var(--who);
+}
+.ov-control-tower .ct-held-line {
+  stroke: var(--scope-ink);
+  stroke-opacity: 0.45;
+  stroke-dasharray: 2 3;
+}
+.ov-control-tower .ct-ghost {
+  fill: none;
+  stroke: var(--who);
+  stroke-opacity: 0.7;
+  stroke-dasharray: 2 2;
+}
+
+/* The sweep: one compositor-only rotation, only while Radar is the mode on screen. */
+.ov-control-tower .ct-sweep {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  width: 524px;
+  height: 524px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg 280deg, color-mix(in oklab, var(--scope-ink) calc(var(--sweep-glow) * 0.3), transparent) 330deg, color-mix(in oklab, var(--scope-ink) var(--sweep-glow), transparent) 359.2deg, color-mix(in oklab, var(--scope-ink) calc(var(--sweep-glow) * 2.4), transparent) 359.7deg, transparent 360deg);
+  pointer-events: none;
+  will-change: transform;
+  animation: ct-sweep 9s linear infinite;
+}
+.ov-control-tower .ct-mode:not(.is-on) .ct-sweep,
+.ov-control-tower .ct-ov:not([data-mode="radar"]) .ct-sweep {
+  animation-play-state: paused;
+  visibility: hidden;
+}
+@keyframes ct-sweep {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.ov-control-tower .ct-blips {
+  position: absolute;
+  inset: 0;
+}
+.ov-control-tower .ct-blip {
+  position: absolute;
+  width: 0;
+  height: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+.ov-control-tower .ct-blip::before {
+  /* a 24px target around the 10px dot */
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: -12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+.ov-control-tower .ct-blip-dot {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--who);
+  box-shadow: 0 0 0 2px var(--scope-face), 0 0 12px color-mix(in oklab, var(--who) 60%, transparent);
+  transition: transform var(--dur-1);
+}
+.ov-control-tower .ct-blip:hover .ct-blip-dot {
+  transform: scale(1.25);
+}
+.ov-control-tower .ct-blip.is-run .ct-blip-dot {
+  border-radius: 2px;
+  transform: rotate(45deg) scale(0.9);
+}
+.ov-control-tower .ct-blip.is-unknown .ct-blip-dot {
+  background: var(--scope-face);
+  box-shadow: inset 0 0 0 1.6px var(--who), 0 0 0 2px var(--scope-face);
+}
+.ov-control-tower .ct-blip.is-calling .ct-blip-dot {
+  box-shadow: 0 0 0 2px var(--scope-face), 0 0 0 3.6px var(--you), 0 0 14px var(--you);
+}
+.ov-control-tower .ct-blip.is-stacked .ct-blip-dot {
+  opacity: 0.55;
+  box-shadow: 0 0 0 2px var(--scope-face), 0 0 0 3.2px color-mix(in oklab, var(--scope-ink) 50%, transparent);
+}
+.ov-control-tower .ct-blip.is-conflict .ct-blip-dot {
+  box-shadow: 0 0 0 2px var(--scope-face), 0 0 0 3.6px var(--you);
+}
+.ov-control-tower .ct-blip.is-held .ct-blip-dot {
+  box-shadow: 0 0 0 2px var(--scope-face), 0 0 0 3.4px color-mix(in oklab, var(--scope-ink) 70%, transparent);
+}
+.ov-control-tower .ct-blip.is-on .ct-blip-dot {
+  box-shadow: 0 0 0 2px var(--scope-face), 0 0 0 4.4px var(--scope-ink), 0 0 16px color-mix(in oklab, var(--who) 80%, transparent);
+}
+.ov-control-tower .ct-halo {
+  position: absolute;
+  left: -13px;
+  top: -13px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--you);
+  opacity: 0;
+  pointer-events: none;
+  animation: ct-pulse 2.4s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+  will-change: transform, opacity;
+}
+@keyframes ct-pulse {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+.ov-control-tower .ct-blip-label {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 4px 2px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--scope-face) 72%, transparent);
+  line-height: 1.12;
+  text-align: left;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ov-control-tower .ct-blip-label.is-left {
+  align-items: flex-end;
+  text-align: right;
+}
+.ov-control-tower .ct-blip-label.is-center {
+  align-items: center;
+  text-align: center;
+}
+.ov-control-tower .ct-blip-label b {
+  color: var(--scope-ink);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+}
+.ov-control-tower .ct-blip-label small {
+  color: color-mix(in oklab, var(--scope-ink) 64%, transparent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-blip.is-calling .ct-blip-label small,
+.ov-control-tower .ct-blip.is-conflict .ct-blip-label small {
+  color: var(--you);
+}
+.ov-control-tower .ct-blip:hover .ct-blip-label b,
+.ov-control-tower .ct-blip.is-on .ct-blip-label b {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ov-control-tower .ct-me {
+  position: absolute;
+  left: 261px;
+  top: 261px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--scope-face), 0 0 0 4px color-mix(in oklab, var(--you) 45%, transparent);
+}
+.ov-control-tower .ct-me .cr-you {
+  display: block;
+}
+
+/* Under the scope: what is on the ground, and how to read the scope. */
+.ov-control-tower .ct-ground {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-ground-h {
+  margin-right: 4px;
+  color: var(--muted);
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-ground-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px 0 0;
+  border-radius: 6px;
+  background: var(--raised);
+  box-shadow: var(--strip-shadow);
+  color: var(--ink);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  overflow: hidden;
+}
+.ov-control-tower .ct-ground-chip::before {
+  content: "";
+  align-self: stretch;
+  width: 4px;
+  margin-right: 7px;
+  background: var(--tab);
+}
+.ov-control-tower .ct-ground-chip .ct-unread {
+  width: 5px;
+  height: 5px;
+  margin: 0 6px 0 0;
+}
+.ov-control-tower .ct-ground-chip:hover,
+.ov-control-tower .ct-ground-chip.is-on {
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--ink) 55%, transparent);
+}
+.ov-control-tower .ct-ground-more {
+  margin-left: 4px;
+}
+.ov-control-tower .ct-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 12px;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+.ov-control-tower .ct-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-control-tower .ct-legend i {
+  display: inline-block;
+  flex: none;
+}
+.ov-control-tower .ct-lg-ring {
+  width: 14px;
+  height: 8px;
+  border: 1px dashed var(--faint);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+}
+.ov-control-tower .ct-lg-range {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+}
+.ov-control-tower .ct-lg-trail {
+  width: 14px;
+  height: 6px;
+  background: radial-gradient(circle at 2px 3px, var(--faint) 1.4px, transparent 1.8px), radial-gradient(circle at 7px 3px, color-mix(in oklab, var(--faint) 60%, transparent) 1.2px, transparent 1.6px), radial-gradient(circle at 12px 3px, color-mix(in oklab, var(--faint) 35%, transparent) 1px, transparent 1.4px);
+}
+.ov-control-tower .ct-lg-hold {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.6px var(--you);
+}
+.ov-control-tower .ct-hint {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 380px;
+  height: 64px;
+  padding: 0 16px;
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ================================================================== the arrivals board */
+
+.ov-control-tower .ct-arrivals {
+  position: relative;
+  align-self: start;
+  max-height: 100%;
+  overflow: hidden;
+  padding: 16px 16px 14px;
+  border-radius: 16px;
+  background: var(--board-bg);
+  color: var(--flap-ink);
+  box-shadow: 0 18px 40px -20px oklch(0.2 0.03 165 / 0.5), 0 2px 6px oklch(0.2 0.03 165 / 0.12);
+}
+.ov-control-tower .ct-arrivals::before {
+  /* the brass inlay of a 1930s station board */
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 55%, transparent);
+  pointer-events: none;
+}
+.ov-control-tower .ct-arr-h {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 34px;
+}
+.ov-control-tower .ct-arr-rule {
+  flex: 1;
+  height: 4px;
+  border-top: 1px solid var(--brass);
+  border-bottom: 1px solid var(--brass);
+  opacity: 0.8;
+}
+.ov-control-tower .ct-arr-name {
+  margin: 0;
+  color: var(--flap-ink);
+  font-family: var(--font-deco);
+  font-size: 25px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.ov-control-tower .ct-arr-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 2px 10px;
+  color: color-mix(in oklab, var(--flap-ink) 60%, transparent);
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-arr-heads {
+  display: flex;
+  gap: 12px;
+  padding: 0 8px 4px;
+  color: color-mix(in oklab, var(--flap-ink) 50%, transparent);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.ov-control-tower .ct-arr-heads span:nth-child(1) {
+  width: 102px;
+}
+.ov-control-tower .ct-arr-heads span:nth-child(2) {
+  flex: 1;
+}
+.ov-control-tower .ct-arr-heads span:nth-child(3) {
+  width: 102px;
+}
+.ov-control-tower .ct-arr-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-control-tower .ct-arr-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px 7px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--dur-1);
+}
+.ov-control-tower .ct-arr-row + .ct-arr-row {
+  box-shadow: 0 -1px 0 color-mix(in oklab, var(--flap-ink) 7%, transparent);
+}
+.ov-control-tower .ct-arr-row:hover {
+  background: color-mix(in oklab, var(--flap-ink) 5%, transparent);
+}
+.ov-control-tower .ct-arr-row.is-on {
+  background: color-mix(in oklab, var(--flap-ink) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--flap-ink) 30%, transparent);
+}
+.ov-control-tower .ct-arr-l1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ov-control-tower .ct-arr-l2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-left: 1px;
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-arr-tab {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--tab);
+  transform: rotate(45deg);
+}
+.ov-control-tower .ct-arr-flight {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in oklab, var(--flap-ink) 82%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-arr-for {
+  flex: none;
+  color: color-mix(in oklab, var(--flap-ink) 52%, transparent);
+}
+.ov-control-tower .ct-tone-you .ct-arr-for {
+  color: var(--you);
+}
+
+/* Split flaps: every character on its own flap with a hinge across the middle. */
+.ov-control-tower .ct-flaps {
+  display: inline-flex;
+  gap: 1.5px;
+  flex: none;
+  perspective: 80px;
+}
+.ov-control-tower .ct-flaps i {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 20px;
+  border-radius: 2.5px;
+  background: linear-gradient(var(--flap) 0 50%, color-mix(in oklab, var(--flap) 86%, black) 50% 100%);
+  box-shadow: inset 0 -1px 0 oklch(0 0 0 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.05);
+  color: var(--flap-ink);
+  font-size: 12px;
+  font-stretch: 78%;
+  font-style: normal;
+  font-weight: var(--w-bold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-flaps i::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: oklch(0 0 0 / 0.5);
+}
+.ov-control-tower .ct-flaps i.is-blank {
+  opacity: 0.6;
+}
+.ov-control-tower .ct-col-time i {
+  width: 12px;
+}
+.ov-control-tower .ct-tone-you .ct-col-status i {
+  color: var(--you);
+}
+.ov-control-tower .ct-tone-ok .ct-col-status i {
+  color: var(--ok);
+}
+.ov-control-tower .ct-arr-clock i {
+  width: 12px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-control-tower .ct-arr-row.is-turning .ct-flaps i {
+    animation: ct-flip 460ms cubic-bezier(0.3, 0.7, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 28ms);
+  }
+}
+@keyframes ct-flip {
+  0% {
+    transform: rotateX(-88deg);
+    filter: brightness(1.5);
+  }
+  60% {
+    transform: rotateX(12deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* The conflict alert, on the board. */
+.ov-control-tower .ct-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 6px 6px 6px 10px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--you) 16%, var(--board-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 50%, transparent);
+  color: var(--flap-ink);
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-alert-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-align: left;
+}
+.ov-control-tower .ct-alert-ic {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--you);
+}
+.ov-control-tower .ct-alert-text {
+  flex: 1;
+  min-width: 0;
+}
+.ov-control-tower .ct-alert-text b {
+  color: var(--you);
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-alert .icon-btn {
+  color: color-mix(in oklab, var(--flap-ink) 60%, transparent);
+}
+.ov-control-tower .ct-alert .icon-btn:hover {
+  background: color-mix(in oklab, var(--flap-ink) 10%, transparent);
+  color: var(--flap-ink);
+}
+.ov-control-tower .ct-alert .btn--quiet {
+  color: color-mix(in oklab, var(--flap-ink) 72%, transparent);
+}
+.ov-control-tower .ct-alert .btn--quiet:hover {
+  background: color-mix(in oklab, var(--flap-ink) 10%, transparent);
+  color: var(--flap-ink);
+}
+.ov-control-tower .ct-alert.is-open {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+.ov-control-tower .ct-alert-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ov-control-tower .ct-alert.is-open .ct-alert-text {
+  font-size: var(--t-13);
+}
+.ov-control-tower .ct-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ov-control-tower .ct-plan li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--flap-ink) 6%, transparent);
+}
+.ov-control-tower .ct-plan .ct-call {
+  width: 84px;
+  color: var(--flap-ink);
+}
+.ov-control-tower .ct-plan li > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in oklab, var(--flap-ink) 78%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-plan-when {
+  flex: none;
+  color: color-mix(in oklab, var(--flap-ink) 60%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-plan-when b {
+  color: var(--flap-ink);
+}
+.ov-control-tower .ct-alert-why {
+  margin: 0;
+  color: color-mix(in oklab, var(--flap-ink) 72%, transparent);
+  line-height: 1.5;
+}
+.ov-control-tower .ct-alert-acts {
+  display: flex;
+  gap: 6px;
+}
+.ov-control-tower .ct-alert--done {
+  background: color-mix(in oklab, var(--flap-ink) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--flap-ink) 14%, transparent);
+}
+.ov-control-tower .ct-alert--done .ct-alert-ic {
+  color: var(--ok);
+}
+
+/* Landed while you were away (the away state). */
+.ov-control-tower .ct-landed {
+  margin-top: 12px;
+  padding-top: 10px;
+  box-shadow: 0 -1px 0 color-mix(in oklab, var(--brass) 45%, transparent);
+}
+.ov-control-tower .ct-landed-h {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 8px 4px;
+  color: color-mix(in oklab, var(--flap-ink) 60%, transparent);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.ov-control-tower .ct-landed-h span {
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-landed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: color-mix(in oklab, var(--flap-ink) 78%, transparent);
+  font-size: var(--t-12);
+  text-align: left;
+}
+.ov-control-tower .ct-landed-row:hover {
+  background: color-mix(in oklab, var(--flap-ink) 6%, transparent);
+}
+.ov-control-tower .ct-landed-at {
+  width: 36px;
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-landed-call {
+  width: 88px;
+  color: var(--flap-ink);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+}
+.ov-control-tower .ct-landed-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-landed-end {
+  flex: none;
+  color: color-mix(in oklab, var(--flap-ink) 52%, transparent);
+}
+.ov-control-tower .ct-landed-end.you-ink {
+  color: var(--you);
+}
+
+/* ================================================================== Threads: the strip board */
+
+.ov-control-tower .ct-board {
+  position: absolute;
+  inset: 56px 0 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px 16px;
+}
+.ov-control-tower .ct-timeline {
+  position: relative;
+  flex: none;
+  height: 124px;
+  padding-top: 6px;
+}
+.ov-control-tower .ct-tl-h {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  height: 20px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-tl-h b {
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-control-tower .ct-tl-plot {
+  position: relative;
+  height: 92px;
+  margin-top: 6px;
+}
+.ov-control-tower .ct-tl-tick {
+  position: absolute;
+  top: 0;
+  height: 80px;
+  border-left: 1px dashed var(--line-soft);
+}
+.ov-control-tower .ct-tl-tick.is-major {
+  border-left: 1px solid var(--line);
+}
+.ov-control-tower .ct-tl-tick b,
+.ov-control-tower .ct-tl-now b,
+.ov-control-tower .ct-tl-slot b {
+  position: absolute;
+  top: 84px;
+  left: 0;
+  transform: translateX(-50%);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-tl-now {
+  position: absolute;
+  top: -2px;
+  height: 82px;
+  border-left: 1.5px solid var(--ink);
+}
+.ov-control-tower .ct-tl-now b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  transform: none;
+  left: -1px;
+}
+.ov-control-tower .ct-tl-slot {
+  position: absolute;
+  top: -2px;
+  height: 82px;
+  border-left: 2px dotted var(--ink);
+}
+.ov-control-tower .ct-tl-slot b {
+  top: -22px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: var(--w-bold);
+  line-height: 18px;
+}
+.ov-control-tower .ct-tl-slot--held {
+  border-left: 1.5px dashed var(--muted);
+}
+.ov-control-tower .ct-tl-conflict {
+  position: absolute;
+  top: -4px;
+  height: 84px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--you) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 70%, transparent);
+}
+.ov-control-tower .ct-tl-conflict span {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--you-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 60%, transparent);
+  color: var(--you-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 18px;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-tl-conflict:hover span {
+  text-decoration: underline;
+}
+.ov-control-tower .ct-tl-holding {
+  position: absolute;
+  top: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  width: 72px;
+}
+.ov-control-tower .ct-tl-holding i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--you);
+}
+.ov-control-tower .ct-tl-holding b {
+  width: 100%;
+  margin-top: 3px;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-tl-holding small {
+  width: 100%;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+/* An arrival: a chip with its call sign; the bar along its foot is the predicted range. */
+.ov-control-tower .ct-tl-chip {
+  position: absolute;
+  height: 17px;
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--who-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 75%, transparent);
+  cursor: pointer;
+}
+.ov-control-tower .ct-tl-chip span {
+  position: relative;
+  display: block;
+  padding: 0 8px;
+  color: var(--who-ink);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-align: left;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-tl-range {
+  position: absolute;
+  bottom: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--who);
+}
+.ov-control-tower .ct-tl-chip:hover {
+  box-shadow: inset 0 0 0 1px var(--who);
+}
+.ov-control-tower .ct-tl-chip.is-conflict {
+  box-shadow: inset 0 0 0 1px var(--who), inset 0 0 0 2.5px var(--you);
+}
+.ov-control-tower .ct-tl-chip.is-on {
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.ov-control-tower .ct-tl-chip.is-ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 60%, transparent);
+}
+.ov-control-tower .ct-tl-chip.is-ghost .ct-tl-range {
+  opacity: 0.45;
+}
+.ov-control-tower .ct-tl-more {
+  position: absolute;
+  right: 0;
+  top: -24px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-control-tower .ct-tl-held {
+  position: absolute;
+  height: 1px;
+  margin-top: 10.5px;
+  border-top: 1.5px dashed var(--muted);
+}
+.ov-control-tower .ct-tl-pin {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: 5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--who);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--muted);
+}
+
+.ov-control-tower .ct-rack {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 300px repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  margin-top: 6px;
+}
+.ov-control-tower .ct-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 14px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  transition: box-shadow var(--dur-1), background var(--dur-1);
+}
+.ov-control-tower .ct-col--holding {
+  background: color-mix(in oklab, var(--you-tint) 42%, var(--sunken));
+}
+.ov-control-tower .ct-col-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 12px 14px 10px;
+}
+.ov-control-tower .ct-col-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ov-control-tower .ct-col-name .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+.ov-control-tower .ct-col-sub {
+  width: 100%;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-col-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 10px 16px;
+  scrollbar-width: none;
+}
+/* Threads docks the card over the Holding column's foot, and the column's list ends above it. */
+.ov-control-tower .ct-ov[data-mode="threads"] .ct-card {
+  left: 24px;
+  bottom: 16px;
+  width: 300px;
+  border-radius: 14px;
+}
+.ov-control-tower .ct-ov[data-mode="threads"] .ct-col--holding .ct-col-list {
+  margin-bottom: var(--card-space, 0px);
+}
+
+/* A scrolled list fades at the edges that have more beyond them, so nothing looks cut off. */
+.ov-control-tower [data-fade="bottom"] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), rgb(0 0 0 / 0.4) calc(100% - 30px), transparent calc(100% - 10px));
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), rgb(0 0 0 / 0.4) calc(100% - 30px), transparent calc(100% - 10px));
+}
+.ov-control-tower [data-fade="top"] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px);
+  mask-image: linear-gradient(to bottom, transparent, #000 28px);
+}
+.ov-control-tower [data-fade="both"] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 64px), rgb(0 0 0 / 0.4) calc(100% - 30px), transparent calc(100% - 10px));
+  mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 64px), rgb(0 0 0 / 0.4) calc(100% - 30px), transparent calc(100% - 10px));
+}
+/* The sidebar's list scrolls above the pinned Assistants; a hairline marks where it ends. */
+.ov-control-tower .stage-list {
+  padding-bottom: 20px;
+}
+.ov-control-tower .stage-assistants {
+  margin: 0 -12px;
+  padding: 8px 12px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.ov-control-tower .ct-col .ct-hangar {
+  padding-top: 4px;
+}
+
+/* Board strips: three lines, like a paper strip's fields. */
+.ov-control-tower .ct-strip--board {
+  min-height: 0;
+  margin-bottom: 8px;
+}
+.ov-control-tower .ct-strip--board .ct-body {
+  gap: 3px;
+  padding: 8px 10px 9px 11px;
+}
+.ov-control-tower .ct-strip--board .ct-l2 {
+  display: block;
+  height: 18px;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 18px;
+}
+.ov-control-tower .ct-strip--board .ct-l3 {
+  display: flex;
+  align-items: center;
+  height: 16px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-strip--board .ct-l3.ct-ask {
+  display: block;
+  height: auto;
+  margin-top: 2px;
+  overflow: visible;
+  white-space: normal;
+  line-height: 1.4;
+}
+.ov-control-tower .ct-strip--board .ct-l3.ct-ask code {
+  color: var(--ink);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.ov-control-tower .ct-strip--board .ct-l4 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ov-control-tower .ct-strip--board.ct-in-holding {
+  min-height: 0;
+}
+.ov-control-tower .ct-col .ct-deck {
+  height: 66px;
+}
+.ov-control-tower .ct-col .ct-deck-face {
+  inset: 0 0 8px;
+}
+
+/* Dragging a strip on the board: two large targets cover the Holding column. */
+.ov-control-tower .ct-col--holding {
+  position: relative;
+}
+.ov-control-tower .ct-zones {
+  display: none;
+}
+.ov-control-tower .ct-ov.is-dragging .ct-zones {
+  position: absolute;
+  z-index: 3;
+  inset: 62px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ov-control-tower .ct-zone {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 22px 12px 12px;
+  border-radius: 12px;
+  background-color: color-mix(in oklab, var(--surface) 88%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-align: center;
+  transition: box-shadow var(--dur-1), background-color var(--dur-1), color var(--dur-1);
+}
+.ov-control-tower .ct-zone .ic {
+  color: var(--faint);
+}
+.ov-control-tower .ct-zone b {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-ov.is-dragging[data-drag-from="holding"] .ct-zone--hold,
+.ov-control-tower .ct-ov.is-dragging[data-drag-from="held"] .ct-zone--hold {
+  display: none;
+}
+.ov-control-tower .ct-ov.is-dragging .ct-card {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-1);
+}
+.ov-control-tower .ct-zone.is-target {
+  background-color: var(--raised);
+  box-shadow: inset 0 0 0 2px var(--ink), var(--shadow-2);
+  color: var(--ink);
+}
+.ov-control-tower .ct-zone.is-target .ic {
+  color: var(--ink);
+}
+.ov-control-tower .ct-col.is-target {
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--ink) 45%, transparent);
+}
+.ov-control-tower .ct-strip.is-lifted {
+  opacity: 0.3;
+}
+.ov-control-tower .ct-ghost-strip {
+  position: absolute;
+  z-index: 50;
+  left: 0;
+  top: 0;
+  margin: 0;
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-3);
+  pointer-events: none;
+}
+.ov-control-tower .ct-ov.is-dragging,
+.ov-control-tower .ct-ov.is-dragging * {
+  cursor: grabbing;
+}
+.ov-control-tower [data-drag] {
+  cursor: grab;
+}
+
+/* ================================================================== the Office */
+
+/* The Office starts under the top bar, so its own HUD is never covered. */
+.ov-control-tower .ct-office-host {
+  position: absolute;
+  inset: 56px 0 0;
+}
+.ov-control-tower .ct-office-ph {
+  position: absolute;
+  inset: 56px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 48px 120px;
+}
+.ov-control-tower .ct-ph-art {
+  width: 100%;
+  max-width: 860px;
+  height: auto;
+}
+.ov-control-tower .ct-ph-ground {
+  fill: color-mix(in oklab, var(--room-lawn) 26%, transparent);
+}
+.ov-control-tower .ct-ph-runway {
+  stroke: var(--room-inlay-2);
+  stroke-width: 22;
+  stroke-linecap: round;
+}
+.ov-control-tower .ct-ph-dash {
+  stroke: var(--room-paper);
+  stroke-width: 2;
+  stroke-dasharray: 18 14;
+}
+.ov-control-tower .ct-ph-label {
+  fill: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: var(--w-medium);
+}
+.ov-control-tower .ct-office-ph-text {
+  max-width: 520px;
+  text-align: center;
+}
+.ov-control-tower .ct-ph-title {
+  margin: 0 0 6px;
+  font-family: var(--font-deco);
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+.ov-control-tower .ct-office-ph-text p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.ov-control-tower .ct-office-ph-note {
+  margin-top: 8px !important;
+  color: var(--faint) !important;
+  font-size: var(--t-12);
+}
+
+/* ================================================================== the selection card */
+
+.ov-control-tower .ct-card {
+  position: absolute;
+  z-index: 8;
+  left: 16px;
+  bottom: 16px;
+  width: 380px;
+  padding: 12px 14px 12px 12px;
+  border-radius: var(--r-lg);
+  background: color-mix(in oklab, var(--raised) 94%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-2);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-control-tower .ct-card:not([hidden]) {
+    animation: ct-card-in 220ms var(--ease-out);
+  }
+}
+@keyframes ct-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.ov-control-tower .ct-card-h {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ov-control-tower .ct-card-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.ov-control-tower .ct-card-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-card-phase {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-card-phase.you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.ov-control-tower .ct-card-title {
+  overflow: hidden;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-control-tower .ct-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ov-control-tower .ct-card-meta .proj {
+  font-size: var(--t-12);
+}
+.ov-control-tower .ct-card-meta > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-control-tower .ct-card-x {
+  margin: -2px -4px 0 0;
+}
+.ov-control-tower .ct-card-ask,
+.ov-control-tower .ct-card-eta,
+.ov-control-tower .ct-card-result {
+  margin: 10px 0 0;
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.ov-control-tower .ct-card-ask code {
+  font-size: 12px;
+}
+.ov-control-tower .ct-card-eta b {
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-card-eta {
+  color: var(--muted);
+}
+.ov-control-tower .ct-card-eta b {
+  color: var(--ink);
+}
+.ov-control-tower .ct-card-basis {
+  margin: 3px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.ov-control-tower .ct-card-result {
+  color: var(--muted);
+}
+.ov-control-tower .ct-card-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.ov-control-tower .ct-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--r-btn);
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.ov-control-tower .ct-open:hover {
+  background: var(--hover);
+}
+.ov-control-tower .ct-open .ic {
+  color: var(--muted);
+}
+.ov-control-tower .ct-card-eyebrow {
+  position: absolute;
+  top: -10px;
+  left: 14px;
+  margin: 0;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--you-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 55%, transparent);
+  line-height: 19px;
+  color: var(--you-ink);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ov-control-tower .ct-card.is-next {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--you) 45%, transparent), var(--shadow-2);
+}
+
+/* ================================================================== the slots popover */
+
+.ov-control-tower .ct-pop {
+  position: absolute;
+  z-index: 40;
+  width: 380px;
+  border-radius: var(--r-lg);
+  background: color-mix(in oklab, var(--raised) 96%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-control-tower .ct-pop {
+    animation: ct-card-in 160ms var(--ease-out);
+  }
+}
+.ov-control-tower .ct-pop .pop-h span {
+  margin-left: 0;
+}
+.ov-control-tower .ct-pop .pop-h {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.ov-control-tower .ct-pop .pop-sec {
+  padding: 8px 14px;
+}
+.ov-control-tower .ct-pop .options {
+  margin: 0 -8px;
+}
+.ov-control-tower .ct-opt b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-control-tower .ct-every {
+  padding: 1px;
+  gap: 1px;
+}
+.ov-control-tower .ct-every button {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-pop-row,
+.ov-control-tower .ct-pop-dock {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ov-control-tower .ct-pop-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.ov-control-tower .ct-pop-row-text b {
+  font-weight: var(--w-medium);
+}
+.ov-control-tower .ct-pop-row-text small {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.ov-control-tower .ct-pop-dock {
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
+}
+.ov-control-tower .ct-pop-dock .ct-pop-row-text b {
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-control-tower .ct-pop-foot {
+  margin: 0;
+  padding: 9px 14px 12px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ================================================================== Reduce Motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-control-tower .ct-halo,
+  .ov-control-tower .ct-sweep {
+    display: none;
+  }
+  .ov-control-tower .ct-blip.is-calling .ct-blip-dot {
+    box-shadow: 0 0 0 2px var(--scope-face), 0 0 0 3.6px var(--you), 0 0 0 7px color-mix(in oklab, var(--you) 30%, transparent);
+  }
+}
+
+/* Docked at the column's 300px, the card lets its phase and title wrap instead of cutting them. */
+.ov-control-tower .ct-ov[data-mode="threads"] .ct-card-line {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.ov-control-tower .ct-ov[data-mode="threads"] .ct-card-phase,
+.ov-control-tower .ct-ov[data-mode="threads"] .ct-card-title {
+  white-space: normal;
+}
+.ov-control-tower .ct-ov[data-mode="threads"] .ct-card-title {
+  line-height: 1.3;
+}

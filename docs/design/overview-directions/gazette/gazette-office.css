@@ -1,0 +1,857 @@
+/*
+ * PROTOTYPE - Gazette's Office mode: the Bureau, rewindable. Every rule is scoped under
+ * .ov-gazette-office, every class is prefixed gzo-. Nothing floating over the canvas uses
+ * backdrop-filter (OFFICE-KIT.md: a blur over a live canvas composites the window every frame).
+ */
+
+.ov-gazette-office {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+  -webkit-font-smoothing: antialiased;
+  outline: none;
+  --gzo-ring: inset 0 0 0 1px var(--line-soft);
+  --gzo-float: 0 1px 1px oklch(0.3 0.03 60 / 0.07), 0 6px 16px -6px oklch(0.3 0.03 60 / 0.3);
+}
+[data-theme="orient-express"] .ov-gazette-office,
+[data-theme="dark"] .ov-gazette-office,
+[data-theme="nile"] .ov-gazette-office,
+[data-theme="end-house"] .ov-gazette-office {
+  --gzo-float: 0 1px 1px oklch(0 0 0 / 0.35), 0 8px 18px -6px oklch(0 0 0 / 0.6);
+}
+
+.ov-gazette-office .gzo-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.ov-gazette-office button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- labels over beans */
+
+.ov-gazette-office .gzo-label {
+  z-index: 100;
+  padding-bottom: 3px;
+  pointer-events: none;
+  translate: calc(-50% + var(--gzo-dx, 0px)) calc(-100% - var(--gzo-lift, 0px));
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+/* A label moved clear of another keeps a dotted leader back to its head, on a layer under
+   every label, so a leader never crosses a label's words. */
+.ov-gazette-office .gzo-leaders {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.ov-gazette-office .gzo-leaders path {
+  fill: none;
+  stroke: color-mix(in oklab, var(--ink) 40%, transparent);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 3.2;
+}
+.ov-gazette-office .gzo-label[data-kind="none"] {
+  display: none;
+}
+.ov-gazette-office .gzo-label.is-selected,
+.ov-gazette-office .gzo-label.is-hovered {
+  z-index: 200 !important;
+}
+
+.ov-gazette-office .gzo-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--who);
+}
+
+/* A thought bubble: a cloud of a pill and two puffs that trail down to the head. */
+.ov-gazette-office .gzo-label[data-kind="bubble"],
+.ov-gazette-office .gzo-label[data-kind="message"],
+.ov-gazette-office .gzo-label[data-kind="crew"] {
+  padding-bottom: 17px;
+}
+/* Far away, each piece of work has one bubble with a line per member at work; close up, each
+   bean has its own. */
+.ov-gazette-office:not([data-zoom="far"]) .gzo-label--crew,
+.ov-gazette-office[data-zoom="far"] .gzo-label:is([data-kind="bubble"], [data-kind="message"]):not(.is-selected):not(.is-hovered):not(.gzo-label--loose) {
+  display: none;
+}
+.ov-gazette-office .gzo-bubble--crew {
+  gap: 1px;
+}
+.ov-gazette-office .gzo-bubble {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 240px;
+  padding: 4px 11px 5px 9px;
+  border-radius: 14px;
+  background: var(--raised);
+  box-shadow: var(--gzo-ring), var(--gzo-float);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.ov-gazette-office .gzo-bubble::before,
+.ov-gazette-office .gzo-bubble::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: var(--gzo-ring), 0 1px 2px oklch(0.3 0.03 60 / 0.12);
+}
+.ov-gazette-office .gzo-bubble::before {
+  left: calc(50% - 8px);
+  bottom: -9px;
+  width: 8px;
+  height: 8px;
+}
+.ov-gazette-office .gzo-bubble::after {
+  left: calc(50% - 2px);
+  bottom: -15px;
+  width: 4.5px;
+  height: 4.5px;
+}
+.ov-gazette-office .is-moved .gzo-bubble::before,
+.ov-gazette-office .is-moved .gzo-bubble::after {
+  display: none;
+}
+.ov-gazette-office .gzo-bubble-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.ov-gazette-office .gzo-bubble-line .gzo-plane-icon {
+  margin-left: -2px;
+}
+.ov-gazette-office .gzo-bubble-text {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-gazette-office .gzo-bubble--message .gzo-who {
+  margin-left: 18px;
+}
+.ov-gazette-office .gzo-who {
+  display: none;
+  margin: 0 0 1px 13px;
+  color: var(--who-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 14px;
+  white-space: nowrap;
+}
+.ov-gazette-office[data-zoom="near"] .gzo-who,
+.ov-gazette-office .is-selected .gzo-who,
+.ov-gazette-office .is-hovered .gzo-who {
+  display: block;
+}
+
+/* The message a paper plane brought: who sent it, and its first words, in the sender's colour. */
+.ov-gazette-office .gzo-bubble--message {
+  padding: 4px 11px 5px 8px;
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in oklab, var(--who) 70%, transparent),
+    var(--gzo-float);
+}
+.ov-gazette-office .gzo-bubble--message::before,
+.ov-gazette-office .gzo-bubble--message::after {
+  box-shadow: inset 0 0 0 1.25px color-mix(in oklab, var(--who) 70%, transparent);
+}
+.ov-gazette-office .gzo-plane-icon {
+  flex: none;
+  display: block;
+}
+
+/* A name tag, as the app's: a pill off-centre to the right of the head. */
+.ov-gazette-office .gzo-label[data-kind="tag"],
+.ov-gazette-office .gzo-label[data-kind="waiting"],
+.ov-gazette-office .gzo-label[data-kind="waiting-head"],
+.ov-gazette-office .gzo-label[data-kind="waiting-message"],
+.ov-gazette-office .gzo-label--assistant,
+.ov-gazette-office .gzo-label--newsboy {
+  translate: calc(-38% + var(--gzo-dx, 0px)) calc(-100% - var(--gzo-lift, 0px));
+}
+/* A message that lands on a bean in the queue stacks over its ask. */
+.ov-gazette-office .gzo-label[data-kind="waiting-message"] .gzo-bubble {
+  margin-bottom: 5px;
+}
+.ov-gazette-office .gzo-label[data-kind="waiting-message"] .gzo-bubble::before,
+.ov-gazette-office .gzo-label[data-kind="waiting-message"] .gzo-bubble::after {
+  display: none;
+}
+.ov-gazette-office .gzo-tag {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 8px 3px 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 94%, transparent);
+  box-shadow: var(--shadow-1), var(--gzo-ring);
+  color: var(--ink);
+  font-size: var(--t-11);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.ov-gazette-office .gzo-tag .gzo-dot {
+  align-self: center;
+}
+.ov-gazette-office .gzo-tag b {
+  font-weight: var(--w-bold);
+}
+.ov-gazette-office .gzo-tag span {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette-office .gzo-tag--waiting {
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 60%, transparent);
+}
+.ov-gazette-office .gzo-tag--waiting span {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.ov-gazette-office .gzo-tag--news {
+  background: var(--raised);
+}
+.ov-gazette-office .gzo-tag--news b {
+  font-family: var(--font-deco);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.ov-gazette-office .is-selected .gzo-bubble,
+.ov-gazette-office .is-selected .gzo-tag {
+  box-shadow:
+    inset 0 0 0 1.5px var(--who),
+    var(--gzo-float);
+}
+.ov-gazette-office .is-selected .gzo-bubble::before,
+.ov-gazette-office .is-selected .gzo-bubble::after {
+  box-shadow: inset 0 0 0 1.25px var(--who);
+}
+.ov-gazette-office .is-hovered:not(.is-selected) .gzo-bubble,
+.ov-gazette-office .is-hovered:not(.is-selected) .gzo-tag {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--who) 70%, transparent),
+    var(--gzo-float);
+}
+
+/* Semantic zoom. Far: bubbles, the head of the queue, and a marigold pip for the rest of it.
+   Room: every waiting tag. Near: every tag, and the bubbles name their thread. */
+.ov-gazette-office[data-zoom="far"] .gzo-label[data-kind="tag"]:not(.is-selected):not(.is-hovered),
+.ov-gazette-office:not([data-zoom="near"]) .gzo-label--assistant {
+  opacity: 0;
+}
+.ov-gazette-office[data-zoom="far"] .gzo-label[data-kind="waiting"]:not(.is-selected):not(.is-hovered) {
+  translate: -50% -100%;
+}
+.ov-gazette-office[data-zoom="far"] .gzo-label[data-kind="waiting"]:not(.is-selected):not(.is-hovered) .gzo-tag {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  gap: 0;
+  background: var(--you);
+  box-shadow:
+    var(--shadow-1),
+    0 0 0 1.5px var(--raised);
+}
+.ov-gazette-office[data-zoom="far"] .gzo-label[data-kind="waiting"]:not(.is-selected):not(.is-hovered) .gzo-tag > * {
+  display: none;
+}
+
+/* The swarm: bubbles outside the room in focus fold to a small dot over the head. */
+.ov-gazette-office.is-swarm .gzo-label.is-muted:is([data-kind="bubble"], [data-kind="crew"]):not(.is-selected):not(.is-hovered) {
+  padding-bottom: 6px;
+}
+.ov-gazette-office.is-swarm .gzo-label.is-muted:is([data-kind="bubble"], [data-kind="crew"]):not(.is-selected):not(.is-hovered) .gzo-bubble {
+  width: 14px;
+  height: 8px;
+  padding: 0;
+  border-radius: 6px;
+  background:
+    radial-gradient(circle at 3px 4px, var(--muted) 1.2px, transparent 1.6px),
+    radial-gradient(circle at 7px 4px, var(--muted) 1.2px, transparent 1.6px),
+    radial-gradient(circle at 11px 4px, var(--muted) 1.2px, transparent 1.6px),
+    var(--raised);
+}
+.ov-gazette-office.is-swarm .gzo-label.is-muted:is([data-kind="bubble"], [data-kind="crew"]):not(.is-selected):not(.is-hovered) .gzo-bubble > *,
+.ov-gazette-office.is-swarm .gzo-label.is-muted:is([data-kind="bubble"], [data-kind="crew"]):not(.is-selected):not(.is-hovered) .gzo-bubble::before,
+.ov-gazette-office.is-swarm .gzo-label.is-muted:is([data-kind="bubble"], [data-kind="crew"]):not(.is-selected):not(.is-hovered) .gzo-bubble::after {
+  display: none;
+}
+.ov-gazette-office.is-swarm .gzo-label.is-muted[data-kind="message"]:not(.is-selected) {
+  opacity: 0;
+}
+.ov-gazette-office.is-swarm[data-zoom="far"] .gzo-label[data-kind="waiting-head"]:not(.is-selected) .gzo-tag span {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- room labels */
+
+.ov-gazette-office .gzo-room {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow: var(--shadow-1), var(--gzo-ring);
+  color: var(--ink);
+  pointer-events: auto;
+  cursor: pointer;
+  translate: -50% -50%;
+  transition: box-shadow var(--dur-1);
+}
+.ov-gazette-office .gzo-room:hover {
+  box-shadow: var(--shadow-2), inset 0 0 0 1px var(--line);
+}
+.ov-gazette-office .gzo-room-name {
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+.ov-gazette-office .gzo-room-tint {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  rotate: 45deg;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 18%, transparent);
+}
+.ov-gazette-office .gzo-room-tint--webshop {
+  background: var(--proj-webshop);
+}
+.ov-gazette-office .gzo-room-tint--payments {
+  background: var(--proj-payments);
+}
+.ov-gazette-office .gzo-room-tint--ops {
+  background: var(--proj-ops);
+}
+.ov-gazette-office .gzo-room-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 16px;
+  margin-right: -5px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette-office .gzo-room-count + .gzo-room-count {
+  margin-left: -2px;
+}
+.ov-gazette-office .gzo-room-count--you {
+  background: var(--you);
+  color: var(--face-ink);
+}
+.ov-gazette-office .gzo-room-count[hidden] {
+  display: none;
+}
+.ov-gazette-office .gzo-room.is-covered {
+  visibility: hidden;
+}
+.ov-gazette-office[data-zoom="near"] .gzo-room-wrap {
+  opacity: 0;
+  pointer-events: none;
+}
+.ov-gazette-office[data-zoom="near"] .gzo-room {
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- the crumb */
+
+.ov-gazette-office .gzo-crumb {
+  position: absolute;
+  top: var(--gzo-inset-top, 14px);
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow: var(--shadow-1), var(--gzo-ring);
+  font-size: var(--t-12);
+}
+.ov-gazette-office .gzo-crumb-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-pill);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-gazette-office .gzo-crumb.is-in .gzo-crumb-home {
+  color: var(--muted);
+}
+.ov-gazette-office .gzo-crumb-home:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ov-gazette-office .gzo-crumb-sep {
+  color: var(--faint);
+}
+.ov-gazette-office .gzo-crumb-room {
+  padding: 0 10px 0 4px;
+  font-weight: var(--w-bold);
+}
+
+/* ---------------------------------------------------------------- the time dial */
+
+/* It docks at the bottom, clear of the window's selection card (bottom-left, about 380 x 150). */
+.ov-gazette-office .gzo-dial {
+  position: absolute;
+  left: 412px;
+  right: 16px;
+  bottom: 16px;
+  max-width: 980px;
+  margin-left: auto;
+  padding: 8px 16px 4px 10px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-2), var(--gzo-ring);
+  user-select: none;
+}
+.ov-gazette-office .gzo-dial-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+}
+.ov-gazette-office .gzo-spacer {
+  flex: 1;
+}
+.ov-gazette-office .gzo-play {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--btn-fill, var(--raised));
+  box-shadow: inset 0 0 0 1px var(--btn-rim, var(--line)), var(--shadow-1);
+  color: var(--ink);
+}
+.ov-gazette-office .gzo-play:hover {
+  background: color-mix(in oklab, var(--ink) 5%, var(--raised));
+}
+.ov-gazette-office .gzo-play svg {
+  display: block;
+}
+.ov-gazette-office .gzo-play .gzo-i-pause,
+.ov-gazette-office .gzo-play.is-playing .gzo-i-play {
+  display: none;
+}
+.ov-gazette-office .gzo-play.is-playing .gzo-i-pause {
+  display: block;
+}
+.ov-gazette-office .gzo-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 220px;
+}
+.ov-gazette-office .gzo-clock-time {
+  font-family: var(--font-deco);
+  font-size: 23px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette-office .gzo-clock-note {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-gazette-office.is-past .gzo-clock-note {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-gazette-office .gzo-speed {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.ov-gazette-office .gzo-speed button {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette-office .gzo-speed button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.ov-gazette-office .gzo-away-btn,
+.ov-gazette-office .gzo-now-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: var(--r-btn);
+  background: var(--btn-fill, var(--raised));
+  box-shadow: inset 0 0 0 1px var(--btn-rim, var(--line)), 0 1px 2px oklch(0 0 0 / 0.05);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.ov-gazette-office .gzo-away-btn:hover,
+.ov-gazette-office .gzo-now-btn:hover {
+  background: color-mix(in oklab, var(--ink) 5%, var(--raised));
+}
+.ov-gazette-office .gzo-now-btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.ov-gazette-office .gzo-you-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--you);
+}
+
+.ov-gazette-office .gzo-track {
+  position: relative;
+  height: 40px;
+  margin: 2px 6px 0 8px;
+  cursor: ew-resize;
+  outline: none;
+  touch-action: none;
+}
+.ov-gazette-office .gzo-track:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus);
+  border-radius: var(--r-xs);
+}
+.ov-gazette-office .gzo-track-line,
+.ov-gazette-office .gzo-track-done {
+  position: absolute;
+  left: 0;
+  top: 20px;
+  height: 2px;
+  border-radius: 1px;
+}
+.ov-gazette-office .gzo-track-line {
+  right: 0;
+  background: var(--line);
+}
+.ov-gazette-office .gzo-track-done {
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+}
+.ov-gazette-office .gzo-track-away {
+  position: absolute;
+  top: 2px;
+  height: 21px;
+  border-radius: 4px 4px 0 0;
+  background: color-mix(in oklab, var(--you-tint) 70%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--you) 40%, transparent);
+}
+.ov-gazette-office .gzo-track-away span {
+  display: none;
+}
+.ov-gazette-office .gzo-dial.is-away .gzo-track-away {
+  background: var(--you-tint);
+}
+.ov-gazette-office .gzo-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.ov-gazette-office .gzo-tick {
+  position: absolute;
+  bottom: 20px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px 1px 0 0;
+  background: var(--who);
+}
+.ov-gazette-office .gzo-tick--arrive {
+  height: 5px;
+  background: color-mix(in oklab, var(--who) 60%, var(--line));
+}
+/* A message between threads is a bead on the line. */
+.ov-gazette-office .gzo-tick--message {
+  bottom: 17px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.5px var(--who-ink);
+}
+.ov-gazette-office .gzo-tick--end {
+  height: 9px;
+}
+.ov-gazette-office .gzo-tick--request {
+  height: 14px;
+  background: var(--you);
+}
+.ov-gazette-office .gzo-tick--request::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--you);
+}
+.ov-gazette-office .gzo-hours {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26px;
+  height: 14px;
+  pointer-events: none;
+}
+.ov-gazette-office .gzo-hours span {
+  position: absolute;
+  translate: -50% 0;
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette-office .gzo-hours span.is-hour {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.ov-gazette-office .gzo-hours span:first-child {
+  translate: 0 0;
+}
+.ov-gazette-office .gzo-hours span.is-now {
+  translate: -100% 0;
+  color: var(--ok);
+  font-weight: var(--w-bold);
+}
+.ov-gazette-office .gzo-head {
+  position: absolute;
+  top: 0;
+  bottom: 16px;
+  width: 0;
+  pointer-events: none;
+}
+.ov-gazette-office .gzo-head::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+.ov-gazette-office .gzo-head i {
+  position: absolute;
+  left: -5px;
+  top: 16px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 2px var(--ink), var(--shadow-1);
+}
+.ov-gazette-office.is-scrubbing .gzo-head i {
+  scale: 1.2;
+}
+
+/* The wire: the last three things that happened up to the minute shown, newest nearest the dial. */
+.ov-gazette-office .gzo-wire {
+  position: absolute;
+  left: 412px;
+  right: 16px;
+  bottom: 112px;
+  max-width: 980px;
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.ov-gazette-office .gzo-wire.is-shown {
+  opacity: 1;
+}
+.ov-gazette-office .gzo-wire-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 13px 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow: var(--shadow-1), var(--gzo-ring);
+  font-size: var(--t-13);
+  white-space: nowrap;
+}
+/* Older lines recede by size and ink, not by opacity: the Bureau never shows through them. */
+.ov-gazette-office .gzo-wire-line[data-age="1"],
+.ov-gazette-office .gzo-wire-line[data-age="2"] {
+  transform-origin: left center;
+}
+.ov-gazette-office .gzo-wire-line[data-age="1"] {
+  scale: 0.96;
+}
+.ov-gazette-office .gzo-wire-line[data-age="2"] {
+  scale: 0.92;
+}
+.ov-gazette-office .gzo-wire-line:not([data-age="0"]) .gzo-wire-text,
+.ov-gazette-office .gzo-wire-line:not([data-age="0"]) .gzo-wire-text b {
+  color: var(--muted);
+}
+.ov-gazette-office .gzo-wire-line:not([data-age="0"]) .gzo-wire-time {
+  color: var(--muted);
+}
+.ov-gazette-office .gzo-wire-time {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-gazette-office .gzo-wire-mark {
+  display: inline-flex;
+}
+.ov-gazette-office .gzo-wire-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+.ov-gazette-office .gzo-wire-text b {
+  font-weight: var(--w-bold);
+}
+.ov-gazette-office .gzo-wire-line--request {
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 55%, transparent);
+}
+.ov-gazette-office .gzo-wire-line--request .gzo-wire-time {
+  background: var(--you);
+  color: var(--face-ink);
+}
+
+/* ---------------------------------------------------------------- desk captions (close up) */
+
+/* What a desk's props stand for, hung under its front edge: shown only close up. */
+.ov-gazette-office .gzo-desk-wrap {
+  z-index: 0;
+  translate: -50% 4px;
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+  pointer-events: none;
+}
+.ov-gazette-office[data-zoom="near"] .gzo-desk-wrap {
+  opacity: 1;
+}
+.ov-gazette-office .gzo-desk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 92%, transparent);
+  box-shadow: var(--shadow-1), var(--gzo-ring);
+  font-size: var(--t-11);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ov-gazette-office .gzo-desk[hidden] {
+  display: none;
+}
+.ov-gazette-office .gzo-desk > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ov-gazette-office .gzo-desk-diff {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 10.5px;
+}
+.ov-gazette-office .gzo-plus {
+  color: var(--ok);
+}
+.ov-gazette-office .gzo-minus {
+  color: var(--fail-ink);
+}
+.ov-gazette-office .gzo-desk-note i {
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+  background: color-mix(in oklab, var(--who) 70%, white);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 60%, transparent);
+  rotate: -6deg;
+}
+.ov-gazette-office .gzo-desk-pr i {
+  width: 7px;
+  height: 9px;
+  border-radius: 2px 2px 3px 3px;
+  background: var(--brass);
+}
+.ov-gazette-office .gzo-desk-pr--draft i {
+  background: color-mix(in oklab, var(--muted) 60%, var(--raised));
+}
+.ov-gazette-office .gzo-desk-fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.ov-gazette-office .gzo-desk-fail i {
+  width: 10px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--fail);
+}
+
+/* The past reads like an old photograph: a touch of sepia over the Bureau while the dial is
+   behind now. A CSS filter, composited by the GPU; the canvas still draws only on demand. */
+.ov-gazette-office .gzo-stage canvas {
+  transition: filter var(--dur-3) var(--ease-out);
+}
+.ov-gazette-office.is-past .gzo-stage canvas {
+  filter: sepia(0.2) saturate(0.9);
+}

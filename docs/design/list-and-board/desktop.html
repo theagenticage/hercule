@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven" data-flow="off">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440" />
+    <link rel="icon" href="data:," />
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/office.css" />
+    <link rel="stylesheet" href="board.css" />
+    <link rel="stylesheet" href="list.css" />
+    <title>The office · Hercule</title>
+  </head>
+  <!--
+    PROTOTYPE - the overview window of round 2: the book's sidebar, and the overview in the main
+    pane with three modes, Office · List · Kanban. list.js draws everything in the main pane except
+    the Office floor (office.js, unchanged) and the Kanban (board.js, the board builder's module).
+
+    URL: ?mode=office|list|kanban  ?list=rows|table|outline  ?board=state|phase  ?lanes=project
+         ?lens=all|following|mine|waiting  ?q=<query>  ?select=<id>  ?peek=0|1  ?zoom=<project>
+         ?group=project|none  ?density=comfortable|compact  ?theme=whitehaven|orient-express
+  -->
+  <body>
+    <div class="app lb-list">
+      <!-- crew.js draws the book's sidebar on its Threads tab ("overview" selects no row);
+           list.js then fills its Waiting on you, its threads and its foot from HEAVY. -->
+      <aside data-side="overview"></aside>
+      <main class="main lbl-main" data-lbl-main>
+        <div class="lbl-pane" data-lbl-pane>
+          <!-- office.js finds this host at load; a ResizeObserver redraws the floor when it is shown. -->
+          <div class="lbl-office" data-lbl-office><div data-office></div><p class="lbl-office-note">The Office as it is today, on the book's smaller morning</p></div>
+        </div>
+      </main>
+    </div>
+    <script src="../sidebar-directions/shared/world.js"></script>
+    <script src="shared/heavy-world.js"></script>
+    <script src="shared/digest.js"></script>
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+    <script src="../crew-bureau-2/office.js"></script>
+    <script src="board.js"></script>
+    <script src="list.js"></script>
+  </body>
+</html>

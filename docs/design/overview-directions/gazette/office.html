@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440" />
+    <!-- PROTOTYPE - Gazette's Office mode alone, full window: the Bureau, rewindable.
+         ?state=everyday|swarm|away|open|replay|edition  ?theme=whitehaven|orient-express  ?select=<thread id>
+         The window (desktop.html) mounts the same module from gazette-office.js. -->
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="gazette-office.css" />
+    <title>Gazette · the Office · Hercule</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--surface);
+        font-family: var(--font-ui);
+      }
+      #office {
+        position: fixed;
+        inset: 0;
+      }
+      /* The page's own switcher, top right: state and theme. Not part of the module. */
+      .gzo-page-switch {
+        position: fixed;
+        top: 14px;
+        right: 14px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px;
+        border-radius: var(--r-pill);
+        background: var(--raised);
+        box-shadow:
+          var(--shadow-1),
+          inset 0 0 0 1px var(--line-soft);
+        color: var(--ink);
+        font-size: var(--t-12);
+      }
+      .gzo-page-switch div {
+        display: flex;
+        gap: 2px;
+      }
+      .gzo-page-switch div + div {
+        padding-left: 8px;
+        border-left: 1px solid var(--line-soft);
+      }
+      .gzo-page-switch button {
+        height: 24px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--r-pill);
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        cursor: pointer;
+      }
+      .gzo-page-switch button:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      .gzo-page-switch button[aria-pressed="true"] {
+        background: var(--selected);
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="office"></div>
+    <nav class="gzo-page-switch" aria-label="State and theme">
+      <div data-group="state">
+        <button type="button" data-state="everyday">Everyday</button>
+        <button type="button" data-state="replay">Replay 09:21</button>
+        <button type="button" data-state="away">Away</button>
+        <button type="button" data-state="open">Open</button>
+        <button type="button" data-state="swarm">Swarm</button>
+      </div>
+      <div data-group="theme">
+        <button type="button" data-theme-choice="whitehaven">Whitehaven</button>
+        <button type="button" data-theme-choice="orient-express">Orient Express</button>
+      </div>
+    </nav>
+
+    <script src="../../sidebar-directions/shared/world.js"></script>
+    <script src="../shared/world-plus.js"></script>
+    <script src="../vendor/office-kit.js"></script>
+    <script src="gazette-office.js"></script>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var state = params.get("state") || "everyday";
+        var html = document.documentElement;
+        var handle = null;
+        handle = OfficeModes.gazette.mount(document.getElementById("office"), {
+          world: window.WORLD,
+          theme: html.dataset.theme,
+          state: state,
+          selected: params.get("select"),
+          reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+          // The window shows the selection card; this page only keeps the selection.
+          onSelect: function (id) {
+            handle.select(id);
+          },
+          onOpen: function (id) {
+            console.log("open", id);
+          },
+        });
+        function show() {
+          document.querySelectorAll(".gzo-page-switch [data-state]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.state === state));
+          });
+          var evening = html.dataset.theme === "orient-express" || html.dataset.theme === "dark";
+          document.querySelectorAll(".gzo-page-switch [data-theme-choice]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String((b.dataset.themeChoice === "orient-express") === evening));
+          });
+        }
+        document.querySelectorAll(".gzo-page-switch [data-state]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            state = b.dataset.state;
+            handle.setState(state);
+            show();
+          });
+        });
+        document.querySelectorAll(".gzo-page-switch [data-theme-choice]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            html.dataset.theme = b.dataset.themeChoice;
+            show();
+          });
+        });
+        show();
+        window.gazetteOffice = handle;
+      })();
+    </script>
+  </body>
+</html>

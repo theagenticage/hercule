@@ -1,0 +1,1015 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- PROTOTYPE - the cover of the book "Seeing all the work": the problem, the design team
+         exercise, the brief, the idea wall, and the five directions. Story pages and live windows
+         live in each direction's folder. -->
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="shared/book.css" />
+    <link rel="stylesheet" href="index.css" />
+    <script src="shared/book.js"></script>
+    <title>Seeing all the work · five directions · Hercule</title>
+  </head>
+  <body class="ix-book">
+    <!-- ================================================================ top bar -->
+    <header class="ix-top">
+      <a class="ix-brand" href="#top" aria-label="Seeing all the work, back to the top"><i data-logo="26"></i><span>Seeing all the work</span></a>
+      <nav class="ix-nav" aria-label="Sections">
+        <a href="#problem"><span>Problem</span></a>
+        <a href="#team"><span>Team</span></a>
+        <a href="#lexicon"><span>Lexicon</span></a>
+        <a href="#method"><span>Method</span></a>
+        <a href="#contract"><span>Contract</span></a>
+        <a href="#wall"><span>Idea wall</span></a>
+        <a href="#directions"><span>Directions</span></a>
+        <a href="#compare"><span>Compare</span></a>
+      </nav>
+      <div class="ix-themes" role="group" aria-label="Theme">
+        <button type="button" data-theme-option="whitehaven" title="Whitehaven, the light theme"><i data-i="sun" data-size="16"></i><span>Whitehaven</span></button>
+        <button type="button" data-theme-option="orient-express" title="Orient Express, the dark theme"><i data-i="moon" data-size="16"></i><span>Orient Express</span></button>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- ================================================================ 1. cover -->
+      <section class="ix-cover" aria-labelledby="ix-title">
+        <div class="ix-plate">
+          <svg class="ix-sun" viewBox="0 0 400 200" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
+            <path d="M120 200a80 80 0 0 1 160 0" fill="var(--brass)" opacity=".22" />
+            <path d="M150 200a50 50 0 0 1 100 0" fill="var(--brass)" opacity=".3" />
+            <path stroke="var(--brass)" stroke-width="1" opacity=".55" d="M138.5 191.9L51.3 180.4M144.0 185.0L22.3 152.4M142.7 176.3L61.4 142.6M149.8 171.0L40.7 108.0M150.8 162.3L81.0 108.7M159.0 159.0L69.9 69.9M162.3 150.8L108.7 81.0M171.0 149.8L108.0 40.7M176.3 142.7L142.6 61.4M185.0 144.0L152.4 22.3M191.9 138.5L180.4 51.3M200.0 142.0L200.0 16.0M208.1 138.5L219.6 51.3M215.0 144.0L247.6 22.3M223.7 142.7L257.4 61.4M229.0 149.8L292.0 40.7M237.7 150.8L291.3 81.0M241.0 159.0L330.1 69.9M249.2 162.3L319.0 108.7M250.2 171.0L359.3 108.0M257.3 176.3L338.6 142.6M256.0 185.0L377.7 152.4M261.5 191.9L348.7 180.4" />
+            <path d="M10 200a190 190 0 0 1 380 0" fill="none" stroke="var(--brass)" stroke-width="1" opacity=".45" />
+          </svg>
+          <div class="ix-plate-text">
+            <p class="ix-plate-eyebrow">Hercule · a design book</p>
+            <h1 class="ix-title" id="ix-title">Seeing all the&nbsp;work</h1>
+            <p class="ix-plate-sub">Five directions for how Hercule shows the work in flight. Each one draws it three ways.</p>
+            <p class="ix-plate-date"><span>24 October 2026</span></p>
+          </div>
+          <div class="ix-crowd" aria-hidden="true">
+            <i data-face="Read the Stripe v14 changelog" data-pose="idle" data-size="40"></i>
+            <i data-face="Refactor cart totals" data-pose="working" data-size="46"></i>
+            <i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="52"></i>
+            <i data-face="Rotate staging secrets" data-pose="working" data-size="46"></i>
+            <i data-face="Tidy checkout CSS" data-pose="done" data-size="42"></i>
+            <i data-face="Migrate ops dashboards" data-pose="waiting" data-size="44"></i>
+            <i data-face="Webhook retry backoff" data-pose="working" data-size="40"></i>
+            <i data-face="Add iDEAL research" data-pose="idle" data-size="38"></i>
+            <i data-face="Juno" data-pose="asleep" data-size="36"></i>
+          </div>
+          <div class="ix-floor" aria-hidden="true"></div>
+        </div>
+
+        <div class="ix-intro">
+          <p class="ix-pitch">On a normal day you run 40 threads in five projects. The sidebar lists them and the Office counts them. Neither tells you <b>what each one is working on, how far along it is, or what will need you next.</b></p>
+          <p class="ix-intro-body">This book asks what a full design team would do with that problem: who sits at the table, what each person worries about, and the words they use. Then it shows the five directions that came out of it. Each one organizes the work by a different thing, and draws it three ways: in the Office, as a list of threads, and in one view of its own.</p>
+          <nav class="ix-dirchips" aria-label="The five directions">
+            <a href="#expedition"><i>1</i><b>Expedition</b><span>progress</span></a>
+            <a href="#control-tower"><i>2</i><b>Control Tower</b><span>attention</span></a>
+            <a href="#atlas"><i>3</i><b>Atlas</b><span>territory</span></a>
+            <a href="#gazette"><i>4</i><b>Gazette</b><span>news</span></a>
+            <a href="#the-firm"><i>5</i><b>The Firm</b><span>delegation</span></a>
+          </nav>
+        </div>
+      </section>
+
+      <!-- ================================================================ 2. the problem -->
+      <section class="ix-sec" id="problem" data-spy>
+        <header class="ix-sec-h">
+          <p class="ix-eyebrow"><span class="ix-num">01</span>The problem</p>
+          <h2 class="ix-h2">The sidebar does all the watching, in 272&nbsp;pixels</h2>
+          <p class="ix-lede">This is your sidebar on 24 October 2026. It is better than it was: #828 folded the threads of one workspace into one row with dots. But look at what a row can say.</p>
+        </header>
+
+        <div class="ix-problem">
+          <figure class="ix-shot">
+            <div class="ix-shot-frame">
+              <div class="ix-shot-img">
+              <img src="shared/rogier-sidebar-2026-10-24.webp" width="311" height="1262" alt="Rogier's sidebar on 24 October 2026: five projects, each a list of rows with a title, an age, and a machine or branch under it." />
+              <span class="ix-pin" style="left: 79%; top: 17.05%">1</span>
+              <span class="ix-pin" style="left: 31%; top: 18.95%">2</span>
+              <span class="ix-pin" style="left: 79%; top: 23.25%">3</span>
+              <span class="ix-pin" style="left: 26.5%; top: 38.2%">4</span>
+              </div>
+            </div>
+            <button class="ix-shot-more" type="button" aria-expanded="false"><span>Show the whole sidebar</span><i data-i="chev-d" data-size="16"></i></button>
+            <figcaption>
+              <ol class="ix-pins-key">
+                <li><b>An age</b>, not how far along it is.</li>
+                <li><b>A machine</b>, not what the thread is doing.</li>
+                <li><b>Dots</b> say how many threads, not who they are.</li>
+                <li><b>15 more</b> threads of one project, out of sight.</li>
+              </ol>
+            </figcaption>
+          </figure>
+
+          <ol class="ix-points">
+            <li>
+              <h3>The sidebar is the only overview</h3>
+              <p>It was built to navigate: find a thread, open it. Now it also carries 40 threads in five projects, partners that leads start, threads that assistants start, and workflows that run at night. A 272px column has room for a title, a status word and a machine. Nothing else.</p>
+            </li>
+            <li>
+              <h3>The Office shows how many, not what</h3>
+              <p>It is the one place that shows every session at once, and you use it to show people, not to work. It does not show what each agent works on, how far it is from its goal, or which ones belong together. Every thread of a project sits in the same room, at the same kind of desk.</p>
+            </li>
+            <li>
+              <h3>Two ideas were left on the shelf</h3>
+              <p>The Crew Bureau 2 book drew the Office with a List | Floor switch: the beans are one way to look at a lot of work, and a list is another. Round one of the sidebar book drew Tracks, whose day sheet laid every thread on one clock.</p>
+              <div class="ix-shelf">
+                <a class="ix-shelf-item" href="shared/cb2-office-floor.webp" target="_blank" rel="noopener">
+                  <span class="ix-shelf-pics ix-shelf-pics--pair">
+                    <img src="shared/cb2-office-list.webp" alt="" loading="lazy" />
+                    <img src="shared/cb2-office-floor.webp" alt="The Crew Bureau 2 Office on its Floor view, with the List and Floor switch in its top bar" loading="lazy" />
+                  </span>
+                  <span class="ix-shelf-cap"><b>List | Floor</b>Crew Bureau 2's Office, two ways</span>
+                </a>
+                <a class="ix-shelf-item" href="shared/tracks-day-sheet.webp" target="_blank" rel="noopener">
+                  <span class="ix-shelf-pics">
+                    <img src="shared/tracks-day-sheet.webp" alt="The Tracks day sheet: every thread of the morning as a lane on one time axis" loading="lazy" />
+                  </span>
+                  <span class="ix-shelf-cap"><b>The day sheet</b>Tracks, every thread on one clock</span>
+                </a>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <blockquote class="ix-question">
+          <p class="ix-q-label">The question</p>
+          <p class="ix-q-text">How might Hercule give Rogier a true overview of all the work in flight, in three modes that look at the same work three ways: the Office, a list of threads, and one new view, so he always knows <em>what is happening</em>, <em>what it means</em>, and <em>what will happen next</em>?</p>
+          <ol class="ix-q-levels">
+            <li><b>Perception</b><span>what is happening</span></li>
+            <li><b>Comprehension</b><span>what it means</span></li>
+            <li><b>Projection</b><span>what happens next</span></li>
+          </ol>
+          <p class="ix-q-note">The three levels of <a href="#lex-ux">situational awareness</a>. Today the sidebar gives you the first, and the Office gives you a headcount. Nothing gives you the other two.</p>
+        </blockquote>
+
+        <div class="ix-rules">
+          <h3>Rogier's rules for this round</h3>
+          <ul>
+            <li><b>Up to five directions</b>, each radically different in how it organizes the threads.</li>
+            <li><b>Three modes each:</b> the Office (3D, with a new concept), Threads (a list, organized however the direction likes), and one view of its own.</li>
+            <li><b>Hi-fi, in Crew Bureau.</b> New atoms are welcome when they serve the UX.</li>
+            <li><b>Intuitive</b> to anyone who uses Claude Code, Codex or T3 Code, and still makes them think "huh, why didn't anyone think of that?"</li>
+            <li><b>Moonshots are welcome.</b> A direction may need data Hercule does not hold yet, if it says plainly what.</li>
+            <li><b>Reviewed on the phone</b>, over the tailnet.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ================================================================ 3. the team -->
+      <section class="ix-sec" id="team" data-spy>
+        <header class="ix-sec-h">
+          <p class="ix-eyebrow"><span class="ix-num">02</span>The team at the table</p>
+          <h2 class="ix-h2">Five people, five different worries</h2>
+          <p class="ix-lede">Give this question to a full design team and each person pulls on a different thread. Nobody is right alone. The brief is what is left when all five have had their say.</p>
+        </header>
+
+        <div class="ix-team-bar">
+          <div class="ix-dots" role="group" aria-label="Roles">
+            <button type="button" aria-label="Product owner" aria-current="true"><i></i></button>
+            <button type="button" aria-label="Lead designer"><i></i></button>
+            <button type="button" aria-label="UX expert"><i></i></button>
+            <button type="button" aria-label="Senior designer"><i></i></button>
+            <button type="button" aria-label="Junior designer"><i></i></button>
+          </div>
+          <p class="ix-swipe">Swipe for the next role<i data-i="arrow" data-size="14"></i></p>
+        </div>
+        <div class="ix-team" id="ix-team" tabindex="0" role="region" aria-label="The five roles, one card each">
+          <article class="ix-role" style="--hue: var(--hue-teal)">
+            <header class="ix-role-h">
+              <i data-face="Product owner" data-pose="idle" data-size="52"></i>
+              <div><h3>Product owner</h3><p>Jobs, measures and scope</p></div>
+            </header>
+            <p class="ix-role-q">“What is the overview hired to do, and will Rogier open it on a Tuesday?”</p>
+            <dl class="ix-role-dl">
+              <div><dt>Concern</dt><dd>The Office is a showpiece. A mode you only open to impress people is a screensaver. <b>Every mode must earn a daily habit, or be cut.</b> The sidebar stays a fast navigator; the overview is a second place with its own jobs.</dd></div>
+              <div><dt>Brings</dt><dd>The job stories, the measures, the line between "drawing" and "ticket", and a veto on nouns that do not pay for themselves.</dd></div>
+              <div><dt>Approach</dt><dd>Writes the jobs first. Asks each direction to finish one sentence: "Rogier opens this mode when ___." Makes each list its data asks, so a moonshot can shrink to a first slice and keep its idea.</dd></div>
+              <div><dt>Asks first</dt><dd>"When Rogier comes back from lunch, how long until he knows what changed? Today he opens threads one by one."</dd></div>
+            </dl>
+            <p class="ix-role-words"><span class="chip chip--who">jobs to be done</span><span class="chip chip--who">job story</span><span class="chip chip--who">north-star measure</span><span class="chip chip--who">time to attend</span><span class="chip chip--who">return briefing</span><span class="chip chip--who">habit loop</span><span class="chip chip--who">walking skeleton</span><span class="chip chip--who">kill criteria</span><span class="chip chip--who">scope creep</span></p>
+          </article>
+
+          <article class="ix-role" style="--hue: var(--hue-grape)">
+            <header class="ix-role-h">
+              <i data-face="Lead designer" data-pose="working" data-size="52"></i>
+              <div><h3>Lead designer</h3><p>The idea, and the world it lives in</p></div>
+            </header>
+            <p class="ix-role-q">“One idea per direction, told three ways.”</p>
+            <dl class="ix-role-dl">
+              <div><dt>Concern</dt><dd>Five directions that differ in kind, not in detail. Each is a world with one organizing idea, told precisely in Threads, spatially in the Office, analytically in its own view. <b>If the three modes do not share an idea, it is three features, not a direction.</b></dd></div>
+              <div><dt>Brings</dt><dd>The concept, the metaphor, the principles and the critique. And the homage to Crew Bureau: color is who, state is a pose and a mark, places get tints, marigold means you.</dd></div>
+              <div><dt>Approach</dt><dd>A double diamond. Go wide with crazy 8s and the idea wall. Cluster the ideas by axis. Pick five axes that do not overlap, then push each one to its most convincing form.</dd></div>
+              <div><dt>Asks first</dt><dd>"Finish the sentence: in this direction, the work is organized by ___, and the Office shows it as ___."</dd></div>
+            </dl>
+            <p class="ix-role-words"><span class="chip chip--who">the big idea</span><span class="chip chip--who">the axis</span><span class="chip chip--who">the lever</span><span class="chip chip--who">through-line</span><span class="chip chip--who">world-building</span><span class="chip chip--who">signature moment</span><span class="chip chip--who">hero shot</span><span class="chip chip--who">the huh test</span><span class="chip chip--who">on brand</span></p>
+          </article>
+
+          <article class="ix-role" style="--hue: var(--hue-orchid)">
+            <header class="ix-role-h">
+              <i data-face="UX expert" data-pose="idle" data-size="52"></i>
+              <div><h3>UX expert</h3><p>The model, and what the eye does</p></div>
+            </header>
+            <p class="ix-role-q">“Three coordinated views of one model, and what the eye does in three seconds.”</p>
+            <dl class="ix-role-dl">
+              <div><dt>Concern</dt><dd>Mode error and lost context: the three modes share one selection, one set of filters, one set of counts. And <b>situational awareness</b>: today the sidebar gives perception and the Office a headcount. Nothing gives comprehension or projection.</dd></div>
+              <div><dt>Brings</dt><dd>The object map, the state matrix, the three-second test, a first-click test, the return test, and accessibility: a list for every 3D view, the keyboard, Reduce Motion.</dd></div>
+              <div><dt>Approach</dt><dd>Runs every direction through the edge cases: a lone thread, a team of ten, a partner on another machine, a swarm of 40, a question with no goal, a run, and a Request folded out of sight.</dd></div>
+              <div><dt>Asks first</dt><dd>"You were away 40 minutes. What changed?"</dd></div>
+            </dl>
+            <p class="ix-role-words"><span class="chip chip--who">mental model</span><span class="chip chip--who">coordinated views</span><span class="chip chip--who">brushing and linking</span><span class="chip chip--who">glanceability</span><span class="chip chip--who">semantic zoom</span><span class="chip chip--who">spatial memory</span><span class="chip chip--who">change blindness</span><span class="chip chip--who">calm technology</span><span class="chip chip--who">mode error</span></p>
+          </article>
+
+          <article class="ix-role" style="--hue: var(--hue-mint)">
+            <header class="ix-role-h">
+              <i data-face="Senior designer" data-pose="working" data-size="52"></i>
+              <div><h3>Senior designer</h3><p>Craft, at real density</p></div>
+            </header>
+            <p class="ix-role-q">“Does it read at 13px and at 1,000 metres?”</p>
+            <dl class="ix-role-dl">
+              <div><dt>Concern</dt><dd>The row at 272px and 52px. Name tags that collide in 3D. A scene that reads at 1440x900 and on a phone. A camera that never loses you. <b>Switching modes keeps object constancy:</b> a row becomes its bean, a bean becomes its card.</dd></div>
+              <div><dt>Brings</dt><dd>The state matrix drawn out, motion specs, token discipline, label systems (leader lines, clustering, level of detail), and lighting and materials from the tokens.</dd></div>
+              <div><dt>Approach</dt><dd>Draws the hardest state first: the swarm, the folded waiting partner, a long title beside a role. Then the hero shot. Draws the lone thread early, to prove it costs nothing.</dd></div>
+              <div><dt>Asks first</dt><dd>"Show me the swarm. Then show me the lone thread."</dd></div>
+            </dl>
+            <p class="ix-role-words"><span class="chip chip--who">visual hierarchy</span><span class="chip chip--who">density</span><span class="chip chip--who">object constancy</span><span class="chip chip--who">state matrix</span><span class="chip chip--who">level of detail</span><span class="chip chip--who">label collision</span><span class="chip chip--who">establishing shot</span><span class="chip chip--who">diorama</span><span class="chip chip--who">the 1px that makes it</span></p>
+          </article>
+
+          <article class="ix-role" style="--hue: var(--hue-sky)">
+            <header class="ix-role-h">
+              <i data-face="Junior" data-pose="waiting" data-size="52"></i>
+              <div><h3>Junior designer</h3><p>Fresh eyes, and the naive question</p></div>
+            </header>
+            <p class="ix-role-q">“Why do all the beans sit in one room?”</p>
+            <dl class="ix-role-dl">
+              <div><dt>Concern</dt><dd>Fresh eyes. <b>Asks the naive questions that turn out to be the sharp ones</b>, and brings references from games and the world beyond software.</dd></div>
+              <div><dt>Brings</dt><dd>The teardown and the mood board: The Sims' thought bubbles, Fallout Shelter's cut-away building, an RTS minimap, CodeCity, air traffic control's holding stack, a newspaper front page, a kitchen's ticket rail, an org chart.</dd></div>
+              <div><dt>Asks</dt><dd>
+                <ul class="ix-asks">
+                  <li>"Why can't the office show me where they are in the code?" <a href="#atlas">Atlas</a></li>
+                  <li>"What if I could rewind the office?" <a href="#gazette">Gazette</a></li>
+                  <li>"What if they were planes waiting to land?" <a href="#control-tower">Control Tower</a></li>
+                  <li>"Why don't they walk over when they talk to each other?" <a href="#the-firm">The Firm</a></li>
+                  <li>"Why does the office look the same at 9 and at 5?"</li>
+                  <li>"Can it tell me what will need me after lunch?"</li>
+                </ul>
+              </dd></div>
+            </dl>
+            <p class="ix-role-words"><span class="chip chip--who">inspo</span><span class="chip chip--who">teardown</span><span class="chip chip--who">mood board</span><span class="chip chip--who">"what if"</span><span class="chip chip--who">"like X does it"</span><span class="chip chip--who">game feel</span><span class="chip chip--who">HUD</span><span class="chip chip--who">minimap</span></p>
+          </article>
+        </div>
+
+      </section>
+
+      <!-- ================================================================ 4. the lexicon -->
+      <section class="ix-sec" id="lexicon" data-spy>
+        <header class="ix-sec-h">
+          <p class="ix-eyebrow"><span class="ix-num">03</span>The lexicon</p>
+          <h2 class="ix-h2">The words that framed the work</h2>
+          <p class="ix-lede">Each role reaches for its own words. These twenty did the most to shape the five directions. Each comes with a plain meaning, and an example from Hercule.</p>
+        </header>
+
+        <nav class="ix-lex-index" aria-label="Words by role">
+          <a href="#lex-po" style="--hue: var(--hue-teal)"><i data-face="Product owner" data-size="24"></i>Product owner<span>3</span></a>
+          <a href="#lex-lead" style="--hue: var(--hue-grape)"><i data-face="Lead designer" data-size="24"></i>Lead designer<span>3</span></a>
+          <a href="#lex-ux" style="--hue: var(--hue-orchid)"><i data-face="UX expert" data-size="24"></i>UX expert<span>9</span></a>
+          <a href="#lex-senior" style="--hue: var(--hue-mint)"><i data-face="Senior designer" data-size="24"></i>Senior designer<span>3</span></a>
+          <a href="#lex-junior" style="--hue: var(--hue-sky)"><i data-face="Junior" data-size="24"></i>Junior designer<span>2</span></a>
+        </nav>
+
+        <div class="ix-lex">
+          <section class="ix-lex-group" id="lex-po" style="--hue: var(--hue-teal)">
+            <header class="ix-lex-h"><i data-face="Product owner" data-size="36"></i><div><h3>Product owner</h3><p>Is it worth building?</p></div></header>
+            <div class="ix-lex-list">
+              <article class="ix-term">
+                <h4>Jobs to be done</h4>
+                <p>People "hire" a product to get a job done. A job story says when the job comes up, what you want, and why.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>"When I come back after being away, I want to know what changed, in the order it matters." That is the Catch up job, and every direction is judged on it.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Walking skeleton</h4>
+                <p>The thinnest version that works from end to end. Build it first, put flesh on it later.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Expedition's skeleton is one route line on today's row, read from the agent's own todo list, before a single mountain is drawn.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Kill criteria</h4>
+                <p>A test, agreed before you build, that tells you when to stop.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>If a mode is only ever opened to show visitors, it is a screensaver, and it is cut.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="ix-lex-group" id="lex-lead" style="--hue: var(--hue-grape)">
+            <header class="ix-lex-h"><i data-face="Lead designer" data-size="36"></i><div><h3>Lead designer</h3><p>Is it one idea?</p></div></header>
+            <div class="ix-lex-list">
+              <article class="ix-term">
+                <h4>The axis</h4>
+                <p>The one thing a direction organizes the work by. Five directions need five axes that do not overlap.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Expedition organizes by how far from done, Control Tower by when it will need you, Atlas by where in the code, Gazette by what changed, The Firm by who works for whom.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Office Map</h4>
+                <p>A Hercule word: the plan an Office is built from, with its rooms and the rule by which it grows. One Office, many possible maps.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Today's map is the Bureau. Four directions draw new ones: the Range, the Aerodrome, the City and the Dollhouse.</p>
+              </article>
+              <article class="ix-term">
+                <h4>The huh test</h4>
+                <p>Would someone who uses Claude Code or Codex every day stop and look twice?</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Control Tower passes it with an agent tool that predicts its own interruptions, and lets you schedule them.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="ix-lex-group" id="lex-ux" style="--hue: var(--hue-orchid)">
+            <header class="ix-lex-h"><i data-face="UX expert" data-size="36"></i><div><h3>UX expert</h3><p>Does the eye get it?</p></div></header>
+            <div class="ix-lex-list">
+              <article class="ix-term">
+                <h4>Situational awareness</h4>
+                <p>Three levels: perception (what is there), comprehension (what it means) and projection (what happens next).</p>
+                <p class="ix-term-ex"><b>In Hercule</b>"Rotate staging secrets: Working" is perception. "9 of 14 secrets rotated" is comprehension. "Will need you in about 10 minutes" is projection.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Coordinated views</h4>
+                <p>Several views of one model that share the selection, the filters and the counts. Brushing and linking: pick something in one view, and it lights up in all of them.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Select "Refactor cart totals" in Threads, switch to the Office, and the camera flies to its bean.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Overview first, zoom and filter, details on demand</h4>
+                <p>Shneiderman's mantra. Show everything at a glance, let people narrow it down, and open the details only when asked.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>The whole Office, then the payments-api room, then the dossier card of "Payout report for September".</p>
+              </article>
+              <article class="ix-term">
+                <h4>Semantic zoom</h4>
+                <p>Zooming changes what is shown, not only how big it is.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Far out, Atlas's City shows each folder as one block. Zoom in, and the block opens into buildings, one per file, with lit windows for today's edits.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Pre-attentive attributes</h4>
+                <p>What the eye picks up before you read: hue, size, motion, position. They make a screen glanceable.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>A raised marigold hand is seen before any title is read. That is why marigold is spent only on what waits on you.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Change blindness</h4>
+                <p>You miss a change because nothing marked it.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>You come back from lunch and "Payout report" has finished, but its row looks the same as before you left.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Calm technology</h4>
+                <p>Information that stays at the edge of your attention, and moves to the center only when it matters. Also called peripheral awareness.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Six threads working is quiet background. Only "Migrate ops dashboards" asking "Keep the old Grafana folder?" turns marigold.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Spatial memory</h4>
+                <p>You remember where things are, and look there again without reading.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>payments-api always sits in the same room of the Office, so your eye goes straight to it. That is also why rows never move under the pointer.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Interruption cost</h4>
+                <p>An interruption costs more than the seconds it takes: you lose your focus, and need time to get it back.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Control Tower's landing slots hold every Request that is not urgent until 10:30, so three questions cost you one break, not three.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="ix-lex-group" id="lex-senior" style="--hue: var(--hue-mint)">
+            <header class="ix-lex-h"><i data-face="Senior designer" data-size="36"></i><div><h3>Senior designer</h3><p>Does it hold up?</p></div></header>
+            <div class="ix-lex-list">
+              <article class="ix-term">
+                <h4>Object constancy</h4>
+                <p>A thing stays recognisably the same thing when the view changes, so your eye can follow it.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>The row "Fix 3-D Secure checkout" turns into its peach bean in the Office, then into its card. Same face, same hue.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Level of detail, and label collision</h4>
+                <p>Level of detail: draw less when things are far away or many. Label collision: name tags that overlap until none can be read.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>35 beans in one room, 35 tags in a pile. From afar the room shows one tag, "webshop · 12 working". Up close, each bean gets its own.</p>
+              </article>
+              <article class="ix-term">
+                <h4>Establishing shot</h4>
+                <p>A film word: the wide opening shot that shows where everything is, before the camera moves in.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>The Office opens on the whole Range, then the camera moves in on the rope team that waits on you.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="ix-lex-group" id="lex-junior" style="--hue: var(--hue-sky)">
+            <header class="ix-lex-h"><i data-face="Junior" data-size="36"></i><div><h3>Junior designer</h3><p>Who solved this already?</p></div></header>
+            <div class="ix-lex-list">
+              <article class="ix-term">
+                <h4>Teardown</h4>
+                <p>Taking apart how a game, a tool or the real world already solved a problem like yours.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>The Sims shows a thought bubble over each character. Gazette puts one over each working bean: "reading payment.ts".</p>
+              </article>
+              <article class="ix-term">
+                <h4>Minimap</h4>
+                <p>From strategy games: a small map of the whole world in a corner, with a dot per unit.</p>
+                <p class="ix-term-ex"><b>In Hercule</b>Atlas puts a map of your code at the top of the sidebar, with a dot per agent. Tap an area and the list shows only that area.</p>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ================================================================ 5. method -->
+      <section class="ix-sec" id="method" data-spy>
+        <header class="ix-sec-h">
+          <p class="ix-eyebrow"><span class="ix-num">04</span>How the team works it</p>
+          <h2 class="ix-h2">Go wide, then narrow down. Twice.</h2>
+          <p class="ix-lede">The team works in a double diamond. First it opens the problem up, then narrows it down to one question. Then it opens up the answers, and narrows them down to five directions.</p>
+        </header>
+
+        <figure class="ix-diamond" aria-label="The double diamond: Discover and Define narrow the problem down to the question; Develop and Deliver narrow the answers down to five directions.">
+          <div class="ix-diamond-art">
+            <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true">
+              <path class="ix-dd-a" d="M0 50 L100 3 L200 50 L100 97 Z" />
+              <path class="ix-dd-b" d="M200 50 L300 3 L400 50 L300 97 Z" />
+              <path class="ix-dd-split" d="M100 3 V97 M300 3 V97" />
+            </svg>
+            <span class="ix-dd-step" style="left: 12.5%"><b>Discover</b><small>go wide</small></span>
+            <span class="ix-dd-step" style="left: 37.5%"><b>Define</b><small>narrow</small></span>
+            <span class="ix-dd-step" style="left: 62.5%"><b>Develop</b><small>go wide</small></span>
+            <span class="ix-dd-step" style="left: 87.5%"><b>Deliver</b><small>narrow</small></span>
+            <span class="ix-dd-node" style="left: 0"></span>
+            <span class="ix-dd-node ix-dd-node--q" style="left: 50%"></span>
+            <span class="ix-dd-node" style="left: 100%"></span>
+          </div>
+          <div class="ix-dd-ends">
+            <span>Today's sidebar and Office</span>
+            <span class="ix-dd-mid">The question</span>
+            <span>Five directions</span>
+          </div>
+        </figure>
+
+        <ol class="ix-steps">
+          <li><i>1</i><div><h3>Discover</h3><p>What the data holds. What the Office and the sidebar do today. A teardown of games and tools. Your own sidebar on a heavy day.</p></div></li>
+          <li><i>2</i><div><h3>Define</h3><p>The job stories, the question, the "how might we" list, the principles, and the three-mode contract.</p></div></li>
+          <li><i>3</i><div><h3>Develop</h3><p>Crazy 8s for everyone, then the idea wall. Cluster by axis, pick five axes that do not overlap, and give each one a direction with its own Office Map and its own view.</p></div></li>
+          <li><i>4</i><div><h3>Deliver</h3><p>Five hi-fi live windows and five story pages, all on one shared world, compared against the job stories.</p></div></li>
+        </ol>
+
+        <div class="ix-sub">
+          <h3 class="ix-h3">Seven jobs the overview is hired for</h3>
+          <p class="ix-sub-lede">The product owner's job stories. Every critique checks against them, in this order.</p>
+          <ol class="ix-jobs">
+            <li><b>Attend</b><span>When something needs me, I want to see it and answer it in one move, wherever it is.</span></li>
+            <li><b>Oversee</b><span>When I glance at the overview, I want to know what is moving, what is stuck and what is done, without reading every title.</span></li>
+            <li><b>Gauge</b><span>When I look at a piece of work, I want to know how far it is from done.</span></li>
+            <li><b>Catch up</b><span>When I come back after being away, I want to know what changed, in the order it matters.</span></li>
+            <li><b>Anticipate</b><span>When I plan my next hour, I want to know what will need me and when.</span></li>
+            <li><b>Find</b><span>When I want to get back to something, I want to find it by what it is.</span></li>
+            <li><b>Show</b><span>When I show someone Hercule, I want them to understand what my agents are doing.</span></li>
+          </ol>
+        </div>
+
+        <div class="ix-sub">
+          <h3 class="ix-h3">How might we...</h3>
+          <p class="ix-sub-lede">The question, broken into pieces small enough to sketch.</p>
+          <ul class="ix-hmw">
+            <li>...make the Office legible: what each bean works on, and how far along it is?</li>
+            <li>...let the overview see the future, not only the present?</li>
+            <li>...tell Rogier what changed while he was away, in the order it matters?</li>
+            <li>...keep a lone thread exactly as light as it is today?</li>
+            <li>...make three modes feel like one place, not three features?</li>
+            <li>...let the overview carry 40 threads today and 200 next year?</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ================================================================ 6. the contract -->
+      <section class="ix-sec" id="contract" data-spy>
+        <header class="ix-sec-h">
+          <p class="ix-eyebrow"><span class="ix-num">05</span>The three-mode contract</p>
+          <h2 class="ix-h2">One overview, three modes, one set of rules</h2>
+          <p class="ix-lede">The five directions disagree about how to organize the work. They agree on how the overview behaves. Every direction builds on this contract.</p>
+        </header>
+
+        <figure class="ix-contract">
+          <div class="ix-win" aria-hidden="true">
+            <div class="ix-win-side">
+              <div class="ix-win-lights"><i></i><i></i><i></i></div>
+              <p class="ix-win-h">Waiting on you <b class="count count--you">3</b></p>
+              <p class="ix-win-row is-on"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="18"></i><span>Fix 3-D Secure checkout</span></p>
+              <p class="ix-win-row"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="18"></i><span>Migrate ops dashboards</span></p>
+              <p class="ix-win-row"><i data-face="Ship release v2.15" data-pose="waiting" data-size="18"></i><span>Ship release v2.15</span></p>
+              <p class="ix-win-h"><span class="proj proj--webshop">webshop</span></p>
+              <p class="ix-win-row"><i data-face="Refactor cart totals" data-pose="working" data-size="18"></i><span>Refactor cart totals</span></p>
+              <p class="ix-win-h"><span class="proj proj--payments">payments-api</span></p>
+              <p class="ix-win-row"><i data-face="Payout report for September" data-pose="working" data-size="18"></i><span>Payout report for September</span></p>
+              <p class="ix-win-h"><span class="proj proj--ops">ops</span></p>
+              <p class="ix-win-row"><i data-face="Rotate staging secrets" data-pose="working" data-size="18"></i><span>Rotate staging secrets</span></p>
+            </div>
+            <div class="ix-win-main">
+              <div class="ix-win-bar">
+                <span class="ix-win-seg"><span>Office</span><span class="is-on">Threads</span><span>Its own view</span></span>
+              </div>
+              <p class="ix-win-h">Waiting on you <b class="count count--you">3</b></p>
+              <div class="ix-win-item is-on"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="24"></i><span><b>Fix 3-D Secure checkout for EU cards</b><em class="you-ink">Run git push?</em></span></div>
+              <div class="ix-win-item"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="24"></i><span><b>Migrate ops dashboards</b><em class="you-ink">Keep the old Grafana folder?</em></span></div>
+              <div class="ix-win-item"><i data-face="Ship release v2.15" data-pose="waiting" data-size="24"></i><span><b>Ship release v2.15</b><em class="you-ink">Publish to npm?</em></span></div>
+              <p class="ix-win-h">Working <b class="count">6</b></p>
+              <div class="ix-win-item"><i data-face="Refactor cart totals" data-pose="working" data-size="24"></i><span><b>Refactor cart totals</b><em>Moving discount maths into computeTotals</em></span></div>
+              <div class="ix-win-item"><i data-face="Payout report for September" data-pose="working" data-size="24"></i><span><b>Payout report for September</b><em>Building the report from 1,284 payouts</em></span></div>
+              <div class="ix-win-item"><i data-face="Rotate staging secrets" data-pose="working" data-size="24"></i><span><b>Rotate staging secrets</b><em>Rotated 9 of 14 secrets</em></span></div>
+            </div>
+          </div>
+          <div class="ix-win-notes">
+            <p><b>The sidebar is Threads, folded.</b> The same list, organized by the same idea, at 272px.</p>
+            <p><b>Threads mode is the same list at full width.</b> Line 2 is where each direction puts its idea: a route, an ETA, a file, a headline, a team.</p>
+          </div>
+
+          <div class="ix-modes" aria-label="The same thread selected in all three modes">
+            <div class="ix-mode">
+              <div class="ix-mode-art ix-mode-art--list" aria-hidden="true">
+                <span><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="18"></i><s></s></span>
+                <span class="is-on"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="18"></i><s></s></span>
+                <span><i data-face="Refactor cart totals" data-pose="working" data-size="18"></i><s></s></span>
+                <span><i data-face="Rotate staging secrets" data-pose="working" data-size="18"></i><s></s></span>
+              </div>
+              <b>Threads</b>
+            </div>
+            <i class="ix-mode-arrow" data-i="arrow" data-size="16"></i>
+            <div class="ix-mode">
+              <div class="ix-mode-art ix-mode-art--office" aria-hidden="true">
+                <svg viewBox="0 0 120 84" preserveAspectRatio="xMidYMid meet">
+                  <path d="M60 10 L114 40 L60 70 L6 40 Z" fill="var(--room-floor)" stroke="var(--line)" />
+                  <path d="M60 10 L87 25 L60 40 L33 25 Z" fill="var(--proj-webshop)" opacity=".75" />
+                  <path d="M87 25 L114 40 L87 55 L60 40 Z" fill="var(--proj-payments)" opacity=".75" />
+                  <path d="M33 25 L60 40 L33 55 L6 40 Z" fill="var(--proj-ops)" opacity=".75" />
+                </svg>
+                <span class="ix-bean is-on" style="left: 50%; top: 38%; width: 20%"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="24"></i></span>
+                <span class="ix-bean" style="left: 74%; top: 56%; width: 16%"><i data-face="Payout report for September" data-pose="working" data-size="20"></i></span>
+                <span class="ix-bean" style="left: 28%; top: 56%; width: 16%"><i data-face="Rotate staging secrets" data-pose="working" data-size="20"></i></span>
+                <span class="ix-bean" style="left: 50%; top: 74%; width: 16%"><i data-face="Refactor cart totals" data-pose="working" data-size="20"></i></span>
+              </div>
+              <b>Office</b>
+            </div>
+            <i class="ix-mode-arrow" data-i="arrow" data-size="16"></i>
+            <div class="ix-mode">
+              <div class="ix-mode-art ix-mode-art--view" aria-hidden="true">
+                <span><s></s><s></s><s></s></span>
+                <span><s class="is-on"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="18"></i></s><s></s></span>
+                <span><s></s></span>
+              </div>
+              <b>Its own view</b>
+            </div>
+          </div>
+          <figcaption class="ix-modes-cap">"Fix 3-D Secure checkout" is selected in all three modes. Switch, and you keep your place: the camera flies to its bean. Filters and counts agree everywhere.</figcaption>
+        </figure>
+
+        <ul class="ix-contract-list">
+          <li><i data-i="office" data-size="16"></i><div><b>One overview, three modes.</b> A place in the window, opened with <kbd>⌘⇧O</kbd> or the sidebar's Office button. Its top bar holds a three-way switch: Office · Threads · the direction's own view. Also reachable by keyboard.</div></li>
+          <li><i data-i="sidebar" data-size="16"></i><div><b>The sidebar is Threads, folded.</b> Same list, same idea, at 272px. Each direction says what the sidebar does while the overview is open.</div></li>
+          <li><i data-i="link" data-size="16"></i><div><b>Coordinated views.</b> Selecting a thread in one mode selects it in all three. Switching keeps the selection. Counts agree everywhere.</div></li>
+          <li><i data-i="bell" data-size="16"></i><div><b>Waiting on you always rises</b>, in every mode, and one move answers it.</div></li>
+          <li><i data-i="user" data-size="16"></i><div><b>A lone thread costs nothing</b> in the list: no extra chrome, height or word.</div></li>
+          <li><i data-i="pause" data-size="16"></i><div><b>Nothing moves under the pointer.</b> Changes wait until the pointer leaves, or arrive as a pill: "3 new".</div></li>
+          <li><i data-i="moon" data-size="16"></i><div><b>Cheap while idle.</b> The Office draws only while visible and caps at 30 fps for ambient life. Nothing changes per streamed token. Each direction says what it costs.</div></li>
+          <li><i data-i="eye" data-size="16"></i><div><b>Honest data.</b> Codex reports no usage, so say "not reported", never invent a number. A prediction is shown as a prediction.</div></li>
+          <li><i data-i="palette" data-size="16"></i><div><b>Crew Bureau.</b> Color is who. State is a pose and a mark. Places get tints. Marigold means you. The beans are the real Office's beans.</div></li>
+        </ul>
+
+        <div class="ix-plaque">
+          <p class="ix-plaque-h">Eight principles</p>
+          <ol>
+            <li><b>One idea, three lenses.</b><span>A direction's three modes organize the work by the same thing.</span></li>
+            <li><b>Comprehension, not just perception.</b><span>Every mode answers "what does it mean". At least one answers "what happens next".</span></li>
+            <li><b>What needs you always rises.</b></li>
+            <li><b>The lone thread costs nothing.</b></li>
+            <li><b>Nothing moves under the pointer.</b></li>
+            <li><b>The Office tells the truth.</b><span>Every visual in 3D maps to a fact. Strip the scenery and a chart remains.</span></li>
+            <li><b>Calm by default.</b><span>Peripheral until something needs you. Marigold is spent only on you.</span></li>
+            <li><b>Cheap while idle.</b></li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ================================================================ 7. the idea wall -->
+      <section class="ix-sec" id="wall" data-spy>
+        <header class="ix-sec-h">
+          <p class="ix-eyebrow"><span class="ix-num">06</span>The idea wall</p>
+          <h2 class="ix-h2">Sixteen ideas on the wall, five picked</h2>
+          <p class="ix-lede">Everyone sketched eight ideas in eight minutes. The ideas went on the wall, clustered by axis: what each one organizes the work by. Five axes did not overlap, so five ideas were picked. The rest stay on the wall, and some live on inside a picked one.</p>
+        </header>
+
+        <div class="ix-wall">
+          <div class="ix-cluster">
+            <p class="ix-cluster-h">Progress</p>
+            <div class="ix-notes">
+              <a class="ix-note is-picked" href="#expedition"><b>Expedition</b><span class="ix-note-gist">Routes up a mountain, rope teams, base camp.</span><span class="ix-stamp">Picked · 1</span></a>
+              <div class="ix-note"><span class="ix-note-axis">growth</span><b>Conservatory</b><span class="ix-note-gist">Each thread a plant that grows, wilts and blooms.</span><span class="ix-note-fate"><b>Merged into Expedition.</b> Progress reads better as altitude than as leaves.</span></div>
+              <div class="ix-note"><span class="ix-note-axis">flow</span><b>Factory</b><span class="ix-note-gist">Conveyors move work between stations.</span><span class="ix-note-fate"><b>Merged into Expedition's Board.</b></span></div>
+              <div class="ix-note is-dropped"><span class="ix-note-axis">progress</span><b>Peloton</b><span class="ix-note-gist">All work as riders on one stage profile.</span><span class="ix-note-fate"><b>Dropped.</b> One shared track hides each goal's own route.</span></div>
+            </div>
+          </div>
+
+          <div class="ix-cluster">
+            <p class="ix-cluster-h">Attention, the future</p>
+            <div class="ix-notes">
+              <a class="ix-note is-picked" href="#control-tower"><b>Control Tower</b><span class="ix-note-gist">Flights, the holding stack, landing slots, radar.</span><span class="ix-stamp">Picked · 2</span></a>
+              <div class="ix-note"><span class="ix-note-axis">attention</span><b>The Pass</b><span class="ix-note-gist">A kitchen's ticket rail, orders called by the chef.</span><span class="ix-note-fate"><b>Merged into Control Tower's strips.</b></span></div>
+              <div class="ix-note"><span class="ix-note-axis">the future</span><b>Departures board</b><span class="ix-note-gist">Split-flap rows of every thread's next event.</span><span class="ix-note-fate"><b>Became Control Tower's arrivals board.</b></span></div>
+              <div class="ix-note is-dropped"><span class="ix-note-axis">attention</span><b>Orrery</b><span class="ix-note-gist">You are the sun. Agents orbit closer as they need you.</span><span class="ix-note-fate"><b>Dropped.</b> Beautiful, but radius already carries the Radar.</span></div>
+              <div class="ix-note is-kept"><span class="ix-note-axis">attention</span><b>Concierge</b><span class="ix-note-gist">An assistant at reception walks you to whoever needs you.</span><span class="ix-note-fate"><b>Kept as a detail</b> for any Office.</span></div>
+            </div>
+          </div>
+
+          <div class="ix-cluster">
+            <p class="ix-cluster-h">Where in the code</p>
+            <div class="ix-notes">
+              <a class="ix-note is-picked" href="#atlas"><b>Atlas</b><span class="ix-note-gist">A city of the code, territories, a transit map of branches.</span><span class="ix-stamp">Picked · 3</span></a>
+            </div>
+          </div>
+
+          <div class="ix-cluster">
+            <p class="ix-cluster-h">News, the past</p>
+            <div class="ix-notes">
+              <a class="ix-note is-picked" href="#gazette"><b>Gazette</b><span class="ix-note-gist">The morning paper, and an Office you can rewind.</span><span class="ix-stamp">Picked · 4</span></a>
+              <div class="ix-note is-dropped"><span class="ix-note-axis">time</span><b>Score</b><span class="ix-note-gist">Every thread a staff, tool calls as notes, a playhead at now.</span><span class="ix-note-fate"><b>Dropped.</b> The day sheet already owns time looking back.</span></div>
+            </div>
+          </div>
+
+          <div class="ix-cluster">
+            <p class="ix-cluster-h">Who works for whom</p>
+            <div class="ix-notes">
+              <a class="ix-note is-picked" href="#the-firm"><b>The Firm</b><span class="ix-note-gist">A cut-away building, a room per team, the org chart.</span><span class="ix-stamp">Picked · 5</span></a>
+              <div class="ix-note is-dropped"><span class="ix-note-axis">relations</span><b>Constellation</b><span class="ix-note-gist">A force graph of threads, files and messages.</span><span class="ix-note-fate"><b>Dropped.</b> A layout that never settles breaks spatial memory.</span></div>
+            </div>
+          </div>
+
+          <div class="ix-cluster">
+            <p class="ix-cluster-h">Cost and style</p>
+            <div class="ix-notes">
+              <div class="ix-note is-dropped"><span class="ix-note-axis">cost</span><b>Trading floor</b><span class="ix-note-gist">A ticker of every event. Prices are tokens.</span><span class="ix-note-fate"><b>Dropped.</b> Makes noise the main event.</span></div>
+              <div class="ix-note is-dropped"><span class="ix-note-axis">style</span><b>Console</b><span class="ix-note-gist">A voxel office, pixel-art beans.</span><span class="ix-note-fate"><b>Dropped.</b> A style, not an idea.</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ 8. the directions -->
+      <section class="ix-sec" id="directions" data-spy>
+        <header class="ix-sec-h">
+          <p class="ix-eyebrow"><span class="ix-num">07</span>The five directions</p>
+          <h2 class="ix-h2">Five ways to organize the same morning</h2>
+          <p class="ix-lede">They organize the work by five different things: <b>progress, attention, territory, news and delegation</b>. Each draws the same morning, Tuesday 29 September 2026 at 09:41, in three modes. Read the story first, then open the live window.</p>
+        </header>
+
+        <div class="ix-dirs">
+          <article class="ix-dir" id="expedition">
+            <div class="ix-hero-slot">
+              <div class="ix-emblem-box">
+              <svg class="ix-emblem" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                <rect width="320" height="200" fill="var(--ix-sky)" />
+                <path d="M236 52 V14 M236 52 L258 20 M236 52 L274 34 M236 52 L280 52 M236 52 L214 20 M236 52 L198 34" stroke="var(--brass)" stroke-width="1" opacity=".6" />
+                <circle cx="236" cy="52" r="14" fill="var(--brass)" opacity=".42" />
+                <path d="M0 200 L56 116 L94 148 L150 92 L196 132 L248 98 L320 160 V200 Z" fill="var(--proj-payments)" />
+                <path d="M28 200 L160 46 L294 200 Z" fill="var(--proj-webshop)" />
+                <path d="M160 46 L294 200 L200 200 Z" fill="var(--ink)" opacity=".07" />
+                <path d="M160 46 L144 65 L152 62 L159 70 L167 61 L176 66 Z" fill="var(--raised)" />
+                <path d="M0 200 L0 176 L64 156 L118 182 L176 160 L240 186 L320 162 V200 Z" fill="var(--proj-ops)" />
+                <g fill="var(--raised)" opacity=".92">
+                  <ellipse cx="58" cy="112" rx="16" ry="7" /><ellipse cx="70" cy="106" rx="11" ry="7" /><ellipse cx="48" cy="108" rx="8" ry="5" />
+                </g>
+                <polyline points="148,114 128,94 150,72 160,52" fill="none" stroke="var(--ink)" stroke-width="1.2" stroke-dasharray="2 3" stroke-linecap="round" opacity=".55" />
+                <polyline style="--hue: var(--hue-peach)" points="100,170 132,152 112,132 148,114" fill="none" stroke="var(--who-shade)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+                <g style="--hue: var(--hue-peach)" fill="var(--who-shade)">
+                  <circle cx="100" cy="170" r="3.2" /><circle cx="132" cy="152" r="3.2" /><circle cx="112" cy="132" r="3.2" />
+                </g>
+                <g fill="var(--raised)" stroke="var(--ink)" stroke-width="1.2">
+                  <circle cx="128" cy="94" r="3" /><circle cx="150" cy="72" r="3" />
+                </g>
+                <path d="M160 52 V30" stroke="var(--ink)" stroke-width="1.6" />
+                <path d="M160 30 L178 35 L160 40 Z" fill="var(--accent)" />
+                <path d="M276 124 V106" stroke="var(--ink)" stroke-width="1.2" />
+                <path d="M276 106 L289 110 L276 114 Z" fill="var(--you)" />
+              </svg>
+              <span class="ix-bean" style="left: 46.25%; top: 51%; width: 9%"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="working" data-size="32"></i></span>
+              <span class="ix-bean" style="left: 40.6%; top: 56.5%; width: 7%"><i data-face="Read the Stripe v14 changelog" data-pose="working" data-size="26"></i></span>
+              <span class="ix-bean" style="left: 81.5%; top: 52%; width: 7.5%"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="28"></i></span>
+              </div>
+              <img class="ix-hero" src="expedition/shots/hero.webp" alt="Expedition: the hero shot" loading="lazy" onerror="this.hidden = true" />
+            </div>
+            <div class="ix-dir-body">
+              <p class="ix-dir-num">1</p>
+              <h3 class="ix-dir-name">Expedition</h3>
+              <p class="ix-dir-tag">“Every piece of work has a summit”</p>
+              <p class="ix-dir-by">Organizes by <b>how far from done</b></p>
+              <dl class="ix-dir-modes">
+                <div><dt>Threads</dt><dd>Routes</dd></div>
+                <div><dt>Office</dt><dd>the Range</dd></div>
+                <div><dt>Its own view</dt><dd>The Board</dd></div>
+              </dl>
+              <p class="ix-dir-huh"><b>The huh</b>A progress bar that is not a lie: the agent's own plan, plus checks Hercule can see. And a mountain range where you can point at what is stuck.</p>
+              <p class="ix-dir-links"><a class="btn btn--accent" href="expedition/index.html">Read the story</a><a class="btn" href="expedition/desktop.html" target="_blank" rel="noopener">Open the live window<i data-i="external" data-size="14"></i></a></p>
+            </div>
+          </article>
+
+          <article class="ix-dir" id="control-tower">
+            <div class="ix-hero-slot">
+              <div class="ix-emblem-box">
+              <svg class="ix-emblem" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                <rect width="320" height="200" fill="var(--ix-sky)" />
+                <g fill="none" stroke="var(--line)" stroke-width="1">
+                  <circle cx="236" cy="186" r="44" /><circle cx="236" cy="186" r="88" /><circle cx="236" cy="186" r="132" /><circle cx="236" cy="186" r="176" />
+                </g>
+                <rect x="0" y="182" width="200" height="18" fill="var(--line-soft)" />
+                <path d="M10 191 H190" stroke="var(--raised)" stroke-width="2" stroke-dasharray="12 9" />
+                <g fill="none" stroke="var(--ink)" stroke-width="1" stroke-dasharray="2 4" opacity=".45">
+                  <ellipse cx="236" cy="70" rx="80" ry="15" />
+                  <ellipse cx="236" cy="44" rx="64" ry="12" />
+                </g>
+                <path d="M214 200 V184 H258 V200" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.4" />
+                <rect x="225" y="100" width="22" height="84" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.4" />
+                <path d="M232 106 V178 M240 106 V178" stroke="var(--line)" stroke-width="1" />
+                <path d="M212 80 H260 L253 100 H219 Z" fill="var(--proj-ops)" stroke="var(--ink)" stroke-width="1.4" />
+                <path d="M216 80 L224 70 H248 L256 80 Z" fill="var(--ix-lacquer)" stroke="var(--ink)" stroke-width="1.4" stroke-linejoin="round" />
+                <path d="M236 70 V56" stroke="var(--ink)" stroke-width="1.4" />
+                <circle cx="236" cy="54" r="2.4" fill="var(--brass)" />
+                <g fill="var(--ink)">
+                  <path transform="translate(160 76) rotate(196) scale(.8)" d="M11 0 L-5 -2 L-7 -10 L-10 -10 L-8.5 -2 L-12 -1.6 L-14 -5.5 L-16 -5.5 L-15 0 L-16 5.5 L-14 5.5 L-12 1.6 L-8.5 2 L-10 10 L-7 10 L-5 2 Z" />
+                  <path transform="translate(306 66) rotate(-34) scale(.8)" d="M11 0 L-5 -2 L-7 -10 L-10 -10 L-8.5 -2 L-12 -1.6 L-14 -5.5 L-16 -5.5 L-15 0 L-16 5.5 L-14 5.5 L-12 1.6 L-8.5 2 L-10 10 L-7 10 L-5 2 Z" />
+                  <path transform="translate(186 36) rotate(-160) scale(.7)" d="M11 0 L-5 -2 L-7 -10 L-10 -10 L-8.5 -2 L-12 -1.6 L-14 -5.5 L-16 -5.5 L-15 0 L-16 5.5 L-14 5.5 L-12 1.6 L-8.5 2 L-10 10 L-7 10 L-5 2 Z" />
+                  <path transform="translate(70 150) rotate(-14) scale(.9)" d="M11 0 L-5 -2 L-7 -10 L-10 -10 L-8.5 -2 L-12 -1.6 L-14 -5.5 L-16 -5.5 L-15 0 L-16 5.5 L-14 5.5 L-12 1.6 L-8.5 2 L-10 10 L-7 10 L-5 2 Z" />
+                </g>
+                <circle cx="160" cy="68" r="3.2" fill="var(--you)" />
+                <circle cx="160" cy="68" r="7" fill="none" stroke="var(--you)" stroke-width="1" opacity=".6" />
+              </svg>
+              <span class="ix-bean ix-bean--you" style="left: 73.75%; top: 46%; width: 5.5%"><i data-you="18"></i></span>
+              </div>
+              <img class="ix-hero" src="control-tower/shots/hero.webp" alt="Control Tower: the hero shot" loading="lazy" onerror="this.hidden = true" />
+            </div>
+            <div class="ix-dir-body">
+              <p class="ix-dir-num">2</p>
+              <h3 class="ix-dir-name">Control Tower</h3>
+              <p class="ix-dir-tag">“Every turn is a flight, and you are the tower”</p>
+              <p class="ix-dir-by">Organizes by <b>when it will need you</b></p>
+              <dl class="ix-dir-modes">
+                <div><dt>Threads</dt><dd>Strips</dd></div>
+                <div><dt>Office</dt><dd>the Aerodrome</dd></div>
+                <div><dt>Its own view</dt><dd>Radar</dd></div>
+              </dl>
+              <p class="ix-dir-huh"><b>The huh</b>An agent tool that predicts its own interruptions, and lets you schedule them.</p>
+              <p class="ix-dir-links"><a class="btn btn--accent" href="control-tower/index.html">Read the story</a><a class="btn" href="control-tower/desktop.html" target="_blank" rel="noopener">Open the live window<i data-i="external" data-size="14"></i></a></p>
+            </div>
+          </article>
+
+          <article class="ix-dir" id="atlas">
+            <div class="ix-hero-slot">
+              <div class="ix-emblem-box">
+              <svg class="ix-emblem" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                <rect width="320" height="200" fill="var(--ix-sky)" />
+                <g fill="var(--raised)" stroke="var(--line)" stroke-width="1">
+                  <rect x="12" y="66" width="56" height="22" rx="3" /><rect x="12" y="112" width="40" height="22" rx="3" />
+                  <rect x="76" y="112" width="36" height="30" rx="3" /><rect x="168" y="12" width="44" height="24" rx="3" />
+                  <rect x="176" y="146" width="54" height="40" rx="3" /><rect x="96" y="160" width="60" height="28" rx="3" />
+                </g>
+                <g opacity=".7">
+                  <rect x="80" y="64" width="44" height="26" rx="3" fill="var(--proj-webshop)" />
+                  <rect x="12" y="12" width="64" height="30" rx="3" fill="var(--proj-payments)" />
+                  <rect x="236" y="120" width="44" height="30" rx="3" fill="var(--proj-ops)" />
+                </g>
+                <g fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+                  <path style="--hue: var(--hue-sky)" stroke="var(--who)" d="M-10 52 H180 L206 78 H270" />
+                  <path style="--hue: var(--hue-grape)" stroke="var(--who)" d="M-10 100 H96 L150 154 H270" />
+                  <path style="--hue: var(--hue-mint)" stroke="var(--who)" d="M-10 154 H70 L150 100 H270" />
+                </g>
+                <rect x="264" y="40" width="10" height="128" rx="5" fill="var(--ink)" />
+                <text x="282" y="108" font-family="Bricolage Grotesque, sans-serif" font-size="11" font-weight="640" fill="var(--ink)">main</text>
+                <g fill="var(--raised)" stroke="var(--ink)" stroke-width="2">
+                  <circle cx="44" cy="52" r="5" /><circle cx="128" cy="52" r="5" /><circle cx="236" cy="78" r="5" />
+                  <circle cx="44" cy="100" r="5" /><circle cx="210" cy="154" r="5" />
+                  <circle cx="34" cy="154" r="5" /><circle cx="214" cy="100" r="5" />
+                </g>
+                <circle cx="124" cy="127" r="11" fill="none" stroke="var(--you)" stroke-width="3" />
+              </svg>
+              <span class="ix-bean" style="left: 22%; top: 50%; width: 8%"><i data-face="Refactor cart totals" data-pose="working" data-size="30"></i></span>
+              <span class="ix-bean" style="left: 13%; top: 77%; width: 8%"><i data-face="Cart total rounding on discounts" data-pose="working" data-size="30"></i></span>
+              </div>
+              <img class="ix-hero" src="atlas/shots/hero.webp" alt="Atlas: the hero shot" loading="lazy" onerror="this.hidden = true" />
+            </div>
+            <div class="ix-dir-body">
+              <p class="ix-dir-num">3</p>
+              <h3 class="ix-dir-name">Atlas</h3>
+              <p class="ix-dir-tag">“Your agents, on the map of your code”</p>
+              <p class="ix-dir-by">Organizes by <b>where in the code</b></p>
+              <dl class="ix-dir-modes">
+                <div><dt>Threads</dt><dd>Territories</dd></div>
+                <div><dt>Office</dt><dd>the City</dd></div>
+                <div><dt>Its own view</dt><dd>Lines</dd></div>
+              </dl>
+              <p class="ix-dir-huh"><b>The huh</b>A merge forecast across every agent's branch, and an Office where you can see two agents about to collide.</p>
+              <p class="ix-dir-links"><a class="btn btn--accent" href="atlas/index.html">Read the story</a><a class="btn" href="atlas/desktop.html" target="_blank" rel="noopener">Open the live window<i data-i="external" data-size="14"></i></a></p>
+            </div>
+          </article>
+
+          <article class="ix-dir" id="gazette">
+            <div class="ix-hero-slot">
+              <div class="ix-emblem-box">
+              <svg class="ix-emblem" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                <rect width="320" height="200" fill="var(--ix-sky)" />
+                <g transform="rotate(-4 160 100)">
+                  <rect x="60" y="21" width="204" height="180" rx="2" fill="var(--ink)" opacity=".1" />
+                  <rect x="56" y="16" width="204" height="180" rx="2" fill="var(--ix-paper)" />
+                  <text x="158" y="43" text-anchor="middle" font-family="Limelight, serif" font-size="19" fill="var(--ix-note-ink)">The Bureau Gazette</text>
+                  <path d="M68 51 H248 M68 54 H248" stroke="var(--ix-note-ink)" stroke-width=".8" />
+                  <text x="158" y="62" text-anchor="middle" font-family="Bricolage Grotesque, sans-serif" font-size="5.6" letter-spacing=".6" fill="var(--ix-note-muted)">TUESDAY 29 SEPTEMBER 2026 · MORNING EDITION · 09:41</text>
+                  <path d="M68 66 H248" stroke="var(--ix-note-ink)" stroke-width=".6" />
+                  <rect x="68" y="72" width="104" height="8" rx="1" fill="var(--ix-note-ink)" />
+                  <rect x="68" y="84" width="78" height="8" rx="1" fill="var(--ix-note-ink)" />
+                  <rect x="180" y="72" width="68" height="48" fill="oklch(0.86 0.05 62)" />
+                  <g fill="var(--ix-note-muted)" opacity=".55">
+                    <rect x="68" y="100" width="50" height="2.4" /><rect x="68" y="106" width="50" height="2.4" /><rect x="68" y="112" width="44" height="2.4" /><rect x="68" y="118" width="50" height="2.4" /><rect x="68" y="124" width="36" height="2.4" />
+                    <rect x="122" y="100" width="50" height="2.4" /><rect x="122" y="106" width="50" height="2.4" /><rect x="122" y="112" width="50" height="2.4" /><rect x="122" y="118" width="40" height="2.4" /><rect x="122" y="124" width="50" height="2.4" />
+                    <rect x="180" y="128" width="68" height="2.4" /><rect x="180" y="134" width="60" height="2.4" /><rect x="180" y="140" width="68" height="2.4" /><rect x="180" y="146" width="52" height="2.4" />
+                    <rect x="180" y="158" width="68" height="2.4" /><rect x="180" y="164" width="68" height="2.4" /><rect x="180" y="170" width="40" height="2.4" />
+                  </g>
+                  <rect x="68" y="136" width="104" height="44" rx="2" fill="oklch(0.955 0.04 85)" stroke="oklch(0.8 0.155 78)" stroke-width="1.2" />
+                  <rect x="76" y="144" width="60" height="3.2" fill="var(--ix-note-ink)" />
+                  <rect x="76" y="154" width="84" height="2.4" fill="var(--ix-note-muted)" opacity=".6" />
+                  <rect x="76" y="160" width="70" height="2.4" fill="var(--ix-note-muted)" opacity=".6" />
+                  <rect x="76" y="168" width="22" height="6" rx="1.5" fill="var(--ix-stamp)" />
+                </g>
+                <circle cx="286" cy="168" r="22" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.4" />
+                <g stroke="var(--ink)" stroke-width="1.2">
+                  <path d="M286 150 V154 M286 182 V186 M268 168 H272 M300 168 H304" />
+                </g>
+                <path d="M286 168 L286 156 M286 168 L295 172" stroke="var(--brass)" stroke-width="2" stroke-linecap="round" />
+                <path d="M266 150 a26 26 0 0 0 -4 30" fill="none" stroke="var(--ink)" stroke-width="1.2" />
+                <path d="M259 177 l3 4 l3 -5" fill="none" stroke="var(--ink)" stroke-width="1.2" />
+              </svg>
+              <span class="ix-bean" style="left: 66%; top: 46%; width: 9%"><i data-face="Payout report for September" data-pose="done" data-size="32"></i></span>
+              </div>
+              <img class="ix-hero" src="gazette/shots/hero.webp" alt="Gazette: the hero shot" loading="lazy" onerror="this.hidden = true" />
+            </div>
+            <div class="ix-dir-body">
+              <p class="ix-dir-num">4</p>
+              <h3 class="ix-dir-name">Gazette</h3>
+              <p class="ix-dir-tag">“The morning paper of your agents”</p>
+              <p class="ix-dir-by">Organizes by <b>what changed since you looked</b></p>
+              <dl class="ix-dir-modes">
+                <div><dt>Threads</dt><dd>The Wire</dd></div>
+                <div><dt>Office</dt><dd>the Bureau, rewindable</dd></div>
+                <div><dt>Its own view</dt><dd>Front Page</dd></div>
+              </dl>
+              <p class="ix-dir-huh"><b>The huh</b>You come back from lunch, and the first thing you see is a newspaper written about your morning.</p>
+              <p class="ix-dir-links"><a class="btn btn--accent" href="gazette/index.html">Read the story</a><a class="btn" href="gazette/desktop.html" target="_blank" rel="noopener">Open the live window<i data-i="external" data-size="14"></i></a></p>
+            </div>
+          </article>
+
+          <article class="ix-dir" id="the-firm">
+            <div class="ix-hero-slot">
+              <div class="ix-emblem-box">
+              <svg class="ix-emblem" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                <rect width="320" height="200" fill="var(--ix-sky)" />
+                <g stroke="var(--brass)" stroke-width="1" opacity=".7">
+                  <path d="M160 26 L160 4 M160 26 L146 8 M160 26 L174 8 M160 26 L134 16 M160 26 L186 16" />
+                </g>
+                <rect x="40" y="112" width="56" height="88" fill="var(--sunken)" stroke="var(--line)" />
+                <rect x="224" y="98" width="60" height="102" fill="var(--sunken)" stroke="var(--line)" />
+                <g fill="var(--line)">
+                  <rect x="50" y="124" width="10" height="14" /><rect x="66" y="124" width="10" height="14" /><rect x="50" y="150" width="10" height="14" /><rect x="66" y="150" width="10" height="14" />
+                  <rect x="236" y="112" width="10" height="14" /><rect x="254" y="112" width="10" height="14" /><rect x="236" y="138" width="10" height="14" /><rect x="254" y="138" width="10" height="14" /><rect x="236" y="164" width="10" height="14" /><rect x="254" y="164" width="10" height="14" />
+                </g>
+                <rect x="132" y="26" width="56" height="22" fill="var(--raised)" stroke="var(--ink)" stroke-width="1.4" />
+                <rect x="112" y="48" width="96" height="6" fill="var(--ix-lacquer)" stroke="var(--ink)" stroke-width="1.4" />
+                <rect x="94" y="54" width="132" height="42" fill="var(--proj-webshop)" />
+                <rect x="94" y="96" width="132" height="42" fill="var(--proj-payments)" />
+                <rect x="94" y="138" width="132" height="42" fill="var(--proj-ops)" />
+                <g stroke="var(--ink)" stroke-width="1.4" fill="none">
+                  <rect x="94" y="54" width="132" height="126" />
+                  <path d="M94 96 H226 M94 138 H226" />
+                  <path d="M136 54 V96 M184 54 V96 M152 96 V138 M184 138 V180" />
+                </g>
+                <rect x="154" y="54" width="12" height="126" fill="none" stroke="var(--brass)" stroke-width="1.6" />
+                <rect x="156" y="108" width="8" height="12" fill="var(--brass)" opacity=".8" />
+                <rect x="84" y="180" width="152" height="22" fill="var(--ix-lacquer)" stroke="var(--ink)" stroke-width="1.4" />
+                <path d="M150 200 V188 a10 10 0 0 1 20 0 V200" fill="var(--ix-sky)" />
+              </svg>
+              <span class="ix-bean ix-bean--you" style="left: 50%; top: 18.5%; width: 5.5%"><i data-you="18"></i></span>
+              <span class="ix-bean" style="left: 35.5%; top: 42%; width: 7%"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="working" data-size="26"></i></span>
+              <span class="ix-bean" style="left: 41%; top: 43%; width: 6%"><i data-face="Read the Stripe v14 changelog" data-pose="idle" data-size="22"></i></span>
+              <span class="ix-bean" style="left: 64%; top: 42%; width: 7%"><i data-face="Refactor cart totals" data-pose="working" data-size="26"></i></span>
+              <span class="ix-bean" style="left: 38%; top: 63.5%; width: 7%"><i data-face="Payout report for September" data-pose="working" data-size="26"></i></span>
+              <span class="ix-bean" style="left: 62%; top: 63.5%; width: 7%"><i data-face="Add iDEAL research" data-pose="idle" data-size="26"></i></span>
+              <span class="ix-bean" style="left: 43%; top: 84.5%; width: 7%"><i data-face="Rotate staging secrets" data-pose="working" data-size="26"></i></span>
+              </div>
+              <img class="ix-hero" src="the-firm/shots/hero.webp" alt="The Firm: the hero shot" loading="lazy" onerror="this.hidden = true" />
+            </div>
+            <div class="ix-dir-body">
+              <p class="ix-dir-num">5</p>
+              <h3 class="ix-dir-name">The Firm</h3>
+              <p class="ix-dir-tag">“You run a firm of agents”</p>
+              <p class="ix-dir-by">Organizes by <b>who works for whom</b></p>
+              <dl class="ix-dir-modes">
+                <div><dt>Threads</dt><dd>Chain of command</dd></div>
+                <div><dt>Office</dt><dd>the Dollhouse</dd></div>
+                <div><dt>Its own view</dt><dd>Org Chart</dd></div>
+              </dl>
+              <p class="ix-dir-huh"><b>The huh</b>The answer to "why do all the beans sit in one room": every team has its own room, and you can see the whole firm on one page.</p>
+              <p class="ix-dir-links"><a class="btn btn--accent" href="the-firm/index.html">Read the story</a><a class="btn" href="the-firm/desktop.html" target="_blank" rel="noopener">Open the live window<i data-i="external" data-size="14"></i></a></p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ================================================================ 9. compare -->
+      <section class="ix-sec" id="compare" data-spy>
+        <header class="ix-sec-h">
+          <p class="ix-eyebrow"><span class="ix-num">08</span>Compare</p>
+          <h2 class="ix-h2">Judged against the jobs</h2>
+          <p class="ix-lede">Each direction scored against the seven job stories, in this order. Then against the lone thread, calm, the swarm, the cost, and the huh: would a Codex or Claude Code user stop and look twice?</p>
+        </header>
+
+        <div class="ix-compare" tabindex="0" role="region" aria-label="Comparison table, scrolls sideways">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Job</th>
+                <th scope="col"><i>1</i>Expedition</th>
+                <th scope="col"><i>2</i>Control Tower</th>
+                <th scope="col"><i>3</i>Atlas</th>
+                <th scope="col"><i>4</i>Gazette</th>
+                <th scope="col"><i>5</i>The Firm</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Attend</th><td data-dir="Expedition"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">The flag on the route; the card answers in every mode</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Holding bay answers inline; landing slots batch the rest</span></td><td data-dir="Atlas"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Waiting on top; the queue on the Town hall steps</span></td><td data-dir="Gazette"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">“Needs your signature” on the front page</span></td><td data-dir="The Firm"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">A team row speaks for its waiting member; the penthouse queue</span></td></tr>
+              <tr><th scope="row">Oversee</th><td data-dir="Expedition"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">The Board and the Range: moving, stuck, landed</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Bays show the phase of each flight, not its progress</span></td><td data-dir="Atlas"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Heat and crossings, less about status</span></td><td data-dir="Gazette"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Thought bubbles say what each bean does now</span></td><td data-dir="The Firm"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Door lights per team; the whole firm on one page</span></td></tr>
+              <tr><th scope="row">Gauge</th><td data-dir="Expedition"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">The route: camps reached, summit to go</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="1" role="img" aria-label="weak"><i></i><i></i><i></i></span><span class="ix-why">ETA to the next need, not to done</span></td><td data-dir="Atlas"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Stations left before main</span></td><td data-dir="Gazette"><span class="ix-score" data-score="1" role="img" aria-label="weak"><i></i><i></i><i></i></span><span class="ix-why">Headlines say what happened, not how far</span></td><td data-dir="The Firm"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">The plan on each room’s whiteboard</span></td></tr>
+              <tr><th scope="row">Catch up</th><td data-dir="Expedition"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Ghost ticks where routes stood at 09:01</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">“On stand” bay and the away card</span></td><td data-dir="Atlas"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">“New since 09:01” on Lines</span></td><td data-dir="Gazette"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">The edition, Catch up, and the 30x replay</span></td><td data-dir="The Firm"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">“While you were out” on Rogier’s card</span></td></tr>
+              <tr><th scope="row">Anticipate</th><td data-dir="Expedition"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">ETA to the summit, as a range</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">ETA to the next need, the radar, the conflict alert</span></td><td data-dir="Atlas"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Merge forecast and landing order</span></td><td data-dir="Gazette"><span class="ix-score" data-score="1" role="img" aria-label="weak"><i></i><i></i><i></i></span><span class="ix-why">Only “Tomorrow”: scheduled runs</span></td><td data-dir="The Firm"><span class="ix-score" data-score="1" role="img" aria-label="weak"><i></i><i></i><i></i></span><span class="ix-why">Span-of-control hint</span></td></tr>
+              <tr><th scope="row">Find</th><td data-dir="Expedition"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">By project, or by stage</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="1" role="img" aria-label="weak"><i></i><i></i><i></i></span><span class="ix-why">Strips change bay as phases change</span></td><td data-dir="Atlas"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">By where in the code; the minimap filters</span></td><td data-dir="Gazette"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">By recency of news, by headline</span></td><td data-dir="The Firm"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">By team; partners named by role</span></td></tr>
+              <tr><th scope="row">Show</th><td data-dir="Expedition"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">The Range</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">The Aerodrome</span></td><td data-dir="Atlas"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">The City</span></td><td data-dir="Gazette"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">The Front Page; a familiar Bureau</span></td><td data-dir="The Firm"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">The Dollhouse</span></td></tr>
+            </tbody>
+            <tbody class="ix-then">
+              <tr><th scope="row">The lone thread</th><td data-dir="Expedition"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Line 2 becomes a route; no extra height</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">A strip with a call sign; same height</span></td><td data-dir="Atlas"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">File and diff on line 2; area headers add rows</span></td><td data-dir="Gazette"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Line 2 becomes its headline</span></td><td data-dir="The Firm"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Today’s row, unchanged</span></td></tr>
+              <tr><th scope="row">Calm</th><td data-dir="Expedition"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Cards move only when the pointer is off</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="1" role="img" aria-label="weak"><i></i><i></i><i></i></span><span class="ix-why">Planes always fly; strips change bay</span></td><td data-dir="Atlas"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">A steady map</span></td><td data-dir="Gazette"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">“3 new” pill; unread can nag</span></td><td data-dir="The Firm"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">A stable tree</span></td></tr>
+              <tr><th scope="row">The swarm</th><td data-dir="Expedition"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">The range gets crowded</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">The holding stack grows tall</span></td><td data-dir="Atlas"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">17 lines and 7 crossings still read</span></td><td data-dir="Gazette"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Bubbles fold to the focused room</span></td><td data-dir="The Firm"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Floors split; the span hint</span></td></tr>
+              <tr><th scope="row">The cost</th><td data-dir="Expedition"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Turn-end redraws; 0 frames idle under Reduce Motion</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="1" role="img" aria-label="weak"><i></i><i></i><i></i></span><span class="ix-why">Planes animate while visible; ETAs need a model</span></td><td data-dir="Atlas"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">Edit watch, file trees, dry-run merges</span></td><td data-dir="Gazette"><span class="ix-score" data-score="2" role="img" aria-label="fair"><i></i><i></i><i></i></span><span class="ix-why">A Text Generation per turn end</span></td><td data-dir="The Firm"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Lineage is already stored</span></td></tr>
+              <tr><th scope="row">The huh</th><td data-dir="Expedition"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">A progress bar that is not a lie</span></td><td data-dir="Control Tower"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Predicted interruptions, and slots to schedule them</span></td><td data-dir="Atlas"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">A merge forecast across every agent’s branch</span></td><td data-dir="Gazette"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">A newspaper about your morning; rewind the Office</span></td><td data-dir="The Firm"><span class="ix-score" data-score="3" role="img" aria-label="strong"><i></i><i></i><i></i></span><span class="ix-why">Every team in its own room; stand-up</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="ix-score-key"><span class="ix-score" data-score="3"><i></i><i></i><i></i></span>strong <span class="ix-score" data-score="2"><i></i><i></i><i></i></span>fair <span class="ix-score" data-score="1"><i></i><i></i><i></i></span>weak</p>
+        <p class="ix-swipe ix-swipe--table" aria-hidden="true">Swipe the table sideways<i data-i="arrow" data-size="14"></i></p>
+        <div class="ix-read">
+          <h3 class="ix-h3">The lead's read</h3>
+          <p>No direction wins every row, and that is the point of drawing five: each one is strongest on its own axis. If Rogier asks which to build:</p>
+          <ul>
+            <li><b>Expedition is the strongest daily tool.</b> It adds the level nothing has today, how far along each piece of work is, to every surface: the sidebar row, the Board, the Range. Its main data ask is cheap: read the <code>plan</code> item Hercule already records into a number at each turn's end.</li>
+            <li><b>The Firm is the most direct answer to the Office complaint,</b> and the cheapest first slice of all five: who started whom is already stored in <code>sessions.created_by</code>. The Dollhouse gives every team its own room.</li>
+            <li><b>Gazette has the best habit loop.</b> A "since you looked" dot and a headline per turn would improve today's sidebar on their own, in any direction.</li>
+            <li><b>Control Tower and Atlas are the moonshots.</b> Landing slots (scheduling when agents may interrupt you) and the merge forecast (a dry-run merge across every agent's branch) are ideas no other tool has. Each is worth a research ticket before a design ticket.</li>
+          </ul>
+          <h4 class="ix-read-h">Atoms that travel</h4>
+          <p>Small pieces any direction could adopt, whichever one is picked:</p>
+          <dl class="ix-atoms">
+            <div><dt>The "since you looked" dot</dt><dd>Gazette. Bold title and an ink dot when a thread has news you have not seen.</dd></div>
+            <div><dt>The stuck cloud</dt><dd>Expedition. "No progress in 34m", drawn on the row.</dd></div>
+            <div><dt>Landing slots</dt><dd>Control Tower. Hold what is not urgent until a time you choose.</dd></div>
+            <div><dt>Crossings</dt><dd>Atlas. Two threads in one file, shown on both rows before it becomes a merge conflict.</dd></div>
+            <div><dt>Stand-up</dt><dd>The Firm. One key, and every member of a team answers in one line.</dd></div>
+          </dl>
+          <h4 class="ix-read-h">The first slice of each</h4>
+          <ol class="ix-slices">
+            <li><b>Expedition:</b> the latest <code>plan</code> item read into <code>{done, total}</code>, drawn as the route on line 2.</li>
+            <li><b>Control Tower:</b> "busy since" on a Session, and the Holding and On stand bays. Predictions come later.</li>
+            <li><b>Atlas:</b> the file a thread is in now on line 2, and an Edit Overlap badge on both rows.</li>
+            <li><b>Gazette:</b> a last-seen mark per thread and a headline per turn on line 2.</li>
+            <li><b>The Firm:</b> <code>startedBy</code> on the contract, and partners nested under their lead.</li>
+          </ol>
+        </div>
+
+      </section>
+    </main>
+
+    <!-- ================================================================ 10. footer -->
+    <footer class="ix-foot">
+      <div class="ix-foot-in">
+        <h2 class="ix-h3">What each direction needs from Hercule</h2>
+        <dl class="ix-needs">
+          <div><dt><i>1</i>Expedition</dt><dd>Threads linked to Tasks, a summit per goal, the agent's plan read into a number at each turn's end, and checks Hercule can see: tests, PR, CI, the merge.</dd></div>
+          <div><dt><i>2</i>Control Tower</dt><dd>"Busy since" on a Session, an ETA range per busy session, a "result read" marker per thread, and landing slots that batch notifications.</dd></div>
+          <div><dt><i>3</i>Atlas</dt><dd>Files edited and read per session, the repository's file tree with sizes, diff stats per workspace, and a dry-run merge on the runner.</dd></div>
+          <div><dt><i>4</i>Gazette</dt><dd>A last-seen mark per thread, a headline per turn, a current-activity line while the Office is visible, and the morning's turn history.</dd></div>
+          <div><dt><i>5</i>The Firm</dt><dd><code>startedBy</code> on the Session, the same for threads assistants start, a message to a whole team, and stand-up on demand.</dd></div>
+        </dl>
+        <div class="ix-colophon">
+          <i data-logo="28"></i>
+          <p><b>Seeing all the work</b><span>A Hercule design book · prototype · 24 October 2026</span><span>Drawn in Crew Bureau 2, on the morning of Tuesday 29 September 2026, 09:41.</span></p>
+          <a class="ix-totop" href="#top">Back to the top<i data-i="chev-r" data-size="14"></i></a>
+        </div>
+      </div>
+    </footer>
+
+    <script src="index.js"></script>
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

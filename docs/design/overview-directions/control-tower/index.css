@@ -1,0 +1,444 @@
+/* PROTOTYPE - Control Tower's story page, on top of ../shared/book.css. Phone first (412px), lovely
+   on a desktop. Every class here starts with ct-. */
+
+.ct-story .bk-hero {
+  padding-bottom: 28px;
+}
+.ct-story .bk-lever {
+  font-style: normal;
+}
+
+/* A shot: a static 2x capture of the live window, framed as the book frames a window. */
+.ct-fig {
+  margin: 0;
+}
+.ct-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent), 0 2px 4px oklch(0.2 0.02 165 / 0.06), 0 30px 70px -24px oklch(0.2 0.02 165 / 0.38);
+}
+.ct-shot--crop {
+  border-radius: 14px;
+}
+/* A crop keeps its own size on a wide screen, so text stays near its real size. */
+.ct-fig--narrow .ct-shot {
+  max-width: 420px;
+}
+.ct-fig--mid .ct-shot {
+  max-width: 600px;
+}
+.ct-fig figcaption {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.ct-fig figcaption b {
+  display: block;
+  color: var(--ink);
+  font-size: var(--t-14);
+}
+.ct-fig--hero {
+  margin-top: 8px;
+}
+
+/* The huh block holds a light-on-dark image, so it gets room. */
+.ct-story .bk-huh .ct-shot {
+  margin-top: 26px;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--surface) 18%, transparent);
+}
+.ct-huh-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.ct-huh-row figcaption {
+  color: color-mix(in oklab, var(--surface) 72%, transparent);
+}
+.ct-huh-row figcaption b {
+  color: var(--surface);
+}
+
+/* A mode: its image, then what it shows and when you open it. */
+.ct-mode {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 36px;
+  align-items: start;
+  padding: 36px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.ct-mode:first-of-type {
+  border-top: 0;
+  padding-top: 8px;
+}
+.ct-mode-name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 700;
+  font-stretch: 90%;
+  letter-spacing: -0.02em;
+}
+.ct-mode-name small {
+  color: var(--faint);
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+}
+.ct-mode-when {
+  margin: 14px 0 0 !important;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.ct-mode-when b {
+  color: var(--ink);
+}
+.ct-pending-slot {
+  display: grid;
+  place-items: center;
+  grid-column: 1;
+  min-height: 120px;
+  padding: 24px;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  background-image: repeating-linear-gradient(135deg, transparent 0 8px, color-mix(in oklab, var(--ink) 3%, transparent) 8px 16px);
+  color: var(--muted);
+  font-size: var(--t-13);
+  text-align: center;
+}
+
+/* Words used on the strips, set as they appear there. */
+.ct-call {
+  font-size: 0.82em;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.ct-bays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ct-bays li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 0;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ct-bays li::before {
+  content: "";
+  align-self: stretch;
+  width: 4px;
+  margin-right: 4px;
+  background: var(--line);
+}
+.ct-bays li b {
+  color: var(--ink);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ct-bays li.is-you::before {
+  background: var(--you);
+}
+
+/* The walk-through: numbered steps, each with its crop. */
+.ct-walk {
+  display: grid;
+  gap: 56px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ct-step;
+}
+.ct-walk > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 36px;
+  align-items: start;
+  counter-increment: ct-step;
+}
+.ct-walk-text {
+  position: relative;
+  padding-left: 46px;
+}
+.ct-walk-text::before {
+  content: counter(ct-step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.ct-walk-time {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+.ct-walk h3 {
+  font-size: 20px !important;
+}
+.ct-walk p {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.ct-walk p + p {
+  margin-top: 10px;
+}
+.ct-walk-shots {
+  display: grid;
+  gap: 16px;
+}
+
+/* Needs, costs, risks. */
+.ct-table td:nth-child(2) {
+  min-width: 180px;
+}
+.ct-table td:last-child {
+  min-width: 260px;
+}
+.ct-costs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+}
+.ct-cost > b {
+  display: block;
+  font-family: var(--font-deco);
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+.ct-cost span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.ct-cost span b {
+  color: var(--ink);
+}
+.ct-risks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.ct-risks .bk-card h4 {
+  margin-bottom: 6px;
+}
+.ct-risks .bk-card p {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+/* The links to the live window. */
+.ct-live {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.ct-live-main .btn {
+  margin-top: 16px;
+}
+.ct-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ct-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  text-decoration: none;
+}
+.ct-links a:hover {
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-1);
+}
+.ct-links a small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ct-keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.ct-keys kbd {
+  justify-self: start;
+  font-size: var(--t-12);
+}
+
+@media (max-width: 900px) {
+  .ct-huh-row,
+  .ct-mode,
+  .ct-walk > li,
+  .ct-costs,
+  .ct-risks,
+  .ct-live {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ct-mode {
+    gap: 20px;
+  }
+  .ct-walk > li {
+    gap: 18px;
+  }
+  .ct-walk {
+    gap: 44px;
+  }
+  .ct-walk-text {
+    padding-left: 42px;
+  }
+  .ct-fig--narrow .ct-shot,
+  .ct-fig--mid .ct-shot {
+    max-width: 100%;
+  }
+}
+
+/* On a phone the needs table stacks: each need, then what it is today and what would change. */
+@media (max-width: 700px) {
+  .ct-table thead {
+    display: none;
+  }
+  .ct-table,
+  .ct-table tbody,
+  .ct-table tr,
+  .ct-table td {
+    display: block;
+    width: 100%;
+  }
+  .ct-table tr {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .ct-table td {
+    min-width: 0 !important;
+    padding: 0;
+    border: 0;
+  }
+  .ct-table td:first-child {
+    margin-bottom: 4px;
+    font-size: var(--t-14);
+    font-weight: var(--w-bold);
+    white-space: normal;
+  }
+  .ct-table td[data-label] {
+    margin-top: 4px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .ct-table td[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--faint);
+    font-weight: var(--w-bold);
+  }
+}
+
+/* book.css gives every link in the page its parent's colour; the one filled button keeps its own. */
+.ct-story .bk a.btn--accent {
+  color: var(--accent-fg);
+}
+.ct-story .bk a.btn--accent .ic {
+  color: inherit;
+}
+.ct-keys dd {
+  margin: 0;
+}
+
+/* The Office section: its pictures run large, then four states in a grid. */
+.ct-office {
+  padding: 36px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.ct-office-head {
+  max-width: 760px;
+  margin-bottom: 22px;
+}
+.ct-fig--big {
+  position: relative;
+  margin-bottom: 36px;
+}
+.ct-fig--big picture,
+.ct-fig picture {
+  display: block;
+}
+/* The asks column, set beside the holding stack only on a phone, where the wide picture cannot show it. */
+.ct-fig--asks {
+  display: none;
+  margin-top: 12px;
+}
+.ct-office-states {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px 22px;
+}
+.ct-office-notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  margin-top: 36px;
+}
+.ct-office-notes h4 {
+  margin-bottom: 6px;
+}
+@media (max-width: 600px) {
+  .ct-fig--asks {
+    display: block;
+  }
+  .ct-office-states,
+  .ct-office-notes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

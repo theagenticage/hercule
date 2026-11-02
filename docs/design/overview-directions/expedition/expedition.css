@@ -1,0 +1,2190 @@
+/* PROTOTYPE - Expedition, the live window. Every rule sits under .ov-expedition (the Stage's
+   root class), so the office builder's .ov-expedition-office rules never meet these. */
+
+.ov-expedition {
+  position: relative;
+  /* The route's quiet parts, in ink so both themes agree. */
+  --ex-track: color-mix(in oklab, var(--ink) 17%, transparent);
+  --ex-tick: color-mix(in oklab, var(--ink) 34%, transparent);
+  --ex-ground: var(--bg);
+}
+
+/* ================================================================== the route line, the atom */
+
+.ov-expedition .ex-route {
+  position: relative;
+  display: block;
+  flex: 1 1 0%;
+  min-width: 0;
+  height: 16px;
+}
+/* In a column (a Board card), a route keeps its height instead of sharing the card's. */
+.ov-expedition .ex-bcard > .ex-route {
+  flex: none;
+}
+.ov-expedition .ex-r-in {
+  position: absolute;
+  top: 0;
+  left: 6px;
+  right: 7px;
+  height: 16px;
+}
+.ov-expedition .ex-r-track {
+  position: absolute;
+  top: 7.5px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--ex-track);
+}
+.ov-expedition .ex-r-fill {
+  position: absolute;
+  top: 7px;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--who);
+}
+.ov-expedition .ex-r-fill--seen {
+  background: color-mix(in oklab, var(--who) 34%, var(--ex-ground));
+}
+.ov-expedition .ex-route.is-away:not(.has-news) .ex-r-camp.is-done,
+.ov-expedition .ex-route.is-away:not(.has-news) .ex-r-summit.is-reached {
+  opacity: 0.55;
+}
+.ov-expedition .ex-r-base {
+  position: absolute;
+  top: 5.5px;
+  left: -2.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--who);
+}
+
+/* A camp from the agent's plan is a tick; a check Hercule sees itself is a ring. */
+.ov-expedition .ex-r-camp {
+  position: absolute;
+  top: 5px;
+  width: 1px;
+  height: 6px;
+  margin-left: -0.5px;
+  border-radius: 1px;
+  background: var(--ex-tick);
+}
+.ov-expedition .ex-r-camp.is-done {
+  top: 4.5px;
+  height: 7px;
+  background: var(--who-ink);
+}
+.ov-expedition .ex-r-camp.is-obs {
+  top: 5px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--ex-ground);
+  box-shadow: inset 0 0 0 1.25px var(--ex-tick);
+}
+.ov-expedition .ex-r-camp.is-obs.is-done {
+  background: var(--who);
+  box-shadow: inset 0 0 0 1.25px var(--who-ink);
+}
+
+.ov-expedition .ex-r-summit {
+  position: absolute;
+  top: 3px;
+  left: 100%;
+  width: 10px;
+  height: 8px;
+  margin-left: -5px;
+  line-height: 0;
+}
+.ov-expedition .ex-r-summit svg {
+  display: block;
+  overflow: visible;
+}
+.ov-expedition .ex-r-summit path {
+  fill: var(--ex-ground);
+  stroke: var(--ex-tick);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.ov-expedition .ex-r-summit.is-reached {
+  top: -2px;
+  width: 12px;
+  height: 13px;
+  margin-left: -6px;
+}
+.ov-expedition .ex-r-summit.is-reached .ex-r-peak {
+  fill: var(--who);
+  stroke: var(--who-ink);
+}
+.ov-expedition .ex-r-summit.is-reached .ex-r-pole {
+  fill: none;
+  stroke: var(--who-ink);
+  stroke-width: 1.1;
+}
+.ov-expedition .ex-r-summit.is-reached .ex-r-sflag {
+  fill: var(--who-ink);
+  stroke: none;
+}
+
+/* The bean's head: its face's egg in its hue, at where it stands. */
+.ov-expedition .ex-r-head {
+  position: absolute;
+  top: 1.5px;
+  width: 10px;
+  height: 12px;
+  margin-left: -5px;
+  line-height: 0;
+  filter: drop-shadow(0 0 0.5px var(--ex-ground)) drop-shadow(0 0 1px var(--ex-ground));
+}
+.ov-expedition .ex-r-egg {
+  fill: var(--who);
+  stroke: var(--who-ink);
+  stroke-width: 0.9;
+}
+.ov-expedition .ex-r-eye {
+  fill: var(--face-ink);
+}
+
+/* Partners roped behind the head, one dot each in its own hue. */
+.ov-expedition .ex-r-rope {
+  position: absolute;
+  top: 8px;
+  width: 0;
+  height: 0;
+}
+.ov-expedition .ex-r-rope i {
+  position: absolute;
+  top: -3px;
+  left: calc(var(--i) * -7px - 5px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--who);
+  box-shadow: 0 0 0 1.5px var(--ex-ground);
+}
+
+/* A camp that waits on Rogier: a marigold flag, the one accent. */
+.ov-expedition .ex-r-flag {
+  position: absolute;
+  top: -2px;
+  width: 8px;
+  height: 11px;
+  margin-left: -1.2px;
+  line-height: 0;
+}
+.ov-expedition .ex-r-pole {
+  fill: none;
+  stroke: var(--you-ink);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+.ov-expedition .ex-r-pennant {
+  fill: var(--you);
+}
+
+/* A stuck route: a small cloud over its head. */
+.ov-expedition .ex-r-cloud {
+  position: absolute;
+  top: -4px;
+  width: 14px;
+  height: 9px;
+  margin-left: 1px;
+  line-height: 0;
+}
+.ov-expedition .ex-r-cloud path,
+.ov-expedition .ex-prog.is-stuck path,
+.ov-expedition .ex-stuck path,
+.ov-expedition .ex-intro-p path,
+.ov-expedition .chip path,
+.ov-expedition .ex-bcard-stuck path,
+.ov-expedition .ex-story-h path,
+.ov-expedition .ex-range-cloud path {
+  fill: var(--raised);
+  stroke: var(--muted);
+  stroke-width: 1.1;
+  stroke-linejoin: round;
+}
+
+/* The away state: a notch where the route stood when Rogier left; the climb since is brighter. */
+.ov-expedition .ex-r-ghost {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 14px;
+  margin-left: -0.5px;
+  background: repeating-linear-gradient(to bottom, var(--muted) 0 2px, transparent 2px 3.5px);
+}
+.ov-expedition .ex-r-ghost::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  border: 3.5px solid transparent;
+  border-top: 4px solid var(--muted);
+  border-bottom: 0;
+}
+
+/* No plan yet: a short dashed start. */
+.ov-expedition .ex-r-dash {
+  position: absolute;
+  top: 7.5px;
+  left: 0;
+  width: 26px;
+  height: 1px;
+  background: repeating-linear-gradient(to right, var(--who-ink) 0 3px, transparent 3px 6px);
+}
+
+/* ---- the wide route: the ledger, every camp labelled */
+.ov-expedition .ex-route--wide {
+  height: 48px;
+}
+.ov-expedition .ex-route--wide .ex-r-in {
+  left: 7px;
+  right: 8px;
+}
+.ov-expedition .ex-route--wide .ex-r-fill {
+  top: 6.5px;
+  height: 3px;
+  border-radius: 1.5px;
+}
+.ov-expedition .ex-route--wide .ex-r-camp {
+  top: 4px;
+  height: 8px;
+}
+.ov-expedition .ex-route--wide .ex-r-camp.is-done {
+  top: 3.5px;
+  height: 9px;
+  width: 1.5px;
+  margin-left: -0.75px;
+}
+.ov-expedition .ex-route--wide .ex-r-camp.is-obs {
+  top: 4px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+}
+.ov-expedition .ex-route--wide .ex-r-head {
+  top: -0.5px;
+  transform: scale(1.3);
+  transform-origin: 50% 60%;
+}
+.ov-expedition .ex-route--wide .ex-r-rope i {
+  top: -3.5px;
+  left: calc(var(--i) * -8.5px - 6px);
+  width: 7px;
+  height: 7px;
+}
+.ov-expedition .ex-route--wide .ex-r-flag {
+  top: -4px;
+  transform: scale(1.2);
+  transform-origin: 1px 100%;
+}
+.ov-expedition .ex-route--wide .ex-r-summit {
+  transform: scale(1.2);
+  transform-origin: 50% 80%;
+}
+.ov-expedition .ex-r-labels {
+  position: absolute;
+  top: 19px;
+  left: 0;
+  right: 0;
+  height: 28px;
+}
+.ov-expedition .ex-r-label {
+  position: absolute;
+  top: 0;
+  display: -webkit-box;
+  width: calc(100% / var(--n) - 10px);
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 13px;
+  text-align: center;
+  transform: translateX(-50%);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ov-expedition .ex-r-label.is-done {
+  color: var(--muted);
+}
+.ov-expedition .ex-r-label.is-next {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-r-label.is-waiting {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-r-label.is-last {
+  text-align: right;
+  transform: translateX(calc(-100% + 6px));
+}
+.ov-expedition .ex-r-labels--num {
+  height: 14px;
+}
+.ov-expedition .ex-r-labels--num .ex-r-label {
+  width: auto;
+  font-variant-numeric: tabular-nums;
+}
+.ov-expedition .ex-r-labels--num .ex-r-label.is-last {
+  transform: translateX(-50%);
+  text-align: center;
+}
+.ov-expedition .ex-r-plus {
+  margin-right: 1px;
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+}
+
+/* ---- the card route: the selection card, the open thread's strip, a partner's row */
+.ov-expedition .ex-route--card {
+  height: 32px;
+}
+.ov-expedition .ex-route--card .ex-r-labels {
+  top: 18px;
+  height: 14px;
+}
+.ov-expedition .ex-route--card .ex-r-label {
+  width: max-content;
+  max-width: 240px;
+  overflow: hidden;
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-route--card .ex-r-label.is-start {
+  transform: translateX(-12px);
+}
+.ov-expedition .ex-route--card .ex-r-label.is-end,
+.ov-expedition .ex-route--card .ex-r-label.is-last {
+  transform: translateX(calc(-100% + 12px));
+}
+
+/* ---- the mini route: a Board card, a partner's line in the sidebar */
+.ov-expedition .ex-route--mini .ex-r-head {
+  transform: scale(0.85);
+  transform-origin: 50% 60%;
+}
+
+/* ---- the grew state's animation */
+.ov-expedition .ex-route.is-growing [data-c],
+.ov-expedition .ex-route.is-growing .ex-r-fill,
+.ov-expedition .ex-route.is-growing .ex-r-head,
+.ov-expedition .ex-route.is-growing .ex-r-rope {
+  transition:
+    left 1000ms cubic-bezier(0.3, 0.1, 0.2, 1),
+    width 1000ms cubic-bezier(0.3, 0.1, 0.2, 1),
+    opacity 600ms 300ms;
+}
+.ov-expedition .ex-route .is-unborn {
+  opacity: 0;
+}
+.ov-expedition .ex-goal.is-before-growth .ex-grew-note {
+  opacity: 0;
+  transition: none;
+}
+.ov-expedition .ex-grew-note {
+  transition: opacity 400ms 900ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-expedition .ex-route.is-growing * {
+    transition: none !important;
+  }
+}
+
+/* ================================================================== the sidebar: Routes, folded */
+
+.ov-expedition .ex-lens {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 30px;
+  margin: 4px 0 0;
+  padding: 0 4px 0 10px;
+}
+.ov-expedition .ex-lens-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-expedition .ex-lens-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-lens-btn b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-lens-btn:hover {
+  background: var(--hover);
+}
+
+.ov-expedition .ex-row {
+  position: relative;
+}
+.ov-expedition .ex-detail {
+  gap: 0;
+}
+.ov-expedition .ex-detail .ex-route {
+  margin-left: -2px;
+}
+.ov-expedition .ex-prog {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  flex: none;
+  min-width: 46px;
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ov-expedition .ex-prog.is-stuck,
+.ov-expedition .ex-prog.is-grew {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-prog svg {
+  width: 13px;
+  height: 9px;
+}
+
+/* A lead's route is the button that unfolds its rope team: the partners' own routes. */
+.ov-expedition .ex-rope-btn {
+  position: absolute;
+  top: 27px;
+  left: 26px;
+  right: 58px;
+  height: 20px;
+  border-radius: var(--r-xs);
+}
+.ov-expedition .ex-rope-btn:hover {
+  background: var(--hover);
+}
+.ov-expedition .ex-plines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 1px 0 4px 18px;
+  padding-left: 8px;
+  box-shadow: inset 1px 0 0 var(--line);
+}
+.ov-expedition .ex-pline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-pline:hover {
+  background: var(--hover);
+}
+.ov-expedition .ex-pline.is-on {
+  background: var(--selected);
+}
+.ov-expedition .ex-pline-role {
+  flex: none;
+  max-width: 64px;
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-pline .ex-route {
+  height: 16px;
+}
+.ov-expedition .ex-pline-end {
+  flex: none;
+  min-width: 40px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  text-align: right;
+}
+
+.ov-expedition .ex-asker {
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-rug {
+  width: 9px;
+  height: 9px;
+}
+.ov-expedition .ex-rug::before {
+  width: 8px;
+  height: 8px;
+}
+.ov-expedition .ex-stage-h .count {
+  flex: none;
+}
+.ov-expedition .ex-shelf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.ov-expedition .ex-noproj::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ex-tick);
+}
+
+/* A scrolling list fades where it meets the fixed parts above and below it, so no row is ever
+   cut in half against the Assistants. expedition.js sets the classes from the scroll position. */
+.ov-expedition .stage-list.is-more-below {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+}
+.ov-expedition .stage-list.is-more-above {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20px);
+  mask-image: linear-gradient(to bottom, transparent, #000 20px);
+}
+.ov-expedition .stage-list.is-more-above.is-more-below {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20px, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 20px, #000 calc(100% - 36px), transparent);
+}
+.ov-expedition .ex-ledger {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+}
+
+/* The sidebar's Office button is pressed while the overview is open. */
+.ov-expedition .ex-office-btn[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* ================================================================== the open thread: its route under the tabs */
+
+.ov-expedition.ex-state-open .stage-tx,
+.ov-expedition .stage-tx {
+  --header-clearance: 112px;
+}
+.ov-expedition .stage-main .top {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.ov-expedition .stage-main .top .spacer {
+  order: 1;
+}
+.ov-expedition .stage-main .top > .pill:not(nav) {
+  order: 2;
+}
+.ov-expedition .ex-hstrip {
+  order: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 14px 0 12px;
+  border-radius: 12px;
+  --ex-ground: color-mix(in oklab, var(--surface) 92%, var(--ink));
+  flex-basis: 640px;
+  max-width: 640px;
+  text-align: left;
+}
+.ov-expedition .stage-main .ex-hstrip {
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  backdrop-filter: blur(14px) saturate(1.4);
+  --ex-ground: var(--raised);
+}
+.ov-expedition .ex-hstrip:hover {
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-1);
+}
+.ov-expedition .ex-hstrip-summit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.ov-expedition .ex-hstrip-summit svg path,
+.ov-expedition .ex-goal-summit svg path,
+.ov-expedition .ex-card-summit > svg path,
+.ov-expedition .ex-prow-summit svg path,
+.ov-expedition .ex-lfoot > svg path {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.ov-expedition .ex-hstrip .ex-route {
+  height: 32px;
+  margin-top: 13px;
+}
+.ov-expedition .ex-hstrip-eta {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================== the overview */
+
+.ov-expedition .ex-ov {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 272px;
+  display: none;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: -1px 0 0 var(--line-soft);
+  --ex-ground: var(--surface);
+}
+.ov-expedition.ex-is-overview .ex-ov {
+  display: block;
+}
+/* The open thread stays where it was under the overview, and draws nothing while covered. */
+.ov-expedition.ex-is-overview .stage-main {
+  visibility: hidden;
+}
+.ov-expedition .ex-top {
+  z-index: 8;
+}
+.ov-expedition .ex-top .pill {
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  backdrop-filter: blur(14px) saturate(1.4);
+}
+.ov-expedition .ex-switch .ptab {
+  gap: 6px;
+  padding: 0 11px 0 9px;
+}
+.ov-expedition .ex-switch .ptab.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ov-expedition .ex-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ov-expedition .ex-tools:empty {
+  display: none;
+}
+.ov-expedition .ex-lensbar .pill-btn {
+  gap: 5px;
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-lensbar .pill-btn .faint {
+  font-weight: var(--w-regular);
+}
+.ov-expedition .ex-boardnote {
+  gap: 7px;
+  padding: 0 14px 0 11px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-boardnote.is-news {
+  max-width: 460px;
+  gap: 8px;
+  padding-right: 5px;
+  color: var(--ink);
+  animation: ex-note 600ms var(--ease-out);
+}
+.ov-expedition .ex-boardnote.is-news b {
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-boardnote.is-news > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-expedition .ex-boardnote-by {
+  color: var(--muted);
+}
+.ov-expedition .ex-replay {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-replay:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+@keyframes ex-note {
+  from {
+    box-shadow: 0 0 0 1px var(--line-soft), 0 0 0 5px color-mix(in oklab, var(--ink) 12%, transparent);
+  }
+}
+.ov-expedition .ex-sum {
+  gap: 14px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-sum span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ov-expedition .ex-sum b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ov-expedition .ex-sum .ex-sum-you,
+.ov-expedition .ex-sum .ex-sum-you b {
+  color: var(--you-ink);
+}
+.ov-expedition .ex-close {
+  gap: 8px;
+  padding-right: 6px;
+  color: var(--muted);
+}
+
+.ov-expedition .ex-panes,
+.ov-expedition .ex-pane {
+  position: absolute;
+  inset: 0;
+}
+.ov-expedition .ex-pane {
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 180ms var(--ease-out),
+    visibility 0s 180ms;
+}
+.ov-expedition .ex-pane.is-shown {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 180ms var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-expedition .ex-pane {
+    transition: none;
+  }
+}
+
+/* ================================================================== Threads mode: the ledger */
+
+/* The floating pills sit over the scrolling ledger; a short fade keeps rows from showing between them. */
+.ov-expedition .ex-pane--threads::after,
+.ov-expedition .ex-pane--office::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  right: 12px;
+  height: 58px;
+  background: linear-gradient(to bottom, var(--surface) 62%, color-mix(in oklab, var(--surface) 0%, transparent));
+  pointer-events: none;
+}
+.ov-expedition .ex-pane--office::after {
+  display: none;
+}
+
+.ov-expedition .ex-ledger {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 66px 28px 40px 24px;
+  scrollbar-width: thin;
+}
+.ov-expedition .ex-intro {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin: 2px 0 18px 4px;
+}
+.ov-expedition .ex-intro-h {
+  margin: 0;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-intro-p {
+  margin: 0;
+  color: var(--muted);
+}
+.ov-expedition .ex-intro-p b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-intro-p a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+.ov-expedition .ex-intro-p a:hover {
+  text-decoration-color: currentColor;
+}
+.ov-expedition .ex-catchup {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 560px;
+}
+.ov-expedition .ex-catchup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.ov-expedition .ex-catchup-chips .chip {
+  height: 26px;
+  padding: 0 10px;
+  gap: 6px;
+}
+.ov-expedition .ex-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--who);
+}
+.ov-expedition .ex-catchup-chips .chip:hover {
+  background: color-mix(in oklab, var(--ink) 9%, var(--sunken));
+}
+.ov-expedition .ex-catchup-chips .chip--you:hover {
+  background: color-mix(in oklab, var(--you) 30%, var(--you-tint));
+}
+
+/* Waiting on you, on top: one row per ask with its answer buttons. */
+.ov-expedition .ex-lwait {
+  margin: 0 0 22px;
+}
+.ov-expedition .ex-lgroup-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  margin: 0;
+  padding: 0 4px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-lgroup-h .proj {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-lgroup-count {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.ov-expedition .ex-wrow {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 240px 36px 236px;
+  align-items: center;
+  gap: 14px;
+  min-height: 54px;
+  padding: 6px 10px 6px 6px;
+  border-radius: var(--r-lg);
+  cursor: default;
+}
+.ov-expedition .ex-wrow,
+.ov-expedition .ex-goal,
+.ov-expedition .ex-runrow {
+  position: relative;
+}
+/* Rows are separated by a hairline that stops short of the rounded hover, so it never bends. */
+.ov-expedition .ex-wrow + .ex-wrow::before,
+.ov-expedition .ex-goal + .ex-goal::before,
+.ov-expedition .ex-partners + .ex-goal::before,
+.ov-expedition .ex-runrow + .ex-runrow::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 46px;
+  right: 14px;
+  height: 1px;
+  background: var(--line-soft);
+}
+.ov-expedition .is-selected + .ex-wrow::before,
+.ov-expedition .ex-wrow.is-selected::before,
+.ov-expedition .ex-wrow:hover::before,
+.ov-expedition .ex-wrow:hover + .ex-wrow::before,
+.ov-expedition .is-selected + .ex-goal::before,
+.ov-expedition .ex-goal.is-selected::before,
+.ov-expedition .ex-goal:hover::before,
+.ov-expedition .ex-goal:hover + .ex-goal::before,
+.ov-expedition .ex-runrow:hover::before,
+.ov-expedition .ex-runrow:hover + .ex-runrow::before,
+.ov-expedition .is-selected + .ex-runrow::before,
+.ov-expedition .ex-runrow.is-selected::before {
+  opacity: 0;
+}
+.ov-expedition .ex-wrow:hover {
+  background: var(--hover);
+}
+.ov-expedition .ex-wrow.is-selected {
+  background: var(--selected);
+}
+.ov-expedition .ex-wrow-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+}
+.ov-expedition .ex-wrow-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+.ov-expedition .ex-wrow-title {
+  overflow: hidden;
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-wrow-ask {
+  overflow: hidden;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-wrow-route {
+  display: flex;
+}
+.ov-expedition .ex-wrow-age {
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ov-expedition .ex-wrow-act {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* The column heads, then a group per project (or stage). */
+.ov-expedition .ex-lhead,
+.ov-expedition .ex-goal {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 118px 150px 92px 116px;
+  column-gap: 16px;
+}
+.ov-expedition .ex-lhead {
+  align-items: end;
+  height: 26px;
+  margin: 0 0 4px;
+  padding: 0 12px 6px 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.ov-expedition .ex-lgroup {
+  margin: 14px 0 8px;
+}
+.ov-expedition .ex-lgroup-name {
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-goal {
+  align-items: start;
+  row-gap: 8px;
+  padding: 11px 12px 8px 6px;
+  border-radius: var(--r-lg);
+  cursor: default;
+  transition: background var(--dur-1);
+}
+.ov-expedition .ex-goal:hover {
+  background: var(--hover);
+}
+.ov-expedition .ex-goal.is-selected {
+  background: color-mix(in oklab, var(--ink) 4.5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.ov-expedition .ex-goal-face {
+  padding-top: 1px;
+}
+.ov-expedition .ex-goal-main,
+.ov-expedition .ex-goal-stage,
+.ov-expedition .ex-goal-eta,
+.ov-expedition .ex-goal-last {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+.ov-expedition .ex-goal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ov-expedition .ex-goal-title b {
+  overflow: hidden;
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-chip {
+  flex: none;
+  height: 20px;
+  font-size: var(--t-11);
+}
+.ov-expedition .ex-working {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  color: var(--accent-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-working .mark {
+  color: var(--accent-ink);
+}
+.ov-expedition .ex-goal-summit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-goal-summit > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-grew-note {
+  flex: none;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--who-tint);
+  color: var(--who-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 18px;
+}
+.ov-expedition .ex-goal-stage b,
+.ov-expedition .ex-goal-eta b,
+.ov-expedition .ex-goal-last b {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ov-expedition .ex-goal-stage .faint,
+.ov-expedition .ex-goal-eta .faint,
+.ov-expedition .ex-goal-last .faint {
+  overflow: hidden;
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-goal-eta.is-unknown b {
+  color: var(--muted);
+}
+.ov-expedition .ex-goal-eta[data-tip] b {
+  text-decoration: underline dotted var(--ex-tick);
+  text-underline-offset: 3px;
+}
+.ov-expedition .ex-stuck {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+}
+.ov-expedition .ex-goal-route {
+  grid-column: 2 / -1;
+  display: flex;
+  padding-right: 4px;
+}
+.ov-expedition .ex-goal.is-landed .ex-goal-title b {
+  color: var(--muted);
+}
+.ov-expedition .ex-alone {
+  font-size: var(--t-12);
+  line-height: 24px;
+}
+.ov-expedition .ex-rope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 6px 0 3px;
+  margin: -2px 0 0 -3px;
+  border-radius: var(--r-pill);
+  color: var(--faint);
+}
+.ov-expedition .ex-rope:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ov-expedition .ex-rope[aria-expanded="true"] .ic {
+  transform: rotate(180deg);
+}
+.ov-expedition .ex-rope .stack > * + * {
+  margin-left: -6px;
+}
+
+/* A partner's row under its lead: indented, its own route, quieter. */
+.ov-expedition .ex-partners {
+  margin: -2px 0 6px 34px;
+  padding-left: 12px;
+  box-shadow: inset 1px 0 0 var(--line);
+}
+.ov-expedition .ex-prow {
+  display: grid;
+  grid-template-columns: 20px 220px minmax(0, 1fr) 200px 90px;
+  align-items: center;
+  gap: 14px;
+  min-height: 46px;
+  padding: 4px 12px 4px 6px;
+  border-radius: var(--r-md);
+}
+.ov-expedition .ex-prow:hover {
+  background: var(--hover);
+}
+.ov-expedition .ex-prow.is-selected {
+  background: var(--selected);
+}
+.ov-expedition .ex-prow-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.ov-expedition .ex-prow-main b {
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-prow-main .faint,
+.ov-expedition .ex-prow-summit {
+  overflow: hidden;
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-prow-summit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-expedition .ex-prow-route {
+  display: flex;
+  padding-top: 2px;
+}
+.ov-expedition .ex-prow-end {
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: right;
+}
+
+/* The runs: a run's route is its workflow. */
+.ov-expedition .ex-lruns {
+  margin-top: 26px;
+}
+.ov-expedition .ex-runrow {
+  display: grid;
+  grid-template-columns: 28px 300px minmax(0, 1fr) 132px;
+  align-items: center;
+  gap: 16px;
+  min-height: 50px;
+  padding: 6px 12px 4px 6px;
+  border-radius: var(--r-lg);
+}
+
+.ov-expedition .ex-runrow:hover {
+  background: var(--hover);
+}
+.ov-expedition .ex-runrow.is-selected {
+  background: var(--selected);
+}
+.ov-expedition .ex-runrow-mark {
+  display: grid;
+  place-items: center;
+}
+.ov-expedition .ex-runrow-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.ov-expedition .ex-runrow-main b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-runrow-main .faint {
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-runrow-route {
+  display: flex;
+  padding-top: 4px;
+}
+.ov-expedition .ex-runrow-end {
+  font-size: var(--t-12);
+  text-align: right;
+}
+.ov-expedition .ex-lfoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 28px 0 0 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ================================================================== Board mode */
+
+.ov-expedition .ex-board {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: 58px;
+}
+.ov-expedition .ex-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  align-items: start;
+  overflow: auto;
+  padding: 6px 10px 24px;
+  scrollbar-width: thin;
+}
+.ov-expedition .ex-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 100%;
+  padding: 0 7px;
+}
+.ov-expedition .ex-col + .ex-col {
+  box-shadow: inset 1px 0 0 var(--line-soft);
+}
+.ov-expedition .ex-col-h {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 8px 4px 6px;
+  background: var(--surface);
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+}
+.ov-expedition .ex-col-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.ov-expedition .ex-col-name {
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-col-count {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.ov-expedition .ex-col-med {
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.ov-expedition .ex-col-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ov-expedition .ex-col-empty {
+  margin: 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* The bottleneck: where work piles up, said in words; marigold only for the part that is Rogier's. */
+.ov-expedition .ex-neck {
+  margin: 0 0 2px;
+  padding: 9px 11px 10px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.ov-expedition .ex-neck b {
+  color: var(--ink);
+}
+.ov-expedition .ex-neck.is-yours {
+  background: var(--you-tint);
+}
+.ov-expedition .ex-neck-you {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-neck a {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--ink) 30%, transparent);
+  text-underline-offset: 3px;
+}
+.ov-expedition .ex-neck-you {
+  display: block;
+}
+
+.ov-expedition .ex-bcard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 11px 9px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  cursor: default;
+  --ex-ground: var(--raised);
+  transition: box-shadow var(--dur-1);
+}
+.ov-expedition .ex-bcard:hover {
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+}
+.ov-expedition .ex-bcard.is-selected {
+  box-shadow: inset 0 0 0 1.5px var(--ink), var(--shadow-1);
+}
+.ov-expedition .ex-bcard.is-landed {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  --ex-ground: var(--surface);
+}
+.ov-expedition .ex-bcard.is-landed .ex-bcard-title {
+  color: var(--muted);
+}
+.ov-expedition .ex-bcard.is-landed.is-selected {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.ov-expedition .ex-bcard-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ov-expedition .ex-bcard-head .cr {
+  flex: none;
+  margin-top: -2px;
+}
+.ov-expedition .ex-bcard-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ov-expedition .ex-bcard-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-bcard-prog {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.ov-expedition .ex-bcard-meta .stack > * + * {
+  margin-left: -6px;
+}
+.ov-expedition .ex-bcard-ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-bcard-stuck {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-bcard-moved {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-top: 7px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 1.35;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.ov-expedition .ex-bcard-was {
+  margin-top: -2px;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-bcard-was::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border: 1px dashed var(--muted);
+  border-radius: 2px;
+  vertical-align: 0;
+}
+.ov-expedition .ex-bcard-moved .ic {
+  flex: none;
+}
+.ov-expedition .ex-bcard-signal {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-expedition .ex-bcard-at {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.ov-expedition .ex-bcard.is-moving {
+  position: relative;
+  z-index: 5;
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-3);
+}
+.ov-expedition .ex-bcard.is-arrived {
+  animation: ex-arrive 1600ms var(--ease-out);
+}
+@keyframes ex-arrive {
+  0% {
+    box-shadow: inset 0 0 0 1.5px var(--ink), 0 0 0 4px color-mix(in oklab, var(--ink) 10%, transparent);
+  }
+  100% {
+    box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  }
+}
+
+/* The Board's toast: what moved a card, and by what signal. */
+.ov-expedition .ex-btoast {
+  position: absolute;
+  z-index: 9;
+  top: 58px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 560px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--r-lg);
+  transform: translateX(-50%);
+  animation: ex-rise var(--dur-3) var(--ease-out);
+}
+.ov-expedition .ex-btoast-ic {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--ink);
+}
+.ov-expedition .ex-btoast-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+.ov-expedition .ex-btoast-text b {
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-btoast-text .faint {
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-bpill {
+  position: absolute;
+  z-index: 9;
+  top: 60px;
+  left: 50%;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  transform: translateX(-50%);
+}
+@keyframes ex-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+
+/* The cumulative flow strip: the morning, by stage. An ink ramp, darker as work lands. */
+.ov-expedition .ex-flow {
+  position: relative;
+  z-index: 3;
+  flex: none;
+  height: 150px;
+  padding: 10px 22px 8px;
+  background: var(--surface);
+  box-shadow: 0 -1px 0 var(--line-soft);
+}
+.ov-expedition .ex-flow-h {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-flow-h b {
+  font-size: var(--t-13);
+}
+.ov-expedition .ex-flow-legend {
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+  color: var(--muted);
+}
+.ov-expedition .ex-flow-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-expedition .ex-flow-key {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.ov-expedition .ex-flow-plot {
+  position: relative;
+  height: 76px;
+  margin-right: 108px;
+}
+.ov-expedition .ex-flow-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.ov-expedition .ex-flow-band {
+  stroke: var(--surface);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+.ov-expedition .ex-flow-band--landed {
+  fill: color-mix(in oklab, var(--ink) 64%, var(--surface));
+  background: color-mix(in oklab, var(--ink) 64%, var(--surface));
+}
+.ov-expedition .ex-flow-band--shipping {
+  fill: color-mix(in oklab, var(--ink) 50%, var(--surface));
+  background: color-mix(in oklab, var(--ink) 50%, var(--surface));
+}
+.ov-expedition .ex-flow-band--reviewing {
+  fill: color-mix(in oklab, var(--ink) 38%, var(--surface));
+  background: color-mix(in oklab, var(--ink) 38%, var(--surface));
+}
+.ov-expedition .ex-flow-band--proving {
+  fill: color-mix(in oklab, var(--ink) 27%, var(--surface));
+  background: color-mix(in oklab, var(--ink) 27%, var(--surface));
+}
+.ov-expedition .ex-flow-band--building {
+  fill: color-mix(in oklab, var(--ink) 18%, var(--surface));
+  background: color-mix(in oklab, var(--ink) 18%, var(--surface));
+}
+.ov-expedition .ex-flow-band--scoping {
+  fill: color-mix(in oklab, var(--ink) 10%, var(--surface));
+  background: color-mix(in oklab, var(--ink) 10%, var(--surface));
+}
+.ov-expedition .ex-flow-ends {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 104px;
+}
+.ov-expedition .ex-flow-end {
+  position: absolute;
+  left: 8px;
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 12px;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+.ov-expedition .ex-flow-now {
+  position: absolute;
+  right: 0;
+  bottom: -18px;
+  color: var(--ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  transform: translateX(50%);
+}
+.ov-expedition .ex-flow-axis {
+  position: relative;
+  height: 16px;
+  margin: 4px 108px 0 0;
+}
+.ov-expedition .ex-flow-tick {
+  position: absolute;
+  top: 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+}
+.ov-expedition .ex-flow-tick.is-half {
+  color: color-mix(in oklab, var(--faint) 70%, transparent);
+}
+.ov-expedition .ex-flow-cross {
+  position: absolute;
+  top: -4px;
+  bottom: 0;
+  width: 1px;
+  background: var(--ink);
+  pointer-events: none;
+}
+.ov-expedition .ex-flow-away {
+  position: absolute;
+  top: -6px;
+  bottom: 0;
+  border-left: 1px dashed var(--muted);
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.ov-expedition .ex-flow-away span {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* ================================================================== Office mode: the host, and the flat Range */
+
+.ov-expedition .ex-office {
+  position: absolute;
+  inset: 0;
+}
+.ov-expedition .ex-range {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 64px 60px 190px 90px;
+}
+.ov-expedition .ex-range-art {
+  position: relative;
+  width: min(100%, 1040px);
+  aspect-ratio: 1100 / 540;
+}
+.ov-expedition .ex-range-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.ov-expedition .ex-range-alt {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 5;
+}
+.ov-expedition .ex-range-alt.is-summit {
+  stroke-dasharray: none;
+  stroke: var(--line-soft);
+}
+.ov-expedition .ex-range-altname {
+  fill: var(--faint);
+  font-size: 12px;
+  text-anchor: end;
+}
+.ov-expedition .ex-range-face {
+  stroke: color-mix(in oklab, var(--ink) 16%, transparent);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+.ov-expedition .ex-range-face.is-shade {
+  filter: brightness(0.9);
+}
+.ov-expedition .ex-range-peakflag {
+  fill: var(--brass);
+  stroke: color-mix(in oklab, var(--ink) 45%, transparent);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.ov-expedition .ex-range-route {
+  stroke: color-mix(in oklab, var(--ink) 24%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+.ov-expedition .ex-range-climbed {
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.ov-expedition .ex-range-name {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 640;
+  text-anchor: middle;
+}
+.ov-expedition .ex-range-camp rect {
+  fill: var(--raised);
+  stroke: var(--line);
+}
+.ov-expedition .ex-range-camp text {
+  fill: var(--muted);
+  font-size: 12px;
+  text-anchor: middle;
+}
+.ov-expedition .ex-range-tags {
+  position: absolute;
+  inset: 0;
+}
+.ov-expedition .ex-range-climber {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: -13px 0 0 -9px;
+  text-align: left;
+}
+.ov-expedition .ex-range-head {
+  position: relative;
+  flex: none;
+  width: 18px;
+  height: 22px;
+  line-height: 0;
+}
+.ov-expedition .ex-range-head > svg {
+  width: 18px;
+  height: 22px;
+}
+.ov-expedition .ex-range-climber .ex-r-egg {
+  fill: var(--who);
+  stroke: var(--who-ink);
+}
+.ov-expedition .ex-range-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 190px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 17px;
+  white-space: nowrap;
+}
+.ov-expedition .ex-range-tag > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-expedition .ex-range-art.is-crowded .ex-range-climber:not(.is-selected):not(:hover) .ex-range-tag {
+  display: none;
+}
+.ov-expedition .ex-range-climber:hover {
+  z-index: 2;
+}
+.ov-expedition .ex-range-climber.is-left {
+  flex-direction: row-reverse;
+  margin-left: 0;
+  transform: translateX(calc(-100% + 9px));
+}
+.ov-expedition .ex-range-tag small {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+.ov-expedition .ex-range-climber.is-selected .ex-range-tag {
+  box-shadow: 0 0 0 1.5px var(--ink);
+}
+.ov-expedition .ex-range-climber:hover .ex-range-tag {
+  box-shadow: 0 0 0 1px var(--line);
+}
+.ov-expedition .ex-range-flag {
+  position: absolute;
+  top: -12px;
+  left: 12px;
+}
+.ov-expedition .ex-range-flag svg {
+  width: 10px;
+  height: 14px;
+}
+.ov-expedition .ex-range-cloud {
+  position: absolute;
+  top: -11px;
+  left: -9px;
+}
+.ov-expedition .ex-range-cloud svg {
+  width: 20px;
+  height: 13px;
+}
+.ov-expedition .ex-range-note {
+  max-width: 560px;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: center;
+}
+
+/* ================================================================== the selection card */
+
+.ov-expedition .ex-card {
+  position: absolute;
+  z-index: 7;
+  left: 16px;
+  bottom: 16px;
+  width: 392px;
+  padding: 14px 14px 12px;
+  border-radius: var(--r-xl);
+  --ex-ground: var(--surface);
+  transition: bottom var(--dur-3) var(--ease-out);
+}
+/* In Threads and Board the card docks under the content, full width, so it never covers a row.
+   Its three groups (who, the route, the ask) sit side by side. In the Office it floats, as the
+   Office's module expects (bottom left, about 380x150). */
+.ov-expedition .ex-ov {
+  --ex-dock: 92px;
+}
+.ov-expedition .ex-ov:is([data-ov-mode="threads"], [data-ov-mode="board"]) .ex-card {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: var(--ex-dock);
+  display: grid;
+  grid-template-columns: minmax(240px, 330px) minmax(280px, 1fr) minmax(320px, 400px);
+  align-items: start;
+  column-gap: 32px;
+  padding: 14px 22px 0 20px;
+  border-radius: 0;
+  background: var(--surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: 0 -1px 0 var(--line), 0 -8px 24px -16px oklch(0 0 0 / 0.18);
+  transition: none;
+}
+.ov-expedition .ex-ov:is([data-ov-mode="threads"], [data-ov-mode="board"]) .ex-card-summit {
+  margin-top: 0;
+}
+.ov-expedition .ex-ov:is([data-ov-mode="threads"], [data-ov-mode="board"]) .ex-card-ask,
+.ov-expedition .ex-ov:is([data-ov-mode="threads"], [data-ov-mode="board"]) .ex-card-line {
+  margin: 1px 0 8px;
+}
+.ov-expedition .ex-ov:is([data-ov-mode="threads"], [data-ov-mode="board"]) .ex-card-ask-q,
+.ov-expedition .ex-ov:is([data-ov-mode="threads"], [data-ov-mode="board"]) .ex-card-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-ov:is([data-ov-mode="threads"], [data-ov-mode="board"]) .ex-card-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-expedition .ex-ov.has-card[data-ov-mode="threads"] .ex-ledger,
+.ov-expedition .ex-ov.has-card[data-ov-mode="board"] .ex-board {
+  bottom: var(--ex-dock);
+}
+.ov-expedition .ex-card.is-entering {
+  animation: ex-card-in var(--dur-2) var(--ease-out);
+}
+@keyframes ex-card-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-expedition .ex-card.is-entering {
+    animation: none;
+  }
+}
+.ov-expedition .ex-ov .ex-card[hidden] {
+  display: none;
+}
+.ov-expedition .ex-card-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ov-expedition .ex-card-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+}
+.ov-expedition .ex-card-who {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.ov-expedition .ex-card-title {
+  overflow: hidden;
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-card-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ov-expedition .ex-card-sub .faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-expedition .ex-card-role {
+  flex: none;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 17px;
+}
+.ov-expedition .ex-card-x {
+  align-self: flex-start;
+}
+.ov-expedition .ex-card-summit {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 0 2px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-card-summit > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-card-route {
+  display: flex;
+  margin: 0 -2px;
+}
+.ov-expedition .ex-card-ask {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 8px 0 10px;
+}
+.ov-expedition .ex-card-ask-q {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-card-ask-age {
+  flex: none;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.ov-expedition .ex-card-line {
+  margin: 8px 0 10px;
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.ov-expedition .ex-card-line .ex-working,
+.ov-expedition .ex-card-line .ex-stuck {
+  display: inline-flex;
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-card-line:has(.ex-card-eta) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ov-expedition .ex-card-doing {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-expedition .ex-card-eta {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.ov-expedition .ex-card-act {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-expedition .ex-open {
+  gap: 4px;
+  padding-right: 6px;
+}
+
+/* ================================================================== popovers, tooltips, the story popovers */
+
+.ov-expedition .ex-pop {
+  position: absolute;
+  z-index: 30;
+  width: 300px;
+  padding: 4px 6px 6px;
+  border-radius: var(--r-md);
+}
+.ov-expedition .ex-pop[hidden] {
+  display: none;
+}
+.ov-expedition .ex-pop .pop-h {
+  padding: 8px 8px 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ov-expedition .ex-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+.ov-expedition .ex-menu-item:hover {
+  background: var(--hover);
+}
+.ov-expedition .ex-menu-item > span {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  line-height: 1.35;
+}
+.ov-expedition .ex-menu-item b {
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-menu-item .faint {
+  font-size: var(--t-12);
+}
+.ov-expedition .ex-pop--stuck,
+.ov-expedition .ex-pop--grew {
+  width: 340px;
+  padding: 14px 16px 14px;
+  border-radius: var(--r-lg);
+}
+.ov-expedition .ex-story-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ov-expedition .ex-story-plus {
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  line-height: 20px;
+}
+.ov-expedition .ex-story-p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.ov-expedition .ex-story-p b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-story-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.ov-expedition .ex-story-list {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.ov-expedition .ex-story-list li {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 4px;
+  padding: 3px 0;
+}
+.ov-expedition .ex-story-list li span {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-expedition .ex-tip {
+  position: absolute;
+  z-index: 31;
+  max-width: 300px;
+  padding: 5px 9px 6px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  line-height: 1.4;
+  pointer-events: none;
+  box-shadow: var(--shadow-2);
+}
+.ov-expedition .ex-tip[hidden] {
+  display: none;
+}
+.ov-expedition [data-tip] {
+  cursor: default;
+}

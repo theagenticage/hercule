@@ -1,0 +1,2101 @@
+/* PROTOTYPE - The Firm's window: the sidebar's Chain of command, the overview's three modes, the
+   selection card. Every rule sits under .ov-the-firm (the stage's window root) and every class is
+   prefixed tfw-, because the office builder's Office module shares this page. Tokens only: both
+   themes come from crew-bureau-2/tokens.css. */
+
+/* ================================================================== the sidebar's fixed parts */
+
+/* The assistants are managers in the tree, so the stage's pinned block is not drawn. */
+.ov-the-firm .stage-assistants {
+  display: none;
+}
+.ov-the-firm .stage-toast {
+  bottom: 84px;
+}
+.ov-the-firm .stage-toast b {
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .side-actions .icon-btn.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+/* ================================================================== the root: Rogier */
+
+.ov-the-firm .tfw-root {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 9px;
+  margin: 2px 0 2px;
+  padding: 5px 4px 6px 9px;
+}
+.ov-the-firm .tfw-root > svg {
+  grid-row: 1 / span 2;
+}
+.ov-the-firm .tfw-root-name {
+  font-weight: var(--w-bold);
+  line-height: 18px;
+}
+.ov-the-firm .tfw-root-sub {
+  grid-column: 2 / -1;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  margin: -2px 0;
+  padding: 0 5px 0 8px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.ov-the-firm .tfw-fold:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* The away state's memo, at the top of the tree. */
+.ov-the-firm .tfw-memo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding: 8px 10px 9px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  transition: box-shadow var(--dur-1);
+}
+.ov-the-firm .tfw-memo:hover {
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+}
+.ov-the-firm .tfw-memo-h {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-the-firm .tfw-memo-h span {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.ov-the-firm .tfw-memo-line {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-memo-line b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+/* ================================================================== a team in the sidebar */
+
+.ov-the-firm .tfw-team-block {
+  position: relative;
+}
+.ov-the-firm .tfw-team {
+  position: relative;
+}
+.ov-the-firm .tfw-detail {
+  gap: 6px;
+}
+.ov-the-firm .tfw-pile {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+.ov-the-firm .tfw-pile > svg + svg {
+  margin-left: -5px;
+}
+.ov-the-firm .tfw-pile-more {
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-the-firm .tfw-voice {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-voice--ask {
+  color: var(--you-ink);
+}
+.ov-the-firm .tfw-voice b {
+  font-weight: var(--w-bold);
+}
+
+/* The stand-up button sits on the team row's second line and shows under the pointer. */
+.ov-the-firm .tfw-row-btn {
+  position: absolute;
+  top: 26px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  border-radius: var(--r-xs);
+  background: color-mix(in oklab, var(--ink) 5%, var(--bg));
+  box-shadow: -10px 0 8px -2px color-mix(in oklab, var(--ink) 5%, var(--bg));
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--dur-1), color var(--dur-1), background var(--dur-1);
+}
+.ov-the-firm .tfw-team:hover .tfw-row-btn,
+.ov-the-firm .tfw-row-btn:focus-visible {
+  opacity: 1;
+}
+.ov-the-firm .tfw-row-btn:hover {
+  background: color-mix(in oklab, var(--ink) 10%, var(--bg));
+  color: var(--ink);
+}
+.ov-the-firm .tfw-team .side-row.is-on ~ .tfw-row-btn {
+  background: color-mix(in oklab, var(--ink) 7%, var(--bg));
+  box-shadow: -10px 0 8px -2px color-mix(in oklab, var(--ink) 7%, var(--bg));
+}
+
+/* A partner: an elbow from its lead's first face, its own face, its role first. */
+.ov-the-firm .tfw-members {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ov-the-firm .tfw-member {
+  position: relative;
+  display: block;
+  min-height: 30px;
+  padding: 0 8px 0 30px;
+}
+.ov-the-firm .tfw-member-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+}
+.ov-the-firm .tfw-member-line > svg {
+  flex: none;
+}
+.ov-the-firm .tfw-member-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-13);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-member-name b {
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-of {
+  color: var(--faint);
+}
+.ov-the-firm .tfw-member .side-end {
+  min-width: 48px;
+}
+.ov-the-firm .tfw-member.is-receded {
+  opacity: 0.72;
+}
+.ov-the-firm .tfw-member.is-receded:hover,
+.ov-the-firm .tfw-member.is-receded.is-on {
+  opacity: 1;
+}
+.ov-the-firm .tfw-elbow {
+  position: absolute;
+  top: -5px;
+  bottom: 0;
+  left: 17.5px;
+  width: 11px;
+  pointer-events: none;
+}
+.ov-the-firm .tfw-elbow::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  left: 0;
+  border-left: 1px solid var(--line);
+}
+.ov-the-firm .tfw-elbow::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  left: 0;
+  width: 9px;
+  height: 8px;
+  border-bottom: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-bottom-left-radius: 6px;
+}
+.ov-the-firm .tfw-member.is-last .tfw-elbow::before {
+  bottom: auto;
+  height: 13px;
+}
+.ov-the-firm .tfw-members--mgr .tfw-elbow {
+  top: -3px;
+}
+/* A partner that joined while Rogier was out wears an ink dot before its name. */
+.ov-the-firm .tfw-member.is-new .tfw-member-name::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 6px 1px 0;
+  border-radius: 50%;
+  background: var(--ink);
+  vertical-align: middle;
+}
+
+.ov-the-firm .tfw-stamp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding-left: 30px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The stand-up's line under a member, in the member's own hue: dots while it thinks, then its words. */
+.ov-the-firm .tfw-said {
+  display: block;
+  margin: 1px 0 7px;
+  padding: 5px 9px 6px 10px;
+  border-radius: 3px 9px 9px 3px;
+  background: var(--sunken);
+  box-shadow: inset 2px 0 0 var(--who);
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  line-height: 1.4;
+  white-space: normal;
+  text-wrap: pretty;
+}
+.ov-the-firm .tfw-said.is-thinking {
+  display: inline-flex;
+  align-self: flex-start;
+  width: auto;
+  padding: 7px 10px;
+}
+.ov-the-firm .tfw-member .tfw-said {
+  margin-left: 23px;
+}
+.ov-the-firm .tfw-said--lone {
+  margin: -2px 8px 8px 10px;
+}
+.ov-the-firm .tfw-team-block.has-standup .tfw-team > .side-row,
+.ov-the-firm .tfw-lone .st-thread > .side-row {
+  height: auto;
+  min-height: 52px;
+}
+.ov-the-firm .tfw-team-block.has-standup .tfw-team > .side-row {
+  padding-bottom: 2px;
+}
+.ov-the-firm .tfw-team-block.has-standup .tfw-team .tfw-said {
+  margin-top: 6px;
+}
+.ov-the-firm .tfw-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.ov-the-firm .tfw-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--who);
+  animation: tfw-dot 1s ease-in-out infinite;
+}
+.ov-the-firm .tfw-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.ov-the-firm .tfw-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes tfw-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: none;
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-the-firm .tfw-said:not(.is-thinking) {
+    animation: tfw-say var(--dur-3) var(--ease-out);
+  }
+  .ov-the-firm .tfw-member.is-born,
+  .ov-the-firm .tfw-tr--member.is-born {
+    animation: tfw-join 700ms var(--ease-out);
+  }
+}
+@keyframes tfw-say {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+@keyframes tfw-join {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.ov-the-firm .tfw-noproj::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+.ov-the-firm .tfw-h-note {
+  flex: none !important;
+  color: var(--faint);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.ov-the-firm .tfw-mgr-count {
+  margin-left: 6px;
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.ov-the-firm .tfw-wait .side-ask b {
+  font-weight: var(--w-bold);
+}
+
+/* ================================================================== the sidebar's hover card */
+
+.ov-the-firm .tfw-hover {
+  position: fixed;
+  z-index: 40;
+  left: 276px;
+  width: 312px;
+  padding: 12px 14px 12px;
+  border-radius: var(--r-md);
+  pointer-events: none;
+}
+.ov-the-firm .tfw-hover[hidden] {
+  display: none;
+}
+.ov-the-firm .tfw-hover-h {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ov-the-firm .tfw-hover-h > svg {
+  flex: none;
+}
+.ov-the-firm .tfw-hover-h span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.3;
+}
+.ov-the-firm .tfw-hover-h b {
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-hover-h small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-hover-dl {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 5px 10px;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-12);
+  line-height: 1.35;
+}
+.ov-the-firm .tfw-hover-dl dt {
+  color: var(--faint);
+}
+.ov-the-firm .tfw-hover-dl dd {
+  margin: 0;
+  color: var(--ink);
+}
+.ov-the-firm .tfw-hover-dl .mono {
+  font-size: 11.5px;
+}
+
+/* ================================================================== the overview */
+
+.ov-the-firm .tfw-ov,
+.ov-the-firm .tfw-thread {
+  position: absolute;
+  inset: 0;
+}
+.ov-the-firm .tfw-thread {
+  display: flex;
+  flex-direction: column;
+}
+.ov-the-firm .tfw-ov[hidden],
+.ov-the-firm .tfw-thread[hidden] {
+  display: none;
+}
+.ov-the-firm .tfw-modes {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+/* The modes are stacked; a switch is a short cross-fade, so the selection never seems to jump. */
+.ov-the-firm .tfw-mode {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    visibility 0s linear var(--dur-2);
+}
+.ov-the-firm .tfw-mode.is-shown {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.ov-the-firm .tfw-mode.is-instant {
+  transition: none;
+}
+
+/* ---------------------------------------------------------- the top bar */
+
+.ov-the-firm .tfw-top {
+  z-index: 8;
+}
+.ov-the-firm .tfw-top .pill {
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  backdrop-filter: blur(14px) saturate(1.4);
+}
+.ov-the-firm .tfw-switch .ptab,
+.ov-the-firm .tfw-ctrl .ptab {
+  gap: 6px;
+  padding: 0 10px 0 8px;
+}
+.ov-the-firm .tfw-ctrl .ptab {
+  padding: 0 10px;
+}
+.ov-the-firm .tfw-top .ptab[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ov-the-firm .tfw-top .pill-btn {
+  color: var(--muted);
+  gap: 7px;
+}
+.ov-the-firm .tfw-top .pill-btn:hover {
+  color: var(--ink);
+}
+.ov-the-firm .tfw-top .pill-btn kbd {
+  margin-left: 1px;
+}
+.ov-the-firm .tfw-top .pill-btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.ov-the-firm .tfw-top .pill-sep {
+  margin: 0 3px;
+}
+.ov-the-firm .tfw-sum {
+  gap: 14px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-sum span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ov-the-firm .tfw-sum b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-the-firm .tfw-sum .tfw-sum-you,
+.ov-the-firm .tfw-sum .tfw-sum-you b {
+  color: var(--you-ink);
+}
+
+/* ================================================================== Threads: the chain of command, wide */
+
+.ov-the-firm .tfw-scroll {
+  position: absolute;
+  inset: 0 0 var(--tfw-dock, 0px);
+  overflow: auto;
+  padding: 60px 28px 40px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  mask-image: linear-gradient(to bottom, transparent 44px, rgb(0 0 0 / 0.6) 54px, #000 64px);
+}
+.ov-the-firm .tfw-tbl {
+  --tfw-cols: minmax(0, 1fr) 124px 128px 112px 124px 232px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.ov-the-firm .tfw-tr {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--tfw-cols);
+  align-items: center;
+  column-gap: 14px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.ov-the-firm .tfw-tr[data-tfw-id]:hover {
+  background: var(--hover);
+}
+.ov-the-firm .tfw-tr.is-sel {
+  background: var(--selected);
+}
+.ov-the-firm .tfw-tr--head {
+  min-height: 30px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-the-firm .tfw-tr--head > :first-child {
+  padding-left: 40px;
+}
+.ov-the-firm .tfw-td {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-td > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-the-firm .tfw-td--name {
+  gap: 10px;
+  padding: 8px 0;
+  color: var(--ink);
+  font-size: var(--t-13);
+  white-space: normal;
+}
+.ov-the-firm .tfw-td--name > svg {
+  flex: none;
+}
+.ov-the-firm .tfw-name-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.35;
+}
+.ov-the-firm .tfw-name {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-tr--member .tfw-name {
+  font-weight: var(--w-regular);
+}
+.ov-the-firm .tfw-tr--member .tfw-name b {
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-sub--ask {
+  display: block;
+  overflow: hidden;
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+}
+.ov-the-firm .tfw-sub--ask b {
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-sub code,
+.ov-the-firm .tfw-sel-q code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 0.94em;
+}
+.ov-the-firm .tfw-td--model small,
+.ov-the-firm .tfw-td--by small {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.ov-the-firm .tfw-td--model span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.ov-the-firm .tfw-td--model .br,
+.ov-the-firm .tfw-td--model > svg {
+  flex: none;
+  color: var(--faint);
+}
+.ov-the-firm .tfw-td--st .mark {
+  flex: none;
+}
+.ov-the-firm .tfw-st--waiting {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-st--working {
+  color: var(--accent-ink);
+}
+.ov-the-firm .tfw-td--by span {
+  color: var(--ink);
+}
+.ov-the-firm .tfw-td--by.is-new span::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 6px 1px 0;
+  border-radius: 50%;
+  background: var(--ink);
+  vertical-align: middle;
+}
+.ov-the-firm .tfw-num {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  text-align: right;
+}
+.ov-the-firm .tfw-num small {
+  font-size: var(--t-11);
+}
+.ov-the-firm .tfw-nr {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-the-firm .tfw-team-tag {
+  margin-right: 5px;
+  color: var(--faint);
+}
+.ov-the-firm .tfw-td--act {
+  justify-content: flex-end;
+  gap: 2px;
+}
+.ov-the-firm .tfw-tr--lead:not(.tfw-tr--wait) .tfw-td--act > * {
+  opacity: 0;
+  transition: opacity var(--dur-1);
+}
+.ov-the-firm .tfw-tr--lead:not(.tfw-tr--wait):is(:hover, .is-sel, :focus-within) .tfw-td--act > * {
+  opacity: 1;
+}
+.ov-the-firm .tfw-td--act .btn--quiet {
+  padding: 0 8px;
+}
+.ov-the-firm .tfw-td--act .btn .ic {
+  margin-left: -2px;
+}
+
+.ov-the-firm .tfw-tr--root {
+  min-height: 60px;
+  margin-bottom: 4px;
+}
+.ov-the-firm .tfw-tr--root .tfw-name {
+  font-weight: var(--w-bold);
+}
+
+/* A department's header: the project, its counts, its usage. */
+.ov-the-firm .tfw-dh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  margin-top: 14px;
+  padding: 0 10px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  font-size: var(--t-13);
+}
+.ov-the-firm .tfw-dh .proj {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-dh-name {
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-dh-sub {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-dh--grid {
+  display: grid;
+  grid-template-columns: var(--tfw-cols);
+  column-gap: 14px;
+  height: auto;
+  min-height: 42px;
+}
+.ov-the-firm .tfw-dh-main {
+  display: flex;
+  grid-column: 1 / 5;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ov-the-firm .tfw-dh--grid .tfw-num span {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-span2 {
+  grid-column: span 2;
+}
+.ov-the-firm .tfw-dh--you {
+  margin-top: 4px;
+}
+.ov-the-firm .tfw-team-wide {
+  padding: 2px 0;
+}
+.ov-the-firm .tfw-team-wide + .tfw-team-wide {
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.ov-the-firm .tfw-team-wide.is-team .tfw-tr--lead .tfw-td--name > svg:first-child {
+  position: relative;
+  z-index: 1;
+}
+.ov-the-firm .tfw-tr--member {
+  min-height: 38px;
+}
+.ov-the-firm .tfw-tr--member .tfw-td--name {
+  padding: 5px 0 5px 32px;
+}
+.ov-the-firm .tfw-tr--member .tfw-elbow {
+  top: 0;
+  left: 25px;
+}
+.ov-the-firm .tfw-tr--member .tfw-elbow::after {
+  top: 11px;
+}
+.ov-the-firm .tfw-tr--member .tfw-elbow::before {
+  top: -8px;
+}
+.ov-the-firm .tfw-tr--member.is-last .tfw-elbow::before {
+  height: 27px;
+}
+.ov-the-firm .tfw-tr--member .tfw-said,
+.ov-the-firm .tfw-tr--lead .tfw-said {
+  max-width: 520px;
+  margin: 4px 0 2px;
+}
+.ov-the-firm .tfw-tr--stamp {
+  min-height: 26px;
+}
+.ov-the-firm .tfw-tr--stamp .tfw-td {
+  grid-column: 1 / -1;
+  padding-left: 42px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-the-firm .tfw-tr--more .tfw-td {
+  grid-column: 1 / -1;
+  padding-left: 40px;
+  color: var(--muted);
+}
+.ov-the-firm .tfw-tr--wait.is-answered .tfw-td--name > svg,
+.ov-the-firm .tfw-tr--wait.is-answered .tfw-name {
+  opacity: 0.6;
+}
+.ov-the-firm .tfw-tr--wait.is-answered .tfw-sub--ask {
+  color: var(--accent-ink);
+}
+.ov-the-firm .tfw-run-tile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+}
+.ov-the-firm .tfw-wide-memo {
+  margin: 4px 0 6px;
+}
+
+/* ================================================================== the away memo, wide */
+
+.ov-the-firm .tfw-memo-strip {
+  display: grid;
+  grid-template-columns: 184px repeat(4, minmax(0, 1fr));
+  gap: 0;
+  min-width: 760px;
+  padding: 12px 6px 12px 16px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+  text-align: left;
+}
+.ov-the-firm .tfw-memo-title {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding-right: 12px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-memo-kicker {
+  color: var(--ink);
+  font-family: var(--font-deco);
+  font-size: 17px;
+  line-height: 1.15;
+}
+.ov-the-firm .tfw-memo-g {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 12px;
+  box-shadow: inset 1px 0 0 var(--line-soft);
+}
+.ov-the-firm .tfw-memo-n {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-memo-n b {
+  margin-right: 1px;
+  color: var(--ink);
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-the-firm .tfw-memo-g:last-child .tfw-memo-n,
+.ov-the-firm .tfw-memo-g:last-child .tfw-memo-n b {
+  color: var(--you-ink);
+}
+.ov-the-firm .tfw-memo-faces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.ov-the-firm .tfw-memo-face {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-xs);
+  transition: background var(--dur-1);
+}
+.ov-the-firm .tfw-memo-face:hover {
+  background: var(--hover);
+}
+.ov-the-firm .tfw-memo-note {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ================================================================== the Org Chart */
+
+.ov-the-firm .tfw-org {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--ink) 9%, transparent) 1px, transparent 1.5px) 0 0 / 24px 24px,
+    var(--surface);
+}
+.ov-the-firm .tfw-org.is-panning {
+  cursor: grabbing;
+}
+.ov-the-firm .tfw-org-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.ov-the-firm .tfw-org-canvas.is-gliding {
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.ov-the-firm .tfw-org-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+}
+.ov-the-firm .tfw-edge {
+  fill: none;
+  stroke: color-mix(in oklab, var(--ink) 24%, transparent);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition:
+    stroke var(--dur-1),
+    opacity var(--dur-1);
+}
+.ov-the-firm .tfw-edge.is-dashed {
+  stroke-dasharray: 3 4;
+}
+.ov-the-firm .tfw-org.has-lit .tfw-edge {
+  opacity: 0.35;
+}
+.ov-the-firm .tfw-org.has-lit .tfw-edge.is-lit {
+  opacity: 1;
+  stroke: var(--ink);
+  stroke-width: 1.75;
+}
+.ov-the-firm .tfw-edge.is-drawn {
+  animation: tfw-draw 900ms var(--ease-out) forwards;
+}
+@keyframes tfw-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.ov-the-firm .tfw-org-nodes {
+  position: absolute;
+  inset: 0;
+}
+.ov-the-firm .tfw-node {
+  position: absolute;
+  box-sizing: border-box;
+  transition: opacity var(--dur-1);
+}
+.ov-the-firm .tfw-node.is-moving {
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    opacity var(--dur-1);
+}
+.ov-the-firm .tfw-org.has-lit .tfw-node:not(.is-lit):not(.tfw-node--letterhead) {
+  opacity: 0.42;
+}
+.ov-the-firm .tfw-node[data-tfw-pick] {
+  cursor: pointer;
+}
+
+/* The letterhead: the firm's name in the Deco face, between brass rules. */
+.ov-the-firm .tfw-lh {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.ov-the-firm .tfw-lh-name {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-deco);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-lh-rule {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  border-top: 1px solid var(--brass);
+  border-bottom: 1px solid var(--brass);
+}
+.ov-the-firm .tfw-lh-rule::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  background: var(--brass);
+  transform: rotate(45deg);
+}
+.ov-the-firm .tfw-lh-rule:first-child::after {
+  right: -4px;
+}
+.ov-the-firm .tfw-lh-rule:last-child::after {
+  left: -4px;
+}
+.ov-the-firm .tfw-lh-sub {
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* Rogier's card: the principal. */
+.ov-the-firm .tfw-node--principal {
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-you {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 14px 0 9px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+  font-size: var(--t-12);
+  color: var(--muted);
+}
+.ov-the-firm .tfw-you-name {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.ov-the-firm .tfw-you-name b {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-you-name small,
+.ov-the-firm .tfw-you-fact small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-the-firm .tfw-you-fact {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.ov-the-firm .tfw-you-fact b,
+.ov-the-firm .tfw-you-wait b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ov-the-firm .tfw-you-sep {
+  width: 1px;
+  height: 26px;
+  background: var(--line-soft);
+}
+.ov-the-firm .tfw-you-span {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 9px 3px 9px;
+  border-left: 3px solid var(--brass);
+  border-radius: 2px 7px 7px 2px;
+  color: var(--ink);
+  line-height: 1.25;
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.ov-the-firm .tfw-you-span:hover {
+  background: var(--hover);
+}
+.ov-the-firm .tfw-you-span b {
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-you-span small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-the-firm .tfw-you-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-you-wait b {
+  color: var(--you-ink);
+}
+.ov-the-firm .tfw-you-faces {
+  display: inline-flex;
+}
+.ov-the-firm .tfw-you-faces button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 26px;
+  margin-right: -3px;
+  border-radius: var(--r-xs);
+  transition: transform var(--dur-1) var(--ease-spring);
+}
+.ov-the-firm .tfw-you-faces button:hover {
+  transform: translateY(-2px);
+}
+
+/* A department's plate: the project's rug, its counts, its usage. */
+.ov-the-firm .tfw-plate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 11px 0 9px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--rug) 42%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--rug) 70%, var(--line));
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-plate::before {
+  display: none;
+}
+.ov-the-firm .tfw-plate--none {
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.ov-the-firm .tfw-plate-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-plate-name .proj {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-plate-icon {
+  display: grid;
+  color: var(--muted);
+}
+.ov-the-firm .tfw-plate-facts {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-plate-facts b {
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-plate .count {
+  min-width: 18px;
+  height: 17px;
+  padding: 0 5px;
+  font-size: 10.5px;
+}
+.ov-the-firm .tfw-plate .spacer {
+  flex: 1;
+}
+.ov-the-firm .tfw-plate-tok {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--w-medium);
+}
+
+/* A card: a lead, a manager, a partner, a run. */
+.ov-the-firm .tfw-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px 8px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  transition: box-shadow var(--dur-1);
+}
+.ov-the-firm .tfw-node:hover .tfw-card {
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-2);
+}
+.ov-the-firm .tfw-node.is-waiting:not(.tfw-node--run) .tfw-card {
+  background: color-mix(in oklab, var(--you-tint) 55%, var(--raised));
+  box-shadow: inset 0 0 0 1.5px var(--you), var(--shadow-1);
+}
+.ov-the-firm .tfw-node.is-sel .tfw-card {
+  box-shadow: inset 0 0 0 1.5px var(--ink), var(--shadow-2);
+}
+.ov-the-firm .tfw-node.is-waiting.is-sel .tfw-card {
+  box-shadow: inset 0 0 0 1.5px var(--you), 0 0 0 2px var(--surface), 0 0 0 3.5px var(--ink), var(--shadow-2);
+}
+.ov-the-firm .tfw-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ov-the-firm .tfw-card-top > svg,
+.ov-the-firm .tfw-card-top > .tfw-run-tile {
+  flex: none;
+}
+.ov-the-firm .tfw-card-top .tfw-run-tile {
+  width: 28px;
+  height: 28px;
+}
+.ov-the-firm .tfw-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-width: 0;
+  padding-top: 1px;
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: 1.3;
+}
+.ov-the-firm .tfw-card-title small {
+  display: block;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.ov-the-firm .tfw-card-name {
+  min-width: 0;
+  padding-top: 2px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-card-name b {
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-card-meta > span {
+  flex: none;
+}
+.ov-the-firm .tfw-card-meta > .tfw-model {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-the-firm .tfw-card-meta .tfw-card-tok {
+  margin-left: auto;
+  padding-left: 6px;
+}
+.ov-the-firm .tfw-card-meta > svg,
+.ov-the-firm .tfw-card-meta .br {
+  flex: none;
+  color: var(--faint);
+}
+.ov-the-firm .tfw-card-meta i {
+  color: var(--faint);
+  font-style: normal;
+}
+.ov-the-firm .tfw-card .tfw-card-meta {
+  padding-left: 36px;
+}
+.ov-the-firm .tfw-card--member .tfw-card-meta,
+.ov-the-firm .tfw-card--member .tfw-card-note,
+.ov-the-firm .tfw-card--member .tfw-card-ask {
+  padding-left: 30px;
+}
+.ov-the-firm .tfw-card--member {
+  gap: 2px;
+  padding: 7px 9px 7px;
+}
+.ov-the-firm .tfw-card-note {
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 1.35;
+}
+.ov-the-firm .tfw-card-ask {
+  padding-left: 36px;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  line-height: 1.35;
+}
+.ov-the-firm .tfw-card-ask b {
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-card-tok {
+  margin-left: auto;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.ov-the-firm .tfw-card-tok small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+.ov-the-firm .tfw-said--card {
+  margin: 3px 0 1px 36px;
+}
+.ov-the-firm .tfw-card--member .tfw-said--card {
+  margin: 5px -2px 1px;
+}
+.ov-the-firm .tfw-new {
+  position: absolute;
+  top: -8px;
+  right: 8px;
+  height: 17px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  line-height: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A run's steps as dots: done, at work, waiting on you, to come. */
+.ov-the-firm .tfw-steps {
+  display: inline-flex;
+  gap: 3px;
+}
+.ov-the-firm .tfw-step {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+.ov-the-firm .tfw-step--completed {
+  background: var(--muted);
+  box-shadow: none;
+}
+.ov-the-firm .tfw-step--running {
+  background: var(--accent);
+  box-shadow: none;
+}
+.ov-the-firm .tfw-step--waiting {
+  background: var(--you);
+  box-shadow: none;
+}
+.ov-the-firm .tfw-step--paused {
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+.ov-the-firm .tfw-card--run .tfw-card-meta {
+  gap: 7px;
+}
+/* A run's step session, inside its run's card. */
+.ov-the-firm .tfw-staff {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 7px;
+  margin: 4px -4px -2px;
+  padding: 5px 8px 5px 6px;
+  border-radius: 8px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-12);
+  text-align: left;
+  transition: box-shadow var(--dur-1);
+}
+.ov-the-firm .tfw-staff:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ov-the-firm .tfw-staff.is-sel {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.ov-the-firm .tfw-staff.is-waiting {
+  background: color-mix(in oklab, var(--you-tint) 70%, var(--raised));
+  box-shadow: inset 0 0 0 1.5px var(--you);
+}
+.ov-the-firm .tfw-staff.is-waiting.is-sel {
+  box-shadow: inset 0 0 0 1.5px var(--you), 0 0 0 1.5px var(--ink);
+}
+.ov-the-firm .tfw-staff-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-staff-name b {
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-staff-ask {
+  grid-column: 2 / -1;
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-node--run--done .tfw-card {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.ov-the-firm .tfw-st--working {
+  color: var(--accent-ink);
+}
+.ov-the-firm .tfw-st--idle,
+.ov-the-firm .tfw-st--age {
+  color: var(--muted);
+}
+
+/* The span of control: a note under a lead that manages eight or more. */
+.ov-the-firm .tfw-span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px 8px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  border-left: 3px solid var(--brass);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.35;
+}
+.ov-the-firm .tfw-span b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-resting {
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.ov-the-firm .tfw-resting-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: left;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-resting-row:hover {
+  background: var(--hover);
+}
+.ov-the-firm .tfw-resting-row.is-sel,
+.ov-the-firm .tfw-resting-row:focus-visible {
+  background: var(--selected);
+}
+.ov-the-firm .tfw-resting-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+.ov-the-firm .tfw-node--more {
+  padding: 8px 10px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-more-n {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+/* A new hire grows out of its lead. */
+@media (prefers-reduced-motion: no-preference) {
+  .ov-the-firm .tfw-node.is-born {
+    animation: tfw-born 700ms var(--ease-spring) 250ms both;
+    transform-origin: 14px 0;
+  }
+}
+@keyframes tfw-born {
+  from {
+    opacity: 0;
+    transform: translateY(-22px) scale(0.6);
+  }
+}
+
+/* A message inside a card: what a partner just sent its lead, or the brief a new partner got. */
+.ov-the-firm .tfw-msg {
+  margin: 5px -2px 1px;
+  padding: 6px 9px 7px;
+  border-radius: 9px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.ov-the-firm .tfw-msg-h {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.ov-the-firm .tfw-msg-h .ic {
+  transform: rotate(-45deg);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-the-firm .tfw-msg {
+    animation: tfw-say 400ms var(--ease-out) 600ms both;
+  }
+}
+
+/* A message on its way: a marigold dot that travels the line from the partner up to its lead. */
+.ov-the-firm .tfw-pulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--you);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 10px 2px color-mix(in oklab, var(--you) 60%, transparent);
+  offset-rotate: 0deg;
+  offset-distance: 0%;
+  opacity: 0;
+  pointer-events: none;
+  animation: tfw-travel-down 3.8s linear infinite;
+}
+.ov-the-firm .tfw-pulse.is-up {
+  animation-name: tfw-travel-up;
+}
+@keyframes tfw-travel-up {
+  0% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+  5% {
+    opacity: 1;
+  }
+  40% {
+    offset-distance: 0%;
+    opacity: 1;
+  }
+  46%,
+  100% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+}
+@keyframes tfw-travel-down {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  5% {
+    opacity: 1;
+  }
+  40% {
+    offset-distance: 100%;
+    opacity: 1;
+  }
+  46%,
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+/* The legend and the zoom share one pill at the bottom right. */
+.ov-the-firm .tfw-legend {
+  display: inline-flex;
+  gap: 14px;
+  padding: 0 10px 0 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ov-the-firm .tfw-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-the-firm .tfw-lg-line {
+  width: 18px;
+  border-top: 1.25px solid color-mix(in oklab, var(--ink) 40%, transparent);
+}
+.ov-the-firm .tfw-lg-line--dash {
+  border-top-style: dashed;
+}
+.ov-the-firm .tfw-lg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--you);
+}
+.ov-the-firm .tfw-zoom {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  gap: 0;
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  backdrop-filter: blur(14px) saturate(1.4);
+}
+.ov-the-firm .tfw-zoom-pct {
+  min-width: 52px;
+  justify-content: center;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================== the Office */
+
+.ov-the-firm .tfw-office-host {
+  position: absolute;
+  inset: 0;
+}
+
+/* The Dollhouse's elevation, while the 3D module is missing. */
+.ov-the-firm .tfw-house-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 64px 40px 30px;
+  background:
+    linear-gradient(to bottom, transparent 82%, color-mix(in oklab, var(--room-lawn) 22%, transparent) 82%),
+    var(--surface);
+}
+.ov-the-firm .tfw-house {
+  position: relative;
+  width: min(900px, 100%);
+}
+.ov-the-firm .tfw-roof {
+  position: relative;
+  height: 54px;
+  margin: 0 70px;
+  border-radius: 10px 10px 0 0;
+  background: var(--room-inlay-2);
+  clip-path: polygon(6% 100%, 6% 40%, 14% 40%, 14% 18%, 30% 18%, 30% 0, 70% 0, 70% 18%, 86% 18%, 86% 40%, 94% 40%, 94% 100%);
+  display: grid;
+  place-items: center;
+}
+.ov-the-firm .tfw-roof-name {
+  margin-top: 6px;
+  color: var(--brass);
+  font-family: var(--font-deco);
+  font-size: 22px;
+  letter-spacing: 0.04em;
+}
+.ov-the-firm .tfw-house-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 44px 0 0;
+  border: 6px solid var(--room-inlay-2);
+  border-top-width: 4px;
+  border-radius: 4px;
+  background: var(--room-wall);
+}
+.ov-the-firm .tfw-floor {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  min-height: 66px;
+  border-bottom: 4px solid var(--room-inlay-2);
+}
+.ov-the-firm .tfw-floor:last-of-type {
+  border-bottom: 0;
+}
+.ov-the-firm .tfw-floor-name {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ov-the-firm .tfw-floor-rooms {
+  display: flex;
+  gap: 0;
+}
+.ov-the-firm .tfw-room {
+  display: flex;
+  flex-basis: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-right: 2px solid color-mix(in oklab, var(--room-inlay-2) 40%, transparent);
+  background: color-mix(in oklab, var(--rug, var(--room-floor)) 45%, var(--room-wall));
+  cursor: pointer;
+  transition: background var(--dur-1);
+}
+.ov-the-firm .tfw-room:hover {
+  background: color-mix(in oklab, var(--rug, var(--room-floor)) 70%, var(--room-wall));
+}
+.ov-the-firm .tfw-room.is-waiting {
+  box-shadow: inset 0 -3px 0 var(--you);
+}
+.ov-the-firm .tfw-room-faces {
+  display: flex;
+  gap: 2px;
+}
+.ov-the-firm .tfw-room-label {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-lift {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 44px;
+  border-left: 2px solid var(--brass);
+  background: repeating-linear-gradient(45deg, transparent 0 6px, color-mix(in oklab, var(--brass) 30%, transparent) 6px 7px);
+}
+.ov-the-firm .tfw-lift i {
+  position: absolute;
+  top: 8px;
+  left: 7px;
+  width: 26px;
+  height: 46px;
+  border: 2px solid var(--brass);
+  border-radius: 3px;
+  background: var(--room-wall);
+}
+.ov-the-firm .tfw-ground {
+  height: 8px;
+  margin: 0 -30px;
+  border-radius: 4px;
+  background: var(--room-inlay-2);
+}
+.ov-the-firm .tfw-house-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 12px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* ================================================================== the selection card */
+
+.ov-the-firm .tfw-sel {
+  position: absolute;
+  z-index: 9;
+  left: 18px;
+  bottom: 18px;
+  width: 380px;
+  padding: 13px 14px 12px;
+  border-radius: var(--r-xl);
+}
+.ov-the-firm .tfw-sel[hidden] {
+  display: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-the-firm .tfw-sel:not([hidden]) {
+    animation: tfw-say var(--dur-2) var(--ease-out);
+  }
+}
+.ov-the-firm .tfw-sel-h {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ov-the-firm .tfw-sel-h > svg,
+.ov-the-firm .tfw-sel-h > .tfw-run-tile {
+  flex: none;
+}
+.ov-the-firm .tfw-run-tile--lg {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+.ov-the-firm .tfw-sel-h .who-text {
+  gap: 3px;
+  padding-top: 1px;
+  line-height: 1.3;
+}
+.ov-the-firm .tfw-sel-h .who-name {
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-sel-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 9px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-sel-sub b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-the-firm .tfw-sel-sub .chip {
+  height: 19px;
+  margin-right: 1px;
+  padding: 0 7px;
+  font-size: var(--t-11);
+}
+.ov-the-firm .tfw-sel-of {
+  color: var(--ink);
+}
+.ov-the-firm .tfw-sel-x {
+  margin: -3px -4px 0 auto;
+}
+.ov-the-firm .tfw-sel-by {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-the-firm .tfw-sel-by > svg,
+.ov-the-firm .tfw-sel-by .br {
+  flex: none;
+  color: var(--faint);
+}
+.ov-the-firm .tfw-sel-dot {
+  color: var(--faint);
+}
+.ov-the-firm .tfw-sel-q {
+  margin: 9px 0 11px;
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: 1.4;
+}
+.ov-the-firm .tfw-sel-q--done {
+  color: var(--accent-ink);
+}
+.ov-the-firm .tfw-sel-line2 {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin: 8px 0 11px;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 1.4;
+}
+.ov-the-firm .tfw-sel-tag {
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  vertical-align: 1px;
+}
+.ov-the-firm .tfw-sel-a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-the-firm .tfw-sel-a .btn .ic {
+  margin-right: -3px;
+}
+
+/* ================================================================== the brief popover */
+
+.ov-the-firm .tfw-brief {
+  position: absolute;
+  z-index: 12;
+  width: 360px;
+  padding: 12px;
+  border-radius: var(--r-lg);
+}
+.ov-the-firm .tfw-brief[hidden] {
+  display: none;
+}
+.ov-the-firm .tfw-brief-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+  font-size: var(--t-13);
+}
+.ov-the-firm .tfw-brief-h b {
+  font-weight: var(--w-bold);
+}
+.ov-the-firm .tfw-brief-h span {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-the-firm .tfw-brief-in {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 76px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  resize: none;
+  font: inherit;
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.ov-the-firm .tfw-brief-a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* ================================================================== the open thread's header */
+
+.ov-the-firm .tfw-thread-top .pill {
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  backdrop-filter: blur(14px) saturate(1.4);
+}
+.ov-the-firm .tfw-thread-title {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 4px;
+}
+.ov-the-firm .tfw-thread-top .pill-sep {
+  margin: 0 4px 0 2px;
+}
+.ov-the-firm .tfw-thread-top .pill-btn {
+  gap: 8px;
+  padding-left: 8px;
+  color: var(--muted);
+}
+.ov-the-firm .tfw-thread-top .pill-btn:hover {
+  color: var(--ink);
+}
+.ov-the-firm .tfw-span span {
+  text-wrap: pretty;
+}
+/* A row that carries a stand-up line keeps its face beside the name, not centred on the quote. */
+.ov-the-firm .tfw-td--name:has(.tfw-said) {
+  align-items: flex-start;
+}
+.ov-the-firm .tfw-td--name:has(.tfw-said) > svg {
+  margin-top: 2px;
+}
+
+/* ================================================================== the selection card, docked in Threads */
+
+/* In Threads the card is a bar along the bottom of the pane: who on the left, the ask or the last
+   line in the middle, the answers and Open thread on the right. The table ends above it. */
+.ov-the-firm .tfw-sel-x--dock {
+  display: none;
+}
+.ov-the-firm .tfw-sel.is-docked {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 420px) minmax(0, 1fr) auto;
+  grid-template-areas:
+    "head body acts"
+    "by body acts";
+  align-items: center;
+  column-gap: 28px;
+  row-gap: 4px;
+  width: auto;
+  padding: 11px 26px 12px 38px;
+  border-radius: 0;
+  background: var(--raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: 0 -1px 0 var(--line), 0 -8px 24px -16px oklch(0 0 0 / 0.25);
+  animation: none;
+}
+.ov-the-firm .tfw-sel.is-docked .tfw-sel-h {
+  grid-area: head;
+  align-items: center;
+}
+.ov-the-firm .tfw-sel.is-docked .tfw-sel-h > .tfw-sel-x {
+  display: none;
+}
+.ov-the-firm .tfw-sel.is-docked .tfw-sel-by {
+  grid-area: by;
+  column-gap: 12px;
+  margin: 0;
+  padding-left: 44px;
+}
+.ov-the-firm .tfw-sel.is-docked .tfw-sel-dot {
+  display: none;
+}
+.ov-the-firm .tfw-sel.is-docked :is(.tfw-sel-q, .tfw-sel-line2) {
+  grid-area: body;
+  margin: 0;
+  padding-left: 24px;
+  box-shadow: inset 1px 0 0 var(--line-soft);
+}
+.ov-the-firm .tfw-sel.is-docked .tfw-sel-a {
+  grid-area: acts;
+}
+.ov-the-firm .tfw-sel.is-docked .tfw-sel-a > .spacer {
+  flex: 0 0 6px;
+}
+.ov-the-firm .tfw-sel.is-docked .tfw-sel-x--dock {
+  display: inline-grid;
+  margin-left: 4px;
+}
+
+/* The count pills say what they count. */
+.ov-the-firm .tfw-sum .tfw-sum-all {
+  padding-right: 12px;
+  box-shadow: inset -1px 0 0 var(--line);
+  color: var(--faint);
+}
+.ov-the-firm .tfw-sum .tfw-sum-all b {
+  color: var(--muted);
+}
+.ov-the-firm .side-sum .tfw-sum-all {
+  color: var(--faint);
+}

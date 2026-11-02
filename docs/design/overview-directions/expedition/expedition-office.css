@@ -1,0 +1,485 @@
+/* PROTOTYPE - Expedition's Office, the Range: the labels over the 3D scene and its small HUD.
+ *
+ * Every rule sits under .ov-expedition-office, the class the module puts on its container.
+ * Nothing here blurs what is behind it: a backdrop-filter over the live canvas would make the
+ * browser composite the whole window on every frame (OFFICE-KIT.md). Labels use solid fills.
+ *
+ * Level of detail follows the camera's distance, through a class on the container:
+ *   exo-lod-far    the whole range: massif labels, and only the asks that wait on you
+ *   exo-lod-mid    one massif: every rope team's name and camp
+ *   exo-lod-near   one team: the camp it heads for, too
+ */
+
+.ov-expedition-office {
+  --exo-tag-fill: color-mix(in oklab, var(--raised) 95%, transparent);
+  font-family: var(--font-ui);
+}
+
+/* ---------------------------------------------------------------- a rope team's tag */
+
+.ov-expedition-office .exo-tag {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  max-width: 260px;
+  padding: 5px 10px 6px 9px;
+  border-radius: 10px;
+  background: var(--exo-tag-fill);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-11);
+  line-height: 15px;
+  white-space: nowrap;
+  cursor: pointer;
+  translate: calc(-50% + var(--exo-dx, 0px)) calc(-100% - 6px - var(--exo-lift, 0px));
+  transition:
+    box-shadow var(--dur-1) var(--ease-out),
+    opacity var(--dur-2) var(--ease-out);
+}
+
+/* A tag that would leave the top of the canvas waits until the camera brings it back. */
+.ov-expedition-office .exo-tag.is-offstage,
+.ov-expedition-office .exo-small.is-offstage {
+  opacity: 0;
+  pointer-events: none !important;
+}
+
+/* A tag lifted off a neighbour keeps a leader line down to its climber. */
+.ov-expedition-office .exo-tag.is-lifted::before {
+  content: "";
+  position: absolute;
+  left: calc(50% - var(--exo-dx, 0px));
+  top: 100%;
+  width: 1px;
+  height: var(--exo-lift, 0px);
+  background: color-mix(in oklab, var(--ink) 35%, transparent);
+}
+
+/* The tail that points at the lead's head. */
+.ov-expedition-office .exo-tag::after {
+  content: "";
+  position: absolute;
+  left: clamp(12px, calc(50% - var(--exo-dx, 0px)), calc(100% - 12px));
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  background: inherit;
+  box-shadow: inset -1px -1px 0 0 var(--line-soft);
+  transform: rotate(45deg);
+}
+
+.ov-expedition-office .exo-tag:hover {
+  z-index: 3;
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px color-mix(in oklab, var(--who) 70%, transparent);
+}
+
+.ov-expedition-office .exo-tag.is-selected {
+  z-index: 4;
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1.5px var(--who);
+}
+
+.ov-expedition-office .exo-tag__head {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-expedition-office .exo-tag__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--who);
+}
+
+.ov-expedition-office .exo-tag__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--w-bold);
+}
+
+/* The partners on the rope, as dots behind the lead's name. */
+.ov-expedition-office .exo-tag__crew {
+  display: flex;
+  gap: 3px;
+  margin-left: 1px;
+}
+
+.ov-expedition-office .exo-tag__mate {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--who);
+  box-shadow: 0 0 0 1px var(--raised);
+}
+
+.ov-expedition-office .exo-tag__mate.is-waiting {
+  background: var(--you);
+}
+
+.ov-expedition-office .exo-tag__where {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-expedition-office .exo-tag__where b {
+  color: var(--who-ink);
+  font-weight: var(--w-medium);
+}
+
+.ov-expedition-office .exo-tag--landed .exo-tag__where b {
+  color: var(--muted);
+}
+
+.ov-expedition-office .exo-tag__next {
+  display: none;
+}
+
+.ov-expedition-office .exo-tag__notes {
+  display: flex;
+  gap: 6px;
+  padding-left: 13px;
+}
+
+.ov-expedition-office .exo-tag__note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.ov-expedition-office .exo-tag__note--grew,
+.ov-expedition-office .exo-tag__note--news {
+  color: var(--who-ink);
+  font-weight: var(--w-medium);
+}
+
+.ov-expedition-office .exo-tag__note--stuck .exo-i__fill {
+  fill: var(--faint);
+}
+
+/* What waits on you: marigold, the one colour that means "you". */
+.ov-expedition-office .exo-tag__ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  padding: 1px 8px 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--you-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--you) 55%, transparent);
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+.ov-expedition-office .exo-tag__who {
+  color: var(--you-ink);
+  font-weight: var(--w-regular);
+  opacity: 0.8;
+}
+
+.ov-expedition-office .exo-tag__who::after {
+  content: " ·";
+}
+
+/* The compact form the far view uses. */
+.ov-expedition-office .exo-tag__chip {
+  display: none;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ---------------------------------------------------------------- levels of detail */
+
+/* Far: only the asks that wait on you, as marigold chips over their climbers (and, in the away
+ * state, what moved while you were out). */
+.ov-expedition-office.exo-lod-far .exo-tag:not(.exo-tag--waiting):not(.exo-tag--news):not(.is-selected) {
+  opacity: 0;
+  pointer-events: none !important;
+}
+
+.ov-expedition-office.exo-lod-far .exo-tag--waiting:not(.is-selected) {
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--r-pill);
+  background: var(--you-tint);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px color-mix(in oklab, var(--you) 60%, transparent);
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+.ov-expedition-office.exo-lod-far .exo-tag--waiting:not(.is-selected) > :not(.exo-tag__chip) {
+  display: none;
+}
+
+.ov-expedition-office.exo-lod-far .exo-tag--waiting:not(.is-selected) .exo-tag__chip {
+  display: inline-flex;
+}
+
+.ov-expedition-office.exo-lod-far .exo-tag--waiting .exo-tag__chip .exo-tag__dot {
+  display: none;
+}
+
+.ov-expedition-office.exo-lod-far .exo-tag--news:not(.exo-tag--waiting):not(.is-selected) {
+  padding: 3px 9px 3px 8px;
+  border-radius: var(--r-pill);
+  color: var(--who-ink);
+  font-weight: var(--w-medium);
+}
+
+.ov-expedition-office.exo-lod-far .exo-tag--news:not(.exo-tag--waiting):not(.is-selected) > :not(.exo-tag__chip) {
+  display: none;
+}
+
+.ov-expedition-office.exo-lod-far .exo-tag--news:not(.exo-tag--waiting):not(.is-selected) .exo-tag__chip {
+  display: inline-flex;
+}
+
+/* A far chip with no room folds to a pip: the marigold flag alone. Hover shows the ask. */
+.ov-expedition-office.exo-lod-far .exo-tag.is-pip:not(:hover) {
+  padding: 4px;
+  gap: 0;
+}
+
+.ov-expedition-office.exo-lod-far .exo-tag.is-pip:not(:hover) .exo-tag__chip {
+  font-size: 0;
+  gap: 0;
+}
+
+/* Near, or selected: the camp it heads for, too. */
+.ov-expedition-office.exo-lod-near .exo-tag__next,
+.ov-expedition-office .exo-tag.is-selected .exo-tag__next {
+  display: inline;
+}
+
+/* ---------------------------------------------------------------- the lodge's and the road's tags */
+
+.ov-expedition-office .exo-small {
+  cursor: pointer;
+  translate: calc(-50% + var(--exo-dx, 0px)) calc(-100% - var(--exo-lift, 0px));
+}
+
+.ov-expedition-office .exo-small.is-selected {
+  z-index: 4;
+}
+
+.ov-expedition-office.exo-lod-far .exo-small:not(.exo-small--waiting):not(.is-selected) {
+  opacity: 0;
+  pointer-events: none !important;
+}
+
+.ov-expedition-office.exo-lod-far .exo-small--waiting:not(.is-selected) .office-tag__name {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- a massif's label */
+
+.ov-expedition-office .exo-massif {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: pointer;
+  translate: calc(-50% + var(--exo-dx, 0px)) -50%;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+
+.ov-expedition-office .exo-massif:hover {
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line);
+}
+
+.ov-expedition-office .exo-massif__mark {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--proj);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 18%, transparent);
+  transform: rotate(45deg);
+}
+
+.ov-expedition-office .exo-massif__name {
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ov-expedition-office .exo-massif__count + .exo-massif__count::before,
+.ov-expedition-office .exo-massif__you + .exo-massif__count::before,
+.ov-expedition-office .exo-massif__count + .exo-massif__you::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--faint);
+}
+
+.ov-expedition-office .exo-massif__you {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+
+.ov-expedition-office:not(.exo-lod-far) .exo-massif--top {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ov-expedition-office.exo-lod-near .exo-massif--lodge,
+.ov-expedition-office.exo-lod-mid .exo-massif--lodge {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Away: where a route stood when you left. */
+.ov-expedition-office .exo-ghost {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--muted);
+  font-size: var(--t-11);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  translate: 0 0;
+}
+
+/* ---------------------------------------------------------------- icons */
+
+.ov-expedition-office .exo-i {
+  flex: none;
+  display: block;
+}
+
+.ov-expedition-office .exo-i--flag {
+  color: var(--you-ink);
+}
+
+.ov-expedition-office .exo-i--flag .exo-i__fill {
+  fill: var(--you);
+}
+
+.ov-expedition-office .exo-i--cloud .exo-i__fill {
+  fill: var(--faint);
+}
+
+.ov-expedition-office .exo-i--tent {
+  color: var(--muted);
+}
+
+.ov-expedition-office .exo-i--tent .exo-i__fill {
+  fill: var(--muted);
+}
+
+.ov-expedition-office .exo-i--contour {
+  color: var(--muted);
+}
+
+.ov-expedition-office .exo-i--summit {
+  color: var(--muted);
+}
+
+.ov-expedition-office .exo-i--summit .exo-i__fill {
+  fill: var(--brass);
+}
+
+/* ---------------------------------------------------------------- the HUD: legend and "Whole range" */
+
+.ov-expedition-office .exo-hud {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.ov-expedition-office .exo-legend,
+.ov-expedition-office .exo-hud__whole {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-12);
+  pointer-events: auto;
+}
+
+.ov-expedition-office .exo-legend {
+  gap: 14px;
+  padding: 0 14px;
+  color: var(--muted);
+}
+
+.ov-expedition-office .exo-legend__title {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+.ov-expedition-office .exo-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-expedition-office .exo-hud__whole {
+  gap: 7px;
+  padding: 0 14px 0 12px;
+  border: 0;
+  color: var(--ink);
+  font-family: inherit;
+  font-weight: var(--w-medium);
+  cursor: pointer;
+}
+
+.ov-expedition-office .exo-hud__whole:hover {
+  background: var(--hover);
+}
+
+.ov-expedition-office:not(.exo-has-selection).exo-lod-far .exo-hud__whole {
+  display: none;
+}
+
+.ov-expedition-office.exo-narrow .exo-legend {
+  display: none;
+}
+
+/* A narrow screen with a selection focuses on it: the selected team's tag and what waits on you. */
+.ov-expedition-office.exo-narrow.exo-has-selection .exo-tag:not(.is-selected):not(.exo-tag--waiting),
+.ov-expedition-office.exo-narrow.exo-has-selection .exo-small:not(.is-selected):not(.exo-small--waiting) {
+  opacity: 0;
+  pointer-events: none !important;
+}
