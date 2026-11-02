@@ -1,0 +1,171 @@
+/* PROTOTYPE - throwaway. The floating bar that switches the variants. It is
+   prototype chrome, not part of any design: ink on a dark pill, so it never
+   reads as part of the page. */
+.fp-switcher {
+  position: fixed;
+  z-index: 100;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: oklch(0.2 0.01 250);
+  color: oklch(0.96 0 0);
+  box-shadow:
+    0 0 0 1px oklch(1 0 0 / 0.08),
+    0 10px 30px -6px oklch(0 0 0 / 0.5);
+  font-size: 12px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.fp-switcher button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: inherit;
+}
+.fp-switcher button:hover {
+  background: oklch(1 0 0 / 0.12);
+}
+.fp-switcher-label {
+  min-width: 168px;
+  padding: 0 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+.fp-switcher-label b {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  border-radius: 5px;
+  background: oklch(0.96 0 0);
+  color: oklch(0.2 0.01 250);
+  font-size: 11px;
+}
+.fp-switcher-rule {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: oklch(1 0 0 / 0.16);
+}
+.fp-switcher select {
+  height: 26px;
+  margin-right: 4px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 13px;
+  background: oklch(1 0 0 / 0.1);
+  color: inherit;
+  font: inherit;
+}
+.fp-switcher select option {
+  color: initial;
+}
+
+.fp-switcher-audit {
+  width: auto !important;
+  padding: 0 10px;
+  border-radius: 13px !important;
+  white-space: nowrap;
+}
+.fp-switcher-audit[aria-pressed="true"] {
+  background: oklch(0.55 0.2 300) !important;
+}
+
+/* ---------- The data check ---------- */
+/* Prototype chrome too: a violet no theme uses, so it never reads as design. */
+html[data-audit] [data-needs] {
+  position: relative;
+  outline: 1.5px dashed oklch(0.6 0.22 300);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+html[data-audit] [data-needs]::after {
+  content: attr(data-needs);
+  position: absolute;
+  z-index: 20;
+  top: -10px;
+  right: -6px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: oklch(0.52 0.22 300);
+  color: white;
+  font:
+    600 9.5px/1.35 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.fp-datakey {
+  position: fixed;
+  z-index: 99;
+  right: 16px;
+  bottom: 64px;
+  width: 340px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: oklch(0.2 0.01 250);
+  color: oklch(0.96 0 0);
+  box-shadow: 0 12px 32px -8px oklch(0 0 0 / 0.5);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.fp-datakey p {
+  margin: 4px 0 10px;
+  color: oklch(0.8 0 0);
+}
+.fp-datakey dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+.fp-datakey dt {
+  display: inline-block;
+  margin-bottom: 1px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: oklch(0.52 0.22 300);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.fp-datakey dd {
+  margin: 0;
+  color: oklch(0.85 0 0);
+}
+.fx-spark-wrap {
+  display: block;
+}
+.fp-datakey-hide {
+  float: right;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: oklch(1 0 0 / 0.12);
+  color: inherit;
+  font: inherit;
+}
+.fp-datakey-show {
+  position: fixed;
+  z-index: 99;
+  right: 16px;
+  bottom: 64px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  background: oklch(0.52 0.22 300);
+  color: white;
+  font:
+    600 12px ui-sans-serif,
+    system-ui,
+    sans-serif;
+}

@@ -1,0 +1,689 @@
+/* PROTOTYPE - throwaway. Variant A, "Board". */
+
+.fpa {
+  container: fpa / inline-size;
+}
+.fpa .bar .btn .ic {
+  margin-left: -3px;
+}
+
+.fpa-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  box-shadow: inset 0 1px 0 var(--divider);
+}
+.fpa-board {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  container: fpa-board / inline-size;
+}
+.fpa-inner {
+  padding: 26px 28px 96px;
+}
+
+/* ---------- The numbers at the top ---------- */
+.fpa-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 56px;
+  padding: 0 8px 30px;
+}
+.fpa-stat {
+  display: grid;
+  gap: 2px;
+}
+.fpa-stat b {
+  font-size: var(--t-num);
+  font-weight: var(--w-medium);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.fpa-stat b small {
+  color: var(--faint);
+  font-size: var(--t-14);
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+}
+.fpa-stat > span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.fpa-stat.is-you b {
+  color: var(--you-ink);
+}
+
+.fpa-sec + .fpa-sec {
+  margin-top: 30px;
+}
+.fpa-sec > .fp-gh {
+  padding: 0 8px;
+}
+
+/* ---------- Needs you ---------- */
+.fpa-issues {
+  margin-top: 4px;
+}
+.fpa-issue {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 8px 14px;
+}
+.fpa-issue::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--divider);
+}
+.fpa-issue > .mark {
+  margin-top: 2px;
+}
+.fpa-issue-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.fpa-issue-text p {
+  margin: 0;
+}
+.fpa-issue-text b {
+  font-weight: var(--w-bold);
+}
+.fpa-issue-text > span {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+  max-width: 640px;
+}
+.fpa-issue-acts {
+  flex: none;
+  align-self: center;
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------- The table ---------- */
+.fpa-table {
+  margin-top: 4px;
+}
+.fpa-heads,
+.fpa-row {
+  display: grid;
+  grid-template-columns: 8px minmax(170px, 1.3fr) 140px 132px 132px minmax(150px, 1fr) 14px;
+  align-items: center;
+  gap: 18px;
+  padding: 0 10px;
+}
+.fpa-heads {
+  height: 30px;
+  box-shadow: inset 0 -1px 0 var(--divider);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.fpa-row {
+  position: relative;
+  width: 100%;
+  height: 62px;
+  border-radius: var(--r-md);
+  text-align: left;
+  text-rendering: inherit;
+  transition: background var(--dur-1);
+}
+.fpa-row + .fpa-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--divider);
+}
+.fpa-row:hover {
+  background: var(--hover);
+}
+.fpa-row.is-open {
+  background: var(--selected);
+}
+.fpa-row:is(:hover, .is-open)::before,
+.fpa-row:is(:hover, .is-open) + .fpa-row::before {
+  border-top-color: transparent;
+}
+.fpa-row > .ic {
+  color: var(--faint);
+}
+.fpa-name {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.fpa-name b {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: var(--w-bold);
+}
+.fpa-name b small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.fpa-name > span,
+.fpa-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.fpa-sub.is-you {
+  color: var(--you-ink);
+}
+.fpa-cell {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.fpa-meter-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fpa-pct {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fpa-pct.is-you {
+  color: var(--you-ink);
+}
+.fpa-harness {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.fpa-harness > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.fpa-harness .fp-tool-mark {
+  color: var(--muted);
+}
+.fpa-harness .is-older,
+.fpa-harness .is-older .fp-tool-mark {
+  color: var(--you-ink);
+}
+.fpa-offline {
+  grid-column: span 4;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.fpa-offline span {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.fpa-row.is-off .fpa-name b {
+  color: var(--muted);
+}
+.fpa-row.is-off .fpa-offline {
+  grid-column: 3 / span 4;
+}
+/* A narrow board puts an issue's button under its text, and shows the
+   sessions as a count rather than pips. */
+@container fpa-board (width < 640px) {
+  .fpa-issue {
+    flex-wrap: wrap;
+  }
+  .fpa-issue-text {
+    flex-basis: calc(100% - 26px);
+  }
+  .fpa-issue-acts {
+    align-self: auto;
+    margin-left: 26px;
+  }
+  .fpa-heads,
+  .fpa-row {
+    grid-template-columns: 8px minmax(120px, 1fr) 100px 104px 14px !important;
+    gap: 14px;
+  }
+  .fpa-row .fp-pips {
+    display: none;
+  }
+  .fpa-cell .fpa-sub {
+    color: var(--muted);
+  }
+  .fpa-inner {
+    padding: 22px 20px 96px;
+  }
+}
+/* The board narrows while a machine's pane is open. */
+@container fpa-board (width < 880px) {
+  .fpa-heads,
+  .fpa-row {
+    grid-template-columns: 8px minmax(150px, 1fr) 128px 120px 14px;
+  }
+  .fpa-col-mem,
+  .fpa-col-sw {
+    display: none;
+  }
+  .fpa-row.is-off .fpa-offline {
+    grid-column: 3 / span 2;
+  }
+  .fpa-stats {
+    gap: 18px 40px;
+  }
+}
+
+/* ---------- The machine's pane ---------- */
+.fpa-pane {
+  flex: none;
+  width: clamp(360px, 34vw, 440px);
+  min-height: 0;
+  box-shadow: -1px 0 0 var(--divider);
+}
+.fpa-pane-scroll {
+  height: 100%;
+  overflow: auto;
+  padding: 20px 24px 96px;
+}
+.fpa-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.fpa-pane-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.fpa-pane-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.fpa-pane-title h2 {
+  margin: 0;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.fpa-pane-title span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.fpa-pane-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fpa-pane-title .fp-dot {
+  width: 7px;
+  height: 7px;
+}
+.fpa-banner {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--you-tint);
+}
+.fpa-banner p {
+  margin: 0;
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fpa-banner.is-fail {
+  background: var(--fail-tint);
+}
+.fpa-banner.is-fail p {
+  color: var(--fail-ink);
+}
+.fpa-banner span {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+
+.fpa-psec {
+  margin-top: 30px;
+}
+.fpa-psec > h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.fpa-psec > h3 b {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fpa-psec > h3 b.is-you {
+  color: var(--you-ink);
+}
+.fpa-psec > h3 small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.fpa-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.fpa-note.is-you {
+  color: var(--you-ink);
+}
+
+.fpa-faces {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.fpa-faces li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+}
+.fpa-face-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fpa-face-proj {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fpa-faces li.fpa-faces-more {
+  padding-left: 32px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+.fpa-legend {
+  margin-top: 12px;
+}
+.fpa-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.fpa-legend-label {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.fpa-legend-label small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fpa-legend-row:has(small) {
+  min-height: 40px;
+}
+.fpa-legend-gb {
+  width: 56px;
+  flex: none;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fpa-legend .link {
+  font-size: var(--t-12);
+}
+
+.fpa-tools {
+  display: grid;
+}
+.fpa-tools--chains {
+  margin-top: 16px;
+}
+.fpa-tools-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.fpa-tools-h .link {
+  font-size: var(--t-12);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.fpa-tool {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 36px;
+}
+.fpa-tool-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--w-medium);
+}
+.fpa-tool-ver {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.fpa-tool-ver small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.fpa-tool-ver.is-older {
+  color: var(--you-ink);
+}
+.fpa-tool-ver.is-none {
+  color: var(--faint);
+}
+.fpa-tool-act {
+  min-width: 72px;
+  display: flex;
+  justify-content: flex-end;
+}
+.fpa-current {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+.fpa-projects {
+  display: grid;
+}
+.fpa-project {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+.fpa-project b {
+  font-weight: var(--w-medium);
+}
+.fpa-ok {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fpa-gap {
+  flex: 1;
+  min-width: 0;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}
+
+.fpa-settings {
+  display: grid;
+}
+.fpa-set {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  padding: 8px 0;
+  border-top: 1px solid var(--divider);
+}
+.fpa-set-label {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.fpa-set-label b {
+  font-weight: var(--w-medium);
+}
+.fpa-set-label span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.fpa-value {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fpa-labels {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fpa-stepper {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--divider);
+}
+.fpa-stepper button {
+  width: 26px;
+  height: 24px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--t-14);
+}
+.fpa-stepper button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.fpa-stepper b {
+  min-width: 28px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.fpa-danger {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ---------- Software ---------- */
+.fpa-sw-lead {
+  max-width: 640px;
+  margin: 0 0 28px;
+  padding: 0 8px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.fpa-todo {
+  margin-top: 4px;
+}
+.fpa-todo-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(200px, 300px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  min-height: 50px;
+  padding: 9px 8px;
+}
+.fpa-todo-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--divider);
+}
+.fpa-todo-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.fpa-todo-name b {
+  font-weight: var(--w-bold);
+}
+.fpa-todo-to {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fpa-todo-to::before {
+  content: "to ";
+  color: var(--faint);
+}
+.fpa-todo-on {
+  color: var(--muted);
+}
+.fpa-todo-where {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 18px;
+  min-width: 0;
+}
+.fpa-todo-where > span {
+  white-space: nowrap;
+}
+.fpa-todo-where small {
+  flex-basis: 100%;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fpa-settled {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+  padding: 14px 8px 0;
+  box-shadow: inset 0 1px 0 var(--divider);
+}
+.fpa-settled-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fpa-settled-item b {
+  font-weight: var(--w-medium);
+}
+.fpa-settled-item small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}

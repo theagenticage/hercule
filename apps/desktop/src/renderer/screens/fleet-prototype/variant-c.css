@@ -1,0 +1,335 @@
+/* PROTOTYPE - throwaway. Variant C, "By concern". */
+
+.fpc .pill-btn .ic {
+  margin-left: -2px;
+}
+.fpc-scroll {
+  padding: 78px 32px 140px;
+}
+.fpc-col {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.fpc-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+}
+.fpc-summary b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.fpc-summary b.is-you {
+  color: var(--you-ink);
+}
+.fpc-summary i {
+  margin: 0 6px;
+  color: var(--faint);
+  font-style: normal;
+}
+
+.fpc-part {
+  margin-top: 52px;
+  scroll-margin-top: 70px;
+}
+.fpc-part-h {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  margin-bottom: 14px;
+}
+.fpc-part-h h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.fpc-part-h p {
+  max-width: 620px;
+  margin: 3px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.fpc-machine {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.fpc-machine b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-medium);
+}
+.fpc-num {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fpc-num.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fpc-act {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+.fpc-why {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fpc-why.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fpc-why.is-fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+
+/* Rows share one rule: a hairline above each, none at the very top. */
+.fpc-cap,
+.fpc-disk,
+.fpc-mx-row {
+  position: relative;
+}
+.fpc-cap::before,
+.fpc-disk::before,
+.fpc-mx-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--divider);
+}
+.is-off > .fpc-machine b {
+  color: var(--muted);
+}
+
+/* ---------- Capacity ---------- */
+.fpc-cap-heads,
+.fpc-cap {
+  display: grid;
+  grid-template-columns: 150px calc(var(--fpc-slots) * 14px + 10px) 64px 120px 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+.fpc-cap-heads {
+  height: 26px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.fpc-cap {
+  min-height: 52px;
+}
+.fpc-mem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- Storage ---------- */
+.fpc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 0 0 12px 166px;
+}
+.fpc-legend-limit {
+  width: 1.5px;
+  height: 12px;
+  background: var(--fail);
+  opacity: 0.7;
+}
+.fpc-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.fpc-disk {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 104px 190px;
+  align-items: center;
+  gap: 16px;
+  min-height: 58px;
+}
+.fpc-disk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fpc-disk-fit {
+  flex: none;
+  width: calc((100% - 56px) * var(--fpc-ratio));
+}
+.fpc-disk-size {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.fpc-disk-num {
+  display: grid;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+}
+.fpc-disk-num b {
+  font-weight: var(--w-medium);
+}
+.fpc-disk-num b.is-you {
+  color: var(--you-ink);
+}
+.fpc-disk-num > span {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fpc-disk-num .is-you {
+  color: var(--you-ink);
+}
+
+/* ---------- Software ---------- */
+.fpc-mx-head,
+.fpc-mx-row,
+.fpc-mx-group {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.2fr) 72px repeat(var(--fpc-cols), minmax(84px, 1fr))
+    96px;
+  align-items: center;
+}
+.fpc-mx-head {
+  position: sticky;
+  z-index: 1;
+  /* Chromium measures a sticky offset from inside the scroll area's padding,
+     so 2px here is 80px from the pane's top, just under the header's fade. */
+  top: 2px;
+  height: 36px;
+  background: var(--surface);
+  box-shadow: 0 1px 0 var(--divider);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.fpc-mx-head > span:nth-child(2) {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.fpc-mx-machine {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink);
+}
+.fpc-mx-machine .ic {
+  color: var(--faint);
+}
+.fpc-mx-machine.is-off {
+  color: var(--faint);
+}
+.fpc-mx-group {
+  height: 40px;
+  padding-top: 14px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.fpc-mx-row {
+  min-height: 40px;
+}
+.fpc-mx-row:hover {
+  background: linear-gradient(var(--hover), var(--hover));
+}
+.fpc-mx-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-left: 2px;
+}
+.fpc-mx-name b {
+  font-weight: var(--w-medium);
+}
+.fpc-mx-target {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.fpc-mx-act {
+  display: flex;
+  justify-content: flex-end;
+}
+.fpc-cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  justify-self: center;
+  min-width: 64px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: var(--r-btn);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fpc-cell.is-current,
+.fpc-cell.is-yes {
+  color: var(--faint);
+}
+.fpc-cell.is-yes {
+  color: var(--ok);
+}
+.fpc-cell.is-none,
+.fpc-cell.is-unknown {
+  color: var(--faint);
+  opacity: 0.7;
+}
+.fpc-cell.is-older {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fpc-cell.is-no {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.fpc-cell.is-pending {
+  color: var(--muted);
+}
+.fpc-cell.is-pending .spin {
+  width: 11px;
+  height: 11px;
+}
+/* A cell that can be fixed turns into its button while the pointer is over it. */
+.fpc-cell-hover {
+  display: none;
+}
+.fpc-cell.is-fix:hover {
+  background: var(--btn-fill);
+  box-shadow:
+    inset 0 0 0 1px var(--btn-rim),
+    inset 0 1px 0 var(--glass-edge);
+  color: var(--ink);
+}
+.fpc-cell.is-fix:hover .fpc-cell-text {
+  display: none;
+}
+.fpc-cell.is-fix:hover .fpc-cell-hover {
+  display: inline;
+}

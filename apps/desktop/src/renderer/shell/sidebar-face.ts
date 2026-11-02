@@ -23,6 +23,8 @@ export const decideScreenFace = (pathname: string): SidebarFace | null => {
     return "threads";
   }
   return pathname === "/intake" ||
+    // PROTOTYPE: the Fleet page prototype sits on the Hercule face, where its row is.
+    pathname === "/fleet" ||
     pathname === "/workflows" ||
     pathname.startsWith("/workflows/") ||
     pathname.startsWith("/runs/") ||

@@ -1,0 +1,533 @@
+/* PROTOTYPE - throwaway. The pieces every Fleet variant shares. Every class
+   starts with `fp-` so nothing here can leak into the app's own screens. */
+
+/* ---------- The page frame every variant sits in ---------- */
+.fp-page {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* What scrolls under the floating header fades out at its top, as the
+   thread's transcript does under its header. */
+.fp-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 50px,
+      rgb(0 0 0 / 0.15) 60px,
+      rgb(0 0 0 / 0.6) 70px,
+      #000 80px
+    ),
+    linear-gradient(#000 0 0);
+  mask-size:
+    100% 100%,
+    var(--scrollbar-width) 100%;
+  mask-position: right;
+  mask-repeat: no-repeat;
+}
+
+/* ---------- Status dots ---------- */
+.fp-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.fp-dot--warn {
+  background: var(--you);
+}
+.fp-dot--crit {
+  background: var(--fail);
+}
+.fp-dot--off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fail);
+}
+.fp-dot--drain {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+
+/* ---------- Meters ---------- */
+.fp-meter {
+  position: relative;
+  display: block;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  overflow: hidden;
+}
+.fp-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--ink) 42%, transparent);
+  transition: width var(--dur-3) var(--ease-out);
+}
+.fp-meter--warn i {
+  background: var(--you);
+}
+.fp-meter--crit i {
+  background: var(--fail);
+}
+
+/* ---------- Slot pips ---------- */
+.fp-pips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.fp-pips i {
+  width: 6px;
+  height: 12px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  transition: background var(--dur-2);
+}
+.fp-pips i.is-run {
+  background: color-mix(in oklab, var(--ink) 52%, transparent);
+}
+.fp-pips i.is-wait {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--you);
+}
+.fp-pips-gap {
+  width: 3px;
+}
+.fp-pips--lg {
+  gap: 4px;
+}
+.fp-pips--lg i {
+  width: 10px;
+  height: 20px;
+  border-radius: 3px;
+}
+.fp-pips.is-off i {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+}
+
+/* ---------- The session bar, for machines with many slots ---------- */
+.fp-sbar {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  min-width: 60px;
+}
+.fp-sbar-cap {
+  display: flex;
+  flex: none;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+  /* A thin cut every 10 sessions, through whatever is drawn. */
+  mask-image: repeating-linear-gradient(
+    90deg,
+    #000 0,
+    #000 calc(var(--fp-cut) - 1.5px),
+    transparent calc(var(--fp-cut) - 1.5px),
+    transparent var(--fp-cut)
+  );
+}
+.fp-sbar i {
+  flex: none;
+  height: 100%;
+}
+.fp-sbar-cap i.is-run {
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+}
+.fp-sbar-cap i.is-starved {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--ink) 30%, transparent) 0 1.5px,
+    transparent 1.5px 4px
+  );
+}
+.fp-sbar-rule {
+  flex: none;
+  width: 1.5px;
+  margin: -3px 3px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--ink) 50%, transparent);
+}
+.fp-sbar > i.is-wait {
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1.5px var(--you);
+}
+.fp-sbar > i.is-wait + i.is-could {
+  margin-left: 2px;
+}
+.fp-sbar > i.is-could {
+  border-radius: 3px;
+  outline: 1px dashed color-mix(in oklab, var(--ink) 30%, transparent);
+  outline-offset: -1px;
+}
+.fp-sbar.is-away .fp-sbar-cap {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+  mask-image: none;
+}
+.fx-ladder.is-bar {
+  display: flex;
+  width: 100%;
+}
+
+/* ---------- The disk bar ---------- */
+.fp-disk {
+  position: relative;
+  display: flex;
+  width: 100%;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  overflow: hidden;
+}
+.fp-seg {
+  flex: none;
+  height: 100%;
+  transition: width var(--dur-3) var(--ease-out);
+}
+.fp-seg + .fp-seg {
+  box-shadow: inset 1px 0 0 var(--surface);
+}
+.fp-seg--inUse {
+  background: color-mix(in oklab, var(--ink) 62%, transparent);
+}
+.fp-seg--idle,
+.fp-seg--idleClean {
+  background: var(--you);
+}
+.fp-seg--idleDirty {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--you) 0 2px,
+    color-mix(in oklab, var(--you) 45%, transparent) 2px 4px
+  );
+}
+.fp-seg--caches {
+  background: color-mix(in oklab, var(--ink) 40%, transparent);
+}
+.fp-seg--providerData {
+  background: color-mix(in oklab, var(--ink) 28%, transparent);
+}
+.fp-seg--other {
+  background: color-mix(in oklab, var(--ink) 17%, transparent);
+}
+.fp-seg--free {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+/* The watermark: below it the machine takes no new sessions. */
+.fp-disk-mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1.5px;
+  background: var(--fail);
+  opacity: 0.7;
+}
+.fp-disk.is-off {
+  opacity: 0.45;
+}
+.fp-swatch {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+/* ---------- Small text pieces ---------- */
+.fp-ver {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fp-ver.is-older {
+  color: var(--you-ink);
+}
+.fp-by-hand {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.fp-proj {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+}
+.fp-tool-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--ink);
+}
+/* The runner's mark is Hercule's logo, drawn in ink like the other marks. */
+.fp-tool-mark .logo .logo-head {
+  fill: currentColor;
+}
+.fp-tool-mark .logo .logo-face {
+  fill: var(--surface);
+}
+.fp-tool-mark .pi {
+  font-weight: var(--w-bold);
+  line-height: 1;
+}
+.fp-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Group headings ---------- */
+.fp-gh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.fp-gh .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+.fp-gh-aside {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ---------- The cleanup dialog ---------- */
+.fp-cleanup {
+  width: 680px;
+}
+.fp-cleanup-h {
+  padding: 16px 18px 12px;
+}
+.fp-cleanup-h b {
+  font-size: var(--t-14);
+}
+.fp-cleanup-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 18px 8px;
+}
+.fp-cleanup-lead {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.fp-cg + .fp-cg {
+  margin-top: 18px;
+}
+.fp-cg-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border-radius: var(--r-sm);
+}
+.fp-cg-h:hover {
+  background: var(--hover);
+}
+.fp-cg-title {
+  flex: 1;
+  display: grid;
+  gap: 1px;
+}
+.fp-cg-title b {
+  font-weight: var(--w-bold);
+}
+.fp-cg-title span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.fp-cg-size {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fp-cg-rows {
+  margin: 4px 0 0 26px;
+}
+.fp-cg-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 8px;
+  margin: 0 -8px;
+  border-radius: var(--r-sm);
+}
+.fp-cg-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 8px auto;
+  border-top: 1px solid var(--divider);
+}
+.fp-cg-row:hover {
+  background: var(--hover);
+}
+.fp-cg-row:hover::before,
+.fp-cg-row:hover + .fp-cg-row::before {
+  border-top-color: transparent;
+}
+.fp-cg-name {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 0;
+}
+.fp-cg-name b,
+.fp-cg-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fp-cg-name b {
+  font-weight: var(--w-medium);
+}
+.fp-cg-name span {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fp-cg-age {
+  width: 84px;
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: right;
+}
+.fp-cg-gb {
+  width: 58px;
+  flex: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fp-cg-more {
+  height: 32px;
+  padding: 0 8px;
+  margin: 2px 0 0 -8px;
+  border-radius: var(--r-sm);
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+}
+.fp-cg-more:hover {
+  background: var(--hover);
+}
+.fp-cleanup-kept {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.fp-cleanup-kept .ic {
+  color: var(--ok);
+}
+.fp-cleanup-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 12px 18px;
+  border-top: 1px solid var(--divider);
+}
+.fp-cleanup-sum b {
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Add a machine ---------- */
+.fp-add {
+  width: 560px;
+}
+.fp-add-body {
+  padding: 0 14px 14px;
+}
+.fp-add-body > p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.fp-cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  user-select: text;
+}
+.fp-cmd code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.fp-add-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0 !important;
+  font-size: var(--t-12);
+}
+.fp-add-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+  border-top: 1px solid var(--divider);
+  font-size: var(--t-12);
+}
+
+/* ---------- The toast ---------- */
+.fp-toast {
+  position: absolute;
+  z-index: 30;
+  top: 56px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  padding: 9px 14px 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-2);
+  font-weight: var(--w-medium);
+}
+.fp-toast .ic {
+  flex: none;
+  color: var(--ok);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fp-toast {
+    animation: fp-toast-in var(--dur-2) var(--ease-out);
+  }
+}
+@keyframes fp-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}

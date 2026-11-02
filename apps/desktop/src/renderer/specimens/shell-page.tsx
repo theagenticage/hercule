@@ -396,6 +396,8 @@ interface OpenScreens {
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
+  /** PROTOTYPE: a throwaway screen drawn at `/fleet`, see fleet-prototype.tsx. */
+  readonly prototype?: () => JSX.Element;
 }
 
 /**
@@ -888,6 +890,7 @@ const buildRouter = (
   pendingSubmissions: PendingSubmissions,
   path: string,
   openThreadId: string | undefined,
+  prototype: (() => JSX.Element) | undefined,
 ) => {
   const rootRoute = createRootRoute();
   const connectedRoute = createRoute({
@@ -1027,6 +1030,9 @@ const buildRouter = (
           component: AssistantRoute,
         }),
         intakeRoute,
+        ...(prototype === undefined
+          ? []
+          : [createRoute({ getParentRoute: () => shellRoute, path: "fleet", component: prototype })]),
         workflowsRoute.addChildren([openWorkflowRoute]),
         discussionsRoute.addChildren([openDiscussionRoute]),
         wikiRoute.addChildren([openWikiPageRoute]),
@@ -1250,7 +1256,13 @@ async function mountShellSpecimen(
   for (const sessionId of unsentThreadIds) {
     pendingSubmissions.writeText(sessionId, "Also check the alt text on the gallery page");
   }
-  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
+  const router = buildRouter(
+    client,
+    pendingSubmissions,
+    path,
+    screens.thread?.session.id,
+    screens.prototype,
+  );
   await router.load();
 
   const root = document.getElementById("root");
@@ -1543,4 +1555,16 @@ export async function mountWikiSpecimen(
       ? "/wiki"
       : `/wiki/${wiki.openPage.page.id}` + (search.size === 0 ? "" : `?${search.toString()}`);
   await mountShellSpecimen(records, path, { wiki });
+}
+
+/**
+ * PROTOTYPE: applies the URL's theme and draws the shell into `#root` from
+ * `records`, with `screen` open at `/fleet` in the main pane. Used by the
+ * throwaway Fleet page prototype (fleet-prototype.tsx).
+ */
+export async function mountPrototypeSpecimen(
+  records: SidebarRecords,
+  screen: () => JSX.Element,
+): Promise<void> {
+  await mountShellSpecimen(records, "/fleet", { prototype: screen });
 }

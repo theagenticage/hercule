@@ -1,0 +1,224 @@
+/* PROTOTYPE - throwaway. Variant G, "Grid or list, then software". */
+
+.fxg .pill-btn .ic {
+  margin-left: -2px;
+}
+.fxg .ptab small.is-you {
+  color: var(--you-ink);
+}
+.fxg .ptab.is-name {
+  color: var(--ink);
+}
+.fxg .ptab.is-name .ic {
+  color: var(--muted);
+}
+.fxg-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 0 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.fxg-crumb button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  font-weight: inherit;
+  transition: color var(--dur-1);
+}
+.fxg-crumb button:hover {
+  color: var(--ink);
+}
+.fxg-crumb::after {
+  content: "/";
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.fxg-rule {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--divider);
+}
+
+.fxg-scroll {
+  padding: 78px 32px 140px;
+}
+.fxg-col {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.fxg-machines {
+  scroll-margin-top: 80px;
+}
+
+/* The Machines heading, with the view toggle at its far end. */
+.fxg-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 30px 0 12px;
+}
+.fxg-sec-h h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.fxg-view button {
+  height: 24px;
+  padding: 0 9px 0 8px;
+  font-size: var(--t-12);
+}
+.fxg-view .ic {
+  flex: none;
+}
+
+.fxg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+/* ---------- The list ---------- */
+.fxg-list {
+  container: fxg-list / inline-size;
+}
+.fxg-heads,
+.fxg-row {
+  display: grid;
+  grid-template-columns:
+    8px minmax(190px, 1.3fr) 128px 104px 136px 112px
+    minmax(230px, 1.5fr) 14px;
+  align-items: center;
+  gap: 18px;
+  padding: 0 12px;
+}
+.fxg-heads {
+  height: 30px;
+  box-shadow: inset 0 -1px 0 var(--divider);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.fxg-row {
+  position: relative;
+  min-height: 64px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.fxg-row + .fxg-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 12px auto;
+  border-top: 1px solid var(--divider);
+}
+.fxg-row:hover {
+  background: var(--hover);
+}
+.fxg-row:hover::before,
+.fxg-row:hover + .fxg-row::before {
+  border-top-color: transparent;
+}
+.fxg-row > .ic {
+  color: var(--faint);
+}
+.fxg-name {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.fxg-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.fxg-name-text {
+  display: grid;
+  min-width: 0;
+}
+.fxg-name-text b {
+  justify-self: start;
+  font-weight: var(--w-bold);
+}
+.fxg-name-text small,
+.fxg-cell small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.fxg-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.fxg-cell > b {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fxg-cell :is(b, small).is-you {
+  color: var(--you-ink);
+}
+.fxg-cell small.is-you {
+  font-weight: var(--w-medium);
+}
+.fxg-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fxg-meter b {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fxg-meter b.is-you {
+  color: var(--you-ink);
+}
+.fxg-attn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.fxg-row.is-away .fxg-name-text b {
+  color: var(--muted);
+}
+.fxg-row.is-away :is(.fxg-cell, .fp-pips) {
+  opacity: 0.55;
+}
+
+/* A narrow list drops room and memory, which the machine's page shows. */
+@container fxg-list (width < 900px) {
+  .fxg-heads,
+  .fxg-row {
+    grid-template-columns: 8px minmax(160px, 1fr) 118px 120px minmax(200px, 1.3fr) 14px;
+    gap: 14px;
+  }
+  .fxg-col-room,
+  .fxg-col-mem {
+    display: none;
+  }
+}
+
+.fxg .fx-panel {
+  margin-top: 64px;
+}

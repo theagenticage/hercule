@@ -1,0 +1,228 @@
+/* PROTOTYPE - throwaway. Variant F, "Scope and concern". */
+
+.fxf .bar .btn .ic {
+  margin-left: -3px;
+}
+.fxf-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  box-shadow: inset 0 1px 0 var(--divider);
+}
+
+/* ---------- The rail ---------- */
+.fxf-rail {
+  flex: none;
+  width: 272px;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 12px 48px;
+  box-shadow: 1px 0 0 var(--divider);
+}
+.fxf-scope {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: var(--r-md);
+  text-align: left;
+  text-rendering: inherit;
+  transition: background var(--dur-1);
+}
+.fxf-scope:hover {
+  background: var(--hover);
+}
+.fxf-scope.is-on {
+  background: var(--selected);
+}
+.fxf-scope-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.fxf-scope-text {
+  display: grid;
+  min-width: 0;
+}
+.fxf-scope-text b {
+  font-weight: var(--w-bold);
+}
+.fxf-scope-text > span {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fxf-scope-text .is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fxf-rail-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 10px 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.fxf-rail-h .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+.fxf-card {
+  display: grid;
+  gap: 11px;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 12px 12px 12px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ink) 3.5%, var(--surface));
+  text-align: left;
+  text-rendering: inherit;
+  transition:
+    background var(--dur-1),
+    box-shadow var(--dur-1);
+}
+.fxf-card:hover {
+  background: color-mix(in oklab, var(--ink) 5.5%, var(--surface));
+}
+.fxf-card.is-on {
+  background: color-mix(in oklab, var(--ink) 7%, var(--surface));
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--ink) 22%, transparent);
+}
+.fxf-card-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fxf-card-h .ic {
+  color: var(--muted);
+}
+.fxf-card-h b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-bold);
+}
+.fxf-card-h .fp-dot {
+  width: 7px;
+  height: 7px;
+}
+.fxf-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.fxf-stat {
+  display: grid;
+  gap: 2px;
+}
+.fxf-stat > span {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.fxf-stat b {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fxf-stat.is-warn b {
+  color: var(--you-ink);
+}
+.fxf-stat.is-crit b {
+  color: var(--fail-ink);
+}
+.fxf-stat .fp-meter {
+  width: 100%;
+  margin-top: 3px;
+}
+.fxf-card.is-away .fxf-stats {
+  opacity: 0.5;
+}
+.fxf-note {
+  font-size: var(--t-12);
+}
+.fxf-note .is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fxf-note .is-fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- The canvas ---------- */
+.fxf-canvas {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 26px 28px 120px;
+}
+.fxf-col {
+  max-width: 1040px;
+  margin: 0 auto;
+}
+.fxf .fx-matrix {
+  /* The canvas has no floating header, so the matrix's head sticks to its top edge. */
+  --fx-sticky-top: -26px;
+}
+.fxf .fx-panel {
+  margin-top: 56px;
+  scroll-margin-top: 20px;
+}
+.fxf .fx-psec {
+  scroll-margin-top: 20px;
+}
+.fxf-overview {
+  scroll-margin-top: 26px;
+}
+.fxf-needs {
+  margin-top: 18px;
+}
+.fxf-need {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 0 14px;
+}
+.fxf-need::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--divider);
+}
+.fxf-need > .mark {
+  margin-top: 2px;
+}
+.fxf-need-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.fxf-need-text p {
+  margin: 0;
+}
+.fxf-need-text b {
+  font-weight: var(--w-bold);
+}
+.fxf-need-text > span {
+  max-width: 660px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.fxf-need-act {
+  flex: none;
+  align-self: center;
+}

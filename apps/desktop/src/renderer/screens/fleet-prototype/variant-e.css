@@ -1,0 +1,299 @@
+/* PROTOTYPE - throwaway. Variant E, "Lenses". */
+
+.fxe .pill-btn .ic {
+  margin-left: -2px;
+}
+.fxe .ptab small.is-you {
+  color: var(--you-ink);
+}
+.fxe .ptab.is-name {
+  color: var(--ink);
+}
+.fxe .ptab.is-name .ic {
+  color: var(--muted);
+}
+.fxe-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 0 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.fxe-crumb button {
+  color: inherit;
+  font-weight: inherit;
+}
+.fxe-crumb button:hover {
+  color: var(--ink);
+}
+.fxe-crumb::after {
+  content: "/";
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.fxe-rule {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--divider);
+}
+
+.fxe-scroll {
+  padding: 78px 32px 140px;
+}
+.fxe-col {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.fxe-lead {
+  view-transition-name: fxe-lead;
+}
+.fxe-lead .fx-cap-legend,
+.fxe-lead .fx-storage-legend {
+  margin: 14px 0 0;
+}
+.fxe-lead .fx-baseline {
+  margin: 16px 0 0;
+}
+
+.fxe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+.fxe-grid > .fx-card {
+  min-height: 252px;
+}
+.fxe-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  margin-top: 16px;
+}
+.fxe-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+.fxe-facts {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.fxe-facts.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- Capacity ---------- */
+.fxe-big {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.fxe-big b {
+  font-size: var(--t-num);
+  font-weight: var(--w-medium);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.fxe-big b small {
+  color: var(--faint);
+  font-size: var(--t-14);
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+}
+.fxe-big b.is-you {
+  color: var(--you-ink);
+}
+.fxe-big > span {
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-align: right;
+}
+.fxe-big > span.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fxe-card .fx-ladder {
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.fxe-card .fx-ladder i {
+  width: 7px;
+  height: 14px;
+}
+.fxe-day {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+}
+.fxe-day > span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+/* ---------- Storage ---------- */
+.fxe-disk {
+  margin-top: 14px;
+}
+.fxe-parts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 18px;
+  margin: 14px 0 0;
+}
+.fxe-parts > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fxe-parts dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.fxe-parts dd {
+  margin: 0;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fxe-parts .is-you :is(dt, dd) {
+  color: var(--you-ink);
+}
+.fxe-trend {
+  margin-top: 14px;
+}
+
+/* ---------- Software: the cards stand side by side as columns ---------- */
+.fxe-grid.is-columns {
+  grid-template-columns: 216px repeat(var(--fxe-cols), minmax(0, 1fr));
+  gap: 8px;
+}
+.fxe-grid.is-columns > .fx-card {
+  min-height: 0;
+  padding: 12px 8px 10px;
+}
+.fxe-card.is-software .fx-card-h {
+  flex-direction: column;
+  gap: 6px;
+  height: 64px;
+  text-align: center;
+}
+.fxe-card.is-software .fx-card-name {
+  justify-items: center;
+}
+.fxe-card.is-software .fx-card-name span,
+.fxe-card.is-software .fx-card-icon {
+  display: none;
+}
+.fxe-card.is-software .fx-card-state {
+  font-size: var(--t-11);
+}
+.fxe-card.is-software .fxe-body {
+  margin-top: 0;
+}
+.fxe-labels {
+  position: relative;
+  padding-top: 12px;
+}
+.fxe-labels-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  height: 64px;
+  padding: 0 4px 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.fxe-group-h {
+  display: flex;
+  align-items: flex-end;
+  height: 32px;
+  padding: 0 0 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.fxe-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+}
+.fxe-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.fxe-label {
+  justify-content: space-between;
+  gap: 8px;
+}
+.fxe-label::before {
+  border-top-color: var(--divider);
+}
+.fxe-label-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: inherit;
+  text-align: left;
+}
+.fxe-label-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-medium);
+}
+button.fxe-label-name:hover b {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.fxe-label .fx-policy {
+  margin: 0 -7px 0 0;
+}
+.fxe-label-pop {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 620px;
+  border-radius: var(--r-lg);
+  background: var(--glass-fill-raised);
+  backdrop-filter: var(--glass-filter);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+}
+.fxe-label-pop .fx-tool-detail {
+  margin: 0;
+  padding: 4px 18px 18px;
+  background: none;
+}
+.fxe-card.is-software .fx-cell {
+  min-width: 0;
+}

@@ -18,7 +18,8 @@
     "build:binary": "bun run scripts/gen-version.ts && pnpm --filter @hercule/web build && bun run scripts/check-bundle-budget.ts && bun run scripts/gen-web-bundle.ts && bun build packages/hercule/src/main.ts --compile --splitting --outfile hercule",
     "build:desktop": "pnpm --filter @hercule/desktop build && bun run scripts/check-bundle-budget.ts apps/desktop/out/renderer --route apps/desktop/src/renderer/routes/__root.tsx --route apps/desktop/src/renderer/routes/_connected.tsx --route apps/desktop/src/renderer/routes/_connected/_shell.tsx --route apps/desktop/src/renderer/routes/_connected/_shell/index.tsx --route 'apps/desktop/src/renderer/routes/_connected/_shell/threads/$sessionId/route.tsx' --route 'apps/desktop/src/renderer/routes/_connected/_shell/threads/$sessionId/index.tsx' --guide && bun run scripts/check-bundle-budget.ts --main-startup apps/desktop/out/main/index.js --guide && pnpm --filter @hercule/desktop package",
     "test:desktop": "vitest run --project desktop",
-    "compare:bureau": "pnpm --filter @hercule/desktop compare:bureau"
+    "compare:bureau": "pnpm --filter @hercule/desktop compare:bureau",
+    "prototype:fleet": "pnpm --filter @hercule/desktop prototype:fleet"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0-rc.112",

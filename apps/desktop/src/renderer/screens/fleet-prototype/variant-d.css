@@ -1,0 +1,63 @@
+/* PROTOTYPE - throwaway. Variant D, "Cards, then concerns". */
+
+.fxd .pill-btn .ic {
+  margin-left: -2px;
+}
+.fxd .ptab small.is-you {
+  color: var(--you-ink);
+}
+.fxd .ptab.is-name {
+  color: var(--ink);
+}
+.fxd .ptab.is-name .ic {
+  color: var(--muted);
+}
+.fxd-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 0 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.fxd-crumb button {
+  color: inherit;
+  font-weight: inherit;
+  transition: color var(--dur-1);
+}
+.fxd-crumb button:hover {
+  color: var(--ink);
+}
+.fxd-crumb::after {
+  content: "/";
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.fxd-rule {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--divider);
+}
+
+.fxd-scroll {
+  padding: 78px 32px 140px;
+}
+.fxd-col {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.fxd-machines {
+  scroll-margin-top: 80px;
+}
+.fxd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+.fxd .fx-panel {
+  margin-top: 64px;
+}
