@@ -112,7 +112,7 @@ import projectModelProfile from "./0101-project-model-profile";
 import catalogFirstRead from "./0102-catalog-first-read";
 import runnerMetrics from "./0103-runner-metrics";
 import archivedSessions from "./0104-archived-sessions";
-import runnerMetricsHistory from "./0104-runner-metrics-history";
+import runnerMetricsHistory from "./0105-runner-metrics-history";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],

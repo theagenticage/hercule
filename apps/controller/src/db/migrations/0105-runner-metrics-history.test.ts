@@ -14,7 +14,7 @@ import { runMigrations } from "../migrate";
 import { TestDatabaseWriter } from "../testing";
 import { migrations } from "./index";
 
-const UP_TO_HISTORY = migrations.filter(([id]) => id <= 104);
+const UP_TO_HISTORY = migrations.filter(([id]) => id <= 105);
 
 const NOW = "2026-11-01T00:00:00.000Z";
 
