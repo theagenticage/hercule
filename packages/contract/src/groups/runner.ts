@@ -38,6 +38,7 @@ import { atMost, bounded } from "../strings";
 export {
   Capabilities as RunnerCapabilities,
   HarnessBinary,
+  PROBED_TOOLCHAINS,
   RunnerFacts,
   RunnerMetrics,
   Toolchain as RunnerToolchain,

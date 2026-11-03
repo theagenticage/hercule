@@ -11,13 +11,31 @@ import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { HarnessBinary, RunnerFacts, Toolchain } from "@hercule/protocol";
+import {
+  PROBED_TOOLCHAINS,
+  type HarnessBinary,
+  type RunnerFacts,
+  type Toolchain,
+} from "@hercule/protocol";
 import { readDiskSpace } from "./disk";
 import { ADAPTER_IDS } from "./harnesses";
 import { truncateFact } from "./harnesses/text";
 
-/** Only these two on purpose: any other tool is installed by hand and marked with a label. */
-const TOOLCHAINS = ["git", "gh"] as const;
+/**
+ * The arguments that make a tool print its version. Every tool takes
+ * `--version` except `go`, which has a `version` subcommand instead.
+ */
+const VERSION_ARGUMENTS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  go: ["version"],
+};
+
+const DEFAULT_VERSION_ARGUMENTS: ReadonlyArray<string> = ["--version"];
+
+/**
+ * How many tools are probed at once. Each probe can wait out its whole
+ * deadline, so probing one at a time could hold the hello back by a minute.
+ */
+const PROBE_CONCURRENCY = 4;
 
 /**
  * Unlike a missing toolchain, a missing harness binary is still reported, as
@@ -26,7 +44,12 @@ const TOOLCHAINS = ["git", "gh"] as const;
  */
 const HARNESS_BINARIES = ["claude", "codex", "pi"] as const;
 
-/** Docker is reported as present or absent. The probe never runs it. */
+/**
+ * The `docker` fact says whether the binary is on the PATH, found with
+ * `locate` alone. It does not depend on `docker --version` working, because
+ * placement filters on the fact. Docker is also one of the probed toolchains,
+ * for its version.
+ */
 const DOCKER = "docker";
 
 export const VERSION_DEADLINE: Duration.Duration = Duration.seconds(5);
@@ -38,13 +61,24 @@ export const VERSION_DEADLINE: Duration.Duration = Duration.seconds(5);
  */
 export const DISK_SIZE_DEADLINE: Duration.Duration = Duration.seconds(5);
 
-const SEMVER = /\d+\.\d+\.\d+\S*/;
+/**
+ * A semantic version: the three numbers, an optional `-prerelease` and an
+ * optional `+build`. It stops at punctuation, so `27.3.1, build ce12230` gives
+ * `27.3.1`.
+ */
+const SEMVER = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/;
 
 /** How the probe looks at the machine it runs on. */
 export interface Machine {
   readonly locate: (binary: string) => string | undefined;
-  /** Returns what `<binary> --version` printed, or undefined when it could not be run. */
-  readonly version: (path: string) => Effect.Effect<string | undefined>;
+  /**
+   * Returns what the binary at `path` printed when run with `args`, or
+   * undefined when it could not be run or exited with an error.
+   */
+  readonly version: (
+    path: string,
+    args: ReadonlyArray<string>,
+  ) => Effect.Effect<string | undefined>;
   /** Returns the size of the disk that holds the runner's storage directory. Fails when it cannot be read. */
   readonly diskTotalBytes: Effect.Effect<number, Cause.UnknownError>;
 }
@@ -56,9 +90,9 @@ export interface Machine {
  */
 export const buildThisMachine = (storageDir: string): Machine => ({
   locate: (binary) => Bun.which(binary) ?? undefined,
-  version: (path) =>
+  version: (path, args) =>
     Effect.tryPromise(async (signal) => {
-      const child = Bun.spawn([path, "--version"], { stdout: "pipe", stderr: "ignore" });
+      const child = Bun.spawn([path, ...args], { stdout: "pipe", stderr: "ignore" });
       // Kill the process when the caller stops waiting. Otherwise a binary that
       // hangs on `--version` would be left running, and one more would pile up
       // every hour.
@@ -76,9 +110,10 @@ export const buildThisMachine = (storageDir: string): Machine => ({
 });
 
 /**
- * Returns the semantic version in a binary's `--version` output. Each binary
- * formats that output its own way, so output with no recognisable version is
- * returned trimmed but otherwise unchanged.
+ * Returns the semantic version in the text a binary printed for its version.
+ * Each binary formats that text its own way, so output with no recognisable
+ * version (such as `go1.25` with no patch number) is returned trimmed but
+ * otherwise unchanged.
  */
 const parseVersion = (printed: string): string =>
   truncateFact(SEMVER.exec(printed)?.[0] ?? printed.trim());
@@ -90,7 +125,10 @@ const findToolchain = (machine: Machine, name: string): Effect.Effect<Toolchain 
     // The deadline is applied here, not inside `Machine`, so it bounds every
     // `Machine` implementation and a stub can test it.
     const printed = yield* Effect.orElseSucceed(
-      Effect.timeout(machine.version(path), VERSION_DEADLINE),
+      Effect.timeout(
+        machine.version(path, VERSION_ARGUMENTS[name] ?? DEFAULT_VERSION_ARGUMENTS),
+        VERSION_DEADLINE,
+      ),
       () => undefined,
     );
     if (printed === undefined) return undefined;
@@ -121,11 +159,12 @@ const readDiskTotalBytes = (machine: Machine): Effect.Effect<number | undefined>
 
 export const probeFacts = (machine: Machine, identityPort: number): Effect.Effect<RunnerFacts> =>
   Effect.gen(function* () {
-    const toolchains: Array<Toolchain> = [];
-    for (const name of TOOLCHAINS) {
-      const found = yield* findToolchain(machine, name);
-      if (found !== undefined) toolchains.push(found);
-    }
+    // `forEach` returns its results in the order of the list, whichever probe
+    // finishes first.
+    const found = yield* Effect.forEach(PROBED_TOOLCHAINS, (name) => findToolchain(machine, name), {
+      concurrency: PROBE_CONCURRENCY,
+    });
+    const toolchains = found.filter((toolchain) => toolchain !== undefined);
     const harnesses: Array<HarnessBinary> = HARNESS_BINARIES.map((name) => {
       const path = machine.locate(name);
       return path === undefined

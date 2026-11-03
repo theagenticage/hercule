@@ -243,6 +243,26 @@ const Base64 = Schema.String.check(
 
 const Bytes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
+/**
+ * The tools a runner probes for, in the order it reports them. The list is
+ * fixed in code: there is no setting for it. The runner reads it to know what
+ * to probe, and a client reads it to show the tools in the same order.
+ */
+export const PROBED_TOOLCHAINS = [
+  "git",
+  "gh",
+  "node",
+  "pnpm",
+  "bun",
+  "go",
+  "rustc",
+  "python3",
+  "uv",
+  "docker",
+  "terraform",
+  "dotnet",
+] as const;
+
 export const Toolchain = Schema.Struct({
   name: Fact,
   /** The output of `--version`, unparsed when the runner could not parse it. */
