@@ -178,6 +178,11 @@ import { createAppearanceStore } from "../app/appearance";
 import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
 import { CleanupProvider } from "../app/cleanup";
+import {
+  cleanupThreadsQuery,
+  listCleanupCandidateIds,
+  negotiatedCapabilitiesQuery,
+} from "../app/machine-storage-queries";
 import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
@@ -824,6 +829,22 @@ const seedQueryCache = (
     }
     for (const run of fleet.runs) {
       queryClient.setQueryData(runQuery(client, run.id).queryKey, run);
+    }
+    // Storage reads what each runner negotiated, and the Threads of the workspaces
+    // that are idle at the hour points' read time (see `decideStorageNow`).
+    const storageNow = new Date(fleetHours.readAt);
+    for (const runner of records.runners) {
+      queryClient.setQueryData(
+        negotiatedCapabilitiesQuery(client, runner.id).queryKey,
+        fleet.negotiatedCapabilities[runner.id] ?? null,
+      );
+      const idleIds = listCleanupCandidateIds(records.workspaces, runner.id, storageNow);
+      queryClient.setQueryData(
+        cleanupThreadsQuery(client, runner.id, idleIds).queryKey,
+        fleet.cleanupThreads.filter(
+          ({ workspaceId }) => workspaceId !== null && idleIds.includes(workspaceId),
+        ),
+      );
     }
   }
   if (workflows !== undefined) {

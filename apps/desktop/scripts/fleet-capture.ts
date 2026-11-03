@@ -8,6 +8,12 @@
  * out/fleet/<theme>-<state>.png. The states:
  *
  * - `machine-recent`: atlas's page scrolled to its Recent section;
+ * - `machine-storage`: atlas's page scrolled to its Storage section;
+ * - `machine-storage-narrow`: the same section in a window of the smallest width, 800;
+ * - `machine-storage-rules`: the same section in the smallest window with the
+ *   info popover of automatic cleanup open;
+ * - `machine-storage-too-old`: mini's page scrolled to its Storage section, where
+ *   the runner is too old to measure;
  * - `activity`: atlas's Activity page, filter All;
  * - `activity-problems`: the same page under the Problems filter;
  * - `activity-unfolded`: the same page with the first folded entry unfolded;
@@ -111,7 +117,33 @@ const openCleanup = (pressArchive: boolean, waitFor?: string): string => `(async
   await ${WAIT_FOR_FRAMES};
 })()`;
 
+/** Scrolls a machine's page to its Storage section and waits for the frames. */
+const SCROLL_TO_STORAGE = `(async () => {
+  const section = document.getElementById("machine-storage");
+  if (section === null) throw new Error("The machine's page has no Storage section.");
+  section.scrollIntoView({ block: "start" });
+  await ${WAIT_FOR_FRAMES};
+})()`;
+
 const STATES: ReadonlyArray<State> = [
+  { name: "machine-storage", query: "machine=atlas", script: SCROLL_TO_STORAGE },
+  {
+    name: "machine-storage-narrow",
+    query: "machine=atlas",
+    windowWidth: NARROW_WINDOW_WIDTH,
+    script: SCROLL_TO_STORAGE,
+  },
+  {
+    name: "machine-storage-rules",
+    query: "machine=atlas",
+    windowWidth: NARROW_WINDOW_WIDTH,
+    script: `(async () => {
+      await ${SCROLL_TO_STORAGE};
+      document.querySelector(".machine-storage-info").click();
+      await ${WAIT_FOR_FRAMES};
+    })()`,
+  },
+  { name: "machine-storage-too-old", query: "machine=mini", script: SCROLL_TO_STORAGE },
   {
     name: "machine-recent",
     query: "machine=atlas",

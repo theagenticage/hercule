@@ -28,6 +28,7 @@ import { MachinePageHead, MachinePageRoomLine } from "../../../../screens/fleet/
 import { MachinePageInstruments } from "../../../../screens/fleet/machine-page-instruments";
 import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
+import { CleanUpButton } from "./-clean-up-button";
 import { MachineRecent } from "./-machine-recent";
 import { MachineRetireDialog } from "./-machine-retire-dialog";
 import {
@@ -35,10 +36,13 @@ import {
   MACHINE_RECENT_ID,
   MACHINE_SETTINGS_ID,
   MACHINE_SOFTWARE_ID,
+  MACHINE_STORAGE_ID,
   MACHINE_WORK_ID,
 } from "./-machine-sections";
 import { MachineSettings } from "./-machine-settings";
 import { MachineSoftware } from "./-machine-software";
+import { MachineStorage } from "./-machine-storage";
+import { loadMachineStorage } from "./-machine-storage-reads";
 import { RunnerNotFound } from "./-runner-not-found";
 import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { MachineRunningHere } from "./-running-here";
@@ -48,6 +52,7 @@ import { useRunnerSessionCounts } from "./-session-counts";
 const SECTION_IDS = [
   MACHINE_CAPACITY_ID,
   MACHINE_WORK_ID,
+  MACHINE_STORAGE_ID,
   MACHINE_SOFTWARE_ID,
   MACHINE_RECENT_ID,
   MACHINE_SETTINGS_ID,
@@ -55,6 +60,7 @@ const SECTION_IDS = [
 const SECTIONS = [
   { id: MACHINE_CAPACITY_ID, label: "Capacity" },
   { id: MACHINE_WORK_ID, label: "Running" },
+  { id: MACHINE_STORAGE_ID, label: "Storage" },
   { id: MACHINE_SOFTWARE_ID, label: "Software" },
   { id: MACHINE_RECENT_ID, label: "Recent" },
   { id: MACHINE_SETTINGS_ID, label: "Settings" },
@@ -63,13 +69,15 @@ const SECTIONS = [
 /**
  * One machine's page (spec 17 §Fleet, A machine's page): its head and room
  * line, or the banner of a machine that is away, then its instruments, the
- * work running on it, its Software, its Recent activity and its Settings. Its
- * loader reads everything the page draws before it renders, as the Fleet
- * page's does (`fleet/index.tsx`), including the machine's five-minute points
- * of the last 24 hours, for its graphs. They are read only for a machine that
- * exists, and a cached read is used as it is: a `runnerMetrics` push brings
- * them up to date (see `useRunnerMetricsLive`). The workflow name of each run
- * that has a session on the machine is read once (`runWorkflowNameQuery`).
+ * work running on it, its Storage, its Software, its Recent activity and its
+ * Settings. Its loader reads everything the page draws before it renders, as
+ * the Fleet page's does (`fleet/index.tsx`), including the machine's
+ * five-minute points of the last 24 hours, for its graphs, and what its
+ * Storage section needs (`loadMachineStorage`), among it the Fleet page's hour
+ * points for the forecast. They are read only for a machine that exists, and
+ * a cached read is used as it is: a `runnerMetrics` push brings them up to
+ * date (see `useRunnerMetricsLive`). The workflow name of each run that has a
+ * session on the machine is read once (`runWorkflowNameQuery`).
  * When no runner has the id, or the runner is retired, the route shows
  * `RunnerNotFound`: retired machines are not shown anywhere on Fleet.
  */
@@ -77,14 +85,25 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
   staticData: { title: "Fleet" },
   loader: async ({ context: { controller, queryClient }, params: { runnerId }, location }) => {
     const { client } = controller;
+    const settings = readOnOpen(queryClient, settingsQuery(client));
     await Promise.all([
       queryClient.ensureQueryData(runnersQuery(client)).then((runners) => {
         if (!runners.some((runner) => runner.id === runnerId && runner.lifecycle !== "retired")) {
           throwScreenNotFound(location);
         }
-        return queryClient.ensureQueryData(
-          runnerMetricsQuery(client, buildMachineFiveMinuteScope(runnerId)),
-        );
+        return Promise.all([
+          queryClient.ensureQueryData(
+            runnerMetricsQuery(client, buildMachineFiveMinuteScope(runnerId)),
+          ),
+          settings.then((read) =>
+            loadMachineStorage(
+              queryClient,
+              client,
+              runnerId,
+              resolveDisplayTimezone(read.user.timezone),
+            ),
+          ),
+        ]);
       }),
       queryClient.ensureQueryData(harnessesQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
@@ -99,7 +118,7 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
         ),
       ),
       readOnOpen(queryClient, controllerQuery(client)),
-      readOnOpen(queryClient, settingsQuery(client)),
+      settings,
       // Recent shows a failed read as a line of its own with a Retry, so a read that fails
       // must not fail the whole page.
       readOnOpen(queryClient, machineRecentActivityQuery(client, runnerId)).catch(() => undefined),
@@ -121,8 +140,8 @@ function MachinePage(): JSX.Element {
 /**
  * Draws the Fleet header over the page of the machine `runner`, and the page
  * in the Fleet scroll area. The head, its line and the instruments are drawn
- * here from what the page already holds; the Running here, Software and
- * Settings sections read what they draw themselves.
+ * here from what the page already holds; the Running here, Storage, Software
+ * and Settings sections read what they draw themselves.
  *
  * Retire… on the banner and in Settings ask the same question, so the dialog
  * is held here. So is Add a machine, which the header offers on every Fleet
@@ -194,6 +213,20 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
             runner={runner}
             timezone={timezone}
             today={today}
+          />
+          <MachineStorage
+            id={MACHINE_STORAGE_ID}
+            runner={runner}
+            timezone={timezone}
+            today={today}
+            cleanUp={
+              <CleanUpButton
+                runnerId={runner.id}
+                runnerName={runner.name}
+                isOnline={runner.connectivity === "online"}
+                className="btn btn--sm"
+              />
+            }
           />
           <MachineSoftware id={MACHINE_SOFTWARE_ID} runner={runner} />
           <MachineRecent id={MACHINE_RECENT_ID} runner={runner} />

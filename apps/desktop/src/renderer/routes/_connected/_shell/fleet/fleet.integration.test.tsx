@@ -131,6 +131,12 @@ const openFleet = async ({
     },
     ...Object.fromEntries(
       runners.map((runner): [string, Handler] => [
+        `GET /api/v1/runners/${runner.id}`,
+        { body: { ...runner, negotiatedCapabilities: null, protocolVersion: null } },
+      ]),
+    ),
+    ...Object.fromEntries(
+      runners.map((runner): [string, Handler] => [
         `PATCH /api/v1/runners/${runner.id}`,
         (call: Call) => {
           // `runner.update` answers with the runner's detail.

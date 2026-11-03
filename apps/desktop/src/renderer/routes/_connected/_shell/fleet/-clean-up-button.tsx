@@ -11,13 +11,13 @@ import {
 } from "@hercule/client-core/cleanup";
 import { useCleanupProgress, useCleanupStore } from "../../../../app/cleanup";
 import { useDoneMoves } from "../../../../app/done-moves";
+import { cleanupThreadsQuery } from "../../../../app/machine-storage-queries";
 import { workspacesQuery } from "../../../../app/queries";
 import {
   CleanupChoices,
   CleanupDialogFrame,
   CleanupProgressView,
 } from "../../../../screens/fleet/cleanup-dialog";
-import { cleanupThreadsQuery } from "./-machine-storage-reads";
 
 /**
  * Renders the Clean up… button of the machine `runnerId`, named `runnerName`,

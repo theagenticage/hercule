@@ -6,6 +6,7 @@
  */
 export const MACHINE_CAPACITY_ID = "machine-capacity";
 export const MACHINE_WORK_ID = "machine-work";
+export const MACHINE_STORAGE_ID = "machine-storage";
 export const MACHINE_SOFTWARE_ID = "machine-software";
 export const MACHINE_RECENT_ID = "machine-recent";
 export const MACHINE_SETTINGS_ID = "machine-settings";

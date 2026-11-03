@@ -35,6 +35,7 @@
  * five waiting for a slot, and Ada, an assistant.
  */
 import {
+  DISK_USAGE_CAPABILITY,
   PROBED_TOOLCHAINS,
   type ControllerInfo,
   type EventWithFacts,
@@ -45,6 +46,7 @@ import {
   type Runner,
   type RunnerFacts,
   type Session,
+  type Workspace,
 } from "@hercule/contract";
 import type { RunnerMetricsHistory } from "@hercule/client-core/metrics-history";
 import { HARNESSES } from "@hercule/client-core/testing";
@@ -82,6 +84,9 @@ const DEFAULT_DISK_LIMIT_BYTES = 10 * GIB;
 /** Returns the ISO instant `minutes` before the specimen's clock. */
 const minutesAgo = (minutes: number): string =>
   new Date(SPECIMEN_NOW - minutes * 60_000).toISOString();
+
+/** Returns the ISO instant `days` before the specimen's clock. */
+const daysAgo = (days: number): string => minutesAgo(days * 24 * 60);
 
 /** The ids of the five machines, which are UUIDv7-shaped so they sort in the order the machines joined. */
 const ATLAS_ID = "01a0f0c0-0000-7000-8000-000000000001";
@@ -155,6 +160,16 @@ const buildMachine = (
   diskWatermarkBytes: DEFAULT_DISK_LIMIT_BYTES,
   lastSeenAt: minutesAgo(0.5),
   ...over,
+});
+
+/**
+ * Returns what a runner measured outside its workspaces 20 minutes ago: its
+ * repository caches (`cacheGB`) and its Harness Homes (`sessionDataGB`).
+ */
+const buildRunnerDiskUsage = (cacheGB: number, sessionDataGB: number): Runner["diskUsage"] => ({
+  repositoryCacheBytes: cacheGB * GB,
+  harnessHomeBytes: sessionDataGB * GB,
+  measuredAt: minutesAgo(20),
 });
 
 /** The harness versions each machine reports, by harness id. */
@@ -265,6 +280,7 @@ export const ATLAS: Runner = buildMachine(
     maxConcurrentSessions: 16,
     version: "0.4.1",
     labels: ["macos", "xcode"],
+    diskUsage: buildRunnerDiskUsage(64, 23),
   },
   412 * GB,
   29 * GIB,
@@ -287,6 +303,7 @@ export const BEELINK: Runner = buildMachine(
     ),
     maxConcurrentSessions: 24,
     labels: ["linux", "docker"],
+    diskUsage: buildRunnerDiskUsage(120, 64),
   },
   1900 * GB,
   19 * GIB,
@@ -309,6 +326,7 @@ export const BOSGAME: Runner = buildMachine(
     ),
     maxConcurrentSessions: 8,
     labels: ["linux"],
+    diskUsage: buildRunnerDiskUsage(52, 14),
   },
   6.2 * GB,
   21 * GIB,
@@ -346,6 +364,7 @@ export const STUDIO: Runner = buildMachine(
     ),
     maxConcurrentSessions: 8,
     lifecycle: "draining",
+    diskUsage: buildRunnerDiskUsage(85, 31),
   },
   500 * GB,
   70 * GIB,
@@ -538,6 +557,7 @@ const PAYOUT_WORKSPACE = buildWorkspace({
   kind: "ephemeral",
   checkouts: [{ ...buildCheckout(PAYMENTS_REPO.id, "rogier/payout-report"), form: "worktree" }],
   sessionIds: ["s-payout", "atlas-payout-review", "atlas-payout-tests"],
+  diskUsage: { sizeBytes: 17 * GB, freesBytes: 16.2 * GB, measuredAt: minutesAgo(12) },
 });
 
 /**
@@ -618,6 +638,146 @@ const FLEET_SESSIONS: ReadonlyArray<Session> = [
   buildFleetSession("mini-thread-2", MINI_ID, "idle", "thread", "Review the ops runbook", 95),
   ...buildBusySessions(STUDIO_ID, "studio", 2),
 ];
+
+/**
+ * One idle workspace of a machine, with the Thread that used it. The Thread
+ * is the workspace's sidebar row and gives it its name. It exited long ago.
+ */
+interface IdleWorkspaceRecord {
+  readonly workspace: Workspace;
+  readonly thread: Session;
+}
+
+/**
+ * Returns the idle workspace `id` on the machine `runnerId`, last used `idleDays`
+ * ago by a Thread called `title`. `usage` is what the runner measured, `sizeGB`
+ * on disk of which removing it frees `freesGB`, or `null` for a workspace never
+ * measured. `diskUsageError` is why the newest measuring failed.
+ */
+const buildIdleWorkspace = (
+  id: string,
+  runnerId: string,
+  idleDays: number,
+  title: string,
+  usage: {
+    readonly sizeGB: number;
+    readonly freesGB: number;
+    readonly measuredDaysAgo: number;
+  } | null,
+  diskUsageError: string | null = null,
+): IdleWorkspaceRecord => ({
+  workspace: buildWorkspace({
+    id,
+    runnerId,
+    kind: "ephemeral",
+    checkouts: [{ ...buildCheckout(PAYMENTS_REPO.id, `rogier/${id}`), form: "worktree" }],
+    sessionIds: [],
+    createdAt: daysAgo(idleDays + 2),
+    lastUsedAt: daysAgo(idleDays),
+    diskUsage:
+      usage === null
+        ? null
+        : {
+            sizeBytes: usage.sizeGB * GB,
+            freesBytes: usage.freesGB * GB,
+            measuredAt: daysAgo(usage.measuredDaysAgo),
+          },
+    diskUsageError,
+  }),
+  thread: buildSession({
+    id: `${id}-thread`,
+    title,
+    runnerId,
+    workspaceId: id,
+    status: "exited",
+    createdAt: daysAgo(idleDays + 2),
+    startedAt: daysAgo(idleDays + 2),
+    exitedAt: daysAgo(idleDays),
+    lastActivityAt: daysAgo(idleDays),
+  }),
+});
+
+/**
+ * The idle workspaces of atlas and bosgame. Atlas has nine: eight measured,
+ * where removing the first and the fourth frees less than they take (their
+ * packages are linked to a store that stays), the fifth's newest measuring
+ * failed three days after its last good one, and one never measured. Bosgame,
+ * whose disk is full, has three.
+ */
+const IDLE_WORKSPACE_RECORDS: ReadonlyArray<IdleWorkspaceRecord> = [
+  buildIdleWorkspace("ws-atlas-idle-1", ATLAS_ID, 38, "Move the checkout to Stripe Elements", {
+    sizeGB: 62,
+    freesGB: 25,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace("ws-atlas-idle-2", ATLAS_ID, 22, "Rebuild the search index", {
+    sizeGB: 41,
+    freesGB: 40,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace("ws-atlas-idle-3", ATLAS_ID, 16, "Fix the flaky payout test", {
+    sizeGB: 28,
+    freesGB: 27,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace("ws-atlas-idle-4", ATLAS_ID, 52, "Spike: move the cron jobs to a queue", {
+    sizeGB: 22,
+    freesGB: 9,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace(
+    "ws-atlas-idle-5",
+    ATLAS_ID,
+    12,
+    "Draft the Q3 ops runbook",
+    { sizeGB: 15, freesGB: 14.6, measuredDaysAgo: 3 },
+    "Measuring took longer than 10 minutes",
+  ),
+  buildIdleWorkspace("ws-atlas-idle-6", ATLAS_ID, 9, "Bump the Terraform provider", {
+    sizeGB: 10,
+    freesGB: 9.5,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace("ws-atlas-idle-7", ATLAS_ID, 27, "Try the new dashboard layout", {
+    sizeGB: 8.4,
+    freesGB: 3.4,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace("ws-atlas-idle-8", ATLAS_ID, 8, "Update the onboarding copy", {
+    sizeGB: 3.2,
+    freesGB: 3.2,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace("ws-atlas-idle-9", ATLAS_ID, 31, "Sketch the invoice export", null),
+  buildIdleWorkspace("ws-bosgame-idle-1", BOSGAME_ID, 19, "Rework the ingest pipeline", {
+    sizeGB: 96,
+    freesGB: 88,
+    measuredDaysAgo: 0,
+  }),
+  buildIdleWorkspace("ws-bosgame-idle-2", BOSGAME_ID, 44, "Profile the nightly import", {
+    sizeGB: 61,
+    freesGB: 58,
+    measuredDaysAgo: 0,
+  }),
+  buildIdleWorkspace("ws-bosgame-idle-3", BOSGAME_ID, 13, "Try Postgres 17", {
+    sizeGB: 12,
+    freesGB: 12,
+    measuredDaysAgo: 0,
+  }),
+];
+
+/**
+ * What each machine negotiated with the controller, by runner id. Mini runs a
+ * runner from before storage was measured, so its capabilities lack disk
+ * usage and its Storage section says it is too old.
+ */
+const FLEET_NEGOTIATED_CAPABILITIES: Readonly<Record<string, readonly string[] | null>> = {
+  [ATLAS_ID]: [DISK_USAGE_CAPABILITY],
+  [BEELINK_ID]: [DISK_USAGE_CAPABILITY],
+  [BOSGAME_ID]: [DISK_USAGE_CAPABILITY],
+  [MINI_ID]: [],
+  [STUDIO_ID]: [DISK_USAGE_CAPABILITY],
+};
 
 /** What the controller says of itself: version 0.4.2, running on beelink. */
 const FLEET_CONTROLLER: ControllerInfo = {
@@ -811,6 +971,8 @@ export const FLEET_RECORDS: FleetRecords = {
   metrics: FLEET_METRICS,
   activity: FLEET_ACTIVITY,
   runs: [RUN_RECORDS.waiting.run],
+  negotiatedCapabilities: FLEET_NEGOTIATED_CAPABILITIES,
+  cleanupThreads: IDLE_WORKSPACE_RECORDS.map(({ thread }) => thread),
 };
 
 /**
@@ -820,7 +982,7 @@ export const FLEET_RECORDS: FleetRecords = {
  */
 export const FLEET_SIDEBAR_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
-  workspaces: [PAYOUT_WORKSPACE],
+  workspaces: [PAYOUT_WORKSPACE, ...IDLE_WORKSPACE_RECORDS.map(({ workspace }) => workspace)],
   resources: [PAYMENTS_REPO],
   threads: [...ATLAS_THREADS, ...ATLAS_OTHER_SESSIONS.filter(({ kind }) => kind === "agent")],
   assistants: [

@@ -62,6 +62,12 @@ const openMachineWithHeldRetire = async () => {
     ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [] }),
     "GET /api/v1/runners": () =>
       retired ? runnersRead.handler() : Promise.resolve({ body: { items: [ATLAS, MOSS] } }),
+    ...Object.fromEntries(
+      [ATLAS, MOSS].map((runner) => [
+        `GET /api/v1/runners/${runner.id}`,
+        { body: { ...runner, negotiatedCapabilities: null, protocolVersion: null } },
+      ]),
+    ),
     "GET /api/v1/sessions": { body: { items: [] } },
     "GET /api/v1/harnesses": { body: HARNESSES },
     "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "UTC" } } },
