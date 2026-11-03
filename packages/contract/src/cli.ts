@@ -2353,6 +2353,45 @@ export const CLI = {
     },
   },
 
+  "runnerMetrics.query": {
+    command: "runner metrics",
+    help: "Lists a machine's Runner Metrics history as points. A point holds free disk, available memory, CPU use, and the sessions running and queued, over five minutes or one hour, never a single minute. `minutes` says how many minutes of a point have a report, so a gap shows as fewer minutes, not as an invented value. The span is at most 24 hours for five-minute points, and for hour points as long as the history is kept (14 days).",
+    examples: [
+      { args: ["--since", "2026-11-02T08:00:00.000Z", "--resolution", "fiveMinutes"] },
+      {
+        args: [
+          "--runner",
+          "1f3a9c2e",
+          "--since",
+          "2026-10-27T00:00:00.000Z",
+          "--until",
+          "2026-11-03T00:00:00.000Z",
+          "--resolution",
+          "hour",
+        ],
+      },
+    ],
+    fields: {
+      runnerId: {
+        flag: "runner",
+        help: "Only this machine, by its id or a tail of eight or more characters; leave it off for every machine.",
+        resolves: "runner.query",
+      },
+      since: {
+        flag: "since",
+        help: "The start of the span as a UTC instant with milliseconds: 2026-11-02T08:00:00.000Z. It moves back to the start of its point, so every point is whole.",
+      },
+      until: {
+        flag: "until",
+        help: "The end of the span, not included, as a UTC instant with milliseconds; leave it off for now.",
+      },
+      resolution: {
+        flag: "resolution",
+        help: "How long a point is: fiveMinutes, on UTC multiples of five minutes, or hour, on whole UTC hours.",
+      },
+    },
+  },
+
   "plugin.query": {
     command: "plugin list",
     help: "Lists every plugin this binary was built with. Each row shows whether the user enabled the plugin, and what happened to it when this controller started. The set is fixed at build time, so this is the whole of it.",
