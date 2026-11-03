@@ -1963,7 +1963,7 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 - the machine's icon (a laptop, a desktop or a server, from its OS and RAM), its name, and its status dot with the word only when it is not online ("Offline", "Not heard from since 09:12", "Takes no new work");
 - **sessions against the cap**, drawn by the rule below, with "12 of 16" beside them;
 - **Disk** and **Memory** as two gauges with their percentages, coloured by the rules below; a click on a gauge opens the machine's page at that gauge's section;
-- the small faces of who works there: one per Thread row, run and assistant running on the machine, at most 5, then "+n";
+- the small faces of who works there: ~~one per Thread row, run and assistant running on the machine, at most 5, then "+n"~~ *(Amended 2026-11-03, [#984](https://github.com/theagenticage/hercule/issues/984).)* one per group of Running here, in its order, at most 5, then "+n". "+n" counts groups, not sessions. The List view's rows have no faces;
 - **Room** for more: "Room for 4", "Full", or ~~"Takes no new work" while the disk is below its limit~~; *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* The card's Room reads only "Room for 4" or "Full". No Room shows while the machine is away, told to take no new work, or has its disk below its limit, because the status word or the line of what needs the user already says so. The list's Room cell shows "–" then;
 - **what needs the user,** at most one line, the most serious first (below), with the button that fixes it.
 
@@ -2040,7 +2040,20 @@ One centred column, in this order. The jump links of the header follow the secti
    - **Stop new work**, "Sessions running here finish; nothing new starts.", a toggle (`runner.drain` and `runner.undrain`);
    - **Retire this machine…**, "Forgets it. Its threads keep their transcripts, but cannot resume.", a `btn--danger` with the question `buildRetireQuestion` builds.
 
-**Running here** groups the sessions on the machine into what the user knows them as: a workflow run (its workflow's name and the step), a row of Threads (the sidebar's row, by workspace: its name and its sessions' labels), and an assistant. Each group shows its faces, its status in words ("2 working · 1 waits for you") and since when, and opens what it is: the run's page, the row's open session, the assistant's Conversation. A segmented control, **Work | Sessions**, switches to the plain list of sessions: face, title, status and runtime. Waiting sessions come first, in marigold, then running ones by start. Past 10 groups or 20 sessions, "Show all". `buildMachineWork` in `@hercule/client-core` groups them. Rows of Threads come from the sidebar's own rows, which the shell already holds (`prepareSessionPresentation`): a row is here when one of its sessions on this machine has not exited. So a row keeps the sidebar's name even when only its Agent session still works and its Threads have exited. Runs and assistants come from the machine's open sessions.
+**Running here** groups the sessions on the machine into what the user knows them as: a workflow run (its workflow's name and the step), a row of Threads (the sidebar's row, by workspace: its name and its sessions' labels), and an assistant. Each group shows its faces, its status in words ("2 working · 1 waits for you") and since when, and opens what it is: the run's page, the row's open session, the assistant's Conversation. A segmented control, **Work | Sessions**, switches to the plain list of sessions: face, title, status and runtime. ~~Waiting sessions come first, in marigold, then running ones by start.~~ The order is set below. Past 10 groups or 20 sessions, "Show all". `buildMachineWork` in `@hercule/client-core` groups them. Rows of Threads come from the sidebar's own rows, which the shell already holds (`prepareSessionPresentation`): a row is here when one of its sessions on this machine has not exited. So a row keeps the sidebar's name even when only its Agent session still works and its Threads have exited. Runs and assistants come from the machine's open sessions.
+
+*(Amended 2026-11-03, [#984](https://github.com/theagenticage/hercule/issues/984).)*
+
+- **The order.** "Waiting" means waiting for a slot (queued), as everywhere on Fleet. A group with any session waiting for a slot comes first, by its oldest waiting session. The other groups follow by their earliest start on this machine, oldest first, so new work appends at the bottom and nothing jumps. Ties go by the group's key. The Sessions list is ordered the same way. A session that asks the user is not "waiting" here: the status words say "1 waits for you".
+- **What a group is.**
+  - A run's step sessions are one group per run.
+  - An assistant's sessions are one group per assistant, so several conversations of one assistant are one group. It opens the assistant's page.
+  - Thread and Agent sessions are one group per sidebar row that lists them. It opens the row's lead. The sidebar's own last-open choice is the sidebar's state and is not read here.
+  - A Thread or Agent session that no row lists is a group of its own.
+  - A group's pose, status words, order and "since" come from its sessions on this machine only. Its name and what it opens are the sidebar's.
+- **A run's name** is the workflow's name as the run froze it. For a running run it is `workflowName` from `run.query { status: running }`. For a run that is no longer running but still has an open step session (a user can message a step session after its run ended), it is the plan's name from `run.read`. Until that read answers, the group shows the session's own title. The step is the session's `stepId`, as the sidebar labels run sessions.
+- **Status words** read "2 working · 1 waits for you · 1 waits for a slot · 1 idle". A part is left out when its count is zero. A session queued for a slot shows an idle face unless it asks the user.
+- **Show all.** Past 10 groups or 20 sessions the section shows "Show all 14", then "Show fewer". Each view (Work and Sessions) keeps its own choice. An empty machine keeps the section, with "Nothing runs here right now." The jump link in the header is "Running".
 
 ### The cleanup dialog
 
@@ -2107,6 +2120,8 @@ Each row has a checkbox, the name, what removing it frees, and when it was last 
 |---|---|
 | Machines, status, cap, labels, lifecycle, facts, metrics, storage totals | `runner.query`, `runner.read` |
 | Sessions running and waiting; Running here; faces | `session.query({ runnerId, status })` for the statuses that are not `exited`; the names of Thread rows from the sidebar's rows, already held |
+| Run names in Running here *(Amended 2026-11-03, [#984](https://github.com/theagenticage/hercule/issues/984).)* | `run.query { status: running }` and `run.read` for a run that is no longer running |
+| Assistant names in Running here *(Amended 2026-11-03, [#984](https://github.com/theagenticage/hercule/issues/984).)* | `assistant.query`, already a shell read |
 | Who asks the user | the sessions' open Requests, as the sidebar reads them |
 | Graphs and forecasts | `runnerMetrics.query` |
 | Harness versions and Latest | `harness.query`, with each harness's `latestRelease`; the runner's Latest is `controller.read`'s version |
@@ -2120,7 +2135,7 @@ Each row has a checkbox, the name, what removing it frees, and when it was last 
 
 Live topics while a Fleet route is open: `runner`, `runnerMetrics`, `session`, `provider` and `workspace`. The shell already holds `session`.
 
-*(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* A Fleet page reads the sessions as counts per runner (`countRunnerSessions`), never as the list, so a push that changes only a session's usage or last activity redraws nothing. While the window is hidden the page does not observe the sessions' read, so a `session` push reads nothing; showing the window reads the list once if a push marked it out of date.
+*(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* A Fleet page reads the sessions as ~~counts per runner (`countRunnerSessions`), never as the list~~ *(Amended 2026-11-03, [#984](https://github.com/theagenticage/hercule/issues/984).)* counts and faces per runner (`countRunnerSessions`, `buildFleetFaces`), and a machine's page reads its Running here (`buildMachineWork`). Each is built in the read's `select` from plain data, so a push that changes only a session's usage or last activity redraws nothing. The sidebar's rows reach these through `indexRowMembers`, which the shell publishes only when a row's key, title, lead or a member's label changes. While the window is hidden the page does not observe the sessions' read, so a `session` push reads nothing; showing the window reads the list once if a push marked it out of date.
 
 ### What Fleet costs
 
@@ -2140,7 +2155,7 @@ Stated before the slices build it ([Performance](#performance), as ADR 0037 asks
 
 ### Fleet's tests
 
-- **Unit tests** cover each `client-core` function the pages call: ~~`describeFleet`~~ `describeFleetPage` *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)*, `findMachineNeeds` with every row of its table and their order, ~~`describeRoom`~~ `describeMachinePage`'s room line, the sessions' drawing (inside `describeFleetPage`) above and below 16 slots, `buildMachineWork`, the Software grid's Latest and cells (a harness newer than its latest release shows the check; a toolchain is never marked older), `forecastDiskLimit` (a steady fill, too little history, a cleanup's jump, a limit past 60 days), `describeMachineActivity` and its folding, and `archiveAndRemoveWorkspaces`.
+- **Unit tests** cover each `client-core` function the pages call: ~~`describeFleet`~~ `describeFleetPage` *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)*, `findMachineNeeds` with every row of its table and their order, ~~`describeRoom`~~ `describeMachinePage`'s room line, the sessions' drawing (inside `describeFleetPage`) above and below 16 slots, `buildMachineWork`, `buildFleetFaces` and `indexRowMembers` *(Amended 2026-11-03, [#984](https://github.com/theagenticage/hercule/issues/984).)*, the Software grid's Latest and cells (a harness newer than its latest release shows the check; a toolchain is never marked older), `forecastDiskLimit` (a steady fill, too little history, a cleanup's jump, a limit past 60 days), `describeMachineActivity` and its folding, and `archiveAndRemoveWorkspaces`.
 - **Integration tests** cover the routes and the Fleet row, Grid and List, a gauge opening its section, Allow N, the cleanup dialog's groups, the refusal of a workspace used since it opened, and its result, and the settings rows.
 - **The goldens** gain the Fleet page in Grid and a machine's page, with the cleanup dialog's fixture world: 15 screens and 90 PNGs. AGENTS.md's count changes with them.
 - **End-to-end tests**, against the compiled binary in a scratch `HERCULE_HOME`: the Fleet row opens the page and the face follows; a second runner joins from Add a machine's command and its card appears; Allow N raises the cap and a waiting Thread starts; the cleanup dialog archives and removes an idle workspace and the disk's free space grows; a machine's activity lists the removal.
