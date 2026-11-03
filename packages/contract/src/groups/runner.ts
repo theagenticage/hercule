@@ -10,7 +10,7 @@
  * shape whichever runner it is looking at.
  */
 import { Schema } from "effect";
-import { Bytes, Capabilities, Fact, RunnerFacts, RunnerMetrics } from "@hercule/protocol";
+import { Capabilities, Fact, RunnerDiskUsage, RunnerFacts, RunnerMetrics } from "@hercule/protocol";
 import { CapabilitySnapshot } from "./provider-account";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -40,6 +40,7 @@ export {
   HarnessBinary,
   PROBED_TOOLCHAINS,
   RunnerFacts,
+  RunnerDiskUsage,
   RunnerMetrics,
   Toolchain as RunnerToolchain,
 } from "@hercule/protocol";
@@ -83,21 +84,6 @@ export type RunnerLifecycle = Schema.Schema.Type<typeof RunnerLifecycle>;
 const RunnerName = bounded(1, MAX_RUNNER_NAME_LENGTH);
 
 const RunnerLabel = bounded(1, MAX_RUNNER_LABEL_LENGTH);
-
-/**
- * The disk space a runner uses outside its workspaces, as it last measured it.
- * Each count includes only files with a single link, so it never overlaps a
- * workspace's `freesBytes`.
- */
-export const RunnerDiskUsage = Schema.Struct({
-  /** The runner's managed repositories, the bare storage new worktrees come from. */
-  repositoryCacheBytes: Bytes,
-  /** Every Harness Home on the runner, where the harnesses keep their logins and session files. */
-  harnessHomeBytes: Bytes,
-  measuredAt: Timestamp,
-});
-
-export type RunnerDiskUsage = Schema.Schema.Type<typeof RunnerDiskUsage>;
 
 export const Runner = Schema.Struct({
   id: Id,

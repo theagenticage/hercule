@@ -10,9 +10,10 @@
  * The schema reading is deliberately shallow. A field has one of five types
  * (string, number, boolean, a list of one of those, or anything else, which is
  * given as JSON), and that is enough for every operation in the API. A deeper
- * mapping would be a schema-to-flags compiler nobody asked for. The one
- * exception the table opts into is a record of text values, given as
- * repeated `--<flag> <field>=<value>` (see `namedValues` on the row).
+ * mapping would be a schema-to-flags compiler nobody asked for. The
+ * exceptions the table opts into are a record of text values, given as
+ * repeated `--<flag> <field>=<value>` (see `namedValues` on the row), and a
+ * list of objects that a list positional fills one key of (see `itemKey`).
  *
  * A field whose row is `skillFolder` becomes the positional `<folder>`. The
  * command then reads that folder and sends one request per skill in it (see

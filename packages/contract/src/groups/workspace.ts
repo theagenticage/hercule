@@ -223,7 +223,7 @@ const WorkspaceDisposeWithoutBody = Schema.Null.pipe(
 export const MAX_DISPOSE_MANY_ITEMS = 200;
 
 /** One workspace to remove in `workspace.disposeMany`. */
-export const WorkspaceDisposeManyItem = Schema.Struct({
+export const WorkspaceDisposeManyItem = closedStruct({
   workspaceId: Id,
   /**
    * The workspace's `lastUsedAt` as the caller showed it to the user. When it
@@ -235,7 +235,7 @@ export const WorkspaceDisposeManyItem = Schema.Struct({
 export type WorkspaceDisposeManyItem = Schema.Schema.Type<typeof WorkspaceDisposeManyItem>;
 
 /** The payload of `workspace.disposeMany`: the workspaces to remove, in one call. */
-export const WorkspaceDisposeManyInput = Schema.Struct({
+export const WorkspaceDisposeManyInput = closedStruct({
   items: Schema.Array(WorkspaceDisposeManyItem).check(
     Schema.isBetweenLength(1, MAX_DISPOSE_MANY_ITEMS),
   ),

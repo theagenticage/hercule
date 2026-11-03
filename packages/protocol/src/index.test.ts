@@ -7,7 +7,9 @@ import {
   LocalAnnouncement,
   LocalEnrolment,
   MAX_CHECKOUTS,
+  MAX_DISK_USAGE_ERROR_LENGTH,
   MAX_FRAME_BYTES,
+  MAX_MEASURED_WORKSPACES,
   MAX_LOGIN_CODE_SECONDS,
   MAX_PROBE_MODELS,
   MAX_REPOSITORY_SKILLS,
@@ -208,9 +210,11 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
         },
       ],
       truncated: false,
-      repositoryCacheBytes: 3_100_000_000,
-      harnessHomeBytes: null,
-      measuredAt: "2026-11-03T10:00:00.000Z",
+      runner: {
+        repositoryCacheBytes: 3_100_000_000,
+        harnessHomeBytes: 420_000_000,
+        measuredAt: "2026-11-03T10:00:00.000Z",
+      },
     },
   },
   {
@@ -676,6 +680,37 @@ describe("the runner-to-controller catalogue", () => {
     expect(decodeFromRunner(listed)._tag).toBe("Success");
     expect(
       decodeFromRunner({ ...listed, outcome: { status: "listed", skills: [], skipped: [] } })._tag,
+    ).toBe("Failure");
+  });
+
+  it("fits the largest disk usage report in a frame", () => {
+    // A character of three bytes in UTF-8 is the worst text a reason holds.
+    const report = {
+      _tag: "diskUsageReport",
+      diskUsage: {
+        workspaces: Array.from({ length: MAX_MEASURED_WORKSPACES }, (_, index) => ({
+          workspaceId: `${"w".repeat(63)}${String(index % 10)}`,
+          diskUsage: {
+            sizeBytes: Number.MAX_SAFE_INTEGER,
+            freesBytes: Number.MAX_SAFE_INTEGER,
+            measuredAt: "2026-11-03T10:00:00.000Z",
+          },
+          error: "\u6F22".repeat(MAX_DISK_USAGE_ERROR_LENGTH),
+        })),
+        truncated: true,
+        runner: null,
+      },
+    };
+    const encoded = JSON.stringify(Schema.encodeUnknownSync(RunnerToController)(report));
+    expect(Buffer.byteLength(encoded, "utf8")).toBeLessThan(MAX_FRAME_BYTES);
+    expect(
+      decodeFromRunner({
+        ...report,
+        diskUsage: {
+          ...report.diskUsage,
+          workspaces: [{ ...report.diskUsage.workspaces[0], error: "x".repeat(301) }],
+        },
+      })._tag,
     ).toBe("Failure");
   });
 

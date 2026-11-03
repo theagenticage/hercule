@@ -458,22 +458,56 @@ export const WorkspaceDiskUsage = Schema.Struct({
 
 export type WorkspaceDiskUsage = Schema.Schema.Type<typeof WorkspaceDiskUsage>;
 
+/**
+ * The longest reason a runner gives for a failed measurement. With three-byte
+ * characters, 2,000 entries of 250 stay near 1.9 MB; 300 would pass 2 MiB.
+ */
+export const MAX_DISK_USAGE_ERROR_LENGTH = 250;
+
+/**
+ * Why measuring a workspace failed, such as "Measuring took longer than 10
+ * minutes". It is short and holds no control characters, so a report of
+ * `MAX_MEASURED_WORKSPACES` entries, each with the longest reason, still fits
+ * in one frame (`MAX_FRAME_BYTES`). A runner shortens a longer reason before it
+ * sends it.
+ */
+export const DiskUsageError = Schema.String.check(
+  Schema.isMaxLength(MAX_DISK_USAGE_ERROR_LENGTH),
+  // eslint-disable-next-line no-control-regex
+  Schema.isPattern(/^[^\u0000-\u001f\u007f]*$/, {
+    title: "disk usage error",
+    description: "text without control characters",
+  }),
+);
+
 /** What a runner knows about the disk usage of one of its workspaces. */
 export const WorkspaceDiskUsageEntry = Schema.Struct({
   workspaceId: StorageId,
   /** The latest successful measurement, or `null` when none has succeeded yet. */
   diskUsage: Schema.NullOr(WorkspaceDiskUsage),
   /** Why the newest attempt failed, or `null` when it succeeded. */
-  error: Schema.NullOr(Message),
+  error: Schema.NullOr(DiskUsageError),
 });
 
 export type WorkspaceDiskUsageEntry = Schema.Schema.Type<typeof WorkspaceDiskUsageEntry>;
 
 /**
- * Everything a runner has measured: its managed workspaces and the space it
- * uses outside them. Both byte counts include only files with a single link,
- * so the parts of the disk never overlap.
+ * What the runner last measured outside its workspaces. Each count includes
+ * only files with a single link, so it never overlaps a workspace's
+ * `freesBytes`.
  */
+export const RunnerDiskUsage = Schema.Struct({
+  /** The runner's managed repositories, the bare storage new worktrees come from. */
+  repositoryCacheBytes: Bytes,
+  /** Every Harness Home on the runner, where the harnesses keep their logins and session files. */
+  harnessHomeBytes: Bytes,
+  /** When the runner measured them. */
+  measuredAt: Timestamp,
+});
+
+export type RunnerDiskUsage = Schema.Schema.Type<typeof RunnerDiskUsage>;
+
+/** Everything a runner has measured: its managed workspaces and the space outside them. */
 export const RunnerDiskUsageReport = Schema.Struct({
   /**
    * One entry per managed workspace the runner holds. Past
@@ -484,12 +518,8 @@ export const RunnerDiskUsageReport = Schema.Struct({
   ),
   /** Whether the runner holds more workspaces than the list shows. */
   truncated: Schema.Boolean,
-  /** The runner's managed repositories, or `null` when not measured yet. */
-  repositoryCacheBytes: Schema.NullOr(Bytes),
-  /** Every Harness Home on the runner, or `null` when not measured yet. */
-  harnessHomeBytes: Schema.NullOr(Bytes),
-  /** When the newest of the two byte counts was measured, or `null` when neither has been. */
-  measuredAt: Schema.NullOr(Timestamp),
+  /** What the runner last measured outside its workspaces, or `null` before the first measurement. */
+  runner: Schema.NullOr(RunnerDiskUsage),
 });
 
 export type RunnerDiskUsageReport = Schema.Schema.Type<typeof RunnerDiskUsageReport>;

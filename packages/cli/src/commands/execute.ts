@@ -279,7 +279,7 @@ const resolveTails = async (
  * its words to objects: `["a", "b"]` becomes `[{ workspaceId: "a" }, { workspaceId: "b" }]`.
  * It runs after the words are resolved, so each holds a full id.
  */
-const wrapItemKeys = (
+const wrapListItems = (
   fields: ReadonlyArray<Field>,
   values: Record<string, unknown>,
 ): Record<string, unknown> => {
@@ -554,7 +554,7 @@ export const execute = async (
     writtenPayload,
     params,
   );
-  const payload = wrapItemKeys(payloadFields, resolvedPayload);
+  const payload = wrapListItems(payloadFields, resolvedPayload);
   // Upload only once every id tail has resolved, so a mistyped session id
   // fails before any image is sent.
   await uploadImages(client, images, payload);
