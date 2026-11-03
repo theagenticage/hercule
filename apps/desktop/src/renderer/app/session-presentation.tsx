@@ -13,12 +13,18 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type JSX,
   type ReactNode,
 } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { replaceEqualDeep, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useMatch, useRouteContext } from "@tanstack/react-router";
-import { prepareSessionPresentation, type SessionPresentation } from "@hercule/client-core";
+import {
+  indexRowMembers,
+  prepareSessionPresentation,
+  type RowMember,
+  type SessionPresentation,
+} from "@hercule/client-core";
 import { useRelatedReads } from "./related-reads";
 import {
   projectsQuery,
@@ -31,6 +37,9 @@ import {
 } from "./queries";
 
 const SessionPresentationContext = createContext<SessionPresentation | null>(null);
+
+/** The sidebar's rows by member session, which keeps its identity while equal. */
+const RowMembersContext = createContext<Readonly<Record<string, RowMember>> | null>(null);
 
 /** Holds a function that returns the latest presentation, which keeps its identity. */
 const ReadSessionPresentationContext = createContext<(() => SessionPresentation) | null>(null);
@@ -65,6 +74,11 @@ export function useOpenSessionId(): string | null {
  *
  * It also reads the projects, workspaces and resources again when a session
  * names one the cache does not hold (`useRelatedReads`).
+ *
+ * It offers the rows' members (`useRowMembers`) beside the presentation. The
+ * presentation is prepared again on every session push, but the members only
+ * hold strings, so the object keeps its identity until a row's key, title or
+ * lead, or a member's label, changes.
  */
 export function SessionPresentationProvider({
   children,
@@ -101,9 +115,19 @@ export function SessionPresentationProvider({
   }, [presentation]);
   const readLatest = useCallback(() => latest.current, []);
 
+  const indexed = useMemo(() => indexRowMembers(presentation.groupRows), [presentation]);
+  // Keeping the last shared object in state, and replacing it while rendering, is how a value
+  // keeps its identity without writing a ref during render. A render that finds an equal value
+  // sets nothing.
+  const [shared, setShared] = useState(indexed);
+  const rowMembers = replaceEqualDeep(shared, indexed);
+  if (rowMembers !== shared) setShared(rowMembers);
+
   return (
     <ReadSessionPresentationContext value={readLatest}>
-      <SessionPresentationContext value={presentation}>{children}</SessionPresentationContext>
+      <SessionPresentationContext value={presentation}>
+        <RowMembersContext value={rowMembers}>{children}</RowMembersContext>
+      </SessionPresentationContext>
     </ReadSessionPresentationContext>
   );
 }
@@ -125,4 +149,16 @@ export function useReadSessionPresentation(): () => SessionPresentation {
   const read = use(ReadSessionPresentationContext);
   if (read === null) throw new Error("No SessionPresentationProvider above this component");
   return read;
+}
+
+/**
+ * Returns every session of the sidebar's rows (exited ones included) with its
+ * row's key, title and lead and its own label, by session id. A component that
+ * reads it draws again only when one of those changes, not when a session's
+ * usage or last activity does.
+ */
+export function useRowMembers(): Readonly<Record<string, RowMember>> {
+  const members = use(RowMembersContext);
+  if (members === null) throw new Error("No SessionPresentationProvider above this component");
+  return members;
 }

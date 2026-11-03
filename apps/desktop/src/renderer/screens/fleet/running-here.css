@@ -1,0 +1,251 @@
+/* A machine's "Running here" section: the work as rows, or the sessions as a
+   two-column list. The measurements are the fleet prototype's (`fx-work-*`,
+   `fx-sessions*`, `fx-more`). Every class starts with `running-here-`. Each
+   departure from the prototype is explained in a comment.
+
+   Before "Show all" the rows are a plain list. After it they are a virtual
+   list in a scroll area of their own (`running-here-scroll`), whose rows are
+   the links themselves, with no `li` around them. Every rule below holds for
+   both. */
+
+/* The prototype's switch buttons are smaller than the default segmented control. */
+.running-here-view .seg button {
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--t-12);
+}
+
+.running-here-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.running-here-list a,
+.running-here-scroll a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Every row is a link. It reaches 12px past the list on each side, and pads
+   its content by the same, so the text stays on the list's edge while the
+   hover background and the focus ring have room. The rule between rows is
+   the row's own top edge. The hover background is a layer behind the row's
+   content that starts 1px below that rule, so a hovered row never has to hide
+   its neighbours' rules: each row draws only its own, and the rules stay
+   right in any number of columns. The ring is 2px, inside the row. The
+   background and the radius are the Fleet list's (`.fleet-row`). */
+.running-here-row,
+.running-here-session {
+  position: relative;
+  isolation: isolate;
+  margin-inline: -12px;
+  padding-inline: 12px;
+  border-radius: var(--r-md);
+}
+.running-here-row::before,
+.running-here-session::before {
+  content: "";
+  position: absolute;
+  inset: 0 12px auto;
+  border-top: 1px solid var(--divider);
+}
+.running-here-row::after,
+.running-here-session::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 1px 0 0;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.running-here-row:hover::after,
+.running-here-session:hover::after {
+  background: var(--hover);
+}
+.running-here-row:focus-visible,
+.running-here-session:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* ---------- Work ---------- */
+/* The prototype's row has a column for the number of sessions. Here the faces
+   are one per session, so the count is left out. A virtual list cannot share
+   columns between its rows, so each row is its own grid: the glyph, the text,
+   the faces (as wide as they are) and "since", which has a fixed width. Its
+   widest form, "since 30 Sep 23:59", is much longer than the prototype's
+   "40 min", so the prototype's 64px does not hold it; 10.5 times the text
+   size is that text with room to spare for a wider font. The last column
+   follows the Text size and is the same on every row, and the text is
+   right-aligned, so the faces end at the same place on every row. A row's
+   height follows the Text size too (styles/row-heights.css). */
+.running-here-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto calc(var(--t-12) * 10.5);
+  column-gap: 14px;
+  align-items: center;
+  min-height: var(--fleet-running-height-work);
+}
+.running-here-glyph {
+  display: grid;
+  place-items: center;
+}
+.running-here-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.running-here-text {
+  display: grid;
+  min-width: 0;
+}
+.running-here-text b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-medium);
+}
+/* The kind of group, then " · " and its members (a run's step names, a row's
+   other sessions), then " · " and its status. A group with no members has none
+   of its own separator. When the row is narrow they give way in this order:
+   the members shorten with an ellipsis first and can vanish, the status
+   shortens only once the members are gone, and the kind never shortens. The
+   members start from no width and grow only up to their text, so they take
+   all the shrinking before the status takes any. (A larger shrink factor
+   would still leave the status a sliver of it, enough for an ellipsis.) */
+.running-here-line {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.running-here-kind {
+  flex: none;
+}
+.running-here-members {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: max-content;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.running-here-separator {
+  flex: none;
+  white-space: pre;
+}
+.running-here-line .running-here-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The faces are as wide as they are, at most 12 and "+n", which is about 260px.
+   In a narrow window they take at most 30% of the list and the leftmost are cut
+   off, so the title and the "since" time keep their room. The lists are size
+   containers, which is what 30cqw is a share of. */
+.running-here-list--work,
+.running-here-scroll {
+  container-type: inline-size;
+}
+.running-here-faces {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: min(264px, 30cqw);
+  overflow: hidden;
+  font-size: var(--t-12);
+}
+/* The stack keeps its full width, so a narrow row cuts the leftmost faces
+   (the container is right-aligned) and never the "+n". */
+.running-here-faces > .work-faces {
+  flex: none;
+}
+.running-here-since {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ---------- Sessions ---------- */
+/* Two columns while each keeps 340px, which is what a title needs beside a
+   status and a runtime; one column in a narrow window, where the prototype's
+   two columns would cut every title to a few letters. */
+.running-here-list--sessions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 0 28px;
+}
+.running-here-session {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: var(--fleet-running-height-session);
+}
+.running-here-session b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-medium);
+}
+.running-here-session .running-here-status,
+.running-here-runtime {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+/* The runtime keeps its width, so the statuses of the rows line up. */
+.running-here-runtime {
+  min-width: 3ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Work that waits for a free slot has its status in marigold, in either list.
+   It comes after the sessions' rule for the status, which it must win over. */
+.is-waiting .running-here-status {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- After "Show all" ---------- */
+/* The virtual list scrolls, so it clips what is outside it, and a row reaches
+   12px past the list on each side. The list reaches that far too, with the same
+   padding, so the hover background and the focus ring are not cut. It is at
+   most two thirds of the window tall, so that the page still scrolls past it to
+   the sections below. The Sessions view is one column here, because a virtual
+   list draws its items one under the other. */
+.running-here-scroll {
+  max-height: 66vh;
+  margin-inline: -12px;
+  padding-inline: 12px;
+}
+
+/* ---------- Show all, and the empty line ---------- */
+.running-here-more {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  margin: 6px 0 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+}
+.running-here-more:hover {
+  background: var(--hover);
+}
+.running-here-empty {
+  margin: 0;
+  color: var(--muted);
+}

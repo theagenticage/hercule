@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { MachineSummary } from "@hercule/client-core/fleet";
+import type { MachineFaces, WorkFace } from "@hercule/client-core/machine-work";
 import {
   BUSY_MACHINE,
   DRAINING_MACHINE,
@@ -18,10 +19,25 @@ import {
 import { MachineCard } from "./machine-card";
 import { buildMachineTransitionName } from "./machine-transition";
 
-const renderCard = (machine: MachineSummary, onOpen = vi.fn()): HTMLElement => {
-  const { container } = render(<MachineCard machine={machine} allow={null} onOpen={onOpen} />);
+const renderCard = (
+  machine: MachineSummary,
+  onOpen = vi.fn(),
+  faces?: MachineFaces,
+): HTMLElement => {
+  const { container } = render(
+    <MachineCard machine={machine} faces={faces} allow={null} onOpen={onOpen} />,
+  );
   return container.firstElementChild as HTMLElement;
 };
+
+const buildFaces = (shown: number, moreCount: number): MachineFaces => ({
+  faces: Array.from({ length: shown }, (_, index): WorkFace => ({
+    kind: "thread",
+    seed: `session-${String(index)}`,
+    pose: "working",
+  })),
+  moreCount,
+});
 
 describe("MachineCard", () => {
   it("carries its machine's view transition name, the one the machine's page head carries", () => {
@@ -123,5 +139,28 @@ describe("MachineCard", () => {
     expect(
       within(card).getByRole("button", { name: "Clean up…" }).getAttribute("aria-disabled"),
     ).toBe("true");
+  });
+
+  it("draws the faces of the machine's work left of its room, with the count they leave out", () => {
+    const card = renderCard(BUSY_MACHINE, vi.fn(), buildFaces(5, 2));
+    const faces = within(card).getByRole("img", { name: "7 groups at work here" });
+    const room = card.querySelector(".fleet-room");
+
+    expect(faces.querySelectorAll("svg")).toHaveLength(5);
+    expect(within(faces).getByText("+2")).toBeTruthy();
+    expect(faces.compareDocumentPosition(room!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("draws no count when the faces show every group, and names a lone group in the singular", () => {
+    const card = renderCard(BUSY_MACHINE, vi.fn(), buildFaces(1, 0));
+    const faces = within(card).getByRole("img", { name: "1 group at work here" });
+
+    expect(faces.querySelectorAll("small")).toHaveLength(0);
+  });
+
+  it("draws no faces for a machine with no work", () => {
+    const card = renderCard(BUSY_MACHINE);
+
+    expect(within(card).queryByRole("img", { name: /at work here/ })).toBeNull();
   });
 });

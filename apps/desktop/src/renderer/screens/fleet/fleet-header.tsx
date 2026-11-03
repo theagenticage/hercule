@@ -57,7 +57,9 @@ export type FleetHeaderPlace =
  *   `onAddMachine`.
  *
  * The jump link of the section in view is lit. Pressing a jump link calls
- * `onJump` with the section's id.
+ * `onJump` with the section's id. The links are a convenience, so a header
+ * too narrow to hold them with the crumbs and "Add a machine" drops them
+ * (see fleet-header.css); the sections stay reachable by scrolling.
  */
 export function FleetHeader({
   place,
@@ -67,17 +69,23 @@ export function FleetHeader({
   readonly onAddMachine: () => void;
 }): JSX.Element {
   return (
-    <header className="top">
+    <header className="top fleet-header">
       <nav className="pill fleet-header-pill" aria-label="Fleet">
         <FleetHeaderTitle place={place} />
         {place.page === "activity" || place.sections.length === 0 ? null : (
           <>
-            {place.page === "machine" ? <i className="fleet-header-rule" /> : null}
+            {place.page === "machine" ? (
+              <i className="fleet-header-rule fleet-header-jump" />
+            ) : null}
             {place.sections.map((section) => (
               <button
                 key={section.id}
                 type="button"
-                className={section.id === place.activeSectionId ? "ptab is-on" : "ptab"}
+                className={
+                  section.id === place.activeSectionId
+                    ? "ptab fleet-header-jump is-on"
+                    : "ptab fleet-header-jump"
+                }
                 aria-current={section.id === place.activeSectionId ? "location" : undefined}
                 onClick={() => place.onJump(section.id)}
               >

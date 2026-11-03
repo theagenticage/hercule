@@ -1,0 +1,17 @@
+/* The faces of the work on a machine, side by side with a pixel between them,
+   then how many more groups there are. */
+.work-faces {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+.work-faces svg {
+  flex: none;
+}
+.work-faces small {
+  margin-left: 5px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}

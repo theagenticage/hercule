@@ -14,6 +14,7 @@
     "./machine-activity": "./src/fleet/machine-activity.ts",
     "./machine-graphs": "./src/fleet/machine-graphs.ts",
     "./machine-page": "./src/fleet/machine-page.ts",
+    "./machine-work": "./src/fleet/machine-work.ts",
     "./metrics-history": "./src/fleet/metrics-history.ts",
     "./node-details": "./src/node-details.ts",
     "./project-groups": "./src/project-groups.ts",

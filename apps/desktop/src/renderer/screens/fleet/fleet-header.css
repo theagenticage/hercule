@@ -57,3 +57,28 @@
   margin: 0 6px;
   background: var(--divider);
 }
+
+/* Not in the book, whose pill holds a few short tabs. A narrow window leaves the
+   header too little room for the crumbs, the five jump links and "Add a machine",
+   and the parts overlapped. The header is a size container, so what it holds can
+   follow its own width, which also changes with the sidebar. */
+.fleet-header {
+  container: fleet-header / inline-size;
+}
+/* Nothing in the pill shrinks except the machine's name, which ends in an
+   ellipsis and keeps room for about three letters. */
+.fleet-header-pill > .pill-crumb:first-child,
+.fleet-header-jump {
+  flex: none;
+}
+.fleet-header-pill .ptab.is-name {
+  min-width: 4.5em;
+}
+/* Up to 680px the links are left out: the crumbs, a short name, the links and the
+   button need about 660px, and a longer name more. The links are a convenience, and the
+   sections are still reachable by scrolling. */
+@container fleet-header (max-width: 680px) {
+  .fleet-header-jump {
+    display: none;
+  }
+}

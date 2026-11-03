@@ -21,7 +21,10 @@
  *   disk is 87 % full, which is the one need its card shows.
  *
  * The sidebar's seven threads run on atlas, and are 7 of its 12 running
- * sessions, so the sidebar and the Fleet page agree.
+ * sessions, so the sidebar and the Fleet page agree. Atlas's work is nine
+ * groups in Running here: the seven rows of the sidebar (the Payout row also
+ * holds two Agent sessions), one workflow run with two steps working and
+ * five waiting for a slot, and Ada, an assistant.
  */
 import type {
   ControllerInfo,
@@ -38,7 +41,12 @@ import {
   type RunnerMetricsHistory,
 } from "@hercule/client-core/metrics-history";
 import { HARNESSES } from "@hercule/client-core/testing";
-import { buildSession } from "@hercule/client-core/threads/testing";
+import {
+  buildCheckout,
+  buildRepo,
+  buildSession,
+  buildWorkspace,
+} from "@hercule/client-core/threads/testing";
 import {
   buildMachineMetrics,
   interpolate,
@@ -50,6 +58,7 @@ import {
 } from "./fleet-metrics-fixture";
 import { buildAtlasLog, buildJoinedLog } from "./fleet-activity-fixture";
 import { RUN_RECORDS } from "./run-fixture";
+import { ADA, buildAssistantSession } from "./assistant-states-fixture";
 import { SPECIMEN_ACCOUNTS, SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { SidebarRecords } from "./shell-page";
 
@@ -320,7 +329,12 @@ const FLEET_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
   spreadAccount(SPECIMEN_ACCOUNTS[1]!, "rogier@acme.com", [BEELINK, STUDIO], [ATLAS, MINI]),
 ];
 
-/** Returns a session on `runnerId`, created `minutes` before the clock. */
+/**
+ * Returns a session on `runnerId`, created `minutes` before the clock. A
+ * queued session has not started, as the controller records it. The kind of a
+ * session follows from its ids (`buildSession`): an agent id alone makes an
+ * Agent session, and a run id with it makes a run's step session.
+ */
 const buildFleetSession = (
   id: string,
   runnerId: string,
@@ -328,6 +342,7 @@ const buildFleetSession = (
   kind: "thread" | "agent" | "run",
   title: string,
   minutes: number,
+  over: Partial<Session> = {},
 ): Session =>
   buildSession({
     id,
@@ -335,49 +350,126 @@ const buildFleetSession = (
     runnerId,
     status,
     ...(kind === "thread" ? {} : { agentId: "agent-triage" }),
-    ...(kind === "run" ? { runId: "run-nightly" } : {}),
+    ...(kind === "run" ? { runId: NIGHTLY_RUN_ID, stepId: "build" } : {}),
     createdAt: minutesAgo(minutes),
+    startedAt: status === "queued" ? null : minutesAgo(minutes),
     lastActivityAt: minutesAgo(minutes),
+    ...over,
   });
 
 /** Returns `count` busy sessions of agents and runs on `runnerId`, newest first. */
 const buildBusySessions = (runnerId: string, prefix: string, count: number): Session[] =>
-  Array.from({ length: count }, (_, index) =>
-    buildFleetSession(
+  Array.from({ length: count }, (_, index) => {
+    const kind = index % 2 === 0 ? "agent" : "run";
+    return buildFleetSession(
       `${prefix}-${String(index + 1)}`,
       runnerId,
       "busy",
-      index % 2 === 0 ? "agent" : "run",
-      `${prefix} session ${String(index + 1)}`,
+      kind,
+      // A run's step session is titled "<workflow name> · <step id>".
+      kind === "run"
+        ? `${NIGHTLY_WORKFLOW_NAME} · build`
+        : `${prefix} session ${String(index + 1)}`,
       10 + index * 7,
-    ),
-  );
+    );
+  });
 
-/** The sidebar's seven threads, which run on atlas. */
+/** The id of the one workflow run the fixture's step sessions belong to, which is running. */
+const NIGHTLY_RUN_ID = "01a0f0c0-0000-7000-8000-0000000000a1";
+
+/** The name of the workflow the running run belongs to, which is what a machine's Running here names the run by. */
+const NIGHTLY_WORKFLOW_NAME = "Nightly build";
+
+/** The workspace of the Payout row, which holds the Thread and its two Agent sessions. */
+const PAYOUT_WORKSPACE_ID = "ws-payout";
+
+/** The repository the Payout row works in, and its worktree on atlas, where the Thread and its Agent sessions work. */
+const PAYMENTS_REPO = buildRepo(
+  "res-payments-api",
+  "git@github.com:acme/payments-api.git",
+  "github.com/acme/payments-api",
+  ["p-payments-api"],
+);
+const PAYOUT_WORKSPACE = buildWorkspace({
+  id: PAYOUT_WORKSPACE_ID,
+  runnerId: ATLAS_ID,
+  kind: "ephemeral",
+  checkouts: [{ ...buildCheckout(PAYMENTS_REPO.id, "rogier/payout-report"), form: "worktree" }],
+  sessionIds: ["s-payout", "atlas-payout-review", "atlas-payout-tests"],
+});
+
+/**
+ * The sidebar's seven threads, which run on atlas. The Payout thread shares
+ * its workspace with two Agent sessions, so the three are one row. A thread
+ * started when it was created, which is the minutes ago its record says.
+ */
 const ATLAS_THREADS: ReadonlyArray<Session> = SPECIMEN_RECORDS.threads.map((thread) => ({
   ...thread,
   runnerId: ATLAS_ID,
+  startedAt: thread.createdAt,
+  ...(thread.id === "s-payout" ? { workspaceId: PAYOUT_WORKSPACE_ID } : {}),
 }));
 
+/** Atlas's sessions that are not Threads of the sidebar: the Payout row's two Agent sessions, Ada's, and the run's seven steps. */
+const ATLAS_OTHER_SESSIONS: ReadonlyArray<Session> = [
+  buildFleetSession(
+    "atlas-payout-review",
+    ATLAS_ID,
+    "busy",
+    "agent",
+    "Review the payout totals",
+    4,
+    {
+      workspaceId: PAYOUT_WORKSPACE_ID,
+      agentId: "agent-reviewer",
+    },
+  ),
+  buildFleetSession("atlas-payout-tests", ATLAS_ID, "busy", "agent", "Write the payout tests", 3, {
+    workspaceId: PAYOUT_WORKSPACE_ID,
+    agentId: "agent-tester",
+  }),
+  buildAssistantSession(ADA, {
+    minutesAgo: 9,
+    status: "busy",
+    runnerId: ATLAS_ID,
+    startedAt: minutesAgo(9),
+  }),
+  buildFleetSession("atlas-run-lint", ATLAS_ID, "busy", "run", "Nightly build · lint", 30, {
+    stepId: "lint",
+  }),
+  buildFleetSession(
+    "atlas-run-typecheck",
+    ATLAS_ID,
+    "busy",
+    "run",
+    "Nightly build · typecheck",
+    28,
+    {
+      stepId: "typecheck",
+    },
+  ),
+  ...Array.from({ length: 5 }, (_, index) =>
+    buildFleetSession(
+      `atlas-run-test-${String(index + 1)}`,
+      ATLAS_ID,
+      "queued",
+      "run",
+      `Nightly build · test-${String(index + 1)}`,
+      7 - index,
+      { stepId: `test-${String(index + 1)}` },
+    ),
+  ),
+];
+
 /**
- * Every session that has not exited: atlas runs 12 (the seven threads and
- * five of agents and runs) and has 5 Threads waiting for a slot; beelink runs
- * 9, bosgame 3 and studio 2; mini holds 2 open Threads from before it went
- * offline.
+ * Every session that has not exited: atlas runs 12 (the seven threads, the
+ * Payout row's two Agent sessions, Ada's session and two steps of the run)
+ * and has 5 steps waiting for a slot; beelink runs 9, bosgame 3 and studio 2;
+ * mini holds 2 open Threads from before it went offline.
  */
 const FLEET_SESSIONS: ReadonlyArray<Session> = [
   ...ATLAS_THREADS,
-  ...buildBusySessions(ATLAS_ID, "atlas", 5),
-  ...Array.from({ length: 5 }, (_, index) =>
-    buildFleetSession(
-      `atlas-wait-${String(index + 1)}`,
-      ATLAS_ID,
-      "queued",
-      "thread",
-      `Waiting thread ${String(index + 1)}`,
-      3 + index,
-    ),
-  ),
+  ...ATLAS_OTHER_SESSIONS,
   ...buildBusySessions(BEELINK_ID, "beelink", 9),
   ...buildBusySessions(BOSGAME_ID, "bosgame", 3),
   buildFleetSession("mini-thread-1", MINI_ID, "idle", "thread", "Draft the release notes", 40),
@@ -556,6 +648,8 @@ export interface FleetRecords {
   readonly harnesses: ReadonlyArray<Harness>;
   /** Every session that has not exited, which the machines' counts are made from. */
   readonly sessions: ReadonlyArray<Session>;
+  /** The name of each run's workflow, by run id, as `run.read` gives it. A machine's Running here names its runs by these. */
+  readonly workflowNames: Readonly<Record<string, string>>;
   readonly controller: ControllerInfo;
   /** The Runner Metrics history the graphs and the forecasts are drawn from. */
   readonly metrics: FleetMetricsRecords;
@@ -568,16 +662,29 @@ export interface FleetRecords {
 export const FLEET_RECORDS: FleetRecords = {
   harnesses: FLEET_HARNESSES,
   sessions: FLEET_SESSIONS,
+  workflowNames: { [NIGHTLY_RUN_ID]: NIGHTLY_WORKFLOW_NAME },
   controller: FLEET_CONTROLLER,
   metrics: FLEET_METRICS,
   activity: FLEET_ACTIVITY,
   runs: [RUN_RECORDS.waiting.run],
 };
 
-/** The sidebar's lists with the five machines and their accounts, for a specimen that opens Fleet. */
+/**
+ * The sidebar's lists with the five machines and their accounts, for a
+ * specimen that opens Fleet. The sidebar lists Threads and Agent sessions,
+ * and holds Ada, whose session runs on atlas.
+ */
 export const FLEET_SIDEBAR_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
-  threads: ATLAS_THREADS,
+  workspaces: [PAYOUT_WORKSPACE],
+  resources: [PAYMENTS_REPO],
+  threads: [...ATLAS_THREADS, ...ATLAS_OTHER_SESSIONS.filter(({ kind }) => kind === "agent")],
+  assistants: [
+    {
+      assistant: ADA,
+      currentSession: ATLAS_OTHER_SESSIONS.find(({ kind }) => kind === "assistant") ?? null,
+    },
+  ],
   runners: FLEET_RUNNERS,
   accounts: FLEET_ACCOUNTS,
 };

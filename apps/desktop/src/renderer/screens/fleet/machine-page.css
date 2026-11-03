@@ -229,6 +229,16 @@
   font-size: var(--t-12);
 }
 
+/* A section whose heading has a control at its far end, such as Running here's
+   Work | Sessions. The control is taller than the heading's text, so the first
+   row's rule sits 10px under the heading's row, where a bare heading has 14px. */
+.machine-page-section-head-with-actions {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+
 /* ---------- Software ---------- */
 .machine-page-sw-heading {
   margin: 16px 0 2px;

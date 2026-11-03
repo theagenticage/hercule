@@ -406,16 +406,17 @@
   gap: 4px 12px;
   min-height: 22px;
 }
-/* The row keeps its height while a card has no faces yet. */
+/* The faces at the left, the room at the right. The row keeps its height while a card has no faces. */
 .fleet-card-crew {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px;
   min-height: 24px;
   margin-top: 12px;
 }
 .fleet-room {
+  margin-left: auto;
   color: var(--faint);
   font-size: var(--t-12);
   white-space: nowrap;

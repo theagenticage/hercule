@@ -994,6 +994,7 @@ export {
   type GroupSummary,
   type SessionDot,
 } from "./threads/group-row";
+export { indexRowMembers, type RowMember } from "./threads/row-members";
 export {
   DONE_SHELF_LIMIT,
   DONE_SHELF_STEP,

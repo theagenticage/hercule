@@ -21,10 +21,11 @@ interface DayRead {
  * whenever any one of them is due, such as a per-second duration elsewhere.
  * Those calls find the same day and change nothing here.
  *
- * `showsTimes` is whether the page shows a time at all, which it does for a
- * machine that is away (offline or unreachable). While it is true, the hook
- * watches the clock for the next local midnight in `timezone`. While it is
- * false, nothing is watched.
+ * `showsTimes` is whether the page shows a time at all. While it is true, the
+ * hook watches the clock for the next local midnight in `timezone`. While it
+ * is false, nothing is watched. The machine's page always shows times (when
+ * work started, or when the machine went away); the Fleet page shows them
+ * only for a machine that is away.
  */
 export const useFleetToday = (timezone: string, showsTimes: boolean): Date => {
   const subscribe = useCallback(

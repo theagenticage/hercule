@@ -209,12 +209,13 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
   {
     name: "machine",
     path: "fleet.html?machine=atlas",
-    contentSelector: ".machine-page .machine-page-sw-row",
+    contentSelector: ".machine-page .running-here-row",
     nonTextParts: [
       // Only what sits above the fold of the 1440 x 900 window counts: the head, the
-      // instruments and Software. Recent and Settings (the number field, the toggles)
+      // instruments and Running here, whose first rows fill the rest of the window.
+      // Software, Recent and Settings (the buttons, the number field, the toggles)
       // start below it.
-      { selector: ".machine-page-sw-row .btn", kind: "boundary" },
+      { selector: ".running-here-view .seg", kind: "boundary" },
       { selector: ".machine-page-head .fleet-dot", kind: "mark" },
       // The graphs are not listed: a `mark` passes by covering as many
       // contrasting pixels as its box's width plus height, which a 1.5px line
