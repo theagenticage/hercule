@@ -108,6 +108,11 @@ export interface Field {
    * listing's default holds the ids this field takes.
    */
   readonly resolvesQuery: Readonly<Record<string, string>>;
+  /**
+   * The key under which each word of a list positional is sent as an object,
+   * for a list of objects; absent when the list holds the words themselves.
+   */
+  readonly itemKey: string | undefined;
   readonly help: string;
 }
 
@@ -298,6 +303,19 @@ const toKebabCase = (name: string): string =>
   name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 
 /**
+ * Returns the type of the `itemKey` key of the objects in a list field. Throws
+ * when the field is not a list of objects with that key, because the table is
+ * wrong.
+ */
+const readItemKeyType = (name: string, element: Ast | undefined, itemKey: string): Ast => {
+  const key = element?.propertySignatures?.find((property) => String(property.name) === itemKey);
+  if (key === undefined) {
+    throw new Error(`${name}: itemKey ${itemKey} is not a key of the objects in its list`);
+  }
+  return key.type;
+};
+
+/**
  * Builds one field from its schema type and its CLI row.
  *
  * `schema` is the field's own schema, when the operation declares one; the
@@ -311,7 +329,10 @@ const buildField = (
   schema: unknown,
 ): Field => {
   const element = readElementType(ast);
-  const value = element ?? ast;
+  const itemKey = "itemKey" in row ? row.itemKey : undefined;
+  // A list of objects is typed by the key the words fill, so the words are
+  // checked as that key is.
+  const value = itemKey === undefined ? (element ?? ast) : readItemKeyType(name, element, itemKey);
   const takesNamedValues = "namedValues" in row;
   const readsSkillFolder = "skillFolder" in row;
   // A positional uses the row's placeholder when its own name would not say
@@ -344,6 +365,7 @@ const buildField = (
     readsSkillFolder,
     resolves: "resolves" in row ? row.resolves : undefined,
     resolvesQuery: ("resolvesQuery" in row ? row.resolvesQuery : undefined) ?? {},
+    itemKey,
     help: row.help,
   };
 };

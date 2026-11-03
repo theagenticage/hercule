@@ -802,6 +802,8 @@ const PRIMARY: Workspace = {
   message: null,
   sessionIds: [],
   keptUntil: null,
+  diskUsage: null,
+  diskUsageError: null,
   createdAt: at,
   provisionedAt: at,
   lastUsedAt: at,

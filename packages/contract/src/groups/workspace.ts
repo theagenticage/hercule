@@ -21,6 +21,7 @@ import {
   RepositoryMode,
   WorkspacePath,
   StartingRevision,
+  WorkspaceDiskUsage,
 } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -47,6 +48,7 @@ export {
   RepositoryMode,
   WorkspacePath,
   StartingRevision,
+  WorkspaceDiskUsage,
 };
 
 /** The longest branch name; git's own limit is the filesystem's. */
@@ -159,6 +161,18 @@ export const Workspace = Schema.Struct({
    * and while a session or run still holds it.
    */
   keptUntil: Schema.NullOr(Timestamp),
+  /**
+   * The disk space the workspace takes, as its runner last measured it. Null
+   * until the first successful measurement, and always null for an adopted
+   * main workspace, which the runner never measures. A failed attempt leaves
+   * it as it was.
+   */
+  diskUsage: Schema.NullOr(WorkspaceDiskUsage),
+  /**
+   * Why the newest attempt to measure the workspace failed, such as "Measuring
+   * took longer than 10 minutes". Null when it succeeded or none was made.
+   */
+  diskUsageError: Schema.NullOr(Schema.String),
   createdAt: Timestamp,
   provisionedAt: Schema.NullOr(Timestamp),
   /** Set at provisioning and at every session start and exit in it. */
@@ -205,6 +219,51 @@ const WorkspaceDisposeWithoutBody = Schema.Null.pipe(
   }),
 );
 
+/** The most workspaces one call of `workspace.disposeMany` names. */
+export const MAX_DISPOSE_MANY_ITEMS = 200;
+
+/** One workspace to remove in `workspace.disposeMany`. */
+export const WorkspaceDisposeManyItem = Schema.Struct({
+  workspaceId: Id,
+  /**
+   * The workspace's `lastUsedAt` as the caller showed it to the user. When it
+   * is given and the workspace has been used since, the item is refused.
+   */
+  expectedLastUsedAt: Schema.optionalKey(Timestamp),
+});
+
+export type WorkspaceDisposeManyItem = Schema.Schema.Type<typeof WorkspaceDisposeManyItem>;
+
+/** The payload of `workspace.disposeMany`: the workspaces to remove, in one call. */
+export const WorkspaceDisposeManyInput = Schema.Struct({
+  items: Schema.Array(WorkspaceDisposeManyItem).check(
+    Schema.isBetweenLength(1, MAX_DISPOSE_MANY_ITEMS),
+  ),
+});
+
+export type WorkspaceDisposeManyInput = Schema.Schema.Type<typeof WorkspaceDisposeManyInput>;
+
+/**
+ * What became of one workspace in `workspace.disposeMany`. `requested` means
+ * the removal is reserved and its runner told; the outcome arrives later on
+ * the `workspace` topic. `refused` means nothing was reserved, and `message`
+ * says why.
+ */
+export const WorkspaceDisposeManyResult = Schema.Struct({
+  workspaceId: Id,
+  outcome: Schema.Literals(["requested", "refused"]),
+  message: Schema.optionalKey(Schema.String),
+});
+
+export type WorkspaceDisposeManyResult = Schema.Schema.Type<typeof WorkspaceDisposeManyResult>;
+
+/** The answer of `workspace.disposeMany`: one result per item, in the order given. */
+export const WorkspaceDisposeManyOutput = Schema.Struct({
+  results: Schema.Array(WorkspaceDisposeManyResult),
+});
+
+export type WorkspaceDisposeManyOutput = Schema.Schema.Type<typeof WorkspaceDisposeManyOutput>;
+
 export const WorkspaceFilter = Schema.Struct({
   runnerId: Schema.optionalKey(Id),
   resourceId: Schema.optionalKey(Id),
@@ -248,6 +307,11 @@ export const workspace = HttpApiGroup.make("workspace")
       payload: [WorkspaceDisposeInput, WorkspaceDisposeWithoutBody],
       success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("disposeMany", "/workspaces/dispose", {
+      payload: WorkspaceDisposeManyInput,
+      success: WorkspaceDisposeManyOutput,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     HttpApiEndpoint.post("detach", "/workspaces/:id/detach", {
       params: { id: Id },

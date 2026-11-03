@@ -189,6 +189,31 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   { _tag: "factsReport", facts },
   { _tag: "watermarkReport", metrics },
   {
+    _tag: "diskUsageReport",
+    diskUsage: {
+      workspaces: [
+        {
+          workspaceId: WORKSPACE_ID,
+          diskUsage: {
+            sizeBytes: 2_400_000_000,
+            freesBytes: 900_000_000,
+            measuredAt: "2026-11-03T10:00:00.000Z",
+          },
+          error: null,
+        },
+        {
+          workspaceId: CHECKOUT_ID,
+          diskUsage: null,
+          error: "Measuring took longer than 10 minutes",
+        },
+      ],
+      truncated: false,
+      repositoryCacheBytes: 3_100_000_000,
+      harnessHomeBytes: null,
+      measuredAt: "2026-11-03T10:00:00.000Z",
+    },
+  },
+  {
     _tag: "probeReport",
     requestId: REQUEST_ID,
     providerAccountId: PROVIDER_ACCOUNT_ID,

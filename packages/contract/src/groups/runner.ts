@@ -10,7 +10,7 @@
  * shape whichever runner it is looking at.
  */
 import { Schema } from "effect";
-import { Capabilities, Fact, RunnerFacts, RunnerMetrics } from "@hercule/protocol";
+import { Bytes, Capabilities, Fact, RunnerFacts, RunnerMetrics } from "@hercule/protocol";
 import { CapabilitySnapshot } from "./provider-account";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -84,6 +84,21 @@ const RunnerName = bounded(1, MAX_RUNNER_NAME_LENGTH);
 
 const RunnerLabel = bounded(1, MAX_RUNNER_LABEL_LENGTH);
 
+/**
+ * The disk space a runner uses outside its workspaces, as it last measured it.
+ * Each count includes only files with a single link, so it never overlaps a
+ * workspace's `freesBytes`.
+ */
+export const RunnerDiskUsage = Schema.Struct({
+  /** The runner's managed repositories, the bare storage new worktrees come from. */
+  repositoryCacheBytes: Bytes,
+  /** Every Harness Home on the runner, where the harnesses keep their logins and session files. */
+  harnessHomeBytes: Bytes,
+  measuredAt: Timestamp,
+});
+
+export type RunnerDiskUsage = Schema.Schema.Type<typeof RunnerDiskUsage>;
+
 export const Runner = Schema.Struct({
   id: Id,
   name: RunnerName,
@@ -95,6 +110,11 @@ export const Runner = Schema.Struct({
   labels: atMost(RunnerLabel, MAX_RUNNER_LABELS),
   facts: Schema.NullOr(RunnerFacts),
   metrics: Schema.NullOr(RunnerMetrics),
+  /**
+   * What the runner last measured outside its workspaces. Null until its first
+   * report, and on a runner built before it measured disk usage.
+   */
+  diskUsage: Schema.NullOr(RunnerDiskUsage),
   /** The effective cap: the owner's override, or the one derived from the facts. */
   maxConcurrentSessions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   /** The effective watermark: the owner's override, or the shipped ten gibibytes. */

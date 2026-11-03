@@ -306,6 +306,14 @@ const TABLE = {
     method: "DELETE",
     path: "/api/v1/workspaces/:id",
   },
+  // Removing many workspaces at once is refused to every session token,
+  // whatever its profile holds, like `session.archive`: the user chooses what
+  // to throw away.
+  "workspace.disposeMany": {
+    requires: "workspace.write",
+    method: "POST",
+    path: "/api/v1/workspaces/dispose",
+  },
   "workspace.detach": {
     requires: "workspace.write",
     method: "POST",

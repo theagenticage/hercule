@@ -45,6 +45,7 @@ const buildRunner = (
   labels: [],
   facts: buildFacts(identityPort),
   metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: null,

@@ -56,6 +56,7 @@ const RUNNER: Runner = {
   // Claude Code and Codex installed, so the accounts of the tests are ready here.
   facts: buildRunner("", "").facts,
   metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: "2026-09-05T09:14:00.000Z",
@@ -1866,6 +1867,8 @@ const buildWorkspace = (
   message: null,
   sessionIds,
   keptUntil: null,
+  diskUsage: null,
+  diskUsageError: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,

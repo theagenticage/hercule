@@ -14,6 +14,7 @@ const SILENT: Runner = {
   labels: [],
   facts: null,
   metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 1,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: null,

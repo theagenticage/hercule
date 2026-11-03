@@ -40,6 +40,7 @@ const MOSS: Runner = {
   labels: [],
   facts: null,
   metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 ** 3,
   lastSeenAt: "2026-09-08T11:59:00.000Z",

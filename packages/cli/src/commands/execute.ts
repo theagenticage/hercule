@@ -274,6 +274,25 @@ const resolveTails = async (
   return resolved;
 };
 
+/**
+ * Returns the values with each list field that has an `itemKey` rewritten from
+ * its words to objects: `["a", "b"]` becomes `[{ workspaceId: "a" }, { workspaceId: "b" }]`.
+ * It runs after the words are resolved, so each holds a full id.
+ */
+const wrapItemKeys = (
+  fields: ReadonlyArray<Field>,
+  values: Record<string, unknown>,
+): Record<string, unknown> => {
+  const wrapped = { ...values };
+  for (const field of fields) {
+    const words = wrapped[field.name];
+    const key = field.itemKey;
+    if (key === undefined || !Array.isArray(words)) continue;
+    wrapped[field.name] = (words as ReadonlyArray<unknown>).map((word) => ({ [key]: word }));
+  }
+  return wrapped;
+};
+
 /** One `--image` argument: the path as written, and the file it names, not yet read. */
 interface ImageArgument {
   readonly path: string;
@@ -528,7 +547,14 @@ export const execute = async (
     ...command.payload,
     ...command.positionals.filter((field) => field.carriedIn === "payload"),
   ];
-  const payload = await resolveTails(client, command, payloadFields, writtenPayload, params);
+  const resolvedPayload = await resolveTails(
+    client,
+    command,
+    payloadFields,
+    writtenPayload,
+    params,
+  );
+  const payload = wrapItemKeys(payloadFields, resolvedPayload);
   // Upload only once every id tail has resolved, so a mistyped session id
   // fails before any image is sent.
   await uploadImages(client, images, payload);

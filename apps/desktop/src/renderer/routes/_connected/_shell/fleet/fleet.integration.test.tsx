@@ -61,6 +61,7 @@ const buildRunner = (id: string, name: string, over: Partial<Runner> = {}): Runn
   labels: [],
   facts: FACTS,
   metrics: { diskFreeBytes: 200 * GIB, availableMemoryBytes: 24 * GIB },
+  diskUsage: null,
   maxConcurrentSessions: 16,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-11-02T13:59:00.000Z",

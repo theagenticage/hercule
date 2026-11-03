@@ -52,6 +52,9 @@ export const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH
 /** A name, a version or a path a peer reports about itself, and never a document. */
 export const Fact = Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH));
 
+/** A size in bytes: a whole number, never negative. */
+export const Bytes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
 /** An instant on the wire: ISO-8601 UTC with milliseconds. */
 export const Timestamp = Schema.String.check(
   Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, {

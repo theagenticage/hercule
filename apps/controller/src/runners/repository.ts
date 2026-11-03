@@ -173,6 +173,7 @@ const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
       labels: JSON.parse(row.labels) as ReadonlyArray<string>,
       facts,
       metrics: yield* decodeMetrics(id, row.metrics),
+      diskUsage: null,
       maxConcurrentSessions: computeEffectiveCap(row.max_concurrent_sessions, facts),
       diskWatermarkBytes: computeEffectiveWatermark(row.disk_watermark_bytes),
       lastSeenAt: row.last_seen_at,

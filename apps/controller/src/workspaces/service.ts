@@ -371,6 +371,8 @@ const make = Effect.gen(function* () {
           .filter((holder) => holder.kind === "session")
           .map((holder) => holder.id),
         keptUntil: keptUntil.get(row.id) ?? null,
+        diskUsage: null,
+        diskUsageError: null,
         createdAt: row.createdAt,
         provisionedAt: row.provisionedAt,
         lastUsedAt: row.lastUsedAt,

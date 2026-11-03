@@ -325,6 +325,8 @@ const WORKSPACE: Workspace = {
   message: null,
   sessionIds: [SESSION_ID],
   keptUntil: null,
+  diskUsage: null,
+  diskUsageError: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,

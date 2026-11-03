@@ -150,6 +150,7 @@ const buildMachine = (
   version: CONTROLLER_VERSION,
   labels: [],
   metrics: { diskFreeBytes, availableMemoryBytes, cpu },
+  diskUsage: null,
   diskWatermarkBytes: DEFAULT_DISK_LIMIT_BYTES,
   lastSeenAt: minutesAgo(0.5),
   ...over,

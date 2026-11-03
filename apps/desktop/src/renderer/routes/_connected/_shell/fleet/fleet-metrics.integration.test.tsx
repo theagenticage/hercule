@@ -84,6 +84,7 @@ const buildRunner = (id: string, name: string): Runner => ({
     availableMemoryBytes: 8 * GIB,
     cpu: { averagePercent: 23, peakPercent: 61 },
   },
+  diskUsage: null,
   maxConcurrentSessions: 8,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-11-02T14:01:00.000Z",
