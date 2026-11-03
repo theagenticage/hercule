@@ -797,6 +797,7 @@ const seedQueryCache = (
     // The runners and the accounts are the sidebar's lists, seeded above.
     queryClient.setQueryData(harnessesQuery(client).queryKey, fleet.harnesses);
     queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
+    queryClient.setQueryData(liveRunsQuery(client, "running").queryKey, fleet.runningRuns);
     queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
     const { fiveMinutesByRunner, hoursByRunner, fleetHours } = fleet.metrics;
     queryClient.setQueryData(queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE), fleetHours);

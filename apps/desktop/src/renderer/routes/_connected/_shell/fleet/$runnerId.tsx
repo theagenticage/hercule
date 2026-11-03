@@ -8,17 +8,20 @@ import {
   buildMachineHourScope,
 } from "@hercule/client-core/metrics-history";
 import { describeMachinePage } from "@hercule/client-core/machine-page";
+import { listMachineRunIds } from "@hercule/client-core/machine-work";
 import type { Runner } from "@hercule/contract";
 import { throwScreenNotFound } from "../../../../app/last-screen";
 import {
   controllerQuery,
   fleetSessionsQuery,
   harnessesQuery,
+  liveRunsQuery,
   machineRecentActivityQuery,
   providerAccountsQuery,
   providersQuery,
   readOnOpen,
   runnersQuery,
+  runQuery,
   settingsQuery,
 } from "../../../../app/queries";
 import { AddMachineDialog } from "../../../../screens/fleet/add-machine-dialog";
@@ -35,16 +38,19 @@ import { MachineSettings } from "./-machine-settings";
 import { MachineSoftware } from "./-machine-software";
 import { RunnerNotFound } from "./-runner-not-found";
 import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
+import { MachineRunningHere } from "./-running-here";
 import { useRunnerSessionCounts } from "./-session-counts";
 
 /** The ids of the page's sections, which the header's jump links scroll to. */
 const CAPACITY_ID = "machine-capacity";
+const WORK_ID = "machine-work";
 const SOFTWARE_ID = "machine-software";
 const RECENT_ID = "machine-recent";
 const SETTINGS_ID = "machine-settings";
-const SECTION_IDS = [CAPACITY_ID, SOFTWARE_ID, RECENT_ID, SETTINGS_ID];
+const SECTION_IDS = [CAPACITY_ID, WORK_ID, SOFTWARE_ID, RECENT_ID, SETTINGS_ID];
 const SECTIONS = [
   { id: CAPACITY_ID, label: "Capacity" },
+  { id: WORK_ID, label: "Running" },
   { id: SOFTWARE_ID, label: "Software" },
   { id: RECENT_ID, label: "Recent" },
   { id: SETTINGS_ID, label: "Settings" },
@@ -52,15 +58,17 @@ const SECTIONS = [
 
 /**
  * One machine's page (spec 17 §Fleet, A machine's page): its head and room
- * line, or the banner of a machine that is away, then its instruments, its
- * Software, its Recent activity and its Settings. Its loader reads everything
- * the page draws before it renders, as the Fleet page's does
- * (`fleet/index.tsx`), including the machine's five-minute points of the last
- * 24 hours and hour points of the last 14 days, for its graphs. They are read
- * only for a machine that exists, and a cached read is used as it is: a
- * `runnerMetrics` push brings them up to date (see `useRunnerMetricsLive`).
- * When no runner has the id, or the runner is retired, the route shows
- * `RunnerNotFound`: retired machines are not shown anywhere on Fleet.
+ * line, or the banner of a machine that is away, then its instruments, the
+ * work running on it, its Software, its Recent activity and its Settings. Its
+ * loader reads everything the page draws before it renders, as the Fleet
+ * page's does (`fleet/index.tsx`), including the machine's five-minute points
+ * of the last 24 hours and hour points of the last 14 days, for its graphs.
+ * They are read only for a machine that exists, and a cached read is used as
+ * it is: a `runnerMetrics` push brings them up to date (see
+ * `useRunnerMetricsLive`). The runs that have a session on the machine are
+ * named by the running runs' list, or by their own record when they are not
+ * running. When no runner has the id, or the runner is retired, the route
+ * shows `RunnerNotFound`: retired machines are not shown anywhere on Fleet.
  */
 export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
   staticData: { title: "Fleet" },
@@ -81,7 +89,17 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
       queryClient.ensureQueryData(harnessesQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
       queryClient.ensureQueryData(providerAccountsQuery(client)),
-      queryClient.fetchQuery(fleetSessionsQuery(client)),
+      Promise.all([
+        queryClient.fetchQuery(fleetSessionsQuery(client)),
+        queryClient.ensureQueryData(liveRunsQuery(client, "running")),
+      ]).then(([sessions, runningRuns]) =>
+        // A failed read of one run leaves its group named by its session's title.
+        Promise.all(
+          listMachineRunIds(sessions, runnerId)
+            .filter((runId) => !runningRuns.some((run) => run.id === runId))
+            .map((runId) => queryClient.prefetchQuery(runQuery(client, runId))),
+        ),
+      ),
       readOnOpen(queryClient, controllerQuery(client)),
       readOnOpen(queryClient, settingsQuery(client)),
       // Recent shows a failed read as a line of its own with a Retry, so a read that fails
@@ -105,8 +123,8 @@ function MachinePage(): JSX.Element {
 /**
  * Draws the Fleet header over the page of the machine `runner`, and the page
  * in the Fleet scroll area. The head, its line and the instruments are drawn
- * here from what the page already holds; the Software and Settings sections
- * read what they draw themselves.
+ * here from what the page already holds; the Running here, Software and
+ * Settings sections read what they draw themselves.
  *
  * Retire… on the banner and in Settings ask the same question, so the dialog
  * is held here. So is Add a machine, which the header offers on every Fleet
@@ -131,7 +149,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   const [isAdding, setAdding] = useState(false);
 
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-  const today = useFleetToday(timezone, runner.connectivity !== "online");
+  const today = useFleetToday(timezone, true);
   const page = describeMachinePage(
     runner,
     sessionCounts,
@@ -165,6 +183,13 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
             {page.top.kind === "room" && <MachinePageRoomLine line={page.top.line} />}
             <MachinePageInstruments instruments={page.instruments} graphs={graphs} />
           </section>
+          <MachineRunningHere
+            key={runner.id}
+            id={WORK_ID}
+            runner={runner}
+            timezone={timezone}
+            today={today}
+          />
           <MachineSoftware id={SOFTWARE_ID} runner={runner} />
           <MachineRecent id={RECENT_ID} runner={runner} />
           <MachineSettings id={SETTINGS_ID} runner={runner} onRetire={() => setRetiring(true)} />

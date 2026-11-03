@@ -1,0 +1,215 @@
+/* A machine's "Running here" section: the work as rows, or the sessions as a
+   two-column list. The measurements are the fleet prototype's (`fx-work-*`,
+   `fx-sessions*`, `fx-more`). Every class starts with `running-here-`. Each
+   departure from the prototype is explained in a comment. */
+
+/* The prototype's switch buttons are smaller than the default segmented control. */
+.running-here-view .seg button {
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--t-12);
+}
+
+.running-here-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.running-here-list a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Every row is a link. It reaches 12px past the list on each side, and pads
+   its content by the same, so the text stays on the list's edge while the
+   hover background and the focus ring have room. They are the Fleet list's
+   (`.fleet-row`): the hover colour, the large radius, the rule between rows
+   hidden around the hovered row, and a 2px ring inside the row. */
+.running-here-row,
+.running-here-session {
+  position: relative;
+  margin-inline: -12px;
+  padding-inline: 12px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.running-here-row::before,
+.running-here-session::before {
+  content: "";
+  position: absolute;
+  inset: 0 12px auto;
+  border-top: 1px solid var(--divider);
+}
+.running-here-row:hover,
+.running-here-session:hover {
+  background: var(--hover);
+}
+.running-here-row:hover::before,
+.running-here-session:hover::before {
+  border-top-color: transparent;
+}
+.running-here-row:focus-visible,
+.running-here-session:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* ---------- Work ---------- */
+/* The prototype's row has a column for the number of sessions. Here the faces
+   are one per session, so the count is left out. The list holds the columns
+   and every row takes them over (subgrid), so the faces and the "since" times
+   line up from row to row. The last two columns are as wide as their widest
+   cell: "since 10 Sep 09:00" is much longer than the prototype's "40 min", so
+   a fixed 64px would not hold it. */
+.running-here-list--work {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto auto;
+  column-gap: 14px;
+}
+.running-here-list--work > li {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+.running-here-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-height: 54px;
+}
+.running-here-list--work > li:has(> a:hover) + li > .running-here-row::before,
+.running-here-list--sessions > li:has(> a:hover) + li + li > .running-here-session::before {
+  border-top-color: transparent;
+}
+.running-here-glyph {
+  display: grid;
+  place-items: center;
+}
+.running-here-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.running-here-text {
+  display: grid;
+  min-width: 0;
+}
+.running-here-text b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-medium);
+}
+/* What the group is, then " · ", then its status. Both shorten with an
+   ellipsis when the row is narrow, but the status shrinks far more slowly
+   (0.3 against 1), so it keeps nearly all its words while the longer part,
+   what the group is (a run's step names), gives way. */
+.running-here-line {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.running-here-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.running-here-separator {
+  flex: none;
+  white-space: pre;
+}
+.running-here-line .running-here-status {
+  flex-shrink: 0.3;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.running-here-faces {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1px;
+  max-width: 220px;
+  overflow: hidden;
+}
+.running-here-since {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+/* Work that waits for a free slot: faces dimmed (its status is in marigold, below). */
+.running-here-row.is-waiting .running-here-glyph,
+.running-here-row.is-waiting .running-here-faces {
+  opacity: 0.55;
+}
+
+/* ---------- Sessions ---------- */
+/* Two columns while each keeps 340px, which is what a title needs beside a
+   status and a runtime; one column in a narrow window, where the prototype's
+   two columns would cut every title to a few letters. */
+.running-here-list--sessions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 0 28px;
+}
+.running-here-session {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 46px;
+}
+.running-here-session b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-medium);
+}
+.running-here-session .running-here-status,
+.running-here-runtime {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+/* The runtime keeps its width, so the statuses of the rows line up. */
+.running-here-runtime {
+  min-width: 3ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Work that waits for a free slot has its status in marigold, in either list.
+   It comes after the sessions' rule for the status, which it must win over. */
+.is-waiting .running-here-status {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- Show all, and the empty line ---------- */
+.running-here-more {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  margin: 6px 0 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+}
+.running-here-more:hover {
+  background: var(--hover);
+}
+.running-here-empty {
+  margin: 0;
+  color: var(--muted);
+}
