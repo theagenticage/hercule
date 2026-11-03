@@ -20,7 +20,7 @@ import {
 import { formatShortMoment } from "../time-context";
 import { listFleetRunners } from "./fleet";
 import { plural } from "./machine";
-import { compareReleaseVersions } from "./versions";
+import { compareReleaseVersions, isReleaseVersion } from "./versions";
 
 /**
  * What one machine's cell of the grid shows:
@@ -34,6 +34,8 @@ import { compareReleaseVersions } from "./versions";
  *   a harness or the runner when the version or the latest release is not
  *   known or has no order (such as "go1.25").
  * - `unknown-version`: the tool is installed but its version is not known.
+ * - `not-probed`: the machine's runner is too old to have looked for this
+ *   toolchain, so nothing is known about it. Draws "Unknown".
  */
 export type SoftwareCellKind =
   | "latest"
@@ -41,15 +43,16 @@ export type SoftwareCellKind =
   | "below-floor"
   | "not-installed"
   | "version"
-  | "unknown-version";
+  | "unknown-version"
+  | "not-probed";
 
 /** One machine's cell in one row of the grid. */
 export interface SoftwareCell {
   readonly kind: SoftwareCellKind;
   /**
-   * The version to draw, "Installed" for `unknown-version`, and "Not
-   * installed" for `not-installed` (which is drawn as a dash, so this is its
-   * accessible text).
+   * The version to draw, "Installed" for `unknown-version`, "Unknown" for
+   * `not-probed`, and "Not installed" for `not-installed` (which is drawn as
+   * a dash, so this is its accessible text).
    */
   readonly text: string;
   readonly tooltip: string | null;
@@ -68,7 +71,11 @@ export interface SoftwareLatest {
 
 /** A group of machines that have one version of a tool, in the row's detail. */
 export interface SoftwareVersionGroup {
-  /** The version, "Installed" when the machines have it with no known version, or "Not installed". */
+  /**
+   * The version, "Installed" when the machines have it with no known version,
+   * "Not looked for" when their runners are too old to look for the tool, or
+   * "Not installed".
+   */
   readonly text: string;
   /** The names of the machines, in column order. */
   readonly machines: readonly string[];
@@ -80,7 +87,10 @@ export interface SoftwareDetail {
   readonly description: string | null;
   /** The latest release and when it was last checked, or why there is none. */
   readonly latestLine: string;
-  /** The machines by version, newest first, then versions with no known order, then "Not installed". */
+  /**
+   * The machines by version, newest first, then versions with no known order,
+   * then "Not looked for", then "Not installed".
+   */
   readonly versions: readonly SoftwareVersionGroup[];
 }
 
@@ -118,8 +128,17 @@ export interface FleetSoftware {
 /** What a machine's Tools list shows. See `listMachineTools`. */
 export interface MachineTools {
   readonly tools: readonly { readonly name: string; readonly version: string }[];
-  /** "Not installed: terraform, dotnet", or `null` when every probed toolchain is there. */
+  /**
+   * "Not installed: terraform, dotnet", naming the toolchains the runner
+   * looked for and did not find. `null` when it found every one it looked for.
+   */
   readonly notInstalledText: string | null;
+  /**
+   * "This runner is too old to look for node, pnpm: update it to see them.",
+   * naming the probed toolchains the runner did not look for. `null` when it
+   * looked for all of them.
+   */
+  readonly notProbedText: string | null;
 }
 
 const RUNNER_KEY = "runner";
@@ -148,17 +167,29 @@ const NOT_TRACKED_TEXT = "Hercule does not follow this tool's releases yet.";
 const BELOW_FLOOR_TOOLTIP = "Too old for this Hercule: update it";
 const UNKNOWN_VERSION_TOOLTIP = "The version of this tool is not known yet.";
 const NOT_CHECKED_TEXT = "Not checked yet";
+const NOT_PROBED_TEXT = "Unknown";
+const NOT_PROBED_GROUP = "Not looked for";
+
+/**
+ * The toolchains a runner built before the probed list grew looked for. Its
+ * facts have no `probedToolchains`, so this is what absent means.
+ */
+const OLDEST_PROBED_TOOLCHAINS: readonly string[] = ["git", "gh"];
 
 /** How one installed (or missing) tool on one machine ranks against its latest release. */
-interface Standing {
-  readonly kind: SoftwareCellKind;
-  /**
-   * Whether a newer release exists than the machine's version. True for
-   * `older`, and also for a `below-floor` version that is older than the
-   * latest release: the update count includes it, the cell shows the floor.
-   */
-  readonly isOlder: boolean;
-}
+type Standing =
+  | { readonly kind: "not-installed" | "unknown-version"; readonly isOlder: false }
+  | {
+      readonly kind: "latest" | "older" | "below-floor" | "version";
+      /** The version the machine has, which the cell draws. */
+      readonly version: string;
+      /**
+       * Whether a newer release exists than the machine's version. True for
+       * `older`, and also for a `below-floor` version that is older than the
+       * latest release: the update count includes it, the cell shows the floor.
+       */
+      readonly isOlder: boolean;
+    };
 
 const NOT_INSTALLED: Standing = { kind: "not-installed", isOlder: false };
 const UNKNOWN_VERSION: Standing = { kind: "unknown-version", isOlder: false };
@@ -166,8 +197,10 @@ const UNKNOWN_VERSION: Standing = { kind: "unknown-version", isOlder: false };
 /** Ranks a known version against the latest release. `version` when the order is not known. */
 const rankAgainstLatest = (version: string, latest: string | null): Standing => {
   const order = latest === null ? undefined : compareReleaseVersions(version, latest);
-  if (order === undefined) return { kind: "version", isOlder: false };
-  return order === -1 ? { kind: "older", isOlder: true } : { kind: "latest", isOlder: false };
+  if (order === undefined) return { kind: "version", version, isOlder: false };
+  return order === -1
+    ? { kind: "older", version, isOlder: true }
+    : { kind: "latest", version, isOlder: false };
 };
 
 /**
@@ -190,22 +223,26 @@ const rankHarness = (onMachine: HarnessOnRunner | undefined, latest: string | nu
   if (onMachine.version === null) return UNKNOWN_VERSION;
   const ranked = rankAgainstLatest(onMachine.version, latest);
   return onMachine.versionVerdict === "below-floor"
-    ? { kind: "below-floor", isOlder: ranked.isOlder }
+    ? { kind: "below-floor", version: onMachine.version, isOlder: ranked.isOlder }
     : ranked;
 };
 
-/** Returns the latest release version of a harness from the last successful read, or `null` before one. */
-const readHarnessLatestVersion = (harness: Harness): string | null =>
-  harness.latestRelease?.version ?? null;
-
 /**
- * Describes the failed read of a harness's latest release as a sentence.
- * Returns `null` when the last read did not fail.
+ * Describes the failed read of a harness's latest release in two sentences.
+ * The stored error is its own sentence, so its capital letter is correct.
+ * `hasVersion` says whether an earlier read succeeded. Returns `null` when the
+ * last read did not fail.
  */
-const describeReadFailure = (release: HarnessLatestRelease | null): string | null =>
-  release?.error == null
-    ? null
-    : `The last check for a newer release failed: ${release.error.replace(/\.$/, "")}.`;
+const describeReadFailure = (
+  release: HarnessLatestRelease | null,
+  hasVersion: boolean,
+): string | null => {
+  if (release?.error == null) return null;
+  const reason = release.error.replace(/\.$/, "");
+  return hasVersion
+    ? `The last check for a newer release failed. ${reason}.`
+    : `No release read yet: the last check failed. ${reason}.`;
+};
 
 /**
  * Formats when a harness's latest release was read, in the same short form as
@@ -224,14 +261,14 @@ const formatCheckedAt = (
 const HARNESSES_GROUP = "Harnesses";
 const TOOLCHAINS_GROUP = "Toolchains";
 
-const buildCell = (standing: Standing, version: string | null, isAway: boolean): SoftwareCell => ({
+const buildCell = (standing: Standing, isAway: boolean): SoftwareCell => ({
   kind: standing.kind,
   text:
-    standing.kind === "not-installed"
-      ? "Not installed"
-      : standing.kind === "unknown-version"
-        ? "Installed"
-        : (version ?? "Installed"),
+    "version" in standing
+      ? standing.version
+      : standing.kind === "not-installed"
+        ? "Not installed"
+        : "Installed",
   tooltip:
     standing.kind === "below-floor"
       ? BELOW_FLOOR_TOOLTIP
@@ -242,9 +279,37 @@ const buildCell = (standing: Standing, version: string | null, isAway: boolean):
 });
 
 /**
+ * Builds the cell of a toolchain nobody looked for. The tooltip depends on
+ * why: a runner that has not reported yet has looked at nothing, while a
+ * runner that has reported but is too old does not know the tool.
+ */
+const buildNotProbedCell = (
+  toolchain: string,
+  hasReported: boolean,
+  isAway: boolean,
+): SoftwareCell => ({
+  kind: "not-probed",
+  text: NOT_PROBED_TEXT,
+  tooltip: hasReported
+    ? `This machine's runner is too old to look for ${toolchain}. Update it to see it.`
+    : "This machine has not reported its tools yet.",
+  isAway,
+});
+
+/**
+ * Returns the names of the toolchains the machine's runner looked for. A
+ * runner without `probedToolchains` is older than the list and looked for
+ * `git` and `gh` only. A runner that has sent no facts yet has looked for
+ * nothing, so none of its tools can be called not installed.
+ */
+const listProbedToolchains = (runner: Runner): readonly string[] =>
+  runner.facts === null ? [] : (runner.facts.probedToolchains ?? OLDEST_PROBED_TOOLCHAINS);
+
+/**
  * Groups the machines of a row by the version their cell shows. The groups
  * run newest first by `compareReleaseVersions`, then the versions with no
- * known order in the order they first appear, then "Not installed".
+ * known order in the order they first appear, then "Not looked for", then
+ * "Not installed".
  */
 const groupMachinesByVersion = (
   columns: readonly SoftwareColumn[],
@@ -252,10 +317,11 @@ const groupMachinesByVersion = (
 ): readonly SoftwareVersionGroup[] => {
   const byText = new Map<string, string[]>();
   const missing: string[] = [];
+  const notProbed: string[] = [];
   cells.forEach((cell, index) => {
     const name = columns[index]!.name;
-    if (cell.kind === "not-installed") {
-      missing.push(name);
+    if (cell.kind === "not-installed" || cell.kind === "not-probed") {
+      (cell.kind === "not-installed" ? missing : notProbed).push(name);
       return;
     }
     const group = byText.get(cell.text);
@@ -265,13 +331,13 @@ const groupMachinesByVersion = (
   const ordered: SoftwareVersionGroup[] = [];
   const unordered: SoftwareVersionGroup[] = [];
   for (const [text, machines] of byText) {
-    const hasOrder = compareReleaseVersions(text, text) !== undefined;
-    (hasOrder ? ordered : unordered).push({ text, machines });
+    (isReleaseVersion(text) ? ordered : unordered).push({ text, machines });
   }
   ordered.sort((a, b) => -(compareReleaseVersions(a.text, b.text) ?? 0));
   return [
     ...ordered,
     ...unordered,
+    ...(notProbed.length === 0 ? [] : [{ text: NOT_PROBED_GROUP, machines: notProbed }]),
     ...(missing.length === 0 ? [] : [{ text: "Not installed", machines: missing }]),
   ];
 };
@@ -303,21 +369,23 @@ const buildHarnessRow = (
   today: Date,
 ): SoftwareRow => {
   const release = harness.latestRelease;
-  const latestVersion = readHarnessLatestVersion(harness);
-  const failure = describeReadFailure(release);
+  const latestVersion = release?.version ?? null;
+  const failure = describeReadFailure(release, latestVersion !== null);
   const checkedAt = formatCheckedAt(release, timezone, today);
   const byRunner = new Map(harness.runners.map((entry) => [entry.runnerId, entry]));
   const cells = columns.map((column) => {
     const onMachine = byRunner.get(column.runnerId);
-    return buildCell(
-      rankHarness(onMachine, latestVersion),
-      onMachine?.version ?? null,
-      column.isAway,
-    );
+    return buildCell(rankHarness(onMachine, latestVersion), column.isAway);
   });
   const checked = checkedAt === null ? "" : `, checked ${checkedAt}`;
+  const releaseLine = latestVersion === null ? null : `Latest release ${latestVersion}${checked}.`;
+  // With no release read yet, the failure sentence already says so.
   const latestLine =
-    latestVersion === null ? "Not checked yet." : `Latest release ${latestVersion}${checked}.`;
+    releaseLine === null
+      ? (failure ?? "Not checked yet.")
+      : failure === null
+        ? releaseLine
+        : `${releaseLine} ${failure}`;
   return buildRow(
     columns,
     harness.id,
@@ -330,7 +398,7 @@ const buildHarnessRow = (
           note: failure === null || checkedAt === null ? null : `checked ${checkedAt}`,
           tooltip: failure,
         },
-    failure === null ? latestLine : `${latestLine} ${failure}`,
+    latestLine,
     cells,
   );
 };
@@ -371,18 +439,17 @@ export const describeFleetSoftware = (
     RUNNER_KEY,
     "Hercule runner",
     { text: controllerVersion, tone: "ink", note: null, tooltip: null },
-    "Hercule's own version: a runner updates to its controller's version.",
+    `Latest release ${controllerVersion}, this controller's version: a runner updates to its controller's version.`,
     machines.map((runner, index) =>
-      buildCell(rankRunner(runner, controllerVersion), runner.version, columns[index]!.isAway),
+      buildCell(rankRunner(runner, controllerVersion), columns[index]!.isAway),
     ),
   );
 
-  const versionsByRunner = new Map(
-    machines.map((runner) => [
-      runner.id,
-      new Map((runner.facts?.toolchains ?? []).map((tool) => [tool.name, tool.version])),
-    ]),
-  );
+  const reports = machines.map((runner) => ({
+    versions: new Map((runner.facts?.toolchains ?? []).map((tool) => [tool.name, tool.version])),
+    probed: new Set(listProbedToolchains(runner)),
+    hasReported: runner.facts !== null,
+  }));
   const toolchainRows = PROBED_TOOLCHAINS.map((name) =>
     buildRow(
       columns,
@@ -390,11 +457,16 @@ export const describeFleetSoftware = (
       name,
       { text: "Not tracked", tone: "faint", note: null, tooltip: NOT_TRACKED_TEXT },
       NOT_TRACKED_TEXT,
-      columns.map((column) => {
-        const version = versionsByRunner.get(column.runnerId)?.get(name);
-        return version === undefined
-          ? buildCell(NOT_INSTALLED, null, column.isAway)
-          : buildCell({ kind: "version", isOlder: false }, version, column.isAway);
+      columns.map((column, index) => {
+        const { versions, probed, hasReported } = reports[index]!;
+        const version = versions.get(name);
+        // A tool that was found is shown whatever the list of probed tools says.
+        if (version !== undefined) {
+          return buildCell({ kind: "version", version, isOlder: false }, column.isAway);
+        }
+        return probed.has(name)
+          ? buildCell(NOT_INSTALLED, column.isAway)
+          : buildNotProbedCell(name, hasReported, column.isAway);
       }),
     ),
   );
@@ -430,7 +502,7 @@ export const describeMachineUpdates = (
     (harness) =>
       rankHarness(
         harness.runners.find((entry) => entry.runnerId === runner.id),
-        readHarnessLatestVersion(harness),
+        harness.latestRelease?.version ?? null,
       ).isOlder,
   ).length;
   const count = outdatedHarnesses + (rankRunner(runner, controllerVersion).isOlder ? 1 : 0);
@@ -439,24 +511,32 @@ export const describeMachineUpdates = (
 
 /**
  * Lists the toolchains found on a machine with their versions, for the Tools
- * part of its page. They run in the order of the probed list; a toolchain
- * outside the list, which a newer runner may report, goes after them in the
- * order reported. `notInstalledText` names the probed toolchains that are
- * missing ("Not installed: terraform, dotnet"), or is `null` when none is.
+ * part of its page, in the order the runner reported them (the runner reports
+ * in the order of the probed list). The two texts split the probed
+ * toolchains that were not found:
+ *
+ * - `notInstalledText` names those the runner looked for ("Not installed:
+ *   terraform, dotnet").
+ * - `notProbedText` names those a runner too old to know them did not look
+ *   for.
+ *
  * A runner that has not reported its facts has no tools and no text.
  */
 export const listMachineTools = (runner: Runner): MachineTools => {
-  const reported = runner.facts?.toolchains;
-  if (reported === undefined) return { tools: [], notInstalledText: null };
-  const rank = new Map<string, number>(PROBED_TOOLCHAINS.map((name, index) => [name, index]));
-  const unlisted = PROBED_TOOLCHAINS.length;
-  const tools = reported
-    .map(({ name, version }) => ({ name, version }))
-    .toSorted((a, b) => (rank.get(a.name) ?? unlisted) - (rank.get(b.name) ?? unlisted));
-  const found = new Set(reported.map((tool) => tool.name));
+  if (runner.facts === null) return { tools: [], notInstalledText: null, notProbedText: null };
+  const tools = runner.facts.toolchains.map(({ name, version }) => ({ name, version }));
+  const found = new Set(tools.map((tool) => tool.name));
+  const probed = new Set(listProbedToolchains(runner));
   const missing = PROBED_TOOLCHAINS.filter((name) => !found.has(name));
+  const notInstalled = missing.filter((name) => probed.has(name));
+  const notProbed = missing.filter((name) => !probed.has(name));
   return {
     tools,
-    notInstalledText: missing.length === 0 ? null : `Not installed: ${missing.join(", ")}`,
+    notInstalledText:
+      notInstalled.length === 0 ? null : `Not installed: ${notInstalled.join(", ")}`,
+    notProbedText:
+      notProbed.length === 0
+        ? null
+        : `This runner is too old to look for ${notProbed.join(", ")}: update it to see ${notProbed.length === 1 ? "it" : "them"}.`,
   };
 };

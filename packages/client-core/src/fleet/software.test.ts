@@ -1,3 +1,4 @@
+import { Struct } from "effect";
 import { describe, expect, it } from "vitest";
 import type { Harness, HarnessOnRunner, Runner } from "@hercule/contract";
 import { PROBED_TOOLCHAINS } from "@hercule/contract";
@@ -10,6 +11,12 @@ import {
   type SoftwareCell,
   type SoftwareRow,
 } from "./software";
+
+/**
+ * The facts of a runner built before the probed list was reported: it sends
+ * no `probedToolchains`, and looked for `git` and `gh` only.
+ */
+const OLD_FACTS = Struct.omit(BARE.facts!, ["probedToolchains"]);
 
 const TIMEZONE = "UTC";
 const TODAY = new Date("2026-11-02T14:00:00.000Z");
@@ -122,13 +129,13 @@ describe("describeFleetSoftware Latest", () => {
       text: "2.1.90",
       tone: "ink",
       note: "checked 09:00",
-      tooltip: "The last check for a newer release failed: GitHub answered 503.",
+      tooltip: "The last check for a newer release failed. GitHub answered 503.",
     });
   });
 
   it("does not repeat the full stop of an error that ends in one", () => {
     expect(latestOf({ ...successfulRelease, error: "Timed out." }).tooltip).toBe(
-      "The last check for a newer release failed: Timed out.",
+      "The last check for a newer release failed. Timed out.",
     );
   });
 
@@ -137,7 +144,7 @@ describe("describeFleetSoftware Latest", () => {
       text: "Not checked yet",
       tone: "muted",
       note: null,
-      tooltip: "The last check for a newer release failed: No network.",
+      tooltip: "No release read yet: the last check failed. No network.",
     });
   });
 
@@ -293,13 +300,94 @@ describe("describeFleetSoftware toolchain cells", () => {
     }
   });
 
-  it("shows a dash for a toolchain the machine lacks, or reported no facts for", () => {
+  describe("on a runner too old to look for most tools", () => {
+    // A runner built before the list grew sends no `probedToolchains` and
+    // looked for git and gh only.
+    const OLD = buildRunner(ATLAS, {
+      facts: {
+        ...OLD_FACTS,
+        toolchains: [{ name: "git", version: "2.51.0", path: "/bin/git" }],
+      },
+    });
+    const OLD_FOUND_BOTH = buildRunner(ATLAS, {
+      facts: {
+        ...OLD_FACTS,
+        toolchains: [
+          { name: "git", version: "2.51.0", path: "/bin/git" },
+          { name: "gh", version: "2.80.0", path: "/bin/gh" },
+        ],
+      },
+    });
+
+    it("shows Unknown, not a dash, for every tool but git and gh", () => {
+      const grid = describeGrid([OLD_FOUND_BOTH]);
+      const others = PROBED_TOOLCHAINS.filter((name) => name !== "git" && name !== "gh");
+
+      expect(kindsOf(findRow(grid, "git"))).toEqual(["version"]);
+      expect(kindsOf(findRow(grid, "gh"))).toEqual(["version"]);
+      for (const name of others) expect(kindsOf(findRow(grid, name))).toEqual(["not-probed"]);
+      expect(others).toHaveLength(10);
+      expect(findRow(grid, "node").cells[0]).toEqual({
+        kind: "not-probed",
+        text: "Unknown",
+        tooltip: "This machine's runner is too old to look for node. Update it to see it.",
+        isAway: false,
+      });
+    });
+
+    it("still says git and gh are not installed when the old runner looked and found none", () => {
+      expect(kindsOf(findRow(describeGrid([OLD]), "gh"))).toEqual(["not-installed"]);
+    });
+
+    it("shows a tool that was found whatever the probed list says", () => {
+      const grid = describeGrid([
+        buildRunner(ATLAS, {
+          facts: {
+            ...OLD_FACTS,
+            toolchains: [{ name: "node", version: "24.1.0", path: "/bin/node" }],
+          },
+        }),
+      ]);
+
+      expect(findRow(grid, "node").cells[0]).toMatchObject({ kind: "version", text: "24.1.0" });
+    });
+
+    it("lists the machines under Not looked for, between the versions and Not installed", () => {
+      const grid = describeGrid([OLD, withTools(MOSS, [{ name: "node", version: "24.1.0" }])]);
+      const ZED = withTools(
+        buildRunner(MOSS, { id: "01a06d02-0003-7000-8000-000000000003", name: "zed" }),
+        [],
+      );
+
+      expect(findRow(grid, "node").detail.versions).toEqual([
+        { text: "24.1.0", machines: ["moss"] },
+        { text: "Not looked for", machines: ["atlas"] },
+      ]);
+      expect(findRow(describeGrid([OLD, MOSS, ZED]), "node").detail.versions).toEqual([
+        { text: "Not looked for", machines: ["atlas"] },
+        { text: "Not installed", machines: ["moss", "zed"] },
+      ]);
+    });
+  });
+
+  it("shows a dash for a toolchain the machine lacks", () => {
     const grid = describeGrid([withTools(ATLAS, [{ name: "git", version: "2.51.0" }]), MOSS]);
-    const noFacts = describeGrid([buildRunner(ATLAS, { facts: null })]);
 
     expect(kindsOf(findRow(grid, "git"))).toEqual(["version", "not-installed"]);
     expect(kindsOf(findRow(grid, "gh"))).toEqual(["not-installed", "not-installed"]);
-    expect(kindsOf(findRow(noFacts, "git"))).toEqual(["not-installed"]);
+  });
+
+  it("shows Unknown, with its own tooltip, for a machine that has not reported its facts", () => {
+    const grid = describeGrid([buildRunner(ATLAS, { facts: null })]);
+
+    expect(kindsOf(findRow(grid, "git"))).toEqual(["not-probed"]);
+    expect(findRow(grid, "git").cells[0]).toMatchObject({
+      text: "Unknown",
+      tooltip: "This machine has not reported its tools yet.",
+    });
+    expect(findRow(grid, "git").detail.versions).toEqual([
+      { text: "Not looked for", machines: ["atlas"] },
+    ]);
   });
 });
 
@@ -322,14 +410,14 @@ describe("describeFleetSoftware detail", () => {
     expect(line(successfulRelease)).toBe("Latest release 2.1.90, checked 09:00.");
     expect(line(null)).toBe("Not checked yet.");
     expect(line({ ...successfulRelease, error: "offline" })).toBe(
-      "Latest release 2.1.90, checked 09:00. The last check for a newer release failed: offline.",
+      "Latest release 2.1.90, checked 09:00. The last check for a newer release failed. offline.",
     );
-    expect(line({ version: null, checkedAt: null, error: "offline" })).toBe(
-      "Not checked yet. The last check for a newer release failed: offline.",
-    );
+    expect(
+      line({ version: null, checkedAt: null, error: "Could not reach the npm registry." }),
+    ).toBe("No release read yet: the last check failed. Could not reach the npm registry.");
     const grid = describeGrid([ATLAS]);
     expect(findRow(grid, "runner").detail.latestLine).toBe(
-      "Hercule's own version: a runner updates to its controller's version.",
+      "Latest release 0.4.2, this controller's version: a runner updates to its controller's version.",
     );
     expect(findRow(grid, "git").detail.latestLine).toBe(
       "Hercule does not follow this tool's releases yet.",
@@ -448,11 +536,9 @@ describe("listMachineTools", () => {
       },
     });
 
-  it("lists the tools found in the order of the probed list, and names the missing ones", () => {
-    const { tools, notInstalledText } = listMachineTools(
-      withTools(
-        PROBED_TOOLCHAINS.filter((name) => name !== "terraform" && name !== "dotnet").toReversed(),
-      ),
+  it("lists the tools in the order reported, and names the missing ones that were looked for", () => {
+    const { tools, notInstalledText, notProbedText } = listMachineTools(
+      withTools(PROBED_TOOLCHAINS.filter((name) => name !== "terraform" && name !== "dotnet")),
     );
 
     expect(tools.map((tool) => tool.name)).toEqual(
@@ -460,22 +546,46 @@ describe("listMachineTools", () => {
     );
     expect(tools[0]).toEqual({ name: "git", version: "git-1" });
     expect(notInstalledText).toBe("Not installed: terraform, dotnet");
+    expect(notProbedText).toBeNull();
+  });
+
+  it("keeps the reported order, even for a toolchain outside the list", () => {
+    const { tools } = listMachineTools(withTools(["zig", "node", "deno", "git"]));
+
+    expect(tools.map((tool) => tool.name)).toEqual(["zig", "node", "deno", "git"]);
   });
 
   it("has no Not installed text when every probed toolchain is there", () => {
     expect(listMachineTools(withTools(PROBED_TOOLCHAINS)).notInstalledText).toBeNull();
   });
 
-  it("puts a toolchain outside the list after the others, in the order reported", () => {
-    const { tools } = listMachineTools(withTools(["zig", "node", "deno", "git"]));
+  it("says a runner without a probed list is too old to look for the other ten tools", () => {
+    const old = buildRunner(ATLAS, {
+      facts: {
+        ...OLD_FACTS,
+        toolchains: [
+          { name: "git", version: "2.51.0", path: "/bin/git" },
+          { name: "gh", version: "2.80.0", path: "/bin/gh" },
+        ],
+      },
+    });
 
-    expect(tools.map((tool) => tool.name)).toEqual(["git", "node", "zig", "deno"]);
+    expect(listMachineTools(old)).toEqual({
+      tools: [
+        { name: "git", version: "2.51.0" },
+        { name: "gh", version: "2.80.0" },
+      ],
+      notInstalledText: null,
+      notProbedText:
+        "This runner is too old to look for node, pnpm, bun, go, rustc, python3, uv, docker, terraform, dotnet: update it to see them.",
+    });
   });
 
   it("has no tools and no text before the runner reported its facts", () => {
     expect(listMachineTools(buildRunner(ATLAS, { facts: null }))).toEqual({
       tools: [],
       notInstalledText: null,
+      notProbedText: null,
     });
   });
 });

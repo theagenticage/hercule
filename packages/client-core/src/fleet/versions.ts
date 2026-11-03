@@ -27,6 +27,9 @@ const parseVersion = (version: string): ParsedVersion | undefined => {
   };
 };
 
+/** Returns whether `text` is a version in the shape `compareReleaseVersions` can order. */
+export const isReleaseVersion = (text: string): boolean => parseVersion(text) !== undefined;
+
 const isNumeric = (identifier: string): boolean => /^\d+$/.test(identifier);
 
 /** Orders two numbers written as digits. BigInt keeps a very long number exact. */

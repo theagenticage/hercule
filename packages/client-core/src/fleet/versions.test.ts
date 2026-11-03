@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareReleaseVersions } from "./versions";
+import { compareReleaseVersions, isReleaseVersion } from "./versions";
 
 describe("compareReleaseVersions", () => {
   it("compares the three numbers as numbers, not as text", () => {
@@ -57,5 +57,14 @@ describe("compareReleaseVersions", () => {
       expect(compareReleaseVersions(version, "1.2.3")).toBeUndefined();
       expect(compareReleaseVersions("1.2.3", version)).toBeUndefined();
     }
+  });
+});
+
+describe("isReleaseVersion", () => {
+  it("is true for a version compareReleaseVersions can order, and false for one it cannot", () => {
+    expect(isReleaseVersion("1.2.3")).toBe(true);
+    expect(isReleaseVersion("v1.2.3-rc.1+build")).toBe(true);
+    expect(isReleaseVersion("go1.25")).toBe(false);
+    expect(isReleaseVersion("Installed")).toBe(false);
   });
 });
