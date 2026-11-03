@@ -2375,7 +2375,9 @@ export const CLI = {
           "five-minutes",
         ],
       },
-      { args: ["7b41d0a5", "--since", "2026-10-27T00:00:00Z"] },
+      {
+        args: ["7b41d0a5", "--since", "2026-10-27T00:00:00Z", "--until", "2026-11-03T00:00:00Z"],
+      },
     ],
     fields: {
       runnerId: {
