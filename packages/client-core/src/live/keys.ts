@@ -17,11 +17,11 @@ import type {
   Runner,
   SessionFilter,
   SignalFilter,
-  RunnerMetricsResolution,
   SkillsPreviewFilter,
   TaskFilter,
 } from "@hercule/contract";
 import type { HerculeClient } from "../client";
+import type { RunnerMetricsScope } from "../fleet/metrics-history";
 import { listLoopbackEndpoints } from "../local-runner";
 
 /** A cache key. This package does not read it; the app's query client does. */
@@ -131,10 +131,7 @@ export const queryKeys = {
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
   /**
-   * One history of Runner Metrics a Fleet screen holds: the points of one
-   * resolution over `rangeMs`, for one runner or, with a `null` runner id, for
-   * every runner. Each argument narrows the key, so a prefix matches every
-   * history of that resolution, or of that resolution and runner.
+   * One history of Runner Metrics a Fleet screen holds, keyed by its scope.
    *
    * The `runnerMetrics` topic maps to no key here, on purpose. A push says a
    * row was written, and the screens that draw metrics decide what to read on
@@ -142,13 +139,7 @@ export const queryKeys = {
    * most once an hour. Its key is also outside the `runner` prefix: a push on
    * `runner` must not read any history.
    */
-  runnerMetrics: (
-    ...scope:
-      | []
-      | [resolution: RunnerMetricsResolution]
-      | [resolution: RunnerMetricsResolution, runnerId: string | null]
-      | [resolution: RunnerMetricsResolution, runnerId: string | null, rangeMs: number]
-  ): LiveQueryKey => ["runnerMetrics", ...scope],
+  runnerMetrics: (scope: RunnerMetricsScope): LiveQueryKey => ["runnerMetrics", scope],
   /**
    * A filtered listing is keyed on its filter, such as:
    *

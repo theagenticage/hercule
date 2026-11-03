@@ -3,10 +3,13 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
+import {
+  buildMachineFiveMinuteScope,
+  buildMachineHourScope,
+} from "@hercule/client-core/metrics-history";
 import { describeMachinePage } from "@hercule/client-core/machine-page";
 import type { Runner } from "@hercule/contract";
 import { throwScreenNotFound } from "../../../../app/last-screen";
-import { useRunnerMetricsLive } from "../../../../app/live";
 import {
   controllerQuery,
   fleetSessionsQuery,
@@ -23,17 +26,13 @@ import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { MachinePageBanner } from "../../../../screens/fleet/machine-page-banner";
 import { MachinePageHead, MachinePageRoomLine } from "../../../../screens/fleet/machine-page-head";
 import { MachinePageInstruments } from "../../../../screens/fleet/machine-page-instruments";
-import {
-  buildMachineFiveMinuteScope,
-  buildMachineHourScope,
-} from "../../../../screens/fleet/runner-metrics-scope";
 import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
 import { NotFound } from "../../../../screens/not-found";
 import { MachineRetireDialog } from "./-machine-retire-dialog";
 import { MachineSettings } from "./-machine-settings";
 import { MachineSoftware } from "./-machine-software";
-import { runnerMetricsQuery } from "./-runner-metrics";
+import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { useRunnerSessionCounts } from "./-session-counts";
 
 /** The ids of the page's sections, which the header's jump links scroll to. */

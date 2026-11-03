@@ -1,6 +1,10 @@
 /**
- * The Runner Metrics a Fleet screen holds, and how a re-read joins them
- * (spec 03 §4.3, spec 17 §Graphs and the forecast).
+ * The Runner Metrics a Fleet screen holds, and how it reads them (spec 03
+ * §4.3, spec 17 §Graphs and the forecast).
+ *
+ * A screen holds a few histories, each described by a `RunnerMetricsScope`.
+ * `readRunnerMetricsHistory` brings one up to date: the first read covers the
+ * whole range, and every later one reads only from the newest point it holds.
  *
  * The comparisons use the points' `at` strings as they are. A `Timestamp` is
  * always UTC with milliseconds (`2026-11-03T09:05:00.000Z`), so the strings
@@ -11,6 +15,8 @@ import {
   type RunnerMetricsPoint,
   type RunnerMetricsResolution,
 } from "@hercule/contract";
+import type { HerculeClient } from "../client";
+import { readEveryPage } from "../read-every-page";
 
 /**
  * The points of one resolution (five minutes or one hour) that a screen holds
@@ -38,6 +44,38 @@ export const HOUR_HISTORY_MS = 14 * DAY_MS;
 export const FORECAST_HISTORY_MS = 7 * DAY_MS;
 
 /**
+ * One history of Runner Metrics: the points of one `resolution` over the last
+ * `rangeMs`, for the runner `runnerId` or, with `null`, for every runner. It is
+ * also what a history is keyed by in the cache (`queryKeys.runnerMetrics`).
+ */
+export interface RunnerMetricsScope {
+  readonly resolution: RunnerMetricsResolution;
+  readonly runnerId: string | null;
+  readonly rangeMs: number;
+}
+
+/** The hour points of every runner over the last 7 days, which the Fleet page forecasts disks from. */
+export const FLEET_HOUR_METRICS_SCOPE: RunnerMetricsScope = {
+  resolution: "hour",
+  runnerId: null,
+  rangeMs: FORECAST_HISTORY_MS,
+};
+
+/** Returns the five-minute points of the last 24 hours of the runner `runnerId`: a machine's Sessions, CPU and Memory graphs. */
+export const buildMachineFiveMinuteScope = (runnerId: string): RunnerMetricsScope => ({
+  resolution: "fiveMinutes",
+  runnerId,
+  rangeMs: FIVE_MINUTE_HISTORY_MS,
+});
+
+/** Returns the hour points of the last 14 days of the runner `runnerId`: a machine's Disk graph and forecast. */
+export const buildMachineHourScope = (runnerId: string): RunnerMetricsScope => ({
+  resolution: "hour",
+  runnerId,
+  rangeMs: HOUR_HISTORY_MS,
+});
+
+/**
  * Returns the `since` of the next read of `resolution` points over `rangeMs`,
  * at `now` (Unix ms).
  *
@@ -59,7 +97,7 @@ export const FORECAST_HISTORY_MS = 7 * DAY_MS;
  * skips are outside what a graph draws. Being on a boundary also means a held
  * point never overlaps a read.
  */
-export const findMetricsReadStart = (
+const findReadStart = (
   held: RunnerMetricsHistory,
   resolution: RunnerMetricsResolution,
   rangeMs: number,
@@ -81,7 +119,7 @@ export const findMetricsReadStart = (
  *
  * - `read` is what `runnerMetrics.query` returned for `since`, sorted by runner
  *   id, then oldest first, like the held points.
- * - `since` is the value `findMetricsReadStart` gave. The held points that
+ * - `since` is the value `findReadStart` gave. The held points that
  *   start at or after it were still filling, so the read replaces them.
  * - Points older than `readAt - rangeMs` are dropped, so the history never
  *   grows past the range its graph draws.
@@ -90,7 +128,7 @@ export const findMetricsReadStart = (
  * and nothing is dropped, it returns `held` itself, so a caller comparing by
  * identity (React, TanStack Query) redraws nothing.
  */
-export const mergeRunnerMetricsHistory = (
+const mergeRead = (
   held: RunnerMetricsHistory,
   read: readonly RunnerMetricsPoint[],
   since: string,
@@ -125,4 +163,36 @@ export const mergeRunnerMetricsHistory = (
   while (keptIndex < kept.length) points.push(kept[keptIndex++]!);
   while (readIndex < read.length) points.push(read[readIndex++]!);
   return { points, readAt };
+};
+
+/**
+ * Brings the history `held` of `scope` up to date at `now` (Unix ms), and
+ * returns the new history. Fails when a request fails.
+ *
+ * - It reads from where `findReadStart` says, every page of it.
+ * - Every page ends at the same `until`, `now`. Left to itself, each page would
+ *   end at the controller's own time, and a read that crosses an hour boundary
+ *   between two pages could return one runner's 10:00 hour half filled and
+ *   another's 11:00 hour. The next read would start at 11:00 and the first
+ *   runner's 10:00 would never be completed. It also keeps a point from
+ *   starting after the history's right edge when the controller's clock is
+ *   ahead of the caller's.
+ * - The read joins the held points as `mergeRead` describes. The result is
+ *   `held` itself when nothing changed.
+ */
+export const readRunnerMetricsHistory = async (
+  client: HerculeClient,
+  scope: RunnerMetricsScope,
+  held: RunnerMetricsHistory,
+  now: number,
+): Promise<RunnerMetricsHistory> => {
+  const { resolution, runnerId, rangeMs } = scope;
+  const since = findReadStart(held, resolution, rangeMs, now);
+  const until = new Date(now).toISOString();
+  const read = await readEveryPage((page) =>
+    client.runnerMetrics.query({
+      query: { ...(runnerId === null ? {} : { runnerId }), since, until, resolution, ...page },
+    }),
+  );
+  return mergeRead(held, read, since, now, rangeMs);
 };

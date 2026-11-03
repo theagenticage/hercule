@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeFleetPage } from "@hercule/client-core/fleet";
-import { useRunnerMetricsLive } from "../../../../app/live";
+import { FLEET_HOUR_METRICS_SCOPE } from "@hercule/client-core/metrics-history";
 import {
   controllerQuery,
   fleetSessionsQuery,
@@ -15,11 +15,10 @@ import { AddMachineDialog } from "../../../../screens/fleet/add-machine-dialog";
 import { FleetHeader } from "../../../../screens/fleet/fleet-header";
 import { FleetPageLead } from "../../../../screens/fleet/fleet-lead";
 import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
-import { FLEET_HOUR_METRICS_SCOPE } from "../../../../screens/fleet/runner-metrics-scope";
 import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
 import { MachinesSection } from "./-machines-section";
-import { runnerMetricsQuery } from "./-runner-metrics";
+import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { useRunnerSessionCounts } from "./-session-counts";
 
 /**

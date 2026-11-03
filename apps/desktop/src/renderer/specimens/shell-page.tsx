@@ -92,9 +92,15 @@ import {
   type FetchLike,
   type HerculeClient,
   type Live,
+  queryKeys,
   type RecentModel,
   type ThreadPicks,
 } from "@hercule/client-core";
+import {
+  buildMachineFiveMinuteScope,
+  buildMachineHourScope,
+  FLEET_HOUR_METRICS_SCOPE,
+} from "@hercule/client-core/metrics-history";
 import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
 import type { Bridge } from "../../ipc/bridge";
 import {
@@ -172,12 +178,6 @@ import { createQueryClient } from "../app/query-client";
 import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
-import {
-  buildMachineFiveMinuteScope,
-  buildMachineHourScope,
-  buildRunnerMetricsKey,
-  FLEET_HOUR_METRICS_SCOPE,
-} from "../screens/fleet/runner-metrics-scope";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { useKeepRequestDrafts } from "../app/request-drafts";
 import { AgentPage } from "../screens/thread/agent-page";
@@ -796,15 +796,15 @@ const seedQueryCache = (
     queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
     queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
     const { fiveMinutesByRunner, hoursByRunner, fleetHours } = fleet.metrics;
-    queryClient.setQueryData(buildRunnerMetricsKey(FLEET_HOUR_METRICS_SCOPE), fleetHours);
+    queryClient.setQueryData(queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE), fleetHours);
     for (const [runnerId, history] of Object.entries(fiveMinutesByRunner)) {
       queryClient.setQueryData(
-        buildRunnerMetricsKey(buildMachineFiveMinuteScope(runnerId)),
+        queryKeys.runnerMetrics(buildMachineFiveMinuteScope(runnerId)),
         history,
       );
     }
     for (const [runnerId, history] of Object.entries(hoursByRunner)) {
-      queryClient.setQueryData(buildRunnerMetricsKey(buildMachineHourScope(runnerId)), history);
+      queryClient.setQueryData(queryKeys.runnerMetrics(buildMachineHourScope(runnerId)), history);
     }
   }
   if (workflows !== undefined) {
