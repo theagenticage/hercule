@@ -91,15 +91,15 @@ export const coerceFieldValue = (field: Field, text: string, help: string): unkn
       throw new UsageError(`${formatFieldName(field)}: ${refusal}`, help);
     }
   }
-  if (field.choices !== undefined && !field.choices.includes(text)) {
+  if (field.choices !== undefined && !field.choices.has(text)) {
     throw new UsageError(
-      `${formatFieldName(field)}: ${text} is not one of ${field.choices.join(", ")}`,
+      `${formatFieldName(field)}: ${text} is not one of ${[...field.choices.keys()].join(", ")}`,
       help,
     );
   }
   // The schema's own value for a choice, which differs from the typed one
   // when a camelCase value is typed in kebab case.
-  const choice = field.choiceValues?.[field.choices?.indexOf(text) ?? -1];
+  const choice = field.choices?.get(text);
   switch (field.kind) {
     case "string":
       return choice ?? text;

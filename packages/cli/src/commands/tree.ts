@@ -71,12 +71,11 @@ export interface Field {
   /** Whether the field accepts `null`, which is written `--field null` on the command line. */
   readonly nullable: boolean;
   /**
-   * The closed set of accepted values as they are typed, when the schema
-   * declares one. A camelCase value is typed in kebab case, as a flag name is.
+   * The closed set of accepted values, when the schema declares one, from the
+   * word as it is typed to the schema's own value. A camelCase value is typed
+   * in kebab case, as a flag name is, so the two differ for it only.
    */
-  readonly choices: ReadonlyArray<string> | undefined;
-  /** The schema's own value for each of `choices`, in the same order. */
-  readonly choiceValues: ReadonlyArray<string> | undefined;
+  readonly choices: ReadonlyMap<string, string> | undefined;
   /** The text used when the flag is left out, from the field's CLI row. */
   readonly defaultText: string | undefined;
   /**
@@ -286,6 +285,14 @@ const isRecordOfText = (ast: Ast): boolean =>
 const spellChoice = (value: string): string =>
   /^[a-z][a-zA-Z0-9]*$/.test(value) ? toKebabCase(value) : value;
 
+/** Returns the closed set of a type as a map from the typed word to the value, or `undefined` when the type is not one. */
+const readChoices = (ast: Ast): ReadonlyMap<string, string> | undefined => {
+  const literals = readStringLiterals(ast);
+  return literals === undefined
+    ? undefined
+    : new Map(literals.map((literal) => [spellChoice(literal), literal]));
+};
+
 /** Converts a camelCase field name to kebab case: `sessionId` becomes `session-id`. */
 const toKebabCase = (name: string): string =>
   name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
@@ -329,8 +336,7 @@ const buildField = (
       (ast.context?.isOptional === true && !("required" in row && row.required === true)) ||
       "default" in row,
     nullable: isNullable(ast) || isNullable(value),
-    choices: readStringLiterals(stripNull(value))?.map(spellChoice),
-    choiceValues: readStringLiterals(stripNull(value)),
+    choices: readChoices(stripNull(value)),
     defaultText: "default" in row ? row.default : undefined,
     holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,

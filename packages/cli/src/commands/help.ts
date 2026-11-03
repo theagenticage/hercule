@@ -246,7 +246,8 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
     );
     lines.push("", "arguments:");
     for (const field of command.positionals) {
-      const closed = field.choices === undefined ? "" : ` One of: ${field.choices.join(", ")}.`;
+      const closed =
+        field.choices === undefined ? "" : ` One of: ${[...field.choices.keys()].join(", ")}.`;
       lines.push(
         ...formatLabelledText(formatPositionalShape(field), width, `${field.help}${closed}`),
       );
@@ -259,7 +260,8 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
     const rows: Array<{ label: string; notes: string; help?: string }> = flags.map((field) => {
       const notes = [field.optional ? "optional" : "required"];
       if (field.repeated) notes.push("repeatable");
-      if (field.choices !== undefined) notes.push(`one of: ${field.choices.join(", ")}`);
+      if (field.choices !== undefined)
+        notes.push(`one of: ${[...field.choices.keys()].join(", ")}`);
       if (field.defaultText !== undefined) notes.push(`default: ${field.defaultText}`);
       if (field.nullable) notes.push("`null` clears it");
       return {

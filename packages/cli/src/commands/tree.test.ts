@@ -289,13 +289,13 @@ describe("a command's fields against the schema", () => {
     });
     const grants = create.payload.find((field) => field.name === "grants")!;
     expect(grants.repeated).toBe(true);
-    expect(grants.choices).toContain("permission.write");
+    expect(grants.choices?.has("permission.write")).toBe(true);
 
     expect(
       findCommandByWords(["profile", "update"])!.payload.every((field) => field.optional),
     ).toBe(true);
 
-    expect(findCommandByWords(["secret", "set"])!.positionals[0]?.choices).toEqual([
+    expect([...findCommandByWords(["secret", "set"])!.positionals[0]!.choices!.keys()]).toEqual([
       "connection",
       "plugin",
       "runner",
