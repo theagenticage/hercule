@@ -12,6 +12,7 @@ import {
   BUSY_MACHINE,
   DRAINING_MACHINE,
   FULL_DISK_MACHINE,
+  NEARLY_FULL_DISK_MACHINE,
   OFFLINE_MACHINE,
 } from "./fleet.testing";
 import { MachineList, MachineRow } from "./machine-list";
@@ -78,6 +79,19 @@ describe("MachineList", () => {
     expect(within(draining!).getAllByText("Takes no new work")).toHaveLength(1);
     // The cells are the dot, Machine, Sessions, Room: the fourth.
     expect(within(draining!).getAllByRole("cell")[3]?.textContent).toBe("–");
+  });
+
+  it("shows a disk that is 87% full as a meter and its percentage in the you colour, with the free space under it", () => {
+    const { rows } = renderList([NEARLY_FULL_DISK_MACHINE]);
+    const [orbit] = rows();
+    // The cells are the dot, Machine, Sessions, Room, Disk: the fifth.
+    const disk = within(orbit!).getAllByRole("cell")[4]!;
+
+    expect(within(disk).getByText("87%").className).toBe("is-you");
+    expect(disk.querySelector(".fleet-meter--you i")?.getAttribute("style")).toBe("width: 87%;");
+    expect(within(disk).getByText("69.8 GB free")).toBeTruthy();
+    expect(within(orbit!).getByText("Disk 87% full")).toBeTruthy();
+    expect(within(orbit!).getByRole("button", { name: "Clean up…" })).toBeTruthy();
   });
 
   it("shows an offline machine's last sighting and no button but its name", () => {

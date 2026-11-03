@@ -200,6 +200,28 @@ describe("the Fleet page", () => {
     expect(screen.getByRole("button", { name: "List" }).getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("shows a disk that is 87% full as a percentage with its need line, and the list shows the same", async () => {
+    const user = userEvent.setup();
+    const orbit = buildRunner("01a06d02-a000-7000-8000-000000000004", "orbit", {
+      facts: { ...FACTS, diskTotalBytes: 500 * GIB },
+      metrics: { diskFreeBytes: 65 * GIB, availableMemoryBytes: 24 * GIB },
+    });
+    await openFleet({ runners: [orbit] });
+
+    const card = getCard("orbit");
+    expect(getValue(card, "87%")).toBeTruthy();
+    expect(within(card).getByText("Disk 87% full")).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Clean up…" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "List" }));
+    const row = within(await screen.findByRole("table", { name: "Machines" })).getAllByRole(
+      "row",
+    )[1]!;
+    expect(within(row).getByText("87%")).toBeTruthy();
+    expect(within(row).getByText("69.8 GB free")).toBeTruthy();
+    expect(within(row).getByText("Disk 87% full")).toBeTruthy();
+  });
+
   it("opens a machine's page from its card", async () => {
     const user = userEvent.setup();
     const { router } = await openFleet();

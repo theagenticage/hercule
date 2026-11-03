@@ -57,18 +57,32 @@ export function MachineRow({
       <span role="cell" className="fleet-cell fleet-col-room">
         <b>{roomText ?? "–"}</b>
       </span>
-      <span role="cell" className="fleet-cell fleet-cell--line fleet-col-disk">
-        {disk === null ? (
-          <b>–</b>
-        ) : (
-          <>
-            <b className={disk.level === "fail" ? "is-fail" : undefined}>
-              {disk.amount} {disk.unit}
+      {disk === null || disk.percent === null ? (
+        <span role="cell" className="fleet-cell fleet-cell--line fleet-col-disk">
+          {disk === null ? (
+            <b>–</b>
+          ) : (
+            <>
+              <b className={disk.level === "fail" ? "is-fail" : undefined}>
+                {disk.amount} {disk.unit}
+              </b>
+              <small>free</small>
+            </>
+          )}
+        </span>
+      ) : (
+        <span role="cell" className="fleet-cell fleet-col-disk">
+          <span className="fleet-row-meter">
+            <Meter share={disk.share} level={disk.level} />
+            <b className={disk.level === "normal" ? undefined : `is-${disk.level}`}>
+              {disk.percent}%
             </b>
-            <small>free</small>
-          </>
-        )}
-      </span>
+          </span>
+          <small>
+            {disk.amount} {disk.unit} free
+          </small>
+        </span>
+      )}
       <span role="cell" className="fleet-cell fleet-col-mem">
         {memory === null ? (
           <b>–</b>
@@ -94,7 +108,9 @@ export function MachineRow({
  * Machine, Sessions, Room, Disk, Memory and Needs you. Under 1030px of width
  * the Room and Memory columns go, because the machine's page shows them, and
  * under 720px the Disk column goes too. The rows draw what a card draws, with
- * the sessions smaller and the disk as its free space alone.
+ * the sessions smaller. The disk is a meter and its percentage with the free
+ * space under it, or the free space alone when the runner does not report the
+ * disk's size.
  */
 export function MachineList({ children }: { readonly children: ReactNode }): JSX.Element {
   return (

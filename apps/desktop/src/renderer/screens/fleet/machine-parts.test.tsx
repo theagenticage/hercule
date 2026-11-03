@@ -5,7 +5,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { BUSY_MACHINE, FULL_DISK_MACHINE, OFFLINE_MACHINE } from "./fleet.testing";
+import {
+  BUSY_MACHINE,
+  FULL_DISK_MACHINE,
+  NEARLY_FULL_DISK_MACHINE,
+  OFFLINE_MACHINE,
+} from "./fleet.testing";
 import { Meter, NeedLine, StatusDot } from "./machine-parts";
 
 describe("StatusDot", () => {
@@ -46,6 +51,15 @@ describe("NeedLine", () => {
   it("draws Clean up inert while a disk is below its limit, because the cleanup is not built yet", () => {
     render(<NeedLine need={FULL_DISK_MACHINE.need} allow={null} />);
 
+    const cleanUp = screen.getByRole("button", { name: "Clean up…" });
+    expect(cleanUp.getAttribute("aria-disabled")).toBe("true");
+    expect(cleanUp.getAttribute("title")).toBe("Not built yet");
+  });
+
+  it("draws Clean up inert while a disk is 85% full or more, as it does below the limit", () => {
+    render(<NeedLine need={NEARLY_FULL_DISK_MACHINE.need} allow={null} />);
+
+    expect(screen.getByText("Disk 87% full")).toBeTruthy();
     const cleanUp = screen.getByRole("button", { name: "Clean up…" });
     expect(cleanUp.getAttribute("aria-disabled")).toBe("true");
     expect(cleanUp.getAttribute("title")).toBe("Not built yet");

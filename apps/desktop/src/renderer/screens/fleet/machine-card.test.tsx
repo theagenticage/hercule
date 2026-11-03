@@ -12,6 +12,7 @@ import {
   BUSY_MACHINE,
   DRAINING_MACHINE,
   FULL_DISK_MACHINE,
+  NEARLY_FULL_DISK_MACHINE,
   OFFLINE_MACHINE,
 } from "./fleet.testing";
 import { MachineCard } from "./machine-card";
@@ -69,10 +70,32 @@ describe("MachineCard", () => {
     expect(within(card).getAllByRole("button")).toHaveLength(1);
   });
 
-  it("draws the disk meter empty while the runner does not report its disk size", () => {
+  it("shows the disk's free space and an empty meter while the runner does not report its disk size", () => {
     const card = renderCard(BUSY_MACHINE);
     const [diskMeter] = card.querySelectorAll<HTMLElement>(".fleet-meter i");
 
+    expect(within(card).getByText("21.5", { exact: false }).textContent).toBe("21.5 GB free");
     expect(diskMeter?.style.width).toBe("0%");
+  });
+
+  it("shows a disk that is 87% full as its percentage, in the you colour, with its meter that full", () => {
+    const card = renderCard(NEARLY_FULL_DISK_MACHINE);
+    const gauge = within(card).getByText("Disk").closest(".fleet-gauge");
+    const [diskMeter] = card.querySelectorAll<HTMLElement>(".fleet-meter i");
+
+    expect(gauge?.classList.contains("fleet-gauge--you")).toBe(true);
+    expect(gauge?.querySelector("b")?.textContent).toBe("87%");
+    expect(within(card).queryByText(/GB free/)).toBeNull();
+    expect(diskMeter?.style.width).toBe("87%");
+    expect(card.querySelector(".fleet-meter--you")).toBeTruthy();
+  });
+
+  it("names the 87% in its need line, with the Clean up button drawn inert", () => {
+    const card = renderCard(NEARLY_FULL_DISK_MACHINE);
+
+    expect(within(card).getByText("Disk 87% full")).toBeTruthy();
+    expect(
+      within(card).getByRole("button", { name: "Clean up…" }).getAttribute("aria-disabled"),
+    ).toBe("true");
   });
 });

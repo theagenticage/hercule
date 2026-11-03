@@ -488,12 +488,13 @@
 }
 /* The columns: a dot, Machine, Sessions, Room, Disk, Memory, Needs you and a
    chevron. The drawing of the sessions is cut off at its column's edge, so
-   that column has the room for 16 blocks and a few waiting ones. */
+   that column has the room for 16 blocks and a few waiting ones. Disk is 112px
+   wide, for its 64px meter, a gap and "100%". */
 .fleet-heads,
 .fleet-row {
   display: grid;
   grid-template-columns:
-    8px minmax(160px, 1.3fr) 156px 124px 104px 104px
+    8px minmax(160px, 1.3fr) 156px 124px 112px 104px
     minmax(220px, 1.5fr) 14px;
   align-items: center;
   gap: 16px;
@@ -610,6 +611,10 @@
 .fleet-row-meter .fleet-meter {
   width: 56px;
 }
+/* The disk's meter is 8px longer than the memory's, as in the prototype. */
+.fleet-col-disk .fleet-row-meter .fleet-meter {
+  width: 64px;
+}
 .fleet-row-meter b {
   color: var(--muted);
   font-size: var(--t-12);
@@ -659,7 +664,9 @@
 @container fleet-list (width < 1030px) {
   .fleet-heads,
   .fleet-row {
-    grid-template-columns: 8px minmax(150px, 1.2fr) 156px 104px minmax(180px, 1.3fr) 14px;
+    /* The Machine column gives up the 8px the Disk column gained, so the
+       columns still fit from 720px. */
+    grid-template-columns: 8px minmax(142px, 1.2fr) 156px 112px minmax(180px, 1.3fr) 14px;
   }
   .fleet-col-room,
   .fleet-col-mem {

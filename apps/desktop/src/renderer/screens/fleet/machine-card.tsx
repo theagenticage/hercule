@@ -44,7 +44,8 @@ function Gauge({
 
 /**
  * Renders one machine as a card: its icon, name and status, its sessions
- * against the cap, its disk and memory, how much room it has, and the one
+ * against the cap, its disk and memory (each as a percentage, except a disk
+ * whose size the runner does not report, which shows its free space), how much room it has, and the one
  * thing that needs the user with the button that fixes it. It draws what
  * `machine` holds and works out nothing.
  *
@@ -100,10 +101,15 @@ export function MachineCard({
           <b>
             {disk === null ? (
               "–"
-            ) : (
+            ) : disk.percent === null ? (
               <>
                 {disk.amount}
                 <small> {disk.unit} free</small>
+              </>
+            ) : (
+              <>
+                {disk.percent}
+                <small>%</small>
               </>
             )}
           </b>
