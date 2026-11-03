@@ -2,12 +2,7 @@ import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
-import {
-  buildFleetMachines,
-  describeFleet,
-  describeMachinesSection,
-  isFleetEmpty,
-} from "@hercule/client-core/fleet";
+import { describeFleetPage } from "@hercule/client-core/fleet";
 import {
   controllerQuery,
   fleetSessionsQuery,
@@ -16,12 +11,11 @@ import {
   settingsQuery,
 } from "../../../../app/queries";
 import { AddMachineDialog } from "../../../../screens/fleet/add-machine-dialog";
-import { FleetHeader, type FleetSection } from "../../../../screens/fleet/fleet-header";
+import { FleetHeader } from "../../../../screens/fleet/fleet-header";
 import { FleetPageLead } from "../../../../screens/fleet/fleet-lead";
 import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
-import { useFleetNow } from "../../../../screens/fleet/use-fleet-now";
+import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
-import { useAllowSessions } from "./-allow-sessions";
 import { MachinesSection } from "./-machines-section";
 import { useRunnerSessionCounts } from "./-session-counts";
 
@@ -59,8 +53,7 @@ const SECTION_IDS = ["machines"];
 /**
  * Draws the Fleet page: the floating header, the lead and the Machines
  * section. Pressing a machine opens its page; the router runs that as a view
- * transition (see `decideMachineTransitionTypes`). Allow saves the machine's
- * session cap.
+ * transition (see `decideMachineTransitionTypes`).
  */
 function FleetPage(): JSX.Element {
   const { controller } = Route.useRouteContext();
@@ -72,37 +65,34 @@ function FleetPage(): JSX.Element {
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
   const { activeSectionId, scrollToSection } = useSectionInView(scrollRef, SECTION_IDS);
-  const { allow, pendingRunnerIds, failureMessage } = useAllowSessions(client);
   const [isAdding, setIsAdding] = useState(false);
 
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-  const machines = buildFleetMachines(runners, sessionCounts);
-  const now = useFleetNow(machines, timezone);
-  const sections: ReadonlyArray<FleetSection> = [
-    { id: "machines", label: "Machines", count: describeMachinesSection(machines) },
-  ];
+  // A time shows for a machine that is away. A retired machine is offline for
+  // good and is not shown, so it does not count: it would keep the midnight
+  // watch running with no time to redraw.
+  const today = useFleetToday(
+    timezone,
+    runners.some((runner) => runner.lifecycle !== "retired" && runner.connectivity !== "online"),
+  );
+  const page = describeFleetPage(runners, sessionCounts, record.localRunnerId, timezone, today);
 
   return (
     <div className="fleet-page">
       <FleetHeader
         place={{ page: "fleet" }}
-        sections={sections}
+        sections={[{ id: "machines", label: "Machines", count: page.machinesSection }]}
         activeSectionId={activeSectionId}
         onJump={scrollToSection}
         onAddMachine={() => setIsAdding(true)}
       />
       <FleetScroll scrollRef={scrollRef}>
         <div className="fleet-col">
-          <FleetPageLead lead={describeFleet(machines)} />
+          <FleetPageLead lead={page.lead} />
           <MachinesSection
-            machines={machines}
-            timezone={timezone}
-            now={now}
-            isEmpty={isFleetEmpty(machines, record.localRunnerId)}
-            pendingAllowRunnerIds={pendingRunnerIds}
-            failedAllow={failureMessage}
+            machines={page.machines}
+            isEmpty={page.isEmpty}
             onOpen={(runnerId) => void navigate({ to: "/fleet/$runnerId", params: { runnerId } })}
-            onAllow={allow}
             onAddMachine={() => setIsAdding(true)}
           />
         </div>

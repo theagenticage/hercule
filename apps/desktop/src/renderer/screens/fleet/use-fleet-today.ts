@@ -1,9 +1,8 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import type { FleetMachine } from "@hercule/client-core/fleet";
 import { computeDayStart, findNextListTimeChange } from "@hercule/client-core/list-time";
 import { ageClock } from "../../app/age-clock";
 
-/** The start of the local day the age clock last read, and the zone it was found in. */
+/** The instant the age clock last read, the zone, and the start of the day that instant is in. */
 interface DayRead {
   readonly now: Date;
   readonly timezone: string;
@@ -11,32 +10,29 @@ interface DayRead {
 }
 
 /**
- * Returns the time that the Fleet page and a machine's page draw their times
- * at, such as "Offline since 09:12". The value is the start of the current
- * day in `timezone`, and it is the same `Date` until the local day changes.
- * A time on these pages depends on `now` only through its date: "09:12"
- * today, the weekday within a week, the date after that. So the pages draw
- * again at midnight and at no other moment.
+ * Returns the day that the Fleet page and a machine's page word their times
+ * in, such as "Offline since 09:12": the start of the current day in
+ * `timezone`. It is the same `Date` until the local day changes. A time on
+ * these pages depends on it only through its date: "09:12" today, the weekday
+ * within a week, the date after that. So the pages draw again at midnight and
+ * at no other moment.
  *
- * The time comes from the age clock, which tells every label on screen
+ * The value comes from the age clock, which tells every label on screen
  * whenever any one of them is due, such as a per-second duration elsewhere.
  * Those calls find the same day and change nothing here.
  *
- * `machines` are the machines the page shows. A machine that is not online
- * shows when it was last heard from. While such a machine is shown, the hook
- * watches the clock for the next local midnight in `timezone`. With every
- * machine online no time is shown, and the hook watches nothing.
+ * `showsTimes` is whether the page shows a time at all, which it does for a
+ * machine that is away (offline or unreachable). While it is true, the hook
+ * watches the clock for the next local midnight in `timezone`. While it is
+ * false, nothing is watched.
  */
-export const useFleetNow = (machines: readonly FleetMachine[], timezone: string): Date => {
-  const showsTime = machines.some(
-    ({ runner }) => runner.connectivity !== "online" && runner.lastSeenAt !== null,
-  );
+export const useFleetToday = (timezone: string, showsTimes: boolean): Date => {
   const subscribe = useCallback(
     (onChange: () => void) =>
-      showsTime
+      showsTimes
         ? ageClock.watch((now) => findNextListTimeChange(now, timezone, now, "past"), onChange)
         : () => {},
-    [showsTime, timezone],
+    [showsTimes, timezone],
   );
   const lastRead = useRef<DayRead | null>(null);
   // React compares the snapshot with `Object.is`, so a new `Date` for the same

@@ -1,20 +1,25 @@
-import { useState, type JSX } from "react";
-import type { FleetMachine } from "@hercule/client-core/fleet";
+import { useState, type JSX, type ReactNode } from "react";
+import type { MachineSummary } from "@hercule/client-core/fleet";
 import { EmptyFleetCard } from "../../../../screens/fleet/empty-fleet-card";
 import { MachineCard, MachineGrid } from "../../../../screens/fleet/machine-card";
-import { MachineList } from "../../../../screens/fleet/machine-list";
+import { MachineList, MachineRow } from "../../../../screens/fleet/machine-list";
 import {
   readMachineView,
   rememberMachineView,
   type MachineView,
 } from "../../../../screens/fleet/machine-view";
 import { ViewSwitch } from "../../../../screens/workflows/view-switch";
+import { AllowSessionsButton } from "./-allow-sessions-button";
 
 /** The two ways to show the machines, in the order the switch lists them. */
 const VIEW_CHOICES = [
   { view: "grid", label: "Grid" },
   { view: "list", label: "List" },
 ] as const;
+
+/** Returns the Allow button of `machine`, or `null` when no session of it waits for a slot. */
+const buildAllowButton = ({ runnerId, need }: MachineSummary): ReactNode =>
+  need?.kind === "waiting" ? <AllowSessionsButton runnerId={runnerId} need={need} /> : null;
 
 /**
  * Renders the Machines section of the Fleet page: its heading with the count
@@ -23,28 +28,16 @@ const VIEW_CHOICES = [
  *
  * The switch starts at the view the window last showed and writes each pick
  * back (`machine-view.ts`), so the choice survives leaving the page.
- * `failedAllow` is the text of a failed Allow, drawn under the heading. The
- * other props are what `MachineCard` and `MachineList` take.
  */
 export function MachinesSection({
   machines,
-  timezone,
-  now,
   isEmpty,
-  pendingAllowRunnerIds,
-  failedAllow,
   onOpen,
-  onAllow,
   onAddMachine,
 }: {
-  readonly machines: readonly FleetMachine[];
-  readonly timezone: string;
-  readonly now: Date;
+  readonly machines: readonly MachineSummary[];
   readonly isEmpty: boolean;
-  readonly pendingAllowRunnerIds: ReadonlySet<string>;
-  readonly failedAllow: string | null;
   readonly onOpen: (runnerId: string) => void;
-  readonly onAllow: (runnerId: string, cap: number) => void;
   readonly onAddMachine: () => void;
 }): JSX.Element {
   const [view, setView] = useState<MachineView>(readMachineView);
@@ -66,36 +59,30 @@ export function MachinesSection({
           onPick={pickView}
         />
       </div>
-      {failedAllow === null ? null : (
-        <p className="fleet-err" role="alert">
-          {failedAllow}
-        </p>
-      )}
       {view === "grid" ? (
         <MachineGrid>
           {machines.map((machine) => (
             <MachineCard
-              key={machine.runner.id}
+              key={machine.runnerId}
               machine={machine}
-              timezone={timezone}
-              now={now}
-              allowPending={pendingAllowRunnerIds.has(machine.runner.id)}
+              allow={buildAllowButton(machine)}
               onOpen={onOpen}
-              onAllow={onAllow}
             />
           ))}
           {emptyCard}
         </MachineGrid>
       ) : (
         <>
-          <MachineList
-            machines={machines}
-            timezone={timezone}
-            now={now}
-            pendingAllowRunnerIds={pendingAllowRunnerIds}
-            onOpen={onOpen}
-            onAllow={onAllow}
-          />
+          <MachineList>
+            {machines.map((machine) => (
+              <MachineRow
+                key={machine.runnerId}
+                machine={machine}
+                allow={buildAllowButton(machine)}
+                onOpen={onOpen}
+              />
+            ))}
+          </MachineList>
           {emptyCard}
         </>
       )}

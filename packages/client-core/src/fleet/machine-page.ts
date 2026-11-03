@@ -1,8 +1,9 @@
 /**
- * The pure logic of one machine's page on the desktop Fleet screen: the head's
- * version hint, the offline banner's words, the Software rows, and the parsing
- * of the Settings fields. No function here reads a clock or a store; the
- * caller passes "now" and the records.
+ * The pure logic of one machine's page on the desktop Fleet screen: its head,
+ * the room line or the offline banner under it, the Software rows, and the
+ * parsing of the Settings fields. No function here reads a clock or a store;
+ * the caller passes the records and `today` (see `fleet.ts` for what `today`
+ * is).
  *
  * This module is its own subpath (`@hercule/client-core/machine-page`) and is
  * not re-exported from the package index, so the first screen does not carry
@@ -20,8 +21,18 @@ import {
 import { listProviderAccountMachines } from "../provider-account-machines";
 import { buildProviderAccountName } from "../provider-accounts";
 import { parseWholeNumber } from "../whole-number";
-import type { FleetMachine } from "./fleet";
-import { formatLastSeen } from "./last-seen";
+import {
+  buildFleetMachine,
+  buildPlainPart,
+  decideMachineKind,
+  describeMachineStatus,
+  describeRoom,
+  formatLastSeen,
+  type FleetTextPart,
+  type MachineKind,
+  type MachineStatus,
+  type SessionCountsByRunner,
+} from "./machine";
 
 /** A release version: three numbers, with optional build metadata after a plus. */
 const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/;
@@ -35,10 +46,7 @@ const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/;
  * version is missing or is not that shape (a pre-release such as
  * "0.9.3-rc.1"), because then no order is known and the page must not guess.
  */
-export const isRunnerBehind = (
-  runnerVersion: string | null,
-  controllerVersion: string,
-): boolean => {
+const isRunnerBehind = (runnerVersion: string | null, controllerVersion: string): boolean => {
   if (runnerVersion === null) return false;
   const runner = RELEASE_VERSION.exec(runnerVersion);
   const controller = RELEASE_VERSION.exec(controllerVersion);
@@ -71,55 +79,132 @@ const BYTES_PER_GIBIBYTE = 1024 ** 3;
  * The disk sizes elsewhere follow Finder instead, which counts in units of
  * 10^9 bytes; each is the number its own tool shows the user.
  */
-export const describeMachineFacts = (facts: RunnerFacts): readonly string[] => [
+const describeMachineFacts = (facts: RunnerFacts): readonly string[] => [
   OS_NAMES.get(facts.os) ?? facts.os,
   facts.arch,
   `${String(Math.round(facts.totalMemoryBytes / BYTES_PER_GIBIBYTE))} GB memory`,
 ];
 
 /**
- * The words of the banner an offline or unreachable machine shows. `headline`
- * is its first sentence. The rest, `before`, then `command`, then `after`, is
- * split around the command it names so the page can draw the command as code.
- * Read in order and joined by single spaces where a part ends in a period,
- * the parts are the spec's sentence.
+ * The banner an offline or unreachable machine shows. `headline` is its first
+ * sentence. `detail` holds the rest, with the command to start the machine
+ * again as a `code` part. Read in order, the headline and the detail are the
+ * spec's sentence.
  */
 export interface OfflineBanner {
   readonly headline: string;
-  readonly before: string;
-  readonly command: string;
-  readonly after: string;
+  readonly detail: readonly FleetTextPart[];
 }
 
 /**
  * Builds the offline banner of a machine: when it was last heard from, what
  * may have happened, how many threads wait for it, and how to start it again.
  *
- * - The machine's `openThreads` are the Threads that carry on once it is back.
- *   The sentence about them is left out at 0.
+ * - The `openThreads` are the Threads that carry on once it is back. The
+ *   sentence about them is left out at 0.
  * - A runner never heard from has no time to name: the banner says it has not
  *   been heard from, and drops the closing sentence that dates what the page
  *   shows.
- * - Times are shown in `timezone`, relative to `now`.
  */
-export const describeOfflineBanner = (
-  { runner, openThreads }: FleetMachine,
+const describeOfflineBanner = (
+  runner: Runner,
+  openThreads: number,
   timezone: string,
-  now: Date,
+  today: Date,
 ): OfflineBanner => {
-  const seen = formatLastSeen(runner, timezone, now) ?? undefined;
+  const seen = formatLastSeen(runner, timezone, today);
   const threads =
     openThreads === 0
       ? ""
       : ` Its ${String(openThreads)} ${openThreads === 1 ? "thread" : "threads"} can carry on once it is back, and work waiting for it starts then.`;
   return {
     headline:
-      seen === undefined
+      seen === null
         ? `${runner.name} has not been heard from.`
         : `${runner.name} has not been heard from since ${seen}.`,
-    before: `It may be asleep, off the network, or without power.${threads} If it does not come back by itself, start Hercule on it again: `,
-    command: "hercule service start",
-    after: seen === undefined ? "." : `. What you see below is from ${seen}.`,
+    detail: [
+      buildPlainPart(
+        `It may be asleep, off the network, or without power.${threads} If it does not come back by itself, start Hercule on it again: `,
+      ),
+      { text: "hercule service start", kind: "code" },
+      buildPlainPart(seen === null ? "." : `. What you see below is from ${seen}.`),
+    ],
+  };
+};
+
+/** The head of a machine's page: its icon, name, status and the facts the runner reported. */
+export interface MachineHead {
+  readonly name: string;
+  /** The machine's icon. */
+  readonly kind: MachineKind;
+  readonly status: MachineStatus;
+  /**
+   * The operating system, the architecture and the memory, such as "macOS",
+   * "arm64" and "16 GB memory"; empty before the runner has reported its facts.
+   */
+  readonly facts: readonly string[];
+  /** The runner program's own line, or `null` when the runner reported no version. */
+  readonly runner: {
+    /** Such as "Runner 0.9.3". */
+    readonly text: string;
+    /** "update available" while the controller runs a newer release, else `null`. */
+    readonly updateText: string | null;
+  } | null;
+}
+
+/**
+ * What a machine's page draws under its head. An online machine shows its room
+ * line; a machine that is offline or unreachable shows the banner instead.
+ */
+export type MachinePageTop =
+  | { readonly kind: "room"; readonly line: readonly FleetTextPart[] }
+  | { readonly kind: "away"; readonly banner: OfflineBanner };
+
+/** Everything a machine's page draws above its Software and Settings. */
+export interface MachinePage {
+  readonly head: MachineHead;
+  readonly top: MachinePageTop;
+}
+
+/**
+ * Builds the head and the room line or banner of the page of `runner`.
+ * `counts` holds the session counts of the runners (the runner's own entry is
+ * used; none means no sessions). `controllerVersion` is what the runner's
+ * version is compared with. Times are worded in `timezone`, relative to
+ * `today`.
+ */
+export const describeMachinePage = (
+  runner: Runner,
+  counts: SessionCountsByRunner,
+  controllerVersion: string,
+  timezone: string,
+  today: Date,
+): MachinePage => {
+  const machine = buildFleetMachine(runner, counts);
+  const room = describeRoom(machine);
+  return {
+    head: {
+      name: runner.name,
+      kind: decideMachineKind(runner.facts),
+      status: describeMachineStatus(runner, timezone, today),
+      facts: runner.facts === null ? [] : describeMachineFacts(runner.facts),
+      runner:
+        runner.version === null
+          ? null
+          : {
+              text: `Runner ${runner.version}`,
+              updateText: isRunnerBehind(runner.version, controllerVersion)
+                ? "update available"
+                : null,
+            },
+    },
+    top:
+      room === null
+        ? {
+            kind: "away",
+            banner: describeOfflineBanner(runner, machine.openThreads, timezone, today),
+          }
+        : { kind: "room", line: room.line },
   };
 };
 
@@ -225,17 +310,18 @@ export const listMachineAccounts = (
   });
 
 /**
- * Parses the session cap a user typed. Returns the cap when the text is a
- * whole number of at least 1, else `undefined`.
+ * The outcome of checking text a user typed into a Settings field: the parsed
+ * `value`, or a `refusal` that says what is wrong and what to do.
  */
-export const parseSessionCap = (text: string): number | undefined => {
-  const cap = parseWholeNumber(text);
-  return cap !== undefined && cap >= 1 && Number.isSafeInteger(cap) ? cap : undefined;
-};
+export type ParsedField<Value> = { readonly value: Value } | { readonly refusal: string };
 
-/** The message for a session cap that `parseSessionCap` refused. */
-export const SESSION_CAP_REFUSAL =
-  "The session cap must be a whole number of 1 or more, such as 8.";
+/** Parses the session cap a user typed: a whole number of at least 1, such as 8. */
+export const parseSessionCap = (text: string): ParsedField<number> => {
+  const cap = parseWholeNumber(text);
+  return cap !== undefined && cap >= 1 && Number.isSafeInteger(cap)
+    ? { value: cap }
+    : { refusal: "The session cap must be a whole number of 1 or more, such as 8." };
+};
 
 const BYTES_PER_GIGABYTE = 1e9;
 
@@ -244,20 +330,20 @@ const GIGABYTES = /^\d+(?:\.\d)?$/;
 
 /**
  * Parses the disk limit a user typed, in gigabytes of 10^9 bytes, and returns
- * it in bytes. The text holds a number with at most one decimal. Returns
- * `undefined` for anything else, and for a limit of 0, which would never stop
- * a machine from taking work.
+ * its value in bytes. The text holds a number with at most one decimal. Anything
+ * else is refused, and so is a limit of 0, which would never stop a machine
+ * from taking work.
  */
-export const parseDiskLimit = (text: string): number | undefined => {
+export const parseDiskLimit = (text: string): ParsedField<number> => {
   const trimmed = text.trim();
-  if (!GIGABYTES.test(trimmed)) return undefined;
-  const bytes = Math.round(Number(trimmed) * BYTES_PER_GIGABYTE);
-  return bytes >= 1 && Number.isSafeInteger(bytes) ? bytes : undefined;
+  const bytes = GIGABYTES.test(trimmed) ? Math.round(Number(trimmed) * BYTES_PER_GIGABYTE) : 0;
+  return bytes >= 1 && Number.isSafeInteger(bytes)
+    ? { value: bytes }
+    : {
+        refusal:
+          "The disk limit must be a number of gigabytes with at most one decimal, such as 10 or 12.5.",
+      };
 };
-
-/** The message for a disk limit that `parseDiskLimit` refused. */
-export const DISK_LIMIT_REFUSAL =
-  "The disk limit must be a number of gigabytes with at most one decimal, such as 10 or 12.5.";
 
 /**
  * Formats a disk limit in bytes as the gigabytes the field shows: one decimal
@@ -292,16 +378,16 @@ export const changeRunnerLabels = (
 
 /**
  * Checks a label a user typed against the machine's `labels`. Returns the
- * label without spaces around it, or a `refusal` that says what is wrong and
- * what to do. Empty text is not a label and not an error: it returns
- * `undefined`, so an empty field just closes.
+ * label without spaces around it as the `value`, or a `refusal` that says
+ * what is wrong and what to do. Empty text is not a label and not an error: it
+ * returns `undefined`, so an empty field just closes.
  *
  * The limits are the contract's: at most 64 characters a label and 64 labels.
  */
 export const validateRunnerLabel = (
   text: string,
   labels: readonly string[],
-): { readonly label: string } | { readonly refusal: string } | undefined => {
+): ParsedField<string> | undefined => {
   const label = text.trim();
   if (label === "") return undefined;
   if (label.length > MAX_RUNNER_LABEL_LENGTH) {
@@ -317,5 +403,5 @@ export const validateRunnerLabel = (
       refusal: `A machine can have at most ${String(MAX_RUNNER_LABELS)} labels. Remove one first.`,
     };
   }
-  return { label };
+  return { value: label };
 };

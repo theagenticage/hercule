@@ -1,36 +1,32 @@
 /**
- * Tests how the machine list puts its rows together. What each row says is
- * decided by `@hercule/client-core/fleet`; the route integration tests cover
- * switching to the list and opening a machine from it.
+ * Tests how the machine list puts its rows together from `MachineSummary`
+ * values. What each row says is decided by `describeFleetPage` in
+ * `@hercule/client-core/fleet`; the route integration tests cover switching to
+ * the list and opening a machine from it.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { MachineSummary } from "@hercule/client-core/fleet";
 import {
   BUSY_MACHINE,
   DRAINING_MACHINE,
   FULL_DISK_MACHINE,
-  NOW,
   OFFLINE_MACHINE,
-  TIMEZONE,
 } from "./fleet.testing";
-import { MachineList } from "./machine-list";
+import { MachineList, MachineRow } from "./machine-list";
 import { buildMachineTransitionName } from "./machine-transition";
 
-const renderList = (machines: Parameters<typeof MachineList>[0]["machines"]) => {
+const renderList = (machines: readonly MachineSummary[]) => {
   const onOpen = vi.fn();
-  const onAllow = vi.fn();
   render(
-    <MachineList
-      machines={machines}
-      timezone={TIMEZONE}
-      now={NOW}
-      pendingAllowRunnerIds={new Set()}
-      onOpen={onOpen}
-      onAllow={onAllow}
-    />,
+    <MachineList>
+      {machines.map((machine) => (
+        <MachineRow key={machine.runnerId} machine={machine} allow={null} onOpen={onOpen} />
+      ))}
+    </MachineList>,
   );
-  return { onOpen, onAllow, rows: () => screen.getAllByRole("row").slice(1) };
+  return { onOpen, rows: () => screen.getAllByRole("row").slice(1) };
 };
 
 describe("MachineList", () => {
@@ -47,16 +43,13 @@ describe("MachineList", () => {
     ]);
   });
 
-  it("calls onAllow from the Allow button and onOpen from the name, each once", async () => {
+  it("opens a machine from its name", async () => {
     const user = userEvent.setup();
-    const { onOpen, onAllow, rows } = renderList([BUSY_MACHINE, FULL_DISK_MACHINE]);
+    const { onOpen, rows } = renderList([BUSY_MACHINE, FULL_DISK_MACHINE]);
     const [busy] = rows();
 
-    await user.click(within(busy!).getByRole("button", { name: "Allow 17" }));
-    expect(onAllow).toHaveBeenCalledExactlyOnceWith("runner-busy", 17);
-    expect(onOpen).not.toHaveBeenCalled();
-
     await user.click(within(busy!).getByRole("button", { name: "atlas" }));
+
     expect(onOpen).toHaveBeenCalledExactlyOnceWith("runner-busy");
   });
 
@@ -67,6 +60,14 @@ describe("MachineList", () => {
       buildMachineTransitionName("runner-busy"),
       buildMachineTransitionName("runner-off"),
     ]);
+  });
+
+  it("always words the status under the name, also for an online machine", () => {
+    const { rows } = renderList([BUSY_MACHINE]);
+    const [busy] = rows();
+
+    expect(within(busy!).getByText("Online")).toBeTruthy();
+    expect(within(busy!).queryByRole("img")).toBeNull();
   });
 
   it("shows the free disk on one line, and a dash for the room of a machine told to take no new work", () => {

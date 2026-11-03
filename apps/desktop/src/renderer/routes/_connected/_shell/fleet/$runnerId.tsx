@@ -2,17 +2,7 @@ import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
-import {
-  buildFleetMachine,
-  decideMachineKind,
-  describeMachineStatus,
-  describeRoom,
-} from "@hercule/client-core/fleet";
-import {
-  describeMachineFacts,
-  describeOfflineBanner,
-  isRunnerBehind,
-} from "@hercule/client-core/machine-page";
+import { describeMachinePage } from "@hercule/client-core/machine-page";
 import type { Runner } from "@hercule/contract";
 import { throwScreenNotFound } from "../../../../app/last-screen";
 import {
@@ -30,7 +20,7 @@ import { FleetHeader } from "../../../../screens/fleet/fleet-header";
 import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { MachinePageBanner } from "../../../../screens/fleet/machine-page-banner";
 import { MachinePageHead, MachinePageRoomLine } from "../../../../screens/fleet/machine-page-head";
-import { useFleetNow } from "../../../../screens/fleet/use-fleet-now";
+import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
 import { NotFound } from "../../../../screens/not-found";
 import { MachineRetireDialog } from "./-machine-retire-dialog";
@@ -117,15 +107,19 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   const [isAdding, setAdding] = useState(false);
 
   const timezone = resolveDisplayTimezone(settings.user.timezone);
-  const kind = decideMachineKind(runner.facts);
-  const machine = buildFleetMachine(runner, sessionCounts);
-  const now = useFleetNow([machine], timezone);
-  const room = describeRoom(machine);
+  const today = useFleetToday(timezone, runner.connectivity !== "online");
+  const page = describeMachinePage(
+    runner,
+    sessionCounts,
+    controllerRecord.version,
+    timezone,
+    today,
+  );
 
   return (
     <>
       <FleetHeader
-        place={{ page: "machine", machine: { name: runner.name, kind } }}
+        place={{ page: "machine", machine: { name: page.head.name, kind: page.head.kind } }}
         sections={SECTIONS}
         activeSectionId={activeSectionId}
         onJump={scrollToSection}
@@ -133,22 +127,11 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
       />
       <FleetScroll scrollRef={scrollRef}>
         <div className="machine-page">
-          <MachinePageHead
-            runnerId={runner.id}
-            name={runner.name}
-            kind={kind}
-            status={describeMachineStatus(runner, timezone, now)}
-            facts={runner.facts === null ? [] : describeMachineFacts(runner.facts)}
-            runnerVersion={runner.version}
-            isRunnerBehind={isRunnerBehind(runner.version, controllerRecord.version)}
-          />
-          {room.line === null ? (
-            <MachinePageBanner
-              banner={describeOfflineBanner(machine, timezone, now)}
-              onRetire={() => setRetiring(true)}
-            />
+          <MachinePageHead runnerId={runner.id} head={page.head} />
+          {page.top.kind === "room" ? (
+            <MachinePageRoomLine line={page.top.line} />
           ) : (
-            <MachinePageRoomLine line={room.line} />
+            <MachinePageBanner banner={page.top.banner} onRetire={() => setRetiring(true)} />
           )}
           <MachineSoftware id={SOFTWARE_ID} runner={runner} />
           <MachineSettings id={SETTINGS_ID} runner={runner} onRetire={() => setRetiring(true)} />

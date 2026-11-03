@@ -1,57 +1,60 @@
 /**
- * Tests the buttons of a machine's need line, which the card and the list row
- * both draw. What a need says is decided by `@hercule/client-core/fleet`.
+ * Tests the parts a machine's card and list row both draw: the status dot, the
+ * meter and the need line. What a need says is decided by `describeFleetPage`
+ * in `@hercule/client-core/fleet`.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { summarizeMachine } from "@hercule/client-core/fleet";
-import { BUSY_MACHINE, FULL_DISK_MACHINE, NOW, TIMEZONE } from "./fleet.testing";
-import { NeedLine } from "./machine-parts";
+import { BUSY_MACHINE, FULL_DISK_MACHINE, OFFLINE_MACHINE } from "./fleet.testing";
+import { Meter, NeedLine, StatusDot } from "./machine-parts";
 
-const renderNeedLine = (machine: typeof BUSY_MACHINE, allowPending = false) => {
-  const onAllow = vi.fn();
-  render(
-    <NeedLine
-      runnerId={machine.runner.id}
-      need={summarizeMachine(machine, TIMEZONE, NOW).need}
-      allowPending={allowPending}
-      onAllow={onAllow}
-    />,
-  );
-  return onAllow;
-};
+describe("StatusDot", () => {
+  it("hides itself from assistive technology, because a label is drawn beside it", () => {
+    render(<StatusDot status={{ tone: "offline", label: "Offline" }} />);
+
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("names the state itself where no label is drawn", () => {
+    render(<StatusDot status={{ tone: "online", label: "Online" }} namesState />);
+
+    expect(screen.getByRole("img", { name: "Online" })).toBeTruthy();
+  });
+});
+
+describe("Meter", () => {
+  const readWidth = (container: HTMLElement): string | undefined =>
+    container.querySelector<HTMLElement>("i")?.style.width;
+
+  it("fills to its share", () => {
+    expect(readWidth(render(<Meter share={0.25} level="normal" />).container)).toBe("25%");
+  });
+
+  it("draws empty for a share that is not known", () => {
+    expect(readWidth(render(<Meter share={null} level="normal" />).container)).toBe("0%");
+  });
+});
 
 describe("NeedLine", () => {
-  it("calls onAllow with the machine and the cap that lets every waiting session start", async () => {
-    const user = userEvent.setup();
-    const onAllow = renderNeedLine(BUSY_MACHINE);
+  it("draws the Allow button it is given beside a need of waiting sessions", () => {
+    render(<NeedLine need={BUSY_MACHINE.need} allow={<button type="button">Allow 17</button>} />);
 
-    await user.click(screen.getByRole("button", { name: "Allow 17" }));
-
-    expect(onAllow).toHaveBeenCalledExactlyOnceWith("runner-busy", 17);
+    expect(screen.getByText("5 threads wait for a slot")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Allow 17" })).toBeTruthy();
   });
 
-  it("shows that Allow is saving and ignores presses meanwhile", async () => {
-    const user = userEvent.setup();
-    const onAllow = renderNeedLine(BUSY_MACHINE, true);
-
-    const saving = screen.getByRole("button", { name: "Saving…" });
-    expect(saving.getAttribute("aria-disabled")).toBe("true");
-    await user.click(saving);
-
-    expect(onAllow).not.toHaveBeenCalled();
-  });
-
-  it("draws Clean up inert while a disk is below its limit, because the cleanup is not built yet", async () => {
-    const user = userEvent.setup();
-    const onAllow = renderNeedLine(FULL_DISK_MACHINE);
+  it("draws Clean up inert while a disk is below its limit, because the cleanup is not built yet", () => {
+    render(<NeedLine need={FULL_DISK_MACHINE.need} allow={null} />);
 
     const cleanUp = screen.getByRole("button", { name: "Clean up…" });
     expect(cleanUp.getAttribute("aria-disabled")).toBe("true");
     expect(cleanUp.getAttribute("title")).toBe("Not built yet");
-    await user.click(cleanUp);
+  });
 
-    expect(onAllow).not.toHaveBeenCalled();
+  it("draws no button for an offline machine", () => {
+    render(<NeedLine need={OFFLINE_MACHINE.need} allow={null} />);
+
+    expect(screen.getByText("Offline since 09:12")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

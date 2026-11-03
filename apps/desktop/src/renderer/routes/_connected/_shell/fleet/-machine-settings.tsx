@@ -1,13 +1,10 @@
-import { useState, type JSX } from "react";
+import type { JSX } from "react";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  DISK_LIMIT_REFUSAL,
-  SESSION_CAP_REFUSAL,
   changeRunnerLabels,
   formatDiskLimit,
   parseDiskLimit,
   parseSessionCap,
-  validateRunnerLabel,
   type LabelChange,
 } from "@hercule/client-core/machine-page";
 import type { Runner } from "@hercule/contract";
@@ -30,8 +27,8 @@ const replaceValue = <Value,>(_shown: Value, change: Value): Value => change;
  * Settings' rows do: on every change, with the failed save's message under
  * its row and the control put back.
  *
- * - Text the user typed that does not parse is refused under its row, and
- *   nothing is sent.
+ * - Text the user typed that does not parse is refused under its row by the
+ *   row itself, and nothing is sent.
  * - The disk limit shows gigabytes of 10^9 bytes with one decimal, which is
  *   rounded: the default 10 GiB reads "10.7". The field saves only when its
  *   text changed, so leaving it alone never rewrites the stored limit.
@@ -47,9 +44,6 @@ export function MachineSettings({
   readonly onRetire: () => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const [capRefusal, setCapRefusal] = useState<string | null>(null);
-  const [labelRefusal, setLabelRefusal] = useState<string | null>(null);
-  const [diskRefusal, setDiskRefusal] = useState<string | null>(null);
 
   const cap = useSavedRunnerField<number, number>(
     client,
@@ -93,30 +87,15 @@ export function MachineSettings({
         hint="How many sessions run here at once."
         inputMode="numeric"
         value={String(cap.value)}
-        error={capRefusal ?? cap.error}
-        onCommit={(text) => {
-          const parsed = parseSessionCap(text);
-          setCapRefusal(parsed === undefined ? SESSION_CAP_REFUSAL : null);
-          if (parsed !== undefined) cap.save(parsed);
-        }}
+        error={cap.error}
+        parse={parseSessionCap}
+        onSave={cap.save}
       />
       <MachineLabelsRow
         labels={labels.value}
-        error={labelRefusal ?? labels.error}
-        onAdd={(text) => {
-          const checked = validateRunnerLabel(text, labels.value);
-          if (checked === undefined) return;
-          if ("refusal" in checked) {
-            setLabelRefusal(checked.refusal);
-            return;
-          }
-          setLabelRefusal(null);
-          labels.save({ kind: "add", label: checked.label });
-        }}
-        onRemove={(label) => {
-          setLabelRefusal(null);
-          labels.save({ kind: "remove", label });
-        }}
+        error={labels.error}
+        onAdd={(label) => labels.save({ kind: "add", label })}
+        onRemove={(label) => labels.save({ kind: "remove", label })}
       />
       <MachineSwitchRow
         label="Reserved"
@@ -131,12 +110,9 @@ export function MachineSettings({
         unit="GB"
         inputMode="decimal"
         value={formatDiskLimit(diskLimit.value)}
-        error={diskRefusal ?? diskLimit.error}
-        onCommit={(text) => {
-          const bytes = parseDiskLimit(text);
-          setDiskRefusal(bytes === undefined ? DISK_LIMIT_REFUSAL : null);
-          if (bytes !== undefined) diskLimit.save(bytes);
-        }}
+        error={diskLimit.error}
+        parse={parseDiskLimit}
+        onSave={diskLimit.save}
       />
       <MachineSwitchRow
         label="Stop new work"

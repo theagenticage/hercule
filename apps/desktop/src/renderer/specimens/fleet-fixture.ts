@@ -197,22 +197,28 @@ export const STUDIO: Runner = buildMachine(
   70 * GIB,
 );
 
-const FLEET_RUNNERS: ReadonlyArray<Runner> = [ATLAS, BEELINK, BOSGAME, MINI, STUDIO];
-
-/** The versions of each machine, in the order of `FLEET_RUNNERS`. */
-const VERSIONS_BY_RUNNER: ReadonlyArray<HarnessVersions> = [
-  ATLAS_VERSIONS,
-  BEELINK_VERSIONS,
-  BOSGAME_VERSIONS,
-  MINI_VERSIONS,
-  STUDIO_VERSIONS,
+/**
+ * The five machines in the order they joined, each with the harness versions
+ * it reports. Kept as pairs so a machine and its versions cannot drift apart.
+ */
+const FLEET_MACHINES: ReadonlyArray<{
+  readonly runner: Runner;
+  readonly versions: HarnessVersions;
+}> = [
+  { runner: ATLAS, versions: ATLAS_VERSIONS },
+  { runner: BEELINK, versions: BEELINK_VERSIONS },
+  { runner: BOSGAME, versions: BOSGAME_VERSIONS },
+  { runner: MINI, versions: MINI_VERSIONS },
+  { runner: STUDIO, versions: STUDIO_VERSIONS },
 ];
+
+const FLEET_RUNNERS: ReadonlyArray<Runner> = FLEET_MACHINES.map(({ runner }) => runner);
 
 /** The shipped harnesses with what each machine reports of them. */
 const FLEET_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => ({
   ...harness,
-  runners: FLEET_RUNNERS.map((runner, index) => {
-    const version = VERSIONS_BY_RUNNER[index]![harness.id] ?? null;
+  runners: FLEET_MACHINES.map(({ runner, versions }) => {
+    const version = versions[harness.id] ?? null;
     return {
       runnerId: runner.id,
       installed: version !== null,

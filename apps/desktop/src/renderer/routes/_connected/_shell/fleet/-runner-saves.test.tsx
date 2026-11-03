@@ -6,9 +6,11 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createClient } from "@hercule/client-core";
+import type { MachineNeed } from "@hercule/client-core/fleet";
 import type { Runner } from "@hercule/contract";
 import { runnersQuery } from "../../../../app/queries";
 import { createQueryClient } from "../../../../app/query-client";
@@ -20,8 +22,17 @@ import {
   type Call,
   type Handler,
 } from "../../../../app/testing";
-import { useAllowSessions } from "./-allow-sessions";
+import { AllowSessionsButton } from "./-allow-sessions-button";
 import { useSavedRunnerDrain, useSavedRunnerField } from "./-saved-runner-field";
+
+const route = vi.hoisted(() => ({ client: undefined as unknown }));
+
+// The Allow button reads its client from the route's context, which these
+// tests do not render a router for.
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
+  useRouteContext: () => ({ controller: { client: route.client } }),
+}));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -92,24 +103,43 @@ const readWrites = (calls: readonly Call[]): readonly string[] =>
         .replace("/api/v1/runners/", ""),
     );
 
-/** Renders `useHooks` under a query client whose cached runners are ATLAS and MOSS. */
-const renderWithRunners = <Result,>(
-  useHooks: (client: ReturnType<typeof createClient>) => Result,
-) => {
+/** Returns a query client whose cached runners are ATLAS and MOSS, the client of a controller, and a wrapper that provides them. */
+const setUpRunners = () => {
   const queryClient = createQueryClient();
   const client = createClient({ baseUrl: CONTROLLER_URL, token: "bearer" });
+  route.client = client;
   queryClient.setQueryData(runnersQuery(client).queryKey, [ATLAS, MOSS]);
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  return { ...renderHook(() => useHooks(client), { wrapper }), queryClient, client, wrapper };
+  return { queryClient, client, wrapper };
 };
+
+/** Returns the need of a machine with sessions waiting, whose Allow sets the cap to `cap`. */
+const buildWaitingNeed = (cap: number): Extract<MachineNeed, { kind: "waiting" }> => ({
+  kind: "waiting",
+  hue: "you",
+  line: "5 threads wait for a slot",
+  allow: cap,
+  allowHint: `Lets ${String(cap)} sessions run here at once.`,
+});
+
+/** Returns the settings row for the session cap of ATLAS, which saves like the machine page's. */
+const useCapRow = (client: ReturnType<typeof createClient>) =>
+  useSavedRunnerField(
+    client,
+    ATLAS.id,
+    ATLAS.maxConcurrentSessions,
+    (_value, change: number) => change,
+    (_latest, change) => ({ maxConcurrentSessions: change }),
+  );
 
 describe("the saves of one machine", () => {
   it("sends Stop new work switched on and straight off again in that order", async () => {
     const gate = buildGate();
     const { calls, held } = stubController(`POST /api/v1/runners/${ATLAS.id}/drain`, gate);
-    const { result, queryClient, client } = renderWithRunners((c) => useSavedRunnerDrain(c, ATLAS));
+    const { queryClient, client, wrapper } = setUpRunners();
+    const { result } = renderHook(() => useSavedRunnerDrain(client, ATLAS), { wrapper });
 
     act(() => {
       result.current.save(true);
@@ -135,27 +165,19 @@ describe("the saves of one machine", () => {
   });
 
   it("sends an Allow and then an edit of the cap of the same machine in that order", async () => {
+    const user = userEvent.setup();
     const gate = buildGate();
     const { calls } = stubController(`PATCH /api/v1/runners/${ATLAS.id}`, gate);
-    const { result } = renderWithRunners((client) => ({
-      allow: useAllowSessions(client),
-      cap: useSavedRunnerField(
-        client,
-        ATLAS.id,
-        ATLAS.maxConcurrentSessions,
-        (_value, change: number) => change,
-        (_latest, change) => ({ maxConcurrentSessions: change }),
-      ),
-    }));
+    const { client, wrapper } = setUpRunners();
+    const cap = renderHook(() => useCapRow(client), { wrapper });
+    render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(20)} />, { wrapper });
 
-    act(() => {
-      result.current.allow.allow(ATLAS.id, 20);
-    });
+    await user.click(screen.getByRole("button", { name: "Allow 20" }));
     await waitFor(() => {
       expect(readWrites(calls)).toEqual(["PATCH atlas"]);
     });
     act(() => {
-      result.current.cap.save(3);
+      cap.result.current.save(3);
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -172,31 +194,23 @@ describe("the saves of one machine", () => {
   });
 
   it("keeps an Allow ahead of an edit made after the user left the page", async () => {
+    const user = userEvent.setup();
     const gate = buildGate();
     const { calls } = stubController(`PATCH /api/v1/runners/${ATLAS.id}`, gate);
-    const first = renderWithRunners((client) => useAllowSessions(client));
-    act(() => {
-      first.result.current.allow(ATLAS.id, 20);
+    const { client, wrapper } = setUpRunners();
+    const first = render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(20)} />, {
+      wrapper,
     });
+    await user.click(screen.getByRole("button", { name: "Allow 20" }));
     await waitFor(() => {
       expect(readWrites(calls)).toEqual(["PATCH atlas"]);
     });
     first.unmount();
 
     // The page comes back, on the same query client, with the Allow still saving.
-    const second = renderHook(
-      () =>
-        useSavedRunnerField(
-          first.client,
-          ATLAS.id,
-          ATLAS.maxConcurrentSessions,
-          (_value, change: number) => change,
-          (_latest, change) => ({ maxConcurrentSessions: change }),
-        ),
-      { wrapper: first.wrapper },
-    );
+    const cap = renderHook(() => useCapRow(client), { wrapper });
     act(() => {
-      second.result.current.save(3);
+      cap.result.current.save(3);
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -209,15 +223,48 @@ describe("the saves of one machine", () => {
     });
   });
 
-  it("does not make one machine wait for another", async () => {
+  it("shows an Allow that is still saving on a button drawn anew, and ignores presses meanwhile", async () => {
+    const user = userEvent.setup();
     const gate = buildGate();
     const { calls } = stubController(`PATCH /api/v1/runners/${ATLAS.id}`, gate);
-    const { result } = renderWithRunners((client) => useAllowSessions(client));
-
-    act(() => {
-      result.current.allow(ATLAS.id, 20);
-      result.current.allow(MOSS.id, 5);
+    const { wrapper } = setUpRunners();
+    const first = render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(20)} />, {
+      wrapper,
     });
+    await user.click(screen.getByRole("button", { name: "Allow 20" }));
+    await waitFor(() => {
+      expect(readWrites(calls)).toEqual(["PATCH atlas"]);
+    });
+    // The Grid and List views draw their own buttons, so a switch draws a new one.
+    first.unmount();
+    render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(20)} />, { wrapper });
+
+    const saving = await screen.findByRole("button", { name: "Saving…" });
+    expect(saving.getAttribute("aria-disabled")).toBe("true");
+    await user.click(saving);
+    expect(readWrites(calls)).toEqual(["PATCH atlas"]);
+
+    gate.open();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Saving…" })).toBeNull();
+    });
+  });
+
+  it("does not make one machine wait for another", async () => {
+    const user = userEvent.setup();
+    const gate = buildGate();
+    const { calls } = stubController(`PATCH /api/v1/runners/${ATLAS.id}`, gate);
+    const { wrapper } = setUpRunners();
+    render(
+      <>
+        <AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(20)} />
+        <AllowSessionsButton runnerId={MOSS.id} need={buildWaitingNeed(5)} />
+      </>,
+      { wrapper },
+    );
+
+    await user.click(screen.getByRole("button", { name: "Allow 20" }));
+    await user.click(screen.getByRole("button", { name: "Allow 5" }));
 
     await waitFor(() => {
       expect(readWrites(calls)).toEqual(["PATCH atlas", "PATCH moss"]);
@@ -225,27 +272,22 @@ describe("the saves of one machine", () => {
     gate.open();
   });
 
-  it("says which Allow failed, with the machine's name", async () => {
+  it("says why an Allow failed, and leaves the button to try again", async () => {
+    const user = userEvent.setup();
     stubApi({
       [`PATCH /api/v1/runners/${ATLAS.id}`]: {
         status: 409,
         body: buildErrorBody("conflict", "The runner is being retired."),
       },
     });
-    const { result } = renderWithRunners((client) => useAllowSessions(client));
+    const { wrapper } = setUpRunners();
+    render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />, { wrapper });
 
-    act(() => {
-      result.current.allow(ATLAS.id, 17);
-    });
+    await user.click(screen.getByRole("button", { name: "Allow 17" }));
 
-    await waitFor(() => {
-      expect(result.current.failureMessage).toBe(
-        "Could not allow 17 sessions on atlas: The runner is being retired.",
-      );
-    });
-    act(() => {
-      result.current.allow(MOSS.id, 5);
-    });
-    expect(result.current.failureMessage).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Could not allow 17 sessions: The runner is being retired.",
+    );
+    expect(screen.getByRole("button", { name: "Allow 17" })).toBeTruthy();
   });
 });

@@ -1,4 +1,5 @@
 import { useRef, useState, type JSX } from "react";
+import { validateRunnerLabel, type ParsedField } from "@hercule/client-core/machine-page";
 import { CloseIcon } from "../../icons/close";
 import { PlusIcon } from "../../icons/plus";
 import { SettingRow } from "../settings/setting-row";
@@ -9,11 +10,13 @@ import "./machine-page.css";
  * Renders a Settings row of a machine whose value is a number in a small
  * field, such as the session cap, with `unit` after it when given.
  *
- * The text typed is committed as `useTextDraft` describes: `onCommit`
- * receives it only when it differs from `value`. So a field that merely lost
- * focus saves nothing. `inputMode` is `numeric` for whole numbers and
- * `decimal` for a number with a decimal. `error` is why the last commit was
- * refused or failed, shown under the row.
+ * The text typed is committed as `useTextDraft` describes: `parse` reads it
+ * only when it differs from `value`, so a field that merely lost focus saves
+ * nothing. A parsed number goes to `onSave`. A refusal from `parse` is shown
+ * under the row, and the field shows `value` again, until the next commit.
+ * `inputMode` is `numeric` for whole numbers and `decimal` for a number with
+ * a decimal. `error` is why the last save failed, shown under the row when
+ * there is no refusal.
  */
 export function MachineNumberRow({
   label,
@@ -22,7 +25,8 @@ export function MachineNumberRow({
   unit,
   inputMode,
   error,
-  onCommit,
+  parse,
+  onSave,
 }: {
   readonly label: string;
   readonly hint: string;
@@ -30,14 +34,24 @@ export function MachineNumberRow({
   readonly unit?: string;
   readonly inputMode: "numeric" | "decimal";
   readonly error: string | null;
-  readonly onCommit: (text: string) => void;
+  readonly parse: (text: string) => ParsedField<number>;
+  readonly onSave: (value: number) => void;
 }): JSX.Element {
-  const draft = useTextDraft(value, onCommit);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const draft = useTextDraft(value, (text) => {
+    const parsed = parse(text);
+    if ("refusal" in parsed) {
+      setRefusal(parsed.refusal);
+      return;
+    }
+    setRefusal(null);
+    onSave(parsed.value);
+  });
   return (
     <SettingRow
       label={label}
       hint={hint}
-      error={error}
+      error={refusal ?? error}
       control={(labels) => (
         <span className="machine-page-number">
           <input
@@ -57,8 +71,11 @@ export function MachineNumberRow({
 /**
  * Renders the Labels row of a machine: a chip for each label with a button
  * that removes it, and Add a label, which opens a small field. Enter or
- * leaving the field adds the label typed (`onAdd`, with the text as typed),
- * and Esc closes the field. Removing a chip calls `onRemove`.
+ * leaving the field adds the label typed, and Esc closes the field. A label
+ * that `validateRunnerLabel` accepts goes to `onAdd`, without spaces around
+ * it; one it refuses is explained under the row, and nothing is sent.
+ * Removing a chip calls `onRemove`. `error` is why the last save failed,
+ * shown under the row when there is no refusal.
  */
 export function MachineLabelsRow({
   labels,
@@ -68,15 +85,26 @@ export function MachineLabelsRow({
 }: {
   readonly labels: readonly string[];
   readonly error: string | null;
-  readonly onAdd: (text: string) => void;
+  readonly onAdd: (label: string) => void;
   readonly onRemove: (label: string) => void;
 }): JSX.Element {
   const [isAdding, setAdding] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const add = (text: string): void => {
+    const checked = validateRunnerLabel(text, labels);
+    if (checked === undefined) return;
+    if ("refusal" in checked) {
+      setRefusal(checked.refusal);
+      return;
+    }
+    setRefusal(null);
+    onAdd(checked.value);
+  };
   return (
     <SettingRow
       label="Labels"
       hint="Work can ask for a machine by its labels."
-      error={error}
+      error={refusal ?? error}
       control={(ids) => (
         <span className="machine-page-labels" role="group" aria-labelledby={ids["aria-labelledby"]}>
           {labels.map((label) => (
@@ -86,7 +114,10 @@ export function MachineLabelsRow({
                 type="button"
                 className="machine-page-label-remove"
                 aria-label={`Remove the label ${label}`}
-                onClick={() => onRemove(label)}
+                onClick={() => {
+                  setRefusal(null);
+                  onRemove(label);
+                }}
               >
                 <CloseIcon size={10} />
               </button>
@@ -96,7 +127,7 @@ export function MachineLabelsRow({
             <NewLabelField
               onCommit={(text) => {
                 setAdding(false);
-                onAdd(text);
+                add(text);
               }}
               onClose={() => setAdding(false)}
             />

@@ -1,13 +1,8 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import type { HerculeClient } from "@hercule/client-core";
 import type { Runner, RunnerUpdateInput } from "@hercule/contract";
 import { runnersQuery } from "../../../../app/queries";
 import type { SavedField } from "../../../../app/saved-field";
-import {
-  buildRecordScope,
-  keepSavedRecord,
-  useSavedRecordField,
-} from "../../../../app/saved-record-field";
+import { useSavedRecordField } from "../../../../app/saved-record-field";
 
 /**
  * Returns one field of the machine `runnerId`, whose control saves on every
@@ -42,32 +37,22 @@ export function useSavedRunnerField<Value, Change>(
  * and `runner.undrain`.
  *
  * While a call runs, `value` is the state it asks for. A refused call puts
- * the switch back, and `error` says why. When a call succeeds, the runner it
- * returns replaces the cached one and the list is read again.
- *
- * The calls share the mutation scope of the machine's other saves (the
- * settings rows and Allow), so they reach the controller in the order the
- * user made them: Stop new work switched on and straight off again ends with
- * the machine taking work.
+ * the switch back, and `error` says why. The calls share the mutation scope of
+ * the machine's other saves (the settings rows and Allow), so they reach the
+ * controller in the order the user made them: Stop new work switched on and
+ * straight off again ends with the machine taking work.
  */
 export function useSavedRunnerDrain(
   client: HerculeClient,
   runner: Runner,
 ): SavedField<boolean, boolean> {
-  const queryClient = useQueryClient();
-  const call = useMutation({
-    scope: buildRecordScope(runner.id),
-    mutationFn: (drain: boolean) =>
-      drain
-        ? client.runner.drain({ params: { id: runner.id } })
-        : client.runner.undrain({ params: { id: runner.id } }),
-    onSuccess: (saved) => keepSavedRecord(queryClient, runnersQuery(client).queryKey, saved),
+  return useSavedRecordField({
+    listKey: runnersQuery(client).queryKey,
+    id: runner.id,
+    stored: runner.lifecycle === "draining",
+    applyChange: (_shown, drain: boolean) => drain,
+    buildPayload: (_latest, drain) => ({ drain }),
+    update: (id, { drain }) =>
+      drain ? client.runner.drain({ params: { id } }) : client.runner.undrain({ params: { id } }),
   });
-  return {
-    value: call.isPending ? call.variables : runner.lifecycle === "draining",
-    error: call.isError ? `Could not save: ${readErrorMessage(call.error)}` : null,
-    save: (drain) => {
-      call.mutate(drain);
-    },
-  };
 }

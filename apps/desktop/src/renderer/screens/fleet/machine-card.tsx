@@ -1,10 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import {
-  decideMachineKind,
-  summarizeMachine,
-  type FleetMachine,
-  type GaugeLevel,
-} from "@hercule/client-core/fleet";
+import type { GaugeLevel, MachineSummary } from "@hercule/client-core/fleet";
 import { MachineIcon } from "./machine-icon";
 import { Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
 import { buildMachineTransitionName } from "./machine-transition";
@@ -50,13 +45,15 @@ function Gauge({
 /**
  * Renders one machine as a card: its icon, name and status, its sessions
  * against the cap, its disk and memory, how much room it has, and the one
- * thing that needs the user with the button that fixes it. The card computes
- * all of this from `machine` with `summarizeMachine`.
+ * thing that needs the user with the button that fixes it. It draws what
+ * `machine` holds and works out nothing.
+ *
+ * The status label is drawn only while the machine is not plainly online; the
+ * dot alone says "online".
  *
  * The machine's name is the card's one way to open the machine: its button
- * covers the whole card and calls `onOpen` with the runner id. The Allow button
- * calls `onAllow` instead, and shows that it is saving while `allowPending` is
- * true.
+ * covers the whole card and calls `onOpen` with the runner id. `allow` is the
+ * Allow button, drawn beside a need of waiting sessions.
  *
  * Every card carries the view transition name of its machine, so the browser
  * can grow the card into the head of the machine's page, and back. Runner ids
@@ -64,36 +61,29 @@ function Gauge({
  */
 export function MachineCard({
   machine,
-  timezone,
-  now,
-  allowPending,
+  allow,
   onOpen,
-  onAllow,
 }: {
-  readonly machine: FleetMachine;
-  readonly timezone: string;
-  readonly now: Date;
-  readonly allowPending: boolean;
+  readonly machine: MachineSummary;
+  readonly allow: ReactNode;
   readonly onOpen: (runnerId: string) => void;
-  readonly onAllow: (runnerId: string, cap: number) => void;
 }): JSX.Element {
-  const { runner } = machine;
-  const summary = summarizeMachine(machine, timezone, now);
-  const { status, isAway, drawing, disk, memory } = summary;
+  const { runnerId, status, isAway, drawing, disk, memory } = machine;
+  const isLabelled = status.tone !== "online";
 
   return (
     <div
       className={`fleet-card${isAway ? " is-away" : ""}`}
-      style={{ viewTransitionName: buildMachineTransitionName(runner.id) }}
+      style={{ viewTransitionName: buildMachineTransitionName(runnerId) }}
     >
       <div className="fleet-card-head">
         <span className="fleet-card-icon">
-          <MachineIcon kind={decideMachineKind(runner.facts)} size={16} />
+          <MachineIcon kind={machine.kind} size={16} />
         </span>
-        <OpenMachine runnerId={runner.id} name={runner.name} onOpen={onOpen} />
+        <OpenMachine runnerId={runnerId} name={machine.name} onOpen={onOpen} />
         <span className="fleet-card-state">
-          <StatusDot status={status} />
-          {status.word}
+          <StatusDot status={status} namesState={!isLabelled} />
+          {isLabelled && status.label}
         </span>
       </div>
       <div className="fleet-gauges">
@@ -117,7 +107,7 @@ export function MachineCard({
               </>
             )}
           </b>
-          <Meter share={0} level="normal" />
+          <Meter share={disk?.share ?? null} level={disk?.level ?? "normal"} />
         </Gauge>
         <Gauge label="Memory" level={memory?.level}>
           <b>
@@ -130,22 +120,14 @@ export function MachineCard({
               </>
             )}
           </b>
-          <Meter
-            share={memory === null ? 0 : memory.percent / 100}
-            level={memory?.level ?? "normal"}
-          />
+          <Meter share={memory?.share ?? null} level={memory?.level ?? "normal"} />
         </Gauge>
       </div>
       <div className="fleet-card-crew">
-        {summary.roomText !== null && <span className="fleet-room">{summary.roomText}</span>}
+        {machine.roomText !== null && <span className="fleet-room">{machine.roomText}</span>}
       </div>
       <div className="fleet-card-foot">
-        <NeedLine
-          runnerId={runner.id}
-          need={summary.need}
-          allowPending={allowPending}
-          onAllow={onAllow}
-        />
+        <NeedLine need={machine.need} allow={allow} />
       </div>
     </div>
   );

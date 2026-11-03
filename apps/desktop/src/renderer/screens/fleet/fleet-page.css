@@ -1,5 +1,6 @@
 /* The Fleet page's cards, list, lead and sessions drawing. The measurements
-   are the fleet prototype's, variant G. Every class starts with `fleet-`. */
+   are the fleet prototype's, variant G. Every class starts with `fleet-`. The
+   status dot and the meter are in machine-parts.css. */
 
 /* ---------- The page ---------- */
 .fleet-page {
@@ -36,13 +37,6 @@
   height: 17px;
   letter-spacing: 0;
 }
-/* A failed Allow, under the heading. */
-.fleet-err {
-  margin: 0 0 12px;
-  color: var(--fail-ink);
-  font-size: var(--t-12);
-  line-height: 1.45;
-}
 
 /* ---------- The lead ---------- */
 .fleet-lead h2 {
@@ -62,48 +56,6 @@
 }
 .fleet-lead .is-you {
   color: var(--you-ink);
-}
-
-/* ---------- Status dots ---------- */
-.fleet-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--ok);
-}
-.fleet-dot--offline {
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--fail);
-}
-.fleet-dot--draining {
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--muted);
-}
-
-/* ---------- Meters ---------- */
-.fleet-meter {
-  position: relative;
-  display: block;
-  flex: none;
-  height: 4px;
-  border-radius: var(--r-pill);
-  background: color-mix(in oklab, var(--ink) 8%, transparent);
-  overflow: hidden;
-}
-/* The fill is the plain ink, as in the other meters of the app (Settings,
-   Providers), so it stands out from its track in every theme. */
-.fleet-meter i {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: inherit;
-  background: var(--ink);
-}
-.fleet-meter--you i {
-  background: var(--you-ink);
-}
-.fleet-meter--fail i {
-  background: var(--fail);
 }
 
 /* ---------- Sessions against the cap ---------- */
@@ -246,6 +198,14 @@
 .fleet-attn.is-fail {
   color: var(--fail-ink);
   font-weight: var(--w-medium);
+}
+/* The message of a failed Allow, on a line of its own under the need line and
+   its button. */
+.fleet-attn-err {
+  flex: 1 0 100%;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
 }
 /* The button of a card or row keeps its pointer events while it cannot act,
    so its tooltip shows and a press on it does not fall through to the card
@@ -461,6 +421,7 @@
 }
 .fleet-card-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;

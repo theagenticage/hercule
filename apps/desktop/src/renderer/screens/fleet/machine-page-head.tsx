@@ -1,5 +1,6 @@
 import { Fragment, type JSX } from "react";
-import type { FleetTextPart, MachineKind, MachineStatus } from "@hercule/client-core/fleet";
+import type { MachineHead } from "@hercule/client-core/machine-page";
+import type { FleetTextPart } from "@hercule/client-core/fleet";
 import { FleetText } from "./fleet-text";
 import { buildMachineTransitionName } from "./machine-transition";
 import { StatusDot } from "./machine-parts";
@@ -8,39 +9,26 @@ import "./machine-page.css";
 
 /**
  * Renders the head of a machine's page: its icon in a tile, its name, and
- * under the name its status and the facts the runner reported.
+ * under the name its status and the pieces of text after it, drawn with a dot
+ * between them: the facts the runner reported, then the runner program's own
+ * line with "update available" after it when the controller runs a newer
+ * release.
  *
- * - `status` is the dot and the word beside it. A machine that is simply
- *   online has no word of its own (`null`), and the head says "Online".
- * - `facts` are the pieces of text after the status, such as "macOS", "arm64"
- *   and "16 GB memory", drawn with a dot between them. The runner's own line comes
- *   last: "Runner 0.9.3", and "update available" in the muted colour after
- *   it when `isRunnerBehind`.
- * - The head carries the view-transition name that the machine's card on the
- *   Fleet page carries too (`buildMachineTransitionName`).
+ * The head carries the view-transition name that the machine's card on the
+ * Fleet page carries too (`buildMachineTransitionName`).
  */
 export function MachinePageHead({
   runnerId,
-  name,
-  kind,
-  status,
-  facts,
-  runnerVersion,
-  isRunnerBehind,
+  head,
 }: {
   readonly runnerId: string;
-  readonly name: string;
-  readonly kind: MachineKind;
-  readonly status: MachineStatus;
-  readonly facts: readonly string[];
-  readonly runnerVersion: string | null;
-  readonly isRunnerBehind: boolean;
+  readonly head: MachineHead;
 }): JSX.Element {
-  const word = status.word ?? "Online";
   const pieces = [
-    ...facts,
-    ...(runnerVersion === null ? [] : [`Runner ${runnerVersion}`]),
-    ...(isRunnerBehind ? ["update available"] : []),
+    ...head.facts,
+    ...(head.runner === null
+      ? []
+      : [head.runner.text, ...(head.runner.updateText === null ? [] : [head.runner.updateText])]),
   ];
   return (
     <header
@@ -48,14 +36,14 @@ export function MachinePageHead({
       style={{ viewTransitionName: buildMachineTransitionName(runnerId) }}
     >
       <span className="machine-page-tile">
-        <MachineIcon kind={kind} size={22} />
+        <MachineIcon kind={head.kind} size={22} />
       </span>
       <div className="machine-page-head-text">
-        <h2>{name}</h2>
+        <h2>{head.name}</h2>
         <p>
           <span className="machine-page-status">
-            <StatusDot status={{ tone: status.tone, word }} />
-            {word}
+            <StatusDot status={head.status} />
+            {head.status.label}
           </span>
           {pieces.map((piece) => (
             <Fragment key={piece}>

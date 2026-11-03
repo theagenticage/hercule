@@ -1,10 +1,11 @@
 /**
  * Fixtures the Fleet page's component tests share: a runner builder and four
- * machines, each in a state the cards and rows draw differently. What each
- * machine needs is decided by `@hercule/client-core/fleet`, which has its own
- * tests.
+ * machines, each in a state the cards and rows draw differently. The machines
+ * are what `describeFleetPage` of `@hercule/client-core/fleet` builds from
+ * their runners, which is what the page hands its cards; its own tests cover
+ * what it decides.
  */
-import type { FleetMachine } from "@hercule/client-core/fleet";
+import { describeFleetPage, type MachineSummary } from "@hercule/client-core/fleet";
 import type { Runner } from "@hercule/contract";
 
 export const GIB = 1024 ** 3;
@@ -28,42 +29,45 @@ export const buildRunner = (overrides: Partial<Runner>): Runner => ({
   ...overrides,
 });
 
-/** Runs 12 sessions under a cap of 16, with 5 more waiting for a slot that the cap does not give them. */
-export const BUSY_MACHINE: FleetMachine = {
-  runner: buildRunner({ id: "runner-busy", name: "atlas" }),
-  running: 12,
-  waiting: 5,
-  waitingThreads: 5,
-  openThreads: 5,
-};
-
-/** Has 5 GiB of free disk under a 10 GiB limit. */
-export const FULL_DISK_MACHINE: FleetMachine = {
-  runner: buildRunner({
+const RUNNERS: readonly Runner[] = [
+  buildRunner({ id: "runner-busy", name: "atlas" }),
+  buildRunner({
     id: "runner-full",
     name: "forge",
     watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
   }),
-  running: 2,
-  waiting: 0,
-  waitingThreads: 0,
-  openThreads: 0,
+  buildRunner({ id: "runner-off", name: "nomad", connectivity: "offline" }),
+  buildRunner({ id: "runner-drain", name: "dock", lifecycle: "draining" }),
+];
+
+const NO_QUEUE = { waiting: 0, waitingThreads: 0, openThreads: 0 };
+
+const MACHINES = describeFleetPage(
+  RUNNERS,
+  {
+    "runner-busy": { running: 12, waiting: 5, waitingThreads: 5, openThreads: 5 },
+    "runner-full": { running: 2, ...NO_QUEUE },
+    "runner-drain": { running: 1, ...NO_QUEUE },
+  },
+  null,
+  TIMEZONE,
+  NOW,
+).machines;
+
+const pickMachine = (runnerId: string): MachineSummary => {
+  const machine = MACHINES.find((each) => each.runnerId === runnerId);
+  if (machine === undefined) throw new Error(`The fixture has no machine ${runnerId}.`);
+  return machine;
 };
+
+/** Runs 12 sessions under a cap of 16, with 5 more waiting for a slot that the cap does not give them. */
+export const BUSY_MACHINE = pickMachine("runner-busy");
+
+/** Has 5 GiB of free disk under a 10 GiB limit. */
+export const FULL_DISK_MACHINE = pickMachine("runner-full");
 
 /** Is offline, and was last heard from at 09:12. */
-export const OFFLINE_MACHINE: FleetMachine = {
-  runner: buildRunner({ id: "runner-off", name: "nomad", connectivity: "offline" }),
-  running: 0,
-  waiting: 0,
-  waitingThreads: 0,
-  openThreads: 0,
-};
+export const OFFLINE_MACHINE = pickMachine("runner-off");
 
 /** Is online but told to take no new work. */
-export const DRAINING_MACHINE: FleetMachine = {
-  runner: buildRunner({ id: "runner-drain", name: "dock", lifecycle: "draining" }),
-  running: 1,
-  waiting: 0,
-  waitingThreads: 0,
-  openThreads: 0,
-};
+export const DRAINING_MACHINE = pickMachine("runner-drain");

@@ -1,31 +1,15 @@
 /**
- * Tests `useFleetNow`: the value it returns changes when the local day
+ * Tests `useFleetToday`: the value it returns changes when the local day
  * changes and at no other moment, even while the age clock tells its labels
  * about an unrelated per-second label.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { findNextDurationChange } from "@hercule/client-core";
-import type { FleetMachine } from "@hercule/client-core/fleet";
-import type { Runner } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
-import { useFleetNow } from "./use-fleet-now";
+import { useFleetToday } from "./use-fleet-today";
 
 const TIMEZONE = "UTC";
-
-/** An offline machine heard from at 09:12, so the page shows a time and watches the clock. */
-const OFFLINE: FleetMachine = {
-  runner: {
-    id: "01a06d02-beff-7037-9f5b-042822015952",
-    name: "nomad",
-    connectivity: "offline",
-    lastSeenAt: "2026-11-02T09:12:00.000Z",
-  } as Runner,
-  running: 0,
-  waiting: 0,
-  waitingThreads: 0,
-  openThreads: 0,
-};
 
 /** Fakes the timers and the date at 22:00 UTC on 2 Nov 2026, two hours before midnight. */
 beforeEach(() => {
@@ -36,9 +20,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("useFleetNow", () => {
+describe("useFleetToday", () => {
   it("returns the start of the local day", () => {
-    const { result } = renderHook(() => useFleetNow([OFFLINE], TIMEZONE));
+    const { result } = renderHook(() => useFleetToday(TIMEZONE, true));
     expect(result.current.toISOString()).toBe("2026-11-02T00:00:00.000Z");
   });
 
@@ -46,7 +30,7 @@ describe("useFleetNow", () => {
     let renders = 0;
     const { result } = renderHook(() => {
       renders += 1;
-      return useFleetNow([OFFLINE], TIMEZONE);
+      return useFleetToday(TIMEZONE, true);
     });
     const first = result.current;
     const rendersBefore = renders;
@@ -66,7 +50,7 @@ describe("useFleetNow", () => {
   });
 
   it("returns the next day's start when the local day changes", () => {
-    const { result } = renderHook(() => useFleetNow([OFFLINE], TIMEZONE));
+    const { result } = renderHook(() => useFleetToday(TIMEZONE, true));
     const first = result.current;
 
     act(() => {
@@ -77,12 +61,8 @@ describe("useFleetNow", () => {
     expect(result.current.toISOString()).toBe("2026-11-03T00:00:00.000Z");
   });
 
-  it("watches the clock only while a machine shows a time", () => {
-    const online: FleetMachine = {
-      ...OFFLINE,
-      runner: { ...OFFLINE.runner, connectivity: "online" },
-    };
-    const { result } = renderHook(() => useFleetNow([online], TIMEZONE));
+  it("watches the clock only while the page shows a time", () => {
+    const { result } = renderHook(() => useFleetToday(TIMEZONE, false));
     const first = result.current;
 
     act(() => {

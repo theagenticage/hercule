@@ -1,17 +1,24 @@
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import type { GaugeLevel, MachineNeed, MachineStatus } from "@hercule/client-core/fleet";
-import "./fleet-page.css";
+import "./machine-parts.css";
 
 /**
  * Renders the dot before a machine's status: green while it is online, a red
  * ring while it is offline or unreachable, a grey ring while it takes no new
- * work. The dot names its state itself ("Online") only when no word is drawn
- * beside it.
+ * work. The dot is decoration, hidden from assistive technology, because a
+ * label is drawn beside it. Set `namesState` where none is (a card of an online
+ * machine), and the dot then names its state itself, such as "Online".
  */
-export function StatusDot({ status }: { readonly status: MachineStatus }): JSX.Element {
+export function StatusDot({
+  status,
+  namesState,
+}: {
+  readonly status: MachineStatus;
+  readonly namesState?: boolean;
+}): JSX.Element {
   const className = `fleet-dot fleet-dot--${status.tone}`;
-  return status.word === null ? (
-    <i className={className} role="img" aria-label="Online" />
+  return namesState === true ? (
+    <i className={className} role="img" aria-label={status.label} />
   ) : (
     <i className={className} aria-hidden="true" />
   );
@@ -19,46 +26,42 @@ export function StatusDot({ status }: { readonly status: MachineStatus }): JSX.E
 
 /**
  * Renders a bar that is `share` full, from 0 to 1, in the colour of `level`.
- * The percentage is drawn beside it, so the bar is hidden from assistive
+ * A `share` of `null` draws it empty, for a gauge whose total is not known. The
+ * percentage is drawn beside it, so the bar is hidden from assistive
  * technology.
  */
 export function Meter({
   share,
   level,
 }: {
-  readonly share: number;
+  readonly share: number | null;
   readonly level: GaugeLevel;
 }): JSX.Element {
   return (
     <span className={`fleet-meter fleet-meter--${level}`} aria-hidden="true">
-      <i style={{ width: `${Math.min(1, Math.max(0, share)) * 100}%` }} />
+      <i style={{ width: `${(share ?? 0) * 100}%` }} />
     </span>
   );
 }
 
 /**
  * Renders the line that says what a machine needs from the user, with the
- * button that fixes it, as two siblings for the parent to lay out. Renders
- * nothing when the machine needs nothing.
+ * button that fixes it, as siblings for the parent to lay out. Renders nothing
+ * when the machine needs nothing.
  *
- * - A waiting need has `Allow N`, which calls `onAllow` with the machine's
- *   runner id and the cap that lets every waiting session start. While
- *   `allowPending` is true the button shows that it is saving and does nothing.
+ * - A waiting need has `allow`, the button that raises the session cap, which
+ *   the caller builds because it owns what pressing it does.
  * - A full disk has `Clean up…`, drawn inert because the cleanup dialog is not
  *   built yet. It stays `aria-disabled` rather than `disabled` so its tooltip
  *   still shows.
  * - An offline or unreachable machine has no button.
  */
 export function NeedLine({
-  runnerId,
   need,
-  allowPending,
-  onAllow,
+  allow,
 }: {
-  readonly runnerId: string;
   readonly need: MachineNeed | undefined;
-  readonly allowPending: boolean;
-  readonly onAllow: (runnerId: string, cap: number) => void;
+  readonly allow: ReactNode;
 }): JSX.Element | null {
   if (need === undefined) return null;
   return (
@@ -66,25 +69,7 @@ export function NeedLine({
       <span className={`fleet-attn is-${need.hue}`} title={need.line}>
         {need.line}
       </span>
-      {need.kind === "waiting" && (
-        <button
-          type="button"
-          className="btn btn--sm fleet-attn-btn"
-          title={need.allowHint}
-          aria-disabled={allowPending || undefined}
-          onClick={() => {
-            if (!allowPending) onAllow(runnerId, need.allow);
-          }}
-        >
-          {allowPending ? (
-            <>
-              <span className="spin" aria-hidden="true" /> Saving…
-            </>
-          ) : (
-            `Allow ${String(need.allow)}`
-          )}
-        </button>
-      )}
+      {need.kind === "waiting" && allow}
       {need.kind === "disk-below-limit" && (
         <button
           type="button"

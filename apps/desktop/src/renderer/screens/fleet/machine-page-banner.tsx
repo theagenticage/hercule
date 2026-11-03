@@ -1,10 +1,11 @@
 import type { JSX } from "react";
 import type { OfflineBanner } from "@hercule/client-core/machine-page";
+import { FleetText } from "./fleet-text";
 import "./machine-page.css";
 
 /**
  * Renders the banner of an offline or unreachable machine: what happened and
- * how to start the machine again, with the command drawn as code, and Retire…
+ * how to start the machine again (the command is a `code` part), and Retire…
  * at the right end. Pressing Retire… calls `onRetire`.
  */
 export function MachinePageBanner({
@@ -19,9 +20,7 @@ export function MachinePageBanner({
       <div>
         <p>{banner.headline}</p>
         <span>
-          {banner.before}
-          <code>{banner.command}</code>
-          {banner.after}
+          <FleetText parts={banner.detail} />
         </span>
       </div>
       <button type="button" className="btn btn--sm btn--danger" onClick={onRetire}>

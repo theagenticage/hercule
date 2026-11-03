@@ -236,10 +236,8 @@ describe("the Fleet page", () => {
 
     await user.click(within(getCard("atlas")).getByRole("button", { name: "Allow 17" }));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe(
-      "Could not allow 17 sessions on atlas: The runner is being retired.",
-    );
+    const alert = await within(getCard("atlas")).findByRole("alert");
+    expect(alert.textContent).toBe("Could not allow 17 sessions: The runner is being retired.");
     expect(getValue(getCard("atlas"), "12 of 16")).toBeTruthy();
   });
 

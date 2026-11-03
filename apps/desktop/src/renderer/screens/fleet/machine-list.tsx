@@ -1,5 +1,5 @@
-import type { JSX } from "react";
-import { decideMachineKind, summarizeMachine, type FleetMachine } from "@hercule/client-core/fleet";
+import type { JSX, ReactNode } from "react";
+import type { MachineSummary } from "@hercule/client-core/fleet";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { MachineIcon } from "./machine-icon";
 import { Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
@@ -7,45 +7,44 @@ import { buildMachineTransitionName } from "./machine-transition";
 import { SessionsFigure } from "./sessions-drawing";
 import "./fleet-page.css";
 
-/** Renders one machine as a row of the list. See `MachineList` for the props. */
-function MachineRow({
+/**
+ * Renders one machine as a row of the list. It draws what `machine` holds and
+ * works out nothing, and the status label is always drawn under the name.
+ *
+ * The machine's name is the row's one way to open the machine: its button
+ * covers the whole row and calls `onOpen` with the runner id. `allow` is the
+ * Allow button, drawn beside a need of waiting sessions.
+ *
+ * Every row carries the view transition name of its machine, so the browser
+ * can grow the row into the head of the machine's page, and back.
+ */
+export function MachineRow({
   machine,
-  timezone,
-  now,
-  allowPending,
+  allow,
   onOpen,
-  onAllow,
 }: {
-  readonly machine: FleetMachine;
-  readonly timezone: string;
-  readonly now: Date;
-  readonly allowPending: boolean;
+  readonly machine: MachineSummary;
+  readonly allow: ReactNode;
   readonly onOpen: (runnerId: string) => void;
-  readonly onAllow: (runnerId: string, cap: number) => void;
 }): JSX.Element {
-  const { runner } = machine;
-  const { status, isAway, drawing, disk, memory, roomText, need } = summarizeMachine(
-    machine,
-    timezone,
-    now,
-  );
+  const { runnerId, status, isAway, drawing, disk, memory, roomText, need } = machine;
 
   return (
     <div
       role="row"
       className={`fleet-row${isAway ? " is-away" : ""}`}
-      style={{ viewTransitionName: buildMachineTransitionName(runner.id) }}
+      style={{ viewTransitionName: buildMachineTransitionName(runnerId) }}
     >
       <span role="cell" className="fleet-row-dot">
         <StatusDot status={status} />
       </span>
       <span role="cell" className="fleet-row-name">
         <span className="fleet-row-icon">
-          <MachineIcon kind={decideMachineKind(runner.facts)} size={14} />
+          <MachineIcon kind={machine.kind} size={14} />
         </span>
         <span className="fleet-row-name-text">
-          <OpenMachine runnerId={runner.id} name={runner.name} onOpen={onOpen} />
-          <small>{status.word ?? "Online"}</small>
+          <OpenMachine runnerId={runnerId} name={machine.name} onOpen={onOpen} />
+          <small>{status.label}</small>
         </span>
       </span>
       <span role="cell" className="fleet-cell">
@@ -75,7 +74,7 @@ function MachineRow({
           <b>–</b>
         ) : (
           <span className="fleet-row-meter">
-            <Meter share={memory.percent / 100} level={memory.level} />
+            <Meter share={memory.share} level={memory.level} />
             <b className={memory.level === "normal" ? undefined : `is-${memory.level}`}>
               {memory.percent}%
             </b>
@@ -83,7 +82,7 @@ function MachineRow({
         )}
       </span>
       <span role="cell" className="fleet-row-need">
-        <NeedLine runnerId={runner.id} need={need} allowPending={allowPending} onAllow={onAllow} />
+        <NeedLine need={need} allow={allow} />
       </span>
       <ChevronRightIcon size={14} />
     </div>
@@ -91,36 +90,13 @@ function MachineRow({
 }
 
 /**
- * Renders the machines as a table with one row per machine, its columns
- * lining up: Machine, Sessions, Room, Disk, Memory and Needs you. Under 1030px
- * of width the Room and Memory columns go, because the machine's page shows
- * them, and under 720px the Disk column goes too. The rows draw what a card
- * draws, with the sessions smaller and the disk as its free space alone.
- *
- * - `onOpen` is called with the runner id when the user presses a row. The
- *   machine's name is the row's one way to open the machine: its button covers
- *   the whole row.
- * - `onAllow` is called by the row's Allow button; `pendingAllowRunnerIds`
- *   holds the machines whose Allow button shows that it is saving.
- *
- * Every row carries the view transition name of its machine, so the browser
- * can grow the row into the head of the machine's page, and back.
+ * Renders the table the machine rows sit in, with its columns lining up:
+ * Machine, Sessions, Room, Disk, Memory and Needs you. Under 1030px of width
+ * the Room and Memory columns go, because the machine's page shows them, and
+ * under 720px the Disk column goes too. The rows draw what a card draws, with
+ * the sessions smaller and the disk as its free space alone.
  */
-export function MachineList({
-  machines,
-  timezone,
-  now,
-  pendingAllowRunnerIds,
-  onOpen,
-  onAllow,
-}: {
-  readonly machines: readonly FleetMachine[];
-  readonly timezone: string;
-  readonly now: Date;
-  readonly pendingAllowRunnerIds: ReadonlySet<string>;
-  readonly onOpen: (runnerId: string) => void;
-  readonly onAllow: (runnerId: string, cap: number) => void;
-}): JSX.Element {
+export function MachineList({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
     <div className="fleet-list" role="table" aria-label="Machines">
       <div className="fleet-heads" role="row">
@@ -139,17 +115,7 @@ export function MachineList({
         <span role="columnheader">Needs you</span>
         <span role="presentation" />
       </div>
-      {machines.map((machine) => (
-        <MachineRow
-          key={machine.runner.id}
-          machine={machine}
-          timezone={timezone}
-          now={now}
-          allowPending={pendingAllowRunnerIds.has(machine.runner.id)}
-          onOpen={onOpen}
-          onAllow={onAllow}
-        />
-      ))}
+      {children}
     </div>
   );
 }
