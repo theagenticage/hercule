@@ -20,60 +20,38 @@
  *    successful read opens the gate: the live connection causes one on the
  *    next `workspace` push and on a reconnect. The store runs no timer.
  * 3. From then on, every read of the workspaces that the `workspace` topic's
- *    pushes cause settles the rows still being removed
- *    (`decideRemovalOutcome`).
- * 4. When no row is left being removed, the result is worded
- *    (`describeCleanupOutcome`) and the toast shows it, unless the dialog is
- *    open and shows it itself, in a paragraph under its title.
+ *    pushes cause settles the rows still being removed.
+ * 4. When no row is left being removed, the result is worded and the toast
+ *    shows it, unless the dialog is open and shows it itself, in a paragraph
+ *    under its title.
+ *
+ * What a change does to the progress is decided by `applyCleanupChange`. This
+ * store holds what needs the app: the query cache, the watchers, the toast.
  */
 import { matchQuery, type QueryClient } from "@tanstack/react-query";
-import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
+import type { HerculeClient } from "@hercule/client-core";
 import {
   archiveAndRemoveWorkspaces,
-  decideRemovalOutcome,
-  describeCleanupOutcome,
-  type CleanupItem,
-  type CleanupOutcomeWords,
+  requestRemovals,
   type CleanupPlan,
-  type CleanupRow,
-  type CleanupStart,
-  type RemovalOutcome,
 } from "@hercule/client-core/cleanup";
+import {
+  applyCleanupChange,
+  type CleanupChange,
+  type CleanupOutcomeWords,
+  type CleanupProgress,
+} from "@hercule/client-core/cleanup-progress";
 import { workspacesQuery } from "./queries";
-
-/** What the dialog shows of a cleanup, from the moment the button is pressed. */
-export type CleanupProgress =
-  /** The Threads are being archived and the removal is being asked for. */
-  | { readonly kind: "starting"; readonly rows: readonly CleanupRow[] }
-  /** Nothing was removed: the archive was refused or failed. `message` says why. */
-  | {
-      readonly kind: "stopped";
-      readonly rows: readonly CleanupRow[];
-      readonly message: string;
-    }
-  /**
-   * The Threads are archived and the removals were asked for. `outcomes` has
-   * one outcome for each of `rows`. `result` is `null` while any is still
-   * `removing`, else the words that tell how the cleanup ended.
-   */
-  | {
-      readonly kind: "removing";
-      readonly rows: readonly CleanupRow[];
-      readonly archivedCount: number;
-      readonly outcomes: ReadonlyMap<string, RemovalOutcome>;
-      readonly result: CleanupOutcomeWords | null;
-    };
 
 /** The progress of the cleanups of the machines, by machine. See the module comment. */
 export interface CleanupStore {
   /**
    * Archives the Threads of `plan` and removes its workspaces on the machine
-   * `runnerId`. `rows` are the dialog's rows of those workspaces, in the
-   * order of `plan.items`. Replaces any progress the machine has. The Clean
-   * up… button's guard keeps it from calling this while a cleanup is in
-   * progress, so the store does not check that itself.
+   * `runnerId`. Replaces any progress the machine has. The Clean up… button's
+   * guard keeps it from calling this while a cleanup is in progress, so the
+   * store does not check that itself.
    */
-  readonly start: (runnerId: string, rows: readonly CleanupRow[], plan: CleanupPlan) => void;
+  readonly start: (runnerId: string, plan: CleanupPlan) => void;
   /**
    * Asks again for the removal of one workspace of the machine's cleanup that
    * was refused, with the `lastUsedAt` the dialog showed. Does nothing when
@@ -122,25 +100,7 @@ interface Entry {
    * call, so no row is settled.
    */
   readonly awaitingFreshRead: boolean;
-  /**
-   * The reason to show for each workspace whose removal call failed, so that
-   * it is unknown whether it was asked for. See `decideRemovalOutcome`.
-   */
-  readonly failureMessages: ReadonlyMap<string, string>;
 }
-
-/** Checks whether two outcomes of one row are the same, so that a read that changes nothing draws nothing. */
-const isSameOutcome = (a: RemovalOutcome, b: RemovalOutcome): boolean =>
-  a.kind === b.kind &&
-  (a.kind !== "refused" ||
-    (b.kind === "refused" && a.message === b.message && a.retry === b.retry));
-
-/** Returns the `CleanupItem` the result's words and the retry are built from. */
-const toItem = (row: CleanupRow): CleanupItem => ({
-  workspaceId: row.workspaceId,
-  expectedLastUsedAt: row.expectedLastUsedAt,
-  freesBytes: row.freesBytes ?? 0,
-});
 
 /** What the store needs from the shell. */
 export interface CleanupStoreDependencies {
@@ -197,40 +157,20 @@ export const createCleanupStore = ({
 
   /**
    * Settles the rows of `runnerId` that are being removed from the cached
-   * workspaces, and words the result when none is left. Does nothing while a
-   * call of the machine awaits its answer or its fresh read, and draws
-   * nothing when the read changed no row.
+   * workspaces, and announces the result when none is left. Does nothing
+   * while a call of the machine awaits its answer or its fresh read, and
+   * draws nothing when the read changed no row.
    */
   const settle = (runnerId: string): void => {
     const entry = entries.get(runnerId);
     const workspaces = queryClient.getQueryData(workspacesKey);
     if (entry === undefined || workspaces === undefined) return;
     if (entry.unansweredCalls > 0 || entry.awaitingFreshRead) return;
-    const { progress } = entry;
-    if (progress.kind !== "removing" || progress.result !== null) return;
-    const byId = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
-    const outcomes = new Map(progress.outcomes);
-    let isChanged = false;
-    for (const row of progress.rows) {
-      const workspace = byId.get(row.workspaceId);
-      const current = outcomes.get(row.workspaceId);
-      if (current?.kind !== "removing" || workspace === undefined) continue;
-      const decided = decideRemovalOutcome(
-        workspace,
-        entry.failureMessages.get(row.workspaceId) ?? null,
-      );
-      if (isSameOutcome(decided, current)) continue;
-      outcomes.set(row.workspaceId, decided);
-      isChanged = true;
-    }
-    const result = describeCleanupOutcome(
-      progress.archivedCount,
-      progress.rows.map(toItem),
-      outcomes,
-    );
-    if (!isChanged && result === null) return;
-    replace(runnerId, { ...entry, progress: { ...progress, outcomes, result } });
-    if (result !== null) announce(runnerId, result);
+    const progress = applyCleanupChange(entry.progress, { kind: "workspacesRead", workspaces });
+    if (progress === entry.progress) return;
+    replace(runnerId, { ...entry, progress });
+    if (progress.kind === "removing" && progress.result !== null)
+      announce(runnerId, progress.result);
     if (!hasRowsBeingRemoved()) {
       stopWatchingCache?.();
       stopWatchingCache = null;
@@ -272,136 +212,58 @@ export const createCleanupStore = ({
   };
 
   /**
-   * Records what the call that asked for the removals of `asked` answered,
-   * then starts a fresh read to settle from. The call was counted in
-   * `unansweredCalls` when it was sent.
+   * Applies the answer to a call that was counted in `unansweredCalls` when it
+   * was sent. A stopped cleanup ends there: a dialog that is closed cannot
+   * show the reason, so the toast does, and there is nothing left to reopen.
+   * Otherwise the store starts a fresh read to settle from.
    */
-  const applyAnswer = (
-    runnerId: string,
-    run: object,
-    asked: readonly string[],
-    answer: Exclude<CleanupStart, { status: "archiveRefused" | "archiveUnconfirmed" }>,
-  ): void => {
+  const applyAnswer = (runnerId: string, run: object, change: CleanupChange): void => {
     const entry = readRun(runnerId, run);
     if (entry === undefined) return;
-    const failureMessages = new Map(entry.failureMessages);
-    const answered = new Map<string, RemovalOutcome>();
-    if (answer.status === "started") {
-      for (const { workspaceId, outcome } of answer.removals) answered.set(workspaceId, outcome);
-    } else {
-      for (const workspaceId of asked) {
-        answered.set(workspaceId, { kind: "removing" });
-        failureMessages.set(workspaceId, answer.message);
+    const progress = applyCleanupChange(entry.progress, change);
+    if (progress.kind === "stopped") {
+      if ((watchers.get(runnerId) ?? 0) === 0) {
+        showNotice(progress.message);
+        replace(runnerId, null);
+      } else {
+        replace(runnerId, { ...entry, unansweredCalls: 0, progress });
       }
+      return;
     }
-    const previous = entry.progress.kind === "removing" ? entry.progress : null;
     replace(runnerId, {
       ...entry,
       unansweredCalls: entry.unansweredCalls - 1,
       awaitingFreshRead: true,
-      failureMessages,
-      progress: {
-        kind: "removing",
-        rows: entry.progress.rows,
-        archivedCount: previous?.archivedCount ?? answer.archivedCount,
-        outcomes: new Map([...(previous?.outcomes ?? []), ...answered]),
-        result: null,
-      },
+      progress,
     });
     startFreshRead();
   };
 
   return {
-    start: (runnerId, rows, plan) => {
+    start: (runnerId, plan) => {
       const run = {};
       replace(runnerId, {
-        progress: { kind: "starting", rows },
+        progress: { kind: "starting", rows: plan.rows },
         run,
         unansweredCalls: 1,
         awaitingFreshRead: false,
-        failureMessages: new Map(),
       });
-      const stop = (message: string): void => {
-        const entry = readRun(runnerId, run);
-        if (entry === undefined) return;
-        // A dialog that is closed cannot show the reason, so the toast does,
-        // and there is nothing left to reopen.
-        if ((watchers.get(runnerId) ?? 0) === 0) {
-          showNotice(message);
-          replace(runnerId, null);
-          return;
-        }
-        replace(runnerId, {
-          ...entry,
-          unansweredCalls: 0,
-          progress: { kind: "stopped", rows, message },
-        });
-      };
-      void archiveAndRemoveWorkspaces(client, plan).then(
-        (answer) => {
-          if (answer.status === "archiveRefused" || answer.status === "archiveUnconfirmed")
-            stop(answer.message);
-          else
-            applyAnswer(
-              runnerId,
-              run,
-              plan.items.map((item) => item.workspaceId),
-              answer,
-            );
-        },
-        (error: unknown) => {
-          stop(`Could not archive: ${readErrorMessage(error)}`);
-        },
-      );
+      void archiveAndRemoveWorkspaces(client, plan).then((start) => {
+        applyAnswer(runnerId, run, { kind: "startAnswered", start });
+      });
     },
 
     retry: (runnerId, workspaceId) => {
       const entry = entries.get(runnerId);
       if (entry?.progress.kind !== "removing") return;
-      const { progress, run } = entry;
-      const row = progress.rows.find((each) => each.workspaceId === workspaceId);
-      if (row === undefined || progress.outcomes.get(workspaceId)?.kind !== "refused") return;
-      const failureMessages = new Map(entry.failureMessages);
-      failureMessages.delete(workspaceId);
-      replace(runnerId, {
-        ...entry,
-        failureMessages,
-        unansweredCalls: entry.unansweredCalls + 1,
-        progress: {
-          ...progress,
-          outcomes: new Map(progress.outcomes).set(workspaceId, { kind: "removing" }),
-          result: null,
-        },
-      });
+      const row = entry.progress.rows.find((each) => each.workspaceId === workspaceId);
+      const progress = applyCleanupChange(entry.progress, { kind: "retryAsked", workspaceId });
+      if (row === undefined || progress === entry.progress) return;
+      replace(runnerId, { ...entry, unansweredCalls: entry.unansweredCalls + 1, progress });
       startWatchingCache();
-      // A retry archives nothing, so only a failed call to the controller can end it early.
-      const refuse = (message: string): void => {
-        const current = readRun(runnerId, run);
-        if (current?.progress.kind !== "removing") return;
-        replace(runnerId, {
-          ...current,
-          unansweredCalls: current.unansweredCalls - 1,
-          progress: {
-            ...current.progress,
-            outcomes: new Map(current.progress.outcomes).set(workspaceId, {
-              kind: "refused",
-              message,
-              retry: true,
-            }),
-          },
-        });
-        settle(runnerId);
-      };
-      void archiveAndRemoveWorkspaces(client, { threadIds: [], items: [toItem(row)] }).then(
-        (answer) => {
-          if (answer.status === "archiveRefused" || answer.status === "archiveUnconfirmed")
-            refuse(answer.message);
-          else applyAnswer(runnerId, run, [workspaceId], answer);
-        },
-        (error: unknown) => {
-          refuse(readErrorMessage(error));
-        },
-      );
+      void requestRemovals(client, [row]).then((removal) => {
+        applyAnswer(runnerId, entry.run, { kind: "retryAnswered", workspaceId, removal });
+      });
     },
 
     dismiss: (runnerId) => {

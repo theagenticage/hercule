@@ -54,10 +54,7 @@ const ROW: CleanupRow = {
   unarchivedThreadIds: [],
 };
 
-const PLAN: CleanupPlan = {
-  threadIds: [],
-  items: [{ workspaceId: WORKSPACE_ID, expectedLastUsedAt: LAST_USED_AT, freesBytes: GB }],
-};
+const PLAN: CleanupPlan = { threadIds: [], rows: [ROW] };
 
 interface World {
   /** What the controller lists as the workspace. A test changes it. */
@@ -142,7 +139,7 @@ describe("createCleanupStore", () => {
     const { world, showNotice, store } = await buildStore();
     onlineManager.setOnline(false);
 
-    store.start(RUNNER_ID, [ROW], PLAN);
+    store.start(RUNNER_ID, PLAN);
     await vi.waitFor(() => {
       expect(store.read(RUNNER_ID)?.kind).toBe("removing");
     });
@@ -165,7 +162,7 @@ describe("createCleanupStore", () => {
   it("does not settle from a write to the cached workspaces while the fresh read is paused", async () => {
     const { world, queryClient, client, showNotice, store } = await buildStore();
     onlineManager.setOnline(false);
-    store.start(RUNNER_ID, [ROW], PLAN);
+    store.start(RUNNER_ID, PLAN);
     await vi.waitFor(() => {
       expect(store.read(RUNNER_ID)?.kind).toBe("removing");
     });
@@ -194,7 +191,7 @@ describe("createCleanupStore", () => {
       await buildStore();
     world.failReads = true;
 
-    store.start(RUNNER_ID, [ROW], PLAN);
+    store.start(RUNNER_ID, PLAN);
     await vi.waitFor(() => {
       expect(countReads(calls)).toBe(readsBefore + 1);
     });
@@ -220,15 +217,32 @@ describe("createCleanupStore", () => {
   it("settles at once from the fresh read when the controller already lists the workspace as deleted", async () => {
     const { world, showNotice, store } = await buildStore();
     world.workspace = buildStored("deleted");
-    store.start(RUNNER_ID, [ROW], PLAN);
+    store.start(RUNNER_ID, PLAN);
     await vi.waitFor(() => {
       expect(showNotice).toHaveBeenCalledWith(REMOVED_TOAST);
     });
   });
 
+  it("asks again for a refused row and settles it from the read that follows", async () => {
+    const { world, calls, showNotice, store } = await buildStore();
+    world.workspace = buildStored("ready", "A process had a file open.");
+    store.start(RUNNER_ID, PLAN);
+    await vi.waitFor(() => {
+      expect(showNotice).toHaveBeenCalledWith("Removed 0 of 1 workspace.");
+    });
+
+    world.workspace = buildStored("deleted");
+    store.retry(RUNNER_ID, WORKSPACE_ID);
+
+    await vi.waitFor(() => {
+      expect(showNotice).toHaveBeenCalledWith(REMOVED_TOAST);
+    });
+    expect(calls.filter((call) => call.path === "/api/v1/workspaces/dispose")).toHaveLength(2);
+  });
+
   it("draws nothing when a read of the workspaces changes no row", async () => {
     const { calls, readsBefore, queryClient, client, store } = await buildStore();
-    store.start(RUNNER_ID, [ROW], PLAN);
+    store.start(RUNNER_ID, PLAN);
     await vi.waitFor(() => {
       expect(store.read(RUNNER_ID)?.kind).toBe("removing");
       expect(countReads(calls)).toBe(readsBefore + 1);
@@ -247,7 +261,7 @@ describe("createCleanupStore", () => {
   it("shows the reason as a toast and keeps nothing when the archive is refused with no dialog open", async () => {
     const { showNotice, store } = await buildStore();
 
-    store.start(RUNNER_ID, [ROW], { ...PLAN, threadIds: [WORKSPACE_ID] });
+    store.start(RUNNER_ID, { ...PLAN, threadIds: [WORKSPACE_ID] });
 
     await vi.waitFor(() => {
       expect(showNotice).toHaveBeenCalledWith("Thread 1 started working again.");
@@ -259,7 +273,7 @@ describe("createCleanupStore", () => {
     const { showNotice, store } = await buildStore();
     store.watch(RUNNER_ID);
 
-    store.start(RUNNER_ID, [ROW], { ...PLAN, threadIds: [WORKSPACE_ID] });
+    store.start(RUNNER_ID, { ...PLAN, threadIds: [WORKSPACE_ID] });
 
     await vi.waitFor(() => {
       expect(store.read(RUNNER_ID)?.kind).toBe("stopped");
@@ -270,7 +284,7 @@ describe("createCleanupStore", () => {
   it("drops the answer of a call that is still on its way when it is disposed", async () => {
     const { world, calls, readsBefore, showNotice, store } = await buildStore();
     world.holdDispose = true;
-    store.start(RUNNER_ID, [ROW], PLAN);
+    store.start(RUNNER_ID, PLAN);
     await vi.waitFor(() => {
       expect(world.releaseDispose).not.toBeNull();
     });

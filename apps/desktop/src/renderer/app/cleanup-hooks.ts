@@ -4,8 +4,9 @@
  * screen, because the store is Fleet code.
  */
 import { use, useSyncExternalStore } from "react";
+import type { CleanupProgress } from "@hercule/client-core/cleanup-progress";
 import { CleanupContext } from "./cleanup";
-import { createCleanupStore, type CleanupProgress, type CleanupStore } from "./cleanup-store";
+import { createCleanupStore, type CleanupStore } from "./cleanup-store";
 
 /**
  * Returns the shell's cleanup store, creating it on first use. The value keeps

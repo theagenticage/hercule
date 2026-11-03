@@ -2,20 +2,19 @@
  * The pure logic behind cleaning up a machine's disk on the desktop Fleet
  * screen: which workspaces are idle candidates, the rows both the machine
  * page's "Largest idle workspaces" and the cleanup dialog draw, the dialog
- * itself, the archive-then-remove call, and the words of its outcome (spec 17
- * §A machine's page point 5 and §The cleanup dialog).
+ * itself, and the archive-then-remove call (spec 17 §A machine's page point 5
+ * and §The cleanup dialog). What happens to a cleanup after the press is in
+ * `cleanup-progress.ts`.
  *
  * The flow, as the desktop runs it:
  *
  * 1. `listCleanupCandidates` picks the idle workspaces from the shell's list.
- * 2. `readCleanupThreads` reads their Threads.
+ * 2. `readWorkspaceThreads` reads their Threads.
  * 3. `buildCleanupSnapshot` freezes the dialog's rows from both, once, when
  *    the dialog opens. The dialog does not rebuild them as pushes arrive:
  *    what the user saw is what goes.
  * 4. `describeCleanupDialog` draws the snapshot for the set of ticked rows.
  * 5. `archiveAndRemoveWorkspaces` runs the dialog's `plan`.
- * 6. `decideRemovalOutcome` settles each removal from a fresh workspace read,
- *    and `describeCleanupOutcome` words the result once all have settled.
  *
  * This module is its own subpath (`@hercule/client-core/cleanup`) and is not
  * re-exported from the package index, so the first screen does not carry it.
@@ -23,16 +22,15 @@
 import {
   MAX_DISPOSE_MANY_ITEMS,
   MAX_SESSION_IDS,
-  USED_SINCE_LOOKED_REFUSAL,
   type Session,
   type Workspace,
+  type WorkspaceDisposeManyResult,
 } from "@hercule/contract";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
 import { buildSessionGroups } from "../threads/session-groups";
 import { describeAge } from "../threads/age";
-import { readWorkspaceThreads } from "../threads/workspace-threads";
-import { formatDiskSize, plural } from "./machine";
+import { formatDiskSize } from "./machine";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -62,7 +60,7 @@ export const isIdleWorkspace = (workspace: Workspace, now: Date): boolean =>
  * workspace is never listed: it is removed on its own.
  *
  * Whether a Thread used the workspace is not known from the workspace alone.
- * `readCleanupThreads` reads that, and the rows built after it leave out
+ * `readWorkspaceThreads` reads that, and the rows built after it leave out
  * workspaces no Thread used (a workflow run's workspace goes by its run's
  * rules).
  */
@@ -88,15 +86,6 @@ export const describeCleanUpDisabledHint = (
   runnerName: string,
   isOnline: boolean,
 ): string | null => (isOnline ? null : `${runnerName} is offline. Cleaning up needs it online.`);
-
-/**
- * Reads every Thread, archived ones included, that was placed in one of
- * `workspaceIds`. Fails when a read fails. See `readWorkspaceThreads`.
- */
-export const readCleanupThreads = (
-  client: HerculeClient,
-  workspaceIds: readonly string[],
-): Promise<readonly Session[]> => readWorkspaceThreads(client, workspaceIds);
 
 /** An idle workspace as the machine page and the cleanup dialog draw it. */
 export interface IdleWorkspaceRow {
@@ -158,8 +147,9 @@ const buildIdleWorkspaceRow = (workspace: Workspace, name: string, now: Date): I
 /**
  * Returns the rows of the `candidates` that at least one of `threads` used,
  * each named as the workspace's sidebar row is named. `threads` are the
- * Threads `readCleanupThreads` read for the candidates. The order of
- * `candidates` is kept.
+ * Threads `readWorkspaceThreads` read for the candidates. The rows are ordered
+ * by what removing them frees, largest first. A workspace never measured goes
+ * last, and ties go by workspace id.
  */
 export const buildIdleWorkspaceRows = (
   candidates: readonly Workspace[],
@@ -174,10 +164,16 @@ export const buildIdleWorkspaceRows = (
       ),
     ).map((group) => [group.lead.workspaceId, group.lead.title]),
   );
-  return candidates.flatMap((workspace) => {
-    const name = names.get(workspace.id);
-    return name === undefined ? [] : [buildIdleWorkspaceRow(workspace, name, now)];
-  });
+  return candidates
+    .flatMap((workspace) => {
+      const name = names.get(workspace.id);
+      return name === undefined ? [] : [buildIdleWorkspaceRow(workspace, name, now)];
+    })
+    .toSorted(
+      (a, b) =>
+        (b.freesBytes ?? -1) - (a.freesBytes ?? -1) ||
+        (a.workspaceId < b.workspaceId ? -1 : a.workspaceId > b.workspaceId ? 1 : 0),
+    );
 };
 
 /** Which group of the dialog a workspace is in. */
@@ -206,7 +202,7 @@ export interface CleanupSnapshot {
 
 /**
  * Freezes the cleanup dialog's rows for the machine named `runnerName`, from
- * the `candidates` and the `threads` read for them (see `readCleanupThreads`).
+ * the `candidates` and the `threads` read for them (see `readWorkspaceThreads`).
  *
  * - A workspace no Thread used has no row.
  * - Rows are ordered by what removing them frees, largest first, and a
@@ -256,19 +252,12 @@ export const buildCleanupSnapshot = (
   };
 };
 
-/** A workspace to remove: what the dialog showed of it, which the removal sends back. */
-export interface CleanupItem {
-  readonly workspaceId: string;
-  readonly expectedLastUsedAt: string | null;
-  /** What removing it frees, for the words of the result; 0 when it was never measured. */
-  readonly freesBytes: number;
-}
-
-/** What the button does: the Threads to archive, then the workspaces to remove. */
+/** What the button does: archive the Threads, then remove the workspaces of `rows`. */
 export interface CleanupPlan {
   /** The Threads of the ticked workspaces that are not archived yet. Empty skips the archive. */
   readonly threadIds: readonly string[];
-  readonly items: readonly CleanupItem[];
+  /** The ticked rows, which the removal sends back as the dialog showed them. */
+  readonly rows: readonly CleanupRow[];
 }
 
 /** A row as the dialog draws it. */
@@ -390,98 +379,89 @@ export const describeCleanupDialog = (
       ? null
       : {
           threadIds,
-          items: tickedRows.map((row) => ({
-            workspaceId: row.workspaceId,
-            expectedLastUsedAt: row.expectedLastUsedAt,
-            freesBytes: row.freesBytes ?? 0,
-          })),
+          rows: tickedRows,
         },
   };
 };
 
-/**
- * Where one removal stands: `removing` while the runner works on it,
- * `removed` once the workspace is deleted, `refused` when it stays. A refused
- * outcome has the reason to show under the row and whether the row offers Try
- * again: `retry` is false for a workspace used since the dialog showed it,
- * because asking again with the same `expectedLastUsedAt` can only be refused
- * again.
- */
-export type RemovalOutcome =
-  | { readonly kind: "removing" }
-  | { readonly kind: "removed" }
-  | { readonly kind: "refused"; readonly message: string; readonly retry: boolean };
-
-/** The words under a refused row for a workspace that was used after the dialog opened. */
-const USED_SINCE_WORDS = "Used since you looked.";
-
-/** The reason shown for a refused removal that came with no message. */
-const UNKNOWN_REFUSAL = "The machine did not say why. Try again.";
-
-/** Builds the refused outcome for the controller's or the runner's `message`. */
-const buildRefusal = (message: string | null | undefined): RemovalOutcome => {
-  if (message === USED_SINCE_LOOKED_REFUSAL) {
-    return { kind: "refused", message: USED_SINCE_WORDS, retry: false };
-  }
-  return {
-    kind: "refused",
-    message:
-      message === null || message === undefined || message === "" ? UNKNOWN_REFUSAL : message,
-    retry: true,
-  };
-};
+/** What `requestRemovals` returns. */
+export type RemovalAnswer =
+  | {
+      readonly status: "started";
+      /** For each row asked, in order: `requested` when the runner was told, else `refused` with the reason. */
+      readonly results: readonly WorkspaceDisposeManyResult[];
+    }
+  /**
+   * The call failed, so it is not known what became of the workspaces: the
+   * controller commits the items one by one, and some may be `disposing` or
+   * `deleted` already. `message` is the error's.
+   */
+  | { readonly status: "removalUnknown"; readonly message: string };
 
 /** What `archiveAndRemoveWorkspaces` returns. */
 export type CleanupStart =
-  /** The archive was refused, so nothing was removed. `message` is the controller's. */
-  | { readonly status: "archiveRefused"; readonly message: string }
   /**
-   * The archive call failed without a usable answer (the connection dropped,
-   * or the controller answered `internal`), so the archive may or may not
-   * have happened. Nothing was removed. `message`
-   * is worded for the user and says to check the threads.
+   * The archive was refused, or failed without a usable answer (the connection
+   * dropped, or the controller answered `internal`), so nothing was removed.
+   * `message` is worded for the user. A refusal carries the controller's
+   * message. A failure without an answer says the archive may have happened,
+   * and to check the threads.
    */
-  | { readonly status: "archiveUnconfirmed"; readonly message: string }
+  | { readonly status: "archiveFailed"; readonly message: string }
   | {
-      readonly status: "started";
+      readonly status: "archived";
       /** How many Threads the archive archived; 0 when there was none to archive. */
       readonly archivedCount: number;
-      /** For each item of the plan, in order: `removing` when it was asked of the runner, else `refused`. */
-      readonly removals: readonly {
-        readonly workspaceId: string;
-        readonly outcome: RemovalOutcome;
-      }[];
-    }
-  /**
-   * The archive is done, but the call to remove the workspaces failed, so it
-   * is not known what became of them: the controller commits the items one by
-   * one, and some may be `disposing` or `deleted` already. `message` is the
-   * error's. Settle every item from a fresh workspace read with
-   * `decideRemovalOutcome(workspace, message)`.
-   */
-  | {
-      readonly status: "removalUnknown";
-      readonly archivedCount: number;
-      readonly message: string;
+      readonly removal: RemovalAnswer;
     };
 
 /**
+ * Asks `workspace.disposeMany` to remove the workspaces of `rows`, each with
+ * the `lastUsedAt` its row showed. Never fails: a failed call returns
+ * `removalUnknown`. A removal the controller accepts answers `requested`: its
+ * outcome arrives later, on the `workspace` topic.
+ *
+ * Try again calls this with the one row that was refused, so the original
+ * `lastUsedAt` is sent again.
+ */
+export const requestRemovals = async (
+  client: HerculeClient,
+  rows: readonly CleanupRow[],
+): Promise<RemovalAnswer> => {
+  try {
+    const { results } = await client.workspace.disposeMany({
+      payload: {
+        items: rows.map(({ workspaceId, expectedLastUsedAt }) =>
+          // The controller stamps `lastUsedAt` when it creates a workspace, so a null
+          // one is a row from before that was recorded. Such a row sends no
+          // `expectedLastUsedAt`, so it is not checked against use since the dialog
+          // opened. The controller still refuses it while a session holds it.
+          expectedLastUsedAt === null ? { workspaceId } : { workspaceId, expectedLastUsedAt },
+        ),
+      },
+    });
+    return { status: "started", results };
+  } catch (error) {
+    return {
+      status: "removalUnknown",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+/**
  * Archives the Threads of `plan` with one `session.archive` call (none when
- * `plan.threadIds` is empty), then asks `workspace.disposeMany` to remove
- * `plan.items`, each with the `lastUsedAt` the dialog showed.
+ * `plan.threadIds` is empty), then removes its rows with `requestRemovals`.
+ * Never fails.
  *
  * A refused archive, such as a Thread that started working again, removes
- * nothing and returns the controller's message. An archive call that fails
- * with no answer from the controller, or with an `internal` error (which
- * includes a success the client could not decode), returns
- * `archiveUnconfirmed`, because the archive may have been committed. A
- * removal the controller accepts answers `removing`: its outcome arrives
- * later, and `decideRemovalOutcome` reads it. Once the archive is done this
- * never fails, because the archive cannot be undone and its count
- * must reach the user: when the removal call fails it returns `removalUnknown`.
- *
- * A "Try again" asks for one removal alone: pass `{ threadIds: [], items: [item] }`
- * with the item the plan held, so the original `lastUsedAt` is sent again.
+ * nothing and returns `archiveFailed` with the controller's message. So does
+ * an archive call that fails with no answer from the controller, or with an
+ * `internal` error (which includes a success the client could not decode),
+ * because the archive may have been committed: its message says so. Once the
+ * archive is done this returns `archived`, because the archive cannot be
+ * undone and its count must reach the user, even when the removal call
+ * failed.
  */
 export const archiveAndRemoveWorkspaces = async (
   client: HerculeClient,
@@ -497,116 +477,14 @@ export const archiveAndRemoveWorkspaces = async (
       // The client also turns a success body it cannot decode into an `internal` ApiError, and
       // then the archive may have been committed. Every other code is the controller's refusal.
       if (error instanceof ApiError && error.code !== "internal") {
-        return { status: "archiveRefused", message: error.message };
+        return { status: "archiveFailed", message: error.message };
       }
       const reason = (error instanceof Error ? error.message : String(error)).replace(/\.+$/, "");
       return {
-        status: "archiveUnconfirmed",
+        status: "archiveFailed",
         message: `Could not confirm that the threads were archived: ${reason}. Check them before you try again.`,
       };
     }
   }
-  let results;
-  try {
-    ({ results } = await client.workspace.disposeMany({
-      payload: {
-        items: plan.items.map(({ workspaceId, expectedLastUsedAt }) =>
-          // The controller stamps `lastUsedAt` when it creates a workspace, so a null
-          // one is a row from before that was recorded. Such a row sends no
-          // `expectedLastUsedAt`, so it is not checked against use since the dialog
-          // opened. The controller still refuses it while a session holds it.
-          expectedLastUsedAt === null ? { workspaceId } : { workspaceId, expectedLastUsedAt },
-        ),
-      },
-    }));
-  } catch (error) {
-    return {
-      status: "removalUnknown",
-      archivedCount,
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
-  return {
-    status: "started",
-    archivedCount,
-    removals: results.map((result) => ({
-      workspaceId: result.workspaceId,
-      outcome: result.outcome === "requested" ? { kind: "removing" } : buildRefusal(result.message),
-    })),
-  };
-};
-
-/**
- * Decides where the removal of `workspace` stands, from a workspace read that
- * began after `workspace.disposeMany` answered or failed: `deleted` is
- * removed, `disposing` is still being removed, and any other status means the
- * workspace stayed.
- *
- * A workspace that stayed is refused with its own reason, `Workspace.message`.
- * After a failed call (`removalUnknown`) pass the error's message as
- * `failureMessage`: it is then the reason shown, with `retry` set, because
- * `Workspace.message` may be left over from an earlier attempt.
- */
-export const decideRemovalOutcome = (
-  workspace: Workspace,
-  failureMessage: string | null = null,
-): RemovalOutcome => {
-  if (workspace.status === "deleted") return { kind: "removed" };
-  if (workspace.status === "disposing") return { kind: "removing" };
-  return failureMessage === null
-    ? buildRefusal(workspace.message)
-    : { kind: "refused", message: failureMessage, retry: true };
-};
-
-/** The words that tell the user how a cleanup ended. See `describeCleanupOutcome`. */
-export interface CleanupOutcomeWords {
-  /**
-   * Whether every workspace was removed: the words are then the page's toast,
-   * else the first line under the dialog's title.
-   */
-  readonly allRemoved: boolean;
-  readonly text: string;
-}
-
-/**
- * Words how a cleanup ended, or returns `null` while any of its `items` has
- * no outcome yet or is still `removing`. `archivedCount` is what
- * `archiveAndRemoveWorkspaces` archived.
- *
- * - All removed, the page's toast: "Archived 9 threads and removed 6
- *   workspaces. 41 GB freed."
- * - Some or all refused, the first line under the dialog's title: "Archived 9
- *   threads. Removed 4 of 6 workspaces." The archive is always said when it
- *   archived something, because it is never undone.
- *
- * With nothing archived, the archive is left out of the words, and a freed
- * size of 0 is too.
- */
-export const describeCleanupOutcome = (
-  archivedCount: number,
-  items: readonly CleanupItem[],
-  outcomes: ReadonlyMap<string, RemovalOutcome>,
-): CleanupOutcomeWords | null => {
-  const removedItems: CleanupItem[] = [];
-  for (const item of items) {
-    const outcome = outcomes.get(item.workspaceId);
-    if (outcome === undefined || outcome.kind === "removing") return null;
-    if (outcome.kind === "removed") removedItems.push(item);
-  }
-  const archived = `${String(archivedCount)} ${plural(archivedCount, "thread", "threads")}`;
-  const total = `${String(items.length)} ${plural(items.length, "workspace", "workspaces")}`;
-  if (removedItems.length === items.length) {
-    const freed = removedItems.reduce((sum, item) => sum + item.freesBytes, 0);
-    const removed =
-      archivedCount > 0 ? `Archived ${archived} and removed ${total}.` : `Removed ${total}.`;
-    return {
-      allRemoved: true,
-      text: freed === 0 ? removed : `${removed} ${formatDiskSize(freed)} freed.`,
-    };
-  }
-  const removed = `Removed ${String(removedItems.length)} of ${total}.`;
-  return {
-    allRemoved: false,
-    text: archivedCount > 0 ? `Archived ${archived}. ${removed}` : removed,
-  };
+  return { status: "archived", archivedCount, removal: await requestRemovals(client, plan.rows) };
 };

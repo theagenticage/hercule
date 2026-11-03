@@ -225,11 +225,7 @@ function CleanupDialog({
         }}
         onConfirm={() => {
           if (description.plan === null) return;
-          store.start(
-            runnerId,
-            snapshot.rows.filter((row) => ticked.has(row.workspaceId)),
-            description.plan,
-          );
+          store.start(runnerId, description.plan);
         }}
         onClose={() => dialogRef.current?.close()}
       />

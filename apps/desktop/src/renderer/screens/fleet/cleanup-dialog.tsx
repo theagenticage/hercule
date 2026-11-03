@@ -10,10 +10,9 @@ import type {
   CleanupDialogGroup,
   CleanupDialogRow,
   CleanupGroupId,
-  CleanupOutcomeWords,
   CleanupRow,
-  RemovalOutcome,
 } from "@hercule/client-core/cleanup";
+import type { CleanupOutcomeWords, RemovalOutcome } from "@hercule/client-core/cleanup-progress";
 import { CheckIcon } from "../../icons/check";
 import { GlassDialog } from "../glass-dialog";
 import "./cleanup-dialog.css";

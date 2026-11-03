@@ -1,15 +1,9 @@
 /**
  * Tests the cleanup logic of the Fleet screen through its interface: which
  * workspaces are candidates, the dialog's groups and the button's words, the
- * archive-then-remove call against a stub controller, and the words of the
- * outcome.
+ * archive-then-remove call against a stub controller.
  */
-import {
-  MAX_SESSION_WORKSPACE_IDS,
-  USED_SINCE_LOOKED_REFUSAL,
-  type Session,
-  type Workspace,
-} from "@hercule/contract";
+import type { Session, Workspace } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildErrorBody, createApiStub, type Handler } from "../api-stub";
 import { createClient } from "../client";
@@ -17,15 +11,11 @@ import { buildSession, buildWorkspace } from "../threads/workspaces.testing";
 import {
   archiveAndRemoveWorkspaces,
   buildCleanupSnapshot,
-  decideRemovalOutcome,
   describeCleanUpDisabledHint,
   describeCleanupDialog,
-  describeCleanupOutcome,
   listCleanupCandidates,
-  readCleanupThreads,
-  type CleanupItem,
+  requestRemovals,
   type CleanupPlan,
-  type RemovalOutcome,
 } from "./cleanup";
 
 const GB = 1e9;
@@ -109,24 +99,6 @@ describe("listCleanupCandidates", () => {
   });
 });
 
-describe("readCleanupThreads", () => {
-  it("reads archived Threads too, in one read per 150 workspaces", async () => {
-    const api = createApiStub({ "GET /api/v1/sessions": { body: { items: [] } } });
-    const client = createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch });
-    const ids = Array.from({ length: 151 }, (_, index) => uuid(index + 1));
-
-    await readCleanupThreads(client, ids);
-
-    const queries = api.calls.map((call) => new URLSearchParams(call.search));
-    expect(queries.map((query) => query.getAll("workspaceId").length)).toEqual([
-      MAX_SESSION_WORKSPACE_IDS,
-      1,
-    ]);
-    expect(queries[0]!.get("kind")).toBe("thread");
-    expect(queries[0]!.has("archived")).toBe(false);
-  });
-});
-
 describe("describeCleanupDialog", () => {
   const big = buildIdle(10, 30);
   const small = buildIdle(11, 11);
@@ -197,14 +169,14 @@ describe("describeCleanupDialog", () => {
       hint: null,
     });
     // The archived Thread of the first workspace and the whole archived workspace are not archived again.
-    expect(dialog.plan).toEqual({
-      threadIds: [uuid(101), uuid(103)],
-      items: [
-        { workspaceId: uuid(10), expectedLastUsedAt: daysAgo(10), freesBytes: 30 * GB },
-        { workspaceId: uuid(11), expectedLastUsedAt: daysAgo(10), freesBytes: 11 * GB },
-        { workspaceId: uuid(13), expectedLastUsedAt: daysAgo(10), freesBytes: 5 * GB },
-      ],
-    });
+    expect(dialog.plan?.threadIds).toEqual([uuid(101), uuid(103)]);
+    expect(
+      dialog.plan?.rows.map((row) => [row.workspaceId, row.expectedLastUsedAt, row.freesBytes]),
+    ).toEqual([
+      [uuid(10), daysAgo(10), 30 * GB],
+      [uuid(11), daysAgo(10), 11 * GB],
+      [uuid(13), daysAgo(10), 5 * GB],
+    ]);
   });
 
   it("words the button again when the user ticks and unticks", () => {
@@ -288,7 +260,7 @@ describe("describeCleanupDialog", () => {
       unmeasured.id,
     ]);
     expect(dialog.button.label).toBe("Archive and remove 2, frees 4 GB");
-    expect(dialog.plan!.items[1]!.freesBytes).toBe(0);
+    expect(dialog.plan!.rows[1]!.freesBytes).toBeNull();
   });
 
   it("says nothing is left to clean up when no Thread used an idle workspace", () => {
@@ -309,7 +281,7 @@ describe("describeCleanupDialog", () => {
     const once = buildCleanupSnapshot("atlas", [none], [buildThread(401, none)], NOW);
 
     expect(
-      describeCleanupDialog(once, once.initialTicked).plan!.items[0]!.expectedLastUsedAt,
+      describeCleanupDialog(once, once.initialTicked).plan!.rows[0]!.expectedLastUsedAt,
     ).toBeNull();
   });
 });
@@ -324,12 +296,15 @@ describe("archiveAndRemoveWorkspaces", () => {
     projectId: null,
   });
 
+  // The first workspace has a last-used time and frees 30 GB. The second has no last-used time.
   const plan: CleanupPlan = {
     threadIds: [uuid(101), uuid(103)],
-    items: [
-      { workspaceId: uuid(10), expectedLastUsedAt: daysAgo(10), freesBytes: 30 * GB },
-      { workspaceId: uuid(11), expectedLastUsedAt: null, freesBytes: 11 * GB },
-    ],
+    rows: buildCleanupSnapshot(
+      "atlas",
+      [buildIdle(10, 30), buildIdle(11, 11, { lastUsedAt: null })],
+      [buildThread(101, buildIdle(10, 30)), buildThread(103, buildIdle(11, 11))],
+      NOW,
+    ).rows,
   };
 
   /** Returns a client on a stub controller with `archive` and `dispose` handlers, and the calls it receives. */
@@ -357,7 +332,7 @@ describe("archiveAndRemoveWorkspaces", () => {
     const start = await archiveAndRemoveWorkspaces(client, plan);
 
     expect(start).toEqual({
-      status: "archiveRefused",
+      status: "archiveFailed",
       message: "Thread 103 is working. Stop it first.",
     });
     expect(api.calls.map((call) => call.path)).toEqual(["/api/v1/sessions/archive"]);
@@ -388,48 +363,31 @@ describe("archiveAndRemoveWorkspaces", () => {
       ],
     ]);
     expect(start).toEqual({
-      status: "started",
+      status: "archived",
       archivedCount: 2,
-      removals: [
-        { workspaceId: uuid(10), outcome: { kind: "removing" } },
-        { workspaceId: uuid(11), outcome: { kind: "removing" } },
-      ],
-    });
-  });
-
-  it("still reports the archive when every removal is refused, and words a workspace used since", async () => {
-    const { client } = buildController(archiveAll, {
-      body: {
+      removal: {
+        status: "started",
         results: [
-          {
-            workspaceId: uuid(10),
-            outcome: "refused",
-            message: USED_SINCE_LOOKED_REFUSAL,
-          },
-          {
-            workspaceId: uuid(11),
-            outcome: "refused",
-            message: "Stop sessions 01a0 first.",
-          },
+          { workspaceId: uuid(10), outcome: "requested" },
+          { workspaceId: uuid(11), outcome: "requested" },
         ],
       },
     });
+  });
+
+  it("still reports the archive when every removal is refused", async () => {
+    const results = [
+      { workspaceId: uuid(10), outcome: "refused", message: "Stop sessions 01a0 first." },
+      { workspaceId: uuid(11), outcome: "refused", message: "A process had a file open." },
+    ];
+    const { client } = buildController(archiveAll, { body: { results } });
 
     const start = await archiveAndRemoveWorkspaces(client, plan);
 
     expect(start).toEqual({
-      status: "started",
+      status: "archived",
       archivedCount: 2,
-      removals: [
-        {
-          workspaceId: uuid(10),
-          outcome: { kind: "refused", message: "Used since you looked.", retry: false },
-        },
-        {
-          workspaceId: uuid(11),
-          outcome: { kind: "refused", message: "Stop sessions 01a0 first.", retry: true },
-        },
-      ],
+      removal: { status: "started", results },
     });
   });
 
@@ -439,7 +397,7 @@ describe("archiveAndRemoveWorkspaces", () => {
       { body: { results: [{ workspaceId: uuid(10), outcome: "requested" }] } },
     );
 
-    const start = await archiveAndRemoveWorkspaces(client, { ...plan, items: [plan.items[0]!] });
+    const start = await archiveAndRemoveWorkspaces(client, { ...plan, rows: [plan.rows[0]!] });
 
     expect(start).toMatchObject({ archivedCount: 1 });
   });
@@ -451,11 +409,11 @@ describe("archiveAndRemoveWorkspaces", () => {
 
     const start = await archiveAndRemoveWorkspaces(client, {
       threadIds: [],
-      items: [plan.items[0]!],
+      rows: [plan.rows[0]!],
     });
 
     expect(api.calls.map((call) => call.path)).toEqual(["/api/v1/workspaces/dispose"]);
-    expect(start).toMatchObject({ status: "started", archivedCount: 0 });
+    expect(start).toMatchObject({ status: "archived", archivedCount: 0 });
   });
 
   it("still returns the archived count when the archive is done and the removal call fails", async () => {
@@ -467,9 +425,9 @@ describe("archiveAndRemoveWorkspaces", () => {
     const start = await archiveAndRemoveWorkspaces(client, plan);
 
     expect(start).toEqual({
-      status: "removalUnknown",
+      status: "archived",
       archivedCount: 2,
-      message: "The controller is restarting.",
+      removal: { status: "removalUnknown", message: "The controller is restarting." },
     });
   });
 
@@ -481,7 +439,7 @@ describe("archiveAndRemoveWorkspaces", () => {
 
     const start = await archiveAndRemoveWorkspaces(client, plan);
 
-    expect(start.status).toBe("archiveUnconfirmed");
+    expect(start.status).toBe("archiveFailed");
     expect(api.calls.map((call) => call.path)).toEqual(["/api/v1/sessions/archive"]);
   });
 
@@ -493,7 +451,7 @@ describe("archiveAndRemoveWorkspaces", () => {
 
     const start = await archiveAndRemoveWorkspaces(client, plan);
 
-    expect(start.status).toBe("archiveUnconfirmed");
+    expect(start.status).toBe("archiveFailed");
   });
 
   it("does not claim the archive failed when the call gets no answer", async () => {
@@ -506,141 +464,54 @@ describe("archiveAndRemoveWorkspaces", () => {
 
     const start = await archiveAndRemoveWorkspaces(client, plan);
 
-    if (start.status !== "archiveUnconfirmed") throw new Error(`Unexpected status ${start.status}`);
+    if (start.status !== "archiveFailed") throw new Error(`Unexpected status ${start.status}`);
     expect(start.message).toMatch(
       /^Could not confirm that the threads were archived: .+[^.]\. Check them before you try again\.$/,
     );
   });
 });
 
-describe("decideRemovalOutcome", () => {
-  it("reads a deleted workspace as removed and a disposing one as still being removed", () => {
-    expect(decideRemovalOutcome(buildIdle(10, 1, { status: "deleted" }))).toEqual({
-      kind: "removed",
+describe("requestRemovals", () => {
+  const rows = buildCleanupSnapshot(
+    "atlas",
+    [buildIdle(10, 30), buildIdle(11, 11, { lastUsedAt: null })],
+    [buildThread(101, buildIdle(10, 30)), buildThread(102, buildIdle(11, 11))],
+    NOW,
+  ).rows;
+
+  it("sends each row's last-used time, and none for a row that has none, without archiving", async () => {
+    const api = createApiStub({
+      "POST /api/v1/workspaces/dispose": { body: { results: [] } },
     });
-    expect(decideRemovalOutcome(buildIdle(10, 1, { status: "disposing" }))).toEqual({
-      kind: "removing",
-    });
+    const client = createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch });
+
+    await requestRemovals(client, rows);
+
+    expect(api.calls.map((call) => [call.path, call.body])).toEqual([
+      [
+        "/api/v1/workspaces/dispose",
+        {
+          items: [
+            { workspaceId: uuid(10), expectedLastUsedAt: daysAgo(10) },
+            { workspaceId: uuid(11) },
+          ],
+        },
+      ],
+    ]);
   });
 
-  it("reads a workspace that is back as refused, with its reason", () => {
-    const refused = buildIdle(10, 1, { message: "The runner refused safe removal." });
-
-    expect(decideRemovalOutcome(refused)).toEqual({
-      kind: "refused",
-      message: "The runner refused safe removal.",
-      retry: true,
+  it("returns the failure instead of throwing when the call fails", async () => {
+    const api = createApiStub({
+      "POST /api/v1/workspaces/dispose": {
+        status: 500,
+        body: buildErrorBody("internal", "The controller is restarting."),
+      },
     });
-  });
+    const client = createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch });
 
-  it("shows the failure of the removal call, not a reason left from an earlier attempt", () => {
-    const stale = buildIdle(10, 1, { message: "Refused last week." });
-
-    expect(decideRemovalOutcome(stale, "The controller is restarting.")).toEqual({
-      kind: "refused",
+    expect(await requestRemovals(client, rows)).toEqual({
+      status: "removalUnknown",
       message: "The controller is restarting.",
-      retry: true,
     });
-    expect(decideRemovalOutcome({ ...stale, status: "deleted" }, "x")).toEqual({ kind: "removed" });
-    expect(decideRemovalOutcome({ ...stale, status: "disposing" }, "x")).toEqual({
-      kind: "removing",
-    });
-  });
-
-  it("says so when a workspace is back with no reason", () => {
-    expect(decideRemovalOutcome(buildIdle(10, 1, { message: null }))).toEqual({
-      kind: "refused",
-      message: "The machine did not say why. Try again.",
-      retry: true,
-    });
-  });
-});
-
-describe("describeCleanupOutcome", () => {
-  const item = (number: number, freesGb: number): CleanupItem => ({
-    workspaceId: uuid(number),
-    expectedLastUsedAt: null,
-    freesBytes: freesGb * GB,
-  });
-  const removed: RemovalOutcome = { kind: "removed" };
-  const refused: RemovalOutcome = { kind: "refused", message: "No.", retry: true };
-
-  it("words the toast when every workspace was removed", () => {
-    const items = [item(1, 30), item(2, 11)];
-    const outcomes = new Map<string, RemovalOutcome>([
-      [uuid(1), removed],
-      [uuid(2), removed],
-    ]);
-
-    expect(describeCleanupOutcome(9, items, outcomes)).toEqual({
-      allRemoved: true,
-      text: "Archived 9 threads and removed 2 workspaces. 41 GB freed.",
-    });
-  });
-
-  it("uses singular words", () => {
-    expect(
-      describeCleanupOutcome(
-        1,
-        [item(1, 2)],
-        new Map<string, RemovalOutcome>([[uuid(1), removed]]),
-      ),
-    ).toEqual({
-      allRemoved: true,
-      text: "Archived 1 thread and removed 1 workspace. 2 GB freed.",
-    });
-  });
-
-  it("words the dialog's head when some removals were refused, always saying what was archived", () => {
-    const items = [item(1, 30), item(2, 11), item(3, 5)];
-    const outcomes = new Map<string, RemovalOutcome>([
-      [uuid(1), removed],
-      [uuid(2), refused],
-      [uuid(3), refused],
-    ]);
-
-    expect(describeCleanupOutcome(9, items, outcomes)).toEqual({
-      allRemoved: false,
-      text: "Archived 9 threads. Removed 1 of 3 workspaces.",
-    });
-    expect(
-      describeCleanupOutcome(
-        1,
-        [item(1, 1)],
-        new Map<string, RemovalOutcome>([[uuid(1), refused]]),
-      ),
-    ).toEqual({
-      allRemoved: false,
-      text: "Archived 1 thread. Removed 0 of 1 workspace.",
-    });
-  });
-
-  it("leaves out the archive and the size when there is none", () => {
-    expect(
-      describeCleanupOutcome(0, [item(1, 0)], new Map<string, RemovalOutcome>([[uuid(1), removed]]))
-        ?.text,
-    ).toBe("Removed 1 workspace.");
-    expect(
-      describeCleanupOutcome(0, [item(1, 3)], new Map<string, RemovalOutcome>([[uuid(1), refused]]))
-        ?.text,
-    ).toBe("Removed 0 of 1 workspace.");
-  });
-
-  it("gives no words while a removal is still going or has no outcome", () => {
-    const items = [item(1, 3), item(2, 3)];
-
-    expect(
-      describeCleanupOutcome(
-        2,
-        items,
-        new Map<string, RemovalOutcome>([
-          [uuid(1), removed],
-          [uuid(2), { kind: "removing" }],
-        ]),
-      ),
-    ).toBeNull();
-    expect(
-      describeCleanupOutcome(2, items, new Map<string, RemovalOutcome>([[uuid(1), removed]])),
-    ).toBeNull();
   });
 });
