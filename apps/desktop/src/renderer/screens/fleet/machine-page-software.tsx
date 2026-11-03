@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import type { MachineAccountRow, MachineHarnessRow } from "@hercule/client-core/machine-page";
+import type { MachineTools } from "@hercule/client-core/software";
 import { HarnessLogo } from "../thread/harness-logo";
 import { MachinePageSection } from "./machine-page-section";
 import "./machine-page.css";
@@ -7,7 +8,8 @@ import "./machine-page.css";
 /**
  * Renders the Software section of a machine's page: one row per harness with
  * its version and what the version means for this Hercule, then one row per
- * account that signs in on each machine, with who is signed in here.
+ * account that signs in on each machine, with who is signed in here, then the
+ * tools found on the machine with their versions.
  *
  * - A machine that is away shows the versions it last reported in the muted
  *   colour (`isAway`).
@@ -15,17 +17,23 @@ import "./machine-page.css";
  *   Pressing it calls `onSignIn` with the account's id.
  * - Nothing is installed or updated from here.
  * - The accounts part is left out when no account signs in on each machine.
+ * - The tools part lists each tool with its version, a long version cut with
+ *   an ellipsis and whole in its tooltip, then one faint line naming the tools
+ *   that are not installed. It is left out when the machine has not reported
+ *   its tools and there is nothing to name.
  */
 export function MachinePageSoftware({
   id,
   harnesses,
   accounts,
+  tools,
   isAway,
   onSignIn,
 }: {
   readonly id: string;
   readonly harnesses: readonly MachineHarnessRow[];
   readonly accounts: readonly MachineAccountRow[];
+  readonly tools: MachineTools;
   readonly isAway: boolean;
   readonly onSignIn: (providerAccountId: string) => void;
 }): JSX.Element {
@@ -92,6 +100,33 @@ export function MachinePageSoftware({
           <p className="machine-page-sw-footnote">
             Accounts with a key or a token work on every machine and need no sign-in here.
           </p>
+        </>
+      )}
+      {tools.tools.length === 0 && tools.notInstalledText === null ? null : (
+        <>
+          <h4 className="machine-page-sw-heading">Tools</h4>
+          {tools.tools.length === 0 ? null : (
+            <ul className="machine-page-sw machine-page-sw--tools" aria-label="Tools">
+              {tools.tools.map((tool) => (
+                <li key={tool.name} className="machine-page-sw-row">
+                  <span className="machine-page-sw-name">{tool.name}</span>
+                  <span
+                    className={
+                      isAway
+                        ? "machine-page-sw-version is-tool is-muted"
+                        : "machine-page-sw-version is-tool"
+                    }
+                    title={tool.version}
+                  >
+                    {tool.version}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {tools.notInstalledText === null ? null : (
+            <p className="machine-page-sw-footnote">{tools.notInstalledText}</p>
+          )}
         </>
       )}
     </MachinePageSection>

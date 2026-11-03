@@ -7,6 +7,7 @@ import { FLEET_HOUR_METRICS_SCOPE } from "@hercule/client-core/metrics-history";
 import {
   controllerQuery,
   fleetSessionsQuery,
+  harnessesQuery,
   readOnOpen,
   runnersQuery,
   settingsQuery,
@@ -20,6 +21,7 @@ import { useSectionInView } from "../../../../screens/fleet/use-section-in-view"
 import { MachinesSection } from "./-machines-section";
 import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { useRunnerSessionCounts } from "./-session-counts";
+import { SoftwareSection } from "./-software-section";
 
 /**
  * Fleet: every machine at a glance (spec 17 §Fleet). Its loader reads
@@ -34,6 +36,10 @@ import { useRunnerSessionCounts } from "./-session-counts";
  * - every runner's hour points of the last 7 days, for the disk forecasts.
  *   A `runnerMetrics` push reads them again at most once an hour (see
  *   `useRunnerMetricsLive`), so a cached read is used as it is;
+ * - the harnesses with their latest releases, which the Software section
+ *   draws. The shell reads and keeps them current: a push on `runner` or
+ *   `provider` reads them again (the controller announces a new latest
+ *   release on `provider`);
  * - the controller's record, whose `localRunnerId` the page needs when the
  *   fleet is empty, and the settings, whose time zone the times are shown in.
  *   No topic covers either, so they are read each time the page opens.
@@ -46,6 +52,7 @@ export const Route = createFileRoute("/_connected/_shell/fleet/")({
       queryClient.ensureQueryData(runnersQuery(client)),
       queryClient.fetchQuery(fleetSessionsQuery(client)),
       queryClient.ensureQueryData(runnerMetricsQuery(client, FLEET_HOUR_METRICS_SCOPE)),
+      queryClient.ensureQueryData(harnessesQuery(client)),
       readOnOpen(queryClient, controllerQuery(client)),
       readOnOpen(queryClient, settingsQuery(client)),
     ]);
@@ -54,12 +61,18 @@ export const Route = createFileRoute("/_connected/_shell/fleet/")({
 });
 
 /** The jump links' section ids, in the order the sections are on the page. */
-const SECTION_IDS = ["machines"];
+const SECTION_IDS = ["machines", "software"];
+
+/** The id of the section of a machine's page that a Software column head opens. */
+const MACHINE_SOFTWARE_ID = "machine-software";
 
 /**
- * Draws the Fleet page: the floating header, the lead and the Machines
- * section. Pressing a machine opens its page; the router runs that as a view
- * transition (see `decideMachineTransitionTypes`).
+ * Draws the Fleet page: the floating header, the lead, the Machines section
+ * and the Software section. Pressing a machine opens its page; the router
+ * runs that as a view transition (see `decideMachineTransitionTypes`).
+ * Pressing a machine's column head in Software opens its page at its
+ * Software section: the location's hash names the section, and the page
+ * scrolls to it once it is drawn.
  */
 function FleetPage(): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
@@ -98,7 +111,10 @@ function FleetPage(): JSX.Element {
       <FleetHeader
         place={{
           page: "fleet",
-          sections: [{ id: "machines", label: "Machines", count: page.machinesSection }],
+          sections: [
+            { id: "machines", label: "Machines", count: page.machinesSection },
+            { id: "software", label: "Software" },
+          ],
           activeSectionId,
           onJump: scrollToSection,
         }}
@@ -112,6 +128,15 @@ function FleetPage(): JSX.Element {
             isEmpty={page.isEmpty}
             onOpen={(runnerId) => void navigate({ to: "/fleet/$runnerId", params: { runnerId } })}
             onAddMachine={() => setIsAdding(true)}
+          />
+          <SoftwareSection
+            onOpenMachine={(runnerId) =>
+              void navigate({
+                to: "/fleet/$runnerId",
+                params: { runnerId },
+                hash: MACHINE_SOFTWARE_ID,
+              })
+            }
           />
         </div>
       </FleetScroll>

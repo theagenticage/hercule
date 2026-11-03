@@ -200,6 +200,20 @@
   color: var(--fail-ink);
   font-weight: var(--w-medium);
 }
+/* The quiet line of a machine's software updates: on a line of its own, level
+   with where the need line starts. Under a need line it sits 4px below it
+   (the foot's 8px gap less 4px), and alone it takes the need line's place. */
+.fleet-updates {
+  flex: 1 0 100%;
+  min-width: 0;
+  margin-block-start: 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 18px;
+}
+.fleet-updates:not(:first-child) {
+  margin-block-start: -4px;
+}
 /* The message of a failed Allow, on a line of its own under the need line and
    its button. */
 .fleet-attn-err {

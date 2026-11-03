@@ -1,6 +1,6 @@
-import { useRef, useState, type JSX } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
 import {
@@ -142,6 +142,16 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   );
   const scrollRef = useRef<HTMLDivElement>(null);
   const { activeSectionId, scrollToSection } = useSectionInView(scrollRef, SECTION_IDS);
+  // A link from another page opens this one at a section by putting the
+  // section's id in the location's hash (the Fleet page's Software column
+  // heads do). The page scrolls there once it is drawn.
+  const hashedSectionId = useLocation({ select: (location) => location.hash });
+  const scrollToHashedSection = useEffectEvent(() => {
+    if (SECTION_IDS.includes(hashedSectionId)) scrollToSection(hashedSectionId);
+  });
+  useEffect(() => {
+    scrollToHashedSection();
+  }, [hashedSectionId]);
   const [isRetiring, setRetiring] = useState(false);
   const [isAdding, setAdding] = useState(false);
 

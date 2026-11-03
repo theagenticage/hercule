@@ -20,21 +20,29 @@
  * - studio: a Mac with 96 GB, online and set to take no new work. Its
  *   disk is 87 % full, which is the one need its card shows.
  *
+ * Software: atlas, beelink and studio report all twelve probed toolchains,
+ * bosgame lacks terraform and dotnet, and mini lacks four. The latest Claude
+ * Code and pi are read, so the grid shows checks, an older version (atlas's
+ * runner, studio's Claude Code), a version below the floor (atlas's Codex), a
+ * dash, and Codex's last read failed after one succeeded ("checked 09:00").
+ *
  * The sidebar's seven threads run on atlas, and are 7 of its 12 running
  * sessions, so the sidebar and the Fleet page agree. Atlas's work is nine
  * groups in Running here: the seven rows of the sidebar (the Payout row also
  * holds two Agent sessions), one workflow run with two steps working and
  * five waiting for a slot, and Ada, an assistant.
  */
-import type {
-  ControllerInfo,
-  EventWithFacts,
-  Harness,
-  ProviderAccount,
-  Run,
-  Runner,
-  RunnerFacts,
-  Session,
+import {
+  PROBED_TOOLCHAINS,
+  type ControllerInfo,
+  type EventWithFacts,
+  type Harness,
+  type HarnessLatestRelease,
+  type ProviderAccount,
+  type Run,
+  type Runner,
+  type RunnerFacts,
+  type Session,
 } from "@hercule/contract";
 import {
   FORECAST_HISTORY_MS,
@@ -88,20 +96,31 @@ type HarnessVersions = Readonly<Record<string, string | null>>;
 /** The one Codex version of the fixture that is below the oldest this Hercule works with. */
 const BELOW_FLOOR_VERSION = "0.9.0";
 
-/** Returns the facts of a machine with a disk of `diskTotalBytes` and the harnesses of `versions` installed. */
+/** The version of each probed toolchain a machine reports, by name. A toolchain the machine lacks has no entry. */
+type ToolchainVersions = Readonly<Partial<Record<(typeof PROBED_TOOLCHAINS)[number], string>>>;
+
+/**
+ * Returns the facts of a machine with a disk of `diskTotalBytes`, the harnesses
+ * of `versions` installed and the toolchains of `tools`, which the runner
+ * reports in the order of the probed list.
+ */
 const buildFacts = (
   os: string,
   arch: string,
   totalMemoryBytes: number,
   diskTotalBytes: number,
   versions: HarnessVersions,
+  tools: ToolchainVersions,
 ): RunnerFacts => ({
   os,
   arch,
   totalMemoryBytes,
   diskTotalBytes,
-  docker: os === "linux",
-  toolchains: [{ name: "node", version: "v24.8.0", path: "/usr/local/bin/node" }],
+  docker: tools.docker !== undefined,
+  toolchains: PROBED_TOOLCHAINS.flatMap((name) => {
+    const version = tools[name];
+    return version === undefined ? [] : [{ name, version, path: `/usr/local/bin/${name}` }];
+  }),
   harnesses: HARNESSES.map((harness) => ({
     name: harness.binaryName,
     present: versions[harness.id] !== null && versions[harness.id] !== undefined,
@@ -155,9 +174,75 @@ const MINI_VERSIONS: HarnessVersions = {
   "pi/pi": null,
 };
 const STUDIO_VERSIONS: HarnessVersions = {
-  "claude-code/claude-code": "2.0.84",
+  "claude-code/claude-code": "2.0.80",
   "codex/codex": "0.46.0",
   "pi/pi": "0.9.2",
+};
+
+/** The toolchains each machine reports. Atlas, beelink and studio have all twelve; bosgame lacks terraform and dotnet; mini lacks four. */
+const ATLAS_TOOLS: ToolchainVersions = {
+  git: "2.51.0",
+  gh: "2.78.0",
+  node: "24.8.0",
+  pnpm: "10.17.1",
+  bun: "1.2.23",
+  go: "1.25.1",
+  rustc: "1.90.0",
+  python3: "3.13.7",
+  uv: "0.8.17",
+  docker: "28.4.0",
+  terraform: "1.13.3",
+  dotnet: "9.0.305",
+};
+const BEELINK_TOOLS: ToolchainVersions = {
+  git: "2.43.0",
+  gh: "2.45.0",
+  node: "22.19.0",
+  pnpm: "10.17.1",
+  bun: "1.2.21",
+  go: "1.24.6",
+  rustc: "1.89.0",
+  python3: "3.12.3",
+  uv: "0.8.15",
+  docker: "27.5.1",
+  terraform: "1.12.2",
+  dotnet: "8.0.414",
+};
+const BOSGAME_TOOLS: ToolchainVersions = {
+  git: "2.43.0",
+  gh: "2.45.0",
+  node: "22.19.0",
+  pnpm: "9.15.4",
+  bun: "1.2.21",
+  go: "1.24.6",
+  rustc: "1.89.0",
+  python3: "3.12.3",
+  uv: "0.8.15",
+  docker: "27.5.1",
+};
+const MINI_TOOLS: ToolchainVersions = {
+  git: "2.50.1",
+  gh: "2.76.2",
+  node: "22.14.0",
+  pnpm: "10.11.0",
+  bun: "1.2.19",
+  go: "1.24.2",
+  python3: "3.13.1",
+  uv: "0.8.4",
+};
+const STUDIO_TOOLS: ToolchainVersions = {
+  git: "2.51.0",
+  gh: "2.80.0",
+  node: "24.8.0",
+  pnpm: "10.17.1",
+  bun: "1.2.23",
+  go: "1.25.1",
+  rustc: "1.90.0",
+  python3: "3.13.7",
+  uv: "0.8.17",
+  docker: "28.3.3",
+  terraform: "1.13.3",
+  dotnet: "9.0.304",
 };
 
 /** Atlas: a Mac with 64 GB and a 1,000 GB disk, one release behind, with 12 sessions running of a cap of 16. */
@@ -165,7 +250,7 @@ export const ATLAS: Runner = buildMachine(
   ATLAS_ID,
   "atlas",
   {
-    facts: buildFacts("darwin", "arm64", 64 * GIB, 1000 * GB, ATLAS_VERSIONS),
+    facts: buildFacts("darwin", "arm64", 64 * GIB, 1000 * GB, ATLAS_VERSIONS, ATLAS_TOOLS),
     maxConcurrentSessions: 16,
     version: "0.4.1",
     labels: ["macos", "xcode"],
@@ -180,7 +265,7 @@ export const BEELINK: Runner = buildMachine(
   BEELINK_ID,
   "beelink",
   {
-    facts: buildFacts("linux", "x64", 128 * GIB, 4000 * GB, BEELINK_VERSIONS),
+    facts: buildFacts("linux", "x64", 128 * GIB, 4000 * GB, BEELINK_VERSIONS, BEELINK_TOOLS),
     maxConcurrentSessions: 24,
     labels: ["linux", "docker"],
   },
@@ -194,7 +279,7 @@ export const BOSGAME: Runner = buildMachine(
   BOSGAME_ID,
   "bosgame",
   {
-    facts: buildFacts("linux", "x64", 32 * GIB, 500 * GB, BOSGAME_VERSIONS),
+    facts: buildFacts("linux", "x64", 32 * GIB, 500 * GB, BOSGAME_VERSIONS, BOSGAME_TOOLS),
     maxConcurrentSessions: 8,
     labels: ["linux"],
   },
@@ -208,7 +293,7 @@ export const MINI: Runner = buildMachine(
   MINI_ID,
   "mini",
   {
-    facts: buildFacts("darwin", "arm64", 16 * GIB, 500 * GB, MINI_VERSIONS),
+    facts: buildFacts("darwin", "arm64", 16 * GIB, 500 * GB, MINI_VERSIONS, MINI_TOOLS),
     maxConcurrentSessions: 4,
     connectivity: "offline",
     lastSeenAt: "2026-09-29T09:12:00.000Z",
@@ -223,7 +308,7 @@ export const STUDIO: Runner = buildMachine(
   STUDIO_ID,
   "studio",
   {
-    facts: buildFacts("darwin", "arm64", 96 * GIB, 4000 * GB, STUDIO_VERSIONS),
+    facts: buildFacts("darwin", "arm64", 96 * GIB, 4000 * GB, STUDIO_VERSIONS, STUDIO_TOOLS),
     maxConcurrentSessions: 8,
     lifecycle: "draining",
   },
@@ -249,9 +334,29 @@ const FLEET_MACHINES: ReadonlyArray<{
 
 const FLEET_RUNNERS: ReadonlyArray<Runner> = FLEET_MACHINES.map(({ runner }) => runner);
 
-/** The shipped harnesses with what each machine reports of them. */
+/**
+ * The latest release of each harness, as the controller last read it at 09:00:
+ *
+ * - Claude Code: read at 09:00, so a machine on 2.0.80 is older.
+ * - Codex: read at 09:00, and the read after it failed, so the grid shows the
+ *   last good version with "checked 09:00".
+ * - pi: read at 09:00.
+ */
+const CHECKED_AT = minutesAgo(41);
+const LATEST_RELEASES: Readonly<Record<string, HarnessLatestRelease>> = {
+  "claude-code/claude-code": { version: "2.0.84", checkedAt: CHECKED_AT, error: null },
+  "codex/codex": {
+    version: "0.46.0",
+    checkedAt: CHECKED_AT,
+    error: "GitHub's rate limit was reached.",
+  },
+  "pi/pi": { version: "0.9.2", checkedAt: CHECKED_AT, error: null },
+};
+
+/** The shipped harnesses with what each machine reports of them and their latest releases. */
 const FLEET_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => ({
   ...harness,
+  latestRelease: LATEST_RELEASES[harness.id] ?? null,
   runners: FLEET_MACHINES.map(({ runner, versions }) => {
     const version = versions[harness.id] ?? null;
     return {

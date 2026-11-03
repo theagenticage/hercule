@@ -113,6 +113,16 @@ export function NeedLine({
 }
 
 /**
+ * Renders the quiet line of a machine's software updates, such as "2 updates",
+ * under its need line, or at the need line's place when there is no need.
+ * Renders nothing for `undefined`. It is always muted and never in a hue,
+ * because an update is not something that needs the user.
+ */
+export function UpdatesLine({ text }: { readonly text: string | undefined }): JSX.Element | null {
+  return text === undefined ? null : <span className="fleet-updates">{text}</span>;
+}
+
+/**
  * Renders the machine's name as the one button that opens the machine's page.
  * Its `::after` covers the whole card or row (the nearest positioned
  * ancestor), so pressing anywhere on it opens the page while the name stays

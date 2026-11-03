@@ -18,12 +18,21 @@ import {
 import { MachineList, MachineRow } from "./machine-list";
 import { buildMachineTransitionName } from "./machine-transition";
 
-const renderList = (machines: readonly MachineSummary[]) => {
+const renderList = (
+  machines: readonly MachineSummary[],
+  updates: Readonly<Record<string, string>> = {},
+) => {
   const onOpen = vi.fn();
   render(
     <MachineList>
       {machines.map((machine) => (
-        <MachineRow key={machine.runnerId} machine={machine} allow={null} onOpen={onOpen} />
+        <MachineRow
+          key={machine.runnerId}
+          machine={machine}
+          updatesText={updates[machine.runnerId]}
+          allow={null}
+          onOpen={onOpen}
+        />
       ))}
     </MachineList>,
   );
@@ -139,5 +148,23 @@ describe("MachineList", () => {
 
     expect(within(offline!).getByText("Offline since 09:12")).toBeTruthy();
     expect(within(offline!).getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("draws the updates line in the Needs you cell, under the need line, in no hue", () => {
+    const { rows } = renderList([NEARLY_FULL_DISK_MACHINE], { "runner-87": "2 updates" });
+    const cell = within(rows()[0]!).getAllByRole("cell").at(-1)!;
+    const need = within(cell).getByText("Disk 87% full");
+    const updates = within(cell).getByText("2 updates");
+
+    expect(need.compareDocumentPosition(updates) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(updates.className).toBe("fleet-updates");
+  });
+
+  it("draws the updates line alone, in the need line's place, for a machine that needs nothing, and not for one with none", () => {
+    const { rows } = renderList([BUSY_MACHINE, DRAINING_MACHINE], { "runner-drain": "1 update" });
+    const [busy, draining] = rows().map((row) => within(row).getAllByRole("cell").at(-1)!);
+
+    expect(draining!.textContent).toBe("1 update");
+    expect(busy!.querySelector(".fleet-updates")).toBeNull();
   });
 });

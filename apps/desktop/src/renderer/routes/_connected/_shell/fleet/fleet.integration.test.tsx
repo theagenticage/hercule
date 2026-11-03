@@ -2,12 +2,14 @@
  * Tests the Fleet page through the rendered app: the lead, the machines as
  * cards and as rows, the view that survives leaving the page, Allow saving a
  * machine's session cap, the card that adds a machine while the fleet is
- * empty, and a card opening its machine's page.
+ * empty, a card opening its machine's page, and the Software section with
+ * its column heads and its jump link.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Runner, RunnerFacts, Session } from "@hercule/contract";
+import { HARNESSES } from "@hercule/client-core/testing";
+import type { Harness, Runner, RunnerFacts, Session } from "@hercule/contract";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -414,5 +416,119 @@ describe("the Fleet page", () => {
       await waitFor(() => expect(getValue(getCard("forge"), "4 of 16")).toBeTruthy());
       expect(countFleetReads(calls, before)).toBe(1);
     });
+  });
+});
+
+describe("the Software section", () => {
+  const CLAUDE_CODE: Harness = {
+    ...HARNESSES.find((harness) => harness.id === "claude-code/claude-code")!,
+    runners: [
+      { runnerId: ATLAS.id, installed: true, version: "2.0.84", versionVerdict: "ok" },
+      { runnerId: FORGE.id, installed: true, version: "2.0.78", versionVerdict: "ok" },
+      { runnerId: NOMAD.id, installed: false, version: null, versionVerdict: "unknown" },
+    ],
+    latestRelease: { version: "2.0.84", checkedAt: "2026-11-02T09:00:00.000Z", error: null },
+  };
+  const ATLAS_WITH_GIT = {
+    ...ATLAS,
+    facts: { ...FACTS, toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }] },
+  };
+
+  const openSoftware = () =>
+    openFleet({
+      runners: [ATLAS_WITH_GIT, FORGE, NOMAD],
+      handlers: { "GET /api/v1/harnesses": { body: [CLAUDE_CODE] } },
+    });
+
+  const getSoftwareTable = (): HTMLElement =>
+    screen.getByRole("table", { name: "Software on each machine" });
+
+  /** Returns the cells of the tool `name` after its Latest cell, as text, one per machine in the column order. */
+  const readToolCells = (name: string): string[] => {
+    const row = within(getSoftwareTable())
+      .getAllByRole("row")
+      .find((each) => within(each).queryByRole("button", { name }) !== null)!;
+    return within(row)
+      .getAllByRole("cell")
+      .map((cell) => cell.textContent ?? "");
+  };
+
+  it("shows each tool against its latest release, on every machine", async () => {
+    await openSoftware();
+
+    const table = getSoftwareTable();
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((head) => head.textContent),
+    ).toEqual(["Tool", "Latest", "atlas", "forge", "nomad"]);
+    // Latest, then atlas (the latest, a check), forge (older), nomad (not installed).
+    // A dash for a missing tool has "Not installed" as hidden text.
+    expect(readToolCells("Claude Code")).toEqual([
+      "2.0.84",
+      "2.0.84",
+      "2.0.78",
+      "\u2013Not installed",
+    ]);
+    // A runner updates to its controller's version, which is also theirs.
+    expect(readToolCells("Hercule runner")).toEqual(["0.9.3", "0.9.3", "0.9.3", "0.9.3"]);
+    expect(readToolCells("git")).toEqual([
+      "Not tracked",
+      "2.50.1",
+      "\u2013Not installed",
+      "\u2013Not installed",
+    ]);
+  });
+
+  it("opens a tool's detail under its row, with when its latest release was checked", async () => {
+    const user = userEvent.setup();
+    await openSoftware();
+
+    await user.click(within(getSoftwareTable()).getByRole("button", { name: "Claude Code" }));
+
+    const table = getSoftwareTable();
+    expect(within(table).getByText("Runs Claude models.")).toBeTruthy();
+    expect(within(table).getByText("Latest release 2.0.84, checked 09:00.")).toBeTruthy();
+    expect([...table.querySelectorAll("dl > div")].map((group) => group.textContent)).toEqual([
+      "2.0.84atlas",
+      "2.0.78forge",
+      "Not installednomad",
+    ]);
+  });
+
+  it("opens a machine's page at its Software section from the machine's column head", async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    const { router } = await openSoftware();
+
+    await user.click(
+      within(getSoftwareTable()).getByRole("button", { name: "Open forge at Software" }),
+    );
+
+    await screen.findByRole("heading", { level: 2, name: "forge" });
+    expect(router.state.location.pathname).toBe(`/fleet/${FORGE.id}`);
+    await waitFor(() =>
+      expect(scrollIntoView.mock.contexts.map((element) => (element as Element).id)).toContain(
+        "machine-software",
+      ),
+    );
+    scrollIntoView.mockRestore();
+  });
+
+  it("scrolls to the section from the Software jump link", async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    await openSoftware();
+
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Fleet" })).getByRole("button", {
+        name: "Software",
+      }),
+    );
+
+    expect(scrollIntoView.mock.contexts.map((element) => (element as Element).id)).toEqual([
+      "software",
+    ]);
+    scrollIntoView.mockRestore();
   });
 });

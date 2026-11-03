@@ -828,6 +828,47 @@ describe("the Software section", () => {
     ]);
   });
 
+  it("lists the tools found on the machine in the probed order, then names the ones that are missing", async () => {
+    await openMachine({
+      runner: {
+        ...ATLAS,
+        facts: {
+          ...ATLAS.facts!,
+          toolchains: [
+            { name: "node", version: "22.11.0", path: "/usr/local/bin/node" },
+            { name: "git", version: "2.47.0", path: "/usr/bin/git" },
+          ],
+        },
+      },
+    });
+
+    const tools = within(getSoftware()).getByRole("list", { name: "Tools" });
+    expect(
+      within(tools)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual(["git2.47.0", "node22.11.0"]);
+    expect(within(getSoftware()).getByText(/^Not installed: gh, /).textContent).not.toMatch(
+      /git|node/,
+    );
+  });
+
+  it("names every probed tool as not installed when the runner found none", async () => {
+    await openMachine();
+
+    const software = getSoftware();
+    expect(within(software).queryByRole("list", { name: "Tools" })).toBeNull();
+    expect(within(software).getByRole("heading", { name: "Tools" })).toBeTruthy();
+    expect(within(software).getByText(/^Not installed: git, gh, node, /)).toBeTruthy();
+  });
+
+  it("says nothing about tools while the runner has not reported its facts", async () => {
+    await openMachine({ runner: { ...ATLAS, facts: null } });
+
+    expect(within(getSoftware()).queryByRole("heading", { name: "Tools" })).toBeNull();
+    expect(within(getSoftware()).queryByText(/^Not installed:/)).toBeNull();
+  });
+
   it("opens the account's sign-in dialog for this machine from Sign in", async () => {
     const { calls } = await openMachine({
       overrides: {

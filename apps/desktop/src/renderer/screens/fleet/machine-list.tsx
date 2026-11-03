@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import type { MachineGauge, MachineSummary } from "@hercule/client-core/fleet";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { MachineIcon } from "./machine-icon";
-import { Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
+import { Meter, NeedLine, OpenMachine, StatusDot, UpdatesLine } from "./machine-parts";
 import { buildMachineTransitionName } from "./machine-transition";
 import { SessionsFigure } from "./sessions-drawing";
 import "./fleet-page.css";
@@ -26,17 +26,22 @@ function MeterWithValue({ gauge }: { readonly gauge: MachineGauge }): JSX.Elemen
  *
  * The machine's name is the row's one way to open the machine: its button
  * covers the whole row and calls `onOpen` with the runner id. `allow` is the
- * Allow button, drawn beside a need of waiting sessions.
+ * Allow button, drawn beside a need of waiting sessions. `updatesText` is the
+ * quiet "2 updates" line, drawn under the need line in the Needs you cell, or
+ * in its place when there is no need; `undefined` when the machine has no
+ * update.
  *
  * Every row carries the view transition name of its machine, so the browser
  * can grow the row into the head of the machine's page, and back.
  */
 export function MachineRow({
   machine,
+  updatesText,
   allow,
   onOpen,
 }: {
   readonly machine: MachineSummary;
+  readonly updatesText: string | undefined;
   readonly allow: ReactNode;
   readonly onOpen: (runnerId: string) => void;
 }): JSX.Element {
@@ -95,6 +100,7 @@ export function MachineRow({
       </span>
       <span role="cell" className="fleet-row-need">
         <NeedLine need={need} allow={allow} />
+        <UpdatesLine text={updatesText} />
       </span>
       <ChevronRightIcon size={14} />
     </div>

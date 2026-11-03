@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import type { GaugeLevel, MachineSummary } from "@hercule/client-core/fleet";
 import type { MachineFaces } from "@hercule/client-core/machine-work";
 import { MachineIcon } from "./machine-icon";
-import { GaugeValue, Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
+import { GaugeValue, Meter, NeedLine, OpenMachine, StatusDot, UpdatesLine } from "./machine-parts";
 import { buildMachineTransitionName } from "./machine-transition";
 import { SessionsFigure } from "./sessions-drawing";
 import { MachineFacesStack } from "./work-faces";
@@ -56,7 +56,9 @@ function Gauge({
  * covers the whole card and calls `onOpen` with the runner id. `allow` is the
  * Allow button, drawn beside a need of waiting sessions. `faces` are the faces
  * of the work on the machine, drawn left of its room; `undefined` when the
- * machine has no work.
+ * machine has no work. `updatesText` is the quiet "2 updates" line, drawn
+ * under the need line, or in its place when there is no need; `undefined`
+ * when the machine has no update.
  *
  * Every card carries the view transition name of its machine, so the browser
  * can grow the card into the head of the machine's page, and back. Runner ids
@@ -65,11 +67,13 @@ function Gauge({
 export function MachineCard({
   machine,
   faces,
+  updatesText,
   allow,
   onOpen,
 }: {
   readonly machine: MachineSummary;
   readonly faces: MachineFaces | undefined;
+  readonly updatesText: string | undefined;
   readonly allow: ReactNode;
   readonly onOpen: (runnerId: string) => void;
 }): JSX.Element {
@@ -113,6 +117,7 @@ export function MachineCard({
       </div>
       <div className="fleet-card-foot">
         <NeedLine need={machine.need} allow={allow} />
+        <UpdatesLine text={updatesText} />
       </div>
     </div>
   );

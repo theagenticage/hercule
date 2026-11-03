@@ -16,10 +16,14 @@
  *   the user removed, in Recent on its page and on the Activity page, and the
  *   crumb of the Activity page leads back to the machine;
  * - a thread started on a machine shows on that machine's card as a group at
- *   work, and in the Running here section of its page, which opens the thread.
+ *   work, and in the Running here section of its page, which opens the thread;
+ * - the Software grid shows the git version the controller's own, real runner
+ *   probed on this machine, and a column head opens the machine's page at its
+ *   Software section.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
+import { execFileSync } from "node:child_process";
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { findCompiledBinary, PASSWORD, runCli, USERNAME } from "../../scripts/controller-process";
@@ -367,5 +371,40 @@ describe("the Fleet page", () => {
           .getAttribute("aria-current"),
       )
       .toBe("page");
+  });
+
+  it("shows the git version of the real runner in the Software grid, and a column head opens the machine's page at its Software", async () => {
+    // The controller starts a real runner of its own, which probes the git on
+    // this machine. Its column of the grid must show the version `git` prints.
+    const printed = execFileSync("git", ["--version"], { encoding: "utf8" });
+    const gitVersion = /\d+\.\d+\.\d+/.exec(printed)![0];
+    const { url } = await startControllerForTest({ setUp: true });
+    const { page } = await openSignedIn(url);
+    await openFleet(page);
+
+    const grid = page.getByRole("table", { name: "Software on each machine" });
+    await grid.waitFor();
+    // Tool and Latest come first, so the runner's head is the third. In a row the name is its
+    // row header, so the runner's cell follows the Latest cell.
+    const machineHead = grid.getByRole("columnheader").nth(2);
+    const gitRow = grid
+      .getByRole("row")
+      .filter({ has: page.getByRole("button", { name: "git", exact: true }) });
+    // The first report follows the hello, so the cell shows "Not installed" until then.
+    await expect.poll(() => gitRow.getByRole("cell").nth(1).innerText()).toContain(gitVersion);
+
+    await machineHead.getByRole("button").click();
+    const software = page.getByRole("region", { name: "Software" });
+    await software.waitFor();
+    await expect
+      .poll(() =>
+        software.evaluate((section) => {
+          const area = section.closest(".fleet-scroll")!;
+          const top = section.getBoundingClientRect().top - area.getBoundingClientRect().top;
+          // The section starts under the header (80px) and not far below it.
+          return top >= 0 && top < 200;
+        }),
+      )
+      .toBe(true);
   });
 });
