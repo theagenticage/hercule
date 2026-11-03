@@ -49,25 +49,66 @@ function locateCard(page: Page, name: string) {
 const GIB = 1024 ** 3;
 
 /**
- * Returns the path data of the line each of the CPU, Memory and Disk graphs
- * draws on a machine's page, by the label of its instrument. The svg is hidden
- * from assistive technology, because the numbers beside a graph carry its
- * meaning, so a role or a label cannot reach it. The line's `d` is the one
- * thing that changes when the graph draws another value. An instrument with no
- * line yet, such as one that shows its "not reported" sentence, has an empty
- * string.
+ * The room a graph keeps above and below its line, in drawing units. It is
+ * the component's `EDGE_INSET` in `machine-graph.tsx`.
  */
-async function readGraphLines(page: Page): Promise<Record<string, string>> {
-  const lines: Record<string, string> = {};
-  for (const label of ["CPU", "Memory", "Disk"]) {
-    const line = page
-      .locator(".machine-page-instrument")
-      .filter({ has: page.locator(".machine-page-instrument-label", { hasText: label }) })
-      .locator(".machine-graph-line");
-    lines[label] = (await line.count()) === 0 ? "" : ((await line.getAttribute("d")) ?? "");
-  }
-  return lines;
+const GRAPH_EDGE_INSET = 1;
+
+/**
+ * Reads the line of the graph of the instrument labelled `label` on a
+ * machine's page, and returns its path data and the height of its drawing
+ * space, or `null` when the instrument draws no line (it shows its "not
+ * reported" sentence instead). The svg is hidden from assistive technology,
+ * because the numbers beside a graph carry its meaning, so a role or a label
+ * cannot reach it.
+ */
+async function readGraphLine(
+  page: Page,
+  label: string,
+): Promise<{ readonly d: string; readonly height: number } | null> {
+  const graph = page
+    .locator(".machine-page-instrument")
+    .filter({ has: page.locator(".machine-page-instrument-label", { hasText: label }) })
+    .locator("svg.machine-graph");
+  const line = graph.locator(".machine-graph-line");
+  if ((await line.count()) === 0) return null;
+  const viewBox = (await graph.getAttribute("viewBox"))!.split(" ").map(Number);
+  return { d: (await line.getAttribute("d"))!, height: viewBox[3]! };
 }
+
+/** Waits until the graph of `label` draws a line, and returns what `readGraphLine` returns for it. */
+async function waitForGraphLine(
+  page: Page,
+  label: string,
+): Promise<NonNullable<Awaited<ReturnType<typeof readGraphLine>>>> {
+  let line: Awaited<ReturnType<typeof readGraphLine>> = null;
+  await expect
+    .poll(async () => {
+      line = await readGraphLine(page, label);
+      return line !== null;
+    })
+    .toBe(true);
+  return line!;
+}
+
+/**
+ * Returns the `y` of the last point of the graph line of `label`, in drawing
+ * units (it grows downward), or -1 when there is no line. The `x` of every
+ * point depends on when the page read the history, so only the `y` tells
+ * which value was drawn.
+ */
+async function readLastPointY(page: Page, label: string): Promise<number> {
+  const line = await readGraphLine(page, label);
+  if (line === null) return -1;
+  return Number(line.d.match(/,(-?[\d.]+)\s*$/)![1]);
+}
+
+/**
+ * Returns the `y` at which a graph draws `share`, a value from 0 (the bottom)
+ * to 1 (the top) of the graph, in a drawing space `height` units tall.
+ */
+const placeOnGraph = (share: number, height: number): number =>
+  height - GRAPH_EDGE_INSET - share * (height - 2 * GRAPH_EDGE_INSET);
 
 describe("the Fleet page", () => {
   it("opens from the Fleet row, keeps the row selected on a machine's page, and gives way to the Threads face when a thread opens", async () => {
@@ -187,26 +228,29 @@ describe("the Fleet page", () => {
     await openFleet(page);
     await locateCard(page, "studio").getByRole("button", { name: "studio", exact: true }).click();
 
-    // Every graph draws the one report, as a line that has a point in it.
+    // Report 1: CPU at 10%, and memory 25% in use (48 of 64 GiB available).
+    // Disk only needs to draw a line.
+    const height = (await waitForGraphLine(page, "Disk")).height;
+    await expect.poll(() => readLastPointY(page, "CPU")).toBeCloseTo(placeOnGraph(0.1, height), 1);
     await expect
-      .poll(async () => Object.values(await readGraphLines(page)).every((d) => d !== ""))
-      .toBe(true);
-    const first = await readGraphLines(page);
+      .poll(() => readLastPointY(page, "Memory"))
+      .toBeCloseTo(placeOnGraph(0.25, height), 1);
 
-    // A second report in the same minute replaces the first one's point. The
-    // page is not navigated or reloaded: the report reaches it as a push. Only
-    // CPU and Memory are checked for a change: they draw five-minute points,
-    // and the page re-reads the hour points of Disk at most once an hour.
+    // Report 2 lands in the same minute, so it replaces the first one's point.
+    // The page is not navigated or reloaded: the report reaches it as a push.
+    // The last point's y is checked, not the whole path, because every x moves
+    // with the time the page reads the history, so any re-read changes the
+    // path even when it brings the old values. Only CPU and Memory are checked
+    // for a change: they draw five-minute points, and the page re-reads the
+    // hour points of Disk at most once an hour.
     runner.reportMetrics({
       diskFreeBytes: 200 * GIB,
       availableMemoryBytes: 16 * GIB,
       cpu: { averagePercent: 70, peakPercent: 90 },
     });
+    await expect.poll(() => readLastPointY(page, "CPU")).toBeCloseTo(placeOnGraph(0.7, height), 1);
     await expect
-      .poll(async () => {
-        const next = await readGraphLines(page);
-        return ["CPU", "Memory"].filter((label) => next[label] !== first[label]);
-      })
-      .toEqual(["CPU", "Memory"]);
+      .poll(() => readLastPointY(page, "Memory"))
+      .toBeCloseTo(placeOnGraph(0.75, height), 1);
   });
 });
