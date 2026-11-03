@@ -12,6 +12,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   createValidationError,
+  RUNNER_METRICS_POINT_MS,
   DEFAULT_PAGE_LIMIT,
   type Forbidden,
   type RunnerMetrics,
@@ -22,7 +23,7 @@ import {
 import { requireGrant } from "../actor";
 import { announce, nowIso, refuseCursor, withTransaction } from "../db";
 import { Settings } from "../settings";
-import { POINT_MS, runnerMetricsRepository } from "./repository";
+import { runnerMetricsRepository } from "./repository";
 
 /** How many days of history are kept when `retention.runnerMetrics` is not set. */
 const DEFAULT_RETENTION_DAYS = 14;
@@ -159,7 +160,7 @@ const make = Effect.gen(function* () {
             );
           }
         }
-        const pointMs = POINT_MS[input.resolution];
+        const pointMs = RUNNER_METRICS_POINT_MS[input.resolution];
         const page = yield* refuseCursor(
           rows.readPoints({
             runnerId: input.runnerId,

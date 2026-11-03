@@ -7,7 +7,12 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Statement } from "effect/sql/Statement";
-import type { RunnerMetrics, RunnerMetricsPoint, RunnerMetricsResolution } from "@hercule/contract";
+import {
+  RUNNER_METRICS_POINT_MS,
+  type RunnerMetrics,
+  type RunnerMetricsPoint,
+  type RunnerMetricsResolution,
+} from "@hercule/contract";
 import {
   buildPage,
   decodeCursor,
@@ -20,12 +25,6 @@ import {
 } from "../db";
 
 const MINUTE_MS = 60_000;
-
-/** How long a point is, per resolution, in milliseconds. Points start on multiples of it. */
-export const POINT_MS: Readonly<Record<RunnerMetricsResolution, number>> = {
-  fiveMinutes: 5 * MINUTE_MS,
-  hour: 60 * MINUTE_MS,
-};
 
 /** Returns the start of the minute that `instantMs` falls in, in Unix milliseconds. */
 export const floorToMinute = (instantMs: number): number => instantMs - (instantMs % MINUTE_MS);
@@ -146,7 +145,7 @@ export const buildPointsStatement = (
   request: PointsRequest,
   after: { readonly runnerId: string; readonly minuteMs: number } | undefined,
 ): Statement<PointRow> => {
-  const pointMs = POINT_MS[request.resolution];
+  const pointMs = RUNNER_METRICS_POINT_MS[request.resolution];
   const runnerClause =
     request.runnerId === undefined
       ? sql`runner_id IN (SELECT id FROM runners)`
@@ -217,7 +216,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Page<RunnerMetricsPoint>, SqlError | CursorError> =>
       Effect.gen(function* () {
         const scope = buildCursorScope(request);
-        const pointMs = POINT_MS[request.resolution];
+        const pointMs = RUNNER_METRICS_POINT_MS[request.resolution];
         const cursor =
           request.cursor === undefined
             ? undefined

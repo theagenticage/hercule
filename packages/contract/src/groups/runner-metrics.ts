@@ -23,6 +23,12 @@ export const RunnerMetricsResolution = Schema.Literals(RUNNER_METRICS_RESOLUTION
 
 export type RunnerMetricsResolution = Schema.Schema.Type<typeof RunnerMetricsResolution>;
 
+/** How long a point of each resolution is, in milliseconds: the one spelling every package uses. */
+export const RUNNER_METRICS_POINT_MS: Readonly<Record<RunnerMetricsResolution, number>> = {
+  fiveMinutes: 5 * 60_000,
+  hour: 60 * 60_000,
+};
+
 const Bytes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 const Percent = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
