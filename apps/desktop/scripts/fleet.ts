@@ -29,9 +29,14 @@ import type {
   SpawnWorkspace,
   TranscriptRow,
 } from "../../../packages/contract/src/index";
-import type { RunnerFacts, TurnState } from "../../../packages/protocol/src/index";
+import type { TurnState } from "../../../packages/protocol/src/index";
 import { PASSWORD, USERNAME } from "../../../scripts/controller-process.ts";
-import { enlistScriptedRunner, type ScriptedRunner, type ScriptStep } from "./scripted-runner.ts";
+import {
+  enlistScriptedRunner,
+  type ScriptedMachine,
+  type ScriptedRunner,
+  type ScriptStep,
+} from "./scripted-runner.ts";
 import { pollUntil } from "./poll.ts";
 
 /** How many spawns are in flight at once; SQLite writes one at a time anyway. */
@@ -100,8 +105,9 @@ export interface Fleet {
    *   reports a port nothing serves.
    * - `joinToken` is the join token the runner joins with, such as the one an
    *   Add a machine dialog showed. Without it, a token is minted.
-   * - `machine` sets the memory size the runner reports. A machine page draws
-   *   its Memory graph only for a runner that reports it.
+   * - `machine` sets the memory and disk size the runner reports, which a
+   *   machine page needs for its Memory graph and its disk gauge, and whether
+   *   the runner claims to measure disk usage (see `ScriptedMachine`).
    */
   readonly enlistRunner: (
     name: string,
@@ -109,7 +115,7 @@ export interface Fleet {
       readonly maxConcurrentSessions?: number;
       readonly identityPort?: number;
       readonly joinToken?: string;
-      readonly machine?: Partial<Pick<RunnerFacts, "totalMemoryBytes">>;
+      readonly machine?: ScriptedMachine;
     },
   ) => Promise<ScriptedRunner>;
   readonly createProject: (name: string) => Promise<Project>;

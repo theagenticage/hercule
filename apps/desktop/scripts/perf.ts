@@ -164,6 +164,17 @@
  *
  *        pnpm --filter @hercule/desktop perf -- --providers-only
  *
+ * Spec 17 §What Fleet costs asks for processes, memory, idle and per streamed
+ * token with the Fleet page and then a machine's page open, and for the reads
+ * that Runner Metrics nudges, disk usage reports, the Activity page and the
+ * cleanup cause. Pass `--fleet-only` for that: on six machines with 14 days of
+ * history, five launches, the new-thread screen to compare with, the Fleet
+ * page, studio's page, the Fleet page with about 500 sessions open, and
+ * nimbus's page for the cleanup (see `perf-fleet.ts`). The full run does not
+ * measure Fleet:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --fleet-only
+ *
  * The first thread screen's JavaScript is not measured here: `pnpm
  * build:desktop` checks it, and prints it as "the first screen", because the
  * thread's route is among the routes its check counts.
@@ -345,6 +356,16 @@ import {
   seedWorkflows,
 } from "./perf-workflows.ts";
 import { measureAccountUsageUpdates, reportAccountUsageUpdates } from "./perf-providers.ts";
+import {
+  buildFleetDatabaseWrite,
+  measureFleetLaunch,
+  openFleetScreenOnce,
+  reportFleetLaunch,
+  reportFleetReadSizes,
+  reportFleetState,
+  seedFleet,
+  type FleetLaunchPlan,
+} from "./perf-fleet.ts";
 import { pollUntil } from "./poll.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
@@ -1455,6 +1476,12 @@ const SKILLS_ONLY = process.argv.includes("--skills-only");
 const PROVIDERS_ONLY = process.argv.includes("--providers-only");
 
 /**
+ * Whether the run measures only the Fleet screens (see `measureFleet`), and
+ * skips every other launch and the workflow list.
+ */
+const FLEET_ONLY = process.argv.includes("--fleet-only");
+
+/**
  * Writes the events of Intake, and measures Everything in a plain launch that
  * opens Intake again. The fixture gives the events their titles and arrival
  * times in `prepareLaunch`.
@@ -1665,6 +1692,69 @@ async function measureProviders(fixture: ThreadFixture, userDataDir: string): Pr
 }
 
 /**
+ * Measures the Fleet screens (see `perf-fleet.ts`): seeds the machines and
+ * their history on 48 threads, then measures the new-thread screen, the
+ * Fleet page and studio's page, then grows to 492 threads and measures the
+ * Fleet page again, and last nimbus's page with its cleanup. Each launch
+ * starts from a fresh `prepareLaunch`, because a streamed turn makes its
+ * thread's age recent.
+ */
+async function measureFleet(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  await fixture.growTo(48);
+  const seeded = await seedFleet(fixture);
+  const writeDatabase = buildFleetDatabaseWrite(seeded);
+  const [studio] = seeded.runners;
+  const plans: FleetLaunchPlan[] = [
+    {
+      name: "the new-thread screen, to compare with",
+      path: "/",
+      drawn: `document.querySelector("main") !== null && document.querySelector(".fleet-card, .machine-page-head") === null`,
+      reporters: seeded.runners,
+      reportsDiskUsage: true,
+      opensActivity: false,
+      cleansUp: false,
+    },
+    {
+      name: "the Fleet page",
+      path: "/fleet",
+      drawn: `document.querySelectorAll(".fleet-card").length >= 5`,
+      reporters: seeded.runners,
+      reportsDiskUsage: true,
+      opensActivity: false,
+      cleansUp: false,
+    },
+    {
+      name: "studio's page",
+      path: `/fleet/${studio!.runnerId}`,
+      drawn: `document.querySelector(".machine-page-head") !== null`,
+      reporters: [studio!],
+      reportsDiskUsage: false,
+      opensActivity: true,
+      cleansUp: false,
+    },
+  ];
+  const measure = async (plan: FleetLaunchPlan) => {
+    await fixture.prepareLaunch({ twoMinuteRow: false, writeDatabase });
+    await reportFleetState(seeded);
+    await openFleetScreenOnce(userDataDir, plan);
+    reportFleetLaunch(await measureFleetLaunch(userDataDir, fixture, seeded, plan));
+  };
+  for (const plan of plans) await measure(plan);
+  await reportFleetReadSizes(fixture, studio!.runnerId);
+  await fixture.growTo(492);
+  await measure({ ...plans[1]!, name: "the Fleet page, about 500 sessions" });
+  await measure({
+    name: "nimbus's page, cleaning up",
+    path: `/fleet/${seeded.nimbus.runnerId}`,
+    drawn: `document.querySelector(".machine-page-head") !== null && document.querySelector("#machine-storage") !== null`,
+    reporters: [seeded.nimbus],
+    reportsDiskUsage: false,
+    opensActivity: false,
+    cleansUp: true,
+  });
+}
+
+/**
  * Measures every launch but the workflow list's, and reports each launch as
  * it is measured. Returns the readings that are reported once the
  * controller has stopped.
@@ -1742,6 +1832,10 @@ const launches = await runWithThreadFixture(async (fixture) => {
     }
     if (PROVIDERS_ONLY) {
       await measureProviders(fixture, userDataDir);
+      return null;
+    }
+    if (FLEET_ONLY) {
+      await measureFleet(fixture, userDataDir);
       return null;
     }
     if (SIDEBAR_ONLY) {

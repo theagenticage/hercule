@@ -63,6 +63,7 @@ import type {
   ATTACHMENTS_CAPABILITY,
   AttachmentReference,
   ControllerToRunner,
+  DISK_USAGE_CAPABILITY,
   ExitReason,
   ItemKind,
   JoinAnswer,
@@ -75,6 +76,7 @@ import type {
   REPOSITORY_SKILLS_CAPABILITY,
   RepositorySkill,
   RequestResolution,
+  RunnerDiskUsageReport,
   RunnerFacts,
   RunnerMetrics,
   RunnerToController,
@@ -458,6 +460,25 @@ export interface ScriptedRunner {
    * no metrics until a test calls this. Fails if the runner is not connected.
    */
   readonly reportMetrics: (metrics: RunnerMetrics) => void;
+  /**
+   * Sends one disk usage report, as a runner does after it measured its
+   * workspaces. A scripted runner measures nothing and sends none on its own.
+   * The controller stores only entries for workspaces this runner holds.
+   * Fails if the runner is not connected.
+   */
+  readonly reportDiskUsage: (report: RunnerDiskUsageReport) => void;
+}
+
+/** What a scripted runner reports about the machine it stands in for. */
+export interface ScriptedMachine extends Partial<
+  Pick<RunnerFacts, "totalMemoryBytes" | "diskTotalBytes">
+> {
+  /**
+   * Whether the runner says it measures disk usage (the `diskUsage`
+   * capability), so a machine page draws its Storage section instead of
+   * saying that the runner is too old. Off unless set.
+   */
+  readonly measuresDiskUsage?: boolean;
 }
 
 /** The skills a scripted runner knows about; see `ScriptedRunner.setSkills`. */
@@ -491,14 +512,16 @@ export interface ScriptedSkills {
  * port, is where the developer's own runner listens: a client would find
  * that runner instead.
  *
- * `machine` overrides the memory size the runner reports. The machine page
- * cannot draw a Memory graph without it.
+ * `machine` overrides the memory size the runner reports, which the machine
+ * page needs for its Memory graph, can add the disk's size, which the disk
+ * gauge and forecast need, and can make the runner claim it measures disk
+ * usage (see `ScriptedMachine`).
  */
 export async function enlistScriptedRunner(
   url: string,
   joinToken: string,
   identityPort: number,
-  machine: Partial<Pick<RunnerFacts, "totalMemoryBytes">> = {},
+  { measuresDiskUsage = false, ...machine }: ScriptedMachine = {},
 ): Promise<ScriptedRunner> {
   const joined = await fetch(`${url}/api/v1/runners/join`, {
     method: "POST",
@@ -1358,6 +1381,7 @@ export async function enlistScriptedRunner(
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
               "skills" satisfies typeof SKILLS_CAPABILITY,
               "repositorySkills" satisfies typeof REPOSITORY_SKILLS_CAPABILITY,
+              ...(measuresDiskUsage ? ["diskUsage" satisfies typeof DISK_USAGE_CAPABILITY] : []),
             ],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
@@ -1438,6 +1462,7 @@ export async function enlistScriptedRunner(
     // The wire keeps the report's old name: the frame is `watermarkReport`
     // and its key `watermark`.
     reportMetrics: (metrics) => send({ _tag: "watermarkReport", watermark: metrics }),
+    reportDiskUsage: (diskUsage) => send({ _tag: "diskUsageReport", diskUsage }),
     goOffline: async () => {
       if (socket.readyState === WebSocket.OPEN) send({ _tag: "goodbye" });
       await closeSocket();

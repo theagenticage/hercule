@@ -566,8 +566,11 @@ export interface ThreadFixture {
    * without it only the Anthropic account the fleet makes, with no identity
    * (see `buildProviderAccountFixtures`). With `signalsAboutThreads`,
    * that many of the oldest open signals become signals of a plugin's event,
-   * each about a thread (see `makeSignalsAboutThreads`). Fails when a thread
-   * is not in its expected state afterwards.
+   * each about a thread (see `makeSignalsAboutThreads`). With
+   * `writeDatabase`, that function runs on the stopped controller's database
+   * last, for a scenario that seeds what no operation makes, such as Runner
+   * Metrics history. Fails when a thread is not in its expected state
+   * afterwards.
    */
   readonly prepareLaunch: (options: {
     readonly twoMinuteRow: boolean;
@@ -575,6 +578,7 @@ export interface ThreadFixture {
     readonly connections?: boolean;
     readonly providerAccounts?: boolean;
     readonly signalsAboutThreads?: number;
+    readonly writeDatabase?: (database: DatabaseSync) => void;
   }) => Promise<void>;
   /**
    * Spawns the 500 threads of the sidebar's groups scenario instead of
@@ -635,6 +639,19 @@ export interface ThreadFixture {
     text: string,
     script: ReadonlyArray<ScriptStep>,
   ) => Promise<{ readonly played: Promise<void> }>;
+  /** The scripted runners the fixture enlisted, "studio" and "laptop" first, then each `enlistRunner` added. */
+  readonly runners: ReadonlyArray<ScriptedRunner>;
+  /**
+   * Enlists one more scripted runner (see `Fleet`). The fixture reconnects it
+   * after each restart of the controller, as it does its own two.
+   */
+  readonly enlistRunner: Fleet["enlistRunner"];
+  /**
+   * Spawns threads on a runner (see `Fleet`). The fixture does not track
+   * them: a scenario that spawns some settles them itself, idle, before the
+   * next `prepareLaunch`, which counts every idle thread.
+   */
+  readonly spawnThreads: Fleet["spawnThreads"];
   /** Calls one operation of the public API as the signed-in user (see `Fleet`). */
   readonly call: Fleet["call"];
   /**
@@ -871,12 +888,14 @@ export async function runWithThreadFixture<T>(
         connections = false,
         providerAccounts = false,
         signalsAboutThreads = 0,
+        writeDatabase,
       }: {
         readonly twoMinuteRow: boolean;
         readonly spreadRuns?: RunSpread;
         readonly connections?: boolean;
         readonly providerAccounts?: boolean;
         readonly signalsAboutThreads?: number;
+        readonly writeDatabase?: (database: DatabaseSync) => void;
       }) => {
         // A Request is answered before the restart and opened again after it,
         // so the restart never has to decide what happens to one.
@@ -931,6 +950,14 @@ export async function runWithThreadFixture<T>(
         // the fixture, so every other launch measures what it measured before.
         resetProviderAccounts(home);
         if (providerAccounts) writeProviderAccounts(home, buildProviderAccountFixtures(Date.now()));
+        if (writeDatabase !== undefined) {
+          const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+          try {
+            writeDatabase(database);
+          } finally {
+            database.close();
+          }
+        }
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
@@ -1042,6 +1069,13 @@ export async function runWithThreadFixture<T>(
         growTranscript,
         streamTurn,
         playTurn,
+        runners,
+        enlistRunner: async (name, options) => {
+          const runner = await fleet.enlistRunner(name, options);
+          runners.push(runner);
+          return runner;
+        },
+        spawnThreads: fleet.spawnThreads,
         call,
         callAsSession: (sessionId, method, path, body) =>
           callApi(
