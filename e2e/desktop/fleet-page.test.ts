@@ -131,9 +131,9 @@ describe("the Fleet page", () => {
 
   it("shows the disk of a real runner as a percentage", async () => {
     // The controller starts a real runner of its own, which `arrangeFleet`
-    // retires. This test keeps it: it reports the size of its disk, so its
-    // card draws a percentage instead of the free space the scripted runners'
-    // cards draw.
+    // retires. This test keeps it: it reports its disk, so its card draws a
+    // percentage. The scripted runners send no metrics, so their cards draw a
+    // dash.
     const { url } = await startControllerForTest({ setUp: true });
     const { page } = await openSignedIn(url);
     await openFleet(page);

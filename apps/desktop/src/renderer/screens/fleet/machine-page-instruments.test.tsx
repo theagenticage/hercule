@@ -14,7 +14,7 @@ const INSTRUMENTS: MachineInstruments = {
     unit: " of 16",
     level: "you",
     share: null,
-    note: "5 waiting for a slot",
+    note: "5 waiting",
     drawing: { shape: "blocks", cap: 16, running: 12, free: 4, waiting: 5, waitingBlocks: 5 },
   },
   cpu: {
@@ -39,7 +39,7 @@ describe("MachinePageInstruments", () => {
     );
 
     expect(readTiles(container)).toEqual([
-      "Sessions12 of 165 waiting for a slot",
+      "Sessions12 of 165 waiting",
       "CPU34%Peak 71% in the last minute",
       "Memory55%29.0 GB free of 64 GB",
       "Disk87%500 GB free of 4,000 GB",
@@ -71,7 +71,7 @@ describe("MachinePageInstruments", () => {
             unit: " GB free",
             level: "normal",
             share: null,
-            note: "This machine's runner is too old to report its disk size. Update it.",
+            note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
           },
         }}
         isAway={false}
@@ -80,7 +80,7 @@ describe("MachinePageInstruments", () => {
 
     const disk = readTiles(container)[3];
     expect(disk).toBe(
-      "Disk412 GB freeThis machine's runner is too old to report its disk size. Update it.",
+      "Disk412 GB freeThis machine's runner does not report its disk size. Update it to see how full the disk is.",
     );
     const meters = container.querySelectorAll<HTMLElement>(".fleet-meter i");
     expect(meters[2]!.style.width).toBe("0%");
@@ -106,15 +106,21 @@ describe("MachinePageInstruments", () => {
     expect(readTiles(container)[1]).toBe("CPU–First reading within a minute");
   });
 
-  it("keeps the last values of a machine that is away, but not its sessions, which cannot be known", () => {
-    const { container } = render(<MachinePageInstruments instruments={INSTRUMENTS} isAway />);
+  it("draws a machine that is away in quieter inks, with its instruments as given", () => {
+    const { container } = render(
+      <MachinePageInstruments
+        instruments={{ ...INSTRUMENTS, sessions: { ...INSTRUMENTS.sessions, value: "–" } }}
+        isAway
+      />,
+    );
 
     expect(readTiles(container)).toEqual([
-      "Sessions– of 165 waiting for a slot",
+      "Sessions– of 165 waiting",
       "CPU34%Peak 71% in the last minute",
       "Memory55%29.0 GB free of 64 GB",
       "Disk87%500 GB free of 4,000 GB",
     ]);
+    expect(container.querySelector(".machine-page-instruments-box.is-away")).not.toBeNull();
     expect(container.querySelector(".fleet-sessions.is-away")).not.toBeNull();
   });
 });

@@ -499,14 +499,24 @@ describe("describeMachinePage instruments", () => {
       });
     });
 
-    it("turns you and counts the sessions waiting for a slot", () => {
+    it("turns you and counts the sessions waiting, whatever they wait for", () => {
       expect(instruments({}, { running: 4, waiting: 3 }).sessions).toMatchObject({
         level: "you",
-        note: "3 waiting for a slot",
+        note: "3 waiting",
       });
-      expect(instruments({}, { running: 4, waiting: 1 }).sessions.note).toBe(
-        "1 waiting for a slot",
+      // Under the cap, so the cap is not what holds the session back.
+      expect(instruments({ maxConcurrentSessions: 16 }, { waiting: 1 }).sessions.note).toBe(
+        "1 waiting",
       );
+    });
+
+    it("shows a dash against the cap while the machine is away, and still counts what waits", () => {
+      for (const connectivity of ["offline", "unreachable"] as const) {
+        expect(
+          instruments({ connectivity, maxConcurrentSessions: 16 }, { running: 4, waiting: 3 })
+            .sessions,
+        ).toMatchObject({ value: "–", unit: " of 16", level: "normal", note: "3 waiting" });
+      }
     });
 
     it("draws the same blocks or bar as a card: blocks at 16 slots, a bar at 17", () => {
@@ -644,7 +654,14 @@ describe("describeMachinePage instruments", () => {
         unit: " GB free",
         level: "normal",
         share: null,
-        note: "This machine's runner is too old to report its disk size. Update it.",
+        note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
+      });
+    });
+
+    it("never shows more free space than the disk holds", () => {
+      expect(instruments(withDisk(500e9, 100e9)).disk).toMatchObject({
+        value: "0",
+        note: "100 GB free of 100 GB",
       });
     });
 

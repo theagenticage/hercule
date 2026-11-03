@@ -79,10 +79,10 @@ const BYTES_PER_GIBIBYTE = 1024 ** 3;
 const formatWholeMemory = (bytes: number): string => String(Math.round(bytes / BYTES_PER_GIBIBYTE));
 
 /**
- * Formats a memory size in binary gigabytes with one decimal under 100 and
+ * Formats a byte count in binary gigabytes with one decimal under 100 and
  * whole from there on, as the disk sizes do: "17.6", "120".
  */
-const formatFreeMemory = (bytes: number): string => {
+const formatGibibytes = (bytes: number): string => {
   const gibibytes = bytes / BYTES_PER_GIBIBYTE;
   const tenths = Math.round(gibibytes * 10) / 10;
   return tenths < 100 ? tenths.toFixed(1) : Math.round(gibibytes).toLocaleString("en-US");
@@ -189,13 +189,16 @@ export type MachinePageTop =
 
 /**
  * One instrument of a machine's page: a big number, a meter and a line under
- * it. A renderer draws every instrument with the same component, and the
- * graphs join these tiles in a later slice.
+ * it. A renderer draws every instrument with the same component.
  */
 export interface MachineInstrument {
   /** The big number, such as "23", or "–" when the machine reported none. */
   readonly value: string;
-  /** What follows the number, such as "%" or " of 16"; empty when `value` is "–". */
+  /**
+   * What follows the number, such as "%", " GB free" or " of 16". It is empty
+   * when CPU, memory or disk has no number to show ("–"). The Sessions
+   * instrument of a machine that is away keeps its " of 16" beside the "–".
+   */
   readonly unit: string;
   /** Colours the number and the meter. */
   readonly level: GaugeLevel;
@@ -248,34 +251,31 @@ const describeCpuInstrument = (runner: Runner): MachineInstrument => {
 /** Describes the instrument of memory: the share in use and the memory free. See `describeMachineInstruments`. */
 const describeMemoryInstrument = (runner: Runner): MachineInstrument => {
   const memory = measureMemory(runner);
-  if (memory === null || runner.facts === null || runner.metrics === null) return NOT_REPORTED;
-  const { totalMemoryBytes } = runner.facts;
-  const free = Math.min(totalMemoryBytes, runner.metrics.availableMemoryBytes);
+  if (memory === null) return NOT_REPORTED;
   return {
     value: String(memory.percent),
     unit: "%",
     level: memory.level,
     share: memory.share,
-    note: `${formatFreeMemory(free)} GB free of ${formatWholeMemory(totalMemoryBytes)} GB`,
+    note: `${formatGibibytes(memory.freeBytes)} GB free of ${formatWholeMemory(memory.totalBytes)} GB`,
   };
 };
 
 /** Describes the instrument of the disk: the share in use and the space free. See `describeMachineInstruments`. */
 const describeDiskInstrument = (runner: Runner): MachineInstrument => {
   const disk = measureDisk(runner);
-  if (disk === null || runner.metrics === null) return NOT_REPORTED;
-  const free = splitDiskSize(runner.metrics.diskFreeBytes);
-  const total = runner.facts?.diskTotalBytes;
-  if (disk.percent === null || disk.share === null || total === undefined) {
+  if (disk === null) return NOT_REPORTED;
+  const free = splitDiskSize(disk.freeBytes);
+  if (disk.percent === null || disk.share === null || disk.totalBytes === null) {
     return {
       value: free.amount,
       unit: ` ${free.unit} free`,
       level: disk.level,
       share: null,
-      note: "This machine's runner is too old to report its disk size. Update it.",
+      note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
     };
   }
-  const size = splitDiskSize(total);
+  const size = splitDiskSize(disk.totalBytes);
   return {
     value: String(disk.percent),
     unit: "%",
@@ -290,8 +290,11 @@ const describeDiskInstrument = (runner: Runner): MachineInstrument => {
  * An away machine keeps the values it last reported. Before any report, CPU,
  * memory and disk show "–" and "Not reported yet".
  *
- * - Sessions: how many run, against the cap. It is `you` while sessions wait
- *   for a slot.
+ * - Sessions: how many run, against the cap, and how many wait. It is `you`
+ *   while sessions wait. A machine that is offline or unreachable runs
+ *   nothing that can be counted, so the number is "–" against the cap, as on
+ *   its card, and the level is `normal`. The controller still knows what
+ *   waits for the machine, so the note keeps that count.
  * - CPU: the last minute's mean, floored, with the peak. It has no colour
  *   levels. A runner that reports no CPU, or none yet, says so in the note.
  * - Memory: the share in use, floored, and the memory free of the total, in
@@ -302,13 +305,14 @@ const describeDiskInstrument = (runner: Runner): MachineInstrument => {
  */
 const describeMachineInstruments = (machine: FleetMachine): MachineInstruments => {
   const { runner, running, waiting } = machine;
+  const isAway = runner.connectivity !== "online";
   return {
     sessions: {
-      value: String(running),
+      value: isAway ? "–" : String(running),
       unit: ` of ${String(runner.maxConcurrentSessions)}`,
-      level: waiting > 0 ? "you" : "normal",
+      level: waiting > 0 && !isAway ? "you" : "normal",
       share: null,
-      note: waiting === 0 ? "None waiting" : `${String(waiting)} waiting for a slot`,
+      note: waiting === 0 ? "None waiting" : `${String(waiting)} waiting`,
       drawing: buildSessionsDrawing(machine),
     },
     cpu: describeCpuInstrument(runner),

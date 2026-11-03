@@ -21,7 +21,6 @@ export {
   MAX_ANSWERS_LENGTH,
   MAX_MESSAGE_LENGTH,
   readSkillReferenceName,
-  RunnerCpu,
   TodoListDetail,
   TodoStep,
   UnknownItemDetail,

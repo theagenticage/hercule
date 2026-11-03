@@ -79,9 +79,10 @@ export const countRunnerSessions = (sessions: readonly Session[]): SessionCounts
  * Returns every need that applies to the machine of `runner`, the most serious
  * first: it is offline, it is unreachable, its disk is below its limit,
  * sessions wait for a slot, its disk is 85% full or more. The list is empty
- * when the machine needs nothing. `counts` holds the session counts of the runners (the runner's own entry is
- * used; none means no sessions). A time is worded relative to `today` in
- * `timezone`, and left out when the runner was never seen.
+ * when the machine needs nothing. `counts` holds the session counts of the
+ * runners (the runner's own entry is used; none means no sessions). A time is
+ * worded relative to `today` in `timezone`, and left out when the runner was
+ * never seen.
  *
  * Takes the runner and the counts rather than a machine type, so that type
  * stays private to the Fleet modules.
@@ -208,6 +209,7 @@ const summarizeMachine = (
 ): MachineSummary => {
   const { runner } = machine;
   const disk = measureDisk(runner);
+  const memory = measureMemory(runner);
   return {
     runnerId: runner.id,
     name: runner.name,
@@ -218,10 +220,18 @@ const summarizeMachine = (
     roomText: describeRoom(machine)?.short ?? null,
     need: needs[0],
     disk:
-      runner.metrics === null || disk === null
+      disk === null
         ? null
-        : { ...splitDiskSize(runner.metrics.diskFreeBytes), ...disk },
-    memory: measureMemory(runner),
+        : {
+            ...splitDiskSize(disk.freeBytes),
+            level: disk.level,
+            share: disk.share,
+            percent: disk.percent,
+          },
+    memory:
+      memory === null
+        ? null
+        : { percent: memory.percent, share: memory.share, level: memory.level },
   };
 };
 

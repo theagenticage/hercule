@@ -287,8 +287,9 @@ const DISK_YOU_FROM_PERCENT = 85;
 
 /**
  * Measures how much of `totalBytes` is `usedBytes`, which is clamped to the
- * total first. `share` is the fill from 0 to 1. `percent` is the whole number
- * shown beside a gauge, rounded down.
+ * total first, so `freeBytes` is never negative or above the total. `share`
+ * is the fill from 0 to 1. `percent` is the whole number shown beside a gauge,
+ * rounded down.
  *
  * It rounds down, never to the nearest, and the levels below compare that
  * same whole percent. A gauge that turns `you` at 85% must never show a
@@ -300,41 +301,56 @@ const DISK_YOU_FROM_PERCENT = 85;
 const measureUse = (
   usedBytes: number,
   totalBytes: number,
-): { readonly share: number; readonly percent: number } => {
+): { readonly share: number; readonly percent: number; readonly freeBytes: number } => {
   const used = Math.min(totalBytes, Math.max(0, usedBytes));
-  return { share: used / totalBytes, percent: Math.floor((used * 100) / totalBytes) };
+  return {
+    share: used / totalBytes,
+    percent: Math.floor((used * 100) / totalBytes),
+    freeBytes: totalBytes - used,
+  };
 };
 
 /**
  * Measures the memory in use on a machine: `share` is the part of its RAM
  * that is not available, from 0 to 1, `percent` is that share rounded down
  * (see `measureUse`), and `level` is `you` from 80% and `fail` from 92%.
- * Returns `null` when the runner has not reported its total memory or its
- * available memory. A high level is only a colour: memory never makes a
+ * `freeBytes` is the available memory, capped at `totalBytes`, the machine's
+ * RAM. Returns `null` when the runner has not reported its total memory or
+ * its available memory. A high level is only a colour: memory never makes a
  * machine need the user.
  */
 export const measureMemory = (
   runner: Runner,
-): { readonly share: number; readonly percent: number; readonly level: GaugeLevel } | null => {
+): {
+  readonly share: number;
+  readonly percent: number;
+  readonly level: GaugeLevel;
+  readonly freeBytes: number;
+  readonly totalBytes: number;
+} | null => {
   if (runner.facts === null || runner.metrics === null) return null;
   const total = runner.facts.totalMemoryBytes;
   if (total <= 0) return null;
-  const { share, percent } = measureUse(total - runner.metrics.availableMemoryBytes, total);
+  const { share, percent, freeBytes } = measureUse(
+    total - runner.metrics.availableMemoryBytes,
+    total,
+  );
   const level =
     percent >= MEMORY_FAIL_FROM_PERCENT
       ? "fail"
       : percent >= MEMORY_YOU_FROM_PERCENT
         ? "you"
         : "normal";
-  return { share, percent, level };
+  return { share, percent, level, freeBytes, totalBytes: total };
 };
 
 /**
  * Measures the disk of a machine. `share` and `percent` are how full it is
  * (see `measureUse`), and are `null` when the runner did not report the disk's
- * total size. `level` is `fail` while the free space is below the disk limit,
- * even without a total, else `you` from 85% full, else `normal`. Returns
- * `null` when the runner has not reported its disk.
+ * total size, as is `totalBytes`. `freeBytes` is the free space, capped at the
+ * total when there is one. `level` is `fail` while the free space is below the
+ * disk limit, even without a total, else `you` from 85% full, else `normal`.
+ * Returns `null` when the runner has not reported its disk.
  */
 export const measureDisk = (
   runner: Runner,
@@ -342,19 +358,25 @@ export const measureDisk = (
   readonly share: number | null;
   readonly percent: number | null;
   readonly level: GaugeLevel;
+  readonly freeBytes: number;
+  readonly totalBytes: number | null;
 } | null => {
   if (runner.metrics === null) return null;
-  const total = runner.facts?.diskTotalBytes;
-  const use =
-    total === undefined || total <= 0
-      ? null
-      : measureUse(total - runner.metrics.diskFreeBytes, total);
+  const reportedTotal = runner.facts?.diskTotalBytes;
+  const total = reportedTotal !== undefined && reportedTotal > 0 ? reportedTotal : null;
+  const use = total === null ? null : measureUse(total - runner.metrics.diskFreeBytes, total);
   const level = isDiskBelowLimit(runner)
     ? "fail"
     : use !== null && use.percent >= DISK_YOU_FROM_PERCENT
       ? "you"
       : "normal";
-  return { share: use?.share ?? null, percent: use?.percent ?? null, level };
+  return {
+    share: use?.share ?? null,
+    percent: use?.percent ?? null,
+    level,
+    freeBytes: use?.freeBytes ?? runner.metrics.diskFreeBytes,
+    totalBytes: total,
+  };
 };
 
 /**
@@ -376,17 +398,13 @@ export type MachineNeed =
     }
   | { readonly kind: "disk-nearly-full"; readonly hue: "you"; readonly line: string };
 
-type NeedKind = MachineNeed["kind"];
-
 /**
- * Returns how full the disk is, in whole percent, when it is 85% full or
- * more. Returns `null` below that, and when the runner did not report the
- * disk's total size.
+ * The kind of a need that applies to a machine. A nearly full disk also
+ * carries how full it is, in whole percent, for its line.
  */
-const findNearlyFullDiskPercent = (runner: Runner): number | null => {
-  const percent = measureDisk(runner)?.percent ?? null;
-  return percent !== null && percent >= DISK_YOU_FROM_PERCENT ? percent : null;
-};
+type NeedKind =
+  | { readonly kind: Exclude<MachineNeed["kind"], "disk-nearly-full"> }
+  | { readonly kind: "disk-nearly-full"; readonly diskPercent: number };
 
 /**
  * Lists the kinds of need that apply to a machine, in the order the card
@@ -407,15 +425,19 @@ const findNearlyFullDiskPercent = (runner: Runner): number | null => {
 const listNeedKinds = (machine: FleetMachine): readonly NeedKind[] => {
   const { runner } = machine;
   const kinds: NeedKind[] = [];
-  if (runner.connectivity === "offline") kinds.push("offline");
-  if (runner.connectivity === "unreachable") kinds.push("unreachable");
-  if (isDiskBelowLimit(runner)) kinds.push("disk-below-limit");
+  if (runner.connectivity === "offline") kinds.push({ kind: "offline" });
+  if (runner.connectivity === "unreachable") kinds.push({ kind: "unreachable" });
+  if (isDiskBelowLimit(runner)) kinds.push({ kind: "disk-below-limit" });
   const isCapHoldingSessionsBack =
     canTakeNewSessions(runner) &&
     machine.waiting > 0 &&
     machine.running + machine.waiting > runner.maxConcurrentSessions;
-  if (isCapHoldingSessionsBack) kinds.push("waiting");
-  if (findNearlyFullDiskPercent(runner) !== null) kinds.push("disk-nearly-full");
+  if (isCapHoldingSessionsBack) kinds.push({ kind: "waiting" });
+  // A disk without a reported total size has no percentage, so it is never "nearly full".
+  const diskPercent = measureDisk(runner)?.percent ?? null;
+  if (diskPercent !== null && diskPercent >= DISK_YOU_FROM_PERCENT) {
+    kinds.push({ kind: "disk-nearly-full", diskPercent });
+  }
   return kinds;
 };
 
@@ -438,9 +460,9 @@ const describeAllowHint = ({ running, waiting }: FleetMachine): string => {
 /**
  * Returns every need that applies to a machine, the most serious first: it is
  * offline, it is unreachable, its disk is below its limit, sessions wait for a
- * slot, its disk is 85% full or more. The list is empty when the machine needs nothing. A time is worded
- * relative to `today` in `timezone`, and left out when the runner was never
- * seen.
+ * slot, its disk is 85% full or more. The list is empty when the machine needs
+ * nothing. A time is worded relative to `today` in `timezone`, and left out
+ * when the runner was never seen.
  */
 export const listMachineNeeds = (
   machine: FleetMachine,
@@ -448,21 +470,25 @@ export const listMachineNeeds = (
   today: Date,
 ): readonly MachineNeed[] => {
   const seen = formatLastSeen(machine.runner, timezone, today);
-  return listNeedKinds(machine).map((kind): MachineNeed => {
-    switch (kind) {
+  return listNeedKinds(machine).map((need): MachineNeed => {
+    switch (need.kind) {
       case "offline":
-        return { kind, hue: "fail", line: seen === null ? "Offline" : `Offline since ${seen}` };
+        return {
+          kind: "offline",
+          hue: "fail",
+          line: seen === null ? "Offline" : `Offline since ${seen}`,
+        };
       case "unreachable":
-        return { kind, hue: "fail", line: describeUnreachable(seen) };
+        return { kind: "unreachable", hue: "fail", line: describeUnreachable(seen) };
       case "disk-below-limit":
         return {
-          kind,
+          kind: "disk-below-limit",
           hue: "fail",
           line: "Disk below its limit. It takes no new sessions.",
         };
       case "waiting":
         return {
-          kind,
+          kind: "waiting",
           hue: "you",
           line: describeWaiting(machine),
           allow: machine.running + machine.waiting,
@@ -470,9 +496,9 @@ export const listMachineNeeds = (
         };
       case "disk-nearly-full":
         return {
-          kind,
+          kind: "disk-nearly-full",
           hue: "you",
-          line: `Disk ${String(findNearlyFullDiskPercent(machine.runner))}% full`,
+          line: `Disk ${String(need.diskPercent)}% full`,
         };
     }
   });

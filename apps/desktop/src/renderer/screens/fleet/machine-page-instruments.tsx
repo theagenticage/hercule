@@ -37,10 +37,10 @@ function Instrument({
  * Memory and Disk, each from its `MachineInstrument`. Sessions is drawn as the
  * cards draw it, the others as a meter.
  *
- * A machine that is `isAway` keeps the values it last reported, in quieter
- * inks as on its card. Its sessions are the one exception: they cannot be
- * known, so the number is a dash and the drawing an outline, as on the card.
- * The row holds four columns while its place is wide and two when it is not.
+ * A machine that is `isAway` is drawn in quieter inks, as on its card, and
+ * its Sessions drawing is an outline. The instruments themselves already say
+ * what an away machine shows. The row holds four columns while its place is
+ * wide and two when it is not.
  */
 export function MachinePageInstruments({
   instruments,
@@ -53,7 +53,7 @@ export function MachinePageInstruments({
   return (
     <div className={`machine-page-instruments-box${isAway ? " is-away" : ""}`}>
       <div className="machine-page-instruments">
-        <Instrument label="Sessions" instrument={isAway ? { ...sessions, value: "–" } : sessions}>
+        <Instrument label="Sessions" instrument={sessions}>
           <SessionsFigure drawing={sessions.drawing} size="card" isAway={isAway} />
         </Instrument>
         <Instrument label="CPU" instrument={cpu}>

@@ -43,10 +43,10 @@ const SECTIONS = [
 /**
  * One machine's page (spec 17 §Fleet, A machine's page): its head and room
  * line, or the banner of a machine that is away, then its instruments, its
- * Software and its Settings. Its loader reads everything the page draws before it renders, as
- * the Fleet page's does (`fleet/index.tsx`). When no runner has the id, or the
- * runner is retired, the route shows `RunnerNotFound`: retired machines are
- * not shown anywhere on Fleet.
+ * Software and its Settings. Its loader reads everything the page draws before
+ * it renders, as the Fleet page's does (`fleet/index.tsx`). When no runner has
+ * the id, or the runner is retired, the route shows `RunnerNotFound`: retired
+ * machines are not shown anywhere on Fleet.
  */
 export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
   staticData: { title: "Fleet" },

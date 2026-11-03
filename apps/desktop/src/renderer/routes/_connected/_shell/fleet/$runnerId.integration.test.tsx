@@ -278,7 +278,7 @@ describe("the Capacity section", () => {
       "Sessions4 of 8None waiting",
       "CPU–This machine's runner is too old to report CPU. Update it.",
       "Memory50%8.0 GB free of 16 GB",
-      "Disk100 GB freeThis machine's runner is too old to report its disk size. Update it.",
+      "Disk100 GB freeThis machine's runner does not report its disk size. Update it to see how full the disk is.",
     ]);
   });
 });

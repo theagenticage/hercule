@@ -780,7 +780,7 @@ describe("MachineSummary memory", () => {
     },
   );
 
-  it("shows the percentage rounded down and colours it on the unrounded share", () => {
+  it("shows the percentage rounded down and colours it on the rounded-down percent", () => {
     // 79.9% in use is "79" and normal, never a normal-coloured "80".
     expect(readMemory(1000, 201)).toMatchObject({ percent: 79, level: "normal" });
     expect(readMemory(1000, 200)).toMatchObject({ percent: 80, level: "you" });
