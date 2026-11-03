@@ -2307,3 +2307,39 @@ describe("hercule session skill list", () => {
     expect(lines.join("\n")).toContain("note: skills may be missing: offline");
   });
 });
+
+describe("hercule harness list", () => {
+  const harness = (id: string, latestRelease: unknown) => ({
+    id,
+    displayName: id,
+    binaryName: id,
+    declared: {},
+    runs: [],
+    runners: [],
+    latestRelease,
+  });
+
+  it("prints the latest version as a column, empty until a read has succeeded", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: [
+          harness("a/a", { version: "2.1.0", checkedAt: "2026-11-03T08:00:00.000Z", error: null }),
+          harness("b/b", {
+            version: null,
+            checkedAt: null,
+            error: "The npm registry answered 404.",
+          }),
+          harness("c/c", null),
+        ],
+      },
+      lookUpCommand("harness", "list"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines[0]).toMatch(/^id\s+displayName\s+binaryName\s+latest\s+declared/);
+    expect(lines[1]).toMatch(/^a\/a\s+a\/a\s+a\/a\s+2\.1\.0\s+\{\}/);
+    expect(lines[2]).toMatch(/^b\/b\s+b\/b\s+b\/b\s+\{\}/);
+    expect(lines.join("\n")).not.toContain("npm registry");
+  });
+});

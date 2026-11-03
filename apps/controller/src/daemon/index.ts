@@ -79,6 +79,13 @@ export {
 } from "./events";
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { runSkillUpdateCheckLoop, SkillUpdateCheckInterval } from "./skills";
+export {
+  HarnessReleaseCheckInterval,
+  HarnessReleaseWake,
+  HarnessReleaseWakeLayer,
+  runHarnessReleaseCheckLoop,
+  WakeHarnessReleaseCheckOnPluginChangeLayer,
+} from "./harnesses";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
 export {
   DiscussionInputs,

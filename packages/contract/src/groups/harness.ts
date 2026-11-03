@@ -10,7 +10,7 @@ import { DeclaredCapabilities, HarnessProviderSupport } from "@hercule/plugin-ho
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated } from "../errors";
-import { Id } from "../ids";
+import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
 
 /** Re-exported so a reader of a harness needs only this package. */
@@ -37,6 +37,28 @@ export const HarnessOnRunner = Schema.Struct({
 
 export type HarnessOnRunner = Schema.Schema.Type<typeof HarnessOnRunner>;
 
+/**
+ * The newest release of a harness that its publisher lists, as the controller
+ * last read it. It is only what the user is told is available. It is not the
+ * version Hercule installs, and not the floor `versionVerdict` checks.
+ */
+export const HarnessLatestRelease = Schema.Struct({
+  /**
+   * The newest release the publisher lists, from the last read that succeeded.
+   * `null` before a read has succeeded.
+   */
+  version: Schema.NullOr(Schema.String),
+  /**
+   * When that successful read happened, so it is the age of `version`. `null`
+   * together with `version`.
+   */
+  checkedAt: Schema.NullOr(Timestamp),
+  /** Why the most recent read failed, or `null` when it succeeded. */
+  error: Schema.NullOr(Schema.String),
+});
+
+export type HarnessLatestRelease = Schema.Schema.Type<typeof HarnessLatestRelease>;
+
 export const Harness = Schema.Struct({
   /** The qualified id, such as `claude-code/claude-code`. */
   id: Schema.String,
@@ -52,6 +74,8 @@ export const Harness = Schema.Struct({
   runs: Schema.Array(HarnessProviderSupport),
   /** One entry per runner the controller knows, in the order the runners were added. */
   runners: Schema.Array(HarnessOnRunner),
+  /** `null` before the controller has tried to read the harness's latest release. */
+  latestRelease: Schema.NullOr(HarnessLatestRelease),
 });
 
 export type Harness = Schema.Schema.Type<typeof Harness>;

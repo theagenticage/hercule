@@ -275,6 +275,7 @@ const buildBootPlugin = (id: string, failure?: string): Plugin => ({
       id,
       displayName: `Harness ${id}`,
       binaryName: "harness",
+      releaseSource: { kind: "npm", package: "harness" },
       runs: [],
       declared: {
         steering: "native",

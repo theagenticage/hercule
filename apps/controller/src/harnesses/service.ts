@@ -29,7 +29,8 @@ const make = Effect.gen(function* () {
      * were added. A harness is installed on a runner when the runner's facts
      * list its binary as present. Its version is the one the newest probe
      * reported, and `null` when the harness is not installed there or no probe
-     * has seen it.
+     * has seen it. Its latest release is what the controller last read from
+     * the harness's publisher, and `null` before the first attempt.
      */
     query: (): Effect.Effect<ReadonlyArray<Harness>, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
@@ -37,6 +38,7 @@ const make = Effect.gen(function* () {
         const definitions = yield* host.harnesses();
         const fleet = yield* runners.listFacts();
         const versions = yield* snapshots.readReportedVersions();
+        const releases = yield* snapshots.readLatestReleases();
         return definitions.map((definition) => ({
           id: definition.id,
           displayName: definition.displayName,
@@ -58,6 +60,7 @@ const make = Effect.gen(function* () {
               versionVerdict: computeVersionVerdict(version, findVersionFloor(definition.id)),
             };
           }),
+          latestRelease: releases.get(definition.id) ?? null,
         }));
       }),
   };

@@ -52,6 +52,9 @@ import {
   SessionEditObserverLayer,
   SessionObserverLayer,
   WorkflowValidityObserversLayer,
+  HarnessReleaseWake,
+  HarnessReleaseWakeLayer,
+  WakeHarnessReleaseCheckOnPluginChangeLayer,
   type ProviderAccountProbing,
   type RunServiceReference,
   type DiscussionInputsReference,
@@ -109,6 +112,7 @@ import {
   PluginsLayer,
   registry,
 } from "./plugins";
+import { HarnessReleases, HarnessReleasesLayer } from "./harnesses";
 import {
   HarnessAccounts,
   HarnessAccountsLayer,
@@ -272,6 +276,8 @@ export type ControllerServices =
   | ConnectionTypes
   | RunnerConnections
   | RunnerMetricsService
+  | HarnessReleases
+  | HarnessReleaseWake
   | HarnessAccounts
   | ModelCatalogs
   | ModelProfileLookup
@@ -462,7 +468,12 @@ export const bootWith = <A, E>(
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
       Layer.provideMerge(RunServiceReferenceLayer),
       Layer.provideMerge(DiscussionInputsReferenceLayer),
+      // A plugin change also wakes the hourly read of the harnesses' latest
+      // releases, which a newly enabled harness plugin adds to.
+      Layer.provideMerge(WakeHarnessReleaseCheckOnPluginChangeLayer),
       Layer.provideMerge(WorkflowValidityObserversLayer),
+      Layer.provideMerge(HarnessReleaseWakeLayer),
+      Layer.provideMerge(HarnessReleasesLayer.pipe(Layer.provide(FetchHttpClient.layer))),
       Layer.provideMerge(withFleet),
     );
 

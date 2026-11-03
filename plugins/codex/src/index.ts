@@ -15,6 +15,7 @@ const definition: HarnessDefinition = {
   id: "codex",
   displayName: "Codex",
   binaryName: "codex",
+  releaseSource: { kind: "npm", package: "@openai/codex" },
   declared: {
     steering: "native",
     fork: "native",

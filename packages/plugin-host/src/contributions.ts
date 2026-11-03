@@ -145,6 +145,19 @@ export const HarnessProviderSupport = Schema.Struct({
 export type HarnessProviderSupport = Schema.Schema.Type<typeof HarnessProviderSupport>;
 
 /**
+ * Where a harness's releases are published, so the controller can read the
+ * newest one. The `kind` is a literal so that another publisher can be added
+ * later as another member of a union. `npm` means the public npm registry, and
+ * `package` is the package's name there, such as `@openai/codex`.
+ */
+export const HarnessReleaseSource = Schema.Struct({
+  kind: Schema.Literal("npm"),
+  package: Schema.NonEmptyString,
+});
+
+export type HarnessReleaseSource = Schema.Schema.Type<typeof HarnessReleaseSource>;
+
+/**
  * A harness's static self-description, which is all a harness plugin
  * contributes. `id` is the plugin's bare word; the host mints the qualified id
  * (`claude-code/claude-code`) at registration.
@@ -154,6 +167,8 @@ export const HarnessDefinition = Schema.Struct({
   displayName: ContributionName,
   /** The harness's executable name on `PATH`, which links a runner's facts to a harness. */
   binaryName: ContributionName,
+  /** Where the harness's releases are published. */
+  releaseSource: HarnessReleaseSource,
   declared: DeclaredCapabilities,
   /** The providers, and the account kinds of each, that the harness can run. */
   runs: Schema.Array(HarnessProviderSupport),

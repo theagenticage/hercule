@@ -22,6 +22,7 @@ import * as Redacted from "effect/Redacted";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as HttpServer from "effect/http/HttpServer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -75,6 +76,8 @@ import {
   revalidateStoredWorkflowsOrLog,
   WorkflowValidityObserversLayer,
   WorkspaceSweepInterval,
+  HarnessReleaseWakeLayer,
+  WakeHarnessReleaseCheckOnPluginChangeLayer,
 } from "../daemon";
 import { CurrentActor, type Actor } from "../actor";
 import { ExpressionBudget } from "../expressions";
@@ -99,6 +102,7 @@ import {
   type SecurityRunner,
 } from "../secrets";
 import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "../model-profiles";
+import { HarnessReleasesLayer } from "../harnesses";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import {
   findCredentialSecretName,
@@ -161,6 +165,7 @@ const buildServices = (
   home: string,
   githubSkillSources: GithubSkillSources["Service"],
   providerKeyHttpClient: HttpClient.HttpClient,
+  harnessRegistryHttpClient: HttpClient.HttpClient,
   masterKeyBackend: MasterKeyBackend = "file",
   securityRunner?: SecurityRunner,
   readLocalRunnerId: () => string | undefined = () => undefined,
@@ -196,7 +201,14 @@ const buildServices = (
         Layer.provideMerge(DiscussionInputsReferenceLayer),
         // As in the real boot: a plugin's lifecycle change and a Connection's
         // or an agent's delete validate the stored workflows again.
+        Layer.provideMerge(WakeHarnessReleaseCheckOnPluginChangeLayer),
         Layer.provideMerge(WorkflowValidityObserversLayer),
+        Layer.provideMerge(HarnessReleaseWakeLayer),
+        Layer.provideMerge(
+          HarnessReleasesLayer.pipe(
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, harnessRegistryHttpClient)),
+          ),
+        ),
       ),
     ),
     // One connection map and one set of awaited device logins: the socket
@@ -337,6 +349,18 @@ const addTestProviderAccount = Effect.gen(function* () {
  */
 const acceptingProviderKeyClient = HttpClient.make((request) =>
   Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}"))),
+);
+
+/**
+ * The npm registry a test controller reads when the test gives none: no
+ * request gets an answer, so no test reaches the real registry by accident.
+ */
+const unreachableRegistryClient = HttpClient.make((request) =>
+  Effect.fail(
+    new HttpClientError.HttpClientError({
+      reason: new HttpClientError.TransportError({ request, cause: "no registry in this test" }),
+    }),
+  ),
 );
 
 /**
@@ -512,6 +536,12 @@ export interface ServerOptions {
    * accepted, so no test reaches a real provider.
    */
   readonly providerKeyHttpClient?: HttpClient.HttpClient;
+  /**
+   * The HTTP client the latest releases of the harnesses are read through.
+   * Without it, no read gets an answer, so no test reaches the real npm
+   * registry.
+   */
+  readonly harnessRegistryHttpClient?: HttpClient.HttpClient;
   /** The default second is too long for a test that waits several ticks. */
   readonly eventRoutingInterval?: Duration.Duration;
   /** The default minute is longer than a test can wait. */
@@ -696,6 +726,7 @@ export const withServer = (
           home,
           options.githubSkillSources ?? unreachableGithub.service,
           options.providerKeyHttpClient ?? acceptingProviderKeyClient,
+          options.harnessRegistryHttpClient ?? unreachableRegistryClient,
           options.masterKeyBackend,
           options.securityRunner,
           options.readLocalRunnerId,

@@ -2507,7 +2507,7 @@ export const CLI = {
 
   "harness.query": {
     command: "harness list",
-    help: "Lists the harnesses: the agent programs sessions run in, such as Claude Code, Codex and pi. Each row has its qualified id, its binary name, what it can do, and for every runner whether it is installed there and which version. Use the id with --harness. If a harness is missing on a runner, install it with `hercule runner install-harness`.",
+    help: "Lists the harnesses: the agent programs sessions run in, such as Claude Code, Codex and pi. Each row has its qualified id, its binary name, what it can do, and for every runner whether it is installed there and which version. The `latest` column is the newest release its publisher lists, as the controller last read it, and is empty until a read has succeeded; `--json` also has when it was read and why the last read failed. Use the id with --harness. If a harness is missing on a runner, install it with `hercule runner install-harness`.",
     examples: [{ args: [] }],
     fields: {},
   },

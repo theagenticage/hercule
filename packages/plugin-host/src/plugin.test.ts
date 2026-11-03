@@ -8,6 +8,7 @@ const definition: HarnessDefinition = {
   id: "fixture",
   displayName: "Fixture",
   binaryName: "harness",
+  releaseSource: { kind: "npm", package: "harness" },
   declared: {
     steering: "native",
     fork: "native",

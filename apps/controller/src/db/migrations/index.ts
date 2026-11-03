@@ -114,6 +114,7 @@ import runnerMetrics from "./0103-runner-metrics";
 import archivedSessions from "./0104-archived-sessions";
 import runnerMetricsHistory from "./0105-runner-metrics-history";
 import eventsRunnerId from "./0106-events-runner-id";
+import harnessReleases from "./0107-harness-releases";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -222,6 +223,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [104, "archived-sessions", Effect.succeed(archivedSessions)],
   [105, "runner-metrics-history", Effect.succeed(runnerMetricsHistory)],
   [106, "events-runner-id", Effect.succeed(eventsRunnerId)],
+  [107, "harness-releases", Effect.succeed(harnessReleases)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

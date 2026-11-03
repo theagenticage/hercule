@@ -56,6 +56,7 @@ export const buildHarnessDefinition = (
   id,
   displayName: `Harness ${id}`,
   binaryName: "harness",
+  releaseSource: { kind: "npm", package: "harness" },
   declared: {
     steering: "native",
     fork: "native",
@@ -160,18 +161,22 @@ afterAll(() => {
   homes.length = 0;
 });
 
+/** A `PluginObserver` that does nothing, for a stack that stores no workflows. */
+const idleObserver: Layer.Layer<PluginObserver> = Layer.succeed(PluginObserver)({
+  pluginStatusChanged: () => Effect.void,
+});
+
 /**
  * Builds the real plugin services on a temporary database file, including a real
- * master key file, with a `PluginObserver` that does nothing. A plugin's
- * secrets are rows in the secrets table, so the encryption is part of what
- * is tested.
+ * master key file, with the `PluginObserver` given, which by default does
+ * nothing. A plugin's secrets are rows in the secrets table, so the
+ * encryption is part of what is tested.
  */
-export const buildPluginStack = () => {
+export const buildPluginStack = (observer: Layer.Layer<PluginObserver> = idleObserver) => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(
-    // This stack stores no workflows, so no one listens to a status change.
-    Layer.provide(Layer.succeed(PluginObserver)({ pluginStatusChanged: () => Effect.void })),
+    Layer.provide(observer),
     Layer.provideMerge(
       PluginHostLayer.pipe(
         Layer.provide(IngestExecutorLayer),

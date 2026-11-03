@@ -15,6 +15,7 @@ const definition: HarnessDefinition = {
   id: "claude-code",
   displayName: "Claude Code",
   binaryName: "claude",
+  releaseSource: { kind: "npm", package: "@anthropic-ai/claude-code" },
   declared: {
     steering: "native",
     fork: "native",
