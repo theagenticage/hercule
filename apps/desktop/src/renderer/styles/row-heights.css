@@ -125,7 +125,7 @@
 
 /* ---------- A machine's activity ---------- */
 
-/* A day's heading: one small line between 23px above and 9px below. */
+/* A day's heading: one small line between 24px above and 8px below. */
 @property --fleet-activity-height-day {
   syntax: "<length>";
   inherits: true;

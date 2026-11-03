@@ -12,14 +12,23 @@
    - A day's heading does not stick to the top: a virtual list draws only the
      lines near the view, so the heading of the day on screen may not be drawn. */
 
-/* The width of the time column. The Activity page has the days above its
-   entries, so a time is only "09:12". Recent has no days, so an entry that is
-   not from today starts with its day. */
+/* The time column. The Activity page has the days above its entries, so a
+   time is only "09:12" and fits a fixed width. Recent has no days, so an
+   entry that is not from today starts with its day ("Yesterday, 17:48"). Its
+   lines share one grid, so the column grows to the longest time instead of
+   cutting it, and every dot stays in one column. */
 .machine-activity {
   --machine-activity-time-width: 52px;
 }
 .machine-activity--recent {
-  --machine-activity-time-width: 120px;
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 18px minmax(0, 1fr);
+  column-gap: 8px;
+}
+.machine-activity--recent > .machine-activity-row,
+.machine-activity--recent > .machine-activity-member {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
 }
 
 /* ---------- An entry ---------- */
@@ -27,14 +36,18 @@
 .machine-activity-member {
   position: relative;
   display: grid;
-  grid-template-columns: var(--machine-activity-time-width) 14px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: var(--machine-activity-time-width) 18px minmax(0, 1fr);
+  column-gap: 8px;
   box-sizing: border-box;
 }
+/* The space below the text is the rest of the line's fixed height. The time
+   and the sentence share a baseline, so the small time sits on the line of
+   the larger sentence. */
 .machine-activity-row {
-  align-items: start;
+  grid-template-rows: var(--line-18);
+  align-items: baseline;
   height: var(--fleet-activity-height-entry);
-  padding: 8px 0 9px;
+  padding-top: 8px;
   line-height: var(--line-18);
 }
 .machine-activity-time {
@@ -47,15 +60,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.machine-activity-row .machine-activity-time {
-  /* Puts the small time on the baseline of the larger sentence. */
-  padding-top: 1px;
-}
 .machine-activity-dot {
+  align-self: center;
   justify-self: center;
   width: 8px;
   height: 8px;
-  margin-top: 5px;
   border-radius: 50%;
   background: color-mix(in oklab, var(--ink) 32%, transparent);
 }
@@ -75,7 +84,9 @@
 .machine-activity-member::before {
   content: "";
   position: absolute;
-  left: calc(var(--machine-activity-time-width) + 10px + 6.25px);
+  /* Placed in the dot's column, and centred in it. */
+  grid-column: 2;
+  left: 8.25px;
   width: 1.5px;
   background: color-mix(in oklab, var(--ink) 10%, transparent);
 }
@@ -97,7 +108,7 @@
 .machine-activity-text {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 .machine-activity-sentence {
@@ -128,7 +139,7 @@
 }
 .machine-activity-more {
   flex: none;
-  padding: 0 6px;
+  padding: 0 8px;
   border-radius: var(--r-xs);
   color: var(--accent-ink);
   font-size: var(--t-12);
@@ -182,7 +193,7 @@
   height: var(--fleet-activity-height-day);
   margin: 0;
   /* The space around the heading is inside the line's height. */
-  padding: 23px 0 9px;
+  padding: 24px 0 8px;
   color: var(--muted);
   font-size: var(--t-11);
   font-weight: var(--w-bold);
@@ -237,7 +248,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 18px 0 0;
+  margin: 16px 0 0;
   color: var(--muted);
 }
 .machine-activity-note[role="alert"] {
@@ -251,7 +262,7 @@
   align-items: center;
   gap: 6px;
   height: 30px;
-  margin: 6px 0 0 -8px;
+  margin: 8px 0 0 -8px;
   padding: 0 8px;
   border-radius: var(--r-sm);
   color: var(--accent-ink);

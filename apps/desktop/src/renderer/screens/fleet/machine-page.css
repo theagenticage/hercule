@@ -215,7 +215,7 @@
 .machine-page-section-head {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 8px;
   margin: 0 0 14px;
 }
 .machine-page-section-head h3 {
