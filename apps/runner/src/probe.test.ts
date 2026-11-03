@@ -14,11 +14,12 @@
  * every hour for nothing.
  */
 import { describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber, Schema } from "effect";
+import { Cause, Duration, Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { arch, platform, tmpdir, totalmem } from "node:os";
 import { IDENTITY_PORT, MAX_FACT_LENGTH, RunnerFacts } from "@hercule/protocol";
 import {
+  DISK_SIZE_DEADLINE,
   FACTS_REFRESH,
   VERSION_DEADLINE,
   probeFacts,
@@ -79,13 +80,17 @@ describe("probeFacts", () => {
     expect(facts.totalMemoryBytes).toBeGreaterThan(0);
   });
 
-  it("reports the size of the disk, and leaves it out when the disk cannot be read", async () => {
-    const facts = await probePrinted(FULL);
-    expect(facts.diskTotalBytes).toBe(DISK);
+  it("reports the size of the disk", async () => {
+    expect((await probePrinted(FULL)).diskTotalBytes).toBe(DISK);
+  });
 
+  it("leaves the disk size out when the disk cannot be read", async () => {
     const unreadable = await Effect.runPromise(
       probeFacts(
-        { ...buildMachine(FULL), diskTotalBytes: Effect.succeed(undefined) },
+        {
+          ...buildMachine(FULL),
+          diskTotalBytes: Effect.fail(new Cause.UnknownError(new Error("statfs failed"))),
+        },
         IDENTITY_PORT,
       ),
     );
@@ -94,6 +99,24 @@ describe("probeFacts", () => {
     expect("diskTotalBytes" in unreadable).toBe(false);
     expect(unreadable.toolchains).toHaveLength(2);
     expect(Schema.is(RunnerFacts)(unreadable)).toBe(true);
+  });
+
+  it("gives up on a disk read that never completes, and leaves the size out", async () => {
+    // A `statfs` on a dead mount. Waiting for ever would stop the runner from
+    // connecting because of a display fact.
+    const probed = await run(
+      Effect.gen(function* () {
+        const running = yield* Effect.forkChild(
+          probeFacts({ ...buildMachine(FULL), diskTotalBytes: Effect.never }, IDENTITY_PORT),
+        );
+        yield* TestClock.adjust(DISK_SIZE_DEADLINE);
+        return yield* Fiber.join(running);
+      }),
+    );
+
+    expect("diskTotalBytes" in probed).toBe(false);
+    expect(probed.toolchains).toHaveLength(2);
+    expect(Schema.is(RunnerFacts)(probed)).toBe(true);
   });
 
   it("reports the identity port it was given, defaulting to 4939", async () => {
@@ -268,10 +291,10 @@ describe("buildThisMachine", () => {
     expect(facts.harnesses.map((one) => one.name)).toEqual(["claude", "codex", "pi"]);
   });
 
-  it("leaves the disk size out of the facts when the storage directory cannot be read", async () => {
+  it("fails the disk size read when the storage directory cannot be read", async () => {
     const machine = buildThisMachine("/no/such/directory/on/this/machine");
 
-    expect(await Effect.runPromise(machine.diskTotalBytes)).toBeUndefined();
+    expect((await Effect.runPromise(Effect.result(machine.diskTotalBytes)))._tag).toBe("Failure");
   });
 });
 

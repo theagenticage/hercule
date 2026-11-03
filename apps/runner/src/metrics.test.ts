@@ -9,8 +9,9 @@
  *   because of one failed `statfs`;
  * - carries the CPU use: `null` on the first report, however long the first
  *   read takes, then the average and the peak of the minute before the report,
- *   from a fake sequence of the kernel's counters. A skipped report's minute
- *   is dropped, not added to the next.
+ *   from a fake sequence of the kernel's counters. The minute is taken before
+ *   the disk and memory read, so a skipped report's minute is dropped, not
+ *   added to the next.
  *
  * The controller decides whether a report means the machine can take work;
  * that is not tested here.
@@ -185,8 +186,9 @@ describe("reportMetrics", () => {
         yield* settle;
         expect(sent).toHaveLength(1);
 
-        // The read fails at the end of the busy minute. A failed read does not
-        // mean the machine has no disk left, so nothing is sent.
+        // The read fails right after the busy minute is taken. A failed read
+        // does not mean the machine has no disk left, so nothing is sent, and
+        // the busy minute goes with the skipped report.
         readable = false;
         yield* TestClock.adjust(METRICS_INTERVAL);
         expect(sent).toHaveLength(1);
@@ -250,7 +252,8 @@ describe("reportMetrics", () => {
         );
 
         // By now the sampler has two seconds of samples, so a report that
-        // took its CPU from them would not be `null`.
+        // took its CPU after the read would not be `null`. The loop takes the
+        // minute before the read starts.
         yield* TestClock.adjust(Duration.seconds(2));
         expect(sent).toHaveLength(1);
         expect(sent[0]?.cpu).toBeNull();

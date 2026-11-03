@@ -7,8 +7,10 @@
  * machine the tests run on. Nothing here reads a credential file.
  */
 import { arch, platform, totalmem } from "node:os";
+import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type { HarnessBinary, RunnerFacts, Toolchain } from "@hercule/protocol";
 import { readDiskSpace } from "./disk";
 import { ADAPTER_IDS } from "./harnesses";
@@ -29,6 +31,13 @@ const DOCKER = "docker";
 
 export const VERSION_DEADLINE: Duration.Duration = Duration.seconds(5);
 
+/**
+ * The longest the probe waits for the disk size. The probe must finish before
+ * the runner connects, and the size is only a display fact, so a `statfs` on a
+ * dead mount must not hold the connection back.
+ */
+export const DISK_SIZE_DEADLINE: Duration.Duration = Duration.seconds(5);
+
 const SEMVER = /\d+\.\d+\.\d+\S*/;
 
 /** How the probe looks at the machine it runs on. */
@@ -36,8 +45,8 @@ export interface Machine {
   readonly locate: (binary: string) => string | undefined;
   /** Returns what `<binary> --version` printed, or undefined when it could not be run. */
   readonly version: (path: string) => Effect.Effect<string | undefined>;
-  /** Returns the size of the disk that holds the runner's storage directory, or undefined when it could not be read. */
-  readonly diskTotalBytes: Effect.Effect<number | undefined>;
+  /** Returns the size of the disk that holds the runner's storage directory. Fails when it cannot be read. */
+  readonly diskTotalBytes: Effect.Effect<number, Cause.UnknownError>;
 }
 
 /**
@@ -63,12 +72,7 @@ export const buildThisMachine = (storageDir: string): Machine => ({
       // A machine without the tool is normal, not a failed probe.
       Effect.orElseSucceed(() => undefined),
     ),
-  // An unreadable disk leaves the size out of the facts. It must not fail the
-  // probe: the facts hold much that the fleet needs besides the disk size.
-  diskTotalBytes: readDiskSpace(storageDir).pipe(
-    Effect.map((disk) => disk.totalBytes),
-    Effect.orElseSucceed(() => undefined),
-  ),
+  diskTotalBytes: Effect.map(readDiskSpace(storageDir), (disk) => disk.totalBytes),
 });
 
 /**
@@ -95,6 +99,26 @@ const findToolchain = (machine: Machine, name: string): Effect.Effect<Toolchain 
     return version.length === 0 ? undefined : { name, version, path: truncateFact(path) };
   });
 
+/**
+ * Returns the disk size, or `undefined` when it cannot be read within
+ * `DISK_SIZE_DEADLINE`. A failed or late read is logged as a warning and the
+ * size is left out of the facts: the facts hold much the fleet needs besides
+ * it, so it must not fail the probe. The deadline stops the wait only; it does
+ * not cancel a `statfs` that is already running in the kernel.
+ */
+const readDiskTotalBytes = (machine: Machine): Effect.Effect<number | undefined> =>
+  Effect.map(
+    Effect.option(
+      Effect.tapCause(Effect.timeout(machine.diskTotalBytes, DISK_SIZE_DEADLINE), (cause) =>
+        Effect.logWarning(
+          "The runner could not read the size of its disk, so it left the disk size out of its facts",
+          cause,
+        ),
+      ),
+    ),
+    Option.getOrUndefined,
+  );
+
 export const probeFacts = (machine: Machine, identityPort: number): Effect.Effect<RunnerFacts> =>
   Effect.gen(function* () {
     const toolchains: Array<Toolchain> = [];
@@ -108,7 +132,7 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
         ? { name, present: false }
         : { name, present: true, path: truncateFact(path) };
     });
-    const diskTotalBytes = yield* machine.diskTotalBytes;
+    const diskTotalBytes = yield* readDiskTotalBytes(machine);
     return {
       os: truncateFact(platform()),
       arch: truncateFact(arch()),

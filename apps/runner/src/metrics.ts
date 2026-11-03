@@ -52,13 +52,18 @@ export interface MetricsCheck<E> {
  *
  * The loop starts a CPU sampler that lives as long as the loop. So the
  * once-a-second CPU reads happen only while the runner is connected, in one
- * timer, and stop when the connection ends. The CPU minute is taken once per
- * round, whether or not a report is sent, so a report's CPU covers only the
- * time since the round before it:
+ * timer, and stop when the connection ends. Each round takes the CPU minute
+ * first, then reads the disk and memory, then sends. That order gives the
+ * report's CPU these properties without any extra bookkeeping:
  *
- * - the first report carries `cpu: null`, because no full minute has passed
- *   yet. This holds however long the first read takes;
- * - the others carry the average and peak of the minute before them.
+ * - the first report carries `cpu: null`. The loop takes the minute right
+ *   after starting the sampler, which has only its baseline read by then and
+ *   no sample, however long the disk and memory read takes;
+ * - a report skipped because its read failed drops its own minute, because the
+ *   minute was already taken. The next report covers only the minute after it,
+ *   never two minutes mixed;
+ * - a report's minute ends when its round starts, so the minute is at most
+ *   `DISK_AND_MEMORY_TIMEOUT` old when the report is sent.
  *
  * A read that fails or takes longer than `DISK_AND_MEMORY_TIMEOUT` is logged
  * and skipped: sending zero free bytes instead would take the machine out of
@@ -67,8 +72,7 @@ export interface MetricsCheck<E> {
  * `availableMemoryBytes` and a made-up value would be wrong. The cost is that
  * while the read keeps failing, the controller keeps the last free disk it was
  * sent and places sessions on it. The warning, once a minute, is how that
- * shows. The CPU of a skipped report is dropped, so the next report does not
- * mix two minutes.
+ * shows.
  *
  * The controller decides whether a report means the machine can take work,
  * by comparing the free disk with the disk watermark it holds. The runner only
@@ -78,8 +82,8 @@ export const reportMetrics = <E>(check: MetricsCheck<E>): Effect.Effect<never, E
   Effect.scoped(
     Effect.gen(function* () {
       const sampler = yield* startCpuSampler(check.readCpuTimes);
-      let isFirstReport = true;
       while (true) {
+        const minute = yield* sampler.takeMinute;
         const diskAndMemory = yield* Effect.option(
           Effect.tapCause(
             Effect.timeout(check.readDiskAndMemory, DISK_AND_MEMORY_TIMEOUT),
@@ -90,11 +94,9 @@ export const reportMetrics = <E>(check: MetricsCheck<E>): Effect.Effect<never, E
               ),
           ),
         );
-        const minute = yield* sampler.takeMinute;
         if (Option.isSome(diskAndMemory)) {
-          yield* check.send({ ...diskAndMemory.value, cpu: isFirstReport ? null : minute });
+          yield* check.send({ ...diskAndMemory.value, cpu: minute });
         }
-        isFirstReport = false;
         yield* Effect.sleep(METRICS_INTERVAL);
       }
     }),

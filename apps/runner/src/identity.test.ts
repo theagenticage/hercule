@@ -16,7 +16,7 @@
  * machine, including this suite's own child processes, may be using it.
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { networkInterfaces } from "node:os";
 import { IDENTITY_PORT_COUNT } from "@hercule/protocol";
 import { serveIdentity } from "./identity";
@@ -109,7 +109,7 @@ const findLanAddress = (): string | undefined =>
 const bareMachine: Machine = {
   locate: () => undefined,
   version: () => Effect.succeed(undefined),
-  diskTotalBytes: Effect.succeed(undefined),
+  diskTotalBytes: Effect.fail(new Cause.UnknownError(new Error("no disk in this test"))),
 };
 
 describe("the identity response", () => {
