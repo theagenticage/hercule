@@ -2,16 +2,22 @@ import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
+import { forecastDiskLimit } from "@hercule/client-core/fleet";
+import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
 import { describeMachinePage } from "@hercule/client-core/machine-page";
 import type { Runner } from "@hercule/contract";
 import { throwScreenNotFound } from "../../../../app/last-screen";
+import { RUNNER_METRICS_TOPICS, useScreenTopicsLive } from "../../../../app/live";
 import {
+  buildMachineFiveMinuteScope,
+  buildMachineHourScope,
   controllerQuery,
   fleetSessionsQuery,
   harnessesQuery,
   providerAccountsQuery,
   providersQuery,
   readOnOpen,
+  runnerMetricsQuery,
   runnersQuery,
   settingsQuery,
 } from "../../../../app/queries";
@@ -44,7 +50,11 @@ const SECTIONS = [
  * One machine's page (spec 17 §Fleet, A machine's page): its head and room
  * line, or the banner of a machine that is away, then its instruments, its
  * Software and its Settings. Its loader reads everything the page draws before
- * it renders, as the Fleet page's does (`fleet/index.tsx`). When no runner has
+ * it renders, as the Fleet page's does (`fleet/index.tsx`), including the
+ * machine's five-minute points of the last 24 hours and hour points of the
+ * last 14 days, for its graphs. They are read only for a machine that exists,
+ * and a cached read is used as it is: a `runnerMetrics` push brings them up to
+ * date (see `invalidateForRunnerMetricsPush`). When no runner has
  * the id, or the runner is retired, the route shows `RunnerNotFound`: retired
  * machines are not shown anywhere on Fleet.
  */
@@ -52,8 +62,18 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
   staticData: { title: "Fleet" },
   loader: async ({ context: { controller, queryClient }, params: { runnerId }, location }) => {
     const { client } = controller;
-    const [runners] = await Promise.all([
-      queryClient.ensureQueryData(runnersQuery(client)),
+    await Promise.all([
+      queryClient.ensureQueryData(runnersQuery(client)).then((runners) => {
+        if (!runners.some((runner) => runner.id === runnerId && runner.lifecycle !== "retired")) {
+          throwScreenNotFound(location);
+        }
+        return Promise.all([
+          queryClient.ensureQueryData(
+            runnerMetricsQuery(client, buildMachineFiveMinuteScope(runnerId)),
+          ),
+          queryClient.ensureQueryData(runnerMetricsQuery(client, buildMachineHourScope(runnerId))),
+        ]);
+      }),
       queryClient.ensureQueryData(harnessesQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
       queryClient.ensureQueryData(providerAccountsQuery(client)),
@@ -61,9 +81,6 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
       readOnOpen(queryClient, controllerQuery(client)),
       readOnOpen(queryClient, settingsQuery(client)),
     ]);
-    if (!runners.some((runner) => runner.id === runnerId && runner.lifecycle !== "retired")) {
-      throwScreenNotFound(location);
-    }
   },
   component: MachinePage,
   notFoundComponent: RunnerNotFound,
@@ -100,11 +117,18 @@ function MachinePage(): JSX.Element {
  * page.
  */
 function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
-  const { controller } = Route.useRouteContext();
+  const { controller, queryClient } = Route.useRouteContext();
   const { client } = controller;
+  useScreenTopicsLive(controller.live, queryClient, RUNNER_METRICS_TOPICS);
   const sessionCounts = useRunnerSessionCounts(client);
   const { data: controllerRecord } = useSuspenseQuery(controllerQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
+  const { data: fiveMinutes } = useSuspenseQuery(
+    runnerMetricsQuery(client, buildMachineFiveMinuteScope(runner.id)),
+  );
+  const { data: hours } = useSuspenseQuery(
+    runnerMetricsQuery(client, buildMachineHourScope(runner.id)),
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const { activeSectionId, scrollToSection } = useSectionInView(scrollRef, SECTION_IDS);
   const [isRetiring, setRetiring] = useState(false);
@@ -118,6 +142,12 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
     controllerRecord.version,
     timezone,
     today,
+  );
+  const graphs = describeMachineGraphs(
+    runner,
+    fiveMinutes,
+    hours,
+    forecastDiskLimit(hours.points, runner, hours.readAt),
   );
 
   return (
@@ -139,7 +169,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
               need none. Its label names it for the jump link and for screen readers. */}
           <section id={CAPACITY_ID} className="machine-page-capacity" aria-label="Capacity">
             {page.top.kind === "room" && <MachinePageRoomLine line={page.top.line} />}
-            <MachinePageInstruments instruments={page.instruments} />
+            <MachinePageInstruments instruments={page.instruments} graphs={graphs} />
           </section>
           <MachineSoftware id={SOFTWARE_ID} runner={runner} />
           <MachineSettings id={SETTINGS_ID} runner={runner} onRetire={() => setRetiring(true)} />

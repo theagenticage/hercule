@@ -24,6 +24,9 @@
  *   closed;
  * - `plugin`, for the plugins whose names label each signal's source.
  *
+ * The Fleet pages hold one more topic, `runnerMetrics`, while they are open
+ * and the window is visible (see `RUNNER_METRICS_TOPICS`).
+ *
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
  *
@@ -88,6 +91,50 @@ const invalidateLegReads = (
   }
 };
 
+/** How old a history of hour points must be before a nudge reads it again. */
+const HOUR_HISTORY_REFRESH_MS = 60 * 60 * 1000;
+
+/**
+ * Reads again what a `runnerMetrics` push makes out of date (spec 17
+ * §Graphs and the forecast). A push says the controller wrote a row of Runner
+ * Metrics for each runner it names, or for any runner when it names none.
+ *
+ * - The runners are read again, for the latest metrics on the cards and the
+ *   machine page. A routine report publishes nothing on `runner`.
+ * - The five-minute history of each runner the push names is read again, from
+ *   the start of its newest point (see `runnerMetricsQuery`). That point was
+ *   still filling.
+ * - A history of hour points is read again only when its last successful read
+ *   is an hour old or more, so a nudge a minute changes none of them within
+ *   the hour. The age is the query's `dataUpdatedAt`, not the history's own
+ *   `readAt`, which does not move when a read brings no new point. A history
+ *   that is being read is left alone, because that read is newer than any
+ *   nudge that arrives during it.
+ *
+ * Reading goes through `invalidateWithoutCancelling`, so however many nudges
+ * arrive, a history has at most one read running and one more waiting.
+ */
+const invalidateForRunnerMetricsPush = (
+  queryClient: QueryClient,
+  push: LiveInvalidatePush,
+): void => {
+  invalidateWithoutCancelling(queryClient, queryKeys.runners());
+  const fiveMinuteKeys =
+    push.ids.length === 0
+      ? [queryKeys.runnerMetrics("fiveMinutes")]
+      : push.ids.map((runnerId) => queryKeys.runnerMetrics("fiveMinutes", runnerId));
+  for (const queryKey of fiveMinuteKeys) invalidateWithoutCancelling(queryClient, queryKey);
+  const now = Date.now();
+  for (const query of queryClient
+    .getQueryCache()
+    .findAll({ queryKey: queryKeys.runnerMetrics("hour") })) {
+    const isOldEnough = now - query.state.dataUpdatedAt >= HOUR_HISTORY_REFRESH_MS;
+    if (isOldEnough && query.state.fetchStatus === "idle") {
+      invalidateWithoutCancelling(queryClient, query.queryKey);
+    }
+  }
+};
+
 /**
  * Reads again every query a push on `topic` makes stale: the queries under
  * `keys`, and for a `run` push, Tracking and the Tracking details of the Tasks
@@ -120,6 +167,7 @@ export const invalidateForPush = (
   push: LiveInvalidatePush,
 ): void => {
   for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+  if (topic === "runnerMetrics") invalidateForRunnerMetricsPush(queryClient, push);
   if (topic === "task") {
     invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByTaskPush(legs, push));
   }
@@ -250,6 +298,12 @@ export const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow"];
  * when it shows, as `useScreenTopicsLive` does for every screen's topics.
  */
 export const RUN_TOPICS: readonly MutableLiveTopic[] = ["run"];
+
+/**
+ * The topic the Fleet pages hold: a nudge for each minute of Runner Metrics a
+ * runner reports. No other screen subscribes to it.
+ */
+export const RUNNER_METRICS_TOPICS: readonly MutableLiveTopic[] = ["runnerMetrics"];
 
 /** The topic the Discussions pages hold. */
 export const DISCUSSION_TOPICS: readonly MutableLiveTopic[] = ["discussion"];
