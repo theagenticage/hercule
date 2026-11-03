@@ -6,6 +6,9 @@ import type { MachineNeed } from "@hercule/client-core/fleet";
 import { runnersQuery } from "../../../../app/queries";
 import { buildRecordScope, keepSavedRecord } from "../../../../app/saved-record-field";
 
+/** How long a finished Allow stays in the mutation cache, as Query's default `gcTime` for a query. */
+const KEEP_ALLOW_MS = 5 * 60 * 1000;
+
 /**
  * Renders the Allow button of a machine whose sessions wait for a slot. It
  * sets the machine's session cap to `need.allow`, so every waiting session can
@@ -19,9 +22,12 @@ import { buildRecordScope, keepSavedRecord } from "../../../../app/saved-record-
  *   same machine's cap reaches the controller in that order. The mutation
  *   cache holds the scope, not this component, so the order holds also when
  *   the user leaves the page while the Allow is saving.
- * - The button shows that it is saving for as long as the mutation cache holds
- *   a pending Allow of this machine, so a new card or row (after a switch
- *   between Grid and List) shows a save that is still running.
+ * - The mutation cache is the one source of truth for this machine's latest
+ *   Allow. The button shows "Saving…" while that Allow is pending and the
+ *   refusal when it failed, with the cap it asked for. A new card or row (after
+ *   a switch between Grid and List) therefore shows a save that is still
+ *   running, and a failure that was already shown. A later Allow replaces an
+ *   earlier failure, because it is the latest.
  * - A successful save puts the runner the controller returns in the cached
  *   list, so the card shows the new cap at once, and then reads the list
  *   again.
@@ -36,14 +42,26 @@ export function AllowSessionsButton({
   const queryClient = useQueryClient();
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const mutationKey = ["fleet", "allow-sessions", runnerId];
-  const { mutate, error } = useMutation({
+  const { mutate } = useMutation({
     mutationKey,
     scope: buildRecordScope(runnerId),
+    // The app's `gcTime` of 0 removes a mutation as soon as no component
+    // observes it. A button drawn anew after a Grid/List switch has to find
+    // this Allow still in the cache, to show that it is saving or why it failed.
+    gcTime: KEEP_ALLOW_MS,
     mutationFn: (cap: number) =>
       client.runner.update({ params: { id: runnerId }, payload: { maxConcurrentSessions: cap } }),
     onSuccess: (saved) => keepSavedRecord(queryClient, runnersQuery(client).queryKey, saved),
   });
-  const isSaving = useMutationState({ filters: { mutationKey, status: "pending" } }).length > 0;
+  const latestAllow = useMutationState({
+    filters: { mutationKey },
+    select: (mutation) => ({
+      status: mutation.state.status,
+      error: mutation.state.error,
+      cap: mutation.state.variables as number,
+    }),
+  }).at(-1);
+  const isSaving = latestAllow?.status === "pending";
 
   return (
     <>
@@ -64,9 +82,9 @@ export function AllowSessionsButton({
           `Allow ${String(need.allow)}`
         )}
       </button>
-      {error !== null && (
+      {latestAllow?.status === "error" && (
         <span className="fleet-attn-err" role="alert">
-          Could not allow {need.allow} sessions: {readErrorMessage(error)}
+          Could not allow {latestAllow.cap} sessions: {readErrorMessage(latestAllow.error)}
         </span>
       )}
     </>

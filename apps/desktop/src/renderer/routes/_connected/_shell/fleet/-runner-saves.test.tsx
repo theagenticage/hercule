@@ -290,4 +290,89 @@ describe("the saves of one machine", () => {
     );
     expect(screen.getByRole("button", { name: "Allow 17" })).toBeTruthy();
   });
+
+  describe("an Allow that is refused", () => {
+    const REFUSED = {
+      status: 409,
+      body: buildErrorBody("conflict", "The runner is being retired."),
+    };
+
+    /** Stubs a controller that refuses the first Allow only after its gate opens, and accepts later ones at once. */
+    const stubRefusalAfterGate = (gate: ReturnType<typeof buildGate>) => {
+      let attempts = 0;
+      return stubApi({
+        "GET /api/v1/runners": () => ({ body: { items: [ATLAS, MOSS] } }),
+        [`PATCH /api/v1/runners/${ATLAS.id}`]: async () => {
+          attempts += 1;
+          if (attempts > 1) return { body: asDetail(ATLAS) };
+          await gate.opened;
+          return REFUSED;
+        },
+      });
+    };
+
+    it("shows the refusal, with the cap that was asked for, on a button drawn anew while the Allow was saving", async () => {
+      const user = userEvent.setup();
+      const gate = buildGate();
+      const calls = stubRefusalAfterGate(gate);
+      const { wrapper } = setUpRunners();
+      const first = render(
+        <AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />,
+        { wrapper },
+      );
+      await user.click(screen.getByRole("button", { name: "Allow 17" }));
+      await waitFor(() => {
+        expect(readWrites(calls)).toEqual(["PATCH atlas"]);
+      });
+      first.unmount();
+      // The cap that waits has moved on by the time the new button is drawn.
+      render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(19)} />, { wrapper });
+      await screen.findByRole("button", { name: "Saving…" });
+
+      gate.open();
+
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "Could not allow 17 sessions: The runner is being retired.",
+      );
+      expect(screen.getByRole("button", { name: "Allow 19" })).toBeTruthy();
+    });
+
+    it("stays shown on a button drawn anew after the refusal", async () => {
+      const user = userEvent.setup();
+      const gate = buildGate();
+      stubRefusalAfterGate(gate);
+      gate.open();
+      const { wrapper } = setUpRunners();
+      const first = render(
+        <AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />,
+        { wrapper },
+      );
+      await user.click(screen.getByRole("button", { name: "Allow 17" }));
+      await screen.findByRole("alert");
+
+      first.unmount();
+      render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />, { wrapper });
+
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "Could not allow 17 sessions: The runner is being retired.",
+      );
+    });
+
+    it("is replaced by the next Allow", async () => {
+      const user = userEvent.setup();
+      const gate = buildGate();
+      stubRefusalAfterGate(gate);
+      gate.open();
+      const { wrapper } = setUpRunners();
+      render(<AllowSessionsButton runnerId={ATLAS.id} need={buildWaitingNeed(17)} />, { wrapper });
+      await user.click(screen.getByRole("button", { name: "Allow 17" }));
+      await screen.findByRole("alert");
+
+      await user.click(screen.getByRole("button", { name: "Allow 17" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("alert")).toBeNull();
+      });
+    });
+  });
 });

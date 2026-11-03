@@ -241,6 +241,27 @@ describe("the Fleet page", () => {
     expect(getValue(getCard("atlas"), "12 of 16")).toBeTruthy();
   });
 
+  it("keeps the message of a refused Allow when the view switches between Grid and List", async () => {
+    const user = userEvent.setup();
+    await openFleet({
+      handlers: {
+        [`PATCH /api/v1/runners/${ATLAS.id}`]: {
+          status: 409,
+          body: buildErrorBody("conflict", "The runner is being retired."),
+        },
+      },
+    });
+    await user.click(within(getCard("atlas")).getByRole("button", { name: "Allow 17" }));
+    await within(getCard("atlas")).findByRole("alert");
+
+    await user.click(screen.getByRole("button", { name: "List" }));
+
+    const table = await screen.findByRole("table", { name: "Machines" });
+    expect((await within(table).findByRole("alert")).textContent).toBe(
+      "Could not allow 17 sessions: The runner is being retired.",
+    );
+  });
+
   it("invites the user to add a machine while only the controller's own runner is online", async () => {
     const user = userEvent.setup();
     await openFleet({
