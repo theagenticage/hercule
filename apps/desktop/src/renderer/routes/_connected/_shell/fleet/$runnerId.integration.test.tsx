@@ -235,6 +235,9 @@ const readInstruments = (): readonly string[] =>
     getCapacity().querySelectorAll(".machine-page-instrument"),
     (tile) => tile.textContent,
   );
+/** Returns the text of each piece after the status in a machine's head, in the order drawn. */
+const readHeadPieces = (head: HTMLElement): readonly string[] =>
+  Array.from(head.querySelectorAll(".machine-page-head-piece"), (piece) => piece.textContent);
 const getSettings = () => screen.getByRole("region", { name: "Settings" });
 const getSoftware = () => screen.getByRole("region", { name: "Software" });
 
@@ -243,9 +246,15 @@ describe("a machine's head", () => {
     await openMachine();
 
     const head = screen.getByRole("heading", { level: 2, name: "atlas" }).closest("header")!;
-    expect(head.textContent).toBe(
-      "atlasOnline·macOS·arm64·16 GB memory·500 GB disk·Runner 0.9.3·update available",
-    );
+    expect(within(head).getByText("Online")).toBeTruthy();
+    expect(readHeadPieces(head)).toEqual([
+      "macOS",
+      "arm64",
+      "16 GB memory",
+      "500 GB disk",
+      "Runner 0.9.3",
+      "update available",
+    ]);
     const roomLine = screen.getByText(/^Room for/);
     expect(roomLine.textContent).toBe("Room for 4 more, under its cap of 8");
     expect(within(roomLine).getByText("4").tagName).toBe("B");
@@ -267,7 +276,7 @@ describe("a machine's head", () => {
 });
 
 describe("the Capacity section", () => {
-  it("holds the room line and the four instruments of the machine, with their latest values", async () => {
+  it("holds the room line and the three instruments of the machine, with their latest values", async () => {
     await openMachine();
 
     expect(within(getCapacity()).getByText(/^Room for/).textContent).toBe(
@@ -277,7 +286,6 @@ describe("the Capacity section", () => {
       "Sessions4 of 8None waiting",
       "CPU23%Peak 61% in the last minute",
       "Memory50%8.0 GB free of 16 GB",
-      "Disk80%100 GB free of 500 GB",
     ]);
   });
 
@@ -302,7 +310,7 @@ describe("the Capacity section", () => {
   });
 
   it("tells the instrument a runner cannot report, instead of leaving it blank", async () => {
-    // An older runner leaves out the disk's size and the CPU altogether.
+    // An older runner leaves out the CPU altogether.
     await openMachine({
       runner: {
         ...ATLAS,
@@ -324,7 +332,6 @@ describe("the Capacity section", () => {
       "Sessions4 of 8None waiting",
       "CPU–This machine's runner is too old to report CPU. Update it.",
       "Memory50%8.0 GB free of 16 GB",
-      "Disk100 GB freeThis machine's runner does not report its disk size. Update it to see how full the disk is.",
     ]);
   });
 });
@@ -742,7 +749,6 @@ describe("a machine that is away", () => {
       "Sessions– of 8None waiting",
       "CPU23%Peak 61% in the last minute",
       "Memory50%8.0 GB free of 16 GB",
-      "Disk80%100 GB free of 500 GB",
     ]);
   });
 

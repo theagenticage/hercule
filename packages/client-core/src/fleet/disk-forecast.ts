@@ -1,7 +1,6 @@
 /**
  * The forecast of when a machine's free disk space reaches its disk limit,
- * drawn on the machine's Disk graph and worded on the Fleet page (spec 17
- * §Graphs and the forecast).
+ * worded on the Fleet page (spec 17 §Graphs and the forecast).
  */
 import type { Runner, RunnerMetricsPoint } from "@hercule/contract";
 import { FORECAST_HISTORY_MS } from "./metrics-history";
@@ -21,10 +20,6 @@ const MAX_FORECAST_DAYS = 60;
 export interface DiskForecast {
   /** Whole days from now until the line reaches the limit: rounded to the nearest day, at least 1. */
   readonly days: number;
-  /** The fitted line at the newest point counted, where a graph's dashed line starts: Unix ms and free bytes. */
-  readonly from: { readonly at: number; readonly freeBytes: number };
-  /** When the fitted line reaches the limit, in Unix ms. */
-  readonly reachesAt: number;
 }
 
 /** The free space of a machine at the start of one hour point. */
@@ -76,7 +71,8 @@ const dropSamplesBeforeLastJump = (
  *   the limit, because the machine then needs the user for that reason.
  * - There is no forecast when the fitted line is already at or below the limit
  *   at the newest point, even though that point is above it. Noisy data does
- *   this: the dashed line would run backwards or have no length.
+ *   this. The newest reading contradicts the line, so "reaches the limit in 1
+ *   day" would claim more than the data shows.
  * - `days` is the time from `now` until the line reaches the limit, rounded to
  *   the nearest whole day and at least 1 (a line that has already crossed the
  *   limit between two reads still says 1). A forecast of more than 60 days
@@ -121,5 +117,5 @@ export const forecastDiskLimit = (
   if (reachesAt <= newest.at) return null;
   const days = Math.max(1, Math.round((reachesAt - now) / DAY_MS));
   if (days > MAX_FORECAST_DAYS) return null;
-  return { days, from: { at: newest.at, freeBytes: freeAt(newest.at) }, reachesAt };
+  return { days };
 };

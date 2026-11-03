@@ -46,10 +46,7 @@ import {
   type RunnerFacts,
   type Session,
 } from "@hercule/contract";
-import {
-  FORECAST_HISTORY_MS,
-  type RunnerMetricsHistory,
-} from "@hercule/client-core/metrics-history";
+import type { RunnerMetricsHistory } from "@hercule/client-core/metrics-history";
 import { HARNESSES } from "@hercule/client-core/testing";
 import {
   buildCheckout,
@@ -671,7 +668,7 @@ const buildQuietStory = (
 };
 
 /**
- * Atlas's last 14 days. Yesterday from 14:00 to 16:30 it ran at its cap of 16
+ * Atlas's last 7 days. Yesterday from 14:00 to 16:30 it ran at its cap of 16
  * with 3 to 6 Threads waiting, and its CPU peaked near 100 %. From 16:40 to
  * 21:40 its memory stood near 80 %. Between 22:00 and 23:00 it sent nothing,
  * so every graph has a gap there. Its disk has filled by 33 GB a day, so the
@@ -747,8 +744,6 @@ const FLEET_METRICS_BY_RUNNER: Readonly<Record<string, MachineMetrics>> = Object
 export interface FleetMetricsRecords {
   /** A machine's five-minute points of the last 24 hours, by runner id. */
   readonly fiveMinutesByRunner: Readonly<Record<string, RunnerMetricsHistory>>;
-  /** A machine's hour points of the last 14 days, by runner id. */
-  readonly hoursByRunner: Readonly<Record<string, RunnerMetricsHistory>>;
   /** Every machine's hour points of the last 7 days, which the Fleet page forecasts from. */
   readonly fleetHours: RunnerMetricsHistory;
 }
@@ -757,13 +752,8 @@ const FLEET_METRICS: FleetMetricsRecords = {
   fiveMinutesByRunner: Object.fromEntries(
     Object.entries(FLEET_METRICS_BY_RUNNER).map(([id, metrics]) => [id, metrics.fiveMinutes]),
   ),
-  hoursByRunner: Object.fromEntries(
-    Object.entries(FLEET_METRICS_BY_RUNNER).map(([id, metrics]) => [id, metrics.hours]),
-  ),
   fleetHours: {
-    points: Object.values(FLEET_METRICS_BY_RUNNER).flatMap(({ hours }) =>
-      hours.points.filter((point) => Date.parse(point.at) >= SPECIMEN_NOW - FORECAST_HISTORY_MS),
-    ),
+    points: Object.values(FLEET_METRICS_BY_RUNNER).flatMap(({ hourPoints }) => hourPoints),
     readAt: SPECIMEN_NOW,
   },
 };

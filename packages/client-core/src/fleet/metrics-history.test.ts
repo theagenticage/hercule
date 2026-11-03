@@ -7,7 +7,6 @@ import {
 import type { HerculeClient } from "../client";
 import {
   buildMachineFiveMinuteScope,
-  buildMachineHourScope,
   EMPTY_RUNNER_METRICS_HISTORY,
   FLEET_HOUR_METRICS_SCOPE,
   readRunnerMetricsHistory,
@@ -257,9 +256,6 @@ describe("readRunnerMetricsHistory", () => {
       expect((await readFirst(FLEET_HOUR_METRICS_SCOPE, at)).since).toBe(
         new Date(T0 - 7 * DAY_MS + 2 * HOUR_MS).toISOString(),
       );
-      expect((await readFirst(buildMachineHourScope(ATLAS), at)).since).toBe(
-        new Date(T0 - 14 * DAY_MS + 2 * HOUR_MS).toISOString(),
-      );
     });
 
     it("keeps the margin under the controller's range limit", async () => {
@@ -288,7 +284,7 @@ describe("readRunnerMetricsHistory", () => {
 
     await readRunnerMetricsHistory(
       machine.client,
-      buildMachineHourScope(ATLAS),
+      buildMachineFiveMinuteScope(ATLAS),
       EMPTY_RUNNER_METRICS_HISTORY,
       now,
     );
@@ -299,7 +295,11 @@ describe("readRunnerMetricsHistory", () => {
       now,
     );
 
-    expect(machine.requests[0]).toMatchObject({ runnerId: ATLAS, resolution: "hour", limit: 500 });
+    expect(machine.requests[0]).toMatchObject({
+      runnerId: ATLAS,
+      resolution: "fiveMinutes",
+      limit: 500,
+    });
     expect(fleet.requests[0]).toMatchObject({ resolution: "hour", limit: 500 });
     expect(fleet.requests[0]).not.toHaveProperty("runnerId");
   });

@@ -2,8 +2,8 @@
  * Tests how the Fleet pages read and follow Runner Metrics (spec 17 §Graphs
  * and the forecast): the histories each page reads as it opens, what a
  * `runnerMetrics` push reads again, how pushes that arrive during a read are
- * folded together, the hour histories that are read again at most once an
- * hour, and a hidden window that reads nothing.
+ * folded together, the Fleet page's hour history that is read again at most
+ * once an hour, and a hidden window that reads nothing.
  */
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -255,25 +255,24 @@ const buildMachineWorld = (): World => ({
       buildPoint(ATLAS, "2026-11-02T14:00:00.000Z", { minutes: 2 }),
       buildPoint(FORGE, "2026-11-02T14:00:00.000Z", { minutes: 2 }),
     ],
-    hour: [
-      buildPoint(ATLAS, "2026-11-02T12:00:00.000Z", { minutes: 60 }),
-      buildPoint(ATLAS, "2026-11-02T13:00:00.000Z", { minutes: 60 }),
-      buildPoint(ATLAS, "2026-11-02T14:00:00.000Z", { minutes: 2 }),
-    ],
+    hour: [],
   },
   hold: {},
 });
 
 describe("a machine's page", () => {
-  it("reads its five-minute points of the last 24 hours and its hour points of the last 14 days as it opens", async () => {
+  it("reads its five-minute points of the last 24 hours as it opens, and no hour points", async () => {
     const { calls } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
 
     // The range starts two points inside the controller's limit, on a point boundary,
     // and ends at the time of the read.
-    const until = "2026-11-02T14:02:00.000Z";
     expect(readMetricsCalls(calls)).toEqual([
-      { resolution: "fiveMinutes", runnerId: ATLAS.id, since: "2026-11-01T14:10:00.000Z", until },
-      { resolution: "hour", runnerId: ATLAS.id, since: "2026-10-19T16:00:00.000Z", until },
+      {
+        resolution: "fiveMinutes",
+        runnerId: ATLAS.id,
+        since: "2026-11-01T14:10:00.000Z",
+        until: "2026-11-02T14:02:00.000Z",
+      },
     ]);
     expect(readCpuLine().split(" ")).toHaveLength(3);
   });
@@ -358,54 +357,6 @@ describe("a machine's page", () => {
     expect(readFiveMinuteCalls(calls)).toHaveLength(before + 2);
   });
 
-  it("reads its hour points again only when the last read is an hour old", async () => {
-    const world = buildMachineWorld();
-    const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, world);
-    await settle(live);
-    expect(readHourCalls(calls)).toHaveLength(1);
-
-    pushMetrics(live, [ATLAS]);
-    pushMetrics(live, []);
-    await waitForQuiet(context);
-    expect(readHourCalls(calls)).toHaveLength(1);
-
-    world.points.hour.push(buildPoint(ATLAS, "2026-11-02T15:00:00.000Z", { minutes: 3 }));
-    vi.setSystemTime(new Date("2026-11-02T15:03:00.000Z"));
-    pushMetrics(live, [ATLAS]);
-    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(2));
-
-    expect(readHourCalls(calls)[1]).toEqual({
-      resolution: "hour",
-      runnerId: ATLAS.id,
-      since: "2026-11-02T14:00:00.000Z",
-      until: "2026-11-02T15:03:00.000Z",
-    });
-  });
-
-  it("reads its hour points once more when a push arrives during an hourly read, so no report waits another hour", async () => {
-    const world = buildMachineWorld();
-    const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, world);
-    await settle(live);
-    let release = () => {};
-    world.hold.hour = new Promise((resolve) => {
-      release = resolve;
-    });
-
-    vi.setSystemTime(new Date("2026-11-02T15:03:00.000Z"));
-    pushMetrics(live, [ATLAS]);
-    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(2));
-    pushMetrics(live, [ATLAS]);
-    pushMetrics(live, [ATLAS]);
-    await tick();
-    expect(readHourCalls(calls)).toHaveLength(2);
-
-    delete world.hold.hour;
-    release();
-    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(3));
-    await waitForQuiet(context);
-    expect(readHourCalls(calls)).toHaveLength(3);
-  });
-
   it("reads nothing while the window is hidden, and catches up when it shows", async () => {
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
     await settle(live);
@@ -456,6 +407,57 @@ describe("the Fleet page", () => {
       },
     ]);
     expect(await screen.findByText("Disk reaches its limit in about 4 days")).toBeTruthy();
+  });
+
+  it("reads the hour points again only when the last read is an hour old", async () => {
+    const world: World = {
+      runners: [ATLAS, FORGE],
+      points: { fiveMinutes: [], hour: buildFallingDiskPoints() },
+      hold: {},
+    };
+    const { calls, live } = await openApp("/fleet", world);
+    await settle(live);
+    expect(readHourCalls(calls)).toHaveLength(1);
+
+    world.points.hour.push(buildPoint(ATLAS, "2026-11-02T15:00:00.000Z", { minutes: 3 }));
+    vi.setSystemTime(new Date("2026-11-02T15:03:00.000Z"));
+    pushMetrics(live, [ATLAS]);
+    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(2));
+
+    expect(readHourCalls(calls)[1]).toEqual({
+      resolution: "hour",
+      runnerId: null,
+      since: "2026-11-02T14:00:00.000Z",
+      until: "2026-11-02T15:03:00.000Z",
+    });
+  });
+
+  it("reads the hour points once more when a push arrives during an hourly read, so no report waits another hour", async () => {
+    const world: World = {
+      runners: [ATLAS, FORGE],
+      points: { fiveMinutes: [], hour: buildFallingDiskPoints() },
+      hold: {},
+    };
+    const { calls, live, context } = await openApp("/fleet", world);
+    await settle(live);
+    let release = () => {};
+    world.hold.hour = new Promise((resolve) => {
+      release = resolve;
+    });
+
+    vi.setSystemTime(new Date("2026-11-02T15:03:00.000Z"));
+    pushMetrics(live, [ATLAS]);
+    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(2));
+    pushMetrics(live, [ATLAS]);
+    pushMetrics(live, [ATLAS]);
+    await tick();
+    expect(readHourCalls(calls)).toHaveLength(2);
+
+    delete world.hold.hour;
+    release();
+    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(3));
+    await waitForQuiet(context);
+    expect(readHourCalls(calls)).toHaveLength(3);
   });
 
   it("reads the runners again on a push, for the latest metrics on the cards", async () => {

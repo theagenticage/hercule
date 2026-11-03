@@ -492,10 +492,6 @@ describe("describeMachinePage instruments", () => {
     availableMemoryBytes: 17.6 * GIB,
     ...over,
   });
-  const withDisk = (diskFreeBytes: number, diskTotalBytes = 1000e9): Partial<Runner> => ({
-    facts: buildFacts({ diskTotalBytes }),
-    metrics: metrics({ diskFreeBytes }),
-  });
 
   describe("sessions", () => {
     it("shows the sessions running against the cap, and none waiting", () => {
@@ -539,14 +535,13 @@ describe("describeMachinePage instruments", () => {
     });
   });
 
-  it("shows CPU, memory and disk as not reported before the first report", () => {
-    const { cpu, memory, disk } = instruments({ metrics: null });
+  it("shows CPU and memory as not reported before the first report", () => {
+    const { cpu, memory } = instruments({ metrics: null });
 
-    for (const instrument of [cpu, memory, disk]) {
+    for (const instrument of [cpu, memory]) {
       expect(instrument).toEqual({
         value: "–",
         unit: "",
-        freeAmount: "",
         level: "normal",
         share: null,
         note: "Not reported yet",
@@ -561,7 +556,6 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics({ cpu }) }).cpu).toEqual({
         value: "23",
         unit: "%",
-        freeAmount: "",
         level: "normal",
         share: 0.239,
         note: "Peak 61% in the last minute",
@@ -582,7 +576,6 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics({ cpu: null }) }).cpu).toEqual({
         value: "–",
         unit: "",
-        freeAmount: "",
         level: "normal",
         share: null,
         note: "First reading within a minute",
@@ -593,7 +586,6 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics() }).cpu).toEqual({
         value: "–",
         unit: "",
-        freeAmount: "",
         level: "normal",
         share: null,
         note: "This machine's runner is too old to report CPU. Update it.",
@@ -624,40 +616,9 @@ describe("describeMachinePage instruments", () => {
     });
   });
 
-  describe("disk", () => {
-    it("shows the share in use, and the free space of the total in gigabytes of 10^9 bytes", () => {
-      expect(instruments(withDisk(120e9)).disk).toEqual({
-        value: "88",
-        unit: "%",
-        freeAmount: "120 GB",
-        level: "you",
-        share: 0.88,
-        note: "120 GB free of 1,000 GB",
-      });
-    });
-
-    it("shows free space with an empty meter, and says what to do, without the disk's total", () => {
-      expect(instruments({ metrics: metrics({ diskFreeBytes: 42.14e9 }) }).disk).toEqual({
-        value: "42.1",
-        unit: " GB free",
-        freeAmount: "42.1 GB",
-        level: "normal",
-        share: null,
-        note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
-      });
-    });
-
-    it("never shows more free space than the disk holds", () => {
-      expect(instruments(withDisk(500e9, 100e9)).disk).toMatchObject({
-        value: "0",
-        note: "100 GB free of 100 GB",
-      });
-    });
-  });
-
   it("keeps the last values of a machine that is away", () => {
-    const away = instruments({ connectivity: "offline", ...withDisk(120e9) });
+    const away = instruments({ connectivity: "offline", metrics: metrics() });
 
-    expect(away.disk).toMatchObject({ value: "88", note: "120 GB free of 1,000 GB" });
+    expect(away.memory).toMatchObject({ value: "72", note: "17.6 GB free of 64 GB" });
   });
 });

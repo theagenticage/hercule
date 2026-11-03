@@ -10,7 +10,7 @@
  *   percentage, from the size the runner reports;
  * - a machine whose session cap holds a thread back says so on its card, and
  *   Allow raises the cap so the waiting thread starts;
- * - a machine's page draws the CPU, Memory and Disk graphs from the metrics
+ * - a machine's page draws the CPU and Memory graphs from the metrics
  *   its runner reports, and draws a report that arrives while it is open;
  * - a machine's activity lists the session the user spawned and the workspace
  *   the user removed, in Recent on its page and on the Activity page, and the
@@ -231,7 +231,7 @@ describe("the Fleet page", () => {
   it("draws the graphs of a machine's page from its reports, and draws a report that arrives while the page is open", async () => {
     const { url, fleet } = await arrangeFleet();
     const runner = await fleet.enlistRunner("studio", {
-      machine: { totalMemoryBytes: 64 * GIB, diskTotalBytes: 1000 * GIB },
+      machine: { totalMemoryBytes: 64 * GIB },
     });
     runner.reportMetrics({
       diskFreeBytes: 800 * GIB,
@@ -243,8 +243,7 @@ describe("the Fleet page", () => {
     await locateCard(page, "studio").getByRole("button", { name: "studio", exact: true }).click();
 
     // Report 1: CPU at 10%, and memory 25% in use (48 of 64 GiB available).
-    // Disk only needs to draw a line.
-    const height = (await waitForGraphLine(page, "Disk")).height;
+    const height = (await waitForGraphLine(page, "CPU")).height;
     await expect.poll(() => readLastPointY(page, "CPU")).toBeCloseTo(placeOnGraph(0.1, height), 1);
     await expect
       .poll(() => readLastPointY(page, "Memory"))
@@ -261,12 +260,10 @@ describe("the Fleet page", () => {
     //
     // The last point's y is checked, not the whole path, because every x moves
     // with the time the page reads the history, so any re-read changes the
-    // path even when it brings the old values. Only CPU and Memory are checked
-    // for a change: they draw five-minute points, and the page re-reads the
-    // hour points of Disk at most once an hour. A higher value has a lower y,
-    // and the margin covers the two decimals the path is rounded to.
+    // path even when it brings the old values. A higher value has a lower y, and
+    // the margin covers the two decimals the path is rounded to.
     runner.reportMetrics({
-      diskFreeBytes: 200 * GIB,
+      diskFreeBytes: 800 * GIB,
       availableMemoryBytes: 16 * GIB,
       cpu: { averagePercent: 70, peakPercent: 90 },
     });

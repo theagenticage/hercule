@@ -652,7 +652,7 @@ describe("a query's limits", () => {
         // Unset, the retention is 14 days.
         const defaultRefused = yield* Effect.flip(query(hours(14, 1)));
         const defaultAccepted = yield* query(hours(14));
-        // A retention below 14 days still allows the 14 days a machine's page draws.
+        // A retention below 14 days still allows 14 days.
         yield* withRetention(7);
         const shortAccepted = yield* query(hours(14));
         const shortRefused = yield* Effect.flip(query(hours(14, 1)));

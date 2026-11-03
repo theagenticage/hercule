@@ -1,7 +1,6 @@
 import type { JSX, ReactNode } from "react";
 import type {
   CpuGraph,
-  DiskGraph,
   GraphBand,
   GraphLine,
   MemoryGraph,
@@ -87,20 +86,13 @@ const buildReferencePath = (y: number): string =>
 /**
  * Renders the box every graph is drawn in: a 40px tall svg as wide as its
  * tile, with a drawing space that stretches to fit and strokes that keep their
- * width when it does. `tone` is `you` for a graph that has turned marigold. The
- * numbers beside a graph carry its meaning, so the svg is hidden from
- * assistive technology.
+ * width when it does. The numbers beside a graph carry its meaning, so the svg
+ * is hidden from assistive technology.
  */
-function GraphBox({
-  tone,
-  children,
-}: {
-  readonly tone: "ink" | "you";
-  readonly children: ReactNode;
-}): JSX.Element {
+function GraphBox({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
     <svg
-      className={`machine-graph machine-graph--${tone}`}
+      className="machine-graph"
       viewBox={`0 0 ${DRAWING_WIDTH} ${DRAWING_HEIGHT}`}
       preserveAspectRatio="none"
       height={DRAWING_HEIGHT}
@@ -138,7 +130,7 @@ function BandPaths({
  */
 export function SessionsGraphFigure({ graph }: { readonly graph: SessionsGraph }): JSX.Element {
   return (
-    <GraphBox tone="ink">
+    <GraphBox>
       <path className="machine-graph-area" d={buildAreaPath(graph.running)} />
       <BandPaths runs={graph.waiting} className="machine-graph-waiting" />
       <path className="machine-graph-line" d={buildLinePath(graph.running)} />
@@ -150,7 +142,7 @@ export function SessionsGraphFigure({ graph }: { readonly graph: SessionsGraph }
 /** Renders the CPU graph: the peak as a band and the average as a line. */
 export function CpuGraphFigure({ graph }: { readonly graph: CpuGraph }): JSX.Element {
   return (
-    <GraphBox tone="ink">
+    <GraphBox>
       <BandPaths runs={graph.peak} className="machine-graph-band" />
       <path className="machine-graph-line" d={buildLinePath(graph.average)} />
     </GraphBox>
@@ -163,35 +155,11 @@ export function CpuGraphFigure({ graph }: { readonly graph: CpuGraph }): JSX.Ele
  */
 export function MemoryGraphFigure({ graph }: { readonly graph: MemoryGraph }): JSX.Element {
   return (
-    <GraphBox tone="ink">
+    <GraphBox>
       <BandPaths runs={graph.highest} className="machine-graph-band" />
       <path className="machine-graph-line" d={buildLinePath(graph.inUse)} />
       <path className="machine-graph-you-line" d={buildReferencePath(graph.youY)} />
       <path className="machine-graph-limit" d={buildReferencePath(graph.failY)} />
-    </GraphBox>
-  );
-}
-
-/**
- * Renders the Disk graph: the space in use as a line with an area under it,
- * the dashed forecast when there is one, and the disk limit as a dashed red
- * line. `tone` is `you` while the disk gauge is marigold or red.
- */
-export function DiskGraphFigure({
-  graph,
-  tone,
-}: {
-  readonly graph: DiskGraph;
-  readonly tone: "ink" | "you";
-}): JSX.Element {
-  return (
-    <GraphBox tone={tone}>
-      <path className="machine-graph-area" d={buildAreaPath(graph.inUse)} />
-      <path className="machine-graph-line" d={buildLinePath(graph.inUse)} />
-      {graph.forecast !== null && (
-        <path className="machine-graph-forecast" d={buildLinePath([graph.forecast])} />
-      )}
-      <path className="machine-graph-limit" d={buildReferencePath(graph.limitY)} />
     </GraphBox>
   );
 }

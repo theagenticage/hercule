@@ -74,9 +74,6 @@ describe("forecastDiskLimit", () => {
     const forecast = forecastDiskLimit(points, RUNNER, NOW);
 
     expect(forecast?.days).toBe(27);
-    expect(forecast?.reachesAt).toBeCloseTo(NOW + 27 * DAY_MS, -3);
-    expect(forecast?.from.at).toBe(NOW);
-    expect(forecast?.from.freeBytes).toBeCloseTo(370 * GB, -3);
   });
 
   it("rounds the days to the nearest whole day", () => {
@@ -197,20 +194,17 @@ describe("forecastDiskLimit", () => {
         diskWatermarkBytes,
       });
 
-    it("gives nothing when the line is exactly at the limit, which would have no length", () => {
+    it("gives nothing when the line is exactly at the limit", () => {
       // The fitted line falls 450 a day and is at 350 on the newest day.
       expect(forecastDiskLimit(noisy, buildSmallDiskRunner(350), NOW)).toBeNull();
     });
 
-    it("gives nothing when the line is under the limit, which would run backwards", () => {
+    it("gives nothing when the line is under the limit", () => {
       expect(forecastDiskLimit(noisy, buildSmallDiskRunner(400), NOW)).toBeNull();
     });
 
     it("still gives a forecast when the line is just above the limit", () => {
-      const forecast = forecastDiskLimit(noisy, buildSmallDiskRunner(300), NOW);
-
-      expect(forecast?.reachesAt).toBeCloseTo(NOW + DAY_MS * (50 / 450), -3);
-      expect(forecast?.days).toBe(1);
+      expect(forecastDiskLimit(noisy, buildSmallDiskRunner(300), NOW)?.days).toBe(1);
     });
   });
 });

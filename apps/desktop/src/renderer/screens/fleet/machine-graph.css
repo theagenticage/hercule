@@ -45,15 +45,9 @@
 .machine-graph-waiting-single {
   stroke: var(--you);
 }
-.machine-graph-forecast {
-  fill: none;
-  stroke: color-mix(in oklab, var(--ink) 55%, transparent);
-  stroke-width: 1.5;
-  stroke-dasharray: 3 3;
-}
 /* The reference lines are dashed 2 3: the session cap in ink, the memory
-   threshold in marigold, and the memory and disk limits in red. They are
-   mixed with transparent instead of dimmed with opacity. */
+   threshold in marigold, and the memory limit in red. They are mixed with
+   transparent instead of dimmed with opacity. */
 .machine-graph-cap,
 .machine-graph-you-line,
 .machine-graph-limit {
@@ -69,13 +63,6 @@
 }
 .machine-graph-limit {
   stroke: color-mix(in oklab, var(--fail) 75%, transparent);
-}
-.machine-graph--you .machine-graph-line,
-.machine-graph--you .machine-graph-forecast {
-  stroke: var(--you);
-}
-.machine-graph--you .machine-graph-area {
-  fill: color-mix(in oklab, var(--you) 16%, transparent);
 }
 
 /* The frame of a graph with nothing to draw: a graph's height, with the same

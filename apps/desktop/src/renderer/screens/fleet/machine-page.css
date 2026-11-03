@@ -40,14 +40,38 @@
   font-weight: var(--w-bold);
   letter-spacing: -0.015em;
 }
+/* The line under the name wraps, and a "·" must never end a line or start one.
+   So the dot is not an item of its own: each piece after the first draws its dot
+   (`::before`) in a slot of its own to its left, and the line holds no dot at its
+   end. The row is moved left by one slot and clipped at the text column's edge, so
+   the dot of a piece that wraps to the start of a line falls outside the clip and
+   is not drawn. On one line the slots are what the 6px gaps and the dot used to
+   take. The slot is 6px, the dot (0.29em wide, as Inter draws it), and 6px. */
 .machine-page-head-text p {
+  --machine-page-head-slot: calc(12px + 0.29em);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin: 2px 0 0;
+  row-gap: 6px;
+  margin: 2px 0 0 calc(-1 * var(--machine-page-head-slot));
+  clip-path: inset(-1em 0 -1em var(--machine-page-head-slot));
   color: var(--muted);
   font-size: var(--t-12);
+}
+.machine-page-head-text p > * {
+  position: relative;
+  padding-left: var(--machine-page-head-slot);
+}
+/* `content: "·" / ""` gives the dot an empty text alternative, so screen readers
+   skip it as they skipped the `aria-hidden` span it replaces. */
+.machine-page-head-piece::before {
+  content: "·";
+  content: "·" / "";
+  position: absolute;
+  top: 0;
+  left: 6px;
+  width: 0.29em;
+  text-align: center;
 }
 .machine-page-status {
   display: inline-flex;
@@ -99,7 +123,7 @@
   font-size: var(--t-11);
 }
 
-/* ---------- Capacity: the room line and the four instruments ---------- */
+/* ---------- Capacity: the room line and the three instruments ---------- */
 /* The section starts right under the head, unlike the sections below it: the
    room line's own margin is the gap, and an away machine's banner has its own. */
 .machine-page-capacity {
@@ -113,14 +137,24 @@
 }
 .machine-page-instruments {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px 36px;
 }
-/* Four 16-block drawings (9px a block) need 144px a column; under this width
-   they would be cut off. */
-@container machine-page-instruments (width < 720px) {
+/* The widest drawing that must show whole is 16 slots with the cap mark among
+   them (a lowered cap with 16 sessions running): 16 blocks of 7px, the 1.5px
+   mark, and 2px between all 17 parts, so 16 * 7 + 16 * 2 + 1.5 = 145.5px.
+   Three columns need 3 * 145.5 + 2 * 36 = 508.5px, rounded up to 510px. Under
+   that, Sessions takes a row of its own and CPU and Memory share the next.
+   At the narrowest window (800px wide, sidebar open) the row is about 464px,
+   so a third of it would be about 131px, too narrow. Waiting blocks beyond
+   the column are cut off at its edge, as on a card: the numbers carry the
+   counts. */
+@container machine-page-instruments (width < 510px) {
   .machine-page-instruments {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .machine-page-instruments > :first-child {
+    grid-column: 1 / -1;
   }
 }
 .machine-page-instrument {
@@ -155,7 +189,7 @@
 }
 /* The drawings are the cards', made as big as the prototype's instruments:
    a 6px meter and 7 by 14px blocks. Both take 22px with their margins and
-   centre on the same line, so the notes under the four tiles line up (the
+   centre on the same line, so the notes under the three tiles line up (the
    prototype's meter takes 16px and its ladder 22px). */
 .machine-page-instrument .fleet-meter {
   height: 6px;
@@ -182,14 +216,6 @@
   color: var(--faint);
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
-}
-/* When the disk reaches its limit, as a line of its own under the note, in the
-   ink of a need that is not urgent yet. */
-.machine-page-instrument-forecast {
-  margin-top: -4px;
-  color: var(--you-ink);
-  font-size: var(--t-12);
-  font-weight: var(--w-medium);
 }
 /* A machine that is away: what it last reported in quieter inks, as on its
    card, never at reduced opacity. */

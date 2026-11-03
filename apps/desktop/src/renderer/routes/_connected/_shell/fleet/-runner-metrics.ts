@@ -16,7 +16,6 @@ import {
 } from "@hercule/client-core";
 import {
   buildMachineFiveMinuteScope,
-  buildMachineHourScope,
   EMPTY_RUNNER_METRICS_HISTORY,
   FLEET_HOUR_METRICS_SCOPE,
   readRunnerMetricsHistory,
@@ -51,7 +50,7 @@ export const runnerMetricsQuery = (client: HerculeClient, scope: RunnerMetricsSc
   });
 };
 
-/** How old a history of hour points must be before a nudge reads it again. */
+/** How old the Fleet page's history of hour points must be before a nudge reads it again. */
 const HOUR_HISTORY_REFRESH_MS = 60 * 60 * 1000;
 
 /**
@@ -62,17 +61,18 @@ const HOUR_HISTORY_REFRESH_MS = 60 * 60 * 1000;
  *
  * - A machine's page ignores a push that names other runners only: with five
  *   machines, the other four's nudges would otherwise read the runners and
- *   its histories four times a minute for nothing.
+ *   its history four times a minute for nothing.
  * - The runners are read again, for the latest metrics on the cards and the
  *   machine page. A routine report publishes nothing on `runner`.
- * - A machine's five-minute history is read again from the start of its newest
- *   point. That point was still filling.
- * - The history of hour points is read again only when its last successful read
- *   is an hour old or more, so a nudge a minute changes none of them within
- *   the hour. The age is the query's `dataUpdatedAt`, not the history's own
- *   `readAt`, which does not move when a read brings no new point. A history
- *   that is being read is not left alone: a report written after that read's
- *   query ran would otherwise wait another hour.
+ * - A machine's page reads its five-minute history again from the start of its
+ *   newest point. That point was still filling. The page holds no other
+ *   history.
+ * - The Fleet page reads its history of hour points again only when its last
+ *   successful read is an hour old or more, so a nudge a minute changes none
+ *   of them within the hour. The age is the query's `dataUpdatedAt`, not the
+ *   history's own `readAt`, which does not move when a read brings no new
+ *   point. A history that is being read is not left alone: a report written
+ *   after that read's query ran would otherwise wait another hour.
  *
  * Reading goes through `invalidateWithoutCancelling`, so however many nudges
  * arrive, a history has at most one read running and one more waiting.
@@ -89,10 +89,9 @@ const readAgainForPush = (
       queryClient,
       queryKeys.runnerMetrics(buildMachineFiveMinuteScope(runnerId)),
     );
+    return;
   }
-  const hourKey = queryKeys.runnerMetrics(
-    runnerId === null ? FLEET_HOUR_METRICS_SCOPE : buildMachineHourScope(runnerId),
-  );
+  const hourKey = queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE);
   const readAt = queryClient.getQueryState(hourKey)?.dataUpdatedAt ?? 0;
   if (Date.now() - readAt >= HOUR_HISTORY_REFRESH_MS) {
     invalidateWithoutCancelling(queryClient, hourKey);

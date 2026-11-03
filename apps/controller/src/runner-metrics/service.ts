@@ -29,12 +29,13 @@ import { runnerMetricsRepository } from "./repository";
 const DEFAULT_RETENTION_DAYS = 14;
 
 /**
- * The days of history a machine's page always draws, as hour points. A query
- * for hour points may cover this many days even when the retention is shorter:
- * the days beyond the retention hold no rows, so refusing them would protect
- * nothing and only make the page fail.
+ * The fewest days of hour points a query may cover. A query for hour points
+ * may cover this many days, the default retention, even when the retention is
+ * set shorter: the days beyond the retention hold no rows, so refusing them
+ * would protect nothing and only make a client fail. A client written against
+ * the default retention keeps working.
  */
-const MACHINE_PAGE_DAYS = 14;
+const MIN_HOUR_SPAN_DAYS = 14;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -115,11 +116,11 @@ const make = Effect.gen(function* () {
           );
         }
         if (input.resolution === "hour") {
-          const days = Math.max(yield* readRetentionDays, MACHINE_PAGE_DAYS);
+          const days = Math.max(yield* readRetentionDays, MIN_HOUR_SPAN_DAYS);
           if (spanMs > days * DAY_MS) {
             return yield* Effect.fail(
               refuseSpan(
-                `hour points cover at most ${String(days)} days, the longer of the history kept and the ${String(MACHINE_PAGE_DAYS)} days a machine's page draws; ask for a shorter span.`,
+                `hour points cover at most ${String(days)} days, the longer of the history kept and ${String(MIN_HOUR_SPAN_DAYS)} days; ask for a shorter span.`,
               ),
             );
           }
