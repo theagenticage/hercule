@@ -36,7 +36,7 @@ The report was called the watermark, which is also the name of the disk limit th
 - **Export to OpenTelemetry and leave history to a metrics system.** Rejected for v1: it makes a second system a requirement for one screen. Exporting the same metrics is post-v1 ([#978](https://github.com/theagenticage/hercule/issues/978)), and the names already match what such a system would call them.
 - **Keep the metrics on the runner, and ask for them when a page opens.** Rejected: an offline machine is exactly the one whose recent history matters, and it could not answer.
 - **Per-session memory and CPU.** Rejected: a session's tools, such as a build or a container, run outside the session's process tree in ways the runner cannot follow, and the number would blame the wrong session. The memory graph is the whole machine's.
-- **A longer default, such as 90 days.** Rejected for now: the graphs cover 24 hours and 14 days, and the forecast reads 7. About 15 MB for five machines is a cost worth paying; three months is not.
+- **A longer default, such as 90 days.** Rejected for now: the graphs cover 24 hours and 14 days, and the forecast reads 7. *(Amended 2026-11-03, [#1005](https://github.com/theagenticage/hercule/issues/1005), decided by Rogier: the machine page's 14-day Disk graph is gone, so nothing reads more than 7 days of hour points now, the disk forecast. The 14-day default is unchanged.)* About 15 MB for five machines is a cost worth paying; three months is not.
 
 ## Consequences
 
