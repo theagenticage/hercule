@@ -27,33 +27,20 @@ import { execFileSync } from "node:child_process";
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { findCompiledBinary, PASSWORD, runCli, USERNAME } from "../../scripts/controller-process";
-import { arrangeFleet, chooseMenuItem, openSignedIn, startControllerForTest } from "./harness";
+import {
+  arrangeFleet,
+  chooseMenuItem,
+  locateCard,
+  openFleet,
+  openSignedIn,
+  startControllerForTest,
+} from "./harness";
 
 /** Returns the label of the sidebar's list, "Threads" or "Hercule": the face it shows. */
 function readSidebarList(page: Page): Promise<string | null> {
   return page
     .locator('nav[aria-label="Threads"], nav[aria-label="Hercule"]')
     .getAttribute("aria-label");
-}
-
-/** Opens the Fleet page from the sidebar: the Hercule face, then its Fleet row. */
-async function openFleet(page: Page): Promise<void> {
-  await page
-    .getByRole("tablist", { name: "Sidebar" })
-    .getByRole("tab", { name: "Hercule" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Hercule", exact: true })
-    .getByRole("link", { name: "Fleet" })
-    .click();
-  await page.getByRole("heading", { level: 1, name: "Fleet" }).waitFor();
-}
-
-/** Returns the Fleet page's card of the machine named `name`. */
-function locateCard(page: Page, name: string) {
-  return page
-    .locator(".fleet-card")
-    .filter({ has: page.getByRole("button", { name, exact: true }) });
 }
 
 const GIB = 1024 ** 3;
