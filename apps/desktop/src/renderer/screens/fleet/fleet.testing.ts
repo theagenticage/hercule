@@ -54,6 +54,7 @@ export const buildRunner = (overrides: Partial<Runner>): Runner => ({
   labels: [],
   facts: null,
   metrics: buildMetrics(),
+  diskUsage: null,
   maxConcurrentSessions: 16,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-11-02T09:12:00.000Z",

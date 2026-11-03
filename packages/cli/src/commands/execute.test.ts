@@ -242,6 +242,59 @@ describe("a positional whose row resolves tails", () => {
   });
 });
 
+const AT_DISPOSE = "2026-11-03T10:00:00.000Z";
+
+const buildWorkspace = (tail: string) => ({
+  id: buildId(tail),
+  runnerId: buildId("ffffffff"),
+  kind: "ephemeral",
+  status: "ready",
+  ownership: "managed",
+  retentionPolicy: "automatic",
+  path: null,
+  observedAt: null,
+  warnings: [],
+  checkouts: [],
+  designatedConnectionId: null,
+  message: null,
+  sessionIds: [],
+  keptUntil: null,
+  diskUsage: null,
+  diskUsageError: null,
+  createdAt: AT_DISPOSE,
+  provisionedAt: AT_DISPOSE,
+  lastUsedAt: AT_DISPOSE,
+  disposedAt: null,
+});
+
+describe("workspace dispose-many", () => {
+  it("resolves each tail and sends one item per workspace, with no expectedLastUsedAt", async () => {
+    const workspaces = [buildWorkspace("ccccccc3"), buildWorkspace("ddddddd4")];
+    const { fetch, client } = stubClient((request) =>
+      request.method === "GET"
+        ? { items: workspaces }
+        : {
+            results: workspaces.map((workspace) => ({
+              workspaceId: workspace.id,
+              outcome: "requested",
+            })),
+          },
+    );
+    const command = lookUpCommand("workspace", "dispose-many");
+    const args = await parseArguments(command, ["0ccccccc3", "0ddddddd4"], refuseStdinRead);
+
+    await execute(client, command, args);
+
+    expect(fetch.calls).toMatchObject([
+      { method: "GET", path: "/api/v1/workspaces" },
+      { method: "POST", path: "/api/v1/workspaces/dispose" },
+    ]);
+    expect(fetch.calls[1]!.body).toEqual({
+      items: [{ workspaceId: workspaces[0]!.id }, { workspaceId: workspaces[1]!.id }],
+    });
+  });
+});
+
 // A Model Profile is named by a tail wherever a command takes one.
 describe("a flag that names a Model Profile", () => {
   const AT = "2026-10-31T09:00:00.000Z";
@@ -690,6 +743,7 @@ describe("runner metrics", () => {
     labels: [],
     facts: null,
     metrics: null,
+    diskUsage: null,
     maxConcurrentSessions: 1,
     diskWatermarkBytes: 10_737_418_240,
     lastSeenAt: null,

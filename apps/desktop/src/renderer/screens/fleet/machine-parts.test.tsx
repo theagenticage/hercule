@@ -58,31 +58,52 @@ describe("Meter", () => {
 
 describe("NeedLine", () => {
   it("draws the Allow button it is given beside a need of waiting sessions", () => {
-    render(<NeedLine need={BUSY_MACHINE.need} allow={<button type="button">Allow 17</button>} />);
+    render(
+      <NeedLine
+        need={BUSY_MACHINE.need}
+        allow={<button type="button">Allow 17</button>}
+        cleanUp={null}
+      />,
+    );
 
     expect(screen.getByText("5 threads wait for a slot")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Allow 17" })).toBeTruthy();
   });
 
-  it("draws Clean up inert while a disk is below its limit, because the cleanup is not built yet", () => {
-    render(<NeedLine need={FULL_DISK_MACHINE.need} allow={null} />);
-
-    const cleanUp = screen.getByRole("button", { name: "Clean up…" });
-    expect(cleanUp.getAttribute("aria-disabled")).toBe("true");
-    expect(cleanUp.getAttribute("title")).toBe("Not built yet");
+  it("draws the Clean up button it is given beside a disk need", () => {
+    for (const machine of [FULL_DISK_MACHINE, NEARLY_FULL_DISK_MACHINE]) {
+      const { unmount } = render(
+        <NeedLine
+          need={machine.need}
+          allow={null}
+          cleanUp={<button type="button">Clean up…</button>}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Clean up…" })).toBeTruthy();
+      unmount();
+    }
   });
 
-  it("draws Clean up inert while a disk is 85% full or more, as it does below the limit", () => {
-    render(<NeedLine need={NEARLY_FULL_DISK_MACHINE.need} allow={null} />);
+  it("draws no Clean up button beside a need that is not about the disk", () => {
+    render(
+      <NeedLine
+        need={BUSY_MACHINE.need}
+        allow={null}
+        cleanUp={<button type="button">Clean up…</button>}
+      />,
+    );
 
-    expect(screen.getByText("Disk 87% full")).toBeTruthy();
-    const cleanUp = screen.getByRole("button", { name: "Clean up…" });
-    expect(cleanUp.getAttribute("aria-disabled")).toBe("true");
-    expect(cleanUp.getAttribute("title")).toBe("Not built yet");
+    expect(screen.queryByRole("button", { name: "Clean up…" })).toBeNull();
   });
 
   it("draws no button for an offline machine", () => {
-    render(<NeedLine need={OFFLINE_MACHINE.need} allow={null} />);
+    render(
+      <NeedLine
+        need={OFFLINE_MACHINE.need}
+        allow={null}
+        cleanUp={<button type="button">Clean up…</button>}
+      />,
+    );
 
     expect(screen.getByText("Offline since 09:12")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();

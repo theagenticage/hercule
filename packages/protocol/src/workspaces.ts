@@ -12,7 +12,15 @@
  */
 import { Schema } from "effect";
 
-import { Fact, HarnessHome, Message, StorageId, Subdirectory, Timestamp } from "./primitives";
+import {
+  Bytes,
+  Fact,
+  HarnessHome,
+  Message,
+  StorageId,
+  Subdirectory,
+  Timestamp,
+} from "./primitives";
 import { MAX_REPOSITORY_SKILLS, MAX_SKIPPED_REASON_LENGTH, RepositorySkill } from "./skills";
 
 /** The most checkouts one workspace holds; a multi-repo workspace is a handful. */
@@ -34,6 +42,16 @@ export const supportsWorkspaceLifecycle = (capabilities: ReadonlyArray<string>):
  * that lists it.
  */
 export const ARCHIVED_SESSION_FILES_CAPABILITY = "archivedSessionFiles";
+
+/**
+ * Means the runner measures the disk space of its workspaces, repository caches
+ * and Harness Homes, and sends a `DiskUsageReport`. The runner sends the frame
+ * only to a controller that lists it.
+ */
+export const DISK_USAGE_CAPABILITY = "diskUsage";
+
+/** The most workspaces one `DiskUsageReport` lists. A runner with more sends the most recently used. */
+export const MAX_MEASURED_WORKSPACES = 2000;
 
 /**
  * The most archived sessions one dispose lists. Each entry is at most about 1.4 KB,
@@ -420,3 +438,114 @@ export type CredentialRefused = Schema.Schema.Type<typeof CredentialRefused>;
 export const CredentialAnswer = Schema.Union([CredentialGranted, CredentialRefused]);
 
 export type CredentialAnswer = Schema.Schema.Type<typeof CredentialAnswer>;
+
+/**
+ * How much disk space one workspace takes, as its runner last measured it. It
+ * counts allocated blocks, not file lengths, and reads nothing from Git.
+ */
+export const WorkspaceDiskUsage = Schema.Struct({
+  /** The space the workspace's files take. Shown beside one workspace and never added up. */
+  sizeBytes: Bytes,
+  /**
+   * The part of `sizeBytes` that removing the workspace gives back: the files
+   * no other path links to. A file pnpm hard-linked from its store takes space
+   * but frees none.
+   */
+  freesBytes: Bytes,
+  /** When the runner measured it. */
+  measuredAt: Timestamp,
+});
+
+export type WorkspaceDiskUsage = Schema.Schema.Type<typeof WorkspaceDiskUsage>;
+
+/**
+ * The longest reason a runner gives for a failed measurement, in UTF-16 code
+ * units. With three-byte characters (the widest that JSON writes as they are),
+ * 2,000 entries of 250 stay near 1.5 MB; 300 would pass 2 MiB.
+ */
+export const MAX_DISK_USAGE_ERROR_LENGTH = 250;
+
+/**
+ * Matches a lone surrogate. With the `u` flag a surrogate pair is one
+ * character, so only an unpaired half matches. (`String.isWellFormed` does the
+ * same, but the project's TypeScript library setting does not include it.)
+ */
+const LONE_SURROGATE = /\p{Surrogate}/u;
+
+/** Control characters (`Cc`: C0, DEL and C1) and bidirectional controls: the embedding, override and isolate controls. */
+const DISK_USAGE_ERROR_REFUSED_CHARACTERS = /[\p{Cc}\u202a-\u202e\u2066-\u2069]/u;
+
+/**
+ * Why measuring a workspace failed, such as "Measuring took longer than 10
+ * minutes". It is short and well-formed Unicode with no control characters:
+ * no C0, DEL or C1 control, no bidirectional control, and no lone surrogate
+ * (JSON writes each lone surrogate as six bytes). So a report of
+ * `MAX_MEASURED_WORKSPACES` entries, each with the longest reason, still fits
+ * in one frame (`MAX_FRAME_BYTES`). A runner shortens a longer reason before it
+ * sends it.
+ */
+export const DiskUsageError = Schema.String.check(
+  Schema.isMaxLength(MAX_DISK_USAGE_ERROR_LENGTH),
+  Schema.makeFilter<string>((text) => {
+    if (LONE_SURROGATE.test(text)) return "must be well-formed Unicode, with no lone surrogate";
+    if (DISK_USAGE_ERROR_REFUSED_CHARACTERS.test(text))
+      return "must hold no control or bidirectional control characters";
+    return undefined;
+  }),
+);
+
+/** What a runner knows about the disk usage of one of its workspaces. */
+export const WorkspaceDiskUsageEntry = Schema.Struct({
+  workspaceId: StorageId,
+  /** The latest successful measurement, or `null` when none has succeeded yet. */
+  diskUsage: Schema.NullOr(WorkspaceDiskUsage),
+  /** Why the newest attempt failed, or `null` when it succeeded. */
+  error: Schema.NullOr(DiskUsageError),
+});
+
+export type WorkspaceDiskUsageEntry = Schema.Schema.Type<typeof WorkspaceDiskUsageEntry>;
+
+/**
+ * What the runner last measured outside its workspaces. Each count includes
+ * only files with a single link, so it never overlaps a workspace's
+ * `freesBytes`.
+ */
+export const RunnerDiskUsage = Schema.Struct({
+  /** The runner's managed repositories, the bare storage new worktrees come from. */
+  repositoryCacheBytes: Bytes,
+  /** Every Harness Home on the runner, where the harnesses keep their logins and session files. */
+  harnessHomeBytes: Bytes,
+  /** When the runner measured them. */
+  measuredAt: Timestamp,
+});
+
+export type RunnerDiskUsage = Schema.Schema.Type<typeof RunnerDiskUsage>;
+
+/** Everything a runner has measured: its managed workspaces and the space outside them. */
+export const RunnerDiskUsageReport = Schema.Struct({
+  /**
+   * One entry per managed workspace the runner holds. Past
+   * `MAX_MEASURED_WORKSPACES`, the most recently used ones, with `truncated`.
+   */
+  workspaces: Schema.Array(WorkspaceDiskUsageEntry).check(
+    Schema.isMaxLength(MAX_MEASURED_WORKSPACES),
+  ),
+  /** Whether the runner holds more workspaces than the list shows. */
+  truncated: Schema.Boolean,
+  /** What the runner last measured outside its workspaces, or `null` before the first measurement. */
+  runner: Schema.NullOr(RunnerDiskUsage),
+});
+
+export type RunnerDiskUsageReport = Schema.Schema.Type<typeof RunnerDiskUsageReport>;
+
+/**
+ * A runner's latest disk usage, sent right after hello and after measurements,
+ * at most once every 10 seconds. Never buffered: only the latest report
+ * matters.
+ */
+export const DiskUsageReport = Schema.Struct({
+  _tag: Schema.Literal("diskUsageReport"),
+  diskUsage: RunnerDiskUsageReport,
+});
+
+export type DiskUsageReport = Schema.Schema.Type<typeof DiskUsageReport>;

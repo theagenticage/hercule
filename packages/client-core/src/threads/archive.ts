@@ -6,8 +6,8 @@
  */
 import { MAX_SESSION_IDS, type Session } from "@hercule/contract";
 import type { HerculeClient } from "../client";
-import { readEveryPage } from "../read-every-page";
 import type { GroupRow } from "./group-row";
+import { readWorkspaceThreads } from "./workspace-threads";
 
 /** The rows an archive takes, and what the user is told about the rows it leaves. */
 export interface ArchivePlan {
@@ -92,7 +92,8 @@ const buildArchivedToast = (rowCount: number, skippedWorking: number, leftOver: 
  * The sidebar's list leaves out a Thread marked Done more than 14 days ago,
  * so a row can miss such a sibling, and a workspace with one Thread left
  * unarchived would never be cleaned up. So the rows' workspaces are read
- * first, with one query, and each row's Threads are the ones it knows plus
+ * first, in as many queries as the controller's limit of workspace ids per query
+ * needs, and each row's Threads are the ones it knows plus
  * every unarchived Thread of its workspace. Rows are then taken whole, in
  * order, while their Threads stay within the limit of one call. The first
  * row that does not fit ends the list, and the toast counts it as left.
@@ -103,14 +104,7 @@ export const archiveRows = async (
 ): Promise<{ readonly sessions: readonly Session[]; readonly notice: string }> => {
   const workspaceIds = [...new Set(rows.flatMap((row) => row.workspaceId ?? []))];
   // A Thread with no workspace is a row of its own, so there is nothing to read for it.
-  const workspaceThreads =
-    workspaceIds.length === 0
-      ? []
-      : await readEveryPage((page) =>
-          client.session.query({
-            query: { workspaceId: workspaceIds, kind: "thread", archived: false, ...page },
-          }),
-        );
+  const workspaceThreads = await readWorkspaceThreads(client, workspaceIds, { archived: false });
   const taken: GroupRow[] = [];
   const sessionIds: string[] = [];
   for (const row of rows) {

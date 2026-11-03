@@ -96,6 +96,7 @@ import {
   type RecentModel,
   type ThreadPicks,
 } from "@hercule/client-core";
+import { computeDayStart } from "@hercule/client-core/list-time";
 import {
   buildMachineFiveMinuteScope,
   FLEET_HOUR_METRICS_SCOPE,
@@ -177,6 +178,13 @@ import {
 import { createAppearanceStore } from "../app/appearance";
 import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
+import { CleanupProvider } from "../app/cleanup";
+import {
+  decideStorageNow,
+  listCleanupCandidateIds,
+  negotiatedCapabilitiesQuery,
+  writeIdleWorkspaceThreads,
+} from "../app/machine-storage-queries";
 import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
@@ -207,6 +215,7 @@ import { applySheetAppearance, readSheetAppearance } from "./sheet-page";
 import type { DiscussionsRecords } from "./discussions-fixture";
 import type { RunRecords } from "./run-fixture";
 import type { WikiRecords } from "./wiki-fixture";
+import { createCleanupSession } from "./fleet-cleanup-fixture";
 import type { FleetRecords } from "./fleet-fixture";
 import type { WorkflowsRecords } from "./workflows-fixture";
 
@@ -823,6 +832,25 @@ const seedQueryCache = (
     for (const run of fleet.runs) {
       queryClient.setQueryData(runQuery(client, run.id).queryKey, run);
     }
+    // Storage reads what each runner negotiated, and the Threads of the workspaces
+    // that are idle at the hour points' read time (see `decideStorageNow`).
+    const clock = new Date();
+    const storageNow = decideStorageNow(fleetHours.readAt, computeDayStart(clock, "UTC") ?? clock);
+    for (const runner of records.runners) {
+      queryClient.setQueryData(
+        negotiatedCapabilitiesQuery(client, runner.id).queryKey,
+        fleet.negotiatedCapabilities[runner.id] ?? null,
+      );
+      const idleIds = listCleanupCandidateIds(records.workspaces, runner.id, storageNow);
+      writeIdleWorkspaceThreads(
+        queryClient,
+        runner.id,
+        idleIds,
+        fleet.cleanupThreads.filter(
+          ({ workspaceId }) => workspaceId !== null && idleIds.includes(workspaceId),
+        ),
+      );
+    }
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -943,9 +971,11 @@ function ShellLayout(): JSX.Element {
   return (
     <SessionPresentationProvider>
       <DoneMovesProvider client={client}>
-        <Shell onNewThread={() => undefined}>
-          <Outlet />
-        </Shell>
+        <CleanupProvider client={client}>
+          <Shell onNewThread={() => undefined}>
+            <Outlet />
+          </Shell>
+        </CleanupProvider>
       </DoneMovesProvider>
     </SessionPresentationProvider>
   );
@@ -1408,23 +1438,27 @@ async function mountShellSpecimen(
     Promise.resolve(
       new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }),
     );
+  const fetchRecords: FetchLike =
+    created !== undefined
+      ? // The add-account sheet creates an account, and the page then reads the list again.
+        // A model picker reads the account's catalog.
+        (url, init) =>
+          init?.method === "POST" && url.endsWith("/api/v1/provider-accounts")
+            ? answerJson(created)
+            : catalog !== undefined &&
+                (init?.method ?? "GET") === "GET" &&
+                url.endsWith(`/api/v1/provider-accounts/${catalog.providerAccountId}/catalog`)
+              ? answerJson(catalog)
+              : refuseRequest(url, init)
+      : answerMove === undefined
+        ? refuseRequest
+        : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init));
+  const cleanupAnswers = screens.fleet?.cleanupAnswers;
+  const cleanupSession =
+    cleanupAnswers === undefined ? undefined : createCleanupSession(cleanupAnswers);
   const client = createClient({
     baseUrl: CONTROLLER_URL,
-    fetch:
-      created !== undefined
-        ? // The add-account sheet creates an account, and the page then reads the list again.
-          // A model picker reads the account's catalog.
-          (url, init) =>
-            init?.method === "POST" && url.endsWith("/api/v1/provider-accounts")
-              ? answerJson(created)
-              : catalog !== undefined &&
-                  (init?.method ?? "GET") === "GET" &&
-                  url.endsWith(`/api/v1/provider-accounts/${catalog.providerAccountId}/catalog`)
-                ? answerJson(catalog)
-                : refuseRequest(url, init)
-        : answerMove === undefined
-          ? refuseRequest
-          : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
+    fetch: (url, init) => cleanupSession?.answer(url, init) ?? fetchRecords(url, init),
   });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);

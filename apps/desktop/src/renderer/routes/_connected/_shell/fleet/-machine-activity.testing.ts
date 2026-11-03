@@ -106,6 +106,9 @@ export const openMachineWithEvents = async (
   const calls = stubApi({
     ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [] }),
     "GET /api/v1/runners": { body: { items: [ATLAS] } },
+    [`GET /api/v1/runners/${ATLAS.id}`]: {
+      body: { ...ATLAS, negotiatedCapabilities: null, protocolVersion: null },
+    },
     "GET /api/v1/sessions": { body: { items: [] } },
     "GET /api/v1/harnesses": { body: HARNESSES },
     "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "UTC" } } },

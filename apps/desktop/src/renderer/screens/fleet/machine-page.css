@@ -364,8 +364,8 @@
   .machine-page-sw-note {
     grid-area: note;
     /* Starts under the name's text, after its 13px logo and 9px gap, and
-       sits close to it. */
-    margin-top: -8px;
+       sits close to it, with a 2px gap between the two lines. */
+    margin-top: -6px;
     padding: 0 0 8px 22px;
     white-space: normal;
   }

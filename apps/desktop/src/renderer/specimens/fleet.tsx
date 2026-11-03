@@ -9,6 +9,12 @@
  *   captures atlas; `?machine=mini` shows the page of the offline machine;
  * - `?machine=atlas&activity`: the Activity page of that machine, which lists
  *   the machine's audit log (fleet-activity-fixture.ts);
+ * - `?cleanup`: the Fleet page where the controller plays a cleanup of studio's
+ *   nine idle workspaces (fleet-cleanup-fixture.ts), for the cleanup dialog its
+ *   Clean up… opens.
+ *   `?cleanup=pending` has the controller never answer the read that follows a
+ *   removal, so the rows stay "Removing…"; `?cleanup=partial` answers it with
+ *   some workspaces deleted and some refused;
  * - `?empty`: the Fleet page of an empty fleet, where only the controller's
  *   own machine is online, with the dashed card that adds a machine.
  *
@@ -19,6 +25,7 @@
 // its module loads.
 import "./fixed-clock";
 import { rememberMachineView } from "../screens/fleet/machine-view";
+import { buildCleanupAnswers } from "./fleet-cleanup-fixture";
 import { FLEET_ALONE_SIDEBAR_RECORDS, FLEET_RECORDS, FLEET_SIDEBAR_RECORDS } from "./fleet-fixture";
 import { mountFleetSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
@@ -38,7 +45,14 @@ if (params.has("activity") && machine === undefined) {
 rememberMachineView(params.get("view") === "list" ? "list" : "grid");
 await mountFleetSpecimen(
   records,
-  FLEET_RECORDS,
+  params.has("cleanup")
+    ? {
+        ...FLEET_RECORDS,
+        cleanupAnswers: buildCleanupAnswers(
+          params.get("cleanup") === "pending" ? "pending" : "partial",
+        ),
+      }
+    : FLEET_RECORDS,
   machine === undefined
     ? "/fleet"
     : `/fleet/${machine.id}${params.has("activity") ? "/activity" : ""}`,

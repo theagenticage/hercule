@@ -21,6 +21,7 @@ const RUNNER: Runner = {
   labels: ["gpu", "primary"],
   facts: null,
   metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: null,

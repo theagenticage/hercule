@@ -54,7 +54,8 @@ function Gauge({
  *
  * The machine's name is the card's one way to open the machine: its button
  * covers the whole card and calls `onOpen` with the runner id. `allow` is the
- * Allow button, drawn beside a need of waiting sessions. `faces` are the faces
+ * Allow button, drawn beside a need of waiting sessions, and `cleanUp` the
+ * Clean up… button, drawn beside a need of disk. `faces` are the faces
  * of the work on the machine, drawn left of its room; `undefined` when the
  * machine has no work. `updatesText` is the quiet "2 updates" line, drawn
  * under the need line, or in its place when there is no need; `undefined`
@@ -69,12 +70,14 @@ export function MachineCard({
   faces,
   updatesText,
   allow,
+  cleanUp,
   onOpen,
 }: {
   readonly machine: MachineSummary;
   readonly faces: MachineFaces | undefined;
   readonly updatesText: string | undefined;
   readonly allow: ReactNode;
+  readonly cleanUp: ReactNode;
   readonly onOpen: (runnerId: string) => void;
 }): JSX.Element {
   const { runnerId, status, isAway, drawing, disk, memory } = machine;
@@ -116,7 +119,7 @@ export function MachineCard({
         {machine.roomText !== null && <span className="fleet-room">{machine.roomText}</span>}
       </div>
       <div className="fleet-card-foot">
-        <NeedLine need={machine.need} allow={allow} />
+        <NeedLine need={machine.need} allow={allow} cleanUp={cleanUp} />
         <UpdatesLine text={updatesText} />
       </div>
     </div>

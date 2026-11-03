@@ -370,6 +370,7 @@ describe("the placeholders a usage line shows", () => {
     "session done": "<session-id>...",
     "session reopen": "<session-id>...",
     "session archive": "<session-id>...",
+    "workspace dispose-many": "<workspace-id>...",
     "ignore-rule create": "<kind>",
     "discussion read": "<discussion-id>",
     "discussion post": "<discussion-id>",

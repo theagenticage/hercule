@@ -57,6 +57,7 @@ import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
   findCompiledBinary,
   PASSWORD,
+  completeSetup,
   startController,
   startSetUpController,
   USERNAME,
@@ -226,7 +227,9 @@ export async function signInAndReadToken(
  * `./hercule`, in a scratch Hercule Home, never the user's own. With
  * `setUp: true`, it also completes first-run setup as `username`, or as
  * `USERNAME` when it is not given, so the app can sign in; otherwise setup
- * is still pending. Returns the controller with the path of its home.
+ * is still pending. `env` is added to the environment of the controller and
+ * of the runner it starts for itself. Returns the controller with the path
+ * of its home.
  *
  * The controller is stopped, and its home deleted, when the test finishes.
  * Fails when the binary has not been built, when the controller does not
@@ -235,12 +238,29 @@ export async function signInAndReadToken(
 export async function startControllerForTest(options: {
   readonly setUp: boolean;
   readonly username?: string | undefined;
+  readonly env?: Readonly<Record<string, string>> | undefined;
 }): Promise<Controller & { readonly home: string }> {
   const { home, remove } = createTemporaryHome();
   onTestFinished(remove);
-  const controller = options.setUp
-    ? await startSetUpController({ home, username: options.username })
-    : await startController({ home, binary: findCompiledBinary() });
+  const binary = findCompiledBinary();
+  let controller: Controller;
+  if (options.setUp && options.env === undefined) {
+    controller = await startSetUpController({ home, username: options.username });
+  } else {
+    controller = await startController({ home, binary, env: options.env });
+    if (options.setUp) {
+      const setup = await completeSetup({
+        home,
+        url: controller.url,
+        binary,
+        username: options.username,
+      });
+      if (setup.code !== 0) {
+        await controller.stop();
+        throw new Error(`setup failed with exit code ${String(setup.code)}:\n${setup.stderr}`);
+      }
+    }
+  }
   onTestFinished(async () => {
     await controller.stop();
   });
@@ -279,9 +299,16 @@ export interface ArrangedFleet {
  * cannot find it: a test that wants that probe to find a runner enlists a
  * scripted one and serves its identity (see `startIdentityServerForTest`).
  * Fails when that runner does not come online, or its retirement is refused.
+ *
+ * A test that needs the real runner keeps it with `ownRunnerEnv`, the
+ * environment the controller and its runner start with, and again after a
+ * restart. Nothing is retired then, so the caller places threads on that
+ * runner with care: it may find a real agent on this machine.
  */
-export async function arrangeFleet(): Promise<ArrangedFleet> {
-  const controller = await startControllerForTest({ setUp: true });
+export async function arrangeFleet(
+  options: { readonly ownRunnerEnv?: Readonly<Record<string, string>> } = {},
+): Promise<ArrangedFleet> {
+  const controller = await startControllerForTest({ setUp: true, env: options.ownRunnerEnv });
   const fleet = await connectFleet(controller.url);
   onTestFinished(fleet.disconnectRunners);
   const client = createClient({ baseUrl: controller.url, token: fleet.token });
@@ -291,8 +318,10 @@ export async function arrangeFleet(): Promise<ArrangedFleet> {
       message: "the controller's own runner did not come online",
     })
     .toEqual(["online"]);
-  const [own] = await readRunners();
-  await client.runner.retire({ params: { id: own!.id }, payload: {} });
+  if (options.ownRunnerEnv === undefined) {
+    const [own] = await readRunners();
+    await client.runner.retire({ params: { id: own!.id }, payload: {} });
+  }
   return {
     url: controller.url,
     home: controller.home,
@@ -303,6 +332,7 @@ export async function arrangeFleet(): Promise<ArrangedFleet> {
         home: controller.home,
         binary: findCompiledBinary(),
         port: controller.port,
+        env: options.ownRunnerEnv,
       });
       onTestFinished(async () => {
         await restarted.stop();
@@ -327,6 +357,26 @@ export async function openSignedIn(url: string, username: string = USERNAME): Pr
   await signInAndReadToken(launched.page, url, username);
   await launched.page.getByRole("navigation", { name: "Threads", exact: true }).waitFor();
   return launched;
+}
+
+/** Opens the Fleet page from the sidebar: the Hercule face, then its Fleet row. */
+export async function openFleet(page: Page): Promise<void> {
+  await page
+    .getByRole("tablist", { name: "Sidebar" })
+    .getByRole("tab", { name: "Hercule" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Hercule", exact: true })
+    .getByRole("link", { name: "Fleet" })
+    .click();
+  await page.getByRole("heading", { level: 1, name: "Fleet" }).waitFor();
+}
+
+/** Returns the Fleet page's card of the machine named `name`. */
+export function locateCard(page: Page, name: string) {
+  return page
+    .locator(".fleet-card")
+    .filter({ has: page.getByRole("button", { name, exact: true }) });
 }
 
 /**

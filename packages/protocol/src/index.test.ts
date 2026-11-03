@@ -7,7 +7,9 @@ import {
   LocalAnnouncement,
   LocalEnrolment,
   MAX_CHECKOUTS,
+  MAX_DISK_USAGE_ERROR_LENGTH,
   MAX_FRAME_BYTES,
+  MAX_MEASURED_WORKSPACES,
   MAX_LOGIN_CODE_SECONDS,
   MAX_PROBE_MODELS,
   MAX_REPOSITORY_SKILLS,
@@ -188,6 +190,33 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   { _tag: "pong" },
   { _tag: "factsReport", facts },
   { _tag: "watermarkReport", metrics },
+  {
+    _tag: "diskUsageReport",
+    diskUsage: {
+      workspaces: [
+        {
+          workspaceId: WORKSPACE_ID,
+          diskUsage: {
+            sizeBytes: 2_400_000_000,
+            freesBytes: 900_000_000,
+            measuredAt: "2026-11-03T10:00:00.000Z",
+          },
+          error: null,
+        },
+        {
+          workspaceId: CHECKOUT_ID,
+          diskUsage: null,
+          error: "Measuring took longer than 10 minutes",
+        },
+      ],
+      truncated: false,
+      runner: {
+        repositoryCacheBytes: 3_100_000_000,
+        harnessHomeBytes: 420_000_000,
+        measuredAt: "2026-11-03T10:00:00.000Z",
+      },
+    },
+  },
   {
     _tag: "probeReport",
     requestId: REQUEST_ID,
@@ -652,6 +681,59 @@ describe("the runner-to-controller catalogue", () => {
     expect(
       decodeFromRunner({ ...listed, outcome: { status: "listed", skills: [], skipped: [] } })._tag,
     ).toBe("Failure");
+  });
+
+  describe("disk usage report", () => {
+    const entryWith = (error: string, index = 0) => ({
+      workspaceId: `${"w".repeat(63)}${String(index % 10)}`,
+      diskUsage: {
+        sizeBytes: Number.MAX_SAFE_INTEGER,
+        freesBytes: Number.MAX_SAFE_INTEGER,
+        measuredAt: "2026-11-03T10:00:00.000Z",
+      },
+      error,
+    });
+    const reportWith = (entries: ReadonlyArray<ReturnType<typeof entryWith>>) => ({
+      _tag: "diskUsageReport",
+      diskUsage: { workspaces: entries, truncated: true, runner: null },
+    });
+
+    // JSON writes a three-byte character as it is, a quote or backslash as two
+    // bytes, and a four-byte character as it is (two UTF-16 units). The widest
+    // text per UTF-16 unit is therefore the three-byte one.
+    it.each([
+      ["three-byte characters", "\u6F22".repeat(MAX_DISK_USAGE_ERROR_LENGTH)],
+      ["four-byte characters", "\u{1F600}".repeat(MAX_DISK_USAGE_ERROR_LENGTH / 2)],
+      ["characters JSON escapes", '"\\'.repeat(MAX_DISK_USAGE_ERROR_LENGTH / 2)],
+      ["line separators", "\u2028".repeat(MAX_DISK_USAGE_ERROR_LENGTH)],
+    ])("fits the largest report in a frame with %s", (_name, error) => {
+      const report = reportWith(
+        Array.from({ length: MAX_MEASURED_WORKSPACES }, (_, index) => entryWith(error, index)),
+      );
+      const encoded = JSON.stringify(Schema.encodeUnknownSync(RunnerToController)(report));
+      expect(Buffer.byteLength(encoded, "utf8")).toBeLessThan(MAX_FRAME_BYTES);
+    });
+
+    it.each([
+      ["longer than the cap", "x".repeat(MAX_DISK_USAGE_ERROR_LENGTH + 1)],
+      ["a lone high surrogate", "\ud800"],
+      ["a lone low surrogate", "a\udc00b"],
+      ["a lone surrogate before a pair", "\ud800\u{1F600}"],
+      ["a newline", "line one\nline two"],
+      ["a C0 control", "\u0001"],
+      ["DEL", "\u007f"],
+      ["a C1 control", "\u009b"],
+      ["a right-to-left override", "\u202e"],
+      ["a bidirectional isolate", "\u2066"],
+    ])("refuses a disk usage error with %s", (_name, error) => {
+      expect(decodeFromRunner(reportWith([entryWith(error)]))._tag).toBe("Failure");
+    });
+
+    it("accepts a disk usage error of well-formed text, emoji included", () => {
+      expect(decodeFromRunner(reportWith([entryWith("Cannot read \u6F22 \u{1F600}")]))._tag).toBe(
+        "Success",
+      );
+    });
   });
 
   it("fits the largest repository skills inspection in a frame", () => {

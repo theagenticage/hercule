@@ -726,8 +726,8 @@ export const answerSignalQuery = (signals: readonly Signal[], call: Call): Answe
 
 /**
  * Returns the handlers that answer the sidebar's reads from `records`: the
- * threads, projects, workspaces, resources, runners, accounts, the user, the
- * assistants and each assistant's current session. Each list comes back as
+ * threads, projects, workspaces, resources, runners (and each runner on its
+ * own), accounts, the user, the assistants and each assistant's current session. Each list comes back as
  * one page, with no cursor to a next one.
  *
  * They also answer the three reads a Draft Thread adds, which the app makes
@@ -746,6 +746,14 @@ export const buildSidebarHandlers = (
   "GET /api/v1/workspaces": { body: { items: records.workspaces } },
   "GET /api/v1/resources": { body: { items: records.resources } },
   "GET /api/v1/runners": { body: { items: records.runners } },
+  // A machine's page reads each runner on its own too, for what it negotiated.
+  // A test of a runner that negotiated something sets its own answer.
+  ...Object.fromEntries(
+    records.runners.map((runner) => [
+      `GET /api/v1/runners/${runner.id}`,
+      { body: { ...runner, negotiatedCapabilities: null, protocolVersion: null } },
+    ]),
+  ),
   "GET /api/v1/provider-accounts": { body: records.accounts },
   "GET /api/v1/model-profiles": { body: records.modelProfiles ?? [] },
   // The providers and harnesses are what the plugins register, so they do not

@@ -20,6 +20,7 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
+import type { WorkspaceLifecycleObserver } from "../disk-usage";
 import { attachWorkspace, reserveManagedRepositories } from "./attachment";
 import { hasExpectedCheckoutIdentity } from "./identity";
 import { disposeWorkspace, detachWorkspace, hasSameRemovalIntent } from "./dispose";
@@ -116,6 +117,12 @@ export const makeWorkspaces = (options: {
    * outside this module, so the runner passes the function in.
    */
   readonly deleteArchivedSessionFiles: DeleteArchivedSessionFiles;
+  /**
+   * Told when a workspace becomes ready, when its removal begins, and when the
+   * removal ends, completed or not.
+   * Tests that do not measure disk usage leave it out.
+   */
+  readonly observer?: WorkspaceLifecycleObserver;
 }): Effect.Effect<Workspaces, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope;
@@ -315,12 +322,20 @@ export const makeWorkspaces = (options: {
           removalsInFlight.set(instruction.workspaceId, { instruction, result });
           const work = Effect.gen(function* () {
             if (preparation !== undefined) yield* Deferred.await(preparation.result);
+            // A removal that fails can leave the workspace half emptied, so
+            // the observer hears of the change before anything is deleted.
+            yield* options.observer?.beginChange(instruction.workspaceId) ?? Effect.void;
             return yield* instruction._tag === "workspaceDispose"
               ? disposeWorkspace(substrate, instruction)
               : detachWorkspace(substrate, instruction);
           }).pipe(
             Effect.catch((error) =>
               Effect.succeed(failureReport(instruction.workspaceId, error, instruction.requestId)),
+            ),
+            Effect.tap((report) =>
+              report.status === "deleted"
+                ? (options.observer?.forget(report.workspaceId) ?? Effect.void)
+                : (options.observer?.endChange(report.workspaceId) ?? Effect.void),
             ),
           );
           yield* startWorkspaceOperation(result, restore(work), () =>
@@ -410,6 +425,11 @@ export const makeWorkspaces = (options: {
                 }),
               ),
               Effect.catch((error) => Effect.succeed(failureReport(frame.workspaceId, error))),
+              Effect.tap((report) =>
+                report.status === "ready"
+                  ? (options.observer?.workspaceReady(frame.workspaceId) ?? Effect.void)
+                  : Effect.void,
+              ),
             );
             yield* startWorkspaceOperation(result, restore(work), () =>
               inFlight.delete(frame.workspaceId),

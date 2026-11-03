@@ -8,13 +8,28 @@
  * out/fleet/<theme>-<state>.png. The states:
  *
  * - `machine-recent`: atlas's page scrolled to its Recent section;
+ * - `machine-storage`: atlas's page scrolled to its Storage section;
+ * - `machine-storage-narrow`: the same section in a window of the smallest width, 800;
+ * - `machine-storage-rules`: the same section in the smallest window with the
+ *   info popover of automatic cleanup open;
+ * - `machine-software-narrow`: atlas's page scrolled to its Software section in the
+ *   smallest window, where each note sits under its name;
+ * - `machine-storage-too-old`: mini's page scrolled to its Storage section, where
+ *   the runner is too old to measure;
  * - `activity`: atlas's Activity page, filter All;
  * - `activity-problems`: the same page under the Problems filter;
  * - `activity-unfolded`: the same page with the first folded entry unfolded;
  * - `software-detail`: the Fleet page scrolled to its Software section, with
  *   the first tool's detail open;
  * - `software-narrow`: the same section in a window of the smallest width, 800,
- *   with the grid scrolled sideways to its last machine.
+ *   with the grid scrolled sideways to its last machine;
+ * - `cleanup`: studio's cleanup dialog as it opens, over the Fleet page;
+ * - `cleanup-mixed`: the same dialog with one row of the first group unticked,
+ *   so the group's checkbox shows its dash;
+ * - `cleanup-removing`: the same dialog after Archive and remove, while the
+ *   machine has not answered, so every row reads "Removing…";
+ * - `cleanup-partial`: the same dialog when the removals ended, one workspace
+ *   refused as used since the dialog opened and one by the machine.
  *
  * Then it prints the files it wrote and exits with 0, or with 1 when
  * anything fails on the way.
@@ -74,7 +89,74 @@ const pressFilter = (label: string): string => `(async () => {
 /** Scrolls the Fleet page to its Software section, so that the section starts under the header. */
 const SCROLL_TO_SOFTWARE = `document.getElementById("software").scrollIntoView({ block: "start" })`;
 
+/**
+ * Presses Clean up… on studio's card and resolves once the cleanup dialog is
+ * open, with its rows drawn. For a state that presses Archive and remove next,
+ * `pressArchive` resolves once the dialog has the rows' outcomes `waitFor`
+ * names: a selector that matches once they are drawn.
+ */
+const openCleanup = (pressArchive: boolean, waitFor?: string): string => `(async () => {
+  const until = async (find) => {
+    for (let tries = 0; tries < 100; tries += 1) {
+      const found = find();
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error("The cleanup dialog never drew what the state waits for.");
+  };
+  const card = [...document.querySelectorAll(".fleet-card")].find(
+    (each) => each.querySelector(".fleet-open")?.textContent === "studio");
+  const open = [...card.querySelectorAll("button")].find((each) => each.textContent === "Clean up…");
+  if (open === undefined) throw new Error("Studio's card has no Clean up… button.");
+  open.click();
+  await until(() => document.querySelector("dialog.cleanup-dialog[open] .cleanup-row"));
+  ${
+    pressArchive
+      ? `document.querySelector(".cleanup-foot .btn--danger").click();
+  await until(() => document.querySelector(${JSON.stringify(waitFor)}));`
+      : ""
+  }
+  await ${WAIT_FOR_FRAMES};
+})()`;
+
+/** Scrolls a machine's page to its Storage section and waits for the frames. */
+const SCROLL_TO_STORAGE = `(async () => {
+  const section = document.getElementById("machine-storage");
+  if (section === null) throw new Error("The machine's page has no Storage section.");
+  section.scrollIntoView({ block: "start" });
+  await ${WAIT_FOR_FRAMES};
+})()`;
+
 const STATES: ReadonlyArray<State> = [
+  { name: "machine-storage", query: "machine=atlas", script: SCROLL_TO_STORAGE },
+  {
+    name: "machine-storage-narrow",
+    query: "machine=atlas",
+    windowWidth: NARROW_WINDOW_WIDTH,
+    script: SCROLL_TO_STORAGE,
+  },
+  {
+    name: "machine-storage-rules",
+    query: "machine=atlas",
+    windowWidth: NARROW_WINDOW_WIDTH,
+    script: `(async () => {
+      await ${SCROLL_TO_STORAGE};
+      document.querySelector(".machine-storage-info").click();
+      await ${WAIT_FOR_FRAMES};
+    })()`,
+  },
+  {
+    name: "machine-software-narrow",
+    query: "machine=atlas",
+    windowWidth: NARROW_WINDOW_WIDTH,
+    script: `(async () => {
+      const section = document.getElementById("machine-software");
+      if (section === null) throw new Error("The machine's page has no Software section.");
+      section.scrollIntoView({ block: "start" });
+      await ${WAIT_FOR_FRAMES};
+    })()`,
+  },
+  { name: "machine-storage-too-old", query: "machine=mini", script: SCROLL_TO_STORAGE },
   {
     name: "machine-recent",
     query: "machine=atlas",
@@ -107,6 +189,26 @@ const STATES: ReadonlyArray<State> = [
       ${SCROLL_TO_SOFTWARE};
       await ${WAIT_FOR_FRAMES};
     })()`,
+  },
+  { name: "cleanup", query: "cleanup", script: openCleanup(false) },
+  {
+    name: "cleanup-mixed",
+    query: "cleanup",
+    script: `(async () => {
+      await ${openCleanup(false)};
+      document.querySelectorAll(".cleanup-row input")[1].click();
+      await ${WAIT_FOR_FRAMES};
+    })()`,
+  },
+  {
+    name: "cleanup-removing",
+    query: "cleanup=pending",
+    script: openCleanup(true, ".cleanup-status .spin"),
+  },
+  {
+    name: "cleanup-partial",
+    query: "cleanup=partial",
+    script: openCleanup(true, ".cleanup-result"),
   },
   {
     name: "software-narrow",

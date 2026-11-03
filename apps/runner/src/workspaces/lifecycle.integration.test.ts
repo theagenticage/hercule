@@ -196,6 +196,36 @@ describe("safe managed disposal", () => {
     },
   );
 
+  it("tells the lifecycle observer when a removal begins, then whether it failed or completed", async () => {
+    const fixture = await createManaged();
+    makeRemainingFile(fixture.cwd, "untracked");
+    const calls: Array<string> = [];
+    const note = (name: string) => () => Effect.sync(() => void calls.push(name));
+    const observed = makeTestWorkspaces({
+      storageDir: fixture.storageDir,
+      observer: {
+        workspaceReady: note("ready"),
+        beginChange: note("began"),
+        endChange: note("ended"),
+        forget: note("forgot"),
+      },
+    });
+    const dispose = (discardChanges?: true) =>
+      Effect.runPromise(
+        observed.dispose({
+          _tag: "workspaceDispose",
+          workspaceId: fixture.frame.workspaceId,
+          ...(discardChanges === undefined ? {} : { discardChanges }),
+        }),
+      );
+
+    expect((await dispose()).status).toBe("failed");
+    expect(calls).toEqual(["began", "ended"]);
+
+    expect((await dispose(true)).status).toBe("deleted");
+    expect(calls).toEqual(["began", "ended", "began", "forgot"]);
+  });
+
   it.each(["dirty second checkout", "root file"] as const)(
     "preflights every checkout and root before removing anything with a %s",
     async (kind) => {

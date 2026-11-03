@@ -26,7 +26,8 @@ function MeterWithValue({ gauge }: { readonly gauge: MachineGauge }): JSX.Elemen
  *
  * The machine's name is the row's one way to open the machine: its button
  * covers the whole row and calls `onOpen` with the runner id. `allow` is the
- * Allow button, drawn beside a need of waiting sessions. `updatesText` is the
+ * Allow button, drawn beside a need of waiting sessions, and `cleanUp` the
+ * Clean up… button, drawn beside a need of disk. `updatesText` is the
  * quiet "2 updates" line, drawn under the need line in the Needs you cell, or
  * in its place when there is no need; `undefined` when the machine has no
  * update.
@@ -38,11 +39,13 @@ export function MachineRow({
   machine,
   updatesText,
   allow,
+  cleanUp,
   onOpen,
 }: {
   readonly machine: MachineSummary;
   readonly updatesText: string | undefined;
   readonly allow: ReactNode;
+  readonly cleanUp: ReactNode;
   readonly onOpen: (runnerId: string) => void;
 }): JSX.Element {
   const { runnerId, status, isAway, drawing, disk, diskCaption, memory, roomText, need } = machine;
@@ -99,7 +102,7 @@ export function MachineRow({
         {memory.share === null ? <b>–</b> : <MeterWithValue gauge={memory} />}
       </span>
       <span role="cell" className="fleet-row-need">
-        <NeedLine need={need} allow={allow} />
+        <NeedLine need={need} allow={allow} cleanUp={cleanUp} />
         <UpdatesLine text={updatesText} />
       </span>
       <ChevronRightIcon size={14} />

@@ -299,6 +299,15 @@ export const splitDiskSize = (
   return { amount: Math.round(gigabytes).toLocaleString("en-US"), unit: "GB" };
 };
 
+/**
+ * Formats a disk size in units of 10^9 bytes as Finder shows it, without a
+ * trailing ".0": "420 MB", "41 GB", "12.5 GB", "1,000 GB".
+ */
+export const formatDiskSize = (bytes: number): string => {
+  const { amount, unit } = splitDiskSize(bytes);
+  return `${amount.endsWith(".0") ? amount.slice(0, -2) : amount} ${unit}`;
+};
+
 /** How full a gauge is: `normal`, `you` (getting high), or `fail` (too high). */
 export type GaugeLevel = "normal" | "you" | "fail";
 

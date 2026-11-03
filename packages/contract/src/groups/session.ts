@@ -827,13 +827,22 @@ export const SessionRunFilter = Schema.Union([Id, Schema.NonEmptyArray(Id)]);
 export const SessionKindFilter = Schema.Union([SessionKind, Schema.NonEmptyArray(SessionKind)]);
 
 /**
- * One workspace's id, or several, at most one page of them. A client that
- * archives a sidebar row reads the Threads of its workspace in one read. The
- * query string carries several as repeated `workspaceId` keys.
+ * The most workspace ids one `session.query` names. The query string carries
+ * each id as a repeated `workspaceId` key of about 49 bytes, and the server
+ * refuses a request whose headers pass 16 KiB (about 330 ids), so a page of
+ * 500 ids could not be sent. 150 ids are about 7 KiB, which leaves room for
+ * the other filters and for headers a proxy adds.
+ */
+export const MAX_SESSION_WORKSPACE_IDS = 150;
+
+/**
+ * One workspace's id, or several, at most `MAX_SESSION_WORKSPACE_IDS`. A
+ * client that archives a sidebar row reads the Threads of its workspace in one
+ * read. The query string carries several as repeated `workspaceId` keys.
  */
 export const SessionWorkspaceFilter = Schema.Union([
   Id,
-  atMost(Id, MAX_PAGE_LIMIT).check(Schema.isMinLength(1)),
+  atMost(Id, MAX_SESSION_WORKSPACE_IDS).check(Schema.isMinLength(1)),
 ]);
 
 export const SessionFilter = Schema.Struct({

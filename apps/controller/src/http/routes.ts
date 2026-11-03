@@ -488,6 +488,9 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
       .handle("dispose", ({ params, payload }) =>
         withApiErrors(provisioning.disposeWorkspace(params.id, payload)),
       )
+      .handle("disposeMany", ({ payload }) =>
+        withApiErrors(provisioning.disposeWorkspaces(payload)),
+      )
       .handle("detach", ({ params }) => withApiErrors(provisioning.detachWorkspace(params.id)));
   }),
 );

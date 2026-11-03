@@ -18,6 +18,7 @@ import {
   buildSocketPath,
 } from "./credentials";
 import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
+import { makeDiskMeasurements, makeFolderMeasurer } from "./disk-usage";
 import { openFileClock } from "./edit-marks";
 import { serveIdentity } from "./identity";
 import { buildThisMachine, probeFacts } from "./probe";
@@ -34,6 +35,7 @@ import { connect, type RunnerRetired } from "./socket";
 import { readDiskAndMemory } from "./metrics";
 import { makeWorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
+import { makeRegistry } from "./workspaces/registry";
 
 /** Lists this machine's network addresses, sorted so two readings can be compared. */
 const listNetworkAddresses = (): ReadonlyArray<string> =>
@@ -195,10 +197,19 @@ export const runDaemon = (
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
+      // Lives as long as the daemon, like the workspaces it measures. Its
+      // worker measures every workspace nothing has measured yet, once.
+      const diskMeasurements = yield* makeDiskMeasurements({
+        storageDir,
+        registry: makeRegistry(storageDir),
+        measureFolder: makeFolderMeasurer(),
+      });
+      sessions.observeWorkspaceSessions(diskMeasurements.sessionChanges);
       const workspaces = yield* makeWorkspaces({
         storageDir,
         gitEnv: buildGitCredentialEnv({ socketPath }),
         deleteArchivedSessionFiles: (sessions) => deleteArchivedSessionFiles(storageDir, sessions),
+        observer: diskMeasurements,
       });
       const workspaceSteps = makeWorkspaceSteps({
         storageDir,
@@ -292,6 +303,7 @@ export const runDaemon = (
             }),
             sessionSkillsFolders,
             workspaces,
+            diskMeasurements,
             workspaceSteps,
             socketPath,
             credentials,

@@ -6,6 +6,11 @@
 if (process.argv[2] === "github-token") {
   const { runGithubToken } = await import("@hercule/runner/github-token");
   await runGithubToken();
+} else if (process.argv[2] === "measure-disk-usage") {
+  // The runner starts this verb in a child process to walk a folder. It reads
+  // no Home, so it is chosen here, before the dispatcher is imported.
+  const { runMeasureDiskUsage } = await import("@hercule/runner/measure-disk-usage");
+  runMeasureDiskUsage(process.argv.slice(3));
 } else {
   const { dispatch } = await import("./index");
   await dispatch(process.argv.slice(2));

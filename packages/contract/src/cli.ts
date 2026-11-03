@@ -64,6 +64,13 @@ export type FieldRow =
        * signals.
        */
       readonly resolvesQuery?: Readonly<Record<string, string>>;
+      /**
+       * Makes the command send each word of a list positional as one object
+       * of the list, written `{ <itemKey>: <word> }`. It is for a list of
+       * objects whose other keys the command line does not set: the words
+       * are checked and resolved against the schema of the `itemKey` key.
+       */
+      readonly itemKey?: string;
     }
   | {
       readonly flag: string;
@@ -1515,6 +1522,21 @@ export const CLI = {
       invalid_state:
         "stop active sessions and runs first; use detach for an attached checkout, and upgrade an unsupported runner before disposal",
     },
+  },
+  "workspace.disposeMany": {
+    command: "workspace dispose-many",
+    help: "Asks for several workspaces to be removed at once. Reports for each whether the removal was requested or refused. A requested removal is reserved and its machine told, as `hercule workspace dispose` does; the outcome arrives later, and `hercule workspace list` shows the workspace gone or back with the machine's reason. One refusal does not stop the others. A main workspace is refused: remove it on its own with `hercule workspace dispose`. Each workspace is removed as `workspace dispose` without --discard-changes removes it, and an archived workspace is removed whole. At most 200 workspaces per call. Only you can remove; a session cannot, whatever its profile holds.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "7b41d0a5"] }],
+    fields: {
+      items: {
+        positional: true,
+        itemKey: "workspaceId",
+        placeholder: "workspace-id",
+        help: "A workspace's id, or a tail of eight or more characters; find it with `hercule workspace list`. Give several to remove them in one call. The command sends no expected last-used time, so a workspace used a moment ago is removed too.",
+        resolves: "workspace.query",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
   "workspace.detach": {
     command: "workspace detach",

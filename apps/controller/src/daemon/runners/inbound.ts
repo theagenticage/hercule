@@ -3,6 +3,7 @@
  *
  * - the sessions a runner holds, and what happens in them;
  * - the result of provisioning a workspace, and of each workspace step;
+ * - the disk usage of a runner and of its workspaces;
  * - the git credentials and the GitHub tokens a runner asks for;
  * - the end of a device login, and a change in a runner's harnesses, which
  *   each call for a fresh probe;
@@ -25,10 +26,19 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { withTransaction } from "../../db";
 import { ConnectionTypes } from "../../connections";
+import { AuditLog } from "../../events";
 import { SessionTokens } from "../../permissions";
 import { PromotionState } from "../../promotion";
-import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
+import {
+  JoinTokens,
+  RunnerConnections,
+  RunnerService,
+  RunnerServiceLayer,
+  type FleetTraffic,
+  type SessionTraffic,
+} from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
+import { Settings } from "../../settings";
 import { Secrets } from "../../secrets";
 import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
@@ -43,6 +53,7 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
+  const runners = yield* RunnerService;
   const runs = yield* RunService;
   const promotion = yield* PromotionState;
   const workspaceSteps = yield* WorkspaceSteps;
@@ -97,6 +108,23 @@ const make = Effect.gen(function* () {
             );
           }
         });
+      case "diskUsageReported":
+        // One transaction for the workspaces' entries and the runner's totals,
+        // so a screen never reads totals from one report beside entries from
+        // another. Held while a promotion freezes the controller, and never
+        // applied once it is sealed, like a workspace report. The runner sends
+        // its disk usage again after it connects to the new machine.
+        return promotion.whenServing(
+          withTransaction(
+            sql,
+            Effect.asVoid(
+              Effect.all([
+                workspaces.recordDiskUsage(traffic.runnerId, traffic.diskUsage.workspaces),
+                runners.recordDiskUsage(traffic.runnerId, traffic.diskUsage.runner),
+              ]),
+            ),
+          ),
+        );
       case "credentialRequested":
         // The credential is valid for this one request only, so it is sent
         // straight back on the connection that asked, and never stored.
@@ -311,6 +339,9 @@ export const InboundLayer: Layer.Layer<
   | RunnerConnections
   | SessionService
   | WorkspaceService
+  | JoinTokens
+  | Settings
+  | AuditLog
   | RunService
   | WorkspaceSteps
   | ProviderAccountProbing
@@ -322,4 +353,9 @@ export const InboundLayer: Layer.Layer<
   | Secrets
   | TextGenerationTargetChanges
   | DiscussionInputs
-> = Layer.effect(Inbound)(make);
+> = Layer.effect(Inbound)(make).pipe(
+  // The runner service is built here from the same layer the HTTP routes use, so
+  // the controller keeps one runner service and the boot offers it to nobody
+  // else.
+  Layer.provide(RunnerServiceLayer),
+);

@@ -168,6 +168,7 @@ These are guards against an agent's mistake, not a sandbox: an agent that names 
 
 - `hercule git-credential`, which reads no Home and must run inside sessions for git to work;
 - *(Amended 2026-10-26, [#613](https://github.com/theagenticage/hercule/issues/613).)* `hercule github-token`, which reads no Home either and runs inside sessions, from the `gh` shim and from agents;
+- *(Amended 2026-11-03, [#987](https://github.com/theagenticage/hercule/issues/987).)* `hercule measure-disk-usage <path>`, the runner's walker. It is an internal verb: the runner starts it in a child process to add up the disk space of one folder ([03 §6.9](./03-controller-and-runners.md)), and it prints one line of JSON. It reads no Home and writes nothing, and the dispatcher picks it before any Home work, as it does `hercule github-token`;
 - `hercule login` and `hercule logout`. They write only `credentials.json`, and the CLI never reads that file inside a session ([13 §5](./13-security.md)), so a session's login cannot make another session act as the user. At worst it replaces the user's stored login, which the user fixes by logging in again.
 
 Every other command resolves the Home as above.

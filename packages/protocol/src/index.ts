@@ -12,6 +12,7 @@
 import { Schema } from "effect";
 
 import {
+  Bytes,
   CredentialVariable,
   Fact,
   HarnessAccount,
@@ -55,6 +56,7 @@ import { TextGenerationReport, TextGenerationRequest } from "./text-generation";
 import {
   CredentialAnswer,
   CredentialRequest,
+  DiskUsageReport,
   WorkspaceDispose,
   WorkspaceDetach,
   WorkspaceProvision,
@@ -86,6 +88,7 @@ export * from "./text-generation";
 export * from "./workspace-steps";
 export * from "./workspaces";
 export {
+  Bytes,
   CredentialVariable,
   Fact,
   HarnessAccount,
@@ -240,8 +243,6 @@ const Base64 = Schema.String.check(
     description: "standard base64",
   }),
 );
-
-const Bytes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
  * The tools a runner probes for, in the order it reports them. The list is
@@ -748,6 +749,7 @@ export const RunnerToController = Schema.Union([
   Pong,
   RunnerFactsReport,
   MetricsReport,
+  DiskUsageReport,
   ProbeReport,
   InstallResult,
   LoginUrl,

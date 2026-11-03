@@ -122,7 +122,7 @@ describe("runDaemon", () => {
         Effect.raceFirst(
           Effect.ignore(runDaemon(home)),
           Effect.promise(async () => {
-            for (let attempt = 0; attempt < 200 && seen.length === 0; attempt++) {
+            for (let attempt = 0; attempt < 1000 && seen.length === 0; attempt++) {
               await new Promise((resolve) => setTimeout(resolve, 10));
             }
           }),

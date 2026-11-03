@@ -11,6 +11,7 @@ import {
 } from "../../../../screens/fleet/machine-view";
 import { ViewSwitch } from "../../../../screens/workflows/view-switch";
 import { AllowSessionsButton } from "./-allow-sessions-button";
+import { CleanUpButton } from "./-clean-up-button";
 import { useMachineFaces } from "./-machine-faces";
 import { useMachineUpdates } from "./-machine-updates";
 
@@ -23,6 +24,16 @@ const VIEW_CHOICES = [
 /** Returns the Allow button of `machine`, or `null` when no session of it waits for a slot. */
 const buildAllowButton = ({ runnerId, need }: MachineSummary): ReactNode =>
   need?.kind === "waiting" ? <AllowSessionsButton runnerId={runnerId} need={need} /> : null;
+
+/** Returns the Clean up… button of `machine`. */
+const buildCleanUpButton = ({ runnerId, name, isAway }: MachineSummary): ReactNode => (
+  <CleanUpButton
+    runnerId={runnerId}
+    runnerName={name}
+    isOnline={!isAway}
+    className="btn btn--sm fleet-attn-btn"
+  />
+);
 
 /**
  * Renders the machines as cards, each with the faces of the work on its
@@ -48,6 +59,7 @@ function MachineCards({
           faces={faces[machine.runnerId]}
           updatesText={updates[machine.runnerId]}
           allow={buildAllowButton(machine)}
+          cleanUp={buildCleanUpButton(machine)}
           onOpen={onOpen}
         />
       ))}
@@ -73,6 +85,7 @@ function MachineRows({
           machine={machine}
           updatesText={updates[machine.runnerId]}
           allow={buildAllowButton(machine)}
+          cleanUp={buildCleanUpButton(machine)}
           onOpen={onOpen}
         />
       ))}

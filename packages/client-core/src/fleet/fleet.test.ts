@@ -34,6 +34,7 @@ const buildRunner = (overrides: Partial<Runner> = {}): Runner => ({
   labels: [],
   facts: null,
   metrics: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 8 * GIB },
+  diskUsage: null,
   maxConcurrentSessions: 16,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: SEEN_TODAY,

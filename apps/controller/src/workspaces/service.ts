@@ -48,6 +48,7 @@ import {
   type GitIdentity,
   type WorkspaceRemoval,
   type WorkspaceProvision,
+  type WorkspaceDiskUsageEntry,
   type WorkspaceReport,
 } from "@hercule/protocol";
 import {
@@ -73,6 +74,7 @@ import {
   type WorkspaceStatus,
   type WorkspaceAttachInput,
   THREAD_BRANCH_PREFIX,
+  USED_SINCE_LOOKED_REFUSAL,
 } from "@hercule/contract";
 import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import {
@@ -183,6 +185,8 @@ export const buildThreadBranch = (sessionId: string): string =>
 export const buildRunBranch = (runId: string): string => `hercule/run-${runId}`;
 
 const ALREADY_GONE = "that workspace is already gone";
+
+const MAIN_REMOVED_ON_ITS_OWN = "A main workspace is removed on its own, with workspace.dispose.";
 
 /**
  * Builds the refusal for disposing of a workspace that holders still use. It
@@ -371,6 +375,8 @@ const make = Effect.gen(function* () {
           .filter((holder) => holder.kind === "session")
           .map((holder) => holder.id),
         keptUntil: keptUntil.get(row.id) ?? null,
+        diskUsage: row.diskUsage,
+        diskUsageError: row.diskUsageError,
         createdAt: row.createdAt,
         provisionedAt: row.provisionedAt,
         lastUsedAt: row.lastUsedAt,
@@ -876,6 +882,33 @@ const make = Effect.gen(function* () {
         );
     });
 
+  /**
+   * Returns the workspace if its files may be removed now. Fails with
+   * `InvalidState`, with a message that says why, if:
+   *
+   * - it is an existing checkout (ownership `adopted`), whose files belong to the user;
+   * - it is already `deleted` or `lost`;
+   * - a lease on it is active, held by a run that has not finished or by a
+   *   session that has not exited;
+   * - its runner does not support safe removal.
+   */
+  const requireDisposable = (
+    workspace: StoredWorkspace,
+  ): Effect.Effect<StoredWorkspace, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      if (workspace.ownership === "adopted")
+        return yield* Effect.fail(createInvalidStateError(EXISTING_DISPOSAL));
+      if (workspace.status === "deleted" || workspace.status === "lost") {
+        return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
+      }
+      const active = (yield* workspaces.listActiveHolders([workspace.id])).get(workspace.id) ?? [];
+      if (active.length > 0) {
+        return yield* Effect.fail(createInvalidStateError(describeActiveHolders(active)));
+      }
+      yield* requireRemovalSupport(workspace.runnerId);
+      return workspace;
+    });
+
   /** Records a removal receipt or preserves preparation facts while removal is still pending. */
   const recordRemovalOutcome = (
     runnerId: string,
@@ -1149,19 +1182,31 @@ const make = Effect.gen(function* () {
      * The message names every run and session to stop first.
      */
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
+      Effect.flatMap(readStoredWorkspace(id), requireDisposable),
+
+    /**
+     * Returns an ephemeral workspace whose files may be removed now, read
+     * fresh. Call it in the transaction that reserves the removal, so the
+     * checks and the reservation see the same row. Fails with `NotFound` for
+     * an unknown id, and with `InvalidState` if:
+     *
+     * - it is a main workspace, which is removed on its own;
+     * - `expectedLastUsedAt` is given and the workspace's `lastUsedAt` is no
+     *   longer that time, because a session started or exited in it after the
+     *   caller looked;
+     * - any check of `disposable` refuses it, with that check's own message.
+     */
+    requireDisposableEphemeral: (
+      id: string,
+      expectedLastUsedAt: string | undefined,
+    ): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         const workspace = yield* readStoredWorkspace(id);
-        if (workspace.ownership === "adopted")
-          return yield* Effect.fail(createInvalidStateError(EXISTING_DISPOSAL));
-        if (workspace.status === "deleted" || workspace.status === "lost") {
-          return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
-        }
-        const active = (yield* workspaces.listActiveHolders([id])).get(id) ?? [];
-        if (active.length > 0) {
-          return yield* Effect.fail(createInvalidStateError(describeActiveHolders(active)));
-        }
-        yield* requireRemovalSupport(workspace.runnerId);
-        return workspace;
+        if (workspace.kind === "primary")
+          return yield* Effect.fail(createInvalidStateError(MAIN_REMOVED_ON_ITS_OWN));
+        if (expectedLastUsedAt !== undefined && workspace.lastUsedAt !== expectedLastUsedAt)
+          return yield* Effect.fail(createInvalidStateError(USED_SINCE_LOOKED_REFUSAL));
+        return yield* requireDisposable(workspace);
       }),
 
     /** Returns an attached main whose registration may be forgotten without removing its files. */
@@ -1502,6 +1547,21 @@ const make = Effect.gen(function* () {
             : undefined;
         }),
       ),
+
+    /**
+     * Stores the disk usage a runner reported for its workspaces, and returns
+     * the ids of the workspaces that changed, which are announced after the
+     * commit. Only entries whose values differ from the stored ones are
+     * written. An entry for a workspace the controller does not know, or that
+     * belongs to another runner, is dropped, and a workspace missing from the
+     * report keeps what it has. The controller decides nothing from these
+     * numbers.
+     */
+    recordDiskUsage: (
+      runnerId: string,
+      entries: ReadonlyArray<WorkspaceDiskUsageEntry>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      withTransaction(sql, workspaces.recordDiskUsage(runnerId, entries)),
 
     /** Returns the workspace whose runner should be asked for a current observation. */
     readStoredWorkspace,

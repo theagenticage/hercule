@@ -10,7 +10,7 @@
  * shape whichever runner it is looking at.
  */
 import { Schema } from "effect";
-import { Capabilities, Fact, RunnerFacts, RunnerMetrics } from "@hercule/protocol";
+import { Capabilities, Fact, RunnerDiskUsage, RunnerFacts, RunnerMetrics } from "@hercule/protocol";
 import { CapabilitySnapshot } from "./provider-account";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -40,6 +40,7 @@ export {
   HarnessBinary,
   PROBED_TOOLCHAINS,
   RunnerFacts,
+  RunnerDiskUsage,
   RunnerMetrics,
   Toolchain as RunnerToolchain,
 } from "@hercule/protocol";
@@ -95,6 +96,11 @@ export const Runner = Schema.Struct({
   labels: atMost(RunnerLabel, MAX_RUNNER_LABELS),
   facts: Schema.NullOr(RunnerFacts),
   metrics: Schema.NullOr(RunnerMetrics),
+  /**
+   * What the runner last measured outside its workspaces. Null until its first
+   * report, and on a runner built before it measured disk usage.
+   */
+  diskUsage: Schema.NullOr(RunnerDiskUsage),
   /** The effective cap: the owner's override, or the one derived from the facts. */
   maxConcurrentSessions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   /** The effective watermark: the owner's override, or the shipped ten gibibytes. */

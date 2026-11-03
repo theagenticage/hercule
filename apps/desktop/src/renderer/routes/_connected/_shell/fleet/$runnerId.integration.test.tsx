@@ -210,6 +210,7 @@ const openMachine = async ({
     "GET /api/v1/runners": () => ({ body: { items: [held.runner] } }),
     "GET /api/v1/harnesses": { body: HARNESSES_ON_ATLAS },
     "GET /api/v1/controller": { body: buildControllerInfo(controllerVersion) },
+    [`GET ${RUNNER_PATH}`]: () => ({ body: asDetail(held.runner) }),
     [`PATCH ${RUNNER_PATH}`]: (call) => change(call.body as Partial<Runner>),
     [`POST ${RUNNER_PATH}/drain`]: () => change({ lifecycle: "draining" }),
     [`POST ${RUNNER_PATH}/undrain`]: () => change({ lifecycle: "active" }),
@@ -298,6 +299,7 @@ describe("the Capacity section", () => {
     expect(links.map((link) => link.textContent)).toEqual([
       "Capacity",
       "Running",
+      "Storage",
       "Software",
       "Recent",
       "Settings",

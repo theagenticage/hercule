@@ -191,6 +191,7 @@ const RUNNER_STARTED: Runner = {
   // Claude Code and Codex installed, so the accounts of the tests are ready here.
   facts: buildRunner("", "").facts,
   metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: "2026-09-08T09:50:00.000Z",
@@ -4385,6 +4386,8 @@ const buildEphemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
   message: null,
   sessionIds,
   keptUntil: null,
+  diskUsage: null,
+  diskUsageError: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,

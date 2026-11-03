@@ -84,6 +84,7 @@ const buildRunner = (id: string, name: string): Runner => ({
     availableMemoryBytes: 8 * GIB,
     cpu: { averagePercent: 23, peakPercent: 61 },
   },
+  diskUsage: null,
   maxConcurrentSessions: 8,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-11-02T14:01:00.000Z",
@@ -261,11 +262,12 @@ const buildMachineWorld = (): World => ({
 });
 
 describe("a machine's page", () => {
-  it("reads its five-minute points of the last 24 hours as it opens, and no hour points", async () => {
+  it("reads its five-minute points of the last 24 hours as it opens, and the Fleet page's hour points for its Storage forecast", async () => {
     const { calls } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
 
     // The range starts two points inside the controller's limit, on a point boundary,
-    // and ends at the time of the read.
+    // and ends at the time of the read. The hour points are every machine's, as the
+    // Fleet page reads them, not a 14-day read of this machine.
     expect(readMetricsCalls(calls)).toEqual([
       {
         resolution: "fiveMinutes",
@@ -273,8 +275,38 @@ describe("a machine's page", () => {
         since: "2026-11-01T14:10:00.000Z",
         until: "2026-11-02T14:02:00.000Z",
       },
+      {
+        resolution: "hour",
+        runnerId: null,
+        since: "2026-10-26T16:00:00.000Z",
+        until: "2026-11-02T14:02:00.000Z",
+      },
     ]);
     expect(readCpuLine().split(" ")).toHaveLength(3);
+  });
+
+  it("reads the hour points again only when the last read is an hour old", async () => {
+    const world = buildMachineWorld();
+    world.points.hour.push(buildPoint(ATLAS, "2026-11-02T14:00:00.000Z", { minutes: 60 }));
+    const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, world);
+    await settle(live);
+    expect(readHourCalls(calls)).toHaveLength(1);
+
+    // A nudge within the hour reads the five-minute points and no hour points.
+    pushMetrics(live, [ATLAS]);
+    await waitForQuiet(context);
+    expect(readHourCalls(calls)).toHaveLength(1);
+
+    world.points.hour.push(buildPoint(ATLAS, "2026-11-02T15:00:00.000Z", { minutes: 3 }));
+    vi.setSystemTime(new Date("2026-11-02T15:03:00.000Z"));
+    pushMetrics(live, [ATLAS]);
+    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(2));
+    expect(readHourCalls(calls)[1]).toEqual({
+      resolution: "hour",
+      runnerId: null,
+      since: "2026-11-02T14:00:00.000Z",
+      until: "2026-11-02T15:03:00.000Z",
+    });
   });
 
   it("reads from the start of its newest point when a push names it, and draws the point that follows", async () => {

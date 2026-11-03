@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
 import { listUrgentSignals } from "@hercule/client-core";
+import { CleanupProvider } from "../../app/cleanup";
 import { DoneMovesProvider } from "../../app/done-moves";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
@@ -61,15 +62,18 @@ export const Route = createFileRoute("/_connected/_shell")({
 });
 
 /**
- * Prepares the session presentation and the Done moves for everything in the
- * shell, which reads them with `useSessionPresentation` and `useDoneMoves`.
+ * Prepares the session presentation, the Done moves and the cleanup progress
+ * for everything in the shell, which reads them with
+ * `useSessionPresentation`, `useDoneMoves` and `useCleanupStore`.
  */
 function ShellLayout(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   return (
     <SessionPresentationProvider>
       <DoneMovesProvider client={client}>
-        <ShellScreen />
+        <CleanupProvider client={client}>
+          <ShellScreen />
+        </CleanupProvider>
       </DoneMovesProvider>
     </SessionPresentationProvider>
   );
