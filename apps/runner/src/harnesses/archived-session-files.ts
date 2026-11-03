@@ -45,7 +45,7 @@ interface SessionFilesKept {
  * the deletion reach outside it), or when the adapter cannot delete the files.
  * Does not create the home: a home that is not there has no files to delete.
  */
-const deleteSessionFilesOf = (
+const deleteHarnessSessionFiles = (
   storageDir: string,
   session: ArchivedSession,
 ): Effect.Effect<void, SessionFilesKept> => {
@@ -90,7 +90,7 @@ export const deleteArchivedSessionFiles = (
   Effect.gen(function* () {
     const kept = new Map<string, { count: number; reasons: Set<string> }>();
     for (const session of sessions) {
-      const failure = yield* deleteSessionFilesOf(storageDir, session).pipe(
+      const failure = yield* deleteHarnessSessionFiles(storageDir, session).pipe(
         Effect.match({ onSuccess: () => undefined, onFailure: (error) => error }),
       );
       if (failure === undefined) continue;

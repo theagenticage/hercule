@@ -207,7 +207,10 @@ describe("archiveRows", () => {
   };
 
   /** Returns the plan that archives `rows` alone. */
-  const planOf = (rows: readonly GroupRow[], over: Partial<ArchivePlan> = {}): ArchivePlan => ({
+  const buildArchivePlan = (
+    rows: readonly GroupRow[],
+    over: Partial<ArchivePlan> = {},
+  ): ArchivePlan => ({
     rows,
     skippedWorking: 0,
     leftOver: 0,
@@ -225,7 +228,7 @@ describe("archiveRows", () => {
 
     const { sessions, notice } = await archiveRows(
       client,
-      planOf([describeRow([doneThread(uuid(11), 5)])]),
+      buildArchivePlan([describeRow([doneThread(uuid(11), 5)])]),
     );
 
     expect(readArchived(api)).toEqual([[uuid(11)]]);
@@ -239,7 +242,7 @@ describe("archiveRows", () => {
     const old = doneThread(uuid(2), 1, { workspaceId: W1, createdAt: at(-1) });
     const { api, client } = buildController([old, recent]);
 
-    await archiveRows(client, planOf([describeRow([recent])]));
+    await archiveRows(client, buildArchivePlan([describeRow([recent])]));
 
     const read = api.calls.find((call) => call.method === "GET")!;
     expect(new URLSearchParams(read.search).getAll("workspaceId")).toEqual([W1]);
@@ -253,7 +256,7 @@ describe("archiveRows", () => {
     const hidden = doneThread(uuid(13), 1, { workspaceId: W2, createdAt: at(-1) });
     const { api, client } = buildController([first, second, hidden]);
 
-    const { notice } = await archiveRows(client, planOf(describeRows([first, second])));
+    const { notice } = await archiveRows(client, buildArchivePlan(describeRows([first, second])));
 
     const reads = api.calls.filter((call) => call.method === "GET");
     expect(reads).toHaveLength(1);
@@ -270,7 +273,7 @@ describe("archiveRows", () => {
 
     const { notice } = await archiveRows(
       client,
-      planOf(describeRows([doneThread(uuid(11), 5), doneThread(uuid(12), 6)]), {
+      buildArchivePlan(describeRows([doneThread(uuid(11), 5), doneThread(uuid(12), 6)]), {
         skippedWorking: 2,
         leftOver: 1,
       }),
@@ -291,7 +294,7 @@ describe("archiveRows", () => {
     const hidden = doneThread(uuid(21), 1, { workspaceId: W1, createdAt: at(-1) });
     const { api, client } = buildController([hidden]);
 
-    const { notice } = await archiveRows(client, planOf(rows));
+    const { notice } = await archiveRows(client, buildArchivePlan(rows));
 
     expect(rows).toHaveLength(500);
     expect(readArchived(api)[0]).toHaveLength(499);
@@ -305,7 +308,7 @@ describe("archiveRows", () => {
     );
     const { api, client } = buildController(hidden);
 
-    await expect(archiveRows(client, planOf([describeRow([lead])]))).rejects.toThrow(
+    await expect(archiveRows(client, buildArchivePlan([describeRow([lead])]))).rejects.toThrow(
       "more threads than one archive can take",
     );
     expect(readArchived(api)).toEqual([]);
@@ -318,7 +321,7 @@ describe("archiveRows", () => {
     });
 
     await expect(
-      archiveRows(client, planOf([describeRow([doneThread(uuid(11), 5)])])),
+      archiveRows(client, buildArchivePlan([describeRow([doneThread(uuid(11), 5)])])),
     ).rejects.toThrow("Thread one is working.");
   });
 });
