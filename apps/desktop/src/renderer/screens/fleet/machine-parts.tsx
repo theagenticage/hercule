@@ -1,5 +1,10 @@
 import type { JSX, ReactNode } from "react";
-import type { GaugeLevel, MachineNeed, MachineStatus } from "@hercule/client-core/fleet";
+import type {
+  GaugeLevel,
+  MachineGauge,
+  MachineNeed,
+  MachineStatus,
+} from "@hercule/client-core/fleet";
 import "./machine-parts.css";
 
 /**
@@ -41,6 +46,23 @@ export function Meter({
     <span className={`fleet-meter fleet-meter--${level}`} aria-hidden="true">
       <i style={{ width: `${(share ?? 0) * 100}%` }} />
     </span>
+  );
+}
+
+/**
+ * Renders a gauge's big number with its unit in small after it. A unit of ""
+ * draws no unit, as for a gauge with nothing reported.
+ */
+export function GaugeValue({
+  gauge,
+}: {
+  readonly gauge: Pick<MachineGauge, "value" | "unit">;
+}): JSX.Element {
+  return (
+    <b>
+      {gauge.value}
+      {gauge.unit === "" ? null : <small>{gauge.unit}</small>}
+    </b>
   );
 }
 

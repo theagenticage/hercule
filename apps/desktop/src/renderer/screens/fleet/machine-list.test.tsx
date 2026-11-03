@@ -94,6 +94,33 @@ describe("MachineList", () => {
     expect(within(orbit!).getByRole("button", { name: "Clean up…" })).toBeTruthy();
   });
 
+  it("words the sessions against the cap, with the waiting ones in the you colour, and a dash while away", () => {
+    const { rows } = renderList([BUSY_MACHINE, OFFLINE_MACHINE]);
+    // The cells are the dot, Machine, Sessions: the third.
+    const [busy, offline] = rows().map((row) => within(row).getAllByRole("cell")[2]!);
+
+    expect(busy!.querySelector("small")?.textContent).toBe("12 of 16 · 5 waiting");
+    expect(busy!.querySelector("small")?.className).toBe("is-you");
+    expect(offline!.querySelector("small")?.textContent).toBe("– of 16");
+    expect(offline!.querySelector("small")?.className).toBe("");
+  });
+
+  it("draws a dash for a disk and memory the runner has not reported", () => {
+    const notReported = {
+      value: "–",
+      unit: "",
+      freeAmount: "",
+      share: null,
+      level: "normal",
+    } as const;
+    const { rows } = renderList([{ ...BUSY_MACHINE, disk: notReported, memory: notReported }]);
+    // The cells are the dot, Machine, Sessions, Room, Disk, Memory: the fifth and the sixth.
+    const [, , , , disk, memory] = within(rows()[0]!).getAllByRole("cell");
+
+    expect(disk!.textContent).toBe("–");
+    expect(memory!.textContent).toBe("–");
+  });
+
   it("shows an offline machine's last sighting and no button but its name", () => {
     const { rows } = renderList([OFFLINE_MACHINE]);
     const [offline] = rows();

@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from "react";
-import type { MachineInstrument, MachineInstruments } from "@hercule/client-core/machine-page";
-import { Meter } from "./machine-parts";
+import type { MachineInstruments, MeterInstrument } from "@hercule/client-core/machine-page";
+import { GaugeValue, Meter } from "./machine-parts";
 import { SessionsFigure } from "./sessions-drawing";
 import "./machine-page.css";
 
@@ -16,16 +16,13 @@ function Instrument({
   children,
 }: {
   readonly label: string;
-  readonly instrument: MachineInstrument;
+  readonly instrument: Pick<MeterInstrument, "value" | "unit" | "level" | "note">;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
     <div className={`machine-page-instrument machine-page-instrument--${instrument.level}`}>
       <span className="machine-page-instrument-label">{label}</span>
-      <b>
-        {instrument.value}
-        {instrument.unit === "" ? null : <small>{instrument.unit}</small>}
-      </b>
+      <GaugeValue gauge={instrument} />
       {children}
       <span className="machine-page-instrument-note">{instrument.note}</span>
     </div>
@@ -34,27 +31,25 @@ function Instrument({
 
 /**
  * Renders the four instruments of a machine's page, in a row: Sessions, CPU,
- * Memory and Disk, each from its `MachineInstrument`. Sessions is drawn as the
- * cards draw it, the others as a meter.
+ * Memory and Disk. Sessions is drawn as the cards draw it, the others as a
+ * meter.
  *
- * A machine that is `isAway` is drawn in quieter inks, as on its card, and
- * its Sessions drawing is an outline. The instruments themselves already say
- * what an away machine shows. The row holds four columns while its place is
- * wide and two when it is not.
+ * An away machine (its Sessions drawing says so) is drawn in quieter inks, as
+ * on its card, and its Sessions drawing is an outline. The instruments
+ * themselves already say what an away machine shows. The row holds four
+ * columns while its place is wide and two when it is not.
  */
 export function MachinePageInstruments({
   instruments,
-  isAway,
 }: {
   readonly instruments: MachineInstruments;
-  readonly isAway: boolean;
 }): JSX.Element {
   const { sessions, cpu, memory, disk } = instruments;
   return (
-    <div className={`machine-page-instruments-box${isAway ? " is-away" : ""}`}>
+    <div className={`machine-page-instruments-box${sessions.drawing.isAway ? " is-away" : ""}`}>
       <div className="machine-page-instruments">
         <Instrument label="Sessions" instrument={sessions}>
-          <SessionsFigure drawing={sessions.drawing} size="card" isAway={isAway} />
+          <SessionsFigure drawing={sessions.drawing} size="card" />
         </Instrument>
         <Instrument label="CPU" instrument={cpu}>
           <Meter share={cpu.share} level={cpu.level} />

@@ -22,16 +22,17 @@ import {
   countRoom,
   buildSessionsDrawing,
   decideMachineKind,
+  describeDiskGauge,
   describeMachineStatus,
+  describeMemoryGauge,
   describeRoom,
   listMachineNeeds,
   measureDisk,
   measureMemory,
   plural,
-  splitDiskSize,
   type FleetMachine,
   type FleetTextPart,
-  type GaugeLevel,
+  type MachineGauge,
   type MachineKind,
   type MachineNeed,
   type MachineStatus,
@@ -42,6 +43,7 @@ import {
 export type {
   FleetTextPart,
   GaugeLevel,
+  MachineGauge,
   MachineKind,
   MachineNeed,
   MachineStatus,
@@ -175,29 +177,14 @@ export interface MachineSummary {
   /** The most serious need, or `undefined` when the machine needs nothing. */
   readonly need: MachineNeed | undefined;
   /**
-   * The free disk space as a number and a unit, or `null` before the runner has
-   * reported its disk. `level` is `fail` while the free space is below the
-   * machine's disk limit, else `you` from 85% full, else `normal`. `share` is
-   * how full the disk is, from 0 to 1, and `percent` is the same rounded down
-   * to a whole number. Both are `null` when the runner does not report its
-   * total disk size, and the gauge then draws empty (spec 17 §Graphs).
+   * The disk as a gauge: the percentage full, or the free space while the
+   * runner does not report its total disk size (spec 17 §Graphs). Its `level`
+   * is `fail` while the free space is below the machine's disk limit, else
+   * `you` from 85% full, else `normal`.
    */
-  readonly disk: {
-    readonly amount: string;
-    readonly unit: "MB" | "GB";
-    readonly level: GaugeLevel;
-    readonly share: number | null;
-    readonly percent: number | null;
-  } | null;
-  /**
-   * The memory in use as a whole percentage, rounded down, and as a share from
-   * 0 to 1, or `null` before the runner has reported it.
-   */
-  readonly memory: {
-    readonly percent: number;
-    readonly share: number;
-    readonly level: GaugeLevel;
-  } | null;
+  readonly disk: MachineGauge;
+  /** The memory in use as a gauge, as a whole percentage rounded down. */
+  readonly memory: MachineGauge;
 }
 
 /** Builds everything a card and a list row draw for `machine`, so the two cannot disagree. */
@@ -208,8 +195,6 @@ const summarizeMachine = (
   today: Date,
 ): MachineSummary => {
   const { runner } = machine;
-  const disk = measureDisk(runner);
-  const memory = measureMemory(runner);
   return {
     runnerId: runner.id,
     name: runner.name,
@@ -219,19 +204,8 @@ const summarizeMachine = (
     drawing: buildSessionsDrawing(machine),
     roomText: describeRoom(machine)?.short ?? null,
     need: needs[0],
-    disk:
-      disk === null
-        ? null
-        : {
-            ...splitDiskSize(disk.freeBytes),
-            level: disk.level,
-            share: disk.share,
-            percent: disk.percent,
-          },
-    memory:
-      memory === null
-        ? null
-        : { percent: memory.percent, share: memory.share, level: memory.level },
+    disk: describeDiskGauge(measureDisk(runner)),
+    memory: describeMemoryGauge(measureMemory(runner)),
   };
 };
 

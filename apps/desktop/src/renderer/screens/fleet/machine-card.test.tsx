@@ -70,6 +70,32 @@ describe("MachineCard", () => {
     expect(within(card).getAllByRole("button")).toHaveLength(1);
   });
 
+  it("draws the sessions running against the cap, and a dash for a machine that is away", () => {
+    const sessions = (card: HTMLElement) =>
+      within(card).getByText("Sessions").closest(".fleet-gauge")?.querySelector("b")?.textContent;
+
+    expect(sessions(renderCard(BUSY_MACHINE))).toBe("12 of 16");
+    expect(sessions(renderCard(OFFLINE_MACHINE))).toBe("– of 16");
+  });
+
+  it("draws a dash and an empty meter for a disk and memory the runner has not reported", () => {
+    const notReported = {
+      value: "–",
+      unit: "",
+      freeAmount: "",
+      share: null,
+      level: "normal",
+    } as const;
+    const card = renderCard({ ...BUSY_MACHINE, disk: notReported, memory: notReported });
+    const [disk, memory] = ["Disk", "Memory"].map((label) =>
+      within(card).getByText(label).closest(".fleet-gauge"),
+    );
+
+    expect(disk?.querySelector("b")?.textContent).toBe("–");
+    expect(memory?.querySelector("b")?.textContent).toBe("–");
+    expect(card.querySelectorAll(".fleet-meter i")).toHaveLength(2);
+  });
+
   it("shows the disk's free space and an empty meter while the runner does not report its disk size", () => {
     const card = renderCard(BUSY_MACHINE);
     const [diskMeter] = card.querySelectorAll<HTMLElement>(".fleet-meter i");

@@ -29,12 +29,17 @@ import {
   describeMachineStatus,
   describeRoom,
   formatLastSeen,
+  describeDiskGauge,
+  describeMemoryGauge,
+  formatWholeMemory,
   measureDisk,
   measureMemory,
+  NOT_REPORTED_GAUGE,
   splitDiskSize,
   type FleetMachine,
   type FleetTextPart,
   type GaugeLevel,
+  type MachineGauge,
   type MachineKind,
   type MachineStatus,
   type SessionCountsByRunner,
@@ -72,21 +77,6 @@ const OS_NAMES: ReadonlyMap<string, string> = new Map([
   ["linux", "Linux"],
   ["win32", "Windows"],
 ]);
-
-const BYTES_PER_GIBIBYTE = 1024 ** 3;
-
-/** Formats a memory size in binary gigabytes, rounded to a whole number: "64". */
-const formatWholeMemory = (bytes: number): string => String(Math.round(bytes / BYTES_PER_GIBIBYTE));
-
-/**
- * Formats a byte count in binary gigabytes with one decimal under 100 and
- * whole from there on, as the disk sizes do: "17.6", "120".
- */
-const formatGibibytes = (bytes: number): string => {
-  const gibibytes = bytes / BYTES_PER_GIBIBYTE;
-  const tenths = Math.round(gibibytes * 10) / 10;
-  return tenths < 100 ? tenths.toFixed(1) : Math.round(gibibytes).toLocaleString("en-US");
-};
 
 /**
  * Describes a machine for the head of its page, as the pieces drawn between
@@ -188,48 +178,45 @@ export type MachinePageTop =
   | { readonly kind: "away"; readonly banner: OfflineBanner };
 
 /**
- * One instrument of a machine's page: a big number, a meter and a line under
- * it. A renderer draws every instrument with the same component.
+ * An instrument drawn as a meter: the gauge, and the line under the meter. A
+ * renderer draws it as the Fleet cards draw the same gauge.
  */
-export interface MachineInstrument {
-  /** The big number, such as "23", or "–" when the machine reported none. */
-  readonly value: string;
-  /**
-   * What follows the number, such as "%", " GB free" or " of 16". It is empty
-   * when CPU, memory or disk has no number to show ("–"). The Sessions
-   * instrument of a machine that is away keeps its " of 16" beside the "–".
-   */
-  readonly unit: string;
-  /** Colours the number and the meter. */
-  readonly level: GaugeLevel;
-  /** How far the meter is filled, from 0 to 1; `null` draws it empty. */
-  readonly share: number | null;
+export interface MeterInstrument extends MachineGauge {
   /** The line under the meter. */
   readonly note: string;
 }
 
 /**
- * The four instruments of a machine's page, with the latest values. Sessions
- * has no meter: it is drawn as the same blocks or bar a card shows, from
- * `drawing`.
+ * The Sessions instrument: how many sessions run against the cap, and how many
+ * wait. It has no meter, but the same blocks or bar a card shows, from
+ * `drawing`, which also holds the texts of `value` and `unit`.
  */
-export interface MachineInstruments {
-  readonly sessions: MachineInstrument & { readonly drawing: SessionsDrawing };
-  readonly cpu: MachineInstrument;
-  readonly memory: MachineInstrument;
-  readonly disk: MachineInstrument;
+export interface SessionsInstrument {
+  /** The sessions running: "12", or "–" while the machine is away. */
+  readonly value: string;
+  /** The cap, such as " of 16". An away machine keeps it beside the "–". */
+  readonly unit: string;
+  /** Colours the number: `you` while sessions wait on a machine that is online. */
+  readonly level: GaugeLevel;
+  /** The line under the drawing: "5 waiting" or "None waiting". */
+  readonly note: string;
+  readonly drawing: SessionsDrawing;
 }
 
-const NOT_REPORTED: MachineInstrument = {
-  value: "–",
-  unit: "",
-  level: "normal",
-  share: null,
-  note: "Not reported yet",
-};
+/** The four instruments of a machine's page, with the latest values. */
+export interface MachineInstruments {
+  readonly sessions: SessionsInstrument;
+  readonly cpu: MeterInstrument;
+  readonly memory: MeterInstrument;
+  readonly disk: MeterInstrument;
+}
+
+const NOT_REPORTED_NOTE = "Not reported yet";
+
+const NOT_REPORTED: MeterInstrument = { ...NOT_REPORTED_GAUGE, note: NOT_REPORTED_NOTE };
 
 /** Describes the instrument of the CPU: the last minute's mean and peak, floored. See `describeMachineInstruments`. */
-const describeCpuInstrument = (runner: Runner): MachineInstrument => {
+const describeCpuInstrument = (runner: Runner): MeterInstrument => {
   if (runner.metrics === null) return NOT_REPORTED;
   const { cpu } = runner.metrics;
   if (cpu === undefined) {
@@ -242,6 +229,7 @@ const describeCpuInstrument = (runner: Runner): MachineInstrument => {
   return {
     value: String(Math.floor(cpu.averagePercent)),
     unit: "%",
+    freeAmount: "",
     level: "normal",
     share: cpu.averagePercent / 100,
     note: `Peak ${String(Math.floor(cpu.peakPercent))}% in the last minute`,
@@ -249,40 +237,29 @@ const describeCpuInstrument = (runner: Runner): MachineInstrument => {
 };
 
 /** Describes the instrument of memory: the share in use and the memory free. See `describeMachineInstruments`. */
-const describeMemoryInstrument = (runner: Runner): MachineInstrument => {
+const describeMemoryInstrument = (runner: Runner): MeterInstrument => {
   const memory = measureMemory(runner);
   if (memory === null) return NOT_REPORTED;
+  const gauge = describeMemoryGauge(memory);
   return {
-    value: String(memory.percent),
-    unit: "%",
-    level: memory.level,
-    share: memory.share,
-    note: `${formatGibibytes(memory.freeBytes)} GB free of ${formatWholeMemory(memory.totalBytes)} GB`,
+    ...gauge,
+    note: `${gauge.freeAmount} free of ${formatWholeMemory(memory.totalBytes)} GB`,
   };
 };
 
 /** Describes the instrument of the disk: the share in use and the space free. See `describeMachineInstruments`. */
-const describeDiskInstrument = (runner: Runner): MachineInstrument => {
+const describeDiskInstrument = (runner: Runner): MeterInstrument => {
   const disk = measureDisk(runner);
   if (disk === null) return NOT_REPORTED;
-  const free = splitDiskSize(disk.freeBytes);
-  if (disk.percent === null || disk.share === null || disk.totalBytes === null) {
+  const gauge = describeDiskGauge(disk);
+  if (disk.use === null) {
     return {
-      value: free.amount,
-      unit: ` ${free.unit} free`,
-      level: disk.level,
-      share: null,
+      ...gauge,
       note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
     };
   }
-  const size = splitDiskSize(disk.totalBytes);
-  return {
-    value: String(disk.percent),
-    unit: "%",
-    level: disk.level,
-    share: disk.share,
-    note: `${free.amount} ${free.unit} free of ${size.amount} ${size.unit}`,
-  };
+  const size = splitDiskSize(disk.use.totalBytes);
+  return { ...gauge, note: `${gauge.freeAmount} free of ${size.amount} ${size.unit}` };
 };
 
 /**
@@ -304,16 +281,15 @@ const describeDiskInstrument = (runner: Runner): MachineInstrument => {
  *   space with an empty meter and says to update the runner.
  */
 const describeMachineInstruments = (machine: FleetMachine): MachineInstruments => {
-  const { runner, running, waiting } = machine;
-  const isAway = runner.connectivity !== "online";
+  const { runner } = machine;
+  const drawing = buildSessionsDrawing(machine);
   return {
     sessions: {
-      value: isAway ? "–" : String(running),
-      unit: ` of ${String(runner.maxConcurrentSessions)}`,
-      level: waiting > 0 && !isAway ? "you" : "normal",
-      share: null,
-      note: waiting === 0 ? "None waiting" : `${String(waiting)} waiting`,
-      drawing: buildSessionsDrawing(machine),
+      value: drawing.runningText,
+      unit: drawing.capText,
+      level: drawing.waiting > 0 && !drawing.isAway ? "you" : "normal",
+      note: drawing.waitingText ?? "None waiting",
+      drawing,
     },
     cpu: describeCpuInstrument(runner),
     memory: describeMemoryInstrument(runner),

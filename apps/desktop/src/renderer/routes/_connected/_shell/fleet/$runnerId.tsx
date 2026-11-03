@@ -139,10 +139,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
               need none. Its label names it for the jump link and for screen readers. */}
           <section id={CAPACITY_ID} className="machine-page-capacity" aria-label="Capacity">
             {page.top.kind === "room" && <MachinePageRoomLine line={page.top.line} />}
-            <MachinePageInstruments
-              instruments={page.instruments}
-              isAway={page.top.kind === "away"}
-            />
+            <MachinePageInstruments instruments={page.instruments} />
           </section>
           <MachineSoftware id={SOFTWARE_ID} runner={runner} />
           <MachineSettings id={SETTINGS_ID} runner={runner} onRetire={() => setRetiring(true)} />

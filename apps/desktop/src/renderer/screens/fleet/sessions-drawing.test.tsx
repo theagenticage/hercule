@@ -1,8 +1,8 @@
 /**
  * Tests how the sessions drawing is laid out from a `SessionsDrawing`. Which
- * shape a machine gets, and how many waiting blocks, is decided by
- * `describeFleetPage` in `@hercule/client-core/fleet`, which has its own
- * tests.
+ * shape a machine gets, how many waiting blocks, and what an away machine
+ * counts as running, is decided by `describeFleetPage` in
+ * `@hercule/client-core/fleet`, which has its own tests.
  */
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
@@ -12,12 +12,15 @@ import { SessionsFigure } from "./sessions-drawing";
 
 /** Draws a machine with a cap of `cap`, `running` sessions and `waiting` more, as the page draws it. */
 const draw = (cap: number, running: number, waiting: number, isAway = false): HTMLElement => {
-  const runner = buildRunner({ maxConcurrentSessions: cap });
+  const runner = buildRunner({
+    maxConcurrentSessions: cap,
+    connectivity: isAway ? "offline" : "online",
+  });
   const counts = {
     [runner.id]: { running, waiting, waitingThreads: waiting, openThreads: waiting },
   };
   const [machine] = describeFleetPage([runner], counts, null, TIMEZONE, NOW).machines;
-  return render(<SessionsFigure drawing={machine!.drawing} size="card" isAway={isAway} />).container
+  return render(<SessionsFigure drawing={machine!.drawing} size="card" />).container
     .firstElementChild as HTMLElement;
 };
 

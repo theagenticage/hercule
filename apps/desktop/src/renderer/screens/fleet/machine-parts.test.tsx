@@ -1,6 +1,6 @@
 /**
  * Tests the parts a machine's card and list row both draw: the status dot, the
- * meter and the need line. What a need says is decided by `describeFleetPage`
+ * gauge's number, the meter and the need line. What a need says is decided by `describeFleetPage`
  * in `@hercule/client-core/fleet`.
  */
 import { describe, expect, it } from "vitest";
@@ -11,7 +11,7 @@ import {
   NEARLY_FULL_DISK_MACHINE,
   OFFLINE_MACHINE,
 } from "./fleet.testing";
-import { Meter, NeedLine, StatusDot } from "./machine-parts";
+import { GaugeValue, Meter, NeedLine, StatusDot } from "./machine-parts";
 
 describe("StatusDot", () => {
   it("hides itself from assistive technology, because a label is drawn beside it", () => {
@@ -24,6 +24,22 @@ describe("StatusDot", () => {
     render(<StatusDot status={{ tone: "online", label: "Online" }} namesState />);
 
     expect(screen.getByRole("img", { name: "Online" })).toBeTruthy();
+  });
+});
+
+describe("GaugeValue", () => {
+  it("draws the value with its unit in small after it", () => {
+    const { container } = render(<GaugeValue gauge={{ value: "87", unit: "%" }} />);
+
+    expect(container.querySelector("b")?.textContent).toBe("87%");
+    expect(container.querySelector("b > small")?.textContent).toBe("%");
+  });
+
+  it("draws no small for an empty unit", () => {
+    const { container } = render(<GaugeValue gauge={{ value: "–", unit: "" }} />);
+
+    expect(container.querySelector("b")?.textContent).toBe("–");
+    expect(container.querySelector("small")).toBeNull();
   });
 });
 

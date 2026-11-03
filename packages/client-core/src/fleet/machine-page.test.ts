@@ -494,9 +494,12 @@ describe("describeMachinePage instruments", () => {
         value: "12",
         unit: " of 16",
         level: "normal",
-        share: null,
         note: "None waiting",
       });
+    });
+
+    it("has no meter, so no share", () => {
+      expect(instruments({}, { running: 4 }).sessions).not.toHaveProperty("share");
     });
 
     it("turns you and counts the sessions waiting, whatever they wait for", () => {
@@ -519,19 +522,11 @@ describe("describeMachinePage instruments", () => {
       }
     });
 
-    it("draws the same blocks or bar as a card: blocks at 16 slots, a bar at 17", () => {
-      const at16 = instruments({ maxConcurrentSessions: 16 }, { running: 12, waiting: 3 });
-      const at17 = instruments({ maxConcurrentSessions: 17 }, { running: 12, waiting: 3 });
+    it("carries the drawing a card shows for the same machine", () => {
+      const drawing = instruments({ maxConcurrentSessions: 17 }, { running: 12, waiting: 3 })
+        .sessions.drawing;
 
-      expect(at16.sessions.drawing).toEqual({
-        shape: "blocks",
-        cap: 16,
-        running: 12,
-        free: 4,
-        waiting: 3,
-        waitingBlocks: 3,
-      });
-      expect(at17.sessions.drawing).toMatchObject({ shape: "bar", cap: 17, waitingBlocks: 0 });
+      expect(drawing).toMatchObject({ shape: "bar", cap: 17, running: 12, waiting: 3 });
     });
   });
 
@@ -542,6 +537,7 @@ describe("describeMachinePage instruments", () => {
       expect(instrument).toEqual({
         value: "–",
         unit: "",
+        freeAmount: "",
         level: "normal",
         share: null,
         note: "Not reported yet",
@@ -556,6 +552,7 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics({ cpu }) }).cpu).toEqual({
         value: "23",
         unit: "%",
+        freeAmount: "",
         level: "normal",
         share: 0.239,
         note: "Peak 61% in the last minute",
@@ -576,6 +573,7 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics({ cpu: null }) }).cpu).toEqual({
         value: "–",
         unit: "",
+        freeAmount: "",
         level: "normal",
         share: null,
         note: "First reading within a minute",
@@ -586,6 +584,7 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics() }).cpu).toEqual({
         value: "–",
         unit: "",
+        freeAmount: "",
         level: "normal",
         share: null,
         note: "This machine's runner is too old to report CPU. Update it.",
@@ -601,18 +600,6 @@ describe("describeMachinePage instruments", () => {
         level: "normal",
         note: "17.6 GB free of 64 GB",
       });
-    });
-
-    it.each([
-      [79.9, "79", "normal"],
-      [80, "80", "you"],
-      [91.5, "91", "you"],
-      [92, "92", "fail"],
-    ])("colours %d percent in use, shown as %s, %s", (used, value, level) => {
-      const facts = buildFacts({ totalMemoryBytes: 100 * GIB });
-      const metricsOfUse = metrics({ availableMemoryBytes: (100 - used) * GIB });
-
-      expect(instruments({ facts, metrics: metricsOfUse }).memory).toMatchObject({ value, level });
     });
 
     it("counts a free amount from 100 GB in whole gigabytes", () => {
@@ -633,25 +620,18 @@ describe("describeMachinePage instruments", () => {
       expect(instruments(withDisk(120e9)).disk).toEqual({
         value: "88",
         unit: "%",
+        freeAmount: "120 GB",
         level: "you",
         share: 0.88,
         note: "120 GB free of 1,000 GB",
       });
     });
 
-    it("turns you from 85% full, shown rounded down", () => {
-      expect(instruments(withDisk(154e9)).disk).toMatchObject({ value: "84", level: "normal" });
-      expect(instruments(withDisk(150e9)).disk).toMatchObject({ value: "85", level: "you" });
-    });
-
-    it("fails below the disk limit", () => {
-      expect(instruments(withDisk(5 * GIB)).disk).toMatchObject({ level: "fail" });
-    });
-
     it("shows free space with an empty meter, and says what to do, without the disk's total", () => {
       expect(instruments({ metrics: metrics({ diskFreeBytes: 42.14e9 }) }).disk).toEqual({
         value: "42.1",
         unit: " GB free",
+        freeAmount: "42.1 GB",
         level: "normal",
         share: null,
         note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
@@ -663,12 +643,6 @@ describe("describeMachinePage instruments", () => {
         value: "0",
         note: "100 GB free of 100 GB",
       });
-    });
-
-    it("keeps the limit's colour and counts megabytes without the disk's total", () => {
-      expect(
-        instruments({ metrics: metrics({ diskFreeBytes: 420e6 }), diskWatermarkBytes: 1e9 }).disk,
-      ).toMatchObject({ value: "420", unit: " MB free", level: "fail", share: null });
     });
   });
 

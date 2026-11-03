@@ -8,24 +8,51 @@ import { render } from "@testing-library/react";
 import type { MachineInstruments } from "@hercule/client-core/machine-page";
 import { MachinePageInstruments } from "./machine-page-instruments";
 
+const GAUGE = { freeAmount: "" } as const;
+
 const INSTRUMENTS: MachineInstruments = {
   sessions: {
     value: "12",
     unit: " of 16",
     level: "you",
-    share: null,
     note: "5 waiting",
-    drawing: { shape: "blocks", cap: 16, running: 12, free: 4, waiting: 5, waitingBlocks: 5 },
+    drawing: {
+      shape: "blocks",
+      cap: 16,
+      running: 12,
+      free: 4,
+      waiting: 5,
+      waitingBlocks: 5,
+      isAway: false,
+      runningText: "12",
+      capText: " of 16",
+      waitingText: "5 waiting",
+    },
   },
   cpu: {
+    ...GAUGE,
     value: "34",
     unit: "%",
     level: "normal",
     share: 0.34,
     note: "Peak 71% in the last minute",
   },
-  memory: { value: "55", unit: "%", level: "normal", share: 0.55, note: "29.0 GB free of 64 GB" },
-  disk: { value: "87", unit: "%", level: "you", share: 0.87, note: "500 GB free of 4,000 GB" },
+  memory: {
+    ...GAUGE,
+    value: "55",
+    unit: "%",
+    level: "normal",
+    share: 0.55,
+    note: "29.0 GB free of 64 GB",
+  },
+  disk: {
+    ...GAUGE,
+    value: "87",
+    unit: "%",
+    level: "you",
+    share: 0.87,
+    note: "500 GB free of 4,000 GB",
+  },
 };
 
 /** Renders the instruments and returns each tile as its text, in the order drawn. */
@@ -34,9 +61,7 @@ const readTiles = (container: HTMLElement): readonly string[] =>
 
 describe("MachinePageInstruments", () => {
   it("draws Sessions, CPU, Memory and Disk, each with its label, value, unit and note", () => {
-    const { container } = render(
-      <MachinePageInstruments instruments={INSTRUMENTS} isAway={false} />,
-    );
+    const { container } = render(<MachinePageInstruments instruments={INSTRUMENTS} />);
 
     expect(readTiles(container)).toEqual([
       "Sessions12 of 165 waiting",
@@ -46,16 +71,14 @@ describe("MachinePageInstruments", () => {
     ]);
   });
 
-  it("fills a meter to its share, in the colour of its level, and the sessions have the drawing instead of a meter", () => {
-    const { container } = render(
-      <MachinePageInstruments instruments={INSTRUMENTS} isAway={false} />,
-    );
+  it("gives each meter its instrument's share and level, and the sessions a drawing instead of a meter", () => {
+    const { container } = render(<MachinePageInstruments instruments={INSTRUMENTS} />);
 
     const [sessions, cpu, , disk] = Array.from(
       container.querySelectorAll<HTMLElement>(".machine-page-instrument"),
     );
     expect(sessions!.querySelector(".fleet-meter")).toBeNull();
-    expect(sessions!.querySelectorAll(".fleet-sessions i")).toHaveLength(21);
+    expect(sessions!.querySelector(".fleet-sessions")).not.toBeNull();
     expect(sessions!.classList.contains("machine-page-instrument--you")).toBe(true);
     expect(cpu!.querySelector<HTMLElement>(".fleet-meter i")!.style.width).toBe("34%");
     expect(disk!.querySelector(".fleet-meter--you")).not.toBeNull();
@@ -67,6 +90,7 @@ describe("MachinePageInstruments", () => {
         instruments={{
           ...INSTRUMENTS,
           disk: {
+            ...GAUGE,
             value: "412",
             unit: " GB free",
             level: "normal",
@@ -74,7 +98,6 @@ describe("MachinePageInstruments", () => {
             note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
           },
         }}
-        isAway={false}
       />,
     );
 
@@ -92,6 +115,7 @@ describe("MachinePageInstruments", () => {
         instruments={{
           ...INSTRUMENTS,
           cpu: {
+            ...GAUGE,
             value: "–",
             unit: "",
             level: "normal",
@@ -99,7 +123,6 @@ describe("MachinePageInstruments", () => {
             note: "First reading within a minute",
           },
         }}
-        isAway={false}
       />,
     );
 
@@ -109,8 +132,14 @@ describe("MachinePageInstruments", () => {
   it("draws a machine that is away in quieter inks, with its instruments as given", () => {
     const { container } = render(
       <MachinePageInstruments
-        instruments={{ ...INSTRUMENTS, sessions: { ...INSTRUMENTS.sessions, value: "–" } }}
-        isAway
+        instruments={{
+          ...INSTRUMENTS,
+          sessions: {
+            ...INSTRUMENTS.sessions,
+            value: "–",
+            drawing: { ...INSTRUMENTS.sessions.drawing, isAway: true },
+          },
+        }}
       />,
     );
 

@@ -1,11 +1,24 @@
 import type { JSX, ReactNode } from "react";
-import type { MachineSummary } from "@hercule/client-core/fleet";
+import type { MachineGauge, MachineSummary } from "@hercule/client-core/fleet";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { MachineIcon } from "./machine-icon";
 import { Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
 import { buildMachineTransitionName } from "./machine-transition";
 import { SessionsFigure } from "./sessions-drawing";
 import "./fleet-page.css";
+
+/** Renders a gauge as its meter with the number beside it, coloured by the gauge's level. */
+function MeterWithValue({ gauge }: { readonly gauge: MachineGauge }): JSX.Element {
+  return (
+    <span className="fleet-row-meter">
+      <Meter share={gauge.share} level={gauge.level} />
+      <b className={gauge.level === "normal" ? undefined : `is-${gauge.level}`}>
+        {gauge.value}
+        {gauge.unit}
+      </b>
+    </span>
+  );
+}
 
 /**
  * Renders one machine as a row of the list. It draws what `machine` holds and
@@ -48,52 +61,35 @@ export function MachineRow({
         </span>
       </span>
       <span role="cell" className="fleet-cell">
-        <SessionsFigure drawing={drawing} size="list" isAway={isAway} />
-        <small className={drawing.waiting > 0 ? "is-you" : undefined}>
-          {isAway ? "–" : drawing.running} of {drawing.cap}
-          {drawing.waiting > 0 && ` · ${String(drawing.waiting)} waiting`}
+        <SessionsFigure drawing={drawing} size="list" />
+        <small className={drawing.waitingText === null ? undefined : "is-you"}>
+          {drawing.runningText}
+          {drawing.capText}
+          {drawing.waitingText !== null && ` · ${drawing.waitingText}`}
         </small>
       </span>
       <span role="cell" className="fleet-cell fleet-col-room">
         <b>{roomText ?? "–"}</b>
       </span>
-      {disk === null || disk.percent === null ? (
+      {disk.share === null ? (
         <span role="cell" className="fleet-cell fleet-cell--line fleet-col-disk">
-          {disk === null ? (
+          {disk.freeAmount === "" ? (
             <b>–</b>
           ) : (
             <>
-              <b className={disk.level === "fail" ? "is-fail" : undefined}>
-                {disk.amount} {disk.unit}
-              </b>
+              <b className={disk.level === "fail" ? "is-fail" : undefined}>{disk.freeAmount}</b>
               <small>free</small>
             </>
           )}
         </span>
       ) : (
         <span role="cell" className="fleet-cell fleet-col-disk">
-          <span className="fleet-row-meter">
-            <Meter share={disk.share} level={disk.level} />
-            <b className={disk.level === "normal" ? undefined : `is-${disk.level}`}>
-              {disk.percent}%
-            </b>
-          </span>
-          <small>
-            {disk.amount} {disk.unit} free
-          </small>
+          <MeterWithValue gauge={disk} />
+          <small>{disk.freeAmount} free</small>
         </span>
       )}
       <span role="cell" className="fleet-cell fleet-col-mem">
-        {memory === null ? (
-          <b>–</b>
-        ) : (
-          <span className="fleet-row-meter">
-            <Meter share={memory.share} level={memory.level} />
-            <b className={memory.level === "normal" ? undefined : `is-${memory.level}`}>
-              {memory.percent}%
-            </b>
-          </span>
-        )}
+        {memory.share === null ? <b>–</b> : <MeterWithValue gauge={memory} />}
       </span>
       <span role="cell" className="fleet-row-need">
         <NeedLine need={need} allow={allow} />
