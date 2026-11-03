@@ -183,6 +183,14 @@
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
 }
+/* When the disk reaches its limit, as a line of its own under the note, in the
+   ink of a need that is not urgent yet. */
+.machine-page-instrument-forecast {
+  margin-top: -4px;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
 /* A machine that is away: what it last reported in quieter inks, as on its
    card, never at reduced opacity. */
 .machine-page-instruments-box.is-away .machine-page-instrument > b {
