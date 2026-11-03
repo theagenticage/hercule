@@ -27,6 +27,14 @@ import { POINT_MS, runnerMetricsRepository } from "./repository";
 /** How many days of history are kept when `retention.runnerMetrics` is not set. */
 const DEFAULT_RETENTION_DAYS = 14;
 
+/**
+ * The days of history a machine's page always draws, as hour points. A query
+ * for hour points may cover this many days even when the retention is shorter:
+ * the days beyond the retention hold no rows, so refusing them would protect
+ * nothing and only make the page fail.
+ */
+const MACHINE_PAGE_DAYS = 14;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The longest span of five-minute points one query reads. */
@@ -109,8 +117,8 @@ const make = Effect.gen(function* () {
      * defaults to now.
      *
      * Fails with `Validation` when the span is empty, or is longer than a
-     * query may read (24 hours of five-minute points, or the retention
-     * period of hour points), or when the cursor was issued for another
+     * query may read (24 hours of five-minute points, or the longer of the
+     * retention period and 14 days of hour points), or when the cursor was issued for another
      * runner or resolution.
      */
     query: (
@@ -141,12 +149,12 @@ const make = Effect.gen(function* () {
           );
         }
         if (input.resolution === "hour") {
-          const days = yield* readRetentionDays;
+          const days = Math.max(yield* readRetentionDays, MACHINE_PAGE_DAYS);
           if (spanMs > days * DAY_MS) {
             return yield* Effect.fail(
               refuse(
                 "since",
-                `hour points cover at most ${String(days)} days, as long as the history is kept; ask for a shorter span.`,
+                `hour points cover at most ${String(days)} days, the longer of the history kept and the ${String(MACHINE_PAGE_DAYS)} days a machine's page draws; ask for a shorter span.`,
               ),
             );
           }

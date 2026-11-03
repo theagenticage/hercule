@@ -539,27 +539,43 @@ describe("a query's limits", () => {
     expect(page.items).toEqual([]);
   });
 
-  it("refuses hour points beyond the retention period, which is 14 days unless the setting says otherwise", async () => {
-    const tooLong = {
-      resolution: "hour",
+  it("refuses hour points beyond the longer of the retention and 14 days, and accepts up to it", async () => {
+    const hours = (days: number, extraMs = 0) => ({
+      resolution: "hour" as const,
       since: instant(0),
-      until: instant(14 * 24 * 60, 1),
-    } as const;
-    expect(readIssues(await refusal(tooLong))[0]?.message).toContain("at most 14 days");
-    const result = await runAsUser(
+      until: instant(days * 24 * 60, extraMs),
+    });
+    const withRetention = (days: number) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const settings = yield* Settings;
-        const exactly = yield* query({ ...tooLong, until: instant(14 * 24 * 60) });
-        yield* withTransaction(sql, settings.set("retention.runnerMetrics", 3));
-        const shorter = yield* Effect.flip(
-          query({ resolution: "hour", since: instant(0), until: instant(3 * 24 * 60, 1) }),
-        );
-        return { exactly: exactly.items, shorter };
+        yield* withTransaction(sql, settings.set("retention.runnerMetrics", days));
+      });
+    const result = await runAsUser(
+      Effect.gen(function* () {
+        // Unset, the retention is 14 days.
+        const defaultRefused = yield* Effect.flip(query(hours(14, 1)));
+        const defaultAccepted = yield* query(hours(14));
+        // A retention below 14 days still allows the 14 days a machine's page draws.
+        yield* withRetention(7);
+        const shortAccepted = yield* query(hours(14));
+        const shortRefused = yield* Effect.flip(query(hours(14, 1)));
+        // A longer retention allows its own length and no more.
+        yield* withRetention(30);
+        const longAccepted = yield* query(hours(30));
+        const longRefused = yield* Effect.flip(query(hours(30, 1)));
+        return {
+          accepted: [defaultAccepted, shortAccepted, longAccepted].map((page) => page.items),
+          refused: [defaultRefused, shortRefused, longRefused],
+        };
       }),
     );
-    expect(result.exactly).toEqual([]);
-    expect(readIssues(result.shorter)[0]?.message).toContain("at most 3 days");
+    expect(result.accepted).toEqual([[], [], []]);
+    expect(result.refused.map((error) => readIssues(error)[0]?.message)).toEqual([
+      expect.stringContaining("at most 14 days"),
+      expect.stringContaining("at most 14 days"),
+      expect.stringContaining("at most 30 days"),
+    ]);
   });
 
   it("refuses text that has the shape of a time but is not one", async () => {

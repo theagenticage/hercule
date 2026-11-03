@@ -2355,7 +2355,7 @@ export const CLI = {
 
   "runnerMetrics.query": {
     command: "runner metrics",
-    help: "Lists a machine's Runner Metrics history as points. A point holds free disk, available memory, CPU use, and the sessions running and queued, over five minutes or one hour, never a single minute. `minutes` says how many minutes of a point have a report, so a gap shows as fewer minutes, not as an invented value. The span is at most 24 hours for five-minute points, and for hour points as long as the history is kept (14 days).",
+    help: "Lists a machine's Runner Metrics history as points. A point holds free disk, available memory, CPU use, and the sessions running and queued, over five minutes or one hour, never a single minute. `minutes` says how many minutes of a point have a report, so a gap shows as fewer minutes, not as an invented value. The span is at most 24 hours for five-minute points, and for hour points as long as the history is kept, or 14 days if that is longer.",
     examples: [
       { args: ["--since", "2026-11-02T08:00:00.000Z", "--resolution", "fiveMinutes"] },
       {
