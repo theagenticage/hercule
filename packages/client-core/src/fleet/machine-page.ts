@@ -211,7 +211,15 @@ export interface MachineInstruments {
   readonly disk: MeterInstrument;
 }
 
-const NOT_REPORTED_NOTE = "Not reported yet";
+/** The line under an instrument or graph that has no report to show yet. */
+export const NOT_REPORTED_NOTE = "Not reported yet";
+
+/** The line under the CPU of a runner whose reports carry none. */
+export const CPU_TOO_OLD_NOTE = "This machine's runner is too old to report CPU. Update it.";
+
+/** The line under the disk of a runner that does not report the disk's total size. */
+export const DISK_TOTAL_MISSING_NOTE =
+  "This machine's runner does not report its disk size. Update it to see how full the disk is.";
 
 const NOT_REPORTED: MeterInstrument = { ...NOT_REPORTED_GAUGE, note: NOT_REPORTED_NOTE };
 
@@ -222,7 +230,7 @@ const describeCpuInstrument = (runner: Runner): MeterInstrument => {
   if (cpu === undefined) {
     return {
       ...NOT_REPORTED,
-      note: "This machine's runner is too old to report CPU. Update it.",
+      note: CPU_TOO_OLD_NOTE,
     };
   }
   if (cpu === null) return { ...NOT_REPORTED, note: "First reading within a minute" };
@@ -255,7 +263,7 @@ const describeDiskInstrument = (runner: Runner): MeterInstrument => {
   if (disk.use === null) {
     return {
       ...gauge,
-      note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
+      note: DISK_TOTAL_MISSING_NOTE,
     };
   }
   const size = splitDiskSize(disk.use.totalBytes);
