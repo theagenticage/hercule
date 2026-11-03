@@ -7,17 +7,14 @@ import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
 import { describeMachinePage } from "@hercule/client-core/machine-page";
 import type { Runner } from "@hercule/contract";
 import { throwScreenNotFound } from "../../../../app/last-screen";
-import { RUNNER_METRICS_TOPICS, useScreenTopicsLive } from "../../../../app/live";
+import { useRunnerMetricsLive } from "../../../../app/live";
 import {
-  buildMachineFiveMinuteScope,
-  buildMachineHourScope,
   controllerQuery,
   fleetSessionsQuery,
   harnessesQuery,
   providerAccountsQuery,
   providersQuery,
   readOnOpen,
-  runnerMetricsQuery,
   runnersQuery,
   settingsQuery,
 } from "../../../../app/queries";
@@ -27,12 +24,17 @@ import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { MachinePageBanner } from "../../../../screens/fleet/machine-page-banner";
 import { MachinePageHead, MachinePageRoomLine } from "../../../../screens/fleet/machine-page-head";
 import { MachinePageInstruments } from "../../../../screens/fleet/machine-page-instruments";
+import {
+  buildMachineFiveMinuteScope,
+  buildMachineHourScope,
+} from "../../../../screens/fleet/runner-metrics-scope";
 import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
 import { NotFound } from "../../../../screens/not-found";
 import { MachineRetireDialog } from "./-machine-retire-dialog";
 import { MachineSettings } from "./-machine-settings";
 import { MachineSoftware } from "./-machine-software";
+import { runnerMetricsQuery } from "./-runner-metrics";
 import { useRunnerSessionCounts } from "./-session-counts";
 
 /** The ids of the page's sections, which the header's jump links scroll to. */
@@ -54,7 +56,7 @@ const SECTIONS = [
  * machine's five-minute points of the last 24 hours and hour points of the
  * last 14 days, for its graphs. They are read only for a machine that exists,
  * and a cached read is used as it is: a `runnerMetrics` push brings them up to
- * date (see `invalidateForRunnerMetricsPush`). When no runner has
+ * date (see `useRunnerMetricsLive`). When no runner has
  * the id, or the runner is retired, the route shows `RunnerNotFound`: retired
  * machines are not shown anywhere on Fleet.
  */
@@ -119,7 +121,7 @@ function MachinePage(): JSX.Element {
 function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
   const { client } = controller;
-  useScreenTopicsLive(controller.live, queryClient, RUNNER_METRICS_TOPICS);
+  useRunnerMetricsLive(controller.live, queryClient, runner.id);
   const sessionCounts = useRunnerSessionCounts(client);
   const { data: controllerRecord } = useSuspenseQuery(controllerQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));

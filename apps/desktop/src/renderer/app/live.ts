@@ -25,7 +25,7 @@
  * - `plugin`, for the plugins whose names label each signal's source.
  *
  * The Fleet pages hold one more topic, `runnerMetrics`, while they are open
- * and the window is visible (see `RUNNER_METRICS_TOPICS`).
+ * and the window is visible (see `useRunnerMetricsLive`).
  *
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
@@ -95,41 +95,44 @@ const invalidateLegReads = (
 const HOUR_HISTORY_REFRESH_MS = 60 * 60 * 1000;
 
 /**
- * Reads again what a `runnerMetrics` push makes out of date (spec 17
- * §Graphs and the forecast). A push says the controller wrote a row of Runner
- * Metrics for each runner it names, or for any runner when it names none.
+ * Reads again what a `runnerMetrics` push makes out of date on a Fleet page
+ * (spec 17 §Graphs and the forecast). A push says the controller wrote a row of
+ * Runner Metrics for each runner it names, or for any runner when it names
+ * none. `runnerId` is the machine whose page is open, or `null` on the Fleet
+ * page, which draws every machine.
  *
+ * - A machine's page ignores a push that names other runners only: with five
+ *   machines, the other four's nudges would otherwise read the runners and
+ *   its histories four times a minute for nothing.
  * - The runners are read again, for the latest metrics on the cards and the
  *   machine page. A routine report publishes nothing on `runner`.
- * - The five-minute history of each runner the push names is read again, from
- *   the start of its newest point (see `runnerMetricsQuery`). That point was
- *   still filling.
+ * - A machine's five-minute history is read again from the start of its newest
+ *   point (see `runnerMetricsQuery`). That point was still filling.
  * - A history of hour points is read again only when its last successful read
  *   is an hour old or more, so a nudge a minute changes none of them within
  *   the hour. The age is the query's `dataUpdatedAt`, not the history's own
  *   `readAt`, which does not move when a read brings no new point. A history
- *   that is being read is left alone, because that read is newer than any
- *   nudge that arrives during it.
+ *   that is being read is not left alone: a report written after that read's
+ *   query ran would otherwise wait another hour.
  *
  * Reading goes through `invalidateWithoutCancelling`, so however many nudges
  * arrive, a history has at most one read running and one more waiting.
  */
 const invalidateForRunnerMetricsPush = (
   queryClient: QueryClient,
+  runnerId: string | null,
   push: LiveInvalidatePush,
 ): void => {
+  if (runnerId !== null && push.ids.length > 0 && !push.ids.includes(runnerId)) return;
   invalidateWithoutCancelling(queryClient, queryKeys.runners());
-  const fiveMinuteKeys =
-    push.ids.length === 0
-      ? [queryKeys.runnerMetrics("fiveMinutes")]
-      : push.ids.map((runnerId) => queryKeys.runnerMetrics("fiveMinutes", runnerId));
-  for (const queryKey of fiveMinuteKeys) invalidateWithoutCancelling(queryClient, queryKey);
+  if (runnerId !== null) {
+    invalidateWithoutCancelling(queryClient, queryKeys.runnerMetrics("fiveMinutes", runnerId));
+  }
   const now = Date.now();
   for (const query of queryClient
     .getQueryCache()
-    .findAll({ queryKey: queryKeys.runnerMetrics("hour") })) {
-    const isOldEnough = now - query.state.dataUpdatedAt >= HOUR_HISTORY_REFRESH_MS;
-    if (isOldEnough && query.state.fetchStatus === "idle") {
+    .findAll({ queryKey: queryKeys.runnerMetrics("hour", runnerId) })) {
+    if (now - query.state.dataUpdatedAt >= HOUR_HISTORY_REFRESH_MS) {
       invalidateWithoutCancelling(queryClient, query.queryKey);
     }
   }
@@ -167,7 +170,6 @@ export const invalidateForPush = (
   push: LiveInvalidatePush,
 ): void => {
   for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
-  if (topic === "runnerMetrics") invalidateForRunnerMetricsPush(queryClient, push);
   if (topic === "task") {
     invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByTaskPush(legs, push));
   }
@@ -299,12 +301,6 @@ export const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow"];
  */
 export const RUN_TOPICS: readonly MutableLiveTopic[] = ["run"];
 
-/**
- * The topic the Fleet pages hold: a nudge for each minute of Runner Metrics a
- * runner reports. No other screen subscribes to it.
- */
-export const RUNNER_METRICS_TOPICS: readonly MutableLiveTopic[] = ["runnerMetrics"];
-
 /** The topic the Discussions pages hold. */
 export const DISCUSSION_TOPICS: readonly MutableLiveTopic[] = ["discussion"];
 
@@ -347,4 +343,30 @@ export const useScreenTopicsLive = (
       for (const unsubscribe of unsubscribes) unsubscribe();
     };
   }, [live, queryClient, topics, visible]);
+};
+
+/**
+ * Keeps the Runner Metrics a Fleet page draws current while the calling
+ * component is mounted and the window is visible: subscribes to the
+ * `runnerMetrics` topic and reads what each nudge makes out of date (see
+ * `invalidateForRunnerMetricsPush`). Pass the id of the machine whose page is
+ * open, or `null` on the Fleet page. No other screen holds this topic.
+ *
+ * Like `useScreenTopicsLive`, it drops the subscription while the window is
+ * hidden (spec 17 §Rules, rule 3). The controller's first push on the
+ * subscription names no runner, so showing the window reads everything the
+ * page holds that is not fresh.
+ */
+export const useRunnerMetricsLive = (
+  live: Live,
+  queryClient: QueryClient,
+  runnerId: string | null,
+): void => {
+  const visible = useWindowVisible();
+  useEffect(() => {
+    if (!visible) return;
+    return live.subscribe("runnerMetrics", (_keys, push) => {
+      invalidateForRunnerMetricsPush(queryClient, runnerId, push);
+    });
+  }, [live, queryClient, runnerId, visible]);
 };

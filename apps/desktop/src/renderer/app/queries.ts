@@ -39,14 +39,6 @@ import {
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
-import { FORECAST_HISTORY_MS } from "@hercule/client-core/fleet";
-import { FIVE_MINUTE_HISTORY_MS, HOUR_HISTORY_MS } from "@hercule/client-core/machine-graphs";
-import {
-  EMPTY_RUNNER_METRICS_HISTORY,
-  findMetricsReadStart,
-  mergeRunnerMetricsHistory,
-  type RunnerMetricsHistory,
-} from "@hercule/client-core/metrics-history";
 import type { TimelineDay } from "@hercule/client-core/run-timeline";
 import {
   DEFAULT_PAGE_LIMIT,
@@ -56,7 +48,6 @@ import {
   type EventHandling,
   type HandoffLeg,
   type Input,
-  type RunnerMetricsResolution,
   type RunSummary,
   type Runner,
   type Session,
@@ -156,7 +147,7 @@ export const macUserQuery = (bridge: Bridge) =>
  * `useRelatedReads`) marks it out of date. An app that is idle then makes no
  * requests at all.
  */
-const LIVE_KEPT_READ_OPTIONS = {
+export const LIVE_KEPT_READ_OPTIONS = {
   staleTime: Infinity,
   refetchOnWindowFocus: false,
   refetchOnReconnect: false,
@@ -328,68 +319,6 @@ export const runnersQuery = (client: HerculeClient) =>
     queryFn: () => readEveryPage((page) => client.runner.query({ query: page })),
     ...SHELL_READ_OPTIONS,
   });
-
-/**
- * One history of Runner Metrics: the points of one `resolution` over the last
- * `rangeMs`, for the runner `runnerId` or, with `null`, for every runner.
- */
-export interface RunnerMetricsScope {
-  readonly resolution: RunnerMetricsResolution;
-  readonly runnerId: string | null;
-  readonly rangeMs: number;
-}
-
-/** The hour points of every runner over the last 7 days, which the Fleet page forecasts disks from. */
-export const FLEET_HOUR_METRICS_SCOPE: RunnerMetricsScope = {
-  resolution: "hour",
-  runnerId: null,
-  rangeMs: FORECAST_HISTORY_MS,
-};
-
-/** The five-minute points of the last 24 hours of the runner `runnerId`: a machine's Sessions, CPU and Memory graphs. */
-export const buildMachineFiveMinuteScope = (runnerId: string): RunnerMetricsScope => ({
-  resolution: "fiveMinutes",
-  runnerId,
-  rangeMs: FIVE_MINUTE_HISTORY_MS,
-});
-
-/** The hour points of the last 14 days of the runner `runnerId`: a machine's Disk graph and forecast. */
-export const buildMachineHourScope = (runnerId: string): RunnerMetricsScope => ({
-  resolution: "hour",
-  runnerId,
-  rangeMs: HOUR_HISTORY_MS,
-});
-
-/**
- * Reads one history of Runner Metrics (spec 03 §4.3). The first read covers
- * the whole range. Every later read starts at the newest point the cache holds
- * and joins to it (`mergeRunnerMetricsHistory`), so a read after a nudge
- * brings one or two points, not the range again.
- *
- * Nothing makes this read stale on its own: the `runnerMetrics` topic maps to
- * no key, and `useRunnerMetricsLive` decides which histories to read again on
- * each nudge. The query never reads for time, focus or reconnect either.
- */
-export const runnerMetricsQuery = (client: HerculeClient, scope: RunnerMetricsScope) => {
-  const { resolution, runnerId, rangeMs } = scope;
-  const queryKey = queryKeys.runnerMetrics(resolution, runnerId, rangeMs);
-  return queryOptions({
-    queryKey,
-    queryFn: async ({ client: queryClient }): Promise<RunnerMetricsHistory> => {
-      const held =
-        queryClient.getQueryData<RunnerMetricsHistory>(queryKey) ?? EMPTY_RUNNER_METRICS_HISTORY;
-      const readAt = Date.now();
-      const since = findMetricsReadStart(held, resolution, rangeMs, readAt);
-      const read = await readEveryPage((page) =>
-        client.runnerMetrics.query({
-          query: { ...(runnerId === null ? {} : { runnerId }), since, resolution, ...page },
-        }),
-      );
-      return mergeRunnerMetricsHistory(held, read, since, readAt, rangeMs);
-    },
-    ...LIVE_KEPT_READ_OPTIONS,
-  });
-};
 
 /** Reads every Provider Account with what each runner last learned about it. */
 export const providerAccountsQuery = (client: HerculeClient) =>

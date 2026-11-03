@@ -5,6 +5,7 @@
  * folded together, the hour histories that are read again at most once an
  * hour, and a hidden window that reads nothing.
  */
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import type { Runner, RunnerMetricsPoint, RunnerMetricsResolution } from "@hercule/contract";
@@ -19,6 +20,22 @@ import {
   stubIntersectionObserver,
   type Call,
 } from "../../../../app/testing";
+import { rememberMachineView } from "../../../../screens/fleet/machine-view";
+
+/** Every `machine` prop each card was drawn with, oldest first, by runner id. */
+const { drawnMachines } = vi.hoisted(() => ({ drawnMachines: new Map<string, unknown[]>() }));
+
+vi.mock("../../../../screens/fleet/machine-card", async (importActual) => {
+  const actual = await importActual<typeof import("../../../../screens/fleet/machine-card")>();
+  return {
+    ...actual,
+    MachineCard: (props: ComponentProps<typeof actual.MachineCard>) => {
+      const held = drawnMachines.get(props.machine.runnerId) ?? [];
+      drawnMachines.set(props.machine.runnerId, [...held, props.machine]);
+      return <actual.MachineCard {...props} />;
+    },
+  };
+});
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -32,6 +49,8 @@ beforeEach(() => {
   stubIntersectionObserver();
   vi.stubEnv("TZ", "UTC");
   vi.useFakeTimers({ now: new Date("2026-11-02T14:02:00.000Z"), toFake: ["Date"] });
+  drawnMachines.clear();
+  rememberMachineView("grid");
 });
 
 afterEach(() => {
@@ -94,9 +113,12 @@ const buildPoint = (
 
 /** What the controller holds, which a test changes between pushes, and a read it can keep waiting. */
 interface World {
+  runners: Runner[];
   points: Record<RunnerMetricsResolution, RunnerMetricsPoint[]>;
-  /** While set, a read of five-minute points waits for it. */
-  hold: Promise<void> | null;
+  /** While set for a resolution, a read of its points waits for it. */
+  hold: Partial<Record<RunnerMetricsResolution, Promise<void>>>;
+  /** How many points a page holds. A later page also finds the clock an hour on. Unlimited when left out. */
+  pageSize?: number;
 }
 
 /** One `runnerMetrics.query` request, as the controller received it. */
@@ -104,6 +126,7 @@ interface MetricsRead {
   readonly resolution: RunnerMetricsResolution;
   readonly runnerId: string | null;
   readonly since: string;
+  readonly until: string;
 }
 
 const readMetricsCalls = (calls: readonly Call[]): readonly MetricsRead[] =>
@@ -115,6 +138,7 @@ const readMetricsCalls = (calls: readonly Call[]): readonly MetricsRead[] =>
         resolution: query.get("resolution") as RunnerMetricsResolution,
         runnerId: query.get("runnerId"),
         since: query.get("since")!,
+        until: query.get("until")!,
       };
     });
 
@@ -136,7 +160,7 @@ const countRunnerReads = (calls: readonly Call[]): number =>
 const openApp = async (path: string, world: World) => {
   const calls = stubApi({
     ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [ATLAS, FORGE] }),
-    "GET /api/v1/runners": { body: { items: [ATLAS, FORGE] } },
+    "GET /api/v1/runners": () => ({ body: { items: world.runners } }),
     "GET /api/v1/sessions": { body: { items: [] } },
     "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "UTC" } } },
     "GET /api/v1/controller": {
@@ -155,13 +179,20 @@ const openApp = async (path: string, world: World) => {
       const runnerId = query.get("runnerId");
       const since =
         Math.floor(Date.parse(query.get("since")!) / POINT_MS[resolution]) * POINT_MS[resolution];
-      if (resolution === "fiveMinutes") await world.hold;
+      await world.hold[resolution];
+      const cursor = query.get("cursor");
+      // A later page of a read is answered after the clock moved on.
+      if (cursor !== null) vi.setSystemTime(Date.now() + HOUR_MS);
+      const matching = world.points[resolution].filter(
+        (point) =>
+          Date.parse(point.at) >= since && (runnerId === null || point.runnerId === runnerId),
+      );
+      const start = cursor === null ? 0 : Number(cursor);
+      const end = world.pageSize === undefined ? matching.length : start + world.pageSize;
       return {
         body: {
-          items: world.points[resolution].filter(
-            (point) =>
-              Date.parse(point.at) >= since && (runnerId === null || point.runnerId === runnerId),
-          ),
+          items: matching.slice(start, end),
+          ...(end < matching.length ? { nextCursor: String(end) } : {}),
         },
       };
     },
@@ -216,6 +247,7 @@ const readCpuLine = (): string => {
 };
 
 const buildMachineWorld = (): World => ({
+  runners: [ATLAS, FORGE],
   points: {
     fiveMinutes: [
       buildPoint(ATLAS, "2026-11-02T13:50:00.000Z"),
@@ -229,17 +261,19 @@ const buildMachineWorld = (): World => ({
       buildPoint(ATLAS, "2026-11-02T14:00:00.000Z", { minutes: 2 }),
     ],
   },
-  hold: null,
+  hold: {},
 });
 
 describe("a machine's page", () => {
   it("reads its five-minute points of the last 24 hours and its hour points of the last 14 days as it opens", async () => {
     const { calls } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
 
-    // The range starts two points inside the controller's limit, on a point boundary.
+    // The range starts two points inside the controller's limit, on a point boundary,
+    // and ends at the time of the read.
+    const until = "2026-11-02T14:02:00.000Z";
     expect(readMetricsCalls(calls)).toEqual([
-      { resolution: "fiveMinutes", runnerId: ATLAS.id, since: "2026-11-01T14:10:00.000Z" },
-      { resolution: "hour", runnerId: ATLAS.id, since: "2026-10-19T16:00:00.000Z" },
+      { resolution: "fiveMinutes", runnerId: ATLAS.id, since: "2026-11-01T14:10:00.000Z", until },
+      { resolution: "hour", runnerId: ATLAS.id, since: "2026-10-19T16:00:00.000Z", until },
     ]);
     expect(readCpuLine().split(" ")).toHaveLength(3);
   });
@@ -265,20 +299,38 @@ describe("a machine's page", () => {
     await waitForQuiet(context);
     const reads = readFiveMinuteCalls(calls).slice(before);
     expect(reads).toEqual([
-      { resolution: "fiveMinutes", runnerId: ATLAS.id, since: "2026-11-02T14:00:00.000Z" },
+      {
+        resolution: "fiveMinutes",
+        runnerId: ATLAS.id,
+        since: "2026-11-02T14:00:00.000Z",
+        until: "2026-11-02T14:06:00.000Z",
+      },
     ]);
     expect(countRunnerReads(calls)).toBe(runnerReadsBefore + 1);
   });
 
-  it("reads no points when a push names another machine", async () => {
+  it("gives every page of a read the same end, though the clock moves between pages", async () => {
+    const world = buildMachineWorld();
+    world.pageSize = 2;
+    const { calls } = await openApp(`/fleet/${ATLAS.id}`, world);
+
+    // Atlas's three five-minute points come in two pages. The second page is
+    // answered an hour later, and still ends where the first did.
+    const reads = readFiveMinuteCalls(calls);
+    expect(reads).toHaveLength(2);
+    expect(new Set(reads.map((read) => read.until))).toEqual(new Set(["2026-11-02T14:02:00.000Z"]));
+    expect(readCpuLine().split(" ")).toHaveLength(3);
+  });
+
+  it("reads nothing when a push names another machine only", async () => {
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
     await settle(live);
-    const before = readMetricsCalls(calls).length;
+    const before = calls.length;
 
     pushMetrics(live, [FORGE]);
     await waitForQuiet(context);
 
-    expect(readMetricsCalls(calls)).toHaveLength(before);
+    expect(calls).toHaveLength(before);
   });
 
   it("reads once more, not once per push, when pushes arrive while it reads", async () => {
@@ -287,7 +339,7 @@ describe("a machine's page", () => {
     await settle(live);
     const before = readFiveMinuteCalls(calls).length;
     let release = () => {};
-    world.hold = new Promise((resolve) => {
+    world.hold.fiveMinutes = new Promise((resolve) => {
       release = resolve;
     });
 
@@ -299,7 +351,7 @@ describe("a machine's page", () => {
     await tick();
     expect(readFiveMinuteCalls(calls)).toHaveLength(before + 1);
 
-    world.hold = null;
+    delete world.hold.fiveMinutes;
     release();
     await waitFor(() => expect(readFiveMinuteCalls(calls)).toHaveLength(before + 2));
     await waitForQuiet(context);
@@ -326,7 +378,32 @@ describe("a machine's page", () => {
       resolution: "hour",
       runnerId: ATLAS.id,
       since: "2026-11-02T14:00:00.000Z",
+      until: "2026-11-02T15:03:00.000Z",
     });
+  });
+
+  it("reads its hour points once more when a push arrives during an hourly read, so no report waits another hour", async () => {
+    const world = buildMachineWorld();
+    const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, world);
+    await settle(live);
+    let release = () => {};
+    world.hold.hour = new Promise((resolve) => {
+      release = resolve;
+    });
+
+    vi.setSystemTime(new Date("2026-11-02T15:03:00.000Z"));
+    pushMetrics(live, [ATLAS]);
+    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(2));
+    pushMetrics(live, [ATLAS]);
+    pushMetrics(live, [ATLAS]);
+    await tick();
+    expect(readHourCalls(calls)).toHaveLength(2);
+
+    delete world.hold.hour;
+    release();
+    await waitFor(() => expect(readHourCalls(calls)).toHaveLength(3));
+    await waitForQuiet(context);
+    expect(readHourCalls(calls)).toHaveLength(3);
   });
 
   it("reads nothing while the window is hidden, and catches up when it shows", async () => {
@@ -359,8 +436,9 @@ describe("the Fleet page", () => {
 
   it("reads every machine's hour points of the last 7 days once as it opens, and forecasts the disk from them", async () => {
     const world: World = {
+      runners: [ATLAS, FORGE],
       points: { fiveMinutes: [], hour: buildFallingDiskPoints() },
-      hold: null,
+      hold: {},
     };
     const { calls, live, context } = await openApp("/fleet", world);
     await settle(live);
@@ -370,13 +448,22 @@ describe("the Fleet page", () => {
     await waitForQuiet(context);
 
     expect(readMetricsCalls(calls)).toEqual([
-      { resolution: "hour", runnerId: null, since: "2026-10-26T16:00:00.000Z" },
+      {
+        resolution: "hour",
+        runnerId: null,
+        since: "2026-10-26T16:00:00.000Z",
+        until: "2026-11-02T14:02:00.000Z",
+      },
     ]);
     expect(await screen.findByText("Disk reaches its limit in about 4 days")).toBeTruthy();
   });
 
   it("reads the runners again on a push, for the latest metrics on the cards", async () => {
-    const world: World = { points: { fiveMinutes: [], hour: [] }, hold: null };
+    const world: World = {
+      runners: [ATLAS, FORGE],
+      points: { fiveMinutes: [], hour: [] },
+      hold: {},
+    };
     const { calls, live, context } = await openApp("/fleet", world);
     await settle(live);
     const before = countRunnerReads(calls);
@@ -386,5 +473,30 @@ describe("the Fleet page", () => {
     await waitFor(() => expect(countRunnerReads(calls)).toBe(before + 1));
     await waitForQuiet(context);
     expect(countRunnerReads(calls)).toBe(before + 1);
+  });
+
+  it("keeps the card of a machine that did not change as it was when another machine's metrics arrive", async () => {
+    const world: World = {
+      runners: [ATLAS, FORGE],
+      points: { fiveMinutes: [], hour: [] },
+      hold: {},
+    };
+    const { live, context } = await openApp("/fleet", world);
+    await settle(live);
+    const atlasDrawn = drawnMachines.get(ATLAS.id)!.length;
+    const forgeMachine = drawnMachines.get(FORGE.id)!.at(-1);
+
+    world.runners = [
+      { ...ATLAS, metrics: { diskFreeBytes: 90_000_000_000, availableMemoryBytes: 8 * GIB } },
+      FORGE,
+    ];
+    pushMetrics(live, [ATLAS]);
+    await waitFor(() => expect(drawnMachines.get(ATLAS.id)!.length).toBeGreaterThan(atlasDrawn));
+    await waitForQuiet(context);
+
+    expect(drawnMachines.get(FORGE.id)!.at(-1)).toBe(forgeMachine);
+    expect(drawnMachines.get(ATLAS.id)!.at(-1)).not.toBe(
+      drawnMachines.get(ATLAS.id)![atlasDrawn - 1],
+    );
   });
 });
