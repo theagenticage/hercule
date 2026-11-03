@@ -7,6 +7,8 @@
  * - `?view=list`: the Fleet page with its machines as rows;
  * - `?machine=atlas`: the page of the machine called that. `capture:ui`
  *   captures atlas; `?machine=mini` shows the page of the offline machine;
+ * - `?machine=atlas&activity`: the Activity page of that machine, which lists
+ *   the machine's audit log (fleet-activity-fixture.ts);
  * - `?empty`: the Fleet page of an empty fleet, where only the controller's
  *   own machine is online, with the dashed card that adds a machine.
  *
@@ -29,11 +31,16 @@ const machine =
 if (machineName !== null && machine === undefined) {
   throw new Error(`The Fleet specimen has no machine called ${machineName}.`);
 }
+if (params.has("activity") && machine === undefined) {
+  throw new Error("The Fleet specimen's activity page needs a machine: pass ?machine=<name>.");
+}
 
 rememberMachineView(params.get("view") === "list" ? "list" : "grid");
 await mountFleetSpecimen(
   records,
   FLEET_RECORDS,
-  machine === undefined ? "/fleet" : `/fleet/${machine.id}`,
+  machine === undefined
+    ? "/fleet"
+    : `/fleet/${machine.id}${params.has("activity") ? "/activity" : ""}`,
 );
 await markSheetReady();

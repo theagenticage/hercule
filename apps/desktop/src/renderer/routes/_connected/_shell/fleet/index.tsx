@@ -96,10 +96,12 @@ function FleetPage(): JSX.Element {
   return (
     <div className="fleet-page">
       <FleetHeader
-        place={{ page: "fleet" }}
-        sections={[{ id: "machines", label: "Machines", count: page.machinesSection }]}
-        activeSectionId={activeSectionId}
-        onJump={scrollToSection}
+        place={{
+          page: "fleet",
+          sections: [{ id: "machines", label: "Machines", count: page.machinesSection }],
+          activeSectionId,
+          onJump: scrollToSection,
+        }}
         onAddMachine={() => setIsAdding(true)}
       />
       <FleetScroll scrollRef={scrollRef}>

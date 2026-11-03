@@ -247,7 +247,12 @@ describe("the Capacity section", () => {
     await openMachine();
 
     const links = within(screen.getByRole("navigation", { name: "Fleet" })).getAllByRole("button");
-    expect(links.map((link) => link.textContent)).toEqual(["Capacity", "Software", "Settings"]);
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Capacity",
+      "Software",
+      "Recent",
+      "Settings",
+    ]);
     expect(links[0]!.getAttribute("aria-current")).toBe("location");
 
     await userEvent.click(links[0]!);

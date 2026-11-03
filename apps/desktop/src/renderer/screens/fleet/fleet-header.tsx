@@ -13,11 +13,6 @@ export interface FleetHeaderMachine {
   readonly kind: MachineKind;
 }
 
-/** Where the user is in Fleet, as the header draws it. */
-export type FleetHeaderPlace =
-  | { readonly page: "fleet" }
-  | { readonly page: "machine"; readonly machine: FleetHeaderMachine };
-
 /**
  * A jump link to one section of the open page. `count` is the small text
  * after the label, drawn in the "you" colour when `isYou`, because the user
@@ -29,47 +24,62 @@ export interface FleetSection {
   readonly count?: { readonly text: string; readonly isYou: boolean };
 }
 
+/** The jump links of a page that has sections, which one is lit, and what pressing one does. */
+export interface FleetSectionJumps {
+  readonly sections: ReadonlyArray<FleetSection>;
+  /** The id of the section in view, whose link is lit, or `null` when none is. */
+  readonly activeSectionId: string | null;
+  /** Called with the id of the section whose link was pressed. */
+  readonly onJump: (sectionId: string) => void;
+}
+
+/** Where the user is in Fleet, as the header draws it. The pages that have sections carry their jump links. */
+export type FleetHeaderPlace =
+  | ({ readonly page: "fleet" } & FleetSectionJumps)
+  | ({ readonly page: "machine"; readonly machine: FleetHeaderMachine } & FleetSectionJumps)
+  | {
+      readonly page: "activity";
+      readonly runnerId: string;
+      readonly machine: FleetHeaderMachine;
+    };
+
 /**
  * Renders the floating header of every Fleet route (spec 17 §Fleet, "The
  * routes and the way in").
  *
  * - On the Fleet page, it holds the title "Fleet", then a jump link for each
- *   of `sections`.
+ *   of the page's `sections`.
  * - On a machine's page, the title is the crumb "Fleet /", a link back, then
  *   the machine's icon and name, then the jump links.
+ * - On a machine's activity, the title is the crumbs "Fleet / atlas /", each a
+ *   link back to its page, then "Activity". It has no jump links.
  * - "Add a machine" is at the far end on all of them. Pressing it calls
  *   `onAddMachine`.
  *
- * The jump link of `activeSectionId` is lit. Pressing a jump link calls
+ * The jump link of the section in view is lit. Pressing a jump link calls
  * `onJump` with the section's id.
  */
 export function FleetHeader({
   place,
-  sections,
-  activeSectionId,
-  onJump,
   onAddMachine,
 }: {
   readonly place: FleetHeaderPlace;
-  readonly sections: ReadonlyArray<FleetSection>;
-  readonly activeSectionId: string | null;
-  readonly onJump: (sectionId: string) => void;
   readonly onAddMachine: () => void;
 }): JSX.Element {
   return (
     <header className="top">
       <nav className="pill fleet-header-pill" aria-label="Fleet">
         <FleetHeaderTitle place={place} />
-        {sections.length === 0 ? null : (
+        {place.page === "activity" || place.sections.length === 0 ? null : (
           <>
             {place.page === "machine" ? <i className="fleet-header-rule" /> : null}
-            {sections.map((section) => (
+            {place.sections.map((section) => (
               <button
                 key={section.id}
                 type="button"
-                className={section.id === activeSectionId ? "ptab is-on" : "ptab"}
-                aria-current={section.id === activeSectionId ? "location" : undefined}
-                onClick={() => onJump(section.id)}
+                className={section.id === place.activeSectionId ? "ptab is-on" : "ptab"}
+                aria-current={section.id === place.activeSectionId ? "location" : undefined}
+                onClick={() => place.onJump(section.id)}
               >
                 {section.label}
                 {section.count === undefined ? null : (
@@ -95,7 +105,7 @@ export function FleetHeader({
   );
 }
 
-/** Renders the pill's first part: the title on the Fleet page, the crumbs on a machine's page. */
+/** Renders the pill's first part: the title on the Fleet page, the crumbs on the pages of a machine. */
 function FleetHeaderTitle({ place }: { readonly place: FleetHeaderPlace }): JSX.Element {
   switch (place.page) {
     case "fleet":
@@ -107,6 +117,21 @@ function FleetHeaderTitle({ place }: { readonly place: FleetHeaderPlace }): JSX.
           <span className="ptab is-name" aria-current="page">
             <MachineIcon kind={place.machine.kind} size={14} />
             <span className="fleet-header-name">{place.machine.name}</span>
+          </span>
+        </>
+      );
+    case "activity":
+      return (
+        <>
+          <FleetCrumb />
+          <span className="pill-crumb">
+            <Link to="/fleet/$runnerId" params={{ runnerId: place.runnerId }}>
+              <MachineIcon kind={place.machine.kind} size={14} />
+              <span className="fleet-header-name">{place.machine.name}</span>
+            </Link>
+          </span>
+          <span className="ptab is-name" aria-current="page">
+            Activity
           </span>
         </>
       );

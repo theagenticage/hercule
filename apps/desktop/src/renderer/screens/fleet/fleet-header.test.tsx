@@ -8,7 +8,12 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { FleetHeader, type FleetHeaderPlace, type FleetSection } from "./fleet-header";
+import {
+  FleetHeader,
+  type FleetHeaderPlace,
+  type FleetSection,
+  type FleetSectionJumps,
+} from "./fleet-header";
 
 const MACHINE = { name: "atlas", kind: "server" } as const;
 
@@ -17,28 +22,25 @@ const FLEET_SECTIONS: ReadonlyArray<FleetSection> = [
   { id: "software", label: "Software", count: { text: "up to date", isYou: false } },
 ];
 
-/** Renders the header in a router that has the routes its crumbs link to. */
-const renderHeader = async ({
-  place = { page: "fleet" },
-  sections = FLEET_SECTIONS,
-  activeSectionId = "machines",
-}: {
-  place?: FleetHeaderPlace;
-  sections?: ReadonlyArray<FleetSection>;
-  activeSectionId?: string | null;
-} = {}) => {
+/**
+ * Renders the header in a router that has the routes its crumbs link to.
+ * `buildPlace` gets the jump links the page carries and returns the place.
+ */
+const renderHeader = async (
+  buildPlace: (jumps: FleetSectionJumps) => FleetHeaderPlace = (jumps) => ({
+    page: "fleet",
+    ...jumps,
+  }),
+  {
+    sections = FLEET_SECTIONS,
+    activeSectionId = "machines",
+  }: { sections?: ReadonlyArray<FleetSection>; activeSectionId?: string | null } = {},
+) => {
   const onJump = vi.fn();
   const onAddMachine = vi.fn();
+  const place = buildPlace({ sections, activeSectionId, onJump });
   const rootRoute = createRootRoute({
-    component: () => (
-      <FleetHeader
-        place={place}
-        sections={sections}
-        activeSectionId={activeSectionId}
-        onJump={onJump}
-        onAddMachine={onAddMachine}
-      />
-    ),
+    component: () => <FleetHeader place={place} onAddMachine={onAddMachine} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
@@ -68,18 +70,16 @@ describe("FleetHeader", () => {
   });
 
   it("calls onAddMachine on every page", async () => {
-    const { onAddMachine } = await renderHeader({
-      place: { page: "machine", machine: MACHINE },
-      sections: [],
-      activeSectionId: null,
-    });
+    const { onAddMachine } = await renderHeader(
+      (jumps) => ({ page: "machine", machine: MACHINE, ...jumps }),
+      { sections: [], activeSectionId: null },
+    );
     await userEvent.click(screen.getByRole("button", { name: "Add a machine" }));
     expect(onAddMachine).toHaveBeenCalledOnce();
   });
 
   it("names a machine's page by the crumb 'Fleet', a link back, then the machine", async () => {
-    await renderHeader({
-      place: { page: "machine", machine: MACHINE },
+    await renderHeader((jumps) => ({ page: "machine", machine: MACHINE, ...jumps }), {
       sections: [{ id: "capacity", label: "Capacity" }],
       activeSectionId: null,
     });
@@ -87,5 +87,13 @@ describe("FleetHeader", () => {
     expect(screen.getByRole("link", { name: "Fleet" }).getAttribute("href")).toBe("/fleet");
     expect(screen.getByText("atlas").closest(".ptab")?.getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("button", { name: "Capacity" })).toBeTruthy();
+  });
+
+  it("names the activity page by the crumbs 'Fleet', the machine, then 'Activity', with no jump links", async () => {
+    await renderHeader(() => ({ page: "activity", runnerId: "r-1", machine: MACHINE }));
+    expect(screen.getByRole("link", { name: "Fleet" }).getAttribute("href")).toBe("/fleet");
+    expect(screen.getByRole("link", { name: "atlas" }).getAttribute("href")).toBe("/fleet/r-1");
+    expect(screen.getByText("Activity").getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("button", { name: /Machines|Software/ })).toBeNull();
   });
 });

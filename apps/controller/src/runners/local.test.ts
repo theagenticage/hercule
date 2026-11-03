@@ -441,7 +441,7 @@ describe("the first boot of an empty home", () => {
   it("does not replace a child it was asked to stop", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+    const child = buildStubChild(home, JSON.stringify({ runnerId: Bun.randomUUIDv7() }), [
       "--exit",
       "3",
     ]);
@@ -530,7 +530,7 @@ describe("supervising the child", () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
     // It announces its runner id and then exits, over and over.
-    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+    const child = buildStubChild(home, JSON.stringify({ runnerId: Bun.randomUUIDv7() }), [
       "--exit",
       "3",
     ]);
@@ -561,7 +561,7 @@ describe("supervising the child", () => {
   it("records a crash loop once per window, and calls the alert listener", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    const runnerId = crypto.randomUUID();
+    const runnerId = Bun.randomUUIDv7();
     const child = buildStubChild(home, JSON.stringify({ runnerId }), ["--exit", "3"]);
     const alerted: Array<{ runnerId: string | undefined; count: number }> = [];
 
@@ -607,13 +607,57 @@ describe("supervising the child", () => {
     });
     expect(alerted).toEqual([{ runnerId, count: CRASH_LOOP_LIMIT }]);
   }, 30_000);
+
+  it("treats an announced runner id that is not a valid id as not announced", async () => {
+    const home = createTemporaryHome();
+    const port = await findFreePort();
+    const child = buildStubChild(home, JSON.stringify({ runnerId: "not-an-id" }), ["--exit", "3"]);
+    const alerted: Array<{ runnerId: string | undefined; count: number }> = [];
+
+    const result = await Effect.runPromise(
+      bootWith(
+        {
+          argv: ["--home", home, "-c", "bind.host=127.0.0.1", "-c", `bind.port=${String(port)}`],
+          env: {},
+          masterKeyBackend: "file",
+          localRunner: { ...FAST, command: child.command },
+        },
+        () =>
+          Effect.gen(function* () {
+            // Past the crash loop, and then one more start: the supervisor
+            // survived writing the entry.
+            yield* Effect.promise(() =>
+              waitForNotes(
+                child.notes,
+                (notes) => notes.filter((n) => n.what === "spawned").length >= 5,
+              ),
+            );
+            const sql = yield* SqlClient.SqlClient;
+            return yield* sql<{
+              readonly runner_id: string | null;
+            }>`SELECT runner_id FROM events WHERE kind = 'runner.crashLooping' ORDER BY id`;
+          }),
+      ).pipe(
+        Effect.orDie,
+        Effect.provideService(RunnerAlerts, {
+          crashLooping: (id: string | undefined, count: number) =>
+            Effect.sync(() => {
+              alerted.push({ runnerId: id, count });
+            }),
+        }),
+      ),
+    );
+
+    expect(result).toEqual([{ runner_id: null }]);
+    expect(alerted).toEqual([{ runnerId: undefined, count: CRASH_LOOP_LIMIT }]);
+  }, 30_000);
 });
 
 describe("stopping", () => {
   it("asks the child to stop, and does not start another in its place", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }));
+    const child = buildStubChild(home, JSON.stringify({ runnerId: Bun.randomUUIDv7() }));
 
     await bootAndHold(home, port, { ...FAST, command: child.command }, () =>
       Effect.promise(() =>
@@ -634,7 +678,7 @@ describe("stopping", () => {
   it("kills a child that is still running when the drain's deadline passes", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+    const child = buildStubChild(home, JSON.stringify({ runnerId: Bun.randomUUIDv7() }), [
       "--deaf",
       "1",
     ]);

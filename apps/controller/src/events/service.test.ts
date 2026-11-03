@@ -87,6 +87,8 @@ interface NewEvent {
   readonly kind?: string;
   readonly title?: string;
   readonly author?: string;
+  /** The runner the event is about, as `idOf` spells it. */
+  readonly runner?: number;
 }
 
 /** Writes one event and returns its position in the log. */
@@ -97,11 +99,12 @@ const insertEvent = (event: NewEvent = {}) =>
       counter += 1;
       const rows = yield* sql<{ readonly id: number }>`
       INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at,
-                          dedup_key, payload, title, author)
+                          dedup_key, payload, title, author, runner_id)
       VALUES (${event.source ?? "acme"},
               ${event.connection === undefined ? null : bytesOf(event.connection)},
               'acme', ${event.kind ?? "acme.thing.opened"}, ${AT}, ${AT},
-              ${`key-${String(counter)}`}, '{}', ${event.title ?? null}, ${event.author ?? null})
+              ${`key-${String(counter)}`}, '{}', ${event.title ?? null}, ${event.author ?? null},
+              ${event.runner === undefined ? null : bytesOf(event.runner)})
       RETURNING id`;
       return rows[0]!.id;
     }),
@@ -756,6 +759,42 @@ describe("event.query filters", () => {
     expect(found).toEqual([expected]);
   });
 
+  it("returns only the entries about one runner, newest first, and pages through them", async () => {
+    const [firstPage, secondPage, expected] = await run(
+      Effect.gen(function* () {
+        const events = yield* EventService;
+        const a = yield* insertEvent({ runner: 1 });
+        yield* insertEvent({ runner: 2 });
+        const b = yield* insertEvent({ runner: 1 });
+        yield* insertEvent();
+        const c = yield* insertEvent({ runner: 1 });
+        const first = yield* events.query({ runnerId: idOf(1), limit: 2 });
+        const second = yield* events.query({
+          runnerId: idOf(1),
+          limit: 2,
+          cursor: first.nextCursor!,
+        });
+        return [
+          first.items.map((item) => item.id),
+          second.items.map((item) => item.id),
+          [c, b, a],
+        ] as const;
+      }),
+    );
+    expect(firstPage).toEqual([expected[0], expected[1]]);
+    expect(secondPage).toEqual([expected[2]]);
+  });
+
+  it("returns an empty page for a runner no entry is about", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        yield* insertEvent({ runner: 1 });
+        return yield* queryIds({ runnerId: idOf(9) });
+      }),
+    );
+    expect(found).toEqual([]);
+  });
+
   it("combines the filters with and, not or", async () => {
     const [found, expected] = await run(
       Effect.gen(function* () {
@@ -1050,6 +1089,12 @@ describe("event.query plans", () => {
   it("reads the source filter through the events_source index", async () => {
     const plan = await explainPageQuery({ source: "acme" });
     expect(plan).toMatch(/SEARCH events USING (COVERING )?INDEX events_source \(/);
+  });
+
+  it("reads the runner filter through the events_runner_id index, without a scan", async () => {
+    const plan = await explainPageQuery({ runnerId: idOf(1) });
+    expect(plan).toMatch(/SEARCH events USING (COVERING )?INDEX events_runner_id \(/);
+    expect(listScans(plan)).toEqual([]);
   });
 
   it("reads the no-action filter by walking the log newest first", async () => {

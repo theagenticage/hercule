@@ -88,7 +88,7 @@ export function ActorMark({
  * Renders the name of the agent of session `sessionId`, "Another agent" when
  * its session cannot be read, and nothing while it is read.
  */
-function SessionName({ sessionId }: { readonly sessionId: string }): string {
+export function SessionName({ sessionId }: { readonly sessionId: string }): string {
   const sender = useSenderReading(sessionId);
   return sender === "loading" ? "" : sender.name;
 }

@@ -91,6 +91,16 @@
  * whose session lease is still active. After the upgrade both workspaces read
  * with the same holders and kept-until time, so the rebuild lost no lease.
  *
+ * Migration 106 gives audit entries a `runner_id`, filled from the payload's
+ * runner, or through its workspace's or session's runner. The edge binary
+ * writes five of the 19 kinds the migration fills itself: the real runner's
+ * joining and connectivity, and the update, drain and undrain the fixture asks
+ * of its CLI. The other 14 need a registered machine, a workspace or a signed-in
+ * harness, so the fixture inserts those rows into the edge database, in the
+ * payload shapes the controller writes: with a `runnerId`, with only a
+ * `workspaceId`, or with only a `sessionId`. After the upgrade, `event.query`
+ * with `runnerId` returns each entry under its own runner and under no other.
+ *
  * It is not a matrix of session states or harness behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -270,6 +280,22 @@ const SEEDED_ACTIVE_LEASE_HOLDER_ID = "0199e0e7-0000-7000-8000-0000000009c2";
 
 /** When the seeded released lease keeps its workspace until: far enough that the sweep never collects it. */
 const SEEDED_LEASE_KEPT_UNTIL = "2099-01-01T00:00:00.000Z";
+
+/** The migration that adds `events.runner_id` and fills it for the audit entries already in the log. */
+const EVENTS_RUNNER_ID_MIGRATION = 106;
+
+/** The kinds of audit entry the edge binary writes itself about the real runner. */
+const EDGE_RUNNER_AUDIT_KINDS = [
+  "runner.joined",
+  "runner.stateChanged",
+  "runner.updated",
+  "runner.drained",
+  "runner.undrained",
+] as const;
+
+/** The workspaces the fixture writes for audit entries to name: one on the seeded runner, one on the real runner. */
+const SEEDED_AUDIT_WORKSPACE_ID = "0199e0e7-0000-7000-8000-0000000009d1";
+const REAL_AUDIT_WORKSPACE_ID = "0199e0e7-0000-7000-8000-0000000009d2";
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -1190,6 +1216,222 @@ function persistWorkspaceLeases(home: string): boolean {
   }
 }
 
+/** An audit entry of the edge binary's log, and the runner the upgraded binary must read it back with. */
+interface ExpectedRunnerEntry {
+  readonly id: number;
+  readonly kind: string;
+  readonly runnerId: string;
+}
+
+/**
+ * What `persistRunnerAuditEntries` leaves in the edge database for the upgrade
+ * to fill: the entries that belong to a runner, and the ids of the entries that
+ * must stay out of every runner's activity.
+ */
+interface RunnerAuditFixture {
+  readonly expected: ReadonlyArray<ExpectedRunnerEntry>;
+  readonly leftOut: ReadonlyArray<number>;
+}
+
+/**
+ * Collects the audit entries of `EDGE_RUNNER_AUDIT_KINDS` the edge binary wrote
+ * about the real or the seeded runner, and inserts the other 14 kinds the
+ * migration fills as legacy rows. Returns the entries to read back. When the
+ * edge database already ran migration 106, it has filled `runner_id` itself and
+ * writes it on new entries, so only the edge entries are returned.
+ *
+ * The edge entries are only collected, so their payloads must name a runner the
+ * fixture knows. The inserted rows go straight into the database because they
+ * need a machine that connects, a workspace or a signed-in harness. Each has
+ * the payload shape the controller writes: a `runnerId` (and the workspace or
+ * session beside it, as the real entries carry), only a `workspaceId`, or only
+ * a `sessionId`. Three rows test the rules: a payload runner that differs from
+ * the runner of its workspace, an entry of the left-out kind
+ * `workspace.observed`, and an entry whose session no longer exists.
+ */
+function persistRunnerAuditEntries(options: {
+  readonly home: string;
+  readonly realRunnerId: string;
+  readonly seededSessionId: string;
+  readonly realSessionId: string;
+  readonly providerAccountId: string;
+}): RunnerAuditFixture {
+  const { realRunnerId: real, seededSessionId, realSessionId } = options;
+  const seeded = SEEDED_RUNNER_ID;
+  const database = new Database(join(options.home, "data", "hercule.db"));
+  try {
+    const edgeEntries = database
+      .query(
+        `SELECT id, kind, payload FROM events WHERE kind IN (${EDGE_RUNNER_AUDIT_KINDS.map(() => "?").join(", ")})`,
+      )
+      .all(...EDGE_RUNNER_AUDIT_KINDS) as ReadonlyArray<{
+      id: number;
+      kind: string;
+      payload: string;
+    }>;
+    for (const kind of EDGE_RUNNER_AUDIT_KINDS) {
+      expect(
+        edgeEntries.some((entry) => entry.kind === kind),
+        `the edge binary wrote no ${kind} entry`,
+      ).toBe(true);
+    }
+    const expected: ExpectedRunnerEntry[] = edgeEntries.map((entry) => {
+      const { runnerId } = JSON.parse(entry.payload) as { runnerId?: string };
+      expect(runnerId, `the payload of the edge ${entry.kind} entry`).toBeOneOf([real, seeded]);
+      return { id: entry.id, kind: entry.kind, runnerId: runnerId! };
+    });
+    const version = database
+      .query("SELECT max(migration_id) AS version FROM effect_sql_migrations")
+      .get() as { version: number };
+    if (version.version >= EVENTS_RUNNER_ID_MIGRATION) return { expected, leftOut: [] };
+    // The fixture's session, spawned by an entry that names only the session.
+    const spawned = database
+      .query(
+        "SELECT id FROM events WHERE kind = 'session.spawned' AND json_extract(payload, '$.sessionId') = ?",
+      )
+      .get(realSessionId) as { id: number } | null;
+    expect(spawned, "the representative session's spawned entry").not.toBeNull();
+    expected.push({ id: spawned!.id, kind: "session.spawned", runnerId: real });
+
+    const at = new Date().toISOString();
+    const insertWorkspace = database.query(
+      `INSERT INTO workspaces (id, runner_id, kind, status, created_at, provisioned_at, last_used_at)
+       VALUES (?, ?, 'ephemeral', 'ready', ?, ?, ?)`,
+    );
+    const insertLease = database.query(
+      `INSERT INTO workspace_leases (workspace_id, holder_kind, holder_id, acquired_at)
+       VALUES (?, 'session', ?, ?)`,
+    );
+    // An active lease keeps the upgraded controller's sweep from collecting the workspace.
+    for (const [workspaceId, runnerId] of [
+      [SEEDED_AUDIT_WORKSPACE_ID, seeded],
+      [REAL_AUDIT_WORKSPACE_ID, real],
+    ] as const) {
+      insertWorkspace.run(uuidBlob(workspaceId), uuidBlob(runnerId), at, at, at);
+      insertLease.run(uuidBlob(workspaceId), uuidBlob(Bun.randomUUIDv7()), at);
+    }
+
+    const insertEvent = database.query(
+      `INSERT INTO events (source, system, kind, occurred_at, received_at, dedup_key, payload, actor)
+       VALUES ('platform', 'platform', ?, ?, ?, ?, ?, 'system') RETURNING id`,
+    );
+    const append = (kind: string, payload: Record<string, unknown>): number =>
+      (
+        insertEvent.get(kind, at, at, crypto.randomUUID(), JSON.stringify(payload)) as {
+          id: number;
+        }
+      ).id;
+    const requestId = Bun.randomUUIDv7();
+    const ws = SEEDED_AUDIT_WORKSPACE_ID;
+    const entry = (
+      runnerId: string,
+      kind: string,
+      payload: Record<string, unknown>,
+    ): ExpectedRunnerEntry => ({ id: append(kind, payload), kind, runnerId });
+
+    expected.push(
+      // The payload names the runner.
+      entry(seeded, "runner.placementsChanged", { runnerId: seeded, acceptingPlacements: false }),
+      entry(seeded, "runner.crashLooping", { runnerId: seeded, count: 3 }),
+      entry(seeded, "runner.retired", { runnerId: seeded, forced: true, lostDefaultRunner: false }),
+      entry(seeded, "workspace.created", {
+        workspaceId: ws,
+        runnerId: seeded,
+        kind: "ephemeral",
+        resourceIds: [],
+      }),
+      entry(seeded, "workspace.disposalRequested", {
+        workspaceId: ws,
+        runnerId: seeded,
+        requestId,
+        operation: "workspaceDispose",
+        discardChanges: false,
+      }),
+      entry(seeded, "workspace.disposalRefused", {
+        workspaceId: ws,
+        runnerId: seeded,
+        requestId,
+        message: "The runner refused safe removal. The workspace is retained.",
+      }),
+      entry(seeded, "workspace.detached", { workspaceId: ws, runnerId: seeded, requestId }),
+      entry(seeded, "workspace.attachmentRetried", { workspaceId: ws, runnerId: seeded }),
+      entry(seeded, "session.spawned", {
+        providerAccountId: options.providerAccountId,
+        harnessId: "claude-code/claude-code",
+        runnerId: seeded,
+        accessMode: "auto",
+      }),
+      entry(seeded, "session.reconciled", {
+        sessionId: seededSessionId,
+        runnerId: seeded,
+        reason: "runner_lost",
+      }),
+      entry(seeded, "providerAccount.signedIn", {
+        providerAccountId: options.providerAccountId,
+        runnerId: seeded,
+        harnessId: "claude-code/claude-code",
+      }),
+      // Only the workspace is named, and the workspace is on the real runner.
+      entry(real, "workspace.attachmentRetried", { workspaceId: REAL_AUDIT_WORKSPACE_ID }),
+      // The workspace is named beside a session: the workspace's runner counts.
+      entry(seeded, "session.stopped", {
+        sessionId: seededSessionId,
+        workspaceId: ws,
+        reason: "workspace_failed",
+      }),
+      // Only the session is named.
+      entry(seeded, "session.archived", {
+        sessionId: seededSessionId,
+        threadId: Bun.randomUUIDv7(),
+      }),
+      entry(real, "session.stopped", { sessionId: realSessionId, reason: "crash" }),
+      // The payload's runner wins over the runner of the workspace it names.
+      entry(seeded, "workspace.deleted", {
+        workspaceId: REAL_AUDIT_WORKSPACE_ID,
+        runnerId: seeded,
+        requestId,
+      }),
+    );
+    const leftOut = [
+      // Left out of the kinds that show a machine's activity, whatever its payload names.
+      append("workspace.observed", { workspaceId: ws, runnerId: seeded }),
+      // The session was deleted, so nothing says where it ran.
+      append("session.archived", { sessionId: Bun.randomUUIDv7(), threadId: Bun.randomUUIDv7() }),
+    ];
+    return { expected, leftOut };
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Returns the ids of every event about `runnerId` that `event.query` lists, in
+ * the order the controller returns them, reading all pages.
+ */
+async function readRunnerActivity(options: {
+  readonly url: string;
+  readonly apiKey: string;
+  readonly runnerId: string;
+}): Promise<ReadonlyArray<{ readonly id: number; readonly kind: string }>> {
+  const events: Array<{ id: number; kind: string }> = [];
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ runnerId: options.runnerId, limit: "100" });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    const response = await fetch(`${options.url}/api/v1/events?${query.toString()}`, {
+      headers: { authorization: `Bearer ${options.apiKey}` },
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+    const page = (await response.json()) as {
+      items: ReadonlyArray<{ id: number; kind: string }>;
+      nextCursor?: string;
+    };
+    events.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  return events;
+}
+
 /**
  * Stores `RETIRED_SETTINGS` for the one user in the database the edge binary
  * created, when that database predates the migration that deletes them.
@@ -1574,6 +1816,17 @@ describe("upgrading from the previous edge release", () => {
       readApiKey(home);
 
       const runnerId = await waitForEnrolledRunner(edge);
+      // Each of these writes an audit entry about the real runner, which the
+      // upgrade must read back with it. The drain is undone, so the runner
+      // takes work again.
+      for (const args of [
+        ["runner", "update", runnerId, "--label", "upgrade-fixture", "--json"],
+        ["runner", "drain", runnerId, "--json"],
+        ["runner", "undrain", runnerId, "--json"],
+      ]) {
+        const ran = await runCli(args, edge);
+        expect(ran.code, `${args.join(" ")}\n${ran.stdout}\n${ran.stderr}`).toBe(0);
+      }
 
       // The edge boot seeds no account, so the fixture creates one per vendor,
       // oldest first. A subscription that signs in on each machine takes no
@@ -1942,6 +2195,24 @@ describe("upgrading from the previous edge release", () => {
       // replaces the snapshots of the real runner and could set the identity.
       // The runner that never connects keeps its snapshots, and the labelled
       // account keeps the person the fixture signed in on it.
+      // Two more threads, one on each runner, for audit entries that name only
+      // a session. The runner that never connects hosts the first.
+      const seededRunnerSessionId = persistThreadSession({
+        home,
+        providerAccountId: claudeAccount.id,
+        harnessId: "claude-code/claude-code",
+        runnerId: SEEDED_RUNNER_ID,
+        permissionProfileId: unrestricted.id,
+        title: "Thread on the seeded runner",
+        nativeSessionId: null,
+      });
+      const runnerAuditFixture = persistRunnerAuditEntries({
+        home,
+        realRunnerId: runnerId,
+        seededSessionId: seededRunnerSessionId,
+        realSessionId: sessionId,
+        providerAccountId: claudeAccount.id,
+      });
       persistAccountIdentity(home, claudeAccount.id, WORK_IDENTITY);
       persistSnapshots(home, [
         {
@@ -2128,6 +2399,48 @@ describe("upgrading from the previous edge release", () => {
           `Skipping the workspace leases fixture: the edge database already ran migration ${String(ARCHIVED_SESSIONS_MIGRATION)}.`,
         );
       }
+
+      // Migration 106 filled `runner_id` on the audit entries of the edge
+      // binary: each kind reads back under its own runner and under no other,
+      // and the entries that name no runner stay out of both.
+      const activityOptions = { url: controller.url, apiKey: readApiKey(home) };
+      const activityOfRunner = new Map<string, ReadonlyArray<{ id: number; kind: string }>>();
+      for (const id of [runnerId, SEEDED_RUNNER_ID]) {
+        activityOfRunner.set(id, await readRunnerActivity({ ...activityOptions, runnerId: id }));
+      }
+      for (const entry of runnerAuditFixture.expected) {
+        for (const [id, activity] of activityOfRunner) {
+          const found = activity.find((event) => event.id === entry.id);
+          if (id === entry.runnerId) {
+            expect(
+              found,
+              `${entry.kind} entry ${String(entry.id)} under runner ${id}`,
+            ).toMatchObject({
+              id: entry.id,
+              kind: entry.kind,
+            });
+          } else {
+            expect(
+              found,
+              `${entry.kind} entry ${String(entry.id)} under runner ${id}`,
+            ).toBeUndefined();
+          }
+        }
+      }
+      for (const [id, activity] of activityOfRunner) {
+        for (const leftOutId of runnerAuditFixture.leftOut) {
+          expect(
+            activity.map((event) => event.id),
+            `left-out entry ${String(leftOutId)} under runner ${id}`,
+          ).not.toContain(leftOutId);
+        }
+      }
+      // Every kind the migration fills is covered, unless the edge binary
+      // filled the column itself and only its own five entries are checked.
+      expect(
+        new Set(runnerAuditFixture.expected.map((entry) => entry.kind)).size,
+        "the kinds the fixture reads back",
+      ).toBe(runnerAuditFixture.leftOut.length === 0 ? EDGE_RUNNER_AUDIT_KINDS.length : 19);
 
       // An Agent and an assistant keep their account and the harness choice
       // they had: none, which is the account's default.

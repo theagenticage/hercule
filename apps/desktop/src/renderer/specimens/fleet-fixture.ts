@@ -25,8 +25,10 @@
  */
 import type {
   ControllerInfo,
+  EventWithFacts,
   Harness,
   ProviderAccount,
+  Run,
   Runner,
   RunnerFacts,
   Session,
@@ -46,6 +48,8 @@ import {
   type MachineMetrics,
   type MachineStory,
 } from "./fleet-metrics-fixture";
+import { buildAtlasLog, buildJoinedLog } from "./fleet-activity-fixture";
+import { RUN_RECORDS } from "./run-fixture";
 import { SPECIMEN_ACCOUNTS, SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { SidebarRecords } from "./shell-page";
 
@@ -529,6 +533,23 @@ const FLEET_METRICS: FleetMetricsRecords = {
   },
 };
 
+/**
+ * The audit log of each machine, newest first, as `event.query { runnerId }`
+ * returns it. Atlas has five days of activity; the others only joined.
+ */
+const FLEET_ACTIVITY: Readonly<Record<string, ReadonlyArray<EventWithFacts>>> = {
+  [ATLAS_ID]: buildAtlasLog({
+    providerAccountId: SPECIMEN_ACCOUNTS[0]!.id,
+    runId: RUN_RECORDS.waiting.run.id,
+    // The sidebar's seven threads, the sessions the page can name without a read of its own.
+    sessionIds: ATLAS_THREADS.map((thread) => thread.id),
+  }),
+  [BEELINK_ID]: buildJoinedLog("2026-09-25T13:58:00.000Z"),
+  [BOSGAME_ID]: buildJoinedLog("2026-09-26T08:12:00.000Z"),
+  [MINI_ID]: buildJoinedLog("2026-09-26T08:20:00.000Z"),
+  [STUDIO_ID]: buildJoinedLog("2026-09-27T10:05:00.000Z"),
+};
+
 /** What the Fleet page and a machine's page read besides the shell's lists. */
 export interface FleetRecords {
   /** The harnesses with what each machine reports of them. */
@@ -538,6 +559,10 @@ export interface FleetRecords {
   readonly controller: ControllerInfo;
   /** The Runner Metrics history the graphs and the forecasts are drawn from. */
   readonly metrics: FleetMetricsRecords;
+  /** Each machine's audit log, newest first, by runner id. */
+  readonly activity: Readonly<Record<string, ReadonlyArray<EventWithFacts>>>;
+  /** The runs that spawned sessions on a machine, which name the workflow in an entry's sentence. */
+  readonly runs: ReadonlyArray<Run>;
 }
 
 export const FLEET_RECORDS: FleetRecords = {
@@ -545,6 +570,8 @@ export const FLEET_RECORDS: FleetRecords = {
   sessions: FLEET_SESSIONS,
   controller: FLEET_CONTROLLER,
   metrics: FLEET_METRICS,
+  activity: FLEET_ACTIVITY,
+  runs: [RUN_RECORDS.waiting.run],
 };
 
 /** The sidebar's lists with the five machines and their accounts, for a specimen that opens Fleet. */

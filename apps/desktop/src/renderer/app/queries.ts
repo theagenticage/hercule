@@ -1748,6 +1748,66 @@ export const eventQuery = (client: HerculeClient, id: number) =>
     staleTime: Infinity,
   });
 
+/** How many audit entries the Activity page reads in one page. */
+const MACHINE_ACTIVITY_PAGE_SIZE = 100;
+
+/**
+ * How many audit entries the machine page's Recent section reads. It shows
+ * five entries, and folding turns up to a dozen log entries into one, so a
+ * page of 50 fills five entries in practice. The oldest entry shown may be
+ * the part of a fold that the page cut off, which is accepted.
+ */
+const MACHINE_RECENT_PAGE_SIZE = 50;
+
+/**
+ * Reads the first page of the audit entries about the machine `runnerId`,
+ * newest first, for the machine page's Recent section. The Activity page
+ * reads the same log with `machineActivityQuery`, as a read of its own.
+ *
+ * The key sits under the runner's own (`["runner", runnerId, ...]`), so a push
+ * on the `runner` topic that names the machine, or names no runner, reads it
+ * again: stopping new work, going offline and coming back all show at once.
+ * No other topic does. Sessions and workspaces push about once a second while
+ * agents work, so their entries show the next time the page opens, which
+ * reads the log again (see `readOnOpen`).
+ */
+export const machineRecentActivityQuery = (client: HerculeClient, runnerId: string) =>
+  queryOptions({
+    queryKey: [...queryKeys.runner(runnerId), "recent-activity"] as QueryKey,
+    queryFn: () => client.event.query({ query: { runnerId, limit: MACHINE_RECENT_PAGE_SIZE } }),
+    retry: isWorthRetrying,
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Reads the audit entries about the machine `runnerId`, newest first, a page
+ * at a time, for its Activity page. The page reads the next one as the user
+ * nears the end of what is loaded.
+ *
+ * The page reads the log when it opens and no other time: no push reads it
+ * again. The key is kept out of the runner's own (`["runner", runnerId, ...]`)
+ * on purpose, because a push on the `runner` topic would read every page
+ * loaded so far again, and a machine that connects and goes away pushes often.
+ * New entries show the next time the page opens: `readInfiniteOnOpen` starts
+ * again from the first page.
+ */
+export const machineActivityQuery = (client: HerculeClient, runnerId: string) =>
+  infiniteQueryOptions({
+    queryKey: ["machine-activity", runnerId] as QueryKey,
+    queryFn: ({ pageParam }) =>
+      client.event.query({
+        query: {
+          runnerId,
+          limit: MACHINE_ACTIVITY_PAGE_SIZE,
+          ...(pageParam === undefined ? {} : { cursor: pageParam }),
+        },
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    retry: isWorthRetrying,
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
 /**
  * Reads the Discussions, newest Post first, a page at a time, for the
  * Discussions list. The list reads the next page only when the user scrolls

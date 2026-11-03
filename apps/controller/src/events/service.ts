@@ -107,6 +107,7 @@ const QueryInput = Schema.Struct({
   handling: Schema.optionalKey(atMost(EventHandling, EVENT_HANDLINGS.length)),
   workflowId: Schema.optionalKey(Id),
   triggerId: Schema.optionalKey(Schema.String),
+  runnerId: Schema.optionalKey(Id),
   ...buildPageInputFields(EVENT_SORT_FIELDS),
 });
 
@@ -237,6 +238,9 @@ const make = Effect.gen(function* () {
         if (decoded.since !== undefined) where.push(sql`received_at >= ${decoded.since}`);
         if (decoded.until !== undefined) where.push(sql`received_at <= ${decoded.until}`);
         if (decoded.source !== undefined) where.push(sql`events.source = ${decoded.source}`);
+        if (decoded.runnerId !== undefined) {
+          where.push(sql`events.runner_id = ${uuidFromString(decoded.runnerId)}`);
+        }
         if (decoded.text !== undefined) {
           // Text with no word to search for matches nothing. A page ordered
           // by id and a search ordered by relevance cannot share a cursor, so

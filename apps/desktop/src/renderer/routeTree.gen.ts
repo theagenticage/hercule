@@ -37,6 +37,7 @@ import { Route as ConnectedShellSettingsSystemRouteImport } from './routes/_conn
 import { Route as ConnectedShellThreadsSessionIdRouteRouteImport } from './routes/_connected/_shell/threads/$sessionId/route'
 import { Route as ConnectedShellWikiPageIdRouteImport } from './routes/_connected/_shell/wiki/$pageId'
 import { Route as ConnectedShellWorkflowsWorkflowIdRouteImport } from './routes/_connected/_shell/workflows/$workflowId'
+import { Route as ConnectedShellFleetRunnerIdActivityRouteImport } from './routes/_connected/_shell/fleet/$runnerId_.activity'
 import { Route as ConnectedShellSettingsAssistantsIndexRouteImport } from './routes/_connected/_shell/settings/assistants/index'
 import { Route as ConnectedShellSettingsPermissionProfilesIndexRouteImport } from './routes/_connected/_shell/settings/permission-profiles/index'
 import { Route as ConnectedShellSettingsPermissionProfilesIdRouteImport } from './routes/_connected/_shell/settings/permission-profiles/$id'
@@ -202,6 +203,12 @@ const ConnectedShellWorkflowsWorkflowIdRoute =
     path: '/$workflowId',
     getParentRoute: () => ConnectedShellWorkflowsRouteRoute,
   } as any)
+const ConnectedShellFleetRunnerIdActivityRoute =
+  ConnectedShellFleetRunnerIdActivityRouteImport.update({
+    id: '/fleet/$runnerId_/activity',
+    path: '/fleet/$runnerId/activity',
+    getParentRoute: () => ConnectedShellRoute,
+  } as any)
 const ConnectedShellSettingsAssistantsIndexRoute =
   ConnectedShellSettingsAssistantsIndexRouteImport.update({
     id: '/assistants/',
@@ -278,6 +285,7 @@ export interface FileRoutesByFullPath {
   '/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/fleet/': typeof ConnectedShellFleetIndexRoute
   '/settings/': typeof ConnectedShellSettingsIndexRoute
+  '/fleet/$runnerId/activity': typeof ConnectedShellFleetRunnerIdActivityRoute
   '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
   '/settings/skills/$name': typeof ConnectedShellSettingsSkillsNameRoute
   '/settings/assistants/': typeof ConnectedShellSettingsAssistantsIndexRoute
@@ -311,6 +319,7 @@ export interface FileRoutesByTo {
   '/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/fleet': typeof ConnectedShellFleetIndexRoute
   '/settings': typeof ConnectedShellSettingsIndexRoute
+  '/fleet/$runnerId/activity': typeof ConnectedShellFleetRunnerIdActivityRoute
   '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
   '/settings/skills/$name': typeof ConnectedShellSettingsSkillsNameRoute
   '/settings/assistants': typeof ConnectedShellSettingsAssistantsIndexRoute
@@ -350,6 +359,7 @@ export interface FileRoutesById {
   '/_connected/_shell/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/_connected/_shell/fleet/': typeof ConnectedShellFleetIndexRoute
   '/_connected/_shell/settings/': typeof ConnectedShellSettingsIndexRoute
+  '/_connected/_shell/fleet/$runnerId_/activity': typeof ConnectedShellFleetRunnerIdActivityRoute
   '/_connected/_shell/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
   '/_connected/_shell/settings/skills/$name': typeof ConnectedShellSettingsSkillsNameRoute
   '/_connected/_shell/settings/assistants/': typeof ConnectedShellSettingsAssistantsIndexRoute
@@ -388,6 +398,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/fleet/'
     | '/settings/'
+    | '/fleet/$runnerId/activity'
     | '/settings/permission-profiles/$id'
     | '/settings/skills/$name'
     | '/settings/assistants/'
@@ -421,6 +432,7 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/fleet'
     | '/settings'
+    | '/fleet/$runnerId/activity'
     | '/settings/permission-profiles/$id'
     | '/settings/skills/$name'
     | '/settings/assistants'
@@ -459,6 +471,7 @@ export interface FileRouteTypes {
     | '/_connected/_shell/workflows/$workflowId'
     | '/_connected/_shell/fleet/'
     | '/_connected/_shell/settings/'
+    | '/_connected/_shell/fleet/$runnerId_/activity'
     | '/_connected/_shell/settings/permission-profiles/$id'
     | '/_connected/_shell/settings/skills/$name'
     | '/_connected/_shell/settings/assistants/'
@@ -673,6 +686,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellWorkflowsWorkflowIdRouteImport
       parentRoute: typeof ConnectedShellWorkflowsRouteRoute
     }
+    '/_connected/_shell/fleet/$runnerId_/activity': {
+      id: '/_connected/_shell/fleet/$runnerId_/activity'
+      path: '/fleet/$runnerId/activity'
+      fullPath: '/fleet/$runnerId/activity'
+      preLoaderRoute: typeof ConnectedShellFleetRunnerIdActivityRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
     '/_connected/_shell/settings/assistants/': {
       id: '/_connected/_shell/settings/assistants/'
       path: '/assistants'
@@ -868,6 +888,7 @@ interface ConnectedShellRouteChildren {
   ConnectedShellFleetRunnerIdRoute: typeof ConnectedShellFleetRunnerIdRoute
   ConnectedShellRunsRunIdRoute: typeof ConnectedShellRunsRunIdRoute
   ConnectedShellFleetIndexRoute: typeof ConnectedShellFleetIndexRoute
+  ConnectedShellFleetRunnerIdActivityRoute: typeof ConnectedShellFleetRunnerIdActivityRoute
 }
 
 const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
@@ -888,6 +909,8 @@ const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
   ConnectedShellFleetRunnerIdRoute: ConnectedShellFleetRunnerIdRoute,
   ConnectedShellRunsRunIdRoute: ConnectedShellRunsRunIdRoute,
   ConnectedShellFleetIndexRoute: ConnectedShellFleetIndexRoute,
+  ConnectedShellFleetRunnerIdActivityRoute:
+    ConnectedShellFleetRunnerIdActivityRoute,
 }
 
 const ConnectedShellRouteWithChildren = ConnectedShellRoute._addFileChildren(

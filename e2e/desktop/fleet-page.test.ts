@@ -11,12 +11,16 @@
  * - a machine whose session cap holds a thread back says so on its card, and
  *   Allow raises the cap so the waiting thread starts;
  * - a machine's page draws the CPU, Memory and Disk graphs from the metrics
- *   its runner reports, and draws a report that arrives while it is open.
+ *   its runner reports, and draws a report that arrives while it is open;
+ * - a machine's activity lists the session the user spawned and the workspace
+ *   the user removed, in Recent on its page and on the Activity page, and the
+ *   crumb of the Activity page leads back to the machine.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
+import { findCompiledBinary, PASSWORD, runCli, USERNAME } from "../../scripts/controller-process";
 import { arrangeFleet, chooseMenuItem, openSignedIn, startControllerForTest } from "./harness";
 
 /** Returns the label of the sidebar's list, "Threads" or "Hercule": the face it shows. */
@@ -266,5 +270,71 @@ describe("the Fleet page", () => {
     await expect
       .poll(() => readLastPointY(page, "Memory"))
       .toBeLessThanOrEqual(placeOnGraph(0.5, height) + Y_MARGIN);
+  });
+
+  it("lists a session spawn and a workspace removal in a machine's activity", async () => {
+    const { url, home, fleet, client, waitForStatus } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    const [thread] = await fleet.spawnThreads(1, {
+      runner,
+      workspace: { kind: "ephemeral", checkouts: [] },
+    });
+    await waitForStatus(thread!.id, "busy");
+    const workspaceId = (await client.session.read({ params: { id: thread!.id } })).workspaceId!;
+    // A workspace is removed only once its session has ended.
+    await client.session.stop({ params: { id: thread!.id } });
+    await waitForStatus(thread!.id, "exited");
+    await client.workspace.dispose({ params: { id: workspaceId }, payload: {} });
+    await expect
+      .poll(async () => (await client.workspace.read({ params: { id: workspaceId } })).status)
+      .toBe("deleted");
+
+    // The CLI lists the same audit log entries of the machine, by the tail of its id.
+    const login = await runCli(
+      ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-fleet"],
+      { home, binary: findCompiledBinary(), stdin: PASSWORD },
+    );
+    expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
+    const listed = await runCli(
+      ["event", "list", "--runner", runner.runnerId.slice(-12), "--limit", "100", "--json"],
+      { home, binary: findCompiledBinary() },
+    );
+    expect(listed.code, `${listed.stdout}\n${listed.stderr}`).toBe(0);
+    const kinds = (
+      JSON.parse(listed.stdout) as { items: ReadonlyArray<{ kind: string }> }
+    ).items.map((row) => row.kind);
+    expect(kinds).toEqual(expect.arrayContaining(["session.spawned", "workspace.deleted"]));
+
+    const { page } = await openSignedIn(url);
+    await openFleet(page);
+    await locateCard(page, "studio").getByRole("button", { name: "studio", exact: true }).click();
+
+    // Recent lists the newest entries of the machine's audit log, each with who did it.
+    const recent = page.getByRole("region", { name: "Recent" });
+    await recent.getByText("Session spawned", { exact: true }).waitFor();
+    await recent.getByText("Removed a workspace", { exact: true }).waitFor();
+    await recent.getByText("by you").first().waitFor();
+
+    await recent.getByRole("link", { name: "All activity" }).click();
+    await page.getByRole("heading", { level: 2, name: "Activity" }).waitFor();
+    await page.getByRole("heading", { level: 3, name: "Today" }).waitFor();
+    await page.getByText("Session spawned", { exact: true }).waitFor();
+    await page.getByText("Removed a workspace", { exact: true }).waitFor();
+
+    // The Workspaces filter keeps the removal and drops the spawn.
+    await page
+      .getByRole("group", { name: "Show" })
+      .getByRole("button", { name: "Workspaces" })
+      .click();
+    await page.getByText("Removed a workspace", { exact: true }).waitFor();
+    await page.getByText("Session spawned", { exact: true }).waitFor({ state: "detached" });
+
+    // The crumb "Fleet / studio / Activity" leads back to the machine's page.
+    await page
+      .getByRole("navigation", { name: "Fleet", exact: true })
+      .getByRole("link", { name: "studio" })
+      .click();
+    await page.getByRole("region", { name: "Recent" }).waitFor();
+    await page.getByRole("heading", { level: 2, name: "Activity" }).waitFor({ state: "detached" });
   });
 });

@@ -22,12 +22,38 @@ export interface VirtualLines<Item> {
   readonly lines: ReadonlyArray<VirtualLine<Item>>;
   /** The height of all the lines, drawn or not, in pixels. The lines' container is at least this tall. */
   readonly totalSize: number;
-  /** The index in `items` of the last item drawn, or `undefined` when none is. */
+  /**
+   * The index in `items` of the last item drawn in or near the view, or
+   * `undefined` when none is. An item drawn only because it is selected or
+   * holds the focus does not count: it says nothing about how far the scroll
+   * has reached.
+   */
   readonly lastDrawnIndex: number | undefined;
   /** The index in `items` of the selected item, or -1 when `selectedKey` names none. */
   readonly selectedIndex: number;
   /** Scrolls the selected item into view, if it is not in view. Does nothing when none is selected. */
   readonly scrollToSelected: () => void;
+}
+
+/** What `useVirtualLines` draws and how. */
+export interface VirtualLinesOptions<Item> {
+  /** The items to draw, in order. */
+  readonly items: ReadonlyArray<Item>;
+  /** The scroll area the lines scroll inside. */
+  readonly scrollRef: RefObject<HTMLElement | null>;
+  /** Gives the height of an item in pixels. See `useVirtualLines`. */
+  readonly estimateSize: (item: Item) => number;
+  /** The key of the selected item, which is always drawn. Defaults to none. */
+  readonly selectedKey?: string | null;
+  /** The key of the item that holds the focus, which is always drawn. Defaults to none. */
+  readonly focusedKey?: string | null;
+  /**
+   * How far below the top of the scrolled content the first line starts, in
+   * pixels, for a list that has something else above it in the same scroll,
+   * such as a heading. Without it, the list takes its first line to be at the
+   * top.
+   */
+  readonly scrollMargin?: number;
 }
 
 /**
@@ -43,13 +69,14 @@ export interface VirtualLines<Item> {
  * removed drops the focus to the page's body. The caller scrolls the selected
  * item into view with `scrollToSelected`, when it decides to.
  */
-export const useVirtualLines = <Item extends { readonly key: string }>(
-  items: ReadonlyArray<Item>,
-  scrollRef: RefObject<HTMLElement | null>,
-  estimateSize: (item: Item) => number,
-  selectedKey: string | null,
-  focusedKey: string | null = null,
-): VirtualLines<Item> => {
+export const useVirtualLines = <Item extends { readonly key: string }>({
+  items,
+  scrollRef,
+  estimateSize,
+  selectedKey = null,
+  focusedKey = null,
+  scrollMargin = 0,
+}: VirtualLinesOptions<Item>): VirtualLines<Item> => {
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedKey),
     [items, selectedKey],
@@ -86,6 +113,7 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
     getItemKey,
     rangeExtractor,
     overscan: VIRTUAL_OVERSCAN,
+    scrollMargin,
     // Before the scroll element is measured, the list is taken to be as tall as the window. The
     // first render then draws the rows, which the motion that opens Tracking's sheet needs to find.
     initialRect: { width: 0, height: window.innerHeight },
@@ -100,14 +128,16 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
 
   const lines: VirtualLine<Item>[] = [];
   const visible = virtualizer.range;
-  let end = 0;
+  let end = scrollMargin;
   let lastDrawnIndex: number | undefined;
   for (const { index, key, start, size } of virtualizer.getVirtualItems()) {
     if (start > end) lines.push({ kind: "gap", key: `gap:${key}`, height: start - end });
     const onScreen = visible !== null && index >= visible.startIndex && index <= visible.endIndex;
     lines.push({ kind: "item", item: items[index]!, onScreen });
     end = start + size;
-    lastDrawnIndex = index;
+    // An item kept only for the selection or the focus can lie far past the view. It must not
+    // count as the end of what has scrolled by.
+    if (visible === null || index <= visible.endIndex + VIRTUAL_OVERSCAN) lastDrawnIndex = index;
   }
   return {
     lines,

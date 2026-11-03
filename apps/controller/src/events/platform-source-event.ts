@@ -26,6 +26,8 @@ export interface PlatformSourceEventToAppend {
   readonly payload: unknown;
   /** When the recorded change happened. */
   readonly at: string;
+  /** The runner the event is about. Set only on the audit entries that show a machine's activity. */
+  readonly runnerId?: string;
 }
 
 /**
@@ -58,6 +60,7 @@ export const appendPlatformSourceEvent = (
       payload: event.payload,
       raw: null,
       actor: event.actor,
+      ...(event.runnerId === undefined ? {} : { runnerId: event.runnerId }),
     }),
     // A random dedup key never collides, so the insert is never skipped,
     // and a skipped insert is a bug.

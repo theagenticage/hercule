@@ -1497,7 +1497,7 @@ const make = Effect.gen(function* () {
       yield* audit.append({
         kind: "session.stopped",
         actor: SYSTEM_ACTOR,
-        payload: { sessionId, reason: "crash", message },
+        payload: { sessionId, runnerId: ended.value.runnerId, reason: "crash", message },
         at,
       });
       yield* announce({ _tag: "transcript", sessionId });
@@ -1520,7 +1520,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = yield* nowIso;
         const ended = yield* sessions.endInWorkspace(workspaceId, at);
-        for (const { id } of ended) {
+        for (const { id, runnerId } of ended) {
           yield* sessions.append(id, {
             seq: 0,
             at,
@@ -1536,7 +1536,7 @@ const make = Effect.gen(function* () {
           yield* audit.append({
             kind: "session.stopped",
             actor: SYSTEM_ACTOR,
-            payload: { sessionId: id, workspaceId, reason: "workspace_failed" },
+            payload: { sessionId: id, runnerId, workspaceId, reason: "workspace_failed" },
             at,
           });
           // The exit is a row on this session's stream, so clients watching
@@ -2037,7 +2037,7 @@ const make = Effect.gen(function* () {
                     id: session.id,
                     conversationId: session.conversationId,
                   },
-                  payload: { sessionId: session.id, threadId },
+                  payload: { sessionId: session.id, runnerId: session.runnerId, threadId },
                   at,
                 });
               });
@@ -2328,6 +2328,7 @@ const make = Effect.gen(function* () {
           payload: {
             ...open.payload,
             sessionId: open.id,
+            runnerId: open.runnerId,
             ...(open.spec.workspaceId === null ? {} : { workspaceId: open.spec.workspaceId }),
           },
           at: open.at,

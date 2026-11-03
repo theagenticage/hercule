@@ -1542,8 +1542,14 @@ export const CLI = {
       { args: ["--intake", "true", "--text", "dependabot"] },
       { args: ["--intake", "true", "--handling", "raised-signal", "--handling", "evidence"] },
       { args: ["--workflow", "1f3a9c2e", "--trigger", "new_issue"] },
+      { args: ["--runner", "7b41d0a5"] },
     ],
     fields: {
+      runnerId: {
+        flag: "runner",
+        help: "Only the audit entries about this machine, a workspace on it, or a session on it: its joins, state changes, drains, workspaces and sessions. The machine by its id or a tail of eight or more characters.",
+        resolves: "runner.query",
+      },
       workflowId: {
         flag: "workflow",
         help: "With --trigger, lists only the events that trigger holds: matched after its spawn bound was spent, and waiting to start a run. The workflow by its id or a tail of eight or more characters.",

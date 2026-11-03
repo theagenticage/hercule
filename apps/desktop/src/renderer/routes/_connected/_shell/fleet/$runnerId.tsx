@@ -1,6 +1,6 @@
 import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
 import {
@@ -14,6 +14,7 @@ import {
   controllerQuery,
   fleetSessionsQuery,
   harnessesQuery,
+  machineRecentActivityQuery,
   providerAccountsQuery,
   providersQuery,
   readOnOpen,
@@ -28,35 +29,38 @@ import { MachinePageHead, MachinePageRoomLine } from "../../../../screens/fleet/
 import { MachinePageInstruments } from "../../../../screens/fleet/machine-page-instruments";
 import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
-import { NotFound } from "../../../../screens/not-found";
+import { MachineRecent } from "./-machine-recent";
 import { MachineRetireDialog } from "./-machine-retire-dialog";
 import { MachineSettings } from "./-machine-settings";
 import { MachineSoftware } from "./-machine-software";
+import { RunnerNotFound } from "./-runner-not-found";
 import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { useRunnerSessionCounts } from "./-session-counts";
 
 /** The ids of the page's sections, which the header's jump links scroll to. */
 const CAPACITY_ID = "machine-capacity";
 const SOFTWARE_ID = "machine-software";
+const RECENT_ID = "machine-recent";
 const SETTINGS_ID = "machine-settings";
-const SECTION_IDS = [CAPACITY_ID, SOFTWARE_ID, SETTINGS_ID];
+const SECTION_IDS = [CAPACITY_ID, SOFTWARE_ID, RECENT_ID, SETTINGS_ID];
 const SECTIONS = [
   { id: CAPACITY_ID, label: "Capacity" },
   { id: SOFTWARE_ID, label: "Software" },
+  { id: RECENT_ID, label: "Recent" },
   { id: SETTINGS_ID, label: "Settings" },
 ];
 
 /**
  * One machine's page (spec 17 §Fleet, A machine's page): its head and room
  * line, or the banner of a machine that is away, then its instruments, its
- * Software and its Settings. Its loader reads everything the page draws before
- * it renders, as the Fleet page's does (`fleet/index.tsx`), including the
- * machine's five-minute points of the last 24 hours and hour points of the
- * last 14 days, for its graphs. They are read only for a machine that exists,
- * and a cached read is used as it is: a `runnerMetrics` push brings them up to
- * date (see `useRunnerMetricsLive`). When no runner has
- * the id, or the runner is retired, the route shows `RunnerNotFound`: retired
- * machines are not shown anywhere on Fleet.
+ * Software, its Recent activity and its Settings. Its loader reads everything
+ * the page draws before it renders, as the Fleet page's does
+ * (`fleet/index.tsx`), including the machine's five-minute points of the last
+ * 24 hours and hour points of the last 14 days, for its graphs. They are read
+ * only for a machine that exists, and a cached read is used as it is: a
+ * `runnerMetrics` push brings them up to date (see `useRunnerMetricsLive`).
+ * When no runner has the id, or the runner is retired, the route shows
+ * `RunnerNotFound`: retired machines are not shown anywhere on Fleet.
  */
 export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
   staticData: { title: "Fleet" },
@@ -80,22 +84,14 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
       queryClient.fetchQuery(fleetSessionsQuery(client)),
       readOnOpen(queryClient, controllerQuery(client)),
       readOnOpen(queryClient, settingsQuery(client)),
+      // Recent shows a failed read as a line of its own with a Retry, so a read that fails
+      // must not fail the whole page.
+      readOnOpen(queryClient, machineRecentActivityQuery(client, runnerId)).catch(() => undefined),
     ]);
   },
   component: MachinePage,
   notFoundComponent: RunnerNotFound,
 });
-
-/** Renders the screen of a machine that does not exist or is retired, with a link back to Fleet. */
-function RunnerNotFound(): JSX.Element {
-  return (
-    <NotFound headline="This machine was not found.">
-      <Link to="/fleet" className="btn btn--accent">
-        Fleet
-      </Link>
-    </NotFound>
-  );
-}
 
 /** Draws the machine's page, or `RunnerNotFound` when the machine was retired or removed while its page was open. */
 function MachinePage(): JSX.Element {
@@ -148,10 +144,13 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   return (
     <>
       <FleetHeader
-        place={{ page: "machine", machine: { name: page.head.name, kind: page.head.kind } }}
-        sections={SECTIONS}
-        activeSectionId={activeSectionId}
-        onJump={scrollToSection}
+        place={{
+          page: "machine",
+          machine: { name: page.head.name, kind: page.head.kind },
+          sections: SECTIONS,
+          activeSectionId,
+          onJump: scrollToSection,
+        }}
         onAddMachine={() => setAdding(true)}
       />
       <FleetScroll scrollRef={scrollRef}>
@@ -167,6 +166,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
             <MachinePageInstruments instruments={page.instruments} graphs={graphs} />
           </section>
           <MachineSoftware id={SOFTWARE_ID} runner={runner} />
+          <MachineRecent id={RECENT_ID} runner={runner} />
           <MachineSettings id={SETTINGS_ID} runner={runner} onRetire={() => setRetiring(true)} />
         </div>
       </FleetScroll>

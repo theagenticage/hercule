@@ -120,6 +120,8 @@ import {
   liveAgentSessionsQuery,
   liveRunsQuery,
   localRunnerQuery,
+  machineActivityQuery,
+  machineRecentActivityQuery,
   memoryDocumentQuery,
   memoryIndexQuery,
   modelProfilesQuery,
@@ -192,6 +194,7 @@ import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settin
 import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Route as FleetRoute } from "../routes/_connected/_shell/fleet/index";
 import { Route as MachineRoute } from "../routes/_connected/_shell/fleet/$runnerId";
+import { Route as MachineActivityRoute } from "../routes/_connected/_shell/fleet/$runnerId_.activity";
 import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
 import { Route as OpenWorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
 import { Route as RunRoute } from "../routes/_connected/_shell/runs/$runId";
@@ -806,6 +809,19 @@ const seedQueryCache = (
     for (const [runnerId, history] of Object.entries(hoursByRunner)) {
       queryClient.setQueryData(queryKeys.runnerMetrics(buildMachineHourScope(runnerId)), history);
     }
+    for (const [runnerId, events] of Object.entries(fleet.activity)) {
+      // Each log fits on one page of each read, so no read has a next page.
+      queryClient.setQueryData(machineRecentActivityQuery(client, runnerId).queryKey, {
+        items: events,
+      });
+      queryClient.setQueryData(machineActivityQuery(client, runnerId).queryKey, {
+        pages: [{ items: events }],
+        pageParams: [undefined],
+      });
+    }
+    for (const run of fleet.runs) {
+      queryClient.setQueryData(runQuery(client, run.id).queryKey, run);
+    }
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
@@ -1090,6 +1106,12 @@ const buildRouter = (
     getParentRoute: () => shellRoute,
     loader: undefined,
   } as never);
+  const machineActivityRoute = MachineActivityRoute.update({
+    id: "/fleet/$runnerId_/activity",
+    path: "/fleet/$runnerId/activity",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
   const openWorkflowRoute = OpenWorkflowRoute.update({
     id: "/$workflowId",
     path: "/$workflowId",
@@ -1147,6 +1169,7 @@ const buildRouter = (
         workflowsRoute.addChildren([openWorkflowRoute]),
         fleetRoute,
         machineRoute,
+        machineActivityRoute,
         discussionsRoute.addChildren([openDiscussionRoute]),
         wikiRoute.addChildren([openWikiPageRoute]),
         runRoute,
@@ -1197,11 +1220,16 @@ const findWorkflowsDrawnSelector = (path: string): string => {
 
 /**
  * Returns the selector of what the Fleet page draws last at `path`, the
- * app's address: a machine's card or row, or, on a machine's page, the
- * Software section's last rows.
+ * app's address: a machine's card or row; on a machine's page, the Recent
+ * section's last lines; on its Activity page, the first entry, which the
+ * virtual list draws once it has measured its height.
  */
-const findFleetDrawnSelector = (path: string): string =>
-  path === "/fleet" ? ".fleet-card, .fleet-row" : ".machine-page .machine-page-sw-row";
+const findFleetDrawnSelector = (path: string): string => {
+  if (path === "/fleet") return ".fleet-card, .fleet-row";
+  return path.endsWith("/activity")
+    ? ".machine-activity-row"
+    : ".machine-page .machine-activity-row";
+};
 
 /**
  * Returns the selector of what Discussions or the Wiki draws last at `path`,
