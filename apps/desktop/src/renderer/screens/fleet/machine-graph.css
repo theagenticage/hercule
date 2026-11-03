@@ -32,6 +32,19 @@
   fill: var(--you);
   stroke: none;
 }
+/* A run of one point has no area, so it is a vertical stroke in the band's own ink. */
+.machine-graph-band-single,
+.machine-graph-waiting-single {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.machine-graph-band-single {
+  stroke: color-mix(in oklab, var(--ink) 12%, transparent);
+}
+.machine-graph-waiting-single {
+  stroke: var(--you);
+}
 .machine-graph-forecast {
   fill: none;
   stroke: color-mix(in oklab, var(--ink) 55%, transparent);

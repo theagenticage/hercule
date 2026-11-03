@@ -59,7 +59,6 @@ const INSTRUMENTS: MachineInstruments = {
 const GRAPHS: MachineGraphs = {
   sessions: {
     kind: "drawn",
-    resolution: "fiveMinutes",
     running: [
       [
         { x: 0.1, y: 0.5 },
@@ -80,7 +79,6 @@ const GRAPHS: MachineGraphs = {
   },
   cpu: {
     kind: "drawn",
-    resolution: "fiveMinutes",
     average: [
       [
         { x: 0, y: 0.2 },
@@ -96,7 +94,6 @@ const GRAPHS: MachineGraphs = {
   },
   memory: {
     kind: "drawn",
-    resolution: "fiveMinutes",
     inUse: [
       [
         { x: 0, y: 0.5 },
@@ -114,7 +111,6 @@ const GRAPHS: MachineGraphs = {
   },
   disk: {
     kind: "drawn",
-    resolution: "hour",
     inUse: [
       [
         { x: 0, y: 0.2 },
@@ -254,20 +250,44 @@ describe("MachinePageInstruments", () => {
     expect(waiting).toBe("M60,1 L70,1 L70,10.5 L60,10.5 Z");
   });
 
-  it("draws a run of one point as a dot, and nothing for a series with no runs", () => {
+  it("draws a run of one point as a dot, and a band of one point as a vertical stroke", () => {
     const { container } = render(
       <MachinePageInstruments
         instruments={INSTRUMENTS}
         graphs={{
           ...GRAPHS,
-          cpu: { ...GRAPHS.cpu, average: [[{ x: 0.5, y: 0 }]], peak: [] } as MachineGraphs["cpu"],
+          cpu: {
+            kind: "drawn",
+            average: [[{ x: 0.5, y: 0 }]],
+            peak: [
+              [{ x: 0.5, low: 0, high: 0.5 }],
+              [
+                { x: 0.7, low: 0.1, high: 0.2 },
+                { x: 0.8, low: 0.1, high: 0.3 },
+              ],
+            ],
+          },
         }}
       />,
     );
 
     const cpu = container.querySelectorAll(".machine-page-instrument")[1]!;
     expect(cpu.querySelector(".machine-graph-line")!.getAttribute("d")).toBe("M50,39 L50,39");
-    expect(cpu.querySelector(".machine-graph-band")!.getAttribute("d")).toBe("");
+    expect(cpu.querySelector(".machine-graph-band")!.getAttribute("d")).toBe(
+      "M50,20 L50,39 Z M70,31.4 L80,27.6 L80,35.2 L70,35.2 Z",
+    );
+    expect(cpu.querySelector(".machine-graph-band-single")!.getAttribute("d")).toBe(
+      "M50,20 L50,39",
+    );
+  });
+
+  it("draws no single-point stroke for a band whose runs are all longer", () => {
+    const { container } = render(
+      <MachinePageInstruments instruments={INSTRUMENTS} graphs={GRAPHS} />,
+    );
+
+    expect(container.querySelector(".machine-graph-band-single")).toBeNull();
+    expect(container.querySelector(".machine-graph-waiting-single")).toBeNull();
   });
 
   it("draws the disk graph in marigold only while the disk gauge is marigold or red, with its forecast dashed", () => {

@@ -66,6 +66,21 @@ const buildBandPath = (runs: readonly GraphBand[]): string =>
     })
     .join(" ");
 
+/**
+ * Builds the path data of the runs of a band that hold one point: a vertical
+ * stroke from its low to its high edge. A closed shape of one point has no
+ * area and nothing would show, so this stroke draws it, as a line of one point
+ * is drawn as a dot. Returns an empty string when no run is a single point.
+ */
+const buildSinglePointBandPath = (runs: readonly GraphBand[]): string =>
+  runs
+    .flatMap((run) => (run.length === 1 ? [run[0]!] : []))
+    .map(
+      ({ x, low, high }) =>
+        `M${toDrawingX(x)},${toDrawingY(high)} L${toDrawingX(x)},${toDrawingY(low)}`,
+    )
+    .join(" ");
+
 /** Builds the path data of a horizontal line across the whole graph at graph height `y`. */
 const buildReferencePath = (y: number): string =>
   `M0,${toDrawingY(y)} L${DRAWING_WIDTH},${toDrawingY(y)}`;
@@ -98,6 +113,27 @@ function GraphBox({
 }
 
 /**
+ * Renders a band: its closed shapes in `className`, and the strokes that show
+ * a run of one point in `${className}-single`. The strokes are left out when no run is
+ * a single point.
+ */
+function BandPaths({
+  runs,
+  className,
+}: {
+  readonly runs: readonly GraphBand[];
+  readonly className: string;
+}): JSX.Element {
+  const single = buildSinglePointBandPath(runs);
+  return (
+    <>
+      <path className={className} d={buildBandPath(runs)} />
+      {single === "" ? null : <path className={`${className}-single`} d={single} />}
+    </>
+  );
+}
+
+/**
  * Renders the Sessions graph: the sessions running as a step area with its
  * outline, a marigold band where sessions waited, and the cap as a dashed line.
  */
@@ -105,7 +141,7 @@ export function SessionsGraphFigure({ graph }: { readonly graph: SessionsGraph }
   return (
     <GraphBox tone="ink">
       <path className="machine-graph-area" d={buildAreaPath(graph.running)} />
-      <path className="machine-graph-waiting" d={buildBandPath(graph.waiting)} />
+      <BandPaths runs={graph.waiting} className="machine-graph-waiting" />
       <path className="machine-graph-line" d={buildLinePath(graph.running)} />
       <path className="machine-graph-cap" d={buildReferencePath(graph.capY)} />
     </GraphBox>
@@ -116,7 +152,7 @@ export function SessionsGraphFigure({ graph }: { readonly graph: SessionsGraph }
 export function CpuGraphFigure({ graph }: { readonly graph: CpuGraph }): JSX.Element {
   return (
     <GraphBox tone="ink">
-      <path className="machine-graph-band" d={buildBandPath(graph.peak)} />
+      <BandPaths runs={graph.peak} className="machine-graph-band" />
       <path className="machine-graph-line" d={buildLinePath(graph.average)} />
     </GraphBox>
   );
@@ -129,7 +165,7 @@ export function CpuGraphFigure({ graph }: { readonly graph: CpuGraph }): JSX.Ele
 export function MemoryGraphFigure({ graph }: { readonly graph: MemoryGraph }): JSX.Element {
   return (
     <GraphBox tone="ink">
-      <path className="machine-graph-band" d={buildBandPath(graph.highest)} />
+      <BandPaths runs={graph.highest} className="machine-graph-band" />
       <path className="machine-graph-line" d={buildLinePath(graph.inUse)} />
       <path className="machine-graph-you-line" d={buildReferencePath(graph.youY)} />
       <path className="machine-graph-limit" d={buildReferencePath(graph.failY)} />
