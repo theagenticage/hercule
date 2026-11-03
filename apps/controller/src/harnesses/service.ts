@@ -20,7 +20,7 @@ import { computeVersionVerdict, findVersionFloor } from "./version";
 const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const runners = yield* runnerRepository;
-  const snapshots = yield* harnessRepository;
+  const repository = yield* harnessRepository;
 
   return {
     /**
@@ -37,8 +37,8 @@ const make = Effect.gen(function* () {
         yield* requireGrant("harness.query");
         const definitions = yield* host.harnesses();
         const fleet = yield* runners.listFacts();
-        const versions = yield* snapshots.readReportedVersions();
-        const releases = yield* snapshots.readLatestReleases();
+        const versions = yield* repository.readReportedVersions();
+        const releases = yield* repository.readLatestReleases();
         return definitions.map((definition) => ({
           id: definition.id,
           displayName: definition.displayName,

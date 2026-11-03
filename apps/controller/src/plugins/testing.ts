@@ -172,7 +172,9 @@ const idleObserver: Layer.Layer<PluginObserver> = Layer.succeed(PluginObserver)(
  * nothing. A plugin's secrets are rows in the secrets table, so the
  * encryption is part of what is tested.
  */
-export const buildPluginStack = (observer: Layer.Layer<PluginObserver> = idleObserver) => {
+export const buildPluginStack = <RIn = never>(
+  observer: Layer.Layer<PluginObserver, never, RIn> = idleObserver,
+) => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(

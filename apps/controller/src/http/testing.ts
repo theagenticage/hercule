@@ -165,7 +165,6 @@ const buildServices = (
   home: string,
   githubSkillSources: GithubSkillSources["Service"],
   providerKeyHttpClient: HttpClient.HttpClient,
-  harnessRegistryHttpClient: HttpClient.HttpClient,
   masterKeyBackend: MasterKeyBackend = "file",
   securityRunner?: SecurityRunner,
   readLocalRunnerId: () => string | undefined = () => undefined,
@@ -206,7 +205,7 @@ const buildServices = (
         Layer.provideMerge(HarnessReleaseWakeLayer),
         Layer.provideMerge(
           HarnessReleasesLayer.pipe(
-            Layer.provide(Layer.succeed(HttpClient.HttpClient, harnessRegistryHttpClient)),
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableRegistryClient)),
           ),
         ),
       ),
@@ -352,7 +351,7 @@ const acceptingProviderKeyClient = HttpClient.make((request) =>
 );
 
 /**
- * The npm registry a test controller reads when the test gives none: no
+ * The npm registry a test controller reads: no
  * request gets an answer, so no test reaches the real registry by accident.
  */
 const unreachableRegistryClient = HttpClient.make((request) =>
@@ -536,12 +535,6 @@ export interface ServerOptions {
    * accepted, so no test reaches a real provider.
    */
   readonly providerKeyHttpClient?: HttpClient.HttpClient;
-  /**
-   * The HTTP client the latest releases of the harnesses are read through.
-   * Without it, no read gets an answer, so no test reaches the real npm
-   * registry.
-   */
-  readonly harnessRegistryHttpClient?: HttpClient.HttpClient;
   /** The default second is too long for a test that waits several ticks. */
   readonly eventRoutingInterval?: Duration.Duration;
   /** The default minute is longer than a test can wait. */
@@ -726,7 +719,6 @@ export const withServer = (
           home,
           options.githubSkillSources ?? unreachableGithub.service,
           options.providerKeyHttpClient ?? acceptingProviderKeyClient,
-          options.harnessRegistryHttpClient ?? unreachableRegistryClient,
           options.masterKeyBackend,
           options.securityRunner,
           options.readLocalRunnerId,

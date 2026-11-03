@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import type { WorkflowActionContribution } from "./contributions";
+import { HarnessReleaseSource, type WorkflowActionContribution } from "./contributions";
 
 const FIELDS = {
   id: "issue.comment",
@@ -31,5 +31,31 @@ describe("WorkflowActionContribution", () => {
     // @ts-expect-error An action bound as an answer must write its own describe line.
     const action: WorkflowActionContribution = { ...FIELDS, usableIn: ["signal.answer"] };
     expect(action.id).toBe("issue.comment");
+  });
+});
+
+describe("HarnessReleaseSource", () => {
+  const decode = Schema.decodeUnknownOption(HarnessReleaseSource);
+
+  it.each(["@openai/codex", "plain-tool", "a.b_c~d", "@scope/a"])(
+    "accepts the package %s",
+    (name) => {
+      expect(decode({ kind: "npm", package: name })._tag).toBe("Some");
+    },
+  );
+
+  it.each([
+    "..",
+    ".hidden",
+    "_private",
+    "Upper",
+    "@Scope/name",
+    "@scope/",
+    "a/b",
+    "a b",
+    "",
+    "a".repeat(215),
+  ])("refuses the package name %j", (name) => {
+    expect(decode({ kind: "npm", package: name })._tag).toBe("None");
   });
 });

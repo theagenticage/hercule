@@ -1,7 +1,9 @@
 /**
  * Tests how the latest release of each harness is read from the npm registry
  * and what `harness.query` then answers: a read that succeeds, one that fails
- * after a good one, one that fails first, and the live update that follows.
+ * after a good one, one that fails first, the limits on what is accepted from
+ * the registry, which reads a wake makes, and the live update that follows
+ * only when something changed.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Layer } from "effect";
@@ -9,7 +11,7 @@ import { TestClock } from "effect/testing";
 import * as HttpClient from "effect/http/HttpClient";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { Harness } from "@hercule/contract";
-import { AfterCommit, type Change } from "../db";
+import { AfterCommit, withTransaction, type Change } from "../db";
 import { PluginHost } from "../plugins";
 import {
   asUser,
@@ -51,12 +53,14 @@ const SCOPED_URL = "https://registry.npmjs.org/%40acme%2Ftool/latest";
 const PLAIN_URL = "https://registry.npmjs.org/plain-tool/latest";
 
 /** The registry's answer for a release: a package document of which only `version` is used. */
-const releaseOf = (version: string): Response =>
+const buildReleaseResponse = (version: string): Response =>
   new Response(JSON.stringify({ name: "tool", version, dist: { shasum: "abc" } }));
 
 /** Everything the registry answers, by default the release 1.0.0 for both packages. */
-const registry = (answer: (request: FakeProviderRequest) => FakeProviderAnswer) =>
+const buildRegistry = (answer: (request: FakeProviderRequest) => FakeProviderAnswer) =>
   buildFakeProviderApi(answer);
+
+const UNREADABLE = "The npm registry's answer could not be read.";
 
 const TIME_OF_FIRST_READ = Date.parse("2026-11-03T08:00:00.000Z");
 
@@ -91,11 +95,13 @@ const run = <A, E>(
       Effect.provide(stack),
       Effect.provide(TestClock.layer()),
       asUser,
-    ) as Effect.Effect<A, E, never>,
+    ),
   );
 };
 
 const refresh = Effect.flatMap(HarnessReleases, (releases) => releases.refreshLatestReleases());
+
+const readUnread = Effect.flatMap(HarnessReleases, (releases) => releases.readUnreadReleases());
 
 const queryLatest = (
   harnessId: string,
@@ -111,7 +117,7 @@ const queryLatest = (
 
 describe("reading the latest releases", () => {
   it("answers null for a harness the controller has not tried to read", async () => {
-    const { client } = registry(() => releaseOf("1.0.0"));
+    const { client } = buildRegistry(() => buildReleaseResponse("1.0.0"));
 
     const latest = await run(client, () => queryLatest(SCOPED_HARNESS));
 
@@ -119,8 +125,8 @@ describe("reading the latest releases", () => {
   });
 
   it("stores the version and when it was read, for each harness", async () => {
-    const { client } = registry((request) =>
-      releaseOf(request.url === SCOPED_URL ? "2.4.1" : "0.9.0"),
+    const { client } = buildRegistry((request) =>
+      buildReleaseResponse(request.url === SCOPED_URL ? "2.4.1" : "0.9.0"),
     );
 
     const { scoped, plain } = await run(client, () =>
@@ -139,7 +145,7 @@ describe("reading the latest releases", () => {
   });
 
   it("asks the registry once for each harness, with a scoped package's name encoded", async () => {
-    const { client, requests } = registry(() => releaseOf("1.0.0"));
+    const { client, requests } = buildRegistry(() => buildReleaseResponse("1.0.0"));
 
     await run(client, () => refresh);
 
@@ -148,8 +154,8 @@ describe("reading the latest releases", () => {
 
   it("keeps the last good version and when it was read when a later read fails, and clears the error at the next success", async () => {
     // A function, because a response body can be read only once.
-    let answer = (): FakeProviderAnswer => releaseOf("1.0.0");
-    const { client } = registry(() => answer());
+    let answer = (): FakeProviderAnswer => buildReleaseResponse("1.0.0");
+    const { client } = buildRegistry(() => answer());
 
     const outcome = await run(client, () =>
       Effect.gen(function* () {
@@ -159,7 +165,7 @@ describe("reading the latest releases", () => {
         yield* refresh;
         const failed = yield* queryLatest(SCOPED_HARNESS);
         yield* TestClock.adjust(Duration.hours(1));
-        answer = () => releaseOf("1.1.0");
+        answer = () => buildReleaseResponse("1.1.0");
         yield* refresh;
         const recovered = yield* queryLatest(SCOPED_HARNESS);
         return { failed, recovered };
@@ -189,21 +195,28 @@ describe("reading the latest releases", () => {
       () => new Response(JSON.stringify({ name: "tool" })),
       "The npm registry's answer had no version.",
     ],
+    ["answers an empty version", () => new Response(JSON.stringify({ version: "" })), UNREADABLE],
+    ["answers something that is not JSON", () => new Response("<html>"), UNREADABLE],
     [
-      "answers an empty version",
-      () => new Response(JSON.stringify({ version: "" })),
-      "The npm registry's answer had no version.",
+      "answers a version that is not a semantic version",
+      () => new Response(JSON.stringify({ version: "latest" })),
+      UNREADABLE,
     ],
     [
-      "answers something that is not JSON",
-      () => new Response("<html>"),
-      "The npm registry's answer had no version.",
+      "answers a version of more than 100 characters",
+      () => new Response(JSON.stringify({ version: `1.0.0-${"a".repeat(95)}` })),
+      UNREADABLE,
+    ],
+    [
+      "answers a body of more than 256 kB",
+      () => new Response(JSON.stringify({ version: "1.0.0", padding: "x".repeat(256 * 1024) })),
+      UNREADABLE,
     ],
     ["cannot be reached", () => "unreachable", "Could not reach the npm registry."],
   ])(
     "records the reason, with no version, when the first read finds a registry that %s",
     async (_name, answer, error) => {
-      const { client } = registry(answer);
+      const { client } = buildRegistry(answer);
 
       const latest = await run(client, () =>
         Effect.gen(function* () {
@@ -217,8 +230,8 @@ describe("reading the latest releases", () => {
   );
 
   it("fails the read of a registry that does not answer once the deadline has passed, and still reads the other harness", async () => {
-    const { client } = registry((request) =>
-      request.url === SCOPED_URL ? "silent" : releaseOf("3.0.0"),
+    const { client } = buildRegistry((request) =>
+      request.url === SCOPED_URL ? "silent" : buildReleaseResponse("3.0.0"),
     );
 
     const { scoped, plain } = await run(client, () =>
@@ -241,8 +254,8 @@ describe("reading the latest releases", () => {
 
   it("announces one update to the clients' harness list after a read, whether it succeeded or failed", async () => {
     // A function, because a response body can be read only once.
-    let answer = (): FakeProviderAnswer => releaseOf("1.0.0");
-    const { client } = registry(() => answer());
+    let answer = (): FakeProviderAnswer => buildReleaseResponse("1.0.0");
+    const { client } = buildRegistry(() => answer());
 
     const announced = await run(client, (changes) =>
       Effect.gen(function* () {
@@ -260,5 +273,144 @@ describe("reading the latest releases", () => {
         changes.every((change) => change._tag === "record" && change.topic === "provider"),
       ).toBe(true);
     }
+  });
+
+  it("accepts a version with a prerelease and a build part", async () => {
+    const { client } = buildRegistry(() => buildReleaseResponse("2.0.0-beta.1+build.5"));
+
+    const latest = await run(client, () =>
+      Effect.gen(function* () {
+        yield* refresh;
+        return yield* queryLatest(PLAIN_HARNESS);
+      }),
+    );
+
+    expect(latest?.version).toBe("2.0.0-beta.1+build.5");
+  });
+
+  it("sends the registry no trace headers, even from inside a span", async () => {
+    const { client, requests } = buildRegistry(() => buildReleaseResponse("1.0.0"));
+
+    await run(client, () => Effect.withSpan(refresh, "release-read"));
+
+    expect(requests).toHaveLength(2);
+    for (const { headers } of requests) {
+      expect(Object.keys(headers).filter((name) => /^(traceparent|b3|x-b3-)/i.test(name))).toEqual(
+        [],
+      );
+    }
+  });
+
+  it("announces nothing when a read finds what is already stored, but stores when it was read", async () => {
+    // A function, because a response body can be read only once.
+    let answer = (): FakeProviderAnswer => buildReleaseResponse("1.0.0");
+    const { client } = buildRegistry(() => answer());
+
+    const outcome = await run(client, (changes) =>
+      Effect.gen(function* () {
+        yield* refresh;
+        changes.splice(0);
+        yield* TestClock.adjust(Duration.hours(1));
+        yield* refresh;
+        const successRepeated = {
+          announced: changes.splice(0),
+          latest: yield* queryLatest(SCOPED_HARNESS),
+        };
+        answer = () => new Response("", { status: 500 });
+        yield* refresh;
+        changes.splice(0);
+        yield* TestClock.adjust(Duration.hours(1));
+        yield* refresh;
+        const failureRepeated = {
+          announced: changes.splice(0),
+          latest: yield* queryLatest(SCOPED_HARNESS),
+        };
+        return { successRepeated, failureRepeated };
+      }),
+    );
+
+    expect(outcome.successRepeated.announced).toEqual([]);
+    expect(outcome.successRepeated.latest?.checkedAt).toBe(
+      new Date(TIME_OF_FIRST_READ + 60 * 60_000).toISOString(),
+    );
+    expect(outcome.failureRepeated.announced).toEqual([]);
+    expect(outcome.failureRepeated.latest).toEqual({
+      version: "1.0.0",
+      checkedAt: new Date(TIME_OF_FIRST_READ + 60 * 60_000).toISOString(),
+      error: "The npm registry answered 500.",
+    });
+  });
+
+  it("announces only the harness whose version changed", async () => {
+    let newest = "1.0.0";
+    const { client } = buildRegistry((request) =>
+      buildReleaseResponse(request.url === SCOPED_URL ? newest : "0.9.0"),
+    );
+
+    const announced = await run(client, (changes) =>
+      Effect.gen(function* () {
+        yield* refresh;
+        changes.splice(0);
+        newest = "1.1.0";
+        yield* refresh;
+        return changes.splice(0);
+      }),
+    );
+
+    expect(announced).toEqual([
+      { _tag: "record", topic: "provider", id: SCOPED_HARNESS, kind: "updated" },
+    ]);
+  });
+});
+
+describe("reading only the harnesses that were never read", () => {
+  it("reads every harness when none has been read", async () => {
+    const { client, requests } = buildRegistry(() => buildReleaseResponse("1.0.0"));
+
+    await run(client, () => readUnread);
+
+    expect(requests.map((request) => request.url).sort()).toEqual([PLAIN_URL, SCOPED_URL].sort());
+  });
+
+  it("makes no request, write or announcement when every harness has been read", async () => {
+    const { client, requests } = buildRegistry(() => buildReleaseResponse("1.0.0"));
+
+    const announced = await run(client, (changes) =>
+      Effect.gen(function* () {
+        yield* refresh;
+        requests.length = 0;
+        changes.splice(0);
+        yield* TestClock.adjust(Duration.hours(1));
+        yield* readUnread;
+        return changes.splice(0);
+      }),
+    );
+
+    expect(requests).toEqual([]);
+    expect(announced).toEqual([]);
+  });
+
+  it("reads only the harness that has no result, as a newly added harness plugin has none", async () => {
+    const { client, requests } = buildRegistry(() => buildReleaseResponse("1.0.0"));
+
+    const announced = await run(client, (changes) =>
+      Effect.gen(function* () {
+        yield* refresh;
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(
+          sql,
+          sql`DELETE FROM harness_releases WHERE harness_id = ${PLAIN_HARNESS}`,
+        );
+        requests.length = 0;
+        changes.splice(0);
+        yield* readUnread;
+        return changes.splice(0);
+      }),
+    );
+
+    expect(requests.map((request) => request.url)).toEqual([PLAIN_URL]);
+    expect(announced).toEqual([
+      { _tag: "record", topic: "provider", id: PLAIN_HARNESS, kind: "updated" },
+    ]);
   });
 });

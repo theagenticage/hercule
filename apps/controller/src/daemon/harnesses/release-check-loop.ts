@@ -1,15 +1,18 @@
 /**
  * The periodic read of the latest release of every harness (spec 06 section
- * 2): at controller start, then every hour, and again soon after a plugin is
- * enabled, disabled or changed, because that can add a harness to read.
+ * 2): every harness at controller start and then every hour, and, soon after
+ * any plugin changes, only the harnesses that have never been read, because a
+ * plugin change can add a harness and nothing else it does needs a new read.
  *
- * The rule itself is `HarnessReleases.refreshLatestReleases`: what is read
- * and what is stored. This module only repeats it.
+ * What is read and what is stored is decided by `HarnessReleases`
+ * (`refreshLatestReleases` and `readUnreadReleases`). This module only
+ * repeats them.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import { HarnessReleases } from "../../harnesses";
 import { PluginObserver } from "../../plugins";
@@ -18,12 +21,6 @@ import { absorbFailures } from "../absorbing";
 
 /** How often the latest releases are read. Three small requests an hour. */
 const HARNESS_RELEASE_CHECK_INTERVAL: Duration.Duration = Duration.hours(1);
-
-/** The release check interval. Tests override it with a shorter one. */
-export const HarnessReleaseCheckInterval = Context.Reference<Duration.Duration>(
-  "hercule/controller/daemon/HarnessReleaseCheckInterval",
-  { defaultValue: (): Duration.Duration => HARNESS_RELEASE_CHECK_INTERVAL },
-);
 
 /**
  * A request for the loop to read the latest releases now instead of waiting
@@ -41,7 +38,7 @@ export const HarnessReleaseWakeLayer: Layer.Layer<HarnessReleaseWake> = Layer.ef
 
 /**
  * Replaces the `PluginObserver` below it with one that does what that one
- * does and then asks for a read of the latest releases. It only signals, and
+ * does and then asks for a read of the harnesses that have not been read. It only signals, and
  * never waits for the read: the plugin service calls its observer while it
  * holds the host's lifecycle permit, so waiting would keep that permit for as
  * long as the requests take.
@@ -62,13 +59,15 @@ export const WakeHarnessReleaseCheckOnPluginChangeLayer: Layer.Layer<
 );
 
 /**
- * Reads the latest releases at once, then again after each interval or when
- * `HarnessReleaseWake` is asked, whichever comes first. Never returns. A pass
- * that fails is logged, and the next one runs.
+ * Reads the latest release of every harness at once, then again after each
+ * interval. When `HarnessReleaseWake` is asked first, reads only the
+ * harnesses that have no stored result. Never returns. A pass that fails is
+ * logged, and the next one runs.
  *
  * A request that arrives while a pass runs leads to exactly one more pass
  * after it, however many arrive. A request that arrived before the pass
- * started is covered by that pass, so it is dropped when the pass starts.
+ * started is dropped when the pass starts: the pass reads at least what the
+ * request would have.
  *
  * A pass starts only while the controller serves, and never once it is
  * sealed. The pass itself is not counted as running work, because a freeze
@@ -84,15 +83,13 @@ export const runHarnessReleaseCheckLoop: Effect.Effect<
 > = Effect.gen(function* () {
   const releases = yield* HarnessReleases;
   const { queue } = yield* HarnessReleaseWake;
-  const interval = yield* HarnessReleaseCheckInterval;
   const promotion = yield* PromotionState;
+  let pass = releases.refreshLatestReleases();
   while (true) {
     yield* promotion.whenServing(Effect.void);
     yield* Queue.clear(queue);
-    yield* absorbFailures(
-      "Reading the latest releases of the harnesses failed",
-      releases.refreshLatestReleases(),
-    );
-    yield* Effect.timeoutOption(Queue.take(queue), interval);
+    yield* absorbFailures("Reading the latest releases of the harnesses failed", pass);
+    const wake = yield* Effect.timeoutOption(Queue.take(queue), HARNESS_RELEASE_CHECK_INTERVAL);
+    pass = Option.isSome(wake) ? releases.readUnreadReleases() : releases.refreshLatestReleases();
   }
 });

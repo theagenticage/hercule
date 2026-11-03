@@ -80,7 +80,6 @@ export {
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { runSkillUpdateCheckLoop, SkillUpdateCheckInterval } from "./skills";
 export {
-  HarnessReleaseCheckInterval,
   HarnessReleaseWake,
   HarnessReleaseWakeLayer,
   runHarnessReleaseCheckLoop,

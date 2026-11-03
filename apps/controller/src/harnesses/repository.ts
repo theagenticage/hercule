@@ -73,17 +73,17 @@ const make = Effect.gen(function* () {
 
     /**
      * Records that a read of the harness's latest release succeeded: stores
-     * the version and `readAt`, and clears the error. Runs in the caller's
+     * the version and `checkedAt`, and clears the error. Runs in the caller's
      * transaction.
      */
     recordReleaseRead: (
       harnessId: string,
       version: string,
-      readAt: string,
+      checkedAt: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         INSERT INTO harness_releases (harness_id, version, checked_at, error)
-        VALUES (${harnessId}, ${version}, ${readAt}, NULL)
+        VALUES (${harnessId}, ${version}, ${checkedAt}, NULL)
         ON CONFLICT (harness_id) DO UPDATE SET
           version = excluded.version, checked_at = excluded.checked_at, error = NULL
       `),

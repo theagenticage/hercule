@@ -145,6 +145,18 @@ export const HarnessProviderSupport = Schema.Struct({
 export type HarnessProviderSupport = Schema.Schema.Type<typeof HarnessProviderSupport>;
 
 /**
+ * The name of a package on the public npm registry: at most 214 characters,
+ * lowercase, an optional `@scope/` and then a name. The characters are
+ * `a-z`, `0-9` and `-._~`, and neither the scope nor the name starts with `.`
+ * or `_`. These are npm's own rules. They also keep the name from changing the
+ * URL the controller builds from it (`..` is refused).
+ */
+const NpmPackageName = Schema.String.check(
+  Schema.isMaxLength(214),
+  Schema.isPattern(/^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/),
+);
+
+/**
  * Where a harness's releases are published, so the controller can read the
  * newest one. The `kind` is a literal so that another publisher can be added
  * later as another member of a union. `npm` means the public npm registry, and
@@ -152,7 +164,7 @@ export type HarnessProviderSupport = Schema.Schema.Type<typeof HarnessProviderSu
  */
 export const HarnessReleaseSource = Schema.Struct({
   kind: Schema.Literal("npm"),
-  package: Schema.NonEmptyString,
+  package: NpmPackageName,
 });
 
 export type HarnessReleaseSource = Schema.Schema.Type<typeof HarnessReleaseSource>;
