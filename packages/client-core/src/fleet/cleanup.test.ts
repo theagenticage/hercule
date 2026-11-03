@@ -506,12 +506,10 @@ describe("archiveAndRemoveWorkspaces", () => {
 
     const start = await archiveAndRemoveWorkspaces(client, plan);
 
-    expect(start.status).toBe("archiveUnconfirmed");
-    expect(start).toMatchObject({
-      message: expect.stringMatching(
-        /^Could not confirm that the threads were archived: .+[^.]\. Check them before you try again\.$/,
-      ),
-    });
+    if (start.status !== "archiveUnconfirmed") throw new Error(`Unexpected status ${start.status}`);
+    expect(start.message).toMatch(
+      /^Could not confirm that the threads were archived: .+[^.]\. Check them before you try again\.$/,
+    );
   });
 });
 
