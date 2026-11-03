@@ -45,7 +45,7 @@ const make = Effect.gen(function* () {
   /** Sends a runner that has just connected the work owed to it, and wakes the runs waiting for one. */
   const sendOwedWork = (runnerId: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      for (const frame of yield* workspaces.listOwedDisposals(runnerId))
+      for (const frame of yield* workspaces.downgradeOwedDisposals(runnerId))
         yield* connections.tell(runnerId, frame);
       const steps = yield* runs.listOwedWorkspaceSteps(runnerId);
       // Starting an action step sends its workspace's provision first, so

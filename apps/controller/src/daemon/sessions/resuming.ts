@@ -50,8 +50,8 @@ const describeWorkspaceGone = (status: string): string =>
  * the session's harness-native session id. It fails with an invalid state
  * error, whose message states the reason, when:
  *
- * - the session is still live;
  * - the session is archived;
+ * - the session is still live;
  * - the session answered an assistant's conversation that was deleted;
  * - the session left no transcript;
  * - its workspace is gone;
@@ -75,9 +75,9 @@ export const resumable: Effect.Effect<
 
   return (session: StoredSession) =>
     Effect.gen(function* () {
+      yield* refuseArchived(session);
       if (session.status !== "exited")
         return yield* Effect.fail(createInvalidStateError(STILL_LIVE));
-      yield* refuseArchived(session);
       if (session.conversationDeleted)
         return yield* Effect.fail(createInvalidStateError(CONVERSATION_DELETED));
       if (session.nativeSessionId === null)

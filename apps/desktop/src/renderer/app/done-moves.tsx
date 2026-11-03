@@ -16,8 +16,14 @@ import {
 } from "react";
 import { matchQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  buildArchiveCall,
+  buildArchivedToast,
   invalidateWithoutCancelling,
+  listArchiveWorkspaceIds,
+  readEveryPage,
   readErrorMessage,
+  type ArchiveCall,
+  type ArchivePlan,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
@@ -66,15 +72,44 @@ interface DoneRequest {
   readonly announce: boolean;
 }
 
-/**
- * An archive of a list of threads. `text` is the toast shown once the
- * controller has archived them.
- */
+/** An archive of the rows of `plan`, which `archiveRows` completes and sends. */
 interface ArchiveRequest {
-  readonly sessionIds: readonly string[];
   readonly move: "archive";
-  readonly text: string;
+  readonly plan: ArchiveRows;
 }
+
+/** The rows an archive takes, and what the user is told about the rows it leaves. */
+export type ArchiveRows = Pick<ArchivePlan, "rows" | "skippedWorking" | "leftOver">;
+
+/** What the controller answered, and, for an archive, the call that was sent. */
+interface MoveResult {
+  readonly answered: readonly Session[];
+  readonly call: ArchiveCall | null;
+}
+
+/**
+ * Archives the rows of `rows`: reads every unarchived Thread in the rows'
+ * workspaces, because the sidebar's list leaves out Threads marked Done long
+ * ago and a workspace with one left unarchived would never be cleaned up,
+ * then sends the complete call (`buildArchiveCall`). Returns the controller's
+ * answer and the call. Fails when a read or the archive fails, or when the
+ * first row alone holds more Threads than one call takes.
+ */
+const archiveRows = async (client: HerculeClient, { rows }: ArchiveRows): Promise<MoveResult> => {
+  const reads = listArchiveWorkspaceIds(rows).map((workspaceIds) =>
+    readEveryPage((page) =>
+      client.session.query({
+        query: { workspaceId: workspaceIds, kind: "thread", archived: false, ...page },
+      }),
+    ),
+  );
+  const call = buildArchiveCall(rows, (await Promise.all(reads)).flat());
+  if (call.sessionIds.length === 0) {
+    throw new Error("The first row holds more threads than one archive can take.");
+  }
+  const answered = await client.session.archive({ payload: { sessionIds: call.sessionIds } });
+  return { answered, call };
+};
 
 /** Returns the move that reverses `move`. */
 const reverseDoneMove = (move: DoneMove): DoneMove => (move === "markDone" ? "reopen" : "markDone");
@@ -197,7 +232,7 @@ const isLastDoneMove = (queryClient: QueryClient): boolean =>
 interface DoneMoves {
   readonly markDone: (sessionIds: readonly string[]) => void;
   readonly reopen: (sessionIds: readonly string[]) => void;
-  readonly archive: (sessionIds: readonly string[], text: string) => void;
+  readonly archive: (plan: ArchiveRows) => void;
   readonly undo: (undo: DoneUndo) => void;
 }
 
@@ -218,13 +253,14 @@ export interface DoneMovesValue extends DoneMoves {
  *   calls it.
  * - `undo(undo)` makes the move of a toast's Undo on exactly the threads of
  *   that toast. It shows no toast of its own.
- * - `archive(sessionIds, text)` is sent in the same queue, so it is ordered
- *   with the Done moves. The controller can refuse it, for instance when a
- *   session of the row started working, so nothing is written before it
- *   answers. Once it has, the Threads leave the cached list, their own
- *   cached records follow the answer, and `text` shows as a toast with no
- *   Undo, because nothing reverses an archive. A refusal shows the
- *   controller's message as an alert.
+ * - `archive(plan)` archives whole rows. It is sent in the same queue, so it
+ *   is ordered with the Done moves. It first reads the Threads of the rows'
+ *   workspaces (`archiveRows`). The controller can refuse it, for instance
+ *   when a session of a row started working, so nothing is written before
+ *   it answers. Once it has, the Threads leave the cached list, their own
+ *   cached records follow the answer, and a toast with no Undo says
+ *   "Archived", because nothing reverses an archive (`buildArchivedToast`).
+ *   A refusal shows the controller's message as an alert.
  * - A move that fails reads the thread list again, so the rows go back to
  *   where the controller has them, and shows the error in the toast as an
  *   alert. While the toast shows the Undo of a newer move, the error waits
@@ -260,23 +296,22 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
   const { mutate } = useMutation({
     mutationKey: DONE_MOVES_KEY,
     scope: { id: "done-moves" },
-    mutationFn: ({ sessionIds, move }: DoneRequest | ArchiveRequest) =>
-      move === "markDone"
-        ? client.session.markDone({ payload: { sessionIds } })
-        : move === "reopen"
-          ? client.session.reopen({ payload: { sessionIds } })
-          : client.session.archive({ payload: { sessionIds } }),
+    mutationFn: async (request: DoneRequest | ArchiveRequest): Promise<MoveResult> => {
+      if (request.move === "archive") return archiveRows(client, request.plan);
+      const { sessionIds, move } = request;
+      const answered =
+        move === "markDone"
+          ? await client.session.markDone({ payload: { sessionIds } })
+          : await client.session.reopen({ payload: { sessionIds } });
+      return { answered, call: null };
+    },
     // A move in a scope waits for the one before it to finish before it is
     // sent, but its `onMutate` runs at once, so the list follows the user.
     onMutate: async (request) => {
-      const { sessionIds } = request;
-      if (request.move === "archive") {
-        // Nothing is applied before the controller answers, so there is no
-        // read to cancel; the last move still reads these Threads again.
-        for (const id of sessionIds) movedSinceRead.current.add(id);
-        return { pendingMove: null, toastSerial: null };
-      }
-      const { move, announce } = request;
+      // Nothing is applied before the controller answers an archive, so there
+      // is no read to cancel. The last move still reads the list again.
+      if (request.move === "archive") return { pendingMove: null, toastSerial: null };
+      const { sessionIds, move, announce } = request;
       // A read that started before the move would answer without it and
       // put the rows back, so it is cancelled; the last move reads again.
       // Pending from now, not after the cancelling below, so the moves are
@@ -296,10 +331,11 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
         toastSerial: toasts.show(text, { move: reverseDoneMove(move), sessionIds }),
       };
     },
-    onSuccess: (answered, request) => {
-      const { sessionIds } = request;
+    onSuccess: ({ answered, call }, request) => {
       if (request.move === "archive") {
-        const archived = new Set(sessionIds);
+        if (call === null) return;
+        const archived = new Set(call.sessionIds);
+        for (const id of archived) movedSinceRead.current.add(id);
         queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
           sessions?.filter((session) => !archived.has(session.id)),
         );
@@ -308,9 +344,16 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
             cached === undefined ? undefined : session,
           );
         }
-        toasts.showNotice(request.text);
+        const { skippedWorking, leftOver } = request.plan;
+        toasts.showNotice(
+          buildArchivedToast(call.rows.length, {
+            skippedWorking,
+            leftOver: leftOver + call.droppedRows,
+          }),
+        );
         return;
       }
+      const { sessionIds } = request;
       if (!isLastDoneMove(queryClient)) return;
       const answers = new Map(answered.map((session) => [session.id, session]));
       updateCachedSessions(
@@ -359,8 +402,8 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
     [mutate],
   );
   const archive = useCallback(
-    (sessionIds: readonly string[], text: string) => {
-      mutate({ sessionIds, move: "archive", text });
+    (plan: ArchiveRows) => {
+      mutate({ move: "archive", plan });
     },
     [mutate],
   );

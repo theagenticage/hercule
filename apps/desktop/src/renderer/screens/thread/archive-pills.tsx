@@ -5,7 +5,6 @@
  */
 import { useState, type JSX } from "react";
 import {
-  buildArchivedToast,
   buildArchiveTitle,
   findArchiveBlockReason,
   formatDay,
@@ -63,7 +62,7 @@ export function ThreadMorePill({ row }: { readonly row: GroupRow }): JSX.Element
         <ArchiveDialog
           title={buildArchiveTitle([row])}
           onConfirm={() => {
-            archive(row.threadIds, buildArchivedToast(1));
+            archive({ rows: [row], skippedWorking: 0, leftOver: 0 });
           }}
           onClose={() => {
             setConfirming(false);

@@ -7,9 +7,11 @@ import type { Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildProviderAccount, ANTHROPIC_IDENTITY } from "../providers.testing";
 import {
+  buildArchiveCall,
   buildArchivedToast,
   buildArchiveTitle,
   findArchiveBlockReason,
+  listArchiveWorkspaceIds,
   planArchiveAll,
 } from "./archive";
 import type { GroupRow } from "./group-row";
@@ -91,7 +93,6 @@ describe("planArchiveAll", () => {
     ]);
     const plan = planArchiveAll(rows);
     expect(plan.rows.map((row) => row.leadId)).toEqual(["t-old", "t-mid", "t-new"]);
-    expect(plan.sessionIds).toEqual(["t-old", "t-mid", "t-new"]);
     expect(plan).toMatchObject({ skippedWorking: 0, leftOver: 0 });
   });
 
@@ -119,7 +120,7 @@ describe("planArchiveAll", () => {
     const second = doneThread("t-2", 6, { workspaceId: "w-1", createdAt: at(1) });
     const plan = planArchiveAll(describeRows([first, second]));
     expect(plan.rows).toHaveLength(1);
-    expect(plan.sessionIds).toEqual(["t-1", "t-2"]);
+    expect(plan.rows[0]!.threadIds).toEqual(["t-1", "t-2"]);
   });
 
   it("takes whole rows only while the Threads stay within 500, and counts the rows left over", () => {
@@ -134,7 +135,6 @@ describe("planArchiveAll", () => {
     const newest = doneThread("t-newest", 60);
     const plan = planArchiveAll(describeRows([...older, ...big, newest]));
     // 498 Threads fit; the 3 of the big row would make 501, and the newest row waits behind it.
-    expect(plan.sessionIds).toHaveLength(498);
     expect(plan.rows).toHaveLength(498);
     expect(plan.leftOver).toBe(2);
   });
@@ -144,14 +144,14 @@ describe("planArchiveAll", () => {
       doneThread(`t-${String(index)}`, index),
     );
     const plan = planArchiveAll(describeRows(sessions));
-    expect(plan.sessionIds).toHaveLength(500);
+    expect(plan.rows).toHaveLength(500);
     expect(plan.leftOver).toBe(1);
     expect(plan.rows.at(-1)?.leadId).toBe("t-499");
   });
 
   it("plans nothing when every row works", () => {
     const plan = planArchiveAll(describeRows([doneThread("t-1", 5, { status: "busy" })]));
-    expect(plan).toMatchObject({ rows: [], sessionIds: [], skippedWorking: 1, leftOver: 0 });
+    expect(plan).toMatchObject({ rows: [], skippedWorking: 1, leftOver: 0 });
   });
 });
 
@@ -170,8 +170,9 @@ describe("buildArchiveTitle", () => {
 
 describe("buildArchivedToast", () => {
   it("reads only Archived for one row, and counts several", () => {
-    expect(buildArchivedToast(1)).toBe("Archived");
-    expect(buildArchivedToast(12)).toBe("Archived 12");
+    const none = { skippedWorking: 0, leftOver: 0 };
+    expect(buildArchivedToast(1, none)).toBe("Archived");
+    expect(buildArchivedToast(12, none)).toBe("Archived 12");
   });
 
   it("adds the rows Archive all skipped as working and the rows it left over", () => {
@@ -184,5 +185,74 @@ describe("buildArchivedToast", () => {
     expect(buildArchivedToast(1, { skippedWorking: 1, leftOver: 3 })).toBe(
       "Archived. 1 working row skipped. 3 rows left.",
     );
+  });
+});
+
+describe("listArchiveWorkspaceIds", () => {
+  it("lists each workspace once, and none for Threads with no workspace", () => {
+    const rows = describeRows([
+      doneThread("t-1", 5, { workspaceId: "w-1" }),
+      doneThread("t-2", 6, { workspaceId: "w-1", createdAt: at(1) }),
+      doneThread("t-3", 7, { workspaceId: "w-2" }),
+      doneThread("t-4", 8),
+    ]);
+    expect(listArchiveWorkspaceIds(rows)).toEqual([["w-1", "w-2"]]);
+  });
+
+  it("splits the workspaces into reads of at most 500", () => {
+    const rows = describeRows(
+      Array.from({ length: 501 }, (_, index) =>
+        doneThread(`t-${String(index)}`, index, { workspaceId: `w-${String(index)}` }),
+      ),
+    );
+    const chunks = listArchiveWorkspaceIds(rows);
+    expect(chunks.map((chunk) => chunk.length)).toEqual([500, 1]);
+  });
+});
+
+describe("buildArchiveCall", () => {
+  it("adds the Threads of the row's workspace that the sidebar's read missed, such as one marked Done long ago", () => {
+    const [row] = describeRows([doneThread("t-new", 20, { workspaceId: "w-1" })]);
+    const old = doneThread("t-old", 1, { workspaceId: "w-1", createdAt: at(-1) });
+
+    const call = buildArchiveCall([row!], [old, doneThread("t-new", 20, { workspaceId: "w-1" })]);
+
+    expect(call.sessionIds).toEqual(["t-new", "t-old"]);
+    expect(call.rows).toEqual([row]);
+    expect(call.droppedRows).toBe(0);
+  });
+
+  it("leaves out archived Threads, Agent sessions and Threads of other workspaces", () => {
+    const [row] = describeRows([doneThread("t-1", 5, { workspaceId: "w-1" })]);
+    const others = [
+      doneThread("t-archived", 1, { workspaceId: "w-1", archived: { at: at(2), by: "user" } }),
+      doneThread("a-1", 1, { workspaceId: "w-1", kind: "agent", agentId: "ag-1" }),
+      doneThread("t-elsewhere", 1, { workspaceId: "w-2" }),
+    ];
+    expect(buildArchiveCall([row!], others).sessionIds).toEqual(["t-1"]);
+  });
+
+  it("sends a Thread with no workspace as it is", () => {
+    const [row] = describeRows([doneThread("t-1", 5)]);
+    expect(buildArchiveCall([row!], []).sessionIds).toEqual(["t-1"]);
+  });
+
+  it("takes whole rows only while the complete Threads stay within 500, and counts the rows dropped", () => {
+    const { rows } = planArchiveAll(
+      describeRows([
+        ...Array.from({ length: 499 }, (_, index) => doneThread(`t-${String(index)}`, index)),
+        doneThread("w-lead", 600, { workspaceId: "w-1" }),
+      ]),
+    );
+    // The sidebar holds one Thread of the last row, so the plan fits: 500. Its workspace holds a
+    // second Thread the sidebar did not list, which makes 501.
+    const hidden = doneThread("w-old", 1, { workspaceId: "w-1", createdAt: at(-1) });
+
+    const call = buildArchiveCall(rows, [hidden]);
+
+    expect(rows).toHaveLength(500);
+    expect(call.rows).toHaveLength(499);
+    expect(call.sessionIds).toHaveLength(499);
+    expect(call.droppedRows).toBe(1);
   });
 });

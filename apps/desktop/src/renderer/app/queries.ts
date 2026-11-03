@@ -243,16 +243,22 @@ export const threadsQuery = (client: HerculeClient) => ({
 });
 
 /**
- * Reads every live session an Agent spawned: the sessions of runs'
- * agent steps, the assistants' and any other that is not a thread. "From
- * runs" in Waiting on you, and the workflow list's Needs you, keep those of
- * a run that wait on the user (`listWaitingRunSessions`). The controller has
- * no filter for that, so the client keeps them. The read follows the cursor
- * to the last page, and its key sits under the `sessions` prefix, so a push
- * on the `session` topic invalidates it.
+ * Reads every live session an Agent spawned that is not archived: the
+ * sessions of runs' agent steps, the assistants' and any other that is not a
+ * thread. "From runs" in Waiting on you, and the workflow list's Needs you,
+ * keep those of a run that wait on the user (`listWaitingRunSessions`). The
+ * controller has no filter for that, so the client keeps them. An archived
+ * Agent session whose stop has not reached its runner yet is still live, but
+ * it is gone for good, so the Office must not seat it. The read follows the
+ * cursor to the last page, and its key sits under the `sessions` prefix, so a
+ * push on the `session` topic invalidates it.
  */
 export const liveAgentSessionsQuery = (client: HerculeClient) => {
-  const filter = { kind: ["agent", "run", "assistant"], status: LIVE_SESSION_STATUSES } as const;
+  const filter = {
+    kind: ["agent", "run", "assistant"],
+    status: LIVE_SESSION_STATUSES,
+    archived: false,
+  } as const;
   return queryOptions({
     queryKey: queryKeys.sessions(filter),
     queryFn: () => readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),

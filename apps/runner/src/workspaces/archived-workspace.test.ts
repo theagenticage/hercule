@@ -8,7 +8,14 @@
  * - the harness files of the archived sessions the removal lists are deleted
  *   afterwards, and a file that stays becomes a warning that a replay repeats.
  */
-import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { ArchivedSession } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
@@ -75,7 +82,7 @@ const provisionUsedWorkspace = async (
   }
   if (count > 1) writeFileSync(join(root, "notes.txt"), "a file at the root\n");
   const caches = resourceIds.map((resourceId) => join(storageDir, "cache", `${resourceId}.git`));
-  return { workspaces, workspaceId, root, checkoutDirs, caches };
+  return { storageDir, workspaces, workspaceId, root, checkoutDirs, caches };
 };
 
 describe("removing a workspace whole", () => {
@@ -146,6 +153,49 @@ describe("removing a workspace whose repository is gone", () => {
 
     expect(report.status).toBe("failed");
     expect(existsSync(root)).toBe(true);
+  });
+});
+
+describe("removing a workspace whose repository cannot be determined", () => {
+  it("refuses even when changes are discarded, because the repository may still exist", async () => {
+    const { storageDir, workspaces, workspaceId, root } = await provisionUsedWorkspace(1);
+    // An older registry entry has no recorded repository path, so Git must say
+    // where it is, and a broken checkout cannot.
+    const registryPath = join(storageDir, "workspaces.json");
+    const registry = JSON.parse(readFileSync(registryPath, "utf8")) as {
+      workspaces: Array<{ checkouts: Array<Record<string, unknown>> }>;
+    };
+    for (const workspace of registry.workspaces)
+      for (const checkout of workspace.checkouts) {
+        delete checkout["commonDirectory"];
+        delete checkout["commonDirectoryIdentity"];
+      }
+    writeFileSync(registryPath, JSON.stringify(registry));
+    writeFileSync(join(root, ".git"), "gitdir: /nonexistent\n");
+
+    const report = await Effect.runPromise(
+      workspaces.dispose({ _tag: "workspaceDispose", workspaceId, discardChanges: true }),
+    );
+
+    expect(report.status).toBe("failed");
+    expect(report.message).toMatch(/repository is unavailable/);
+    expect(existsSync(join(root, "node_modules"))).toBe(true);
+  });
+});
+
+describe("removing a workspace whose repository refuses", () => {
+  it("keeps the folder and says why, even when changes are discarded", async () => {
+    const { workspaces, workspaceId, root, checkoutDirs, caches } = await provisionUsedWorkspace(1);
+    runGitOrThrow(caches[0]!, "worktree", "lock", checkoutDirs[0]!);
+
+    const report = await Effect.runPromise(
+      workspaces.dispose({ _tag: "workspaceDispose", workspaceId, discardChanges: true }),
+    );
+
+    expect(report.status).toBe("failed");
+    expect(report.message).toMatch(/locked/);
+    expect(existsSync(join(root, "node_modules"))).toBe(true);
+    expect(runGitOrThrow(caches[0]!, "worktree", "list")).toContain(checkoutDirs[0]!);
   });
 });
 
@@ -222,8 +272,8 @@ describe("deleting the harness files of archived sessions", () => {
     expect(calls).toHaveLength(sessions.length);
   });
 
-  it("refuses a request id that comes back with other archived sessions", async () => {
-    const { deleteSessionFiles } = makeRecordingDelete();
+  it("treats a request id that comes back with the list as the same request", async () => {
+    const { calls, deleteSessionFiles } = makeRecordingDelete();
     const { workspaces, workspaceId } = await provisionUsedWorkspace(1, deleteSessionFiles);
     const frame = {
       _tag: "workspaceDispose",
@@ -231,11 +281,23 @@ describe("deleting the harness files of archived sessions", () => {
       requestId: createId(),
       discardChanges: true,
     } as const;
-    await Effect.runPromise(workspaces.dispose({ ...frame, archivedSessions: sessions }));
+    // An older runner removed the workspace from a frame that had no list.
+    const first = await Effect.runPromise(workspaces.dispose(frame));
 
-    const changed = await Effect.runPromise(
-      workspaces.dispose({ ...frame, archivedSessions: sessions.slice(1) }),
+    const resent = await Effect.runPromise(
+      workspaces.dispose({ ...frame, archivedSessions: sessions }),
     );
+
+    expect(resent).toEqual(first);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a request id that comes back with another discard choice", async () => {
+    const { workspaces, workspaceId } = await provisionUsedWorkspace(1);
+    const frame = { _tag: "workspaceDispose", workspaceId, requestId: createId() } as const;
+    await Effect.runPromise(workspaces.dispose(frame));
+
+    const changed = await Effect.runPromise(workspaces.dispose({ ...frame, discardChanges: true }));
 
     expect(changed.status).toBe("failed");
     expect(changed.message).toMatch(/different removal instruction/);

@@ -6944,6 +6944,37 @@ describe("session.markDone and session.reopen", () => {
     });
   });
 
+  it("lists the sessions of one workspace or of several", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const spawnInNewWorkspace = (prompt: string) =>
+        spawnSessionOrFail(arranged, {
+          prompt,
+          workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+        });
+      const first = await spawnInNewWorkspace("first");
+      const second = await spawnInNewWorkspace("second");
+      const third = await spawnInNewWorkspace("third");
+      expect(new Set([first, second, third].map((one) => one.workspaceId)).size).toBe(3);
+
+      const listIds = async (query: string): Promise<ReadonlyArray<string>> => {
+        const response = await get(
+          arranged.harness.base,
+          `/api/v1/sessions?${query}&sort=createdAt:asc`,
+          arranged.token,
+        );
+        expect(response.status, await response.clone().text()).toBe(200);
+        return ((await response.json()) as { items: ReadonlyArray<Session> }).items.map(
+          (one) => one.id,
+        );
+      };
+      expect(await listIds(`workspaceId=${first.workspaceId}`)).toEqual([first.id]);
+      expect(
+        await listIds(`workspaceId=${first.workspaceId}&workspaceId=${third.workspaceId}`),
+      ).toEqual([first.id, third.id]);
+    });
+  });
+
   it("refuses the removed thread filter and says to ask for kind=thread", async () => {
     await withFleet(async (arranged) => {
       await startIdleSession(arranged, "hello");
@@ -7255,6 +7286,109 @@ describe("an archived session", () => {
         arranged.token,
       );
       expect(transcript.status, await transcript.clone().text()).toBe(200);
+    });
+  });
+
+  it("cancels an input that was on the wire when it was archived, instead of sending it again", async () => {
+    await withFleet(
+      async (arranged) => {
+        const session = await startIdleSession(arranged, "hello");
+        arranged.wire.answering(() => undefined);
+        const unanswered = sendInput(arranged, session.id, { text: "on the wire" });
+        const [sent] = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+        // Archiving cancels only the inputs still waiting; this one was sent.
+        await archive(arranged, session.id);
+
+        // The runner never answers, so the delivery fails while the session is still idle.
+        expect((await unanswered).status).toBe(409);
+        await arranged.harness.runWithLiveSessions(
+          Effect.flatMap(Live, (live) => live.deliverQueuedInput(session.id)),
+        );
+
+        const [row] = (await listInputs(arranged, session.id)).filter(
+          (one) => one.id === sent!.requestId,
+        );
+        expect(row).toMatchObject({ status: "cancelled" });
+        expect(listInputFrames(arranged.wire)).toHaveLength(1);
+      },
+      { eventRoutingInterval: NO_TICK, inputDeadline: EXPIRING_INPUT_DEADLINE },
+    );
+  });
+
+  it("refuses a repeat of a keyed session.input once the session is archived", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      const first = await sendInput(arranged, session.id, { text: "once", dedupKey: "key-1" });
+      expect(first.status, await first.clone().text()).toBe(200);
+      await archive(arranged, session.id);
+      const sentBefore = listInputFrames(arranged.wire).length;
+
+      await expectArchivedRefusal(
+        await sendInput(arranged, session.id, { text: "once", dedupKey: "key-1" }),
+      );
+
+      expect(listInputFrames(arranged.wire)).toHaveLength(sentBefore);
+    });
+  });
+
+  it("refuses answers to its open Requests and sends nothing to the runner", async () => {
+    await withFleet(async (arranged) => {
+      const parked = await startParkedSession(arranged);
+      await archive(arranged, parked.id);
+
+      await expectArchivedRefusal(
+        await respondToApprovalRequest(arranged, parked.id, {
+          requestId: REQUEST_ID,
+          decision: "allow",
+        }),
+      );
+      expect(
+        listFrames<SessionRespondToApprovalRequest>(
+          arranged.wire,
+          "sessionRespondToApprovalRequest",
+        ),
+      ).toEqual([]);
+    });
+    await withFleet(async (arranged) => {
+      const asking = await startQuestionSession(arranged);
+      await archive(arranged, asking.id);
+
+      await expectArchivedRefusal(
+        await respondToQuestion(arranged, asking.id, { requestId: REQUEST_ID, answers: ANSWERS }),
+      );
+      expect(
+        listFrames<SessionRespondToQuestion>(arranged.wire, "sessionRespondToQuestion"),
+      ).toEqual([]);
+    });
+  });
+
+  it("opens no Request and raises no notification for a Request it reports after it was archived", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+      await archive(arranged, session.id);
+
+      reportEvent(arranged.wire, 2, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "request.opened",
+        request: {
+          requestId: REQUEST_ID,
+          itemId: "i1",
+          kind: "command_approval",
+          decisions: DECISIONS,
+          detail: { command: "ls -la" },
+        },
+      });
+
+      // The event is recorded in the stream, and opens nothing.
+      await waitUntil("recorded the late request", async () =>
+        (await readStreamRows(arranged.harness, session.id)).find(
+          (row) => row.tag === "request.opened",
+        ),
+      );
+      expect((await readSession(arranged, session.id)).openRequests).toEqual([]);
+      expect(await readApprovalNotifications(arranged, session.id)).toEqual([]);
     });
   });
 

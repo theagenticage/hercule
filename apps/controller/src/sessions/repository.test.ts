@@ -560,6 +560,7 @@ describe("the kind of a session", () => {
         runId: undefined,
         conversationId: undefined,
         activeSince: undefined,
+        workspaceId: undefined,
         doneSince: undefined,
       });
       return page.items.map((one) => one.id);
@@ -670,6 +671,7 @@ describe("listing the sessions on one profile", () => {
           runId: undefined,
           conversationId: undefined,
           activeSince: undefined,
+          workspaceId: undefined,
           doneSince: undefined,
         });
         return { listed: page.items, profileId, live };
@@ -700,6 +702,7 @@ describe("listing the sessions of runs", () => {
         runId,
         conversationId: undefined,
         activeSince: undefined,
+        workspaceId: undefined,
         doneSince: undefined,
       });
       return page.items.map((one) => one.id);
@@ -719,6 +722,65 @@ describe("listing the sessions of runs", () => {
           second,
           one: yield* listByRun(runA),
           several: yield* listByRun([runA, runB]),
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(one).toEqual([first]);
+    expect(several).toEqual([first, second]);
+  });
+});
+
+describe("listing the sessions of workspaces", () => {
+  /** Lists every session placed in `workspaceId`, or in one of them, oldest first. */
+  const listByWorkspaces = (workspaceId: string | ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        kind: undefined,
+        workspaceId,
+        done: undefined,
+        archived: undefined,
+        runId: undefined,
+        conversationId: undefined,
+        activeSince: undefined,
+        doneSince: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  it("returns the sessions placed in one of the workspaces, and no other rows", async () => {
+    const { first, second, one, several } = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const [workspaceA, workspaceB, workspaceC] = [mintId(), mintId(), mintId()];
+        const first = yield* insertSession(mintId());
+        const second = yield* insertSession(mintId());
+        const third = yield* insertSession(mintId());
+        // A session in no workspace, which no list holds.
+        yield* insertSession(mintId());
+        for (const [sessionId, workspaceId] of [
+          [first, workspaceA],
+          [second, workspaceB],
+          [third, workspaceC],
+        ] as const) {
+          yield* sql`
+            UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
+            WHERE id = ${uuidFromString(sessionId)}
+          `;
+        }
+        return {
+          first,
+          second,
+          one: yield* listByWorkspaces(workspaceA),
+          several: yield* listByWorkspaces([workspaceA, workspaceB]),
         };
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
@@ -771,6 +833,7 @@ describe("listing the sessions active since an instant", () => {
           runId: undefined,
           conversationId: undefined,
           activeSince: instant,
+          workspaceId: undefined,
           doneSince: undefined,
         });
         ids.push(...page.items.map((one) => one.id));
@@ -826,6 +889,7 @@ describe("listing the sessions active since an instant", () => {
             runId: undefined,
             conversationId: undefined,
             activeSince: instant,
+            workspaceId: undefined,
             doneSince: undefined,
           })
           .pipe(
@@ -1131,6 +1195,7 @@ describe("the archived mark of a session", () => {
         runId: undefined,
         conversationId: undefined,
         activeSince: undefined,
+        workspaceId: undefined,
         doneSince: undefined,
       });
       return page.items.map((one) => one.id);

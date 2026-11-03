@@ -484,6 +484,7 @@ const RESOLVES: Record<string, string> = {
   "session.continue id": "session.query",
   "session.markDone sessionIds": "session.query",
   "session.archive sessionIds": "session.query",
+  "session.query workspaceId": "workspace.query",
   "session.reopen sessionIds": "session.query",
 
   "input.query id": "session.query",

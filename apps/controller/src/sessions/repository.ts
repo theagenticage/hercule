@@ -249,6 +249,8 @@ export interface SessionPageRequest {
   readonly runId: string | ReadonlyArray<string> | undefined;
   /** Only the sessions of these kinds. */
   readonly kind: SessionKind | ReadonlyArray<SessionKind> | undefined;
+  /** Only the sessions placed in this workspace, or in one of these workspaces. */
+  readonly workspaceId: string | ReadonlyArray<string> | undefined;
   /** `true` lists only the Threads marked Done; `false` lists every session that is not. */
   readonly done: boolean | undefined;
   /** `true` lists only the archived sessions; `false` lists every session that is not. */
@@ -792,6 +794,13 @@ const make = Effect.gen(function* () {
             typeof request.kind === "string"
               ? sql`kind = ${request.kind}`
               : sql`kind IN ${sql.in(request.kind)}`,
+          );
+        }
+        if (request.workspaceId !== undefined) {
+          clauses.push(
+            typeof request.workspaceId === "string"
+              ? sql`workspace_id = ${uuidFromString(request.workspaceId)}`
+              : sql`workspace_id IN ${sql.in(request.workspaceId.map(uuidFromString))}`,
           );
         }
         if (request.done !== undefined) {

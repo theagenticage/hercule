@@ -359,6 +359,7 @@ const make = Effect.gen(function* () {
                 done: undefined,
                 archived: undefined,
                 activeSince: undefined,
+                workspaceId: undefined,
                 doneSince: undefined,
               }),
             );

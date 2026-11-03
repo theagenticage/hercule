@@ -1,8 +1,7 @@
 /**
  * Integration tests for removing the workspace of archived Threads (spec 03
- * section 6.9). The test plays the runner. Threads are archived by writing the
- * rows `session.archive` writes, because that operation belongs to the
- * sessions domain; what is checked here is what the workspace does with them:
+ * section 6.9). The test plays the runner, and Threads are archived through
+ * `session.archive`. What is checked here is what the workspace does with them:
  *
  * - the sweep and `workspace.dispose` remove an archived workspace whole,
  *   and list the archived sessions whose harness files go with it;
@@ -15,20 +14,21 @@ import { Duration, Effect } from "effect";
 import type { Session, Workspace } from "@hercule/contract";
 import { ARCHIVED_SESSION_FILES_CAPABILITY, type WorkspaceDispose } from "@hercule/protocol";
 import { withTransaction } from "../../db";
-import { get, send } from "../../http/testing";
+import { get, post, send } from "../../http/testing";
 import {
   CURRENT_CAPABILITIES,
   waitUntil,
   WAIT_DEADLINE_MS,
+  waitForRunnerGone,
   type Arranged,
+  type Wire,
 } from "../../sessions/testing";
 import {
   ageLeases,
-  archiveSessions,
+  createRepo,
   endResumable,
   listFramesTagged,
   readWorkspace,
-  returnToAutomaticCleanup,
   spawnThread,
   withFleet,
 } from "../../workspaces/testing";
@@ -63,27 +63,47 @@ const listDisposals = (arranged: Arranged, workspaceId: string): ReadonlyArray<W
     (frame) => frame["workspaceId"] === workspaceId,
   ) as unknown as ReadonlyArray<WorkspaceDispose>;
 
+/** Waits until the runner has been sent the first dispose frame for the workspace, and returns it. */
+const waitForDisposal = (arranged: Arranged, workspaceId: string): Promise<WorkspaceDispose> =>
+  waitUntil(
+    "asked the runner to remove the workspace",
+    () => listDisposals(arranged, workspaceId)[0],
+  );
+
+/** Has the user archive these Threads, through `session.archive`. */
+const archiveThreads = async (arranged: Arranged, sessionIds: ReadonlyArray<string>) => {
+  const response = await post(
+    arranged.harness.base,
+    "/api/v1/sessions/archive",
+    { sessionIds },
+    arranged.token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+};
+
 /**
  * Starts a Thread in a workspace of its own, ends it so that its lease is
- * released, and archives it the way `session.archive` does: the session is
- * marked, and the workspace goes back to automatic cleanup. Returns the
- * session, with its native session id bound.
+ * released, and archives it. Returns the session, with its native session id
+ * bound.
  */
 const archiveThread = async (arranged: Arranged, count: number): Promise<Session> => {
   const thread = await spawnThread(arranged, { kind: "ephemeral", checkouts: [] }, count);
   await endResumable(arranged, thread);
-  await archiveSessions(arranged, [thread.id]);
-  await returnToAutomaticCleanup(arranged, thread.workspaceId!);
+  await archiveThreads(arranged, [thread.id]);
   return await readSession(arranged, thread.id);
 };
 
-/** Has the user dispose of the workspace without asking to discard anything. */
-const disposeWorkspace = async (arranged: Arranged, workspaceId: string): Promise<void> => {
+/** Has the user dispose of the workspace, discarding changes only when asked to. */
+const disposeWorkspace = async (
+  arranged: Arranged,
+  workspaceId: string,
+  discardChanges?: boolean,
+): Promise<void> => {
   const response = await send(
     "DELETE",
     arranged.harness.base,
     `/api/v1/workspaces/${workspaceId}`,
-    { token: arranged.token },
+    { token: arranged.token, ...(discardChanges ? { body: { discardChanges } } : {}) },
   );
   expect(response.status, await response.clone().text()).toBe(200);
 };
@@ -93,8 +113,9 @@ const confirmDeleted = async (
   arranged: Arranged,
   frame: WorkspaceDispose,
   warnings: ReadonlyArray<string>,
+  wire: Wire = arranged.wire,
 ): Promise<Workspace> => {
-  arranged.wire.send({
+  wire.send({
     _tag: "workspaceReport",
     workspaceId: frame.workspaceId,
     requestId: frame.requestId!,
@@ -186,13 +207,16 @@ describe("workspace.dispose on an archived workspace", () => {
           const archived = await archiveThread(arranged, 1);
           const workspaceId = archived.workspaceId!;
           await disposeWorkspace(arranged, workspaceId);
-          const [frame] = listDisposals(arranged, workspaceId);
-          expect(frame!.discardChanges).toBe(true);
-          expect(frame!.archivedSessions).toMatchObject([{ nativeSessionId: "native-1" }]);
+          const frame = await waitForDisposal(arranged, workspaceId);
+          expect(frame.discardChanges).toBe(true);
+          expect(frame.archivedSessions).toMatchObject([{ nativeSessionId: "native-1" }]);
           // Asking again while the removal is pending finds the same removal.
           await disposeWorkspace(arranged, workspaceId);
-          expect(listDisposals(arranged, workspaceId).at(-1)).toEqual(frame);
-          expect((await confirmDeleted(arranged, frame!, [])).warnings).toEqual([]);
+          const again = await waitUntil("sent the pending removal again", () =>
+            listDisposals(arranged, workspaceId).at(1),
+          );
+          expect(again).toEqual(frame);
+          expect((await confirmDeleted(arranged, frame, [])).warnings).toEqual([]);
         },
         { capabilities: WITH_FILES },
       );
@@ -214,8 +238,8 @@ describe("workspace.dispose on an archived workspace", () => {
                 WHERE id = unhex(replace(${archived.providerAccountId}, '-', ''))`,
           );
           await disposeWorkspace(arranged, archived.workspaceId!);
-          const [frame] = listDisposals(arranged, archived.workspaceId!);
-          expect(frame!.archivedSessions).toMatchObject([{ harnessHome: "providers/old-login" }]);
+          const frame = await waitForDisposal(arranged, archived.workspaceId!);
+          expect(frame.archivedSessions).toMatchObject([{ harnessHome: "providers/old-login" }]);
         },
         { capabilities: WITH_FILES },
       );
@@ -236,10 +260,10 @@ describe("workspace.dispose on an archived workspace", () => {
                 WHERE id = unhex(replace(${archived.id}, '-', ''))`,
           );
           await disposeWorkspace(arranged, archived.workspaceId!);
-          const [frame] = listDisposals(arranged, archived.workspaceId!);
-          expect(frame!.discardChanges).toBe(true);
+          const frame = await waitForDisposal(arranged, archived.workspaceId!);
+          expect(frame.discardChanges).toBe(true);
           expect(frame).not.toHaveProperty("archivedSessions");
-          const gone = await confirmDeleted(arranged, frame!, []);
+          const gone = await confirmDeleted(arranged, frame, []);
           expect(gone.warnings).toEqual([
             "The harness's files of 1 archived session were kept: their account was deleted.",
           ]);
@@ -251,7 +275,7 @@ describe("workspace.dispose on an archived workspace", () => {
   );
 
   it(
-    "keeps asking safely for a workspace that still has a Thread that is not archived",
+    "lists the archived sessions of a workspace that still has a Thread that is not archived, and does not discard changes unasked",
     async () => {
       await withFleet(
         async (arranged) => {
@@ -259,7 +283,7 @@ describe("workspace.dispose on an archived workspace", () => {
           const workspaceId = first.workspaceId!;
           await endResumable(arranged, first);
           const second = await spawnThread(arranged, { kind: "existing", workspaceId }, 2);
-          await archiveSessions(arranged, [first.id]);
+          await archiveThreads(arranged, [first.id]);
           // The second Thread is still working, so the workspace is refused.
           const refused = await send(
             "DELETE",
@@ -270,7 +294,81 @@ describe("workspace.dispose on an archived workspace", () => {
           expect(refused.status).toBe(409);
           await endResumable(arranged, second);
           await disposeWorkspace(arranged, workspaceId);
-          const [frame] = listDisposals(arranged, workspaceId);
+          const frame = await waitForDisposal(arranged, workspaceId);
+          expect(frame).not.toHaveProperty("discardChanges");
+          expect(frame.archivedSessions).toMatchObject([{ nativeSessionId: "native-1" }]);
+        },
+        { capabilities: WITH_FILES },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "lists only the archived session when the user discards the changes of a workspace shared with a Thread that is not archived",
+    async () => {
+      await withFleet(
+        async (arranged) => {
+          const first = await spawnThread(arranged, { kind: "ephemeral", checkouts: [] }, 1);
+          const workspaceId = first.workspaceId!;
+          await endResumable(arranged, first);
+          const second = await spawnThread(arranged, { kind: "existing", workspaceId }, 2);
+          await endResumable(arranged, second);
+          await archiveThreads(arranged, [first.id]);
+          await disposeWorkspace(arranged, workspaceId, true);
+          const frame = await waitForDisposal(arranged, workspaceId);
+          expect(frame.discardChanges).toBe(true);
+          expect(frame.archivedSessions).toHaveLength(1);
+        },
+        { capabilities: WITH_FILES },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "sends a removal reserved for a runner with the capability, without the list, to an older runner that connects, and warns",
+    async () => {
+      await withFleet(
+        async (arranged) => {
+          const archived = await archiveThread(arranged, 1);
+          const workspaceId = archived.workspaceId!;
+          await disposeWorkspace(arranged, workspaceId);
+          const reserved = await waitForDisposal(arranged, workspaceId);
+          expect(reserved.archivedSessions).toHaveLength(1);
+
+          arranged.wire.close();
+          await waitForRunnerGone(arranged);
+          const older = await arranged.reconnect({ capabilities: WITHOUT_FILES });
+          older.send({ _tag: "sessionsReport", sessions: [] });
+          const replayed = await waitUntil(
+            "replayed the pending removal to the older runner",
+            () => listFramesTagged(older, "workspaceDispose")[0] as WorkspaceDispose | undefined,
+          );
+          expect(replayed.requestId).toBe(reserved.requestId);
+          expect(replayed.discardChanges).toBe(true);
+          expect(replayed).not.toHaveProperty("archivedSessions");
+          const gone = await confirmDeleted(arranged, replayed, [], older);
+          expect(gone.warnings).toEqual([RUNNER_TOO_OLD]);
+        },
+        { capabilities: WITH_FILES },
+      );
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "neither discards changes nor lists archived sessions for a main workspace, which keeps its harness files",
+    async () => {
+      await withFleet(
+        async (arranged) => {
+          const resourceId = await createRepo(arranged, "https://github.com/o/main.git");
+          const thread = await spawnThread(arranged, { kind: "primary", resourceId }, 1);
+          const workspaceId = thread.workspaceId!;
+          await endResumable(arranged, thread);
+          await archiveThreads(arranged, [thread.id]);
+          await disposeWorkspace(arranged, workspaceId);
+          const frame = await waitForDisposal(arranged, workspaceId);
           expect(frame).not.toHaveProperty("discardChanges");
           expect(frame).not.toHaveProperty("archivedSessions");
         },

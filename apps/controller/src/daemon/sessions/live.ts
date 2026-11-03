@@ -684,13 +684,14 @@ const make = Effect.gen(function* () {
 
   /**
    * Reads the session `id` and finds `requestId` among the Requests it waits
-   * on. Fails with `InvalidState` when the session has exited, waits on no
-   * Request, or does not wait on this one, and with `NotFound` when there is
-   * no such session.
+   * on. Fails with `InvalidState` when the session is archived, has exited,
+   * waits on no Request, or does not wait on this one, and with `NotFound`
+   * when there is no such session.
    */
   const readOpenRequest = (id: Id, requestId: string) =>
     Effect.gen(function* () {
       const session = yield* readSession(id);
+      yield* refuseArchived(session);
       if (session.status === "exited")
         return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
       if (session.openRequests.length === 0)
@@ -1238,7 +1239,12 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             if (dedupKey !== undefined) {
               const inputId = yield* dedupKeys.findResultId("session.input", dedupKey);
-              if (inputId !== undefined) return { _tag: "existing" as const, inputId };
+              if (inputId !== undefined) {
+                // A repeat is refused like any input once the session is
+                // archived, even though the first call was accepted.
+                yield* refuseArchived(yield* readSession(input.id));
+                return { _tag: "existing" as const, inputId };
+              }
             }
             const { session, row } = yield* storeInput(input);
             if (dedupKey !== undefined) {
@@ -1386,7 +1392,7 @@ const make = Effect.gen(function* () {
      * decision applied to the wrong request is the one mistake this operation
      * must never make. It fails when:
      *
-     * - the session has exited;
+     * - the session is archived or has exited;
      * - the session waits on no Request, or not on this one;
      * - the request is a question, or does not offer the decision (see
      *   `validateDecision`);
@@ -1416,6 +1422,8 @@ const make = Effect.gen(function* () {
           session.runnerId,
           sessions.respondingToApprovalRequest(id, requestId, decision),
           Effect.gen(function* () {
+            // The session may have been archived since it was read above.
+            yield* refuseArchived(yield* readSession(id));
             yield* audit.append({
               kind: "session.responded",
               actor,
@@ -1439,7 +1447,7 @@ const make = Effect.gen(function* () {
      *
      * Every check runs before anything is sent to the runner. It fails when:
      *
-     * - the session has exited;
+     * - the session is archived or has exited;
      * - the session waits on no Request, or not on this one;
      * - the request is an approval, or the answers do not fit its questions
      *   (see `validateAnswers`);
@@ -1486,6 +1494,8 @@ const make = Effect.gen(function* () {
               yield* withTransaction(
                 sql,
                 Effect.gen(function* () {
+                  // The session may have been archived since it was read above.
+                  yield* refuseArchived(yield* readSession(id));
                   if (!(yield* connections.holdsConnection(session.runnerId))) {
                     return yield* Effect.fail(createInvalidStateError(GONE));
                   }

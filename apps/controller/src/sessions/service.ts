@@ -1649,6 +1649,9 @@ const make = Effect.gen(function* () {
    *   through that exit. The rule is the same as for the inputs not yet sent
    *   when the session exited (`keepsInputsOnExit`, `keepsStepPromptOnExit`).
    *   `SessionObserver` is told (`cancelUndeliveredInput`).
+   * - The session was archived in the meantime. The archive cancelled only
+   *   the inputs still waiting, and an archived session takes no input, so
+   *   this one is cancelled too, whether or not the session has exited.
    * - The input is a Discussion Input. It is always cancelled with `reason`,
    *   never put back to waiting: the session is told again at the end of its
    *   next turn.
@@ -1673,9 +1676,10 @@ const make = Effect.gen(function* () {
         const now = yield* sessions.one(row.sessionId);
         const dropped =
           Option.isSome(now) &&
-          now.value.status === "exited" &&
-          !keepsInputsOnExit(now.value) &&
-          !keepsStepPromptOnExit(now.value);
+          (now.value.archived !== null ||
+            (now.value.status === "exited" &&
+              !keepsInputsOnExit(now.value) &&
+              !keepsStepPromptOnExit(now.value)));
         let waiting = false;
         if (row.source === "discussion") {
           // Nothing was marked told for a Discussion Input that was not
@@ -1785,6 +1789,7 @@ const make = Effect.gen(function* () {
           conversationId,
           runId,
           kind,
+          workspaceId,
           done,
           archived,
           activeSince,
@@ -1843,6 +1848,7 @@ const make = Effect.gen(function* () {
             conversationId,
             runId,
             kind,
+            workspaceId,
             done,
             archived,
             activeSince,
@@ -2011,41 +2017,44 @@ const make = Effect.gen(function* () {
             ];
             // The Thread an Agent session's audit entry names: the first
             // Thread the call named in its workspace.
-            const namedThreadOf = new Map<string, string>();
+            const firstNamedThreadByWorkspace = new Map<string, string>();
             for (const thread of moving) {
-              if (thread.workspaceId !== null && !namedThreadOf.has(thread.workspaceId)) {
-                namedThreadOf.set(thread.workspaceId, thread.id);
+              if (
+                thread.workspaceId !== null &&
+                !firstNamedThreadByWorkspace.has(thread.workspaceId)
+              ) {
+                firstNamedThreadByWorkspace.set(thread.workspaceId, thread.id);
               }
             }
-            const inWorkspace = new Map<string | null, StoredSession[]>();
+            const sessionsByWorkspace = new Map<string | null, StoredSession[]>();
             for (const session of yield* sessions.listThreadsAndAgentSessionsInWorkspaces([
-              ...namedThreadOf.keys(),
+              ...firstNamedThreadByWorkspace.keys(),
             ])) {
-              const group = inWorkspace.get(session.workspaceId) ?? [];
+              const group = sessionsByWorkspace.get(session.workspaceId) ?? [];
               group.push(session);
-              inWorkspace.set(session.workspaceId, group);
+              sessionsByWorkspace.set(session.workspaceId, group);
             }
             // A workspace ends up archived when each of its Threads is
             // archived already or is archived by this call.
             const movingIds = new Set(moving.map((thread) => thread.id));
-            const archivedWorkspaces = [...namedThreadOf].filter(([workspaceId]) =>
-              (inWorkspace.get(workspaceId) ?? []).every(
+            const archivedWorkspaces = [...firstNamedThreadByWorkspace].filter(([workspaceId]) =>
+              (sessionsByWorkspace.get(workspaceId) ?? []).every(
                 (session) =>
                   session.kind !== "thread" ||
                   session.archived !== null ||
                   movingIds.has(session.id),
               ),
             );
-            const archivings = [
+            const archiveEntries = [
               ...moving.map((session) => ({ session, threadId: session.id })),
               ...archivedWorkspaces.flatMap(([workspaceId, threadId]) =>
-                (inWorkspace.get(workspaceId) ?? [])
+                (sessionsByWorkspace.get(workspaceId) ?? [])
                   .filter((session) => session.kind === "agent" && session.archived === null)
                   .map((session) => ({ session, threadId })),
               ),
             ];
-            const archiving = archivings.map(({ session }) => session);
-            const working = archiving.filter((session) =>
+            const sessionsToArchive = archiveEntries.map(({ session }) => session);
+            const working = sessionsToArchive.filter((session) =>
               WORKING_STATUSES.includes(session.status),
             );
             if (working.length > 0) {
@@ -2067,7 +2076,7 @@ const make = Effect.gen(function* () {
                 });
               }
             }
-            for (const { session, threadId } of archivings) {
+            for (const { session, threadId } of archiveEntries) {
               yield* sessions.archive(session.id, actor, at);
               yield* audit.append({
                 kind: "session.archived",
@@ -2080,6 +2089,14 @@ const make = Effect.gen(function* () {
                 payload: { sessionId: session.id, threadId },
                 at,
               });
+              // The stop that follows withdraws these too, but only when the
+              // runner is connected, and a notification nobody can answer
+              // must not outlive the archive.
+              yield* withdrawRequestNotifications(
+                session.id,
+                session.openRequests,
+                WITHDRAW_REASON_SESSION_ARCHIVED,
+              );
               yield* inputs.cancelQueued(session.id, ARCHIVED_INPUT_REASON);
               yield* subscriptions.endHeldBy(
                 { kind: "session", id: session.id },
@@ -2087,7 +2104,7 @@ const make = Effect.gen(function* () {
               );
             }
             yield* withdrawOpenPermissionRequests(
-              archiving.map((session) => session.id),
+              sessionsToArchive.map((session) => session.id),
               WITHDRAW_REASON_SESSION_ARCHIVED,
             );
             for (const [workspaceId] of archivedWorkspaces) {
@@ -2099,7 +2116,7 @@ const make = Effect.gen(function* () {
               threads: yield* Effect.forEach(input.sessionIds, (id) =>
                 Effect.map(readSession(id), composeRecord),
               ),
-              sessionsToStop: archiving.filter((session) => session.status === "idle"),
+              sessionsToStop: sessionsToArchive.filter((session) => session.status === "idle"),
             };
           }),
         );
@@ -3220,7 +3237,7 @@ const make = Effect.gen(function* () {
      * Claims the oldest input still waiting on an idle session, for a
      * delivery pass that finds the session idle. Returns `none` when:
      *
-     * - no input is waiting, or the session is not `idle`;
+     * - no input is waiting, or the session is not `idle`, or it is archived;
      * - another input of the session is sent and not yet answered: that
      *   input's turn may not have started yet, and the runner takes one input
      *   per turn;
@@ -3234,10 +3251,11 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
+          const session = Option.getOrThrow(yield* sessions.one(sessionId));
+          if (session.archived !== null) return Option.none();
           const waiting = yield* inputs.oldestWaiting(sessionId);
           if (Option.isNone(waiting)) return Option.none();
           if (waiting.value.attachments.length > 0) {
-            const session = Option.getOrThrow(yield* sessions.one(sessionId));
             const held = yield* holdInputWithRefusedAttachments(waiting.value, {
               runnerId: session.runnerId,
               providerAccountId: session.providerAccountId,
@@ -3618,6 +3636,10 @@ const make = Effect.gen(function* () {
         // An event for a session that has already exited is still recorded,
         // but changes nothing else: no Request, no subagent, no usage.
         const sessionAcceptsChanges = before !== "exited";
+        // An archived session may still run until its stop arrives. A Request
+        // it opens in that time would wait for an answer that is refused, so
+        // it is recorded in the stream and opens nothing.
+        const requestsAccepted = sessionAcceptsChanges && session.archived === null;
         const at = yield* nowIso;
         let toolCallsChanged = false;
         for (const row of folded.rows) {
@@ -3655,7 +3677,7 @@ const make = Effect.gen(function* () {
           ? yield* applySubagentEvent(session, event)
           : new Map<SubagentId, StoredSubagent>();
         let requestsChanged = false;
-        if (sessionAcceptsChanges && isRequestEvent(event)) {
+        if (requestsAccepted && isRequestEvent(event)) {
           const openRequests = computeOpenRequestsAfter(event, session.openRequests);
           requestsChanged = openRequests !== session.openRequests;
           if (requestsChanged) yield* replaceOpenRequests(session, openRequests, event, askers);
@@ -3717,6 +3739,7 @@ const make = Effect.gen(function* () {
           if (moved === "idle" && event._tag === "turn.completed") {
             const next = yield* inputs.oldestWaiting(id);
             if (
+              session.archived === null &&
               Option.isSome(next) &&
               !(yield* holdInputWithRefusedAttachments(next.value, {
                 runnerId: session.runnerId,

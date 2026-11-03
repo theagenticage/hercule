@@ -13,7 +13,6 @@
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
 import type * as Duration from "effect/Duration";
-import * as SqlClient from "effect/sql/SqlClient";
 import type { ModelDescriptor, RunnerFacts, SessionStart } from "@hercule/protocol";
 import type { Session, Workspace } from "@hercule/contract";
 import {
@@ -35,7 +34,6 @@ import {
   type Arranged,
   type Wire,
 } from "../sessions/testing";
-import { workspaceRepository } from "./repository";
 
 /** The runner facts the single runner in these fleets reports. */
 export const FACTS: RunnerFacts = {
@@ -390,51 +388,6 @@ export const ageLeases = (
     ),
   );
 };
-
-/**
- * Marks these sessions archived, as `session.archive` does to their rows. The
- * sessions domain owns that operation; a workspace test needs only its effect
- * on the rows the workspace reads.
- */
-export const archiveSessions = (
-  arranged: Arranged,
-  sessionIds: ReadonlyArray<string>,
-): Promise<unknown> =>
-  Effect.runPromise(
-    Effect.orDie(
-      withTransaction(
-        arranged.harness.sql,
-        Effect.forEach(
-          sessionIds,
-          (id) =>
-            arranged.harness.sql`
-              UPDATE sessions SET archived_at = ${REPORTED_AT}, archived_by = 'user'
-              WHERE id = unhex(replace(${id}, '-', ''))`,
-          { discard: true },
-        ),
-      ),
-    ),
-  );
-
-/**
- * Gives a workspace back to automatic cleanup through the repository, which
- * is what `session.archive` does once every Thread in it is archived.
- */
-export const returnToAutomaticCleanup = (
-  arranged: Arranged,
-  workspaceId: string,
-  windowDays = 7,
-): Promise<unknown> =>
-  Effect.runPromise(
-    Effect.orDie(
-      withTransaction(
-        arranged.harness.sql,
-        Effect.flatMap(workspaceRepository, (repository) =>
-          repository.returnToAutomaticCleanup(workspaceId, windowDays * 24 * 60 * 60 * 1000),
-        ),
-      ).pipe(Effect.provideService(SqlClient.SqlClient, arranged.harness.sql)),
-    ),
-  );
 
 /**
  * Returns how many lease rows a workspace has, active or released. No API

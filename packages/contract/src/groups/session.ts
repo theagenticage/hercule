@@ -826,6 +826,16 @@ export const SessionRunFilter = Schema.Union([Id, Schema.NonEmptyArray(Id)]);
  */
 export const SessionKindFilter = Schema.Union([SessionKind, Schema.NonEmptyArray(SessionKind)]);
 
+/**
+ * One workspace's id, or several, at most one page of them. A client that
+ * archives a sidebar row reads the Threads of its workspace in one read. The
+ * query string carries several as repeated `workspaceId` keys.
+ */
+export const SessionWorkspaceFilter = Schema.Union([
+  Id,
+  atMost(Id, MAX_PAGE_LIMIT).check(Schema.isMinLength(1)),
+]);
+
 export const SessionFilter = Schema.Struct({
   status: Schema.optionalKey(SessionStatusFilter),
   runnerId: Schema.optionalKey(Id),
@@ -839,6 +849,8 @@ export const SessionFilter = Schema.Struct({
   runId: Schema.optionalKey(SessionRunFilter),
   /** Only the sessions of these kinds. */
   kind: Schema.optionalKey(SessionKindFilter),
+  /** Only the sessions placed in this workspace, or in one of these workspaces. */
+  workspaceId: Schema.optionalKey(SessionWorkspaceFilter),
   /**
    * `true` lists only the Threads marked Done; `false` lists only the
    * sessions that are not, which is every session that is not a Thread too.

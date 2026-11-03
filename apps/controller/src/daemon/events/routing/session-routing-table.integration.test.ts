@@ -94,6 +94,9 @@ describe("the session routing table's sweep", () => {
       const agent = await spawnSubscriber(arranged, "archived-holder");
       const subscriptionId = await subscribeThread(arranged, agent, REF);
       await endPromptTurn(arranged, agent);
+      // Written by hand, not through `session.archive`: the real archive deletes
+      // the session's subscriptions itself, and this test is about the sweep that
+      // ends one that survives (for example, one created after the archive).
       await runEffect(
         withTransaction(
           arranged.harness.sql,

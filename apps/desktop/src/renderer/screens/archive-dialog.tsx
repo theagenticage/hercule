@@ -1,13 +1,14 @@
-import { useRef, type JSX } from "react";
+import { useEffect, useRef, type JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
+import { readErrorMessage } from "@hercule/client-core";
+import { useDoneMoves } from "../app/done-moves";
 import { settingsQuery } from "../app/queries";
 import { ConfirmDialog } from "./confirm-dialog";
 
 /**
- * How many days the dialog says an archived workspace is kept when the
- * controller's settings are not in the cache. It is the controller's default
- * for `workspace.archivedTtlDays`.
+ * How many days an archived workspace is kept when the controller's settings
+ * do not set `workspace.archivedTtlDays`: the controller's default.
  */
 const DEFAULT_KEPT_DAYS = 7;
 
@@ -18,14 +19,17 @@ const DEFAULT_KEPT_DAYS = 7;
  * workspace afterwards. Keep it closes the dialog and has the focus, so a
  * stray Enter does not archive.
  *
+ * The days are the controller's `workspace.archivedTtlDays`, so the dialog
+ * reads the controller's settings when it mounts, which is when the user
+ * starts the archive, and draws nothing until it has them. The settings are
+ * usually cached, so that is no wait. When the read fails, the dialog never
+ * shows: the failure shows as an alert toast, like any other failed move,
+ * and `onClose` is called.
+ *
  * Archive calls `onConfirm` and closes the dialog. The caller sends the
  * request and shows the controller's answer or refusal as a toast, so the
  * dialog does not wait for it. `onClose` is called whenever the dialog
  * closes, and the caller then unmounts it.
- *
- * The days are the controller's `workspace.archivedTtlDays` when the
- * settings are already in the cache. The dialog makes no read of its own, so
- * it falls back to the controller's default of 7 when they are not.
  */
 export function ArchiveDialog({
   title,
@@ -35,11 +39,18 @@ export function ArchiveDialog({
   readonly title: string;
   readonly onConfirm: () => void;
   readonly onClose: () => void;
-}): JSX.Element {
+}): JSX.Element | null {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { toasts } = useDoneMoves();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const settings = useQuery({ ...settingsQuery(client), enabled: false }).data;
-  const days = settings?.controller["workspace.archivedTtlDays"] ?? DEFAULT_KEPT_DAYS;
+  const { data: settings, error } = useQuery(settingsQuery(client));
+  useEffect(() => {
+    if (error === null) return;
+    toasts.showFailure(`Couldn't archive: ${readErrorMessage(error)}`, null);
+    onClose();
+  }, [error, toasts, onClose]);
+  if (settings === undefined) return null;
+  const days = settings.controller["workspace.archivedTtlDays"] ?? DEFAULT_KEPT_DAYS;
   return (
     <ConfirmDialog
       dialogRef={dialogRef}

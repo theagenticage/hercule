@@ -119,6 +119,8 @@ export interface GroupRow {
   readonly key: string;
   /** The project the row sits under: the lead's, or `null` when the lead has none or its project no longer exists. */
   readonly projectId: string | null;
+  /** The workspace the row's sessions work in, or `null` for a Thread with no workspace, which is a row of its own. */
+  readonly workspaceId: string | null;
   /** The session the row opens: the lead. */
   readonly leadId: string;
   /** The row's name: the lead's title. */
@@ -331,6 +333,7 @@ export const describeGroupRows = ({
     return {
       key: group.key,
       projectId,
+      workspaceId: group.lead.workspaceId,
       leadId: group.lead.id,
       title: group.lead.title,
       pose: statusMember.pose,

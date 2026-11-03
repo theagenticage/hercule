@@ -252,6 +252,7 @@ describe("the desktop workflow list's keys", () => {
     const live = queryKeys.sessions({
       kind: ["agent", "run", "assistant"],
       status: LIVE_SESSION_STATUSES,
+      archived: false,
     });
     assert.isTrue(buildQueryKeys("session", ["s1"]).some((key) => isPrefixOf(key, live)));
   });

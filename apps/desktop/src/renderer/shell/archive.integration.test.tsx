@@ -27,6 +27,9 @@ import {
 
 const ARCHIVE_PATH = "/api/v1/sessions/archive";
 const ARCHIVED_AT = "2026-11-02T12:00:00.000Z";
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** A day before the test started: Done times count up from here, a minute for each Thread number. */
+const DONE_BASE_MS = Date.now() - DAY_MS;
 
 beforeEach(() => {
   stubElementSize(272, 800);
@@ -39,8 +42,9 @@ const PLAIN_THREAD = SIDEBAR_FIXTURE.threads.find(
 
 /**
  * Returns a Thread "Thread <number>" in no workspace, marked Done `number`
- * minutes after 09:00, so a higher number is a more recent Done. `over`
- * changes its fields, such as `status: "busy"`.
+ * minutes after `DONE_BASE_MS`, so a higher number is a more recent Done and
+ * the sidebar's read, which leaves out Threads Done over 14 days ago, holds
+ * it. `over` changes its fields, such as `status: "busy"`.
  */
 const buildDoneThread = (number: number, over: Partial<Session> = {}): Session => ({
   ...PLAIN_THREAD,
@@ -48,9 +52,20 @@ const buildDoneThread = (number: number, over: Partial<Session> = {}): Session =
   title: `Thread ${String(number)}`,
   createdAt: "2026-09-10T08:00:00.000Z",
   lastActivityAt: "2026-09-10T08:00:00.000Z",
-  done: { at: new Date(Date.UTC(2026, 8, 10, 9, number)).toISOString(), by: "user" },
+  done: { at: new Date(DONE_BASE_MS + number * 60_000).toISOString(), by: "user" },
   ...over,
 });
+
+/**
+ * Returns a Thread of the workspace `workspaceId`, marked Done 20 days ago.
+ * The sidebar's read leaves it out, so no row holds it, but the workspace
+ * does.
+ */
+const buildOldDoneThread = (number: number, workspaceId: string): Session =>
+  buildDoneThread(number, {
+    workspaceId,
+    done: { at: new Date(Date.now() - 20 * DAY_MS).toISOString(), by: "user" },
+  });
 
 /** The ids an archive request carries. */
 const readSessionIds = (call: Call): readonly string[] =>
@@ -89,9 +104,22 @@ const startApp = async (
         () => ({ body: threads.find((session) => session.id === each.id) }),
       ]),
     ),
-    "GET /api/v1/sessions": () => ({
-      body: { items: threads.filter((session) => session.archived === undefined) },
-    }),
+    // The controller's filters that archiving relies on: not archived, the Threads of the named
+    // workspaces, and, for the sidebar's read, no Thread Done before `doneSince`.
+    "GET /api/v1/sessions": (call) => {
+      const search = new URLSearchParams(call.search);
+      const workspaceIds = search.getAll("workspaceId");
+      const doneSince = search.get("doneSince");
+      const items = threads.filter(
+        (session) =>
+          session.archived === undefined &&
+          (workspaceIds.length === 0 || workspaceIds.includes(session.workspaceId ?? "")) &&
+          (doneSince === null ||
+            session.done === undefined ||
+            Date.parse(session.done.at) >= Date.parse(doneSince)),
+      );
+      return { body: { items } };
+    },
     [`POST ${ARCHIVE_PATH}`]:
       refuse ??
       ((call) => {
@@ -257,6 +285,132 @@ describe("archiving from the Done shelf", () => {
     expect(all.getAttribute("aria-disabled")).toBe("true");
     await userEvent.click(all);
 
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("archiving a row whose workspace holds Threads the sidebar does not list", () => {
+  const WORKSPACE_ID = THREAD_FIXTURES.finished.session.workspaceId!;
+
+  /** Returns the reads of Threads by workspace the app sent, as the workspace ids each carried. */
+  const readWorkspaceReads = (calls: readonly Call[]): readonly (readonly string[])[] =>
+    calls
+      .filter((call) => call.method === "GET" && call.path === "/api/v1/sessions")
+      .map((call) => new URLSearchParams(call.search).getAll("workspaceId"))
+      .filter((ids) => ids.length > 0);
+
+  it("archives the old Done sibling with the row from the Done shelf", async () => {
+    const recent = buildDoneThread(2, { workspaceId: WORKSPACE_ID });
+    const old = buildOldDoneThread(1, WORKSPACE_ID);
+    const { nav, calls } = await startApp([old, recent]);
+    await openShelf(nav);
+
+    await userEvent.click(within(nav).getByRole("button", { name: "Archive" }));
+    await userEvent.click(
+      within(await findConfirmation("Archive Thread 2?")).getByRole("button", { name: "Archive" }),
+    );
+
+    expect(await screen.findByText("Archived")).toBeTruthy();
+    expect(readArchiveRequests(calls)).toEqual([[recent.id, old.id]]);
+    expect(readWorkspaceReads(calls)).toEqual([[WORKSPACE_ID]]);
+  });
+
+  it("archives it from the open thread's header too, reading the workspace only once the user confirms", async () => {
+    const open = { ...THREAD_FIXTURES.finished.session };
+    const old = buildOldDoneThread(1, WORKSPACE_ID);
+    const { calls } = await startApp([old, open], {
+      path: `/threads/${open.id}`,
+      handlers: buildThreadHandlers(THREAD_FIXTURES.finished),
+    });
+    const header = await screen.findByRole("banner");
+
+    await userEvent.click(await within(header).findByRole("button", { name: "More" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Archive…", hidden: true }));
+    const dialog = await findConfirmation("Archive Bump the Bun pin?");
+    expect(readWorkspaceReads(calls)).toEqual([]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+
+    expect(await screen.findByText("Archived")).toBeTruthy();
+    expect(readArchiveRequests(calls)).toEqual([[open.id, old.id]]);
+  });
+
+  it("archives the old siblings of every row with Archive all, reading all the workspaces at once", async () => {
+    const other = SIDEBAR_FIXTURE.workspaces.find((each) => each.id !== WORKSPACE_ID)!.id;
+    const first = buildDoneThread(2, { workspaceId: WORKSPACE_ID });
+    const second = buildDoneThread(3, { workspaceId: other });
+    const firstOld = buildOldDoneThread(1, WORKSPACE_ID);
+    const secondOld = buildOldDoneThread(4, other);
+    const { nav, calls } = await startApp([firstOld, first, second, secondOld]);
+    await openShelf(nav);
+
+    await userEvent.click(within(nav).getByRole("button", { name: "Archive all" }));
+    await userEvent.click(
+      within(await findConfirmation("Archive 2 rows?")).getByRole("button", { name: "Archive" }),
+    );
+
+    expect(await screen.findByText("Archived 2")).toBeTruthy();
+    expect(readArchiveRequests(calls)).toEqual([[first.id, firstOld.id, second.id, secondOld.id]]);
+    expect(readWorkspaceReads(calls)).toHaveLength(1);
+    expect([...readWorkspaceReads(calls)[0]!].sort()).toEqual([WORKSPACE_ID, other].sort());
+  });
+
+  it("applies the 500 Thread limit to the complete rows, so a row that grew past it waits", async () => {
+    const lone = Array.from({ length: 498 }, (_, index) => buildDoneThread(index + 1));
+    // The sidebar holds one Thread of this row, so the 499 fit; with its two hidden siblings the row has 3.
+    const row = [
+      buildDoneThread(600, { workspaceId: WORKSPACE_ID }),
+      buildOldDoneThread(601, WORKSPACE_ID),
+      buildOldDoneThread(602, WORKSPACE_ID),
+    ];
+    const { nav, calls } = await startApp([...lone, ...row]);
+    await openShelf(nav);
+
+    await userEvent.click(within(nav).getByRole("button", { name: "Archive all" }));
+    await userEvent.click(
+      within(await findConfirmation("Archive 499 rows?")).getByRole("button", {
+        name: "Archive",
+      }),
+    );
+
+    expect(await screen.findByText("Archived 498. 1 row left.")).toBeTruthy();
+    const [sent] = readArchiveRequests(calls);
+    expect(sent).toHaveLength(498);
+    expect(sent).not.toContain(row[0]!.id);
+  });
+});
+
+describe("the archive confirmation's retention", () => {
+  it("says the real number of days, and 1 day in the singular", async () => {
+    const { nav } = await startApp([buildDoneThread(1)], {
+      handlers: {
+        "GET /api/v1/settings": {
+          body: { controller: { "workspace.archivedTtlDays": 1 }, user: {} },
+        },
+      },
+    });
+    await openShelf(nav);
+
+    await userEvent.click(within(nav).getByRole("button", { name: "Archive" }));
+
+    const dialog = await findConfirmation("Archive Thread 1?");
+    expect(dialog.textContent).toContain("once nobody has used it for 1 day, files");
+  });
+
+  it("shows the failure, and no dialog, when the settings cannot be read", async () => {
+    const { nav } = await startApp([buildDoneThread(1)], {
+      handlers: {
+        "GET /api/v1/settings": {
+          status: 500,
+          body: buildErrorBody("internal", "The settings are unreadable."),
+        },
+      },
+    });
+    await openShelf(nav);
+
+    await userEvent.click(within(nav).getByRole("button", { name: "Archive" }));
+
+    const toast = await screen.findByText("Couldn't archive: The settings are unreadable.");
+    expect(toast.parentElement!.getAttribute("role")).toBe("alert");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

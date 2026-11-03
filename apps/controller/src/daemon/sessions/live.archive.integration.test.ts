@@ -23,6 +23,7 @@ import {
   createProfile,
   listFrames,
   listInputs,
+  readApprovalNotifications,
   readProfileNamed,
   readSession,
   reportEvent,
@@ -471,6 +472,52 @@ describe("session.archive", () => {
           reason: "The session was archived before the request was answered.",
         }),
       ]);
+    });
+  });
+
+  it("withdraws the approval notification of a subagent's open Request even when the runner is not connected", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await spawnThread(arranged, SCRATCH_WORKSPACE, 1);
+      const base = (subagentId?: string) => ({
+        eventId: crypto.randomUUID(),
+        sessionId: thread.id,
+        at,
+        ...(subagentId === undefined ? {} : { subagentId }),
+      });
+      reportEvent(arranged.wire, 2, { ...base(), _tag: "turn.started", turnId: "t1" });
+      reportEvent(arranged.wire, 3, { ...base(), _tag: "subagent.started", subagentId: "a1" });
+      reportEvent(arranged.wire, 4, {
+        ...base("a1"),
+        _tag: "request.opened",
+        request: {
+          requestId: "sub-req",
+          itemId: "i1",
+          kind: "command_approval",
+          decisions: ["allow", "deny"],
+          detail: { command: "ls" },
+        },
+      });
+      // The Thread's own turn ends; the subagent's Request stays open.
+      reportEvent(arranged.wire, 5, {
+        ...base(),
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "completed",
+      });
+      await waitForSession(arranged, thread.id, (one) => one.status === "idle");
+      expect(
+        (await readApprovalNotifications(arranged, thread.id)).map((one) => one.status),
+      ).toEqual(["open"]);
+      arranged.wire.close();
+      await waitForRunnerGone(arranged);
+
+      await readArchived(await archive(arranged, [thread.id]));
+
+      const [notification] = await readApprovalNotifications(arranged, thread.id);
+      expect(notification!.resolution).toMatchObject({
+        kind: "withdrawn",
+        reason: "The session was archived before the request was answered.",
+      });
     });
   });
 

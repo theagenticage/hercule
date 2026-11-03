@@ -82,7 +82,7 @@ const make = Effect.gen(function* () {
           const found = yield* workspaces.sweepable(id);
           if (found === undefined) return undefined;
           const frame = yield* workspaces.reserveDisposal(found.workspace, SYSTEM_ACTOR, {
-            expired: found.expired,
+            sweep: { expired: found.expired },
           });
           return { runnerId: found.workspace.runnerId, frame };
         }),

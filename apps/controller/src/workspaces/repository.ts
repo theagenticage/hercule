@@ -152,18 +152,11 @@ export const buildReadyClause = (alias: string): string =>
 /** The statuses a workspace can still leave. Every other status is final. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed', 'disposing')";
 
-/**
- * An archived session that has files in its Harness Home, with what the
- * controller needs to name that home.
- */
-export interface ArchivedSessionFiles {
+/** An archived session with a native session id, as its workspace's removal needs it. */
+export interface StoredArchivedSession {
   readonly harnessId: string;
   readonly nativeSessionId: string;
   readonly providerAccountId: string;
-  readonly legacyHomeFolder: string | null;
-  readonly legacyHomeHarnessId: string | null;
-  /** True when the session's provider account was deleted, so its Harness Home cannot be named. */
-  readonly accountDeleted: boolean;
 }
 
 /**
@@ -429,6 +422,20 @@ const make = Effect.gen(function* () {
         );
       }),
 
+    /**
+     * Adds a warning to the pending removal of a workspace, once, so it is
+     * stored on the workspace when the removal is confirmed. Does nothing when
+     * the workspace is not being removed.
+     */
+    addRemovalWarning: (id: string, warning: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE workspaces SET disposal_audit = json_set(disposal_audit, '$.warnings',
+              json(json_insert(COALESCE(json_extract(disposal_audit, '$.warnings'), '[]'), '$[#]', ${warning})))
+            WHERE id = ${uuidFromString(id)} AND status = 'disposing'
+              AND NOT EXISTS (SELECT 1 FROM json_each(COALESCE(json_extract(disposal_audit, '$.warnings'), '[]'))
+                              WHERE value = ${warning})`,
+      ),
+
     /** Restores the recorded status after refusal while keeping the intent as a retained cleanup reason. */
     refuseRemoval: (
       id: string,
@@ -445,14 +452,16 @@ const make = Effect.gen(function* () {
     /**
      * Returns whether the workspace is archived: it has at least one Thread,
      * and every Thread in it is archived. Decided from the sessions, never from
-     * a lease's retention.
+     * a lease's retention. A Thread is a session with no Agent behind it;
+     * `agent_id` is tested rather than `kind` so the query uses the
+     * `sessions_workspace` index instead of scanning every Thread.
      */
     isArchived: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly archived: number }>`
-          SELECT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)} AND kind = 'thread')
+          SELECT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)} AND agent_id IS NULL)
             AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)}
-                              AND kind = 'thread' AND archived_at IS NULL) AS archived`,
+                              AND agent_id IS NULL AND archived_at IS NULL) AS archived`,
         (rows) => rows[0]?.archived === 1,
       ),
 
@@ -461,43 +470,42 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly run: number }>`
           SELECT EXISTS (SELECT 1 FROM workspace_leases WHERE workspace_id = ${uuidFromString(workspaceId)} AND holder_kind = 'run')
-            AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)} AND kind = 'thread') AS run`,
+            AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)} AND agent_id IS NULL) AS run`,
         (rows) => rows[0]?.run === 1,
       ),
 
     /**
      * Returns up to `limit` archived sessions of the workspace that have a
-     * native session id, oldest first. A session whose provider account was
-     * deleted is returned too, flagged `accountDeleted`.
+     * native session id, oldest first, and how many such sessions the
+     * workspace has in all.
      */
-    listArchivedSessionFiles: (
+    listArchivedSessions: (
       workspaceId: string,
       limit: number,
-    ): Effect.Effect<ReadonlyArray<ArchivedSessionFiles>, SqlError> =>
+    ): Effect.Effect<
+      { readonly sessions: ReadonlyArray<StoredArchivedSession>; readonly total: number },
+      SqlError
+    > =>
       Effect.map(
         sql<{
           readonly harness_id: string;
           readonly native_session_id: string;
           readonly provider_account_id: Uint8Array;
-          readonly legacy_home_folder: string | null;
-          readonly legacy_home_harness_id: string | null;
-          readonly account_deleted: number;
+          readonly total: number;
         }>`
-          SELECT s.harness_id, s.native_session_id, s.provider_account_id, a.legacy_home_folder, a.legacy_home_harness_id,
-                 a.id IS NULL AS account_deleted
-          FROM sessions s LEFT JOIN provider_accounts a ON a.id = s.provider_account_id
-          WHERE s.workspace_id = ${uuidFromString(workspaceId)} AND s.archived_at IS NOT NULL
-            AND s.native_session_id IS NOT NULL
-          ORDER BY s.created_at, s.id LIMIT ${limit}`,
-        (rows) =>
-          rows.map((row) => ({
+          SELECT harness_id, native_session_id, provider_account_id, COUNT(*) OVER () AS total
+          FROM sessions
+          WHERE workspace_id = ${uuidFromString(workspaceId)} AND archived_at IS NOT NULL
+            AND native_session_id IS NOT NULL
+          ORDER BY created_at, id LIMIT ${limit}`,
+        (rows) => ({
+          total: rows[0]?.total ?? 0,
+          sessions: rows.map((row) => ({
             harnessId: row.harness_id,
             nativeSessionId: row.native_session_id,
             providerAccountId: uuidToString(row.provider_account_id),
-            legacyHomeFolder: row.legacy_home_folder,
-            legacyHomeHarnessId: row.legacy_home_harness_id,
-            accountDeleted: row.account_deleted === 1,
           })),
+        }),
       ),
 
     /**
@@ -526,7 +534,7 @@ const make = Effect.gen(function* () {
           WHERE workspace_id = ${uuidFromString(workspaceId)} AND released_at IS NOT NULL
             AND NOT (${sql.literal(NO_RETENTION_CLAUSE)})
             AND holder_kind = 'session'
-            AND holder_id IN (SELECT id FROM sessions WHERE archived_at IS NOT NULL)
+            AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = workspace_leases.holder_id AND s.archived_at IS NOT NULL)
           RETURNING workspace_id`;
         if (policy.length > 0 || leases.length > 0) yield* announceChange(workspaceId);
       }),

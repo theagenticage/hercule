@@ -18,9 +18,10 @@ import type { Substrate } from "./substrate";
 /** The steps that remove every checkout of one workspace. */
 export interface CheckoutRemovals {
   /**
-   * What the plan found out about checkouts whose repository cannot be
-   * reached. Only changes are discarded when this is not empty: such a checkout
-   * is skipped by the steps below, and its folder is deleted with the workspace.
+   * One warning for each checkout whose Git repository cannot be found. This
+   * is not empty only when changes are discarded: such a checkout is skipped
+   * by the steps below, and its folder is deleted with the workspace. A
+   * repository that exists and refuses is never skipped.
    */
   readonly warnings: ReadonlyArray<string>;
   /** Runs `work` while holding the coordination of every repository the checkouts belong to. */
@@ -34,14 +35,10 @@ export interface CheckoutRemovals {
   /**
    * Removes each checkout and unregisters its worktree, calling `onRemoved`
    * with the path of every checkout once it is gone. Fails at the first
-   * checkout it cannot remove; the ones already removed stay removed. When
-   * changes are discarded, a checkout whose repository fails to unregister it
-   * does not fail the removal: the returned warnings name it instead. Run
+   * checkout it cannot remove; the ones already removed stay removed. Run
    * inside `coordinate`.
    */
-  readonly removeAll: (
-    onRemoved: (path: string) => void,
-  ) => Effect.Effect<ReadonlyArray<string>, Error>;
+  readonly removeAll: (onRemoved: (path: string) => void) => Effect.Effect<void, Error>;
 }
 
 const checkWorkingFiles = (
@@ -76,21 +73,15 @@ const checkWorkingFiles = (
       );
   });
 
+/** The recorded repository of a checkout no longer exists on disk. */
+class RepositoryMissing extends Error {}
+
 /**
- * A repository that would not unregister a checkout's worktree. `reason` is
- * what Git said. This is not a failure of the removal when changes are
- * discarded.
+ * Finds the repository a checkout belongs to, with its symbolic links
+ * resolved. Fails with `RepositoryMissing` when the repository's path is known
+ * and nothing is there any more. Any other failure, such as Git not being able
+ * to say where the repository is, means the repository is unknown, not gone.
  */
-class RepositoryRefused extends Error {
-  readonly reason: string;
-
-  constructor(message: string, reason: string) {
-    super(message);
-    this.reason = reason;
-  }
-}
-
-/** Finds the repository a checkout belongs to, with its symbolic links resolved. */
 const findCheckoutRepository = (
   substrate: Substrate,
   checkout: RegisteredCheckout,
@@ -112,7 +103,13 @@ const findCheckoutRepository = (
     }
     common ??= buildCacheDir(substrate.storageDir, checkout.resourceId);
     const source = common;
-    return yield* Effect.try({ try: () => realpathSync(source), catch: normalizeError });
+    return yield* Effect.try({
+      try: () => realpathSync(source),
+      catch: (error) =>
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? new RepositoryMissing(normalizeError(error).message)
+          : normalizeError(error),
+    });
   });
 
 /**
@@ -132,12 +129,18 @@ export const planCheckoutRemovals = (
     const sources = new Map<string, string>();
     const warnings: Array<string> = [];
     for (const checkout of entry.checkouts) {
-      // When changes are discarded, a repository that is gone must not keep the
-      // workspace from being removed: the checkout is skipped and reported.
+      // When changes are discarded, a repository known to be gone must not keep
+      // the workspace from being removed: the checkout is skipped and reported.
+      // A repository that cannot be determined still refuses, because it may
+      // exist and hold work that exists nowhere else.
       const canonical = yield* findCheckoutRepository(substrate, checkout).pipe(
-        Effect.catch((error) => (discardChanges ? Effect.succeed(error) : Effect.fail(error))),
+        Effect.catch((error) =>
+          discardChanges && error instanceof RepositoryMissing
+            ? Effect.succeed(error)
+            : Effect.fail(error),
+        ),
       );
-      if (canonical instanceof Error) {
+      if (canonical instanceof RepositoryMissing) {
         warnings.push(
           `The Git repository of the checkout at ${checkout.path} could not be found, so its worktree was not unregistered there. Its folder was deleted anyway.`,
         );
@@ -207,10 +210,7 @@ export const planCheckoutRemovals = (
         });
         if (!listed.ok)
           return yield* Effect.fail(
-            new RepositoryRefused(
-              `Cannot inspect the recorded worktree registration: ${listed.stderr}`,
-              listed.stderr,
-            ),
+            new Error(`Cannot inspect the recorded worktree registration: ${listed.stderr}`),
           );
         const canonicalCheckoutRoot =
           checkout.canonicalRoot ??
@@ -246,32 +246,16 @@ export const planCheckoutRemovals = (
           );
           if (!result.ok)
             return yield* Effect.fail(
-              new RepositoryRefused(
+              new Error(
                 `Git refused to remove the checkout: ${result.stderr}. Preserve its files before retrying disposal.`,
-                result.stderr,
               ),
             );
           onRemoved(checkout.path);
         }
       });
-    const removeAll = (
-      onRemoved: (path: string) => void,
-    ): Effect.Effect<ReadonlyArray<string>, Error> =>
+    const removeAll = (onRemoved: (path: string) => void): Effect.Effect<void, Error> =>
       Effect.gen(function* () {
-        const kept: Array<string> = [];
-        for (const checkout of reachable) {
-          yield* removeCheckout(checkout, onRemoved).pipe(
-            Effect.catch((error) => {
-              if (!discardChanges || !(error instanceof RepositoryRefused))
-                return Effect.fail(error);
-              kept.push(
-                `The Git repository would not unregister the worktree of the checkout at ${checkout.path}: ${error.reason}. Its folder was deleted anyway.`,
-              );
-              return Effect.void;
-            }),
-          );
-        }
-        return kept;
+        for (const checkout of reachable) yield* removeCheckout(checkout, onRemoved);
       });
     return { warnings, coordinate, preflight, removeAll };
   });

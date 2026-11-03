@@ -3777,6 +3777,11 @@ export const CLI = {
       // The removed filter that `--kind thread` replaced. The API refuses it so an
       // old client is told; the command line never offered it.
       thread: { hidden: true },
+      workspaceId: {
+        flag: "workspace",
+        help: "Only the sessions placed in this workspace, by its id or a tail of eight or more characters; repeat the flag to list the sessions of several workspaces. Find a workspace with `hercule workspace list`.",
+        resolves: "workspace.query",
+      },
       done: {
         flag: "done",
         help: "true for only the Threads marked Done, false for every session that is not; mark one with `hercule session done`.",

@@ -119,7 +119,13 @@ import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "./
 import type { LoginCommand } from "./login";
 import { SETUP_TOKEN_FOLDER_PREFIX } from "./setup-token-folder";
 import { runProcess, type Run } from "./process";
-import { readFolderNames, removeSessionFiles } from "./session-files";
+import {
+  isRealFolder,
+  readChildFolders,
+  removeEmptyFolders,
+  removeSessionFiles,
+  UUID_PATTERN,
+} from "./session-files";
 import { describeErrorAsFact, truncateFact, truncateMessage } from "./text";
 import { captureUnknownItemReporter } from "./message-reporting";
 import { buildUserMessage, ensureId } from "./events";
@@ -1918,19 +1924,31 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
     // its id in every project folder instead. What Claude Code keeps per
     // session, besides the transcript and its sidecar folder, is the
     // environment folder and the file-edit backups, both named by the id.
-    deleteSessionFiles: (home, nativeSessionId) =>
-      removeSessionFiles(nativeSessionId, async () => {
-        const projects = join(home, "projects");
-        const perProject = (await readFolderNames(projects)).flatMap((project) => [
-          join(projects, project, `${nativeSessionId}.jsonl`),
-          join(projects, project, nativeSessionId),
-        ]);
+    deleteSessionFiles: (home, nativeSessionId) => {
+      const projects = join(home, "projects");
+      let projectFolders: ReadonlyArray<string> = [];
+      return removeSessionFiles(nativeSessionId, UUID_PATTERN, async () => {
+        projectFolders = await readChildFolders(projects);
         return [
-          ...perProject,
-          join(home, "session-env", nativeSessionId),
-          join(home, "file-history", nativeSessionId),
+          ...projectFolders.flatMap((project) => [
+            join(project, `${nativeSessionId}.jsonl`),
+            join(project, nativeSessionId),
+          ]),
+          ...(
+            await Promise.all(
+              ["session-env", "file-history"].map(async (name) =>
+                (await isRealFolder(join(home, name))) ? [join(home, name, nativeSessionId)] : [],
+              ),
+            )
+          ).flat(),
         ];
-      }),
+      }).pipe(
+        // Claude Code makes one folder per working directory; without this, one
+        // empty folder per removed workspace would stay, and every later walk
+        // would read it.
+        Effect.andThen(Effect.promise(() => removeEmptyFolders(projectFolders))),
+      );
+    },
     // The config is empty for every shipped harness, so it is not read.
     generateText: (ctx, spec) =>
       // The harness is closed, and its exit awaited, before the runner

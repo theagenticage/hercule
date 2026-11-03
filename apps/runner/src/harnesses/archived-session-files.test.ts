@@ -38,7 +38,7 @@ describe("deleteHarnessSessionFiles", () => {
 
     expect(failure).toEqual({
       harnessName: "Claude Code",
-      reason: "the session id is not a valid file name",
+      reason: "the session id is not valid",
     });
   });
 });

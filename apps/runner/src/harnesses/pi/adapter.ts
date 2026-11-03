@@ -82,7 +82,12 @@ import {
   stopChild,
   type Run,
 } from "../process";
-import { removeSessionFiles } from "../session-files";
+import {
+  isRealFolder,
+  PLAIN_ID_PATTERN,
+  readFolderNames,
+  removeSessionFiles,
+} from "../session-files";
 import { truncateFact, truncateMessage } from "../text";
 import { captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
@@ -2277,9 +2282,16 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
 
     // pi keeps one file per session, its transcript.
     deleteSessionFiles: (home, nativeSessionId) =>
-      removeSessionFiles(nativeSessionId, () => {
-        const transcript = findTranscript(home, nativeSessionId);
-        return Promise.resolve(transcript === undefined ? [] : [transcript]);
+      removeSessionFiles(nativeSessionId, PLAIN_ID_PATTERN, async () => {
+        // Unlike `findTranscript`, a folder that cannot be read fails the
+        // deletion instead of reading as "no transcript", so files left behind
+        // are reported.
+        const folder = buildSessionsDir(home);
+        if (!(await isRealFolder(folder))) return [];
+        const name = (await readFolderNames(folder)).find((one) =>
+          one.endsWith(`_${nativeSessionId}.jsonl`),
+        );
+        return name === undefined ? [] : [join(folder, name)];
       }),
     generateText: generateText,
 

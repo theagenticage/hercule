@@ -13,6 +13,8 @@ import { matchQuery, QueryClientProvider, useQuery } from "@tanstack/react-query
 import {
   createClient,
   invalidateWithoutCancelling,
+  prepareSessionPresentation,
+  type GroupRow,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
@@ -48,6 +50,18 @@ const buildThread = (number: number, done = false): Session => ({
   title: `Thread ${String(number)}`,
   ...(done ? { done: { at: "2026-09-10T09:00:00.000Z", by: "user" as const } } : {}),
 });
+
+/** Returns the sidebar's row of `thread`, a Thread in no workspace, which is a row of its own. */
+const buildRow = (thread: Session): GroupRow =>
+  prepareSessionPresentation({
+    listedSessions: [thread],
+    openSession: null,
+    projects: [],
+    workspaces: [],
+    resources: [],
+    runners: [],
+    accounts: [],
+  }).groupRows[0]!;
 
 /**
  * Returns the controller's Threads, as `readThreads` answers them, with the
@@ -167,7 +181,7 @@ function Harness({
       <button
         type="button"
         onClick={() => {
-          archive(idsOf([1]), "Archived");
+          archive({ rows: [buildRow(buildThread(1))], skippedWorking: 0, leftOver: 0 });
         }}
       >
         Archive Thread 1

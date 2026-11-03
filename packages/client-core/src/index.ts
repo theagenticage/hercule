@@ -963,10 +963,13 @@ export { locateShownRequest } from "./threads/shown-request";
 export { createTypingGuard, type TypingGuard } from "./threads/typing-guard";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export {
+  buildArchiveCall,
   buildArchivedToast,
   buildArchiveTitle,
   findArchiveBlockReason,
+  listArchiveWorkspaceIds,
   planArchiveAll,
+  type ArchiveCall,
   type ArchivePlan,
 } from "./threads/archive";
 export { isMarkedDone } from "./threads/status";

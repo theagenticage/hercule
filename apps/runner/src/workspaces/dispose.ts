@@ -17,29 +17,19 @@ import type { Removal, RegisteredCheckout, RegisteredWorkspace } from "./registr
 import { isRootBoundary, removeRootBoundary } from "./root-boundary";
 import type { Substrate } from "./substrate";
 
-/** Checks whether two requests carry the same removal intent and correlation identifier. */
+/**
+ * Checks whether two requests carry the same removal intent and correlation
+ * identifier. The `archivedSessions` list is not part of the intent: it only
+ * adds cleanup of harness files, so a request resent with the list, after an
+ * older runner removed the workspace without it, is still the same request.
+ */
 export const hasSameRemovalIntent = (first: WorkspaceRemoval, second: WorkspaceRemoval): boolean =>
   first._tag === second._tag &&
   first.workspaceId === second.workspaceId &&
   first.requestId === second.requestId &&
   (first._tag !== "workspaceDispose" ||
     second._tag !== "workspaceDispose" ||
-    ((first.discardChanges ?? false) === (second.discardChanges ?? false) &&
-      hasSameArchivedSessions(first, second)));
-
-const hasSameArchivedSessions = (first: WorkspaceDispose, second: WorkspaceDispose): boolean => {
-  const firstSessions = first.archivedSessions ?? [];
-  const secondSessions = second.archivedSessions ?? [];
-  return (
-    firstSessions.length === secondSessions.length &&
-    firstSessions.every(
-      (session, at) =>
-        session.harnessId === secondSessions[at]!.harnessId &&
-        session.harnessHome === secondSessions[at]!.harnessHome &&
-        session.nativeSessionId === secondSessions[at]!.nativeSessionId,
-    )
-  );
-};
+    (first.discardChanges ?? false) === (second.discardChanges ?? false));
 
 /** Returns the directory that holds one directory of step result files per workspace. */
 export const buildStepResultsRoot = (storageDir: string): string =>
@@ -96,8 +86,8 @@ const removeEmptyDirectories = (root: string): void => {
  * Removes a managed workspace: first each of its checkouts, then the folder
  * with whatever is still in it. Unless changes are discarded, nothing is
  * removed before every checkout and every root file passes preflight.
- * Returns warnings for the checkouts whose repository would not unregister
- * them, which only happens when changes are discarded.
+ * Returns a warning for each checkout whose Git repository cannot be found,
+ * which only happens when changes are discarded.
  */
 const removeManagedWorkspace = (
   substrate: Substrate,
@@ -135,7 +125,7 @@ const removeManagedWorkspace = (
     }
     const checkouts = yield* planCheckoutRemovals(substrate, entry, canonicalRoot, discardChanges);
     const removed: Array<string> = [];
-    const kept = yield* checkouts.coordinate(
+    yield* checkouts.coordinate(
       Effect.gen(function* () {
         yield* checkouts.preflight;
         const remaining = yield* findRemainingRootFiles(entry.root, entry.checkouts);
@@ -145,8 +135,8 @@ const removeManagedWorkspace = (
               `Workspace root files remain outside its checkouts: ${remaining.join(", ")}. Preserve those files or explicitly choose discard changes.`,
             ),
           );
-        return yield* Effect.gen(function* () {
-          const kept = yield* checkouts.removeAll((path) => removed.push(path));
+        yield* Effect.gen(function* () {
+          yield* checkouts.removeAll((path) => removed.push(path));
           yield* validateManagedPath(substrate, entry.root);
           yield* Effect.try({
             try: () => {
@@ -158,7 +148,6 @@ const removeManagedWorkspace = (
             },
             catch: normalizeError,
           });
-          return kept;
         }).pipe(
           Effect.catch((error) =>
             Effect.gen(function* () {
@@ -175,7 +164,7 @@ const removeManagedWorkspace = (
         );
       }),
     );
-    return [...checkouts.warnings, ...kept];
+    return checkouts.warnings;
   });
 
 /** Records and executes disposal or detachment, replaying completed receipts without deleting new files. */
@@ -313,7 +302,7 @@ const removeWorkspace = (
               instruction.archivedSessions,
             )
           : [];
-      const warnings = [...checkoutWarnings, ...fileWarnings]
+      const warnings = [...fileWarnings, ...checkoutWarnings]
         .slice(0, MAX_CHECKOUTS)
         .map((warning) => warning.slice(0, MAX_MESSAGE_LENGTH));
       return {

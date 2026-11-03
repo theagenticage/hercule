@@ -1,5 +1,5 @@
 import { useEffect, type JSX } from "react";
-import { buildArchivedToast, buildArchiveTitle, planArchiveAll } from "@hercule/client-core";
+import { buildArchiveTitle, planArchiveAll } from "@hercule/client-core";
 import { useDoneMoves } from "../app/done-moves";
 import { useSessionPresentation } from "../app/session-presentation";
 import { ArchiveDialog } from "../screens/archive-dialog";
@@ -35,12 +35,7 @@ export function ArchiveRowsDialog({
       ? planArchiveAll(groupRows)
       : (() => {
           const rows = groupRows.filter((row) => row.key === target.groupKey);
-          return {
-            rows,
-            sessionIds: rows.flatMap((row) => row.threadIds),
-            skippedWorking: 0,
-            leftOver: 0,
-          };
+          return { rows, skippedWorking: 0, leftOver: 0 };
         })();
   const nothingToArchive = plan.rows.length === 0;
   useEffect(() => {
@@ -51,7 +46,7 @@ export function ArchiveRowsDialog({
     <ArchiveDialog
       title={buildArchiveTitle(plan.rows)}
       onConfirm={() => {
-        archive(plan.sessionIds, buildArchivedToast(plan.rows.length, plan));
+        archive(plan);
       }}
       onClose={onClose}
     />
