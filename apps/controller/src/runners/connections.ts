@@ -79,6 +79,7 @@ import {
   type SessionsReport,
   type CredentialRequest,
   type GithubTokenRequest,
+  type RunnerDiskUsageReport,
   type WorkspaceReport,
   type WorkspaceStepResult,
   type WorkspaceStepsReport,
@@ -224,6 +225,11 @@ export type FleetTraffic =
       readonly _tag: "loginEnded";
       readonly runnerId: string;
       readonly ended: LoginEnded;
+    }
+  | {
+      readonly _tag: "diskUsageReported";
+      readonly runnerId: string;
+      readonly diskUsage: RunnerDiskUsageReport;
     }
   | { readonly _tag: "placementsChanged"; readonly runnerId: string }
   /**
@@ -815,6 +821,18 @@ const make = Effect.gen(function* () {
       report: WorkspaceReport,
     ): Effect.Effect<void> =>
       publish(id, connection, { _tag: "workspaceReported", runnerId: id, report }),
+
+    /**
+     * Publishes a runner's disk usage report. The controller daemon stores it,
+     * because the entries belong to workspaces and the totals to the runner,
+     * and this domain knows nothing of workspaces.
+     */
+    reportedDiskUsage: (
+      id: string,
+      connection: Connection,
+      diskUsage: RunnerDiskUsageReport,
+    ): Effect.Effect<void> =>
+      publish(id, connection, { _tag: "diskUsageReported", runnerId: id, diskUsage }),
 
     /**
      * Publishes a runner's request for the credential git needs. The answer

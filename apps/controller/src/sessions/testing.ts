@@ -21,6 +21,7 @@ import {
   AGENT_STEPS_CAPABILITY,
   ARCHIVED_SESSION_FILES_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   buildWorkspaceActionCapability,
   ControllerToRunner,
@@ -78,7 +79,7 @@ import { buildRunnerSocketUrl, type RunnerWireFrame } from "../runners/testing";
  * The capabilities a runner of this build lists at hello: every workspace
  * action the controller's catalog knows, agent steps, the workspace lifecycle,
  * images in inputs, text generation, library skills, repository skills, and
- * deleting the harness files of archived sessions.
+ * deleting the harness files of archived sessions, and measuring disk usage.
  */
 export const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -89,6 +90,7 @@ export const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   ARCHIVED_SESSION_FILES_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
 ];
 
 /**

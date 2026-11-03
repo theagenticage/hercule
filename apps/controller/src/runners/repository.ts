@@ -12,6 +12,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { RunnerCapabilities, RunnerFacts, RunnerMetrics } from "@hercule/contract";
 import type {
   Runner,
+  RunnerDiskUsage,
   RunnerConnectivity,
   RunnerDetail,
   RunnerLifecycle,
@@ -91,13 +92,16 @@ interface RunnerRow {
   readonly negotiated_capabilities: string | null;
   readonly facts: string | null;
   readonly metrics: string | null;
+  readonly repository_cache_bytes: number | null;
+  readonly harness_home_bytes: number | null;
+  readonly disk_usage_measured_at: string | null;
   readonly last_seen_at: string | null;
 }
 
 const COLUMNS =
   "id, name, connectivity, lifecycle, reserved, labels, max_concurrent_sessions, " +
   "disk_watermark_bytes, binary_version, protocol_version, negotiated_capabilities, " +
-  "facts, metrics, last_seen_at";
+  "facts, metrics, repository_cache_bytes, harness_home_bytes, disk_usage_measured_at, last_seen_at";
 
 /**
  * The memory one session is assumed to need. A runner's default session cap
@@ -173,7 +177,16 @@ const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
       labels: JSON.parse(row.labels) as ReadonlyArray<string>,
       facts,
       metrics: yield* decodeMetrics(id, row.metrics),
-      diskUsage: null,
+      diskUsage:
+        row.repository_cache_bytes === null ||
+        row.harness_home_bytes === null ||
+        row.disk_usage_measured_at === null
+          ? null
+          : {
+              repositoryCacheBytes: row.repository_cache_bytes,
+              harnessHomeBytes: row.harness_home_bytes,
+              measuredAt: row.disk_usage_measured_at,
+            },
       maxConcurrentSessions: computeEffectiveCap(row.max_concurrent_sessions, facts),
       diskWatermarkBytes: computeEffectiveWatermark(row.disk_watermark_bytes),
       lastSeenAt: row.last_seen_at,
@@ -490,6 +503,28 @@ const make = Effect.gen(function* () {
         const accepting = metrics.diskFreeBytes >= effective;
         return { crossed: wasAccepting !== accepting, accepting };
       }),
+
+    /**
+     * Stores what a runner measured outside its workspaces. Writes nothing
+     * when the stored values are the same, so a repeated report leaves the row
+     * as it was.
+     */
+    recordDiskUsage: (
+      id: string,
+      usage: RunnerDiskUsage,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE runners
+        SET repository_cache_bytes = ${usage.repositoryCacheBytes},
+            harness_home_bytes = ${usage.harnessHomeBytes},
+            disk_usage_measured_at = ${usage.measuredAt},
+            updated_at = ${at}
+        WHERE id = ${uuidFromString(id)}
+          AND (repository_cache_bytes IS NOT ${usage.repositoryCacheBytes}
+            OR harness_home_bytes IS NOT ${usage.harnessHomeBytes}
+            OR disk_usage_measured_at IS NOT ${usage.measuredAt})
+      `),
 
     touch: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(

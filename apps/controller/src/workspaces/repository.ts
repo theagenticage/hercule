@@ -17,6 +17,8 @@ import {
   WorkspaceProvision,
   type StartingRevision,
   type CheckoutReport,
+  type WorkspaceDiskUsage,
+  type WorkspaceDiskUsageEntry,
   type WorkspaceReport,
 } from "@hercule/protocol";
 import type {
@@ -62,6 +64,10 @@ export interface StoredWorkspace {
   readonly provisionedAt: string | null;
   readonly lastUsedAt: string | null;
   readonly disposedAt: string | null;
+  /** The latest successful measurement of the workspace's disk usage, or null when none has succeeded. */
+  readonly diskUsage: WorkspaceDiskUsage | null;
+  /** Why the newest attempt to measure the workspace failed, or null. */
+  readonly diskUsageError: string | null;
 }
 
 export interface StoredCheckout {
@@ -206,6 +212,10 @@ interface WorkspaceRow {
   readonly last_used_at: string | null;
   readonly disposed_at: string | null;
   readonly retention_policy: WorkspaceRetentionPolicy;
+  readonly size_bytes: number | null;
+  readonly frees_bytes: number | null;
+  readonly disk_usage_measured_at: string | null;
+  readonly disk_usage_error: string | null;
 }
 
 interface CheckoutRow {
@@ -226,7 +236,8 @@ interface CheckoutRow {
 
 const COLUMNS =
   "id, runner_id, kind, status, designated_connection_id, message, created_at, " +
-  "provisioned_at, last_used_at, disposed_at, ownership, path, observed_at, warnings, available, retention_policy, derived_workspace_ids";
+  "provisioned_at, last_used_at, disposed_at, ownership, path, observed_at, warnings, available, retention_policy, derived_workspace_ids, " +
+  "size_bytes, frees_bytes, disk_usage_measured_at, disk_usage_error";
 
 /** The same columns, for the one query that joins the checkouts table. */
 const WORKSPACE_COLUMNS = COLUMNS.split(", ")
@@ -258,6 +269,15 @@ const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   provisionedAt: row.provisioned_at,
   lastUsedAt: row.last_used_at,
   disposedAt: row.disposed_at,
+  diskUsage:
+    row.size_bytes === null || row.frees_bytes === null || row.disk_usage_measured_at === null
+      ? null
+      : {
+          sizeBytes: row.size_bytes,
+          freesBytes: row.frees_bytes,
+          measuredAt: row.disk_usage_measured_at,
+        },
+  diskUsageError: row.disk_usage_error,
 });
 
 const toCheckout = (row: CheckoutRow): StoredCheckout => ({
@@ -692,6 +712,8 @@ const make = Effect.gen(function* () {
           provisionedAt: null,
           lastUsedAt: workspace.at,
           disposedAt: null,
+          diskUsage: null,
+          diskUsageError: null,
         };
       }),
 
@@ -1115,6 +1137,63 @@ const make = Effect.gen(function* () {
         `,
         (rows) => rows.map((row) => uuidToString(row.id)),
       ),
+
+    /**
+     * Stores the disk usage a runner reported for its workspaces, and returns
+     * the ids of the workspaces whose stored values changed. Each of those is
+     * announced as updated once the transaction commits.
+     *
+     * Reads the stored values of all the listed workspaces in one statement,
+     * compares them in memory, and writes only the entries that differ. An
+     * entry for a workspace that does not exist, or that belongs to another
+     * runner, is dropped. A workspace the report does not list is not touched,
+     * so a report cut short by the runner clears nothing. When an id is listed
+     * twice, the last entry counts.
+     */
+    recordDiskUsage: (
+      runnerId: string,
+      entries: ReadonlyArray<WorkspaceDiskUsageEntry>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.gen(function* () {
+        const reported = new Map(entries.map((entry) => [entry.workspaceId, entry]));
+        if (reported.size === 0) return [];
+        const stored = yield* sql<
+          Pick<
+            WorkspaceRow,
+            "id" | "size_bytes" | "frees_bytes" | "disk_usage_measured_at" | "disk_usage_error"
+          >
+        >`
+          SELECT id, size_bytes, frees_bytes, disk_usage_measured_at, disk_usage_error
+          FROM workspaces
+          WHERE runner_id = ${uuidFromString(runnerId)}
+            AND id IN ${sql.in([...reported.keys()].map(uuidFromString))}
+        `;
+        const changed: Array<string> = [];
+        for (const row of stored) {
+          const id = uuidToString(row.id);
+          const entry = reported.get(id)!;
+          const usage = entry.diskUsage;
+          if (
+            (usage?.sizeBytes ?? null) === row.size_bytes &&
+            (usage?.freesBytes ?? null) === row.frees_bytes &&
+            (usage?.measuredAt ?? null) === row.disk_usage_measured_at &&
+            entry.error === row.disk_usage_error
+          ) {
+            continue;
+          }
+          yield* sql`
+            UPDATE workspaces
+            SET size_bytes = ${usage?.sizeBytes ?? null},
+                frees_bytes = ${usage?.freesBytes ?? null},
+                disk_usage_measured_at = ${usage?.measuredAt ?? null},
+                disk_usage_error = ${entry.error}
+            WHERE id = ${row.id}
+          `;
+          yield* announceChange(id);
+          changed.push(id);
+        }
+        return changed;
+      }),
 
     list: (
       request: WorkspacePageRequest,

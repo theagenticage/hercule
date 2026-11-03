@@ -32,6 +32,7 @@ import {
   AGENT_STEPS_CAPABILITY,
   ARCHIVED_SESSION_FILES_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
   FILES_EDITED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
@@ -125,6 +126,8 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   sessions of a workspace it asks a runner to remove, so the runner deletes
  *   their harness files too. A runner that did not negotiate it gets the
  *   removal without the list, and the workspace gets a warning saying so.
+ * - `DISK_USAGE_CAPABILITY`: this controller reads the `diskUsageReport` frame.
+ *   A runner sends it only to a controller that lists this.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -138,6 +141,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   ARCHIVED_SESSION_FILES_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";
@@ -298,6 +302,9 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "watermarkReport":
             if (!greeted) return;
             return yield* connections.reportedMetrics(runnerId, mine, message.metrics);
+          case "diskUsageReport":
+            if (!greeted) return;
+            return yield* connections.reportedDiskUsage(runnerId, mine, message.diskUsage);
           case "workspaceInspection":
           case "repositorySkillsInspection":
           case "probeReport":

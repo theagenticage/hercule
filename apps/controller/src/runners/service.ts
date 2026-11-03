@@ -36,6 +36,7 @@ import {
   type MintedJoinToken,
   type NotFound,
   type Runner,
+  type RunnerDiskUsage,
   type RunnerDetail,
   type RunnerLifecycle,
   type SortDirection,
@@ -451,6 +452,23 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
+
+    /**
+     * Stores what a runner measured outside its workspaces, as the runner's
+     * disk usage. Nothing is announced: a screen that shows it reads the
+     * runner again when it reads the runner's metrics. A runner that has
+     * measured nothing yet reports no usage, and the earlier values stay.
+     */
+    recordDiskUsage: (
+      runnerId: string,
+      usage: RunnerDiskUsage | null,
+    ): Effect.Effect<void, SqlError> =>
+      usage === null
+        ? Effect.void
+        : withTransaction(
+            sql,
+            Effect.flatMap(nowIso, (at) => runners.recordDiskUsage(runnerId, usage, at)),
+          ),
 
     /**
      * Creates a join token and returns it. The token appears only in this
