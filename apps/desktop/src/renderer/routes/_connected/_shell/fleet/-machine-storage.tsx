@@ -9,7 +9,7 @@ import {
   cleanupThreadsQuery,
   coversWorkspaces,
   listCleanupCandidateIds,
-  listThreadsOf,
+  filterThreadsToWorkspaces,
   negotiatedCapabilitiesQuery,
 } from "../../../../app/machine-storage-queries";
 import { machineRecentActivityQuery, workspacesQuery } from "../../../../app/queries";
@@ -95,7 +95,7 @@ export function MachineStorage({
         runner,
         negotiatedCapabilities: capabilities,
         workspaces,
-        threads: listThreadsOf(threads.data, candidateIds),
+        threads: filterThreadsToWorkspaces(threads.data, candidateIds),
         hourPoints: hours.points.filter((point) => point.runnerId === runner.id),
         events: recent.data?.items ?? [],
         timezone,

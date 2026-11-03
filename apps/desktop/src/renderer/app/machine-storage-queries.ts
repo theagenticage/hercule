@@ -97,7 +97,7 @@ export const coversWorkspaces = (
 };
 
 /** Returns the Threads of `read` that were placed in one of `workspaceIds`. */
-export const listThreadsOf = (
+export const filterThreadsToWorkspaces = (
   read: CleanupThreadsRead | undefined,
   workspaceIds: readonly string[],
 ): readonly Session[] => {
