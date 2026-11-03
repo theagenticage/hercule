@@ -43,7 +43,7 @@ import {
 } from "./machine";
 import type { RunnerMetricsHistory } from "./metrics-history";
 
-export { forecastDiskLimit, type DiskForecast } from "./disk-forecast";
+export { FORECAST_HISTORY_MS, forecastDiskLimit, type DiskForecast } from "./disk-forecast";
 export type {
   FleetTextPart,
   GaugeLevel,

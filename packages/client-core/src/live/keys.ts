@@ -17,6 +17,7 @@ import type {
   Runner,
   SessionFilter,
   SignalFilter,
+  RunnerMetricsResolution,
   SkillsPreviewFilter,
   TaskFilter,
 } from "@hercule/contract";
@@ -129,6 +130,25 @@ export const queryKeys = {
   ],
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
+  /**
+   * One history of Runner Metrics a Fleet screen holds: the points of one
+   * resolution over `rangeMs`, for one runner or, with a `null` runner id, for
+   * every runner. Each argument narrows the key, so a prefix matches every
+   * history of that resolution, or of that resolution and runner.
+   *
+   * The `runnerMetrics` topic maps to no key here, on purpose. A push says a
+   * row was written, and each history is read again from the start of its
+   * newest point, or at most once an hour, as `invalidateForRunnerMetricsPush`
+   * decides. Its key is also outside the `runner` prefix: a push on `runner`
+   * must not read any history.
+   */
+  runnerMetrics: (
+    ...scope:
+      | []
+      | [resolution: RunnerMetricsResolution]
+      | [resolution: RunnerMetricsResolution, runnerId: string | null]
+      | [resolution: RunnerMetricsResolution, runnerId: string | null, rangeMs: number]
+  ): LiveQueryKey => ["runnerMetrics", ...scope],
   /**
    * A filtered listing is keyed on its filter, such as:
    *

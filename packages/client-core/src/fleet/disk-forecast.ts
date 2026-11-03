@@ -8,8 +8,8 @@ import type { Runner, RunnerMetricsPoint } from "@hercule/contract";
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-/** How far back the forecast reads hour points. */
-const HISTORY_DAYS = 7;
+/** How far back the forecast reads hour points: the Fleet page reads this much history. */
+export const FORECAST_HISTORY_MS = 7 * DAY_MS;
 
 /** The history the forecast needs, from its oldest point to its newest. */
 const MIN_HISTORY_MS = 2 * DAY_MS;
@@ -89,7 +89,7 @@ export const forecastDiskLimit = (
   const diskTotalBytes = runner.facts?.diskTotalBytes;
   if (diskTotalBytes === undefined || diskTotalBytes <= 0) return null;
 
-  const oldestAllowed = now - HISTORY_DAYS * DAY_MS;
+  const oldestAllowed = now - FORECAST_HISTORY_MS;
   const samples = points
     .filter((point) => point.runnerId === runner.id)
     .map((point): FreeSpaceSample => ({ at: Date.parse(point.at), freeBytes: point.diskFreeBytes }))

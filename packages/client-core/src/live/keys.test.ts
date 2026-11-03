@@ -350,3 +350,23 @@ describe("the composer's skill list keys", () => {
     assert.notDeepEqual(queryKeys.sessionSkills("s1"), queryKeys.sessionSkills("s2"));
   });
 });
+
+describe("the Runner Metrics history keys", () => {
+  it("is read by no push: the runnerMetrics topic maps to no key, and no other topic's keys cover it", () => {
+    assert.deepEqual(buildQueryKeys("runnerMetrics", []), []);
+    assert.deepEqual(buildQueryKeys("runnerMetrics", ["r1"]), []);
+    const key = queryKeys.runnerMetrics("fiveMinutes", "r1", 1000);
+    for (const topic of ["runner", "session", "provider"] as const) {
+      assert.isFalse(buildQueryKeys(topic, []).some((pushed) => isPrefixOf(pushed, key)));
+    }
+  });
+
+  it("narrows by resolution, then runner, then range", () => {
+    const key = queryKeys.runnerMetrics("hour", null, 1000);
+    assert.isTrue(isPrefixOf(queryKeys.runnerMetrics(), key));
+    assert.isTrue(isPrefixOf(queryKeys.runnerMetrics("hour"), key));
+    assert.isTrue(isPrefixOf(queryKeys.runnerMetrics("hour", null), key));
+    assert.isFalse(isPrefixOf(queryKeys.runnerMetrics("fiveMinutes"), key));
+    assert.isFalse(isPrefixOf(queryKeys.runnerMetrics("hour", "r1"), key));
+  });
+});

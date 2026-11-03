@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RunnerMetricsPoint } from "@hercule/contract";
 import {
   EMPTY_RUNNER_METRICS_HISTORY,
+  findMetricsReadStart,
   findNewestPointStart,
   mergeRunnerMetricsHistory,
   type RunnerMetricsHistory,
@@ -157,5 +158,43 @@ describe("mergeRunnerMetricsHistory", () => {
     );
 
     expect(describePoints(merged)).toEqual(["a@0:100", "a@5:100"]);
+  });
+});
+
+describe("findMetricsReadStart", () => {
+  it("starts a read of an empty history two points after the range's start, on a boundary", () => {
+    const now = T0 + 2 * MINUTE_MS;
+    expect(findMetricsReadStart(EMPTY_RUNNER_METRICS_HISTORY, "fiveMinutes", DAY_MS, now)).toBe(
+      new Date(T0 - DAY_MS + 10 * MINUTE_MS).toISOString(),
+    );
+    expect(findMetricsReadStart(EMPTY_RUNNER_METRICS_HISTORY, "hour", 7 * DAY_MS, now)).toBe(
+      new Date(T0 - 7 * DAY_MS + 2 * HOUR_MS).toISOString(),
+    );
+  });
+
+  it("keeps the margin under the controller's range limit", () => {
+    for (const offset of [0, 1, MINUTE_MS, 4 * MINUTE_MS + 59_999]) {
+      const now = T0 + offset;
+      const since = Date.parse(
+        findMetricsReadStart(EMPTY_RUNNER_METRICS_HISTORY, "fiveMinutes", DAY_MS, now),
+      );
+      // A little clock difference and the request's own time.
+      expect(now + 2_000 - since).toBeLessThan(DAY_MS);
+    }
+  });
+
+  it("starts at the newest point's start when the history holds one in the range", () => {
+    const history = buildHistory([buildPoint(ATLAS, 0), buildPoint(ATLAS, 5)]);
+    expect(findMetricsReadStart(history, "fiveMinutes", DAY_MS, T0 + 7 * MINUTE_MS)).toBe(
+      new Date(T0 + 5 * MINUTE_MS).toISOString(),
+    );
+  });
+
+  it("starts at the range's start when the newest point is older than the range", () => {
+    const history = buildHistory([buildPoint(ATLAS, 0)]);
+    const now = T0 + 30 * HOUR_MS;
+    expect(findMetricsReadStart(history, "fiveMinutes", DAY_MS, now)).toBe(
+      findMetricsReadStart(EMPTY_RUNNER_METRICS_HISTORY, "fiveMinutes", DAY_MS, now),
+    );
   });
 });

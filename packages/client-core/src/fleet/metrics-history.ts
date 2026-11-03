@@ -6,7 +6,7 @@
  * always UTC with milliseconds (`2026-11-03T09:05:00.000Z`), so the strings
  * sort in time order and nothing needs parsing.
  */
-import type { RunnerMetricsPoint } from "@hercule/contract";
+import type { RunnerMetricsPoint, RunnerMetricsResolution } from "@hercule/contract";
 
 /**
  * The points of one resolution (five minutes or one hour) that a screen holds
@@ -37,6 +37,44 @@ export const findNewestPointStart = (history: RunnerMetricsHistory): string | un
     if (newest === undefined || at > newest) newest = at;
   }
   return newest;
+};
+
+/** How long one point of each resolution is, in ms. */
+export const POINT_MS: Readonly<Record<RunnerMetricsResolution, number>> = {
+  fiveMinutes: 5 * 60 * 1000,
+  hour: 60 * 60 * 1000,
+};
+
+/**
+ * Returns the `since` of the next read of `resolution` points over `rangeMs`,
+ * at `now` (Unix ms).
+ *
+ * - When the history holds a point inside the range, it is the start of the
+ *   newest one (`findNewestPointStart`): the read replaces that point, which
+ *   was still filling, and appends the rest.
+ * - Otherwise it is the start of the range, so the read covers all of it. This
+ *   also happens after a long sleep, when the newest point is older than the
+ *   range.
+ *
+ * The start of the range is a point boundary two points after `now - rangeMs`.
+ * The controller refuses a span wider than the range, measuring it from the
+ * `since` the client sent to the time it answers. The margin keeps a little
+ * clock difference and the request's own time from tipping a first read over
+ * that limit. The one or two far-left points it skips are outside what a graph
+ * draws. Being on a boundary also means a held point never overlaps a read.
+ */
+export const findMetricsReadStart = (
+  held: RunnerMetricsHistory,
+  resolution: RunnerMetricsResolution,
+  rangeMs: number,
+  now: number,
+): string => {
+  const pointMs = POINT_MS[resolution];
+  const rangeStart = new Date(Math.floor((now - rangeMs) / pointMs) * pointMs + 2 * pointMs);
+  const newest = findNewestPointStart(held);
+  return newest !== undefined && newest >= rangeStart.toISOString()
+    ? newest
+    : rangeStart.toISOString();
 };
 
 /**
