@@ -14,21 +14,20 @@ import "./machine-page.css";
 /**
  * Renders one instrument: its label, its big value with the unit in small
  * after it, what draws it (`children`: a meter, or the sessions' drawing),
- * its graph (`graph`), and the note under that. The value and the meter take
- * the colour of the instrument's level. `note` is `null` when the graph is an
- * unavailable frame, which shows the note itself.
+ * its graph (`graph`), and the instrument's note under that.
+ *
+ * A `null` graph has nothing to draw. Its frame shows the note instead and the
+ * note line is left out, so the tile never says it twice.
  */
 function Instrument({
   label,
   instrument,
-  note,
   graph,
   children,
 }: {
   readonly label: string;
-  readonly instrument: Pick<MeterInstrument, "value" | "unit" | "level">;
-  readonly note: string | null;
-  readonly graph: ReactNode;
+  readonly instrument: Pick<MeterInstrument, "value" | "unit" | "level" | "note">;
+  readonly graph: ReactNode | null;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -36,8 +35,14 @@ function Instrument({
       <span className="machine-page-instrument-label">{label}</span>
       <GaugeValue gauge={instrument} />
       {children}
-      {graph}
-      {note === null ? null : <span className="machine-page-instrument-note">{note}</span>}
+      {graph === null ? (
+        <UnavailableGraphFrame note={instrument.note} />
+      ) : (
+        <>
+          {graph}
+          <span className="machine-page-instrument-note">{instrument.note}</span>
+        </>
+      )}
     </div>
   );
 }
@@ -47,8 +52,8 @@ function Instrument({
  * and Memory. Sessions is drawn as the cards draw it, the others as a meter.
  * Each has its graph between the meter and the note (`graphs`).
  *
- * A graph with nothing to draw shows the instrument's note in its frame, and
- * the note line under it is left out, so the tile never says it twice.
+ * A `null` graph (`graphs.cpu` or `graphs.memory`) shows the instrument's note
+ * in its frame instead of a graph.
  *
  * An away machine (its Sessions drawing says so) is drawn in quieter inks, as
  * on its card, and its Sessions drawing is an outline. The instruments
@@ -71,7 +76,6 @@ export function MachinePageInstruments({
         <Instrument
           label="Sessions"
           instrument={sessions}
-          note={sessions.note}
           graph={<SessionsGraphFigure graph={graphs.sessions} />}
         >
           <SessionsFigure drawing={sessions.drawing} size="card" />
@@ -79,28 +83,14 @@ export function MachinePageInstruments({
         <Instrument
           label="CPU"
           instrument={cpu}
-          note={graphs.cpu.kind === "drawn" ? cpu.note : null}
-          graph={
-            graphs.cpu.kind === "drawn" ? (
-              <CpuGraphFigure graph={graphs.cpu} />
-            ) : (
-              <UnavailableGraphFrame note={cpu.note} />
-            )
-          }
+          graph={graphs.cpu === null ? null : <CpuGraphFigure graph={graphs.cpu} />}
         >
           <Meter share={cpu.share} level={cpu.level} />
         </Instrument>
         <Instrument
           label="Memory"
           instrument={memory}
-          note={graphs.memory.kind === "drawn" ? memory.note : null}
-          graph={
-            graphs.memory.kind === "drawn" ? (
-              <MemoryGraphFigure graph={graphs.memory} />
-            ) : (
-              <UnavailableGraphFrame note={memory.note} />
-            )
-          }
+          graph={graphs.memory === null ? null : <MemoryGraphFigure graph={graphs.memory} />}
         >
           <Meter share={memory.share} level={memory.level} />
         </Instrument>

@@ -9,8 +9,6 @@ import type { MachineGraphs } from "@hercule/client-core/machine-graphs";
 import type { MachineInstruments } from "@hercule/client-core/machine-page";
 import { MachinePageInstruments } from "./machine-page-instruments";
 
-const GAUGE = { freeAmount: "" } as const;
-
 const INSTRUMENTS: MachineInstruments = {
   sessions: {
     value: "12",
@@ -31,7 +29,6 @@ const INSTRUMENTS: MachineInstruments = {
     },
   },
   cpu: {
-    ...GAUGE,
     value: "34",
     unit: "%",
     level: "normal",
@@ -39,7 +36,6 @@ const INSTRUMENTS: MachineInstruments = {
     note: "Peak 71% in the last minute",
   },
   memory: {
-    ...GAUGE,
     value: "55",
     unit: "%",
     level: "normal",
@@ -50,7 +46,6 @@ const INSTRUMENTS: MachineInstruments = {
 
 const GRAPHS: MachineGraphs = {
   sessions: {
-    kind: "drawn",
     running: [
       [
         { x: 0.1, y: 0.5 },
@@ -70,7 +65,6 @@ const GRAPHS: MachineGraphs = {
     capY: 0.8,
   },
   cpu: {
-    kind: "drawn",
     average: [
       [
         { x: 0, y: 0.2 },
@@ -85,7 +79,6 @@ const GRAPHS: MachineGraphs = {
     ],
   },
   memory: {
-    kind: "drawn",
     inUse: [
       [
         { x: 0, y: 0.5 },
@@ -145,7 +138,6 @@ describe("MachinePageInstruments", () => {
         instruments={{
           ...INSTRUMENTS,
           cpu: {
-            ...GAUGE,
             value: "–",
             unit: "",
             level: "normal",
@@ -204,7 +196,6 @@ describe("MachinePageInstruments", () => {
         graphs={{
           ...GRAPHS,
           cpu: {
-            kind: "drawn",
             average: [[{ x: 0.5, y: 0 }]],
             peak: [
               [{ x: 0.5, low: 0, high: 0.5 }],
@@ -241,10 +232,10 @@ describe("MachinePageInstruments", () => {
     const sentence = "This machine's runner is too old to report CPU. Update it.";
     const { container } = render(
       <MachinePageInstruments
-        graphs={{ ...GRAPHS, cpu: { kind: "unavailable" } }}
+        graphs={{ ...GRAPHS, cpu: null }}
         instruments={{
           ...INSTRUMENTS,
-          cpu: { ...GAUGE, value: "–", unit: "", level: "normal", share: null, note: sentence },
+          cpu: { value: "–", unit: "", level: "normal", share: null, note: sentence },
         }}
       />,
     );

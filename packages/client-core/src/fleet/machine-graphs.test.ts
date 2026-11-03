@@ -53,12 +53,12 @@ const describeGraphs = (
 ): MachineGraphs => describeMachineGraphs(runner, toHistory(fiveMinutePoints));
 
 const drawnCpu = (graphs: MachineGraphs): CpuGraph => {
-  if (graphs.cpu.kind !== "drawn") throw new Error("expected a drawn CPU graph");
+  if (graphs.cpu === null) throw new Error("expected a drawn CPU graph");
   return graphs.cpu;
 };
 
 const drawnMemory = (graphs: MachineGraphs): MemoryGraph => {
-  if (graphs.memory.kind !== "drawn") throw new Error("expected a drawn Memory graph");
+  if (graphs.memory === null) throw new Error("expected a drawn Memory graph");
   return graphs.memory;
 };
 
@@ -174,13 +174,11 @@ describe("describeMachineGraphs cpu", () => {
       buildRunner({ metrics: { diskFreeBytes: 1, availableMemoryBytes: 1 } }),
     );
 
-    expect(graphs.cpu).toEqual({ kind: "unavailable" });
+    expect(graphs.cpu).toBeNull();
   });
 
   it("draws no CPU graph before the first report", () => {
-    expect(describeGraphs([], buildRunner({ metrics: null })).cpu).toEqual({
-      kind: "unavailable",
-    });
+    expect(describeGraphs([], buildRunner({ metrics: null })).cpu).toBeNull();
   });
 });
 
@@ -205,9 +203,7 @@ describe("describeMachineGraphs memory", () => {
   });
 
   it("draws no graph before the machine's memory is known", () => {
-    expect(describeGraphs([], buildRunner({ facts: null })).memory).toEqual({
-      kind: "unavailable",
-    });
+    expect(describeGraphs([], buildRunner({ facts: null })).memory).toBeNull();
   });
 });
 
@@ -243,18 +239,18 @@ describe("describeMachineGraphs unavailable graphs", () => {
     const withoutCpu = buildRunner({ metrics: { diskFreeBytes: 500, availableMemoryBytes: 500 } });
     const withoutFacts = buildRunner({ facts: null });
 
-    expect(describeGraphs([], withoutCpu).cpu.kind).toBe("unavailable");
+    expect(describeGraphs([], withoutCpu).cpu).toBeNull();
     expect(describeInstrumentNotes(withoutCpu).cpu).toBe(
       "This machine's runner is too old to report CPU. Update it.",
     );
-    expect(describeGraphs([], withoutFacts).memory.kind).toBe("unavailable");
+    expect(describeGraphs([], withoutFacts).memory).toBeNull();
     expect(describeInstrumentNotes(withoutFacts).memory).toBe("Not reported yet");
   });
 
   it("has the instrument say it was not reported yet, before the first report", () => {
     const unreported = buildRunner({ metrics: null });
 
-    expect(describeGraphs([], unreported).cpu.kind).toBe("unavailable");
+    expect(describeGraphs([], unreported).cpu).toBeNull();
     expect(describeInstrumentNotes(unreported)).toEqual({
       cpu: "Not reported yet",
       memory: "Not reported yet",

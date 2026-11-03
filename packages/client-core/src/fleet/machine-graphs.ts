@@ -39,20 +39,10 @@ export interface GraphBandPoint {
 export type GraphBand = readonly GraphBandPoint[];
 
 /**
- * A graph that has nothing to draw. The caller shows the note of the matching
- * instrument in its place (`MachineInstruments`), which says why and what to
- * do.
- */
-export interface UnavailableGraph {
-  readonly kind: "unavailable";
-}
-
-/**
  * The Sessions graph, from five-minute points. Each point is a step as wide as
  * the point. Steps of consecutive points join; a gap breaks them.
  */
 export interface SessionsGraph {
-  readonly kind: "drawn";
   /** The sessions running, as the outline of a step area that fills down to y 0. */
   readonly running: readonly GraphLine[];
   /** Where sessions waited: the band from the running sessions up to running plus queued. */
@@ -63,7 +53,6 @@ export interface SessionsGraph {
 
 /** The CPU graph, from five-minute points, on a scale of 0 to 100%. */
 export interface CpuGraph {
-  readonly kind: "drawn";
   /** The average, as a line. A point with no CPU breaks it. */
   readonly average: readonly GraphLine[];
   /** The band from the average up to the peak. */
@@ -72,7 +61,6 @@ export interface CpuGraph {
 
 /** The Memory graph, from five-minute points, on a scale of 0 to the machine's memory. */
 export interface MemoryGraph {
-  readonly kind: "drawn";
   /** The memory in use, as a line. */
   readonly inUse: readonly GraphLine[];
   /** The band from the memory in use up to the most that was in use. */
@@ -83,11 +71,15 @@ export interface MemoryGraph {
   readonly failY: number;
 }
 
-/** The three graphs of a machine's page. */
+/**
+ * The three graphs of a machine's page. A graph that has nothing to draw is
+ * `null`; the note of the matching instrument (`MachineInstruments`) says why
+ * and what to do. Sessions is always drawn.
+ */
 export interface MachineGraphs {
   readonly sessions: SessionsGraph;
-  readonly cpu: CpuGraph | UnavailableGraph;
-  readonly memory: MemoryGraph | UnavailableGraph;
+  readonly cpu: CpuGraph | null;
+  readonly memory: MemoryGraph | null;
 }
 
 /** A point of the runner's history with its start parsed, so it is parsed once. */
@@ -173,7 +165,6 @@ const describeSessionsGraph = (
   }
   const y = (sessions: number): number => sessions / top;
   return {
-    kind: "drawn",
     running: splitIntoRuns(points, ({ sessionsRunning }, at) => {
       const [start, end] = locateStep(at, readAt, x);
       return [
@@ -199,11 +190,10 @@ const describeCpuGraph = (
   runner: Runner,
   points: readonly DatedPoint[],
   x: TimeScale,
-): CpuGraph | UnavailableGraph => {
-  if (runner.metrics === null) return { kind: "unavailable" };
-  if (runner.metrics.cpu === undefined) return { kind: "unavailable" };
+): CpuGraph | null => {
+  if (runner.metrics === null) return null;
+  if (runner.metrics.cpu === undefined) return null;
   return {
-    kind: "drawn",
     average: splitIntoRuns(points, ({ cpuAveragePercent }, at) =>
       cpuAveragePercent === null ? null : [{ x: x(at), y: clamp(cpuAveragePercent / 100) }],
     ),
@@ -225,12 +215,11 @@ const describeMemoryGraph = (
   runner: Runner,
   points: readonly DatedPoint[],
   x: TimeScale,
-): MemoryGraph | UnavailableGraph => {
+): MemoryGraph | null => {
   const total = runner.facts?.totalMemoryBytes;
-  if (total === undefined || total <= 0) return { kind: "unavailable" };
+  if (total === undefined || total <= 0) return null;
   const y = (availableBytes: number): number => clamp((total - availableBytes) / total);
   return {
-    kind: "drawn",
     inUse: splitIntoRuns(points, ({ availableMemoryBytes }, at) => [
       { x: x(at), y: y(availableMemoryBytes) },
     ]),
@@ -254,13 +243,13 @@ const describeMemoryGraph = (
  *   row for is a break, never a zero. A point with no CPU breaks the CPU series.
  * - Sessions: the scale is 0 to the larger of the cap and the most sessions
  *   running and queued at once.
- * - CPU: `unavailable` when the runner is too old to report CPU or has not
- *   reported yet.
- * - Memory: `unavailable` until the runner's total memory is known.
+ * - CPU: `null` when the runner is too old to report CPU or has not reported
+ *   yet.
+ * - Memory: `null` until the runner's total memory is known.
  *
- * An `unavailable` graph says nothing itself. The note of the matching
- * instrument (`describeMachinePage`) says why and what to do, and is the one
- * place that sentence is written.
+ * A `null` graph says nothing itself. The note of the matching instrument
+ * (`describeMachinePage`) says why and what to do, and is the one place that
+ * sentence is written.
  */
 export const describeMachineGraphs = (
   runner: Runner,

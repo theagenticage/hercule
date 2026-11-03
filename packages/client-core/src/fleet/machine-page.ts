@@ -165,9 +165,10 @@ export type MachinePageTop =
 
 /**
  * An instrument drawn as a meter: the gauge, and the line under the meter. A
- * renderer draws it as the Fleet cards draw the same gauge.
+ * renderer draws it as the Fleet cards draw the same gauge. The free amount of
+ * a card's gauge is not here: the page words it in `note`.
  */
-export interface MeterInstrument extends MachineGauge {
+export interface MeterInstrument extends Omit<MachineGauge, "freeAmount"> {
   /** The line under the meter. */
   readonly note: string;
 }
@@ -202,7 +203,16 @@ const NOT_REPORTED_NOTE = "Not reported yet";
 /** The line under the CPU of a runner whose reports carry none. */
 const CPU_TOO_OLD_NOTE = "This machine's runner is too old to report CPU. Update it.";
 
-const NOT_REPORTED: MeterInstrument = { ...NOT_REPORTED_GAUGE, note: NOT_REPORTED_NOTE };
+/** Builds the meter instrument of `gauge` with `note` under it, leaving out the gauge's free amount. */
+const buildMeterInstrument = (gauge: MachineGauge, note: string): MeterInstrument => ({
+  value: gauge.value,
+  unit: gauge.unit,
+  share: gauge.share,
+  level: gauge.level,
+  note,
+});
+
+const NOT_REPORTED: MeterInstrument = buildMeterInstrument(NOT_REPORTED_GAUGE, NOT_REPORTED_NOTE);
 
 /** Describes the instrument of the CPU: the last minute's mean and peak, floored. See `describeMachineInstruments`. */
 const describeCpuInstrument = (runner: Runner): MeterInstrument => {
@@ -218,7 +228,6 @@ const describeCpuInstrument = (runner: Runner): MeterInstrument => {
   return {
     value: String(Math.floor(cpu.averagePercent)),
     unit: "%",
-    freeAmount: "",
     level: "normal",
     share: cpu.averagePercent / 100,
     note: `Peak ${String(Math.floor(cpu.peakPercent))}% in the last minute`,
@@ -230,10 +239,10 @@ const describeMemoryInstrument = (runner: Runner): MeterInstrument => {
   const memory = measureMemory(runner);
   if (memory === null) return NOT_REPORTED;
   const gauge = describeMemoryGauge(memory);
-  return {
-    ...gauge,
-    note: `${gauge.freeAmount} free of ${formatWholeMemory(memory.totalBytes)} GB`,
-  };
+  return buildMeterInstrument(
+    gauge,
+    `${gauge.freeAmount} free of ${formatWholeMemory(memory.totalBytes)} GB`,
+  );
 };
 
 /**

@@ -542,7 +542,6 @@ describe("describeMachinePage instruments", () => {
       expect(instrument).toEqual({
         value: "–",
         unit: "",
-        freeAmount: "",
         level: "normal",
         share: null,
         note: "Not reported yet",
@@ -557,7 +556,6 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics({ cpu }) }).cpu).toEqual({
         value: "23",
         unit: "%",
-        freeAmount: "",
         level: "normal",
         share: 0.239,
         note: "Peak 61% in the last minute",
@@ -578,7 +576,6 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics({ cpu: null }) }).cpu).toEqual({
         value: "–",
         unit: "",
-        freeAmount: "",
         level: "normal",
         share: null,
         note: "First reading within a minute",
@@ -589,7 +586,6 @@ describe("describeMachinePage instruments", () => {
       expect(instruments({ metrics: metrics() }).cpu).toEqual({
         value: "–",
         unit: "",
-        freeAmount: "",
         level: "normal",
         share: null,
         note: "This machine's runner is too old to report CPU. Update it.",
