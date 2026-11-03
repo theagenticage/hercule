@@ -98,7 +98,6 @@ import {
 } from "@hercule/client-core";
 import {
   buildMachineFiveMinuteScope,
-  buildMachineHourScope,
   FLEET_HOUR_METRICS_SCOPE,
 } from "@hercule/client-core/metrics-history";
 import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
@@ -803,16 +802,13 @@ const seedQueryCache = (
       queryClient.setQueryData(runWorkflowNameQuery(client, runId).queryKey, workflowName);
     }
     queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
-    const { fiveMinutesByRunner, hoursByRunner, fleetHours } = fleet.metrics;
+    const { fiveMinutesByRunner, fleetHours } = fleet.metrics;
     queryClient.setQueryData(queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE), fleetHours);
     for (const [runnerId, history] of Object.entries(fiveMinutesByRunner)) {
       queryClient.setQueryData(
         queryKeys.runnerMetrics(buildMachineFiveMinuteScope(runnerId)),
         history,
       );
-    }
-    for (const [runnerId, history] of Object.entries(hoursByRunner)) {
-      queryClient.setQueryData(queryKeys.runnerMetrics(buildMachineHourScope(runnerId)), history);
     }
     for (const [runnerId, events] of Object.entries(fleet.activity)) {
       // Each log fits on one page of each read, so no read has a next page.

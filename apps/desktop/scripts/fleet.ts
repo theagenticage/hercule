@@ -100,9 +100,8 @@ export interface Fleet {
    *   reports a port nothing serves.
    * - `joinToken` is the join token the runner joins with, such as the one an
    *   Add a machine dialog showed. Without it, a token is minted.
-   * - `machine` sets the size the runner reports for its memory and for the
-   *   disk that holds its storage. A machine page draws its Memory and Disk
-   *   graphs only for a runner that reports the disk size.
+   * - `machine` sets the memory size the runner reports. A machine page draws
+   *   its Memory graph only for a runner that reports it.
    */
   readonly enlistRunner: (
     name: string,
@@ -110,7 +109,7 @@ export interface Fleet {
       readonly maxConcurrentSessions?: number;
       readonly identityPort?: number;
       readonly joinToken?: string;
-      readonly machine?: Partial<Pick<RunnerFacts, "totalMemoryBytes" | "diskTotalBytes">>;
+      readonly machine?: Partial<Pick<RunnerFacts, "totalMemoryBytes">>;
     },
   ) => Promise<ScriptedRunner>;
   readonly createProject: (name: string) => Promise<Project>;

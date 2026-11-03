@@ -491,16 +491,14 @@ export interface ScriptedSkills {
  * port, is where the developer's own runner listens: a client would find
  * that runner instead.
  *
- * `machine` overrides the facts about the machine's size: its total memory,
- * and the size of the disk that holds its storage, which the facts leave out
- * unless a test names it. The machine page cannot draw a Memory or a Disk
- * graph without them.
+ * `machine` overrides the memory size the runner reports. The machine page
+ * cannot draw a Memory graph without it.
  */
 export async function enlistScriptedRunner(
   url: string,
   joinToken: string,
   identityPort: number,
-  machine: Partial<Pick<RunnerFacts, "totalMemoryBytes" | "diskTotalBytes">> = {},
+  machine: Partial<Pick<RunnerFacts, "totalMemoryBytes">> = {},
 ): Promise<ScriptedRunner> {
   const joined = await fetch(`${url}/api/v1/runners/join`, {
     method: "POST",

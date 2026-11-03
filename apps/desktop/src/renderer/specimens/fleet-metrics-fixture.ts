@@ -5,15 +5,16 @@
  * graphs and the goldens stay still.
  *
  * A machine's story is a few functions of "hours ago". `buildMachineMetrics`
- * samples them every five minutes over 14 days, leaves out the samples of a
+ * samples them every five minutes over 7 days, leaves out the samples of a
  * gap or of the time a machine was offline, and makes both kinds of point from
  * the samples: five-minute points for the last 24 hours and hour points for the
- * last 14 days, as the controller does.
+ * last 7 days, as the controller does. The hour points are what the Fleet
+ * page forecasts a disk from.
  */
 import type { RunnerMetricsPoint } from "@hercule/contract";
 import {
   FIVE_MINUTE_HISTORY_MS,
-  HOUR_HISTORY_MS,
+  FORECAST_HISTORY_MS,
   type RunnerMetricsHistory,
 } from "@hercule/client-core/metrics-history";
 import { SPECIMEN_NOW } from "./sidebar-fixture";
@@ -28,7 +29,7 @@ const NOW_HOUR_OF_DAY = 9 + 41 / 60;
 /** A function of how many hours before the specimen's clock a moment is. */
 export type OfHoursAgo = (hoursAgo: number) => number;
 
-/** How one machine's numbers moved over the 14 days before the specimen's clock. */
+/** How one machine's numbers moved over the 7 days before the specimen's clock. */
 export interface MachineStory {
   readonly runnerId: string;
   readonly totalMemoryBytes: number;
@@ -46,7 +47,7 @@ export interface MachineStory {
   readonly silentForHours: number;
 }
 
-/** The history one machine's page and the Fleet page hold, each as `runnerMetrics.query` reads it. */
+/** The history one machine's page and the Fleet page read, each as `runnerMetrics.query` returns it. */
 export interface MachineMetrics {
   readonly fiveMinutes: RunnerMetricsHistory;
   readonly hours: RunnerMetricsHistory;
@@ -105,7 +106,11 @@ const clampPercent = (value: number): number => Math.min(100, Math.max(0, value)
 const buildSamples = (story: MachineStory): readonly Sample[] => {
   const samples: Sample[] = [];
   const newestStart = Math.floor(SPECIMEN_NOW / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
-  for (let at = newestStart - HOUR_HISTORY_MS - HOUR_MS; at <= newestStart; at += FIVE_MINUTES_MS) {
+  for (
+    let at = newestStart - FORECAST_HISTORY_MS - HOUR_MS;
+    at <= newestStart;
+    at += FIVE_MINUTES_MS
+  ) {
     const hoursAgo = (SPECIMEN_NOW - at) / HOUR_MS;
     const isGap = story.gaps.some(([older, newer]) => hoursAgo <= older && hoursAgo > newer);
     if (isGap || hoursAgo < story.silentForHours) continue;
@@ -178,7 +183,7 @@ const findFirstSpanStart = (rangeMs: number, spanMs: number): number =>
 
 /**
  * Builds the history of a machine as `runnerMetrics.query` returns it: the
- * five-minute points of the last 24 hours and the hour points of the last 14
+ * five-minute points of the last 24 hours and the hour points of the last 7
  * days, each read at the specimen's clock.
  */
 export const buildMachineMetrics = (story: MachineStory): MachineMetrics => {
@@ -197,7 +202,7 @@ export const buildMachineMetrics = (story: MachineStory): MachineMetrics => {
       points: buildPoints(
         story.runnerId,
         samples,
-        findFirstSpanStart(HOUR_HISTORY_MS, HOUR_MS),
+        findFirstSpanStart(FORECAST_HISTORY_MS, HOUR_MS),
         HOUR_MS,
       ),
       readAt: SPECIMEN_NOW,
