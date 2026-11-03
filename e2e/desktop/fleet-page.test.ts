@@ -14,7 +14,7 @@
  *   its runner reports, and draws a report that arrives while it is open;
  * - a machine's activity lists the session the user spawned and the workspace
  *   the user removed, in Recent on its page and on the Activity page, and the
- *   crumb of the Activity page leads back to the machine.
+ *   crumb of the Activity page leads back to the machine;
  * - a thread started on a machine shows on that machine's card as a group at
  *   work, and in the Running here section of its page, which opens the thread.
  *
