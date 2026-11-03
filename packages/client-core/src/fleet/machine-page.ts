@@ -45,30 +45,18 @@ import {
   type SessionCountsByRunner,
   type SessionsDrawing,
 } from "./machine";
-
-/** A release version: three numbers, with optional build metadata after a plus. */
-const RELEASE_VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$/;
+import { compareReleaseVersions } from "./versions";
 
 /**
  * Checks whether the runner runs an older release than its controller, which
  * is when a runner can be updated to the controller's version.
  *
- * A version is read as major, minor and patch, and the build metadata after a
- * plus sign is ignored, as semantic versioning says. Returns false when either
- * version is missing or is not that shape (a pre-release such as
- * "0.9.3-rc.1"), because then no order is known and the page must not guess.
+ * Versions are compared by semantic-versioning precedence (see
+ * `compareReleaseVersions`). Returns false when either version is missing or
+ * has no known order (such as "edge"), because the page must not guess.
  */
-const isRunnerBehind = (runnerVersion: string | null, controllerVersion: string): boolean => {
-  if (runnerVersion === null) return false;
-  const runner = RELEASE_VERSION.exec(runnerVersion);
-  const controller = RELEASE_VERSION.exec(controllerVersion);
-  if (runner === null || controller === null) return false;
-  for (const index of [1, 2, 3]) {
-    const difference = Number(controller[index]) - Number(runner[index]);
-    if (difference !== 0) return difference > 0;
-  }
-  return false;
-};
+const isRunnerBehind = (runnerVersion: string | null, controllerVersion: string): boolean =>
+  runnerVersion !== null && compareReleaseVersions(runnerVersion, controllerVersion) === -1;
 
 // A Map, not an object: the operating system is text the runner reported, and
 // an object would answer "__proto__" or "constructor" with a value of its own.
