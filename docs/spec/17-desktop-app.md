@@ -1969,6 +1969,8 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 
 A click anywhere else on the card opens the machine's page.
 
+*(Amended 2026-11-03, [#983](https://github.com/theagenticage/hercule/issues/983).)* The card shows the forecast only through its need line ("Disk reaches its limit in about 12 days", within 21 days). The list's Disk cell shows "Limit in 12 days" whenever the forecast shows (within 60 days), whether or not the machine is away.
+
 **The list** is one row per machine with columns that line up: Machine (icon, name and status), Sessions (the same drawing, smaller, and "12 of 16"), Room, Disk (gauge, percentage, and "Limit in 12 days" in `--you-ink` while the forecast shows, else the free space), Memory (gauge and percentage), and Needs you (the line and its button). A row opens the machine's page.
 
 **Sessions are drawn** as one block per slot while the cap is at most 16: filled for a running session, empty for a free slot, and one marigold block per session waiting for a slot, after the cap. Above 16 they are one bar, cut every 10 sessions, with the same three fills. So a machine with a cap of 100 reads at a glance without 100 blocks. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* The blocks are drawn only while the sessions running are at most 16 too, so a cap lowered from 100 to 4 with 100 running is a bar, not 100 blocks. In blocks at most 16 waiting blocks are drawn: the drawing is clipped to its place anyway, and the text beside it carries the count. When more sessions run than the cap allows, a 1.5px rule marks the cap, after the cap-th block or inside the bar, and the waiting part of a bar is cut every 10 sessions like the rest.
@@ -2075,6 +2077,8 @@ Each row has a checkbox, the name, what removing it frees, and when it was last 
 - **The reads.** The Fleet routes subscribe to `runnerMetrics` while open ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 4.3).
   - The Fleet page reads every runner's hour points of the last 7 days once as it opens, for the forecasts, and again on a nudge at most once an hour. On each nudge it reads `runner.query` again, for the latest metrics on the cards.
   - A machine's page reads its five-minute points of the last 24 hours and its hour points of the last 14 days as it opens. On each nudge naming the machine, it reads from the start of its newest five-minute point, replaces that point, which was still filling, and appends the rest; the hour points the same way, at most once an hour.
+  - *(Amended 2026-11-03, [#983](https://github.com/theagenticage/hercule/issues/983).)* A machine's page also reads `runner.query` again on each `runnerMetrics` nudge, for the latest numbers on its instruments, as the Fleet page does. A nudge that arrives while the same read is in flight leads to one more read after it. Hour points are read again only when their last read is an hour old or more.
+  - *(Amended 2026-11-03, [#983](https://github.com/theagenticage/hercule/issues/983).)* Each graph's right edge is the time its points were last read, so no timer runs. A re-read that brings nothing leaves the graph as it was. The first read of a history starts one point after `now - range`, so a small clock difference with the controller never makes the read wider than the range limit.
   - Nothing polls.
 - **Gaps** are drawn as gaps: a point the controller has no row for is missing, never zero. A machine with less history than the graph's range draws what it has from the right.
 - **The graphs are SVG paths** in the page's own component, with no chart library. One path per series, rebuilt only when a point arrives.
@@ -2083,6 +2087,12 @@ Each row has a checkbox, the name, what removing it frees, and when it was last 
   - It needs 2 days of points.
   - It starts again after a jump in free space of more than 10% of the disk between two hours, such as a cleanup: only the points after the jump count, and the 2 days start again.
   - It is worded as an estimate, in days ("in about 12 days"), never a date.
+  - *(Amended 2026-11-03, [#983](https://github.com/theagenticage/hercule/issues/983).)* The rules the first version left open:
+    - A jump is free space growing by more than 10% of the disk's total size between two consecutive hour points held, even across a gap. A drop is never a jump.
+    - "2 days of points" means the newest counted point starts at least 48 hours after the oldest.
+    - `days` is counted from the time the points were read, rounded to the nearest whole day, at least 1. The 21-day and 60-day rules compare that whole number, so the line and the need never disagree.
+    - There is no forecast when the newest point's free space is already below the limit (the "Disk below its limit" need says it), when the line does not fall, or when the runner does not report its disk's total size (the jump rule needs it).
+    - On the machine page the Disk graph's time axis extends past now by the forecast's days, at most 14, so the dashed line fits, as the prototype draws it. A forecast further out is cut at the edge.
 - **A machine whose runner reports no CPU** shows the CPU graph's frame with "This machine's runner is too old to report CPU. Update it." A machine without `diskTotalBytes` shows free space without a percentage, and its disk gauge is empty. Each of these lines names what to do; none is a silent blank.
 
 ### What the Fleet pages read

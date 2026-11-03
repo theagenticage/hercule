@@ -22,12 +22,12 @@ The report was called the watermark, which is also the name of the disk limit th
 **The runner reports its metrics every minute, and the controller keeps one row per runner per minute for 14 days.**
 
 - **The name.** The fluctuating report is the **Runner Metrics**: free disk, available memory and CPU. "Watermark" now means only the disk limit. The rename is made in code and docs; on the wire the frame keeps its old tag and key until the next protocol version raise, so runners and controllers of either age still read each other.
-- **CPU** is read once a second and reported per minute as its average and its peak, so a short spike is not lost between reports. Memory on macOS counts the free, inactive and purgeable pages, as the system itself does.
+- **CPU** is read once a second and reported per minute as its average and its peak, so a short spike is not lost between reports. Memory on macOS ~~counts the free, inactive and purgeable pages, as the system itself does~~. *(Amended 2026-11-03, [#982](https://github.com/theagenticage/hercule/issues/982).)* Memory on macOS is total RAM minus Activity Monitor's "Memory Used", so the gauge agrees with what the user sees there ([spec 03](../spec/03-controller-and-runners.md) section 4.1).
 - **The disk's size** joins the Runner Facts, because it does not change from minute to minute.
 - **One row per runner per minute**, with that minute's session counts taken from the controller's own records, in its own table in the one database. A minute with no report has no row.
 - **Kept 14 days** by default, as the controller setting `retention.runnerMetrics`, with no screen to change it in v1. The prune is built with the table, once an hour.
 - **Read as points of five minutes or one hour**, with each point's mean, lowest available memory and highest CPU, so a graph of a day is one page and the peak bands survive.
-- **Live by nudge.** Every row written nudges the `runner` topic, and a client reads only the points after the newest it holds. Nothing polls.
+- **Live by nudge.** ~~Every row written nudges the `runner` topic~~ *(Amended 2026-11-03, [#983](https://github.com/theagenticage/hercule/issues/983).)* Every row written nudges a topic of its own, `runnerMetrics`, not `runner`: a routine report changes no Runner record, and nudging `runner` would make every runner read refetch once a minute per runner ([spec 03](../spec/03-controller-and-runners.md) section 4.3). A client reads only the points after the newest it holds. Nothing polls.
 - **The forecast is the client's:** a straight line through 7 days of hourly points, in `@hercule/client-core`, where its rules can be tested beside the screen that shows them.
 
 ## Considered options
