@@ -116,12 +116,16 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px 36px;
 }
-/* A 16-block Sessions drawing is 142px wide (7px blocks, 2px apart), so three
-   columns need 3 * 142 + 2 * 36 = 498px, rounded up to 500px. Under that the
-   drawing would be cut off. The narrowest window (800px) leaves the row about
-   445px, a column of 124px. Sessions then takes a row of its own and CPU and
-   Memory share the next, two columns of about 204px. */
-@container machine-page-instruments (width < 500px) {
+/* The widest drawing that must show whole is 16 slots with the cap mark among
+   them (a lowered cap with 16 sessions running): 16 blocks of 7px, the 1.5px
+   mark, and 2px between all 17 parts, so 16 * 7 + 16 * 2 + 1.5 = 145.5px.
+   Three columns need 3 * 145.5 + 2 * 36 = 508.5px, rounded up to 510px. Under
+   that, Sessions takes a row of its own and CPU and Memory share the next.
+   At the narrowest window (800px wide, sidebar open) the row is about 464px,
+   so a third of it would be about 131px, too narrow. Waiting blocks beyond
+   the column are cut off at its edge, as on a card: the numbers carry the
+   counts. */
+@container machine-page-instruments (width < 510px) {
   .machine-page-instruments {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

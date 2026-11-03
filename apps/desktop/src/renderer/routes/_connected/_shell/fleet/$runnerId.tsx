@@ -68,10 +68,10 @@ const SECTIONS = [
  * page's does (`fleet/index.tsx`), including the machine's five-minute points
  * of the last 24 hours, for its graphs. They are read only for a machine that
  * exists, and a cached read is used as it is: a `runnerMetrics` push brings
- * them up to date (see `useRunnerMetricsLive`). The workflow name of each run that has a session
- * on the machine is read once (`runWorkflowNameQuery`). When no runner has
- * the id, or the runner is retired, the route shows `RunnerNotFound`: retired
- * machines are not shown anywhere on Fleet.
+ * them up to date (see `useRunnerMetricsLive`). The workflow name of each run
+ * that has a session on the machine is read once (`runWorkflowNameQuery`).
+ * When no runner has the id, or the runner is retired, the route shows
+ * `RunnerNotFound`: retired machines are not shown anywhere on Fleet.
  */
 export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
   staticData: { title: "Fleet" },

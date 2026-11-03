@@ -54,7 +54,8 @@ function Instrument({
  * on its card, and its Sessions drawing is an outline. The instruments
  * themselves already say what an away machine shows. The row holds three
  * columns while its place is wide. When it is not, Sessions takes a row of its
- * own, so its drawing is never cut off, and CPU and Memory share the next.
+ * own, so its 16 slots are never cut off (waiting blocks beyond the column
+ * are, as on a card), and CPU and Memory share the next.
  */
 export function MachinePageInstruments({
   instruments,

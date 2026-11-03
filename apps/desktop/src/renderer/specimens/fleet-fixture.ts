@@ -753,7 +753,7 @@ const FLEET_METRICS: FleetMetricsRecords = {
     Object.entries(FLEET_METRICS_BY_RUNNER).map(([id, metrics]) => [id, metrics.fiveMinutes]),
   ),
   fleetHours: {
-    points: Object.values(FLEET_METRICS_BY_RUNNER).flatMap(({ hours }) => hours.points),
+    points: Object.values(FLEET_METRICS_BY_RUNNER).flatMap(({ hourPoints }) => hourPoints),
     readAt: SPECIMEN_NOW,
   },
 };

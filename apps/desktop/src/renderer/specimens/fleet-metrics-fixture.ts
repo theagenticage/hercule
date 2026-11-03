@@ -47,10 +47,12 @@ export interface MachineStory {
   readonly silentForHours: number;
 }
 
-/** The history one machine's page and the Fleet page read, each as `runnerMetrics.query` returns it. */
+/** What the specimen holds of one machine's Runner Metrics. */
 export interface MachineMetrics {
+  /** What the machine's page reads, as `runnerMetrics.query` returns it. */
   readonly fiveMinutes: RunnerMetricsHistory;
-  readonly hours: RunnerMetricsHistory;
+  /** The points the Fleet page's history is built from, across all machines. */
+  readonly hourPoints: readonly RunnerMetricsPoint[];
 }
 
 /** A number between -1 and 1 that moves smoothly with `x` and never repeats exactly. */
@@ -198,14 +200,11 @@ export const buildMachineMetrics = (story: MachineStory): MachineMetrics => {
       ),
       readAt: SPECIMEN_NOW,
     },
-    hours: {
-      points: buildPoints(
-        story.runnerId,
-        samples,
-        findFirstSpanStart(FORECAST_HISTORY_MS, HOUR_MS),
-        HOUR_MS,
-      ),
-      readAt: SPECIMEN_NOW,
-    },
+    hourPoints: buildPoints(
+      story.runnerId,
+      samples,
+      findFirstSpanStart(FORECAST_HISTORY_MS, HOUR_MS),
+      HOUR_MS,
+    ),
   };
 };

@@ -12,7 +12,7 @@ import { SPECIMEN_NOW } from "./sidebar-fixture";
 
 const { fiveMinutesByRunner, fleetHours } = FLEET_RECORDS.metrics;
 const fiveMinutes = fiveMinutesByRunner[ATLAS.id]!;
-const hoursOf = (runnerId: string) =>
+const pickHourPoints = (runnerId: string) =>
   fleetHours.points.filter((point) => point.runnerId === runnerId);
 
 describe("the Fleet specimen's Runner Metrics", () => {
@@ -24,7 +24,7 @@ describe("the Fleet specimen's Runner Metrics", () => {
 
     expect(starts[0]).toBeGreaterThanOrEqual(SPECIMEN_NOW - 24 * 3_600_000);
     expect(gaps).toEqual([65 * 60_000]);
-    expect(hoursOf(ATLAS.id).length).toBeGreaterThan(7 * 24 - 3);
+    expect(pickHourPoints(ATLAS.id).length).toBeGreaterThan(7 * 24 - 3);
     expect(fiveMinutes.readAt).toBe(SPECIMEN_NOW);
   });
 
@@ -36,9 +36,14 @@ describe("the Fleet specimen's Runner Metrics", () => {
   });
 
   it("forecast atlas's disk reaching the limit in 12 days and give no other machine a forecast", () => {
-    expect(forecastDiskLimit(hoursOf(ATLAS.id), ATLAS, SPECIMEN_NOW)).toMatchObject({ days: 12 });
+    expect(forecastDiskLimit(pickHourPoints(ATLAS.id), ATLAS, SPECIMEN_NOW)).toMatchObject({
+      days: 12,
+    });
     for (const runner of [BEELINK, BOSGAME, MINI, STUDIO]) {
-      expect(forecastDiskLimit(hoursOf(runner.id), runner, SPECIMEN_NOW), runner.name).toBeNull();
+      expect(
+        forecastDiskLimit(pickHourPoints(runner.id), runner, SPECIMEN_NOW),
+        runner.name,
+      ).toBeNull();
     }
   });
 });

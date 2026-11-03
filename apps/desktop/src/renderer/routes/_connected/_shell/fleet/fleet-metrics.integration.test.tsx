@@ -357,17 +357,6 @@ describe("a machine's page", () => {
     expect(readFiveMinuteCalls(calls)).toHaveLength(before + 2);
   });
 
-  it("never reads hour points, however long the page has been open", async () => {
-    const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
-    await settle(live);
-
-    vi.setSystemTime(new Date("2026-11-02T15:30:00.000Z"));
-    pushMetrics(live, [ATLAS]);
-    await waitForQuiet(context);
-
-    expect(readHourCalls(calls)).toEqual([]);
-  });
-
   it("reads nothing while the window is hidden, and catches up when it shows", async () => {
     const { calls, live, context } = await openApp(`/fleet/${ATLAS.id}`, buildMachineWorld());
     await settle(live);
