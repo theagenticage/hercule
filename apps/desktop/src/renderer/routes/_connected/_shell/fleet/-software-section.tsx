@@ -34,7 +34,10 @@ export function SoftwareSection({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { data: harnesses } = useSuspenseQuery(harnessesQuery(client));
-  const { data: controller } = useSuspenseQuery(controllerQuery(client));
+  const { data: controllerVersion } = useSuspenseQuery({
+    ...controllerQuery(client),
+    select: (record) => record.version,
+  });
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const [openKey, setOpenKey] = useState<string | null>(null);
 
@@ -45,7 +48,7 @@ export function SoftwareSection({
   const { data: software } = useSuspenseQuery({
     ...runnersQuery(client),
     select: (runners) =>
-      describeFleetSoftware(runners, harnesses, controller.version, timezone, today),
+      describeFleetSoftware(runners, harnesses, controllerVersion, timezone, today),
   });
 
   return (

@@ -9,6 +9,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
 import { HARNESSES } from "@hercule/client-core/testing";
+import { PROBED_TOOLCHAINS } from "@hercule/contract";
 import type {
   Assistant,
   Harness,
@@ -72,6 +73,7 @@ const ATLAS: Runner = {
     diskTotalBytes: 500_000_000_000,
     docker: false,
     toolchains: [],
+    probedToolchains: PROBED_TOOLCHAINS,
     harnesses: [
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: true, path: "/usr/local/bin/codex" },
@@ -828,7 +830,7 @@ describe("the Software section", () => {
     ]);
   });
 
-  it("lists the tools found on the machine in the probed order, then names the ones that are missing", async () => {
+  it("lists the tools found on the machine in the order the runner reported them, then names the ones that are missing", async () => {
     await openMachine({
       runner: {
         ...ATLAS,
@@ -847,10 +849,24 @@ describe("the Software section", () => {
       within(tools)
         .getAllByRole("listitem")
         .map((row) => row.textContent),
-    ).toEqual(["git2.47.0", "node22.11.0"]);
+    ).toEqual(["node22.11.0", "git2.47.0"]);
     expect(within(getSoftware()).getByText(/^Not installed: gh, /).textContent).not.toMatch(
       /git|node/,
     );
+  });
+
+  it("says which tools an older runner did not look for, apart from the ones it found missing", async () => {
+    // An older runner sends no list of what it looked for.
+    const olderFacts = Object.fromEntries(
+      Object.entries(ATLAS.facts!).filter(([key]) => key !== "probedToolchains"),
+    ) as NonNullable<Runner["facts"]>;
+    await openMachine({ runner: { ...ATLAS, facts: olderFacts } });
+
+    const software = getSoftware();
+    expect(within(software).getByText("Not installed: git, gh")).toBeTruthy();
+    expect(
+      within(software).getByText(/^This runner is too old to look for node, pnpm, /),
+    ).toBeTruthy();
   });
 
   it("names every probed tool as not installed when the runner found none", async () => {

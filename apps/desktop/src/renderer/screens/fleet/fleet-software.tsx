@@ -25,21 +25,25 @@ const buildDetailId = (key: string): string => `fleet-software-detail-${key.repl
  * - `below-floor`: the version in the failure ink, with its tooltip;
  * - `not-installed`: a short dash, with "Not installed" as text for
  *   assistive technology;
- * - `version` and `unknown-version`: the version, or "Installed".
+ * - `version`, `unknown-version` and `not-probed`: the version, "Installed"
+ *   or "Unknown" (with a tooltip for the last two).
  *
- * A machine that is away draws all of them muted (see `fleet-software.css`).
+ * A machine that is away shows what it last reported: every cell that has a
+ * version draws the version as text in the muted colour, a `latest` one too
+ * (see `fleet-software.css`). Only the dash stays a dash.
  */
 function SoftwareCellView({ cell }: { readonly cell: SoftwareCell }): JSX.Element {
   const className = cell.isAway
     ? `fleet-sw-cell is-${cell.kind} is-away`
     : `fleet-sw-cell is-${cell.kind}`;
+  const showsCheck = cell.kind === "latest" && !cell.isAway;
   // A check shows nothing of the version, and a raw version string can be cut
   // short, so both carry the version in their tooltip.
   const title =
     cell.tooltip ?? (cell.kind === "latest" || cell.kind === "version" ? cell.text : undefined);
   return (
     <div role="cell" className={className} title={title}>
-      {cell.kind === "latest" ? (
+      {showsCheck ? (
         <>
           <CheckIcon size={13} />
           <span className="fleet-sw-hidden">{cell.text}</span>
@@ -168,6 +172,8 @@ function SoftwareColumnHead({
  *   key of the row that is open, or `null`; pressing a name calls `onToggle`
  *   with the row's key.
  * - A machine's column head calls `onOpenMachine` with its runner id.
+ * - With no machine column the section keeps its heading and, in place of
+ *   the grid and the key, says that Software shows once a machine has joined.
  * - It only shows. Nothing is installed or updated from here.
  */
 export function FleetSoftwarePanel({
@@ -186,52 +192,58 @@ export function FleetSoftwarePanel({
       <div className="fleet-sec-h">
         <h2 id="fleet-software-heading">Software</h2>
       </div>
-      <div className="fleet-sw-scroll">
-        <div
-          role="table"
-          aria-label="Software on each machine"
-          className="fleet-sw-table"
-          style={{ "--fleet-sw-columns": software.columns.length } as CSSProperties}
-        >
-          <div role="row" className="fleet-sw-head">
-            <div role="columnheader">Tool</div>
-            <div role="columnheader">Latest</div>
-            {software.columns.map((column) => (
-              <SoftwareColumnHead
-                key={column.runnerId}
-                column={column}
-                onOpenMachine={onOpenMachine}
-              />
-            ))}
-          </div>
-          {software.groups.map((group) => (
-            <div key={group.name} role="rowgroup">
-              <div role="row" className="fleet-sw-group">
-                <div role="rowheader">{group.name}</div>
+      {software.columns.length === 0 ? (
+        <p className="fleet-sw-empty">Software shows here once a machine has joined.</p>
+      ) : (
+        <>
+          <div className="fleet-sw-scroll">
+            <div
+              role="table"
+              aria-label="Software on each machine"
+              className="fleet-sw-table"
+              style={{ "--fleet-sw-columns": software.columns.length } as CSSProperties}
+            >
+              <div role="row" className="fleet-sw-head">
+                <div role="columnheader">Tool</div>
+                <div role="columnheader">Latest</div>
+                {software.columns.map((column) => (
+                  <SoftwareColumnHead
+                    key={column.runnerId}
+                    column={column}
+                    onOpenMachine={onOpenMachine}
+                  />
+                ))}
               </div>
-              {group.rows.map((row) => (
-                <SoftwareToolRow
-                  key={row.key}
-                  row={row}
-                  isOpen={openKey === row.key}
-                  onToggle={onToggle}
-                />
+              {software.groups.map((group) => (
+                <div key={group.name} role="rowgroup">
+                  <div role="row" className="fleet-sw-group">
+                    <div role="rowheader">{group.name}</div>
+                  </div>
+                  {group.rows.map((row) => (
+                    <SoftwareToolRow
+                      key={row.key}
+                      row={row}
+                      isOpen={openKey === row.key}
+                      onToggle={onToggle}
+                    />
+                  ))}
+                </div>
               ))}
             </div>
-          ))}
-        </div>
-      </div>
-      <p className="fleet-sw-key">
-        <span>
-          <CheckIcon size={12} /> latest
-        </span>
-        <span>
-          <b className="is-older">1.2.3</b> older
-        </span>
-        <span>
-          <b>{NOT_INSTALLED_DASH}</b> not installed
-        </span>
-      </p>
+          </div>
+          <p className="fleet-sw-key">
+            <span>
+              <CheckIcon size={12} /> latest
+            </span>
+            <span>
+              <b className="is-older">1.2.3</b> older
+            </span>
+            <span>
+              <b>{NOT_INSTALLED_DASH}</b> not installed
+            </span>
+          </p>
+        </>
+      )}
     </section>
   );
 }

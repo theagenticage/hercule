@@ -18,6 +18,7 @@ import { FleetPageLead } from "../../../../screens/fleet/fleet-lead";
 import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
+import { MACHINE_SOFTWARE_ID } from "./-machine-sections";
 import { MachinesSection } from "./-machines-section";
 import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { useRunnerSessionCounts } from "./-session-counts";
@@ -62,9 +63,6 @@ export const Route = createFileRoute("/_connected/_shell/fleet/")({
 
 /** The jump links' section ids, in the order the sections are on the page. */
 const SECTION_IDS = ["machines", "software"];
-
-/** The id of the section of a machine's page that a Software column head opens. */
-const MACHINE_SOFTWARE_ID = "machine-software";
 
 /**
  * Draws the Fleet page: the floating header, the lead, the Machines section

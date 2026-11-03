@@ -352,6 +352,10 @@
   color: var(--faint);
   font-size: var(--t-12);
 }
+/* Two lines in a row, such as the tools not installed and the tools not looked for, sit closer. */
+.machine-page-sw-footnote + .machine-page-sw-footnote {
+  margin-top: 4px;
+}
 
 /* ---------- Settings ---------- */
 /* The prototype's steppers and value are static. These are fields, and the

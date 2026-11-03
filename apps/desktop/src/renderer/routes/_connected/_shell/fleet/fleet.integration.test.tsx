@@ -24,6 +24,7 @@ import {
   type Handler,
 } from "../../../../app/testing";
 import { rememberMachineView } from "../../../../screens/fleet/machine-view";
+import { MACHINE_SOFTWARE_ID } from "./-machine-sections";
 
 const GIB = 1024 ** 3;
 
@@ -509,7 +510,7 @@ describe("the Software section", () => {
     expect(router.state.location.pathname).toBe(`/fleet/${FORGE.id}`);
     await waitFor(() =>
       expect(scrollIntoView.mock.contexts.map((element) => (element as Element).id)).toContain(
-        "machine-software",
+        MACHINE_SOFTWARE_ID,
       ),
     );
     scrollIntoView.mockRestore();

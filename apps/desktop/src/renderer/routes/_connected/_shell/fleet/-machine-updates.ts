@@ -1,5 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
+import { listFleetRunners } from "@hercule/client-core/fleet";
 import { describeMachineUpdates } from "@hercule/client-core/software";
 import { controllerQuery, harnessesQuery, runnersQuery } from "../../../../app/queries";
 
@@ -14,12 +15,15 @@ import { controllerQuery, harnessesQuery, runnersQuery } from "../../../../app/q
  */
 export function useMachineUpdates(client: HerculeClient): Readonly<Record<string, string>> {
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
-  const controllerVersion = useSuspenseQuery(controllerQuery(client)).data.version;
+  const controllerVersion = useSuspenseQuery({
+    ...controllerQuery(client),
+    select: (record) => record.version,
+  }).data;
   return useSuspenseQuery({
     ...runnersQuery(client),
     select: (runners) => {
       const lines: Record<string, string> = {};
-      for (const runner of runners) {
+      for (const runner of listFleetRunners(runners)) {
         const line = describeMachineUpdates(runner, harnesses, controllerVersion);
         if (line !== null) lines[runner.id] = line;
       }

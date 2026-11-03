@@ -33,6 +33,13 @@ import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
 import { MachineRecent } from "./-machine-recent";
 import { MachineRetireDialog } from "./-machine-retire-dialog";
+import {
+  MACHINE_CAPACITY_ID,
+  MACHINE_RECENT_ID,
+  MACHINE_SETTINGS_ID,
+  MACHINE_SOFTWARE_ID,
+  MACHINE_WORK_ID,
+} from "./-machine-sections";
 import { MachineSettings } from "./-machine-settings";
 import { MachineSoftware } from "./-machine-software";
 import { RunnerNotFound } from "./-runner-not-found";
@@ -40,19 +47,20 @@ import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { MachineRunningHere } from "./-running-here";
 import { useRunnerSessionCounts } from "./-session-counts";
 
-/** The ids of the page's sections, which the header's jump links scroll to. */
-const CAPACITY_ID = "machine-capacity";
-const WORK_ID = "machine-work";
-const SOFTWARE_ID = "machine-software";
-const RECENT_ID = "machine-recent";
-const SETTINGS_ID = "machine-settings";
-const SECTION_IDS = [CAPACITY_ID, WORK_ID, SOFTWARE_ID, RECENT_ID, SETTINGS_ID];
+/** The ids of the page's sections, in order, which the header's jump links scroll to. */
+const SECTION_IDS = [
+  MACHINE_CAPACITY_ID,
+  MACHINE_WORK_ID,
+  MACHINE_SOFTWARE_ID,
+  MACHINE_RECENT_ID,
+  MACHINE_SETTINGS_ID,
+];
 const SECTIONS = [
-  { id: CAPACITY_ID, label: "Capacity" },
-  { id: WORK_ID, label: "Running" },
-  { id: SOFTWARE_ID, label: "Software" },
-  { id: RECENT_ID, label: "Recent" },
-  { id: SETTINGS_ID, label: "Settings" },
+  { id: MACHINE_CAPACITY_ID, label: "Capacity" },
+  { id: MACHINE_WORK_ID, label: "Running" },
+  { id: MACHINE_SOFTWARE_ID, label: "Software" },
+  { id: MACHINE_RECENT_ID, label: "Recent" },
+  { id: MACHINE_SETTINGS_ID, label: "Settings" },
 ];
 
 /**
@@ -186,20 +194,24 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
           )}
           {/* The section has no visible heading: the room line and the numbers
               need none. Its label names it for the jump link and for screen readers. */}
-          <section id={CAPACITY_ID} className="machine-page-capacity" aria-label="Capacity">
+          <section id={MACHINE_CAPACITY_ID} className="machine-page-capacity" aria-label="Capacity">
             {page.top.kind === "room" && <MachinePageRoomLine line={page.top.line} />}
             <MachinePageInstruments instruments={page.instruments} graphs={graphs} />
           </section>
           <MachineRunningHere
             key={runner.id}
-            id={WORK_ID}
+            id={MACHINE_WORK_ID}
             runner={runner}
             timezone={timezone}
             today={today}
           />
-          <MachineSoftware id={SOFTWARE_ID} runner={runner} />
-          <MachineRecent id={RECENT_ID} runner={runner} />
-          <MachineSettings id={SETTINGS_ID} runner={runner} onRetire={() => setRetiring(true)} />
+          <MachineSoftware id={MACHINE_SOFTWARE_ID} runner={runner} />
+          <MachineRecent id={MACHINE_RECENT_ID} runner={runner} />
+          <MachineSettings
+            id={MACHINE_SETTINGS_ID}
+            runner={runner}
+            onRetire={() => setRetiring(true)}
+          />
         </div>
       </FleetScroll>
       {isRetiring && (

@@ -215,6 +215,63 @@ describe("FleetSoftwarePanel", () => {
       expect(atlas!.title).toBe("The version of this tool is not known yet.");
     });
 
+    it("draws the version of a machine that is away as muted text, a latest one too, and keeps a dash a dash", () => {
+      const { table } = renderPanel({
+        ...SOFTWARE,
+        groups: [
+          {
+            name: "Harnesses",
+            rows: [
+              buildRow("claude-code/claude-code", "Claude Code", [
+                buildCell("latest", "2.0.84", { isAway: true }),
+                buildCell("below-floor", "0.9.0", {
+                  isAway: true,
+                  tooltip: "Too old for this Hercule: update it",
+                }),
+              ]),
+              buildRow("codex/codex", "Codex", [
+                buildCell("version", "go1.25.3", { isAway: true }),
+                buildCell("not-installed", "Not installed", { isAway: true }),
+              ]),
+            ],
+          },
+        ],
+      });
+
+      const [latest, belowFloor] = getMachineCells(table, "Claude Code");
+      const [version, missing] = getMachineCells(table, "Codex");
+
+      expect(latest!.textContent).toBe("2.0.84");
+      expect(latest!.querySelector("svg")).toBeNull();
+      expect(belowFloor!.textContent).toBe("0.9.0");
+      expect(version!.textContent).toBe("go1.25.3");
+      expect(missing!.querySelector("[aria-hidden]")!.textContent).toBe("–");
+    });
+
+    it("draws Unknown, with its tooltip, for a toolchain the machine's runner is too old to look for", () => {
+      const tooltip = "This machine's runner is too old to look for go. Update it to see it.";
+      const { table } = renderPanel({
+        ...SOFTWARE,
+        groups: [
+          {
+            name: "Toolchains",
+            rows: [
+              buildRow("go", "go", [
+                buildCell("not-probed", "Unknown", { tooltip }),
+                buildCell("version", "1.25.3"),
+              ]),
+            ],
+          },
+        ],
+      });
+
+      const [atlas] = getMachineCells(table, "go");
+
+      expect(atlas!.className).toContain("is-not-probed");
+      expect(atlas!.textContent).toBe("Unknown");
+      expect(atlas!.title).toBe(tooltip);
+    });
+
     it("draws a raw version whole in its tooltip, and mutes the cells of a machine that is away", () => {
       const { table } = renderPanel();
 
@@ -313,6 +370,22 @@ describe("FleetSoftwarePanel", () => {
         within(detail).getByText("Hercule does not follow this tool's releases yet."),
       ).toBeTruthy();
     });
+  });
+
+  it("keeps its heading and says Software shows once a machine has joined, in place of the grid and the key, when there are no machines", () => {
+    render(
+      <FleetSoftwarePanel
+        software={{ columns: [], groups: [] }}
+        openKey={null}
+        onToggle={() => undefined}
+        onOpenMachine={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 2, name: "Software" })).toBeTruthy();
+    expect(screen.getByText("Software shows here once a machine has joined.")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(document.querySelector(".fleet-sw-key")).toBeNull();
   });
 
   it("explains the cells in a key under the grid, and offers nothing to install or update", () => {

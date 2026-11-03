@@ -31,6 +31,7 @@ describe("the Tools part of a machine's Software section", () => {
         { name: "node", version: "22.11.0" },
       ],
       notInstalledText: "Not installed: terraform, dotnet",
+      notProbedText: null,
     });
 
     const rows = within(within(section).getByRole("list", { name: "Tools" })).getAllByRole(
@@ -49,6 +50,7 @@ describe("the Tools part of a machine's Software section", () => {
     const section = renderSoftware({
       tools: [{ name: "go", version: raw }],
       notInstalledText: null,
+      notProbedText: null,
     });
 
     expect(within(section).getByTitle(raw).textContent).toBe(raw);
@@ -56,22 +58,56 @@ describe("the Tools part of a machine's Software section", () => {
   });
 
   it("shows only the missing line under the heading when no tool was found", () => {
-    const section = renderSoftware({ tools: [], notInstalledText: "Not installed: git, gh" });
+    const section = renderSoftware({
+      tools: [],
+      notInstalledText: "Not installed: git, gh",
+      notProbedText: null,
+    });
 
     expect(within(section).queryByRole("list", { name: "Tools" })).toBeNull();
     expect(within(section).getByRole("heading", { name: "Tools" })).toBeTruthy();
     expect(within(section).getByText("Not installed: git, gh")).toBeTruthy();
   });
 
+  it("names the tools the runner is too old to look for in one more faint line under the missing ones", () => {
+    const section = renderSoftware({
+      tools: [{ name: "git", version: "2.47.0" }],
+      notInstalledText: "Not installed: gh",
+      notProbedText: "This runner is too old to look for node, pnpm: update it to see them.",
+    });
+
+    const missing = within(section).getByText("Not installed: gh");
+    const notProbed = within(section).getByText(
+      "This runner is too old to look for node, pnpm: update it to see them.",
+    );
+    expect(notProbed.className).toBe(missing.className);
+    expect(
+      missing.compareDocumentPosition(notProbed) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("shows the not-looked-for line under the heading when it is the only thing to name", () => {
+    const section = renderSoftware({
+      tools: [],
+      notInstalledText: null,
+      notProbedText: "This runner is too old to look for node: update it to see it.",
+    });
+
+    expect(within(section).getByRole("heading", { name: "Tools" })).toBeTruthy();
+    expect(
+      within(section).getByText("This runner is too old to look for node: update it to see it."),
+    ).toBeTruthy();
+  });
+
   it("leaves the part out when there is nothing to show", () => {
-    const section = renderSoftware({ tools: [], notInstalledText: null });
+    const section = renderSoftware({ tools: [], notInstalledText: null, notProbedText: null });
 
     expect(within(section).queryByRole("heading", { name: "Tools" })).toBeNull();
   });
 
   it("marks the versions muted while the machine is away", () => {
     const section = renderSoftware(
-      { tools: [{ name: "git", version: "2.47.0" }], notInstalledText: null },
+      { tools: [{ name: "git", version: "2.47.0" }], notInstalledText: null, notProbedText: null },
       true,
     );
 

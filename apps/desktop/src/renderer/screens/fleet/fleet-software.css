@@ -13,6 +13,13 @@
   margin-top: 0;
 }
 
+/* The line that stands in for the grid when no machine has joined. */
+.fleet-sw-empty {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
 /* ---------- The grid ---------- */
 /* A grid with more machines than fit scrolls sideways in this box, so the page
    itself never does. The Tool and Latest columns are pinned. */
@@ -202,7 +209,8 @@
    The tooltip has it whole. */
 .fleet-sw-cell.is-version,
 .fleet-sw-cell.is-older,
-.fleet-sw-cell.is-below-floor {
+.fleet-sw-cell.is-below-floor,
+.fleet-sw-cell.is-latest.is-away {
   display: block;
   line-height: 26px;
   overflow: hidden;
@@ -222,10 +230,12 @@
 .fleet-sw-cell.is-not-installed {
   color: var(--faint);
 }
-.fleet-sw-cell.is-unknown-version {
+.fleet-sw-cell.is-unknown-version,
+.fleet-sw-cell.is-not-probed {
   color: var(--muted);
 }
-/* A machine that is away shows what it last reported, muted. A dash stays faint. */
+/* A machine that is away shows the versions it last reported, muted (a check
+   becomes its version). A dash stays faint. */
 .fleet-sw-cell.is-away:not(.is-not-installed) {
   color: var(--muted);
 }
@@ -265,23 +275,26 @@
 .fleet-sw-detail-main > :first-child {
   margin-top: 10px;
 }
-/* The machines by version: the version, then the machines that have it. */
+/* The machines by version: the version, then the machines that have it. The
+   labels share one column, so every machine name starts at the same x. A long
+   raw version wraps inside half the width and never reaches the names. */
 .fleet-sw-versions {
   display: grid;
-  gap: 6px;
+  grid-template-columns: fit-content(50%) minmax(0, 1fr);
+  gap: 6px 12px;
   align-content: start;
+  align-items: baseline;
   margin: 0;
   padding-top: 12px;
   font-size: var(--t-12);
 }
 .fleet-sw-versions > div {
-  display: grid;
-  grid-template-columns: minmax(64px, auto) minmax(0, 1fr);
-  gap: 12px;
+  display: contents;
 }
 .fleet-sw-versions dt {
   font-weight: var(--w-medium);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .fleet-sw-versions dd {
   margin: 0;

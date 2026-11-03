@@ -20,11 +20,13 @@
  * - studio: a Mac with 96 GB, online and set to take no new work. Its
  *   disk is 87 % full, which is the one need its card shows.
  *
- * Software: atlas, beelink and studio report all twelve probed toolchains,
- * bosgame lacks terraform and dotnet, and mini lacks four. The latest Claude
- * Code and pi are read, so the grid shows checks, an older version (atlas's
- * runner, studio's Claude Code), a version below the floor (atlas's Codex), a
- * dash, and Codex's last read failed after one succeeded ("checked 09:00").
+ * Software: atlas, beelink, bosgame and studio report the probed toolchains
+ * (bosgame lacks terraform and dotnet), and mini runs an older runner that
+ * looked for git and gh only, so the grid shows "Unknown" for the rest of its
+ * column. The latest Claude Code and pi are read, so the grid shows checks, an
+ * older version (atlas's runner, studio's Claude Code), a version below the
+ * floor (atlas's Codex), a dash, and Codex's last read failed after one
+ * succeeded ("checked 09:00").
  *
  * The sidebar's seven threads run on atlas, and are 7 of its 12 running
  * sessions, so the sidebar and the Fleet page agree. Atlas's work is nine
@@ -102,7 +104,9 @@ type ToolchainVersions = Readonly<Partial<Record<(typeof PROBED_TOOLCHAINS)[numb
 /**
  * Returns the facts of a machine with a disk of `diskTotalBytes`, the harnesses
  * of `versions` installed and the toolchains of `tools`, which the runner
- * reports in the order of the probed list.
+ * reports in the order of the probed list. `probedToolchains` is the list the
+ * runner says it looked for; an older runner reports none, so its facts leave
+ * the field out.
  */
 const buildFacts = (
   os: string,
@@ -111,6 +115,7 @@ const buildFacts = (
   diskTotalBytes: number,
   versions: HarnessVersions,
   tools: ToolchainVersions,
+  probedToolchains: readonly string[] | undefined,
 ): RunnerFacts => ({
   os,
   arch,
@@ -121,6 +126,7 @@ const buildFacts = (
     const version = tools[name];
     return version === undefined ? [] : [{ name, version, path: `/usr/local/bin/${name}` }];
   }),
+  ...(probedToolchains === undefined ? {} : { probedToolchains }),
   harnesses: HARNESSES.map((harness) => ({
     name: harness.binaryName,
     present: versions[harness.id] !== null && versions[harness.id] !== undefined,
@@ -179,7 +185,11 @@ const STUDIO_VERSIONS: HarnessVersions = {
   "pi/pi": "0.9.2",
 };
 
-/** The toolchains each machine reports. Atlas, beelink and studio have all twelve; bosgame lacks terraform and dotnet; mini lacks four. */
+/**
+ * The toolchains each machine reports. Atlas, beelink and studio have all
+ * twelve; bosgame lacks terraform and dotnet; mini runs an older runner that
+ * looked for git and gh only, so it reports no probed list.
+ */
 const ATLAS_TOOLS: ToolchainVersions = {
   git: "2.51.0",
   gh: "2.78.0",
@@ -223,12 +233,6 @@ const BOSGAME_TOOLS: ToolchainVersions = {
 const MINI_TOOLS: ToolchainVersions = {
   git: "2.50.1",
   gh: "2.76.2",
-  node: "22.14.0",
-  pnpm: "10.11.0",
-  bun: "1.2.19",
-  go: "1.24.2",
-  python3: "3.13.1",
-  uv: "0.8.4",
 };
 const STUDIO_TOOLS: ToolchainVersions = {
   git: "2.51.0",
@@ -250,7 +254,15 @@ export const ATLAS: Runner = buildMachine(
   ATLAS_ID,
   "atlas",
   {
-    facts: buildFacts("darwin", "arm64", 64 * GIB, 1000 * GB, ATLAS_VERSIONS, ATLAS_TOOLS),
+    facts: buildFacts(
+      "darwin",
+      "arm64",
+      64 * GIB,
+      1000 * GB,
+      ATLAS_VERSIONS,
+      ATLAS_TOOLS,
+      PROBED_TOOLCHAINS,
+    ),
     maxConcurrentSessions: 16,
     version: "0.4.1",
     labels: ["macos", "xcode"],
@@ -265,7 +277,15 @@ export const BEELINK: Runner = buildMachine(
   BEELINK_ID,
   "beelink",
   {
-    facts: buildFacts("linux", "x64", 128 * GIB, 4000 * GB, BEELINK_VERSIONS, BEELINK_TOOLS),
+    facts: buildFacts(
+      "linux",
+      "x64",
+      128 * GIB,
+      4000 * GB,
+      BEELINK_VERSIONS,
+      BEELINK_TOOLS,
+      PROBED_TOOLCHAINS,
+    ),
     maxConcurrentSessions: 24,
     labels: ["linux", "docker"],
   },
@@ -279,7 +299,15 @@ export const BOSGAME: Runner = buildMachine(
   BOSGAME_ID,
   "bosgame",
   {
-    facts: buildFacts("linux", "x64", 32 * GIB, 500 * GB, BOSGAME_VERSIONS, BOSGAME_TOOLS),
+    facts: buildFacts(
+      "linux",
+      "x64",
+      32 * GIB,
+      500 * GB,
+      BOSGAME_VERSIONS,
+      BOSGAME_TOOLS,
+      PROBED_TOOLCHAINS,
+    ),
     maxConcurrentSessions: 8,
     labels: ["linux"],
   },
@@ -293,7 +321,7 @@ export const MINI: Runner = buildMachine(
   MINI_ID,
   "mini",
   {
-    facts: buildFacts("darwin", "arm64", 16 * GIB, 500 * GB, MINI_VERSIONS, MINI_TOOLS),
+    facts: buildFacts("darwin", "arm64", 16 * GIB, 500 * GB, MINI_VERSIONS, MINI_TOOLS, undefined),
     maxConcurrentSessions: 4,
     connectivity: "offline",
     lastSeenAt: "2026-09-29T09:12:00.000Z",
@@ -308,7 +336,15 @@ export const STUDIO: Runner = buildMachine(
   STUDIO_ID,
   "studio",
   {
-    facts: buildFacts("darwin", "arm64", 96 * GIB, 4000 * GB, STUDIO_VERSIONS, STUDIO_TOOLS),
+    facts: buildFacts(
+      "darwin",
+      "arm64",
+      96 * GIB,
+      4000 * GB,
+      STUDIO_VERSIONS,
+      STUDIO_TOOLS,
+      PROBED_TOOLCHAINS,
+    ),
     maxConcurrentSessions: 8,
     lifecycle: "draining",
   },
@@ -348,7 +384,7 @@ const LATEST_RELEASES: Readonly<Record<string, HarnessLatestRelease>> = {
   "codex/codex": {
     version: "0.46.0",
     checkedAt: CHECKED_AT,
-    error: "GitHub's rate limit was reached.",
+    error: "The npm registry did not answer in time.",
   },
   "pi/pi": { version: "0.9.2", checkedAt: CHECKED_AT, error: null },
 };

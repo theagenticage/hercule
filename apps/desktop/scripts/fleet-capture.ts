@@ -10,7 +10,11 @@
  * - `machine-recent`: atlas's page scrolled to its Recent section;
  * - `activity`: atlas's Activity page, filter All;
  * - `activity-problems`: the same page under the Problems filter;
- * - `activity-unfolded`: the same page with the first folded entry unfolded.
+ * - `activity-unfolded`: the same page with the first folded entry unfolded;
+ * - `software-detail`: the Fleet page scrolled to its Software section, with
+ *   the first tool's detail open;
+ * - `software-narrow`: the same section in a window of the smallest width, 800,
+ *   with the grid scrolled sideways to its last machine.
  *
  * Then it prints the files it wrote and exits with 0, or with 1 when
  * anything fails on the way.
@@ -26,9 +30,11 @@ import type { BrowserWindow } from "electron";
 import {
   ALL_THEMES,
   captureSheet,
+  HEIGHT,
   MAIN_PANE_REGION,
   openSheet,
   startCaptureApp,
+  type Rect,
 } from "./sheet-window.ts";
 
 const repositoryDir = fileURLToPath(new URL("../../../", import.meta.url));
@@ -40,7 +46,13 @@ interface State {
   readonly query: string;
   /** A script that runs in the page once it is ready, and returns when the state is drawn. */
   readonly script?: string;
+  /** The window's content width in CSS pixels, when the state is drawn narrower than the default. */
+  readonly windowWidth?: number;
 }
+
+/** The window's smallest width, 800, leaves the sidebar 280 px, so the main pane is the rest. */
+const NARROW_WINDOW_WIDTH = 800;
+const NARROW_SIDEBAR_WIDTH = 280;
 
 /**
  * Resolves once the page has drawn two frames and a quarter of a second has
@@ -58,6 +70,9 @@ const pressFilter = (label: string): string => `(async () => {
   button.click();
   await ${WAIT_FOR_FRAMES};
 })()`;
+
+/** Scrolls the Fleet page to its Software section, so that the section starts under the header. */
+const SCROLL_TO_SOFTWARE = `document.getElementById("software").scrollIntoView({ block: "start" })`;
 
 const STATES: ReadonlyArray<State> = [
   {
@@ -82,12 +97,51 @@ const STATES: ReadonlyArray<State> = [
       await ${WAIT_FOR_FRAMES};
     })()`,
   },
+  {
+    name: "software-detail",
+    query: "",
+    script: `(async () => {
+      const name = document.querySelector("#software .fleet-sw-name");
+      if (name === null) throw new Error("The Software section has no tool to open.");
+      name.click();
+      ${SCROLL_TO_SOFTWARE};
+      await ${WAIT_FOR_FRAMES};
+    })()`,
+  },
+  {
+    name: "software-narrow",
+    query: "",
+    windowWidth: NARROW_WINDOW_WIDTH,
+    script: `(async () => {
+      const scroll = document.querySelector("#software .fleet-sw-scroll");
+      if (scroll === null) throw new Error("The Software section has no grid.");
+      ${SCROLL_TO_SOFTWARE};
+      scroll.scrollLeft = scroll.scrollWidth;
+      await ${WAIT_FOR_FRAMES};
+    })()`,
+  },
 ];
+
+/** Returns the main pane's region of a window `state` is drawn in. */
+const decideRegion = (state: State): Rect =>
+  state.windowWidth === undefined
+    ? MAIN_PANE_REGION
+    : {
+        x: NARROW_SIDEBAR_WIDTH,
+        y: 0,
+        width: state.windowWidth - NARROW_SIDEBAR_WIDTH,
+        height: HEIGHT,
+      };
 
 /** Opens `state` in `theme`, brings it about, and returns the window. The caller destroys it. */
 async function openState(sheetsUrl: string, theme: string, state: State): Promise<BrowserWindow> {
   const window = await openSheet(`${sheetsUrl}fleet.html?theme=${theme}&${state.query}`);
   try {
+    if (state.windowWidth !== undefined) {
+      window.setContentSize(state.windowWidth, HEIGHT);
+      // The page lays out again for the new width before the script reads it.
+      await window.webContents.executeJavaScript(WAIT_FOR_FRAMES);
+    }
     if (state.script !== undefined) await window.webContents.executeJavaScript(state.script);
     return window;
   } catch (error) {
@@ -103,7 +157,7 @@ startCaptureApp(async (sheetsUrl) => {
     for (const state of STATES) {
       const window = await openState(sheetsUrl, theme, state);
       try {
-        const { image } = await captureSheet(window, MAIN_PANE_REGION);
+        const { image } = await captureSheet(window, decideRegion(state));
         const file = join(outputDir, `${theme}-${state.name}.png`);
         writeFileSync(file, image.toPNG());
         files.push(relative(repositoryDir, file));

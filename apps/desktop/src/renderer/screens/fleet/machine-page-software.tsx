@@ -19,8 +19,9 @@ import "./machine-page.css";
  * - The accounts part is left out when no account signs in on each machine.
  * - The tools part lists each tool with its version, a long version cut with
  *   an ellipsis and whole in its tooltip, then one faint line naming the tools
- *   that are not installed. It is left out when the machine has not reported
- *   its tools and there is nothing to name.
+ *   that are not installed, and one more faint line naming the tools its
+ *   runner is too old to look for. It is left out when the machine has not
+ *   reported its tools and there is nothing to name.
  */
 export function MachinePageSoftware({
   id,
@@ -102,7 +103,9 @@ export function MachinePageSoftware({
           </p>
         </>
       )}
-      {tools.tools.length === 0 && tools.notInstalledText === null ? null : (
+      {tools.tools.length === 0 &&
+      tools.notInstalledText === null &&
+      tools.notProbedText === null ? null : (
         <>
           <h4 className="machine-page-sw-heading">Tools</h4>
           {tools.tools.length === 0 ? null : (
@@ -126,6 +129,9 @@ export function MachinePageSoftware({
           )}
           {tools.notInstalledText === null ? null : (
             <p className="machine-page-sw-footnote">{tools.notInstalledText}</p>
+          )}
+          {tools.notProbedText === null ? null : (
+            <p className="machine-page-sw-footnote">{tools.notProbedText}</p>
           )}
         </>
       )}

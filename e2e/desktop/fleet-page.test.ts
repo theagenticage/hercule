@@ -394,7 +394,10 @@ describe("the Fleet page", () => {
     await expect.poll(() => gitRow.getByRole("cell").nth(1).innerText()).toContain(gitVersion);
 
     await machineHead.getByRole("button").click();
-    const software = page.getByRole("region", { name: "Software" });
+    // The Fleet page has a Software region of its own, and the app's address is not in the
+    // window's URL, so wait for the machine's page before looking for its section.
+    await page.locator(".machine-page").waitFor();
+    const software = page.locator("#machine-software");
     await software.waitFor();
     await expect
       .poll(() =>
