@@ -227,7 +227,7 @@ describe("GET /runners", () => {
         "version",
         "labels",
         "facts",
-        "watermark",
+        "metrics",
         "maxConcurrentSessions",
         "lastSeenAt",
       ]) {
@@ -342,7 +342,7 @@ describe("GET /runners/{id}", () => {
         "version",
         "labels",
         "facts",
-        "watermark",
+        "metrics",
         "maxConcurrentSessions",
         "lastSeenAt",
         "negotiatedCapabilities",
@@ -373,7 +373,7 @@ describe("GET /runners/{id}", () => {
             harness.sql,
             harness.sql`UPDATE runners
                         SET facts = '{"os":42}',
-                            watermark = 'not json at all',
+                            metrics = 'not json at all',
                             negotiated_capabilities = '{"not":"a list"}'
                         WHERE id = ${uuidFromString(online.id)}`,
           ),
@@ -382,7 +382,7 @@ describe("GET /runners/{id}", () => {
 
       const row = await readRunner(harness.base, token, online.id);
       expect(row.facts).toBeNull();
-      expect(row.watermark).toBeNull();
+      expect(row.metrics).toBeNull();
       expect(row.negotiatedCapabilities).toBeNull();
 
       const page = await listRunners(harness.base, token);
@@ -527,7 +527,7 @@ describe("PATCH /runners/{id}", () => {
     });
   });
 
-  it("rejects a patch that sets facts, state or the watermark", async () => {
+  it("rejects a patch that sets facts, state or the metrics", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris", connectivity: "online" });
@@ -538,7 +538,7 @@ describe("PATCH /runners/{id}", () => {
         { name: "iris-2", facts: { os: "linux" } },
         { name: "iris-2", connectivity: "unreachable" },
         { name: "iris-2", lifecycle: "retired" },
-        { name: "iris-2", watermark: { diskFreeBytes: 1 } },
+        { name: "iris-2", metrics: { diskFreeBytes: 1 } },
       ]) {
         const response = await patchRunner(harness.base, token, runner.id, body);
         expect(response.status, JSON.stringify(body)).toBe(400);
@@ -1214,7 +1214,7 @@ describe("the disk watermark placement checks a runner against", () => {
         Effect.orDie(
           withTransaction(
             harness.sql,
-            harness.sql`UPDATE runners SET watermark = ${JSON.stringify({
+            harness.sql`UPDATE runners SET metrics = ${JSON.stringify({
               diskFreeBytes: 4 * GIB,
               availableMemoryBytes: 16 * GIB,
             })} WHERE id = ${uuidFromString(runner.id)}`,
@@ -1398,7 +1398,7 @@ describe("retiring a runner that still has sessions", () => {
         });
         await waitUntil("stored the low reading", async () => {
           const runner = await readRunner(arranged.harness.base, arranged.token, arranged.runnerId);
-          return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+          return runner.metrics?.diskFreeBytes === 4 * GIB ? runner : undefined;
         });
         const waiting = await spawnSession(arranged, "no room");
         expect(waiting.status).toBe("queued");

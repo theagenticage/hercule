@@ -4218,7 +4218,7 @@ const setDiskWatermark = async (arranged: Arranged, bytes: number): Promise<void
 
 const GIB = 1024 * 1024 * 1024;
 
-/** Sends a watermark report with the runner's free disk space, which admission reads. */
+/** Sends the Runner Metrics with the runner's free disk space, which admission reads. */
 const reportDiskFree = (wire: Wire, diskFreeBytes: number): void =>
   wire.send({
     _tag: "watermarkReport",
@@ -4444,7 +4444,7 @@ describe("session.spawn onto a runner that is short of disk", () => {
           arranged.token,
         );
         const runner = (await response.json()) as Runner;
-        return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+        return runner.metrics?.diskFreeBytes === 4 * GIB ? runner : undefined;
       });
 
       const waiting = await spawnSessionOrFail(arranged, { prompt: "no room" });
@@ -4471,7 +4471,7 @@ describe("session.spawn onto a runner that is short of disk", () => {
           arranged.token,
         );
         const runner = (await response.json()) as Runner;
-        return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+        return runner.metrics?.diskFreeBytes === 4 * GIB ? runner : undefined;
       });
       const waiting = await spawnSessionOrFail(arranged, { prompt: "no room" });
       expect(waiting.status).toBe("queued");
@@ -4987,7 +4987,7 @@ describe("session.input into an exited session", () => {
           arranged.token,
         );
         const runner = (await response.json()) as Runner;
-        return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+        return runner.metrics?.diskFreeBytes === 4 * GIB ? runner : undefined;
       });
 
       const response = await sendInput(arranged, session.id, { text: "no room" });

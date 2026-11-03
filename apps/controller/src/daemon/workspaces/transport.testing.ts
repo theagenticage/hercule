@@ -9,10 +9,9 @@ import {
   WORKSPACE_LIFECYCLE_CAPABILITY,
   type ControllerToRunner,
   type JoinAnswer,
-  type RunnerToController,
 } from "@hercule/protocol";
 import type { Workspaces } from "../../../../runner/src/workspaces";
-import { buildRunnerSocketUrl } from "../../runners/testing";
+import { buildRunnerSocketUrl, type RunnerWireFrame } from "../../runners/testing";
 import { waitUntil } from "../../sessions/testing";
 import { FACTS, MODELS } from "../../workspaces/testing";
 
@@ -126,7 +125,7 @@ export const connectProofRunner = async (
   const socket = new WebSocket(buildRunnerSocketUrl(base), {
     headers: { authorization: `Bearer ${joined.credential}` },
   });
-  const write = (frame: RunnerToController): void => socket.send(JSON.stringify(frame));
+  const write = (frame: RunnerWireFrame): void => socket.send(JSON.stringify(frame));
   let sequence = 0;
   socket.onmessage = (event) => {
     const frame = JSON.parse(String(event.data)) as ControllerToRunner;

@@ -190,7 +190,7 @@ const RUNNER_STARTED: Runner = {
   labels: [],
   // Claude Code and Codex installed, so the accounts of the tests are ready here.
   facts: buildRunner("", "").facts,
-  watermark: null,
+  metrics: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: "2026-09-08T09:50:00.000Z",
@@ -1778,10 +1778,13 @@ describe("Thread: live subscriptions", () => {
     expect(lastTurn.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Neither the stream nor the tap is subscribed again: the stream would
     // stop at the same row, and no row will ever match what the tap delivers.
+    // Both are awaited because they close at different times: the stream is
+    // unsubscribed inside the delta handler, but the tap only when the render
+    // that follows the unreadable state change has flushed its effects.
     await waitFor(() => {
       expect(live.topics()).not.toContain(stream);
+      expect(live.topics()).not.toContain(buildSessionTapTopic(SESSION_ID));
     });
-    expect(live.topics()).not.toContain(buildSessionTapTopic(SESSION_ID));
   });
 
   it("replays a just-spawned thread's rows when the transcript read returned none", async () => {

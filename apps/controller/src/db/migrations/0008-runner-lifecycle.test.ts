@@ -4,7 +4,7 @@
  * The other migration tests read `sqlite_master` on a fully migrated database,
  * which cannot test how existing rows are rewritten. This test migrates to the
  * schema before this migration, writes rows only that schema allows, and then
- * runs the remaining migrations.
+ * runs this migration.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -15,6 +15,12 @@ import { migrations } from "./index";
 
 /** The migrations up to and including `plugins`: the last schema that still had `state`. */
 const BEFORE = migrations.filter(([id]) => id < 8);
+
+/**
+ * The migrations up to and including this one. A later migration, such as the
+ * one that renames `watermark`, must not change what this test checks.
+ */
+const THROUGH = migrations.filter(([id]) => id <= 8);
 
 interface Row {
   readonly name: string;
@@ -99,7 +105,7 @@ const migrated = Effect.gen(function* () {
            ${`2026-09-0${String(index + 1)}T00:00:00.000Z`},
            ${CARRIED.updated_at})`,
   );
-  yield* runMigrations();
+  yield* runMigrations(THROUGH);
   const rows = yield* sql<Row>`
     SELECT name, connectivity, lifecycle, reserved, max_concurrent_sessions
     FROM runners ORDER BY created_at

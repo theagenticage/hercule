@@ -92,6 +92,21 @@ describe("describeMachinePage head", () => {
     expect(describePage({ facts }).head.facts[2]).toBe("16 GB memory");
   });
 
+  it("adds the disk's size in gigabytes of 10^9 bytes when the runner reported it", () => {
+    expect(describePage({ facts: buildFacts({ diskTotalBytes: 1000e9 }) }).head.facts).toEqual([
+      "macOS",
+      "arm64",
+      "64 GB memory",
+      "1,000 GB disk",
+    ]);
+    expect(describePage({ facts: buildFacts({ diskTotalBytes: 245.4e9 }) }).head.facts[3]).toBe(
+      "245 GB disk",
+    );
+    expect(describePage({ facts: buildFacts({ diskTotalBytes: 64.2e9 }) }).head.facts[3]).toBe(
+      "64.2 GB disk",
+    );
+  });
+
   it("has no facts before the runner reported them", () => {
     expect(describePage({ facts: null }).head.facts).toEqual([]);
   });
@@ -170,9 +185,9 @@ describe("describeMachinePage top", () => {
   });
 
   it("names the disk for a disk below its limit", () => {
-    const watermark = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
 
-    expect(readText(line({ watermark }))).toBe(
+    expect(readText(line({ metrics }))).toBe(
       "No room: its disk is below its limit, so it takes no new sessions",
     );
   });
@@ -182,9 +197,9 @@ describe("describeMachinePage top", () => {
   });
 
   it("still names the disk when the machine is also told to take no new work", () => {
-    const watermark = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
 
-    expect(readText(line({ lifecycle: "draining", watermark }))).toBe(
+    expect(readText(line({ lifecycle: "draining", metrics }))).toBe(
       "No room: its disk is below its limit, so it takes no new sessions",
     );
   });
@@ -454,5 +469,186 @@ describe("validateRunnerLabel", () => {
     const labels = Array.from({ length: 64 }, (_, index) => `label-${String(index)}`);
 
     expect(validateRunnerLabel("one more", labels)).toHaveProperty("refusal");
+  });
+});
+
+describe("describeMachinePage instruments", () => {
+  const instruments = (
+    overrides: Partial<Runner> = {},
+    counts: Partial<SessionCountsByRunner[string]> = {},
+  ) => describePage(overrides, counts).instruments;
+
+  const metrics = (over: Partial<NonNullable<Runner["metrics"]>> = {}) => ({
+    diskFreeBytes: 120e9,
+    availableMemoryBytes: 17.6 * GIB,
+    ...over,
+  });
+  const withDisk = (diskFreeBytes: number, diskTotalBytes = 1000e9): Partial<Runner> => ({
+    facts: buildFacts({ diskTotalBytes }),
+    metrics: metrics({ diskFreeBytes }),
+  });
+
+  describe("sessions", () => {
+    it("shows the sessions running against the cap, and none waiting", () => {
+      expect(instruments({ maxConcurrentSessions: 16 }, { running: 12 }).sessions).toMatchObject({
+        value: "12",
+        unit: " of 16",
+        level: "normal",
+        note: "None waiting",
+      });
+    });
+
+    it("has no meter, so no share", () => {
+      expect(instruments({}, { running: 4 }).sessions).not.toHaveProperty("share");
+    });
+
+    it("turns you and counts the sessions waiting, whatever they wait for", () => {
+      expect(instruments({}, { running: 4, waiting: 3 }).sessions).toMatchObject({
+        level: "you",
+        note: "3 waiting",
+      });
+      // Under the cap, so the cap is not what holds the session back.
+      expect(instruments({ maxConcurrentSessions: 16 }, { waiting: 1 }).sessions.note).toBe(
+        "1 waiting",
+      );
+    });
+
+    it("shows a dash against the cap while the machine is away, and still counts what waits", () => {
+      for (const connectivity of ["offline", "unreachable"] as const) {
+        expect(
+          instruments({ connectivity, maxConcurrentSessions: 16 }, { running: 4, waiting: 3 })
+            .sessions,
+        ).toMatchObject({ value: "–", unit: " of 16", level: "normal", note: "3 waiting" });
+      }
+    });
+
+    it("carries the drawing a card shows for the same machine", () => {
+      const drawing = instruments({ maxConcurrentSessions: 17 }, { running: 12, waiting: 3 })
+        .sessions.drawing;
+
+      expect(drawing).toMatchObject({ shape: "bar", cap: 17, running: 12, waiting: 3 });
+    });
+  });
+
+  it("shows CPU, memory and disk as not reported before the first report", () => {
+    const { cpu, memory, disk } = instruments({ metrics: null });
+
+    for (const instrument of [cpu, memory, disk]) {
+      expect(instrument).toEqual({
+        value: "–",
+        unit: "",
+        freeAmount: "",
+        level: "normal",
+        share: null,
+        note: "Not reported yet",
+      });
+    }
+  });
+
+  describe("cpu", () => {
+    it("shows the last minute's mean and peak, rounded down, with no colour", () => {
+      const cpu = { averagePercent: 23.9, peakPercent: 61.9 };
+
+      expect(instruments({ metrics: metrics({ cpu }) }).cpu).toEqual({
+        value: "23",
+        unit: "%",
+        freeAmount: "",
+        level: "normal",
+        share: 0.239,
+        note: "Peak 61% in the last minute",
+      });
+    });
+
+    it("stays normal at a full load", () => {
+      const cpu = { averagePercent: 100, peakPercent: 100 };
+
+      expect(instruments({ metrics: metrics({ cpu }) }).cpu).toMatchObject({
+        value: "100",
+        level: "normal",
+        share: 1,
+      });
+    });
+
+    it("says the first reading comes within a minute while the runner has none yet", () => {
+      expect(instruments({ metrics: metrics({ cpu: null }) }).cpu).toEqual({
+        value: "–",
+        unit: "",
+        freeAmount: "",
+        level: "normal",
+        share: null,
+        note: "First reading within a minute",
+      });
+    });
+
+    it("says what to do when the runner is too old to report CPU", () => {
+      expect(instruments({ metrics: metrics() }).cpu).toEqual({
+        value: "–",
+        unit: "",
+        freeAmount: "",
+        level: "normal",
+        share: null,
+        note: "This machine's runner is too old to report CPU. Update it.",
+      });
+    });
+  });
+
+  describe("memory", () => {
+    it("shows the share in use, and the free memory of the total in binary gigabytes", () => {
+      expect(instruments({ metrics: metrics() }).memory).toMatchObject({
+        value: "72",
+        unit: "%",
+        level: "normal",
+        note: "17.6 GB free of 64 GB",
+      });
+    });
+
+    it("counts a free amount from 100 GB in whole gigabytes", () => {
+      const facts = buildFacts({ totalMemoryBytes: 256 * GIB });
+
+      expect(
+        instruments({ facts, metrics: metrics({ availableMemoryBytes: 120.4 * GIB }) }).memory.note,
+      ).toBe("120 GB free of 256 GB");
+    });
+
+    it("is not reported until the runner has reported its facts", () => {
+      expect(instruments({ facts: null, metrics: metrics() }).memory.note).toBe("Not reported yet");
+    });
+  });
+
+  describe("disk", () => {
+    it("shows the share in use, and the free space of the total in gigabytes of 10^9 bytes", () => {
+      expect(instruments(withDisk(120e9)).disk).toEqual({
+        value: "88",
+        unit: "%",
+        freeAmount: "120 GB",
+        level: "you",
+        share: 0.88,
+        note: "120 GB free of 1,000 GB",
+      });
+    });
+
+    it("shows free space with an empty meter, and says what to do, without the disk's total", () => {
+      expect(instruments({ metrics: metrics({ diskFreeBytes: 42.14e9 }) }).disk).toEqual({
+        value: "42.1",
+        unit: " GB free",
+        freeAmount: "42.1 GB",
+        level: "normal",
+        share: null,
+        note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
+      });
+    });
+
+    it("never shows more free space than the disk holds", () => {
+      expect(instruments(withDisk(500e9, 100e9)).disk).toMatchObject({
+        value: "0",
+        note: "100 GB free of 100 GB",
+      });
+    });
+  });
+
+  it("keeps the last values of a machine that is away", () => {
+    const away = instruments({ connectivity: "offline", ...withDisk(120e9) });
+
+    expect(away.disk).toMatchObject({ value: "88", note: "120 GB free of 1,000 GB" });
   });
 });

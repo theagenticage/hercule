@@ -291,7 +291,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             return yield* connections.reportedFacts(runnerId, mine, message.facts);
           case "watermarkReport":
             if (!greeted) return;
-            return yield* connections.reportedWatermark(runnerId, mine, message.watermark);
+            return yield* connections.reportedMetrics(runnerId, mine, message.metrics);
           case "workspaceInspection":
           case "repositorySkillsInspection":
           case "probeReport":

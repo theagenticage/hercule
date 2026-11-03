@@ -13,7 +13,7 @@ const SILENT: Runner = {
   version: null,
   labels: [],
   facts: null,
-  watermark: null,
+  metrics: null,
   maxConcurrentSessions: 1,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: null,
@@ -40,7 +40,7 @@ const REPORTED: Runner = {
     adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
-  watermark: {
+  metrics: {
     diskFreeBytes: 128 * GIB,
     availableMemoryBytes: 32 * GIB,
   },
@@ -90,8 +90,8 @@ describe("describeRunnerFacts", () => {
     ).toBeNull();
   });
 
-  it("reads free disk space from the watermark, which is reported separately from the facts", () => {
-    expect(describeRunnerFacts({ ...REPORTED, watermark: null }).diskFree).toBeNull();
-    expect(describeRunnerFacts({ ...REPORTED, watermark: null }).memory).toBe("64 GiB");
+  it("reads free disk space from the metrics, which is reported separately from the facts", () => {
+    expect(describeRunnerFacts({ ...REPORTED, metrics: null }).diskFree).toBeNull();
+    expect(describeRunnerFacts({ ...REPORTED, metrics: null }).memory).toBe("64 GiB");
   });
 });

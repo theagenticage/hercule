@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import type { GaugeLevel, MachineSummary } from "@hercule/client-core/fleet";
 import { MachineIcon } from "./machine-icon";
-import { Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
+import { GaugeValue, Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
 import { buildMachineTransitionName } from "./machine-transition";
 import { SessionsFigure } from "./sessions-drawing";
 import "./fleet-page.css";
@@ -44,9 +44,8 @@ function Gauge({
 
 /**
  * Renders one machine as a card: its icon, name and status, its sessions
- * against the cap, its disk and memory, how much room it has, and the one
- * thing that needs the user with the button that fixes it. It draws what
- * `machine` holds and works out nothing.
+ * against the cap, its disk and memory gauges, how much room it has, and the
+ * one thing that needs the user with the button that fixes it. It draws what `machine` holds and works out nothing.
  *
  * The status label is drawn only while the machine is not plainly online; the
  * dot alone says "online".
@@ -89,38 +88,17 @@ export function MachineCard({
       <div className="fleet-gauges">
         <Gauge label="Sessions" isWide>
           <div className="fleet-sessions-line">
-            <b>
-              {isAway ? "–" : drawing.running}
-              <small> of {drawing.cap}</small>
-            </b>
-            <SessionsFigure drawing={drawing} size="card" isAway={isAway} />
+            <GaugeValue gauge={{ value: drawing.runningText, unit: drawing.capText }} />
+            <SessionsFigure drawing={drawing} size="card" />
           </div>
         </Gauge>
-        <Gauge label="Disk" level={disk?.level}>
-          <b>
-            {disk === null ? (
-              "–"
-            ) : (
-              <>
-                {disk.amount}
-                <small> {disk.unit} free</small>
-              </>
-            )}
-          </b>
-          <Meter share={disk?.share ?? null} level={disk?.level ?? "normal"} />
+        <Gauge label="Disk" level={disk.level}>
+          <GaugeValue gauge={disk} />
+          <Meter share={disk.share} level={disk.level} />
         </Gauge>
-        <Gauge label="Memory" level={memory?.level}>
-          <b>
-            {memory === null ? (
-              "–"
-            ) : (
-              <>
-                {memory.percent}
-                <small>%</small>
-              </>
-            )}
-          </b>
-          <Meter share={memory?.share ?? null} level={memory?.level ?? "normal"} />
+        <Gauge label="Memory" level={memory.level}>
+          <GaugeValue gauge={memory} />
+          <Meter share={memory.share} level={memory.level} />
         </Gauge>
       </div>
       <div className="fleet-card-crew">

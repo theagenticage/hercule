@@ -18,8 +18,9 @@ const SESSIONS_PER_CUT = 10;
  *   or inside the bar.
  * - A bar is cut every 10 sessions in its cap part and in its waiting part,
  *   so a cap of 100 stays countable.
- * - `isAway` draws the cap's part as an outline with nothing running in it, for
- *   a machine whose sessions cannot be known. The waiting sessions stay marigold.
+ * - A drawing that `isAway` draws the cap's part as an outline with nothing
+ *   running in it, for a machine whose sessions cannot be known. The waiting
+ *   sessions stay marigold.
  *
  * The numbers are drawn beside it, so the drawing is hidden from assistive
  * technology. `size` is the card's or the list row's.
@@ -27,14 +28,11 @@ const SESSIONS_PER_CUT = 10;
 export function SessionsFigure({
   drawing,
   size,
-  isAway,
 }: {
   readonly drawing: SessionsDrawing;
   readonly size: "card" | "list";
-  readonly isAway: boolean;
 }): JSX.Element {
-  const running = isAway ? 0 : drawing.running;
-  const free = isAway ? drawing.cap : drawing.free;
+  const { running, free, isAway } = drawing;
   const className = `fleet-sessions fleet-sessions--${drawing.shape} fleet-sessions--${size}${isAway ? " is-away" : ""}`;
   const isOverCap = running > drawing.cap;
 

@@ -7,9 +7,12 @@
  * machine the tests run on. Nothing here reads a credential file.
  */
 import { arch, platform, totalmem } from "node:os";
+import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type { HarnessBinary, RunnerFacts, Toolchain } from "@hercule/protocol";
+import { readDiskSpace } from "./disk";
 import { ADAPTER_IDS } from "./harnesses";
 import { truncateFact } from "./harnesses/text";
 
@@ -28,6 +31,13 @@ const DOCKER = "docker";
 
 export const VERSION_DEADLINE: Duration.Duration = Duration.seconds(5);
 
+/**
+ * The longest the probe waits for the disk size. The probe must finish before
+ * the runner connects, and the size is only a display fact, so a `statfs` on a
+ * dead mount must not hold the connection back.
+ */
+export const DISK_SIZE_DEADLINE: Duration.Duration = Duration.seconds(5);
+
 const SEMVER = /\d+\.\d+\.\d+\S*/;
 
 /** How the probe looks at the machine it runs on. */
@@ -35,9 +45,16 @@ export interface Machine {
   readonly locate: (binary: string) => string | undefined;
   /** Returns what `<binary> --version` printed, or undefined when it could not be run. */
   readonly version: (path: string) => Effect.Effect<string | undefined>;
+  /** Returns the size of the disk that holds the runner's storage directory. Fails when it cannot be read. */
+  readonly diskTotalBytes: Effect.Effect<number, Cause.UnknownError>;
 }
 
-export const thisMachine: Machine = {
+/**
+ * Returns the machine this process runs on. `storageDir` is the runner's
+ * storage directory: the disk size is the size of the file system that holds
+ * it, the same file system the metrics read the free space from.
+ */
+export const buildThisMachine = (storageDir: string): Machine => ({
   locate: (binary) => Bun.which(binary) ?? undefined,
   version: (path) =>
     Effect.tryPromise(async (signal) => {
@@ -55,7 +72,8 @@ export const thisMachine: Machine = {
       // A machine without the tool is normal, not a failed probe.
       Effect.orElseSucceed(() => undefined),
     ),
-};
+  diskTotalBytes: Effect.map(readDiskSpace(storageDir), (disk) => disk.totalBytes),
+});
 
 /**
  * Returns the semantic version in a binary's `--version` output. Each binary
@@ -81,6 +99,26 @@ const findToolchain = (machine: Machine, name: string): Effect.Effect<Toolchain 
     return version.length === 0 ? undefined : { name, version, path: truncateFact(path) };
   });
 
+/**
+ * Returns the disk size, or `undefined` when it cannot be read within
+ * `DISK_SIZE_DEADLINE`. A failed or late read is logged as a warning and the
+ * size is left out of the facts: the facts hold much the fleet needs besides
+ * it, so it must not fail the probe. The deadline stops the wait only; it does
+ * not cancel a `statfs` that is already running in the kernel.
+ */
+const readDiskTotalBytes = (machine: Machine): Effect.Effect<number | undefined> =>
+  Effect.map(
+    Effect.option(
+      Effect.tapCause(Effect.timeout(machine.diskTotalBytes, DISK_SIZE_DEADLINE), (cause) =>
+        Effect.logWarning(
+          "The runner could not read the size of its disk, so it left the disk size out of its facts",
+          cause,
+        ),
+      ),
+    ),
+    Option.getOrUndefined,
+  );
+
 export const probeFacts = (machine: Machine, identityPort: number): Effect.Effect<RunnerFacts> =>
   Effect.gen(function* () {
     const toolchains: Array<Toolchain> = [];
@@ -94,10 +132,13 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
         ? { name, present: false }
         : { name, present: true, path: truncateFact(path) };
     });
+    const diskTotalBytes = yield* readDiskTotalBytes(machine);
     return {
       os: truncateFact(platform()),
       arch: truncateFact(arch()),
       totalMemoryBytes: totalmem(),
+      // Left out, not null, when unreadable: the schema allows the key to be absent.
+      ...(diskTotalBytes === undefined ? {} : { diskTotalBytes }),
       docker: machine.locate(DOCKER) !== undefined,
       toolchains,
       harnesses,
@@ -123,7 +164,8 @@ export interface FactsRefresh<E> {
  * anyway would rewrite every runner row in the fleet with nothing new.
  *
  * The comparison uses the JSON text of the facts. That works because the probe
- * builds its result in the same order every time.
+ * builds its result in the same order every time, including the optional
+ * `diskTotalBytes`, which sits at a fixed place or is absent.
  */
 export const refreshFacts = <E>(refresh: FactsRefresh<E>): Effect.Effect<never, E> =>
   Effect.gen(function* () {

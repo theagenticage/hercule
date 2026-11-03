@@ -34,7 +34,6 @@ import {
   type ModelDescriptor,
   type ProbeRequest,
   type RunnerFacts,
-  type RunnerToController as RunnerMessage,
   type HarnessEvent,
   type RepositorySkillsInspect,
   type RepositorySkillsInspection,
@@ -72,7 +71,7 @@ import {
   type ServerOptions,
 } from "../http/testing";
 import { awaitRunningWork } from "../promotion/testing";
-import { buildRunnerSocketUrl } from "../runners/testing";
+import { buildRunnerSocketUrl, type RunnerWireFrame } from "../runners/testing";
 
 /**
  * The capabilities a runner of this build lists at hello: every workspace
@@ -139,7 +138,7 @@ export const carriesInput = (frame: ControllerMessage): frame is FrameCarryingIn
 
 /** A fake runner's end of the socket. It answers pings and probes by itself. */
 export interface Wire {
-  readonly send: (message: RunnerMessage) => void;
+  readonly send: (message: RunnerWireFrame) => void;
   readonly frames: ReadonlyArray<ControllerMessage>;
   readonly close: () => void;
   /**
@@ -247,7 +246,7 @@ const dial = (
       request: RepositorySkillsPreview,
     ) => RepositorySkillsInspection["outcome"] | undefined = () => undefined;
     const withheld: Array<FrameCarryingInput> = [];
-    const writeMessage = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
+    const writeMessage = (message: RunnerWireFrame): void => socket.send(JSON.stringify(message));
     const writeAnswer = (frame: FrameCarryingInput, answer: Answer): void =>
       writeMessage(
         typeof answer === "string"

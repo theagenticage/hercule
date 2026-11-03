@@ -24,14 +24,26 @@ import { parseWholeNumber } from "../whole-number";
 import {
   buildFleetMachine,
   buildPlainPart,
+  buildSessionsDrawing,
   decideMachineKind,
   describeMachineStatus,
   describeRoom,
   formatLastSeen,
+  describeDiskGauge,
+  describeMemoryGauge,
+  formatWholeMemory,
+  measureDisk,
+  measureMemory,
+  NOT_REPORTED_GAUGE,
+  splitDiskSize,
+  type FleetMachine,
   type FleetTextPart,
+  type GaugeLevel,
+  type MachineGauge,
   type MachineKind,
   type MachineStatus,
   type SessionCountsByRunner,
+  type SessionsDrawing,
 } from "./machine";
 
 /** A release version: three numbers, with optional build metadata after a plus. */
@@ -66,24 +78,27 @@ const OS_NAMES: ReadonlyMap<string, string> = new Map([
   ["win32", "Windows"],
 ]);
 
-const BYTES_PER_GIBIBYTE = 1024 ** 3;
-
 /**
  * Describes a machine for the head of its page, as the pieces drawn between
  * dots: the operating system's name, the architecture as the runner reported
- * it, and the memory, such as "macOS", "arm64", "64 GB memory". An operating
- * system the table does not know is shown as the runner reported it.
+ * it, the memory, and the disk's size when the runner reported it, such as
+ * "macOS", "arm64", "64 GB memory", "1,000 GB disk". An operating system the
+ * table does not know is shown as the runner reported it.
  *
  * The memory is counted in binary gigabytes (2^30 bytes), the way Apple's
  * About This Mac and Activity Monitor count it, and rounded to a whole number.
- * The disk sizes elsewhere follow Finder instead, which counts in units of
- * 10^9 bytes; each is the number its own tool shows the user.
+ * The disk follows Finder instead, which counts in units of 10^9 bytes; each
+ * is the number its own tool shows the user.
  */
-const describeMachineFacts = (facts: RunnerFacts): readonly string[] => [
-  OS_NAMES.get(facts.os) ?? facts.os,
-  facts.arch,
-  `${String(Math.round(facts.totalMemoryBytes / BYTES_PER_GIBIBYTE))} GB memory`,
-];
+const describeMachineFacts = (facts: RunnerFacts): readonly string[] => {
+  const disk = facts.diskTotalBytes === undefined ? null : splitDiskSize(facts.diskTotalBytes);
+  return [
+    OS_NAMES.get(facts.os) ?? facts.os,
+    facts.arch,
+    `${formatWholeMemory(facts.totalMemoryBytes)} GB memory`,
+    ...(disk === null ? [] : [`${disk.amount} ${disk.unit} disk`]),
+  ];
+};
 
 /**
  * The banner an offline or unreachable machine shows. `headline` is its first
@@ -139,8 +154,10 @@ export interface MachineHead {
   readonly kind: MachineKind;
   readonly status: MachineStatus;
   /**
-   * The operating system, the architecture and the memory, such as "macOS",
-   * "arm64" and "16 GB memory"; empty before the runner has reported its facts.
+   * The operating system, the architecture, the memory and the disk's size,
+   * such as "macOS", "arm64", "16 GB memory" and "1,000 GB disk"; the disk is
+   * left out when the runner does not report it, and all of it before the
+   * runner has reported its facts.
    */
   readonly facts: readonly string[];
   /** The runner program's own line, or `null` when the runner reported no version. */
@@ -160,10 +177,131 @@ export type MachinePageTop =
   | { readonly kind: "room"; readonly line: readonly FleetTextPart[] }
   | { readonly kind: "away"; readonly banner: OfflineBanner };
 
+/**
+ * An instrument drawn as a meter: the gauge, and the line under the meter. A
+ * renderer draws it as the Fleet cards draw the same gauge.
+ */
+export interface MeterInstrument extends MachineGauge {
+  /** The line under the meter. */
+  readonly note: string;
+}
+
+/**
+ * The Sessions instrument: how many sessions run against the cap, and how many
+ * wait. It has no meter, but the same blocks or bar a card shows, from
+ * `drawing`, which also holds the texts of `value` and `unit`.
+ */
+export interface SessionsInstrument {
+  /** The sessions running: "12", or "–" while the machine is away. */
+  readonly value: string;
+  /** The cap, such as " of 16". An away machine keeps it beside the "–". */
+  readonly unit: string;
+  /** Colours the number: `you` while sessions wait on a machine that is online. */
+  readonly level: GaugeLevel;
+  /** The line under the drawing: "5 waiting" or "None waiting". */
+  readonly note: string;
+  readonly drawing: SessionsDrawing;
+}
+
+/** The four instruments of a machine's page, with the latest values. */
+export interface MachineInstruments {
+  readonly sessions: SessionsInstrument;
+  readonly cpu: MeterInstrument;
+  readonly memory: MeterInstrument;
+  readonly disk: MeterInstrument;
+}
+
+const NOT_REPORTED_NOTE = "Not reported yet";
+
+const NOT_REPORTED: MeterInstrument = { ...NOT_REPORTED_GAUGE, note: NOT_REPORTED_NOTE };
+
+/** Describes the instrument of the CPU: the last minute's mean and peak, floored. See `describeMachineInstruments`. */
+const describeCpuInstrument = (runner: Runner): MeterInstrument => {
+  if (runner.metrics === null) return NOT_REPORTED;
+  const { cpu } = runner.metrics;
+  if (cpu === undefined) {
+    return {
+      ...NOT_REPORTED,
+      note: "This machine's runner is too old to report CPU. Update it.",
+    };
+  }
+  if (cpu === null) return { ...NOT_REPORTED, note: "First reading within a minute" };
+  return {
+    value: String(Math.floor(cpu.averagePercent)),
+    unit: "%",
+    freeAmount: "",
+    level: "normal",
+    share: cpu.averagePercent / 100,
+    note: `Peak ${String(Math.floor(cpu.peakPercent))}% in the last minute`,
+  };
+};
+
+/** Describes the instrument of memory: the share in use and the memory free. See `describeMachineInstruments`. */
+const describeMemoryInstrument = (runner: Runner): MeterInstrument => {
+  const memory = measureMemory(runner);
+  if (memory === null) return NOT_REPORTED;
+  const gauge = describeMemoryGauge(memory);
+  return {
+    ...gauge,
+    note: `${gauge.freeAmount} free of ${formatWholeMemory(memory.totalBytes)} GB`,
+  };
+};
+
+/** Describes the instrument of the disk: the share in use and the space free. See `describeMachineInstruments`. */
+const describeDiskInstrument = (runner: Runner): MeterInstrument => {
+  const disk = measureDisk(runner);
+  if (disk === null) return NOT_REPORTED;
+  const gauge = describeDiskGauge(disk);
+  if (disk.use === null) {
+    return {
+      ...gauge,
+      note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
+    };
+  }
+  const size = splitDiskSize(disk.use.totalBytes);
+  return { ...gauge, note: `${gauge.freeAmount} free of ${size.amount} ${size.unit}` };
+};
+
+/**
+ * Describes the four instruments of a machine from the runner's latest report.
+ * An away machine keeps the values it last reported. Before any report, CPU,
+ * memory and disk show "–" and "Not reported yet".
+ *
+ * - Sessions: how many run, against the cap, and how many wait. It is `you`
+ *   while sessions wait. A machine that is offline or unreachable runs
+ *   nothing that can be counted, so the number is "–" against the cap, as on
+ *   its card, and the level is `normal`. The controller still knows what
+ *   waits for the machine, so the note keeps that count.
+ * - CPU: the last minute's mean, floored, with the peak. It has no colour
+ *   levels. A runner that reports no CPU, or none yet, says so in the note.
+ * - Memory: the share in use, floored, and the memory free of the total, in
+ *   binary gigabytes.
+ * - Disk: the share in use, floored, and the free space of the total, in
+ *   gigabytes of 10^9 bytes. Without the disk's total size it shows the free
+ *   space with an empty meter and says to update the runner.
+ */
+const describeMachineInstruments = (machine: FleetMachine): MachineInstruments => {
+  const { runner } = machine;
+  const drawing = buildSessionsDrawing(machine);
+  return {
+    sessions: {
+      value: drawing.runningText,
+      unit: drawing.capText,
+      level: drawing.waiting > 0 && !drawing.isAway ? "you" : "normal",
+      note: drawing.waitingText ?? "None waiting",
+      drawing,
+    },
+    cpu: describeCpuInstrument(runner),
+    memory: describeMemoryInstrument(runner),
+    disk: describeDiskInstrument(runner),
+  };
+};
+
 /** Everything a machine's page draws above its Software and Settings. */
 export interface MachinePage {
   readonly head: MachineHead;
   readonly top: MachinePageTop;
+  readonly instruments: MachineInstruments;
 }
 
 /**
@@ -205,6 +343,7 @@ export const describeMachinePage = (
             banner: describeOfflineBanner(runner, machine.openThreads, timezone, today),
           }
         : { kind: "room", line: room.line },
+    instruments: describeMachineInstruments(machine),
   };
 };
 

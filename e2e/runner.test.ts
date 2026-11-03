@@ -50,6 +50,14 @@ interface Listed {
     readonly os: string;
     readonly arch: string;
     readonly identityPort: number;
+    readonly totalMemoryBytes: number;
+    readonly diskTotalBytes?: number;
+  } | null;
+  /** The latest Runner Metrics, or `null` until the runner's first report. */
+  readonly metrics: {
+    readonly diskFreeBytes: number;
+    readonly availableMemoryBytes: number;
+    readonly cpu?: { readonly averagePercent: number; readonly peakPercent: number } | null;
   } | null;
 }
 
@@ -180,6 +188,34 @@ describe("the runner the controller starts for itself", () => {
     const said = await identity.text();
     expect(identity.status, said).toBe(200);
     expect(JSON.parse(said)).toEqual({ runnerId: local.id });
+  }, 30_000);
+
+  it("reports the size of its disk, the memory it has free and the CPU key in its metrics", async () => {
+    // The first metrics report follows the hello, so this waits for it. A CPU
+    // minute takes a whole minute, so the test does not wait for one: it
+    // accepts the `null` of the first report and checks an object when it is there.
+    const deadline = Date.now() + 10_000;
+    let local = (await listRunners()).find((one) => one.connectivity === "online");
+    while (local?.metrics == null && Date.now() < deadline) {
+      await Bun.sleep(200);
+      local = (await listRunners()).find((one) => one.connectivity === "online");
+    }
+
+    const { facts, metrics } = local ?? {};
+    expect(facts, "the runner reported its facts").toBeDefined();
+    expect(metrics, `the runner never reported metrics:\n${controller.output()}`).toBeTruthy();
+    expect(facts!.diskTotalBytes, "the facts carry the disk's size").toBeGreaterThan(0);
+    expect(facts!.diskTotalBytes!).toBeGreaterThanOrEqual(metrics!.diskFreeBytes);
+    expect(metrics!.availableMemoryBytes).toBeGreaterThan(0);
+    expect(metrics!.availableMemoryBytes).toBeLessThanOrEqual(facts!.totalMemoryBytes);
+
+    expect(metrics, "the runner reads CPU, so the key is there").toHaveProperty("cpu");
+    if (metrics!.cpu !== null && metrics!.cpu !== undefined) {
+      for (const percent of [metrics!.cpu.averagePercent, metrics!.cpu.peakPercent]) {
+        expect(percent).toBeGreaterThanOrEqual(0);
+        expect(percent).toBeLessThanOrEqual(100);
+      }
+    }
   }, 30_000);
 });
 

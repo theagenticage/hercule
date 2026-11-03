@@ -58,7 +58,6 @@ import {
   type ProbeResult,
   type RepositorySkillsInspection,
   type RunnerFacts,
-  type RunnerWatermark,
   MAX_MESSAGE_LENGTH,
   MAX_WORKSPACE_STEPS,
   type WorkspaceReport,
@@ -88,7 +87,7 @@ import {
   previewRepositorySkills,
   type SessionSkillsFolders,
 } from "./skills";
-import { reportWatermark } from "./watermark";
+import { reportMetrics, type DiskAndMemory } from "./metrics";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
 import type { Workspaces } from "./workspaces";
@@ -154,7 +153,7 @@ export interface ConnectOptions {
   readonly pin: ControllerPin;
   readonly facts: RunnerFacts;
   readonly probe: Effect.Effect<RunnerFacts>;
-  readonly headroom: Effect.Effect<RunnerWatermark, Cause.UnknownError>;
+  readonly readDiskAndMemory: Effect.Effect<DiskAndMemory, Cause.UnknownError>;
   /**
    * The runner's storage directory. A Harness Home is a path the controller
    * names, joined to this directory. Each account has its own home, so two
@@ -1089,9 +1088,9 @@ export const connect = (
       }
       yield* Effect.all(
         [
-          reportWatermark({
-            read: options.headroom,
-            send: (watermark) => write(encodeFrameText({ _tag: "watermarkReport", watermark })),
+          reportMetrics({
+            readDiskAndMemory: options.readDiskAndMemory,
+            send: (metrics) => write(encodeFrameText({ _tag: "watermarkReport", metrics })),
           }),
           refreshFacts({
             probe: reportFacts,

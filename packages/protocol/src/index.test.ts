@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Struct } from "effect";
 import {
   AdapterFailed,
   ControllerToRunner,
@@ -14,6 +14,7 @@ import {
   MAX_SKILL_DESCRIPTION_LENGTH,
   MAX_SKIPPED_REASON_LENGTH,
   PROTOCOL_VERSION,
+  RunnerFacts,
   RunnerToController,
   Sequenced,
   type ControllerToRunner as ControllerMessage,
@@ -48,7 +49,11 @@ const listTags = (union: typeof RunnerToController | typeof ControllerToRunner):
       ? (member.members as ReadonlyArray<{ fields: { _tag: { literal: string } } }>).map(
           (nested) => nested.fields._tag.literal,
         )
-      : [member.fields._tag.literal],
+      : // A frame with a key renamed on the wire is a transformation, and its
+        // struct is the decoded side.
+        "fields" in member
+        ? [member.fields._tag.literal]
+        : [member.to.fields._tag.literal],
   );
 
 const facts = {
@@ -68,7 +73,7 @@ const facts = {
   identityPort: 4939,
 } as const;
 
-const watermark = {
+const metrics = {
   diskFreeBytes: 42949672960,
   availableMemoryBytes: 8589934592,
 } as const;
@@ -182,7 +187,7 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   runnerHello,
   { _tag: "pong" },
   { _tag: "factsReport", facts },
-  { _tag: "watermarkReport", watermark },
+  { _tag: "watermarkReport", metrics },
   {
     _tag: "probeReport",
     requestId: REQUEST_ID,
@@ -805,10 +810,10 @@ describe("the runner hello", () => {
   });
 });
 
-describe("the watermark a runner reports", () => {
+describe("the Runner Metrics a runner reports", () => {
   it.each(["diskFreeBytes", "availableMemoryBytes"])("rejects a report without %s", (key) => {
     expect(
-      decodeFromRunner({ _tag: "watermarkReport", watermark: omitKey(watermark, key) })._tag,
+      decodeFromRunner({ _tag: "watermarkReport", watermark: omitKey(metrics, key) })._tag,
     ).toBe("Failure");
   });
 
@@ -816,12 +821,83 @@ describe("the watermark a runner reports", () => {
     const decoded = Effect.runSync(
       Schema.decodeUnknownEffect(RunnerToController)({
         _tag: "watermarkReport",
-        watermark: { ...watermark, acceptingPlacements: false },
+        watermark: { ...metrics, acceptingPlacements: false },
       }),
-    ) as { readonly watermark: Record<string, unknown> };
+    ) as { readonly metrics: Record<string, unknown> };
 
-    expect(decoded.watermark).not.toHaveProperty("acceptingPlacements");
-    expect(decoded.watermark).toEqual(watermark);
+    expect(decoded.metrics).not.toHaveProperty("acceptingPlacements");
+    expect(decoded.metrics).toEqual(metrics);
+  });
+
+  // Runners and controllers of the age before the rename must still read each
+  // other, so the frame keeps its old tag and key on the wire.
+  it("encodes under the old tag and the old key", () => {
+    expect(Schema.encodeSync(RunnerToController)({ _tag: "watermarkReport", metrics })).toEqual({
+      _tag: "watermarkReport",
+      watermark: metrics,
+    });
+  });
+
+  it("decodes a report in the old wire shape to `metrics`", () => {
+    expect(
+      Effect.runSync(
+        Schema.decodeUnknownEffect(RunnerToController)({
+          _tag: "watermarkReport",
+          watermark: metrics,
+        }),
+      ),
+    ).toEqual({ _tag: "watermarkReport", metrics });
+  });
+
+  it("rejects a report under the new key, which no runner sends yet", () => {
+    expect(decodeFromRunner({ _tag: "watermarkReport", metrics })._tag).toBe("Failure");
+  });
+});
+
+describe("the CPU in the Runner Metrics", () => {
+  const cpu = { averagePercent: 12.5, peakPercent: 80 };
+
+  // What a runner built before CPU was reported sends and reads.
+  const OldMetricsReport = Schema.Struct({
+    _tag: Schema.Literal("watermarkReport"),
+    watermark: Schema.Struct({ diskFreeBytes: Schema.Int, availableMemoryBytes: Schema.Int }),
+  });
+
+  it("decodes a report from a runner that does not report CPU, with no `cpu` key", () => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(RunnerToController)({
+        _tag: "watermarkReport",
+        watermark: metrics,
+      }),
+    ) as { readonly metrics: Record<string, unknown> };
+    expect(decoded.metrics).not.toHaveProperty("cpu");
+  });
+
+  it.each([cpu, null])("round-trips a report with cpu %j", (value) => {
+    const message = { _tag: "watermarkReport", metrics: { ...metrics, cpu: value } } as const;
+    const wire = Schema.encodeSync(RunnerToController)(message);
+    expect(wire).toEqual({ _tag: "watermarkReport", watermark: { ...metrics, cpu: value } });
+    expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(wire))).toEqual(message);
+  });
+
+  it("is read by a runner or controller of the age before it, which drops the extra key", () => {
+    const wire = Schema.encodeSync(RunnerToController)({
+      _tag: "watermarkReport",
+      metrics: { ...metrics, cpu },
+    });
+    const decoded = Effect.runSync(Schema.decodeUnknownEffect(OldMetricsReport)(wire));
+    expect(decoded).toEqual({ _tag: "watermarkReport", watermark: metrics });
+  });
+
+  it.each([
+    ["an average above 100", { averagePercent: 101, peakPercent: 80 }],
+    ["a peak below 0", { averagePercent: 12.5, peakPercent: -1 }],
+    ["an average that is not a number", { averagePercent: Number.NaN, peakPercent: 80 }],
+    ["no peak", { averagePercent: 12.5 }],
+  ])("rejects %s", (_name, badCpu) => {
+    expect(
+      decodeFromRunner({ _tag: "watermarkReport", watermark: { ...metrics, cpu: badCpu } })._tag,
+    ).toBe("Failure");
   });
 });
 
@@ -876,6 +952,31 @@ describe("the runner facts", () => {
       })._tag;
     expect(withVersion("some unparsed banner")).toBe("Success");
     expect(withVersion("")).toBe("Failure");
+  });
+});
+
+describe("the size of the disk in the runner facts", () => {
+  const diskTotalBytes = 994662584320;
+  const decodeFacts = (value: Record<string, unknown>) =>
+    decodeFromRunner({ _tag: "factsReport", facts: value });
+
+  // What a runner built before the disk size was reported sends and reads.
+  const OldRunnerFacts = Schema.Struct(Struct.omit(RunnerFacts.fields, ["diskTotalBytes"]));
+
+  it("decodes facts with and without it", () => {
+    expect(decodeFacts({ ...facts, diskTotalBytes })._tag).toBe("Success");
+    expect(decodeFacts(facts)._tag).toBe("Success");
+  });
+
+  it("is read by a runner or controller of the age before it, which drops the extra key", () => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(OldRunnerFacts)({ ...facts, diskTotalBytes }),
+    );
+    expect(decoded).toEqual(facts);
+  });
+
+  it.each([-1, 1.5])("rejects %s", (invalid) => {
+    expect(decodeFacts({ ...facts, diskTotalBytes: invalid })._tag).toBe("Failure");
   });
 });
 

@@ -22,7 +22,7 @@
  *   The controller daemon calls `recordHeldDepartures` each time the
  *   controller serves again. Once sealed, it is never written.
  * - The writes a frame causes while the connection is open (a pong, a facts
- *   report, a watermark report) are skipped. They are handled one at a time
+ *   report, a metrics report) are skipped. They are handled one at a time
  *   with every other frame, so a write that waited would hold up the pongs,
  *   and the socket would close the connection as silent.
  * - The boot's correction of stranded rows is skipped on a sealed controller.
@@ -41,7 +41,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hercule/contract";
+import type { RunnerConnectivity, RunnerFacts, RunnerMetrics } from "@hercule/contract";
 import {
   GOING_AWAY_CLOSE_CODE,
   RETIRED_CLOSE_CODE,
@@ -966,19 +966,19 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Stores a runner's watermark report. An audit entry is written only when
+     * Stores a runner's Runner Metrics. An audit entry is written only when
      * the runner starts or stops accepting placements, because that is what
      * placement acts on.
      *
      * Skipped while a promotion freezes the controller, and once it is
-     * sealed. The runner reports its watermark every minute, and each report
+     * sealed. The runner reports its metrics every minute, and each report
      * is compared with the stored one, so the first report after a thaw
      * records any change the skipped ones carried.
      */
-    reportedWatermark: (
+    reportedMetrics: (
       id: string,
       connection: Connection,
-      watermark: RunnerWatermark,
+      metrics: RunnerMetrics,
     ): Effect.Effect<void, SqlError> =>
       promotion.runIfServing(
         Effect.gen(function* () {
@@ -987,7 +987,7 @@ const make = Effect.gen(function* () {
             Effect.gen(function* () {
               if (reachable.get(id)?.connection !== connection) return false;
               const at = yield* nowIso;
-              const result = yield* runners.recordWatermark(id, watermark, at);
+              const result = yield* runners.recordMetrics(id, metrics, at);
               if (!result.crossed) return false;
               yield* audit.append({
                 kind: "runner.placementsChanged",

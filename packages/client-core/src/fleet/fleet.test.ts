@@ -24,7 +24,7 @@ const buildRunner = (overrides: Partial<Runner> = {}): Runner => ({
   version: "0.9.3",
   labels: [],
   facts: null,
-  watermark: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 8 * GIB },
+  metrics: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 8 * GIB },
   maxConcurrentSessions: 16,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: SEEN_TODAY,
@@ -41,6 +41,14 @@ const buildFacts = (overrides: Partial<RunnerFacts> = {}): RunnerFacts => ({
   adapters: [],
   identityPort: 7000,
   ...overrides,
+});
+
+const DISK_TOTAL = 1000e9;
+
+/** Returns the overrides of a runner whose 1,000 GB disk has `diskFreeBytes` left and whose total it reports. */
+const withDisk = (diskFreeBytes: number): Partial<Runner> => ({
+  facts: buildFacts({ diskTotalBytes: DISK_TOTAL }),
+  metrics: { diskFreeBytes, availableMemoryBytes: 8 * GIB },
 });
 
 let nextSession = 0;
@@ -284,7 +292,7 @@ describe("findMachineNeeds", () => {
 
   it("reports a disk below its limit", () => {
     const machine = buildMachine({
-      watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
+      metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
     expect(findNeeds(machine)).toEqual([
@@ -366,7 +374,7 @@ describe("findMachineNeeds", () => {
     ["offline", { connectivity: "offline" as const }],
     ["unreachable", { connectivity: "unreachable" as const }],
     ["draining", { lifecycle: "draining" as const }],
-    ["short of disk", { watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB } }],
+    ["short of disk", { metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB } }],
   ])("does not report waiting sessions while the machine is %s", (_name, overrides) => {
     // Raising the cap would start none of them, so Allow would do nothing.
     const kinds = findNeeds(buildFullMachine(3, overrides)).map((need) => need.kind);
@@ -376,7 +384,7 @@ describe("findMachineNeeds", () => {
 
   it("reports waiting sessions when the free disk equals the limit", () => {
     const machine = buildFullMachine(3, {
-      watermark: { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB },
+      metrics: { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
     expect(findNeeds(machine)[0]?.kind).toBe("waiting");
@@ -389,11 +397,50 @@ describe("findMachineNeeds", () => {
     expect(findNeeds(machine)).toEqual([]);
   });
 
+  it("reports a disk that is 85% full, with its percentage rounded down", () => {
+    expect(findNeeds(buildMachine(withDisk(130e9)))).toEqual([
+      { kind: "disk-nearly-full", hue: "you", line: "Disk 87% full" },
+    ]);
+    expect(findNeeds(buildMachine(withDisk(150e9)))[0]?.line).toBe("Disk 85% full");
+    expect(findNeeds(buildMachine(withDisk(120.4e9)))[0]?.line).toBe("Disk 87% full");
+  });
+
+  it("does not report a disk that is 84.6% full", () => {
+    expect(findNeeds(buildMachine(withDisk(154e9)))).toEqual([]);
+  });
+
+  it("does not report a nearly full disk when the runner does not report its size", () => {
+    const machine = buildMachine({
+      facts: buildFacts(),
+      metrics: { diskFreeBytes: 11e9, availableMemoryBytes: 8 * GIB },
+    });
+
+    expect(findNeeds(machine)).toEqual([]);
+  });
+
+  it("lists a nearly full disk after the waiting sessions, and several needs together", () => {
+    const machine = buildMachine(
+      { maxConcurrentSessions: 12, ...withDisk(130e9) },
+      { running: 12, waiting: 3, waitingThreads: 3 },
+    );
+    const belowLimit = buildMachine(
+      { maxConcurrentSessions: 12, ...withDisk(5 * GIB) },
+      { running: 12, waiting: 3 },
+    );
+
+    expect(findNeeds(machine).map((need) => need.kind)).toEqual(["waiting", "disk-nearly-full"]);
+    // A disk below its limit is also over 85% full here: both rows apply, the serious one first.
+    expect(findNeeds(belowLimit).map((need) => need.kind)).toEqual([
+      "disk-below-limit",
+      "disk-nearly-full",
+    ]);
+  });
+
   it("lists every need that applies, the most serious first", () => {
     const machine = buildMachine(
       {
         connectivity: "unreachable",
-        watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
+        metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
       },
       { running: 12, waiting: 3 },
     );
@@ -548,23 +595,23 @@ describe("MachineSummary roomText", () => {
   it("is not reduced by a reserved runner, labels, a runner that has not reported its disk or memory", () => {
     const texts = [
       summarize({ reserved: true, labels: ["gpu"] }),
-      summarize({ watermark: null }),
-      summarize({ watermark: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 0 } }),
+      summarize({ metrics: null }),
+      summarize({ metrics: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 0 } }),
     ].map((machine) => machine.roomText);
 
     expect(texts).toEqual(["Room for 16", "Room for 16", "Room for 16"]);
   });
 
   it("counts a free disk equal to the limit as enough", () => {
-    const watermark = { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB };
+    const metrics = { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB };
 
-    expect(summarize({ watermark }).roomText).toBe("Room for 16");
+    expect(summarize({ metrics }).roomText).toBe("Room for 16");
   });
 
   it("is null for a disk below its limit, because the need line says so", () => {
-    const watermark = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
 
-    expect(summarize({ watermark }).roomText).toBeNull();
+    expect(summarize({ metrics }).roomText).toBeNull();
   });
 
   it("is null for a machine told to take no new work, because its status says so", () => {
@@ -581,7 +628,7 @@ describe("MachineSummary drawing", () => {
     summarize({ maxConcurrentSessions: cap }, { running, waiting }).drawing;
 
   it("draws one block per slot at a cap of 16", () => {
-    expect(drawing(16, 12, 3)).toEqual({
+    expect(drawing(16, 12, 3)).toMatchObject({
       shape: "blocks",
       cap: 16,
       running: 12,
@@ -592,7 +639,7 @@ describe("MachineSummary drawing", () => {
   });
 
   it("draws one bar above a cap of 16", () => {
-    expect(drawing(17, 12, 3)).toEqual({
+    expect(drawing(17, 12, 3)).toMatchObject({
       shape: "bar",
       cap: 17,
       running: 12,
@@ -623,6 +670,53 @@ describe("MachineSummary drawing", () => {
   it("draws no waiting blocks in a bar, which stretches over all of the waiting sessions", () => {
     expect(drawing(17, 17, 40)).toMatchObject({ waiting: 40, waitingBlocks: 0 });
   });
+
+  it("words the sessions running against the cap, and the sessions waiting", () => {
+    expect(drawing(16, 12, 5)).toMatchObject({
+      isAway: false,
+      runningText: "12",
+      capText: " of 16",
+      waitingText: "5 waiting",
+    });
+  });
+
+  it("has no waiting text while no session waits", () => {
+    expect(drawing(16, 12).waitingText).toBeNull();
+  });
+
+  describe("of a machine that is away", () => {
+    const awayDrawing = (
+      cap: number,
+      running: number,
+      waiting: number,
+      connectivity: "offline" | "unreachable" = "offline",
+    ) => summarize({ maxConcurrentSessions: cap, connectivity }, { running, waiting }).drawing;
+
+    it.each(["offline", "unreachable"] as const)(
+      "counts a %s machine as running none, with every slot free and a dash for its running text",
+      (connectivity) => {
+        expect(awayDrawing(16, 12, 5, connectivity)).toMatchObject({
+          isAway: true,
+          running: 0,
+          free: 16,
+          runningText: "–",
+          capText: " of 16",
+        });
+      },
+    );
+
+    it("keeps the sessions that wait for it, because the controller still knows them", () => {
+      expect(awayDrawing(16, 12, 5)).toMatchObject({
+        waiting: 5,
+        waitingBlocks: 5,
+        waitingText: "5 waiting",
+      });
+    });
+
+    it("draws blocks for a cap of 16, however many sessions it last ran", () => {
+      expect(awayDrawing(4, 100, 0)).toMatchObject({ shape: "blocks", running: 0, free: 4 });
+    });
+  });
 });
 
 describe("MachineSummary kind", () => {
@@ -643,10 +737,12 @@ describe("MachineSummary kind", () => {
   });
 });
 
+const NOT_REPORTED = { value: "–", unit: "", freeAmount: "", share: null, level: "normal" };
+
 describe("MachineSummary disk", () => {
   // The disk limit is 10 GiB; levels are checked apart, so only the size is read here.
   const readDisk = (diskFreeBytes: number) =>
-    summarize({ watermark: { diskFreeBytes, availableMemoryBytes: 8 * GIB } }).disk;
+    summarize({ metrics: { diskFreeBytes, availableMemoryBytes: 8 * GIB } }).disk;
 
   it.each([
     [10 * GIB, "10.7", "GB"],
@@ -664,20 +760,66 @@ describe("MachineSummary disk", () => {
     [1e9, "1.0", "GB"],
     [0, "0", "MB"],
   ])("shows %d free bytes as %s %s", (bytes, amount, unit) => {
-    expect(readDisk(bytes)).toMatchObject({ amount, unit });
+    expect(readDisk(bytes)).toMatchObject({ freeAmount: `${amount} ${unit}` });
   });
 
-  it("has no share until the runner reports its disk total, so the gauge draws empty", () => {
-    expect(readDisk(20 * GIB)?.share).toBeNull();
+  it("shows the free space and an empty meter until the runner reports its disk total", () => {
+    expect(readDisk(42.14e9)).toEqual({
+      value: "42.1",
+      unit: " GB free",
+      freeAmount: "42.1 GB",
+      share: null,
+      level: "normal",
+    });
   });
 
   it("is failing while the free space is below the limit, normal otherwise", () => {
-    expect(readDisk(5 * GIB)?.level).toBe("fail");
-    expect(readDisk(10 * GIB)?.level).toBe("normal");
+    expect(readDisk(5 * GIB).level).toBe("fail");
+    expect(readDisk(10 * GIB).level).toBe("normal");
   });
 
-  it("is null until the runner reports its disk", () => {
-    expect(summarize({ watermark: null }).disk).toBeNull();
+  describe("with the disk's total size", () => {
+    const readFullDisk = (diskFreeBytes: number) => summarize(withDisk(diskFreeBytes)).disk;
+
+    it.each([
+      [500e9, 0.5, 50, "normal"],
+      [154e9, 0.846, 84, "normal"],
+      [150e9, 0.85, 85, "you"],
+      [130e9, 0.87, 87, "you"],
+      [290e9, 0.71, 71, "normal"],
+      [11e9, 0.989, 98, "you"],
+    ] as const)(
+      "reads %d free bytes as %d full: %d percent, level %s",
+      (free, share, percent, level) => {
+        expect(readFullDisk(free)).toMatchObject({
+          value: String(percent),
+          unit: "%",
+          share,
+          level,
+        });
+      },
+    );
+
+    it("names the free space beside the percentage", () => {
+      expect(readFullDisk(130e9)).toMatchObject({ freeAmount: "130 GB" });
+    });
+
+    it("is failing while the free space is below the limit, whatever the percentage", () => {
+      expect(readFullDisk(5 * GIB)).toMatchObject({ value: "99", level: "fail" });
+      expect(readFullDisk(10 * GIB)).toMatchObject({ level: "you" });
+    });
+
+    it("stays between 0 and 100 percent when more is free than the disk holds", () => {
+      expect(readFullDisk(2 * DISK_TOTAL)).toMatchObject({ share: 0, value: "0" });
+    });
+  });
+
+  it("fails below the limit even when the runner does not report the disk's total", () => {
+    expect(readDisk(5 * GIB)).toMatchObject({ level: "fail", share: null });
+  });
+
+  it("is not reported until the runner reports its disk", () => {
+    expect(summarize({ metrics: null }).disk).toEqual(NOT_REPORTED);
   });
 });
 
@@ -685,7 +827,7 @@ describe("MachineSummary memory", () => {
   const readMemory = (totalGib: number, availableGib: number) =>
     summarize({
       facts: buildFacts({ totalMemoryBytes: totalGib * GIB }),
-      watermark: { diskFreeBytes: 20 * GIB, availableMemoryBytes: availableGib * GIB },
+      metrics: { diskFreeBytes: 20 * GIB, availableMemoryBytes: availableGib * GIB },
     }).memory;
 
   it.each([
@@ -698,20 +840,38 @@ describe("MachineSummary memory", () => {
   ])(
     "reads %d total and %d available as %d percent in use, level %s",
     (total, available, percent, level) => {
-      expect(readMemory(total, available)).toEqual({ percent, share: percent / 100, level });
+      expect(readMemory(total, available)).toMatchObject({
+        value: String(percent),
+        unit: "%",
+        share: percent / 100,
+        level,
+      });
     },
   );
 
+  it("shows the percentage rounded down and colours it on the rounded-down percent", () => {
+    // 79.9% in use is "79" and normal, never a normal-coloured "80".
+    expect(readMemory(1000, 201)).toMatchObject({ value: "79", level: "normal" });
+    expect(readMemory(1000, 200)).toMatchObject({ value: "80", level: "you" });
+    expect(readMemory(1000, 81)).toMatchObject({ value: "91", level: "you" });
+    expect(readMemory(1000, 79)).toMatchObject({ value: "92", level: "fail" });
+  });
+
+  it("names the free memory in binary gigabytes, whole from 100", () => {
+    expect(readMemory(64, 17.6).freeAmount).toBe("17.6 GB");
+    expect(readMemory(256, 120.4).freeAmount).toBe("120 GB");
+  });
+
   it("stays between 0 and 100 percent when the runner reports more available than total", () => {
-    expect(readMemory(100, 120)).toEqual({ percent: 0, share: 0, level: "normal" });
+    expect(readMemory(100, 120)).toMatchObject({ value: "0", share: 0, level: "normal" });
   });
 
-  it("is null until the runner reports its total memory", () => {
-    expect(summarize({ facts: null }).memory).toBeNull();
+  it("is not reported until the runner reports its total memory", () => {
+    expect(summarize({ facts: null }).memory).toEqual(NOT_REPORTED);
   });
 
-  it("is null until the runner reports its available memory", () => {
-    expect(summarize({ facts: buildFacts(), watermark: null }).memory).toBeNull();
+  it("is not reported until the runner reports its available memory", () => {
+    expect(summarize({ facts: buildFacts(), metrics: null }).memory).toEqual(NOT_REPORTED);
   });
 });
 
@@ -753,7 +913,7 @@ describe("MachineSummary", () => {
     const machine = summarize(
       {
         facts: buildFacts({ totalMemoryBytes: 16 * GIB }),
-        watermark: { diskFreeBytes: 42.14e9, availableMemoryBytes: 4 * GIB },
+        metrics: { diskFreeBytes: 42.14e9, availableMemoryBytes: 4 * GIB },
       },
       { running: 12 },
     );
@@ -763,26 +923,26 @@ describe("MachineSummary", () => {
       isAway: false,
       roomText: "Room for 4",
       need: undefined,
-      disk: { amount: "42.1", unit: "GB", level: "normal", share: null },
-      memory: { percent: 75, share: 0.75, level: "normal" },
+      disk: { value: "42.1", unit: " GB free", level: "normal", share: null },
+      memory: { value: "75", unit: "%", share: 0.75, level: "normal" },
     });
   });
 
   it("takes the first need, with a disk below its limit failing", () => {
     const machine = summarize({
-      watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
+      metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
-    expect(machine.disk?.level).toBe("fail");
+    expect(machine.disk.level).toBe("fail");
     expect(machine.need?.kind).toBe("disk-below-limit");
   });
 
   it("has no disk, memory or room for an offline machine that never reported", () => {
-    expect(summarize({ connectivity: "offline", watermark: null })).toMatchObject({
+    expect(summarize({ connectivity: "offline", metrics: null })).toMatchObject({
       isAway: true,
       roomText: null,
-      disk: null,
-      memory: null,
+      disk: NOT_REPORTED,
+      memory: NOT_REPORTED,
       need: { kind: "offline" },
     });
   });

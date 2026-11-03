@@ -281,24 +281,56 @@ export const RunnerFacts = Schema.Struct({
    * finding out by trying and failing.
    */
   adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The size of the file system that holds the runner's storage directory: the
+   * same file system `RunnerMetrics.diskFreeBytes` is read from. Absent from a
+   * runner built before it was reported; the Fleet screen then shows free
+   * space without a percentage.
+   */
+  diskTotalBytes: Schema.optionalKey(Bytes),
   /** The port that serves `GET /identity`, which is used to resolve the "local" alias. */
   identityPort: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
 });
 
 export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
 
+const Percent = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
+
 /**
- * The fast-changing part of a runner's state. Never buffered: only the latest
- * value matters. The controller decides what a reading means for placement,
- * by comparing it with the watermark it holds, so the runner reports only what
- * the machine has left.
+ * How busy the machine's CPU was over the minute before a report. The runner
+ * reads the share of all cores that were busy once a second, as a number from
+ * 0 to 100.
  */
-export const RunnerWatermark = Schema.Struct({
-  diskFreeBytes: Bytes,
-  availableMemoryBytes: Bytes,
+export const RunnerCpu = Schema.Struct({
+  /** The mean of the minute's reads. */
+  averagePercent: Percent,
+  /** The highest read of the minute. */
+  peakPercent: Percent,
 });
 
-export type RunnerWatermark = Schema.Schema.Type<typeof RunnerWatermark>;
+export type RunnerCpu = Schema.Schema.Type<typeof RunnerCpu>;
+
+/**
+ * The Runner Metrics: the fast-changing part of a runner's state. Never
+ * buffered: only the latest value matters. The controller decides what a
+ * reading means for placement, by comparing the free disk with the disk
+ * watermark it holds, so the runner reports only what the machine has left.
+ */
+export const RunnerMetrics = Schema.Struct({
+  diskFreeBytes: Bytes,
+  availableMemoryBytes: Bytes,
+  /**
+   * The CPU use over the minute before the report, in one of three states:
+   * - an object: the minute's mean and highest once-a-second read;
+   * - `null`: the runner reads CPU but has no minute yet, as on the report
+   *   right after hello;
+   * - absent: the runner was built before it reported CPU. The Fleet screen
+   *   then says the runner is too old to report CPU.
+   */
+  cpu: Schema.optionalKey(Schema.NullOr(RunnerCpu)),
+});
+
+export type RunnerMetrics = Schema.Schema.Type<typeof RunnerMetrics>;
 
 /**
  * What a machine reports about itself when it presents a join token: only what
@@ -405,12 +437,23 @@ export const RunnerFactsReport = Schema.Struct({
 
 export type RunnerFactsReport = Schema.Schema.Type<typeof RunnerFactsReport>;
 
-export const WatermarkReport = Schema.Struct({
+/**
+ * A runner's latest Runner Metrics, sent right after every hello and on the
+ * runner's periodic check.
+ *
+ * The frame was named for the report before the report became the Runner
+ * Metrics. On the wire it keeps the old tag `watermarkReport` and the old key
+ * `watermark`, so a runner and a controller of either age read each other's
+ * report. `encodeKeys` renames the key between the wire and the decoded
+ * `metrics` field. The next raise of `PROTOCOL_VERSION` renames both on the
+ * wire.
+ */
+export const MetricsReport = Schema.Struct({
   _tag: Schema.Literal("watermarkReport"),
-  watermark: RunnerWatermark,
-});
+  metrics: RunnerMetrics,
+}).pipe(Schema.encodeKeys({ metrics: "watermark" }));
 
-export type WatermarkReport = Schema.Schema.Type<typeof WatermarkReport>;
+export type MetricsReport = Schema.Schema.Type<typeof MetricsReport>;
 
 /** Whether the harness reports a usable login, and whose it is. */
 export const SnapshotAuth = Schema.Struct({
@@ -671,7 +714,7 @@ export const RunnerToController = Schema.Union([
   RunnerHello,
   Pong,
   RunnerFactsReport,
-  WatermarkReport,
+  MetricsReport,
   ProbeReport,
   InstallResult,
   LoginUrl,

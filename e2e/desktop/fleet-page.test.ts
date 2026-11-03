@@ -6,6 +6,8 @@
  *   on a machine's page, and the sidebar shows the Hercule face on both;
  * - a second machine joins with the command Add a machine shows, and its card
  *   appears on the open page;
+ * - the card of the controller's own, real runner shows its disk as a
+ *   percentage, from the size the runner reports;
  * - a machine whose session cap holds a thread back says so on its card, and
  *   Allow raises the cap so the waiting thread starts.
  *
@@ -13,7 +15,7 @@
  */
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
-import { arrangeFleet, chooseMenuItem, openSignedIn } from "./harness";
+import { arrangeFleet, chooseMenuItem, openSignedIn, startControllerForTest } from "./harness";
 
 /** Returns the label of the sidebar's list, "Threads" or "Hercule": the face it shows. */
 function readSidebarList(page: Page): Promise<string | null> {
@@ -125,5 +127,24 @@ describe("the Fleet page", () => {
     // Nothing waits any more, so the card loses its line and its button.
     await expect.poll(() => card.getByText("waits for a slot").count()).toBe(0);
     expect(await card.getByRole("button", { name: /^Allow/ }).count()).toBe(0);
+  });
+
+  it("shows the disk of a real runner as a percentage", async () => {
+    // The controller starts a real runner of its own, which `arrangeFleet`
+    // retires. This test keeps it: it reports its disk, so its card draws a
+    // percentage. The scripted runners send no metrics, so their cards draw a
+    // dash.
+    const { url } = await startControllerForTest({ setUp: true });
+    const { page } = await openSignedIn(url);
+    await openFleet(page);
+
+    const card = page.locator(".fleet-card");
+    await card.waitFor();
+    const disk = card.locator(".fleet-gauge").filter({ hasText: "Disk" });
+    // The first report follows the hello, so the card shows a dash until then.
+    // The percent sign may sit in its own element, so the text is read whole.
+    await expect
+      .poll(async () => (await disk.locator("b").innerText()).replace(/\s+/g, ""))
+      .toMatch(/^\d+%$/);
   });
 });

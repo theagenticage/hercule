@@ -1,11 +1,24 @@
 import type { JSX, ReactNode } from "react";
-import type { MachineSummary } from "@hercule/client-core/fleet";
+import type { MachineGauge, MachineSummary } from "@hercule/client-core/fleet";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { MachineIcon } from "./machine-icon";
 import { Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
 import { buildMachineTransitionName } from "./machine-transition";
 import { SessionsFigure } from "./sessions-drawing";
 import "./fleet-page.css";
+
+/** Renders a gauge as its meter with the number beside it, coloured by the gauge's level. */
+function MeterWithValue({ gauge }: { readonly gauge: MachineGauge }): JSX.Element {
+  return (
+    <span className="fleet-row-meter">
+      <Meter share={gauge.share} level={gauge.level} />
+      <b className={gauge.level === "normal" ? undefined : `is-${gauge.level}`}>
+        {gauge.value}
+        {gauge.unit}
+      </b>
+    </span>
+  );
+}
 
 /**
  * Renders one machine as a row of the list. It draws what `machine` holds and
@@ -48,38 +61,35 @@ export function MachineRow({
         </span>
       </span>
       <span role="cell" className="fleet-cell">
-        <SessionsFigure drawing={drawing} size="list" isAway={isAway} />
-        <small className={drawing.waiting > 0 ? "is-you" : undefined}>
-          {isAway ? "–" : drawing.running} of {drawing.cap}
-          {drawing.waiting > 0 && ` · ${String(drawing.waiting)} waiting`}
+        <SessionsFigure drawing={drawing} size="list" />
+        <small className={drawing.waitingText === null ? undefined : "is-you"}>
+          {drawing.runningText}
+          {drawing.capText}
+          {drawing.waitingText !== null && ` · ${drawing.waitingText}`}
         </small>
       </span>
       <span role="cell" className="fleet-cell fleet-col-room">
         <b>{roomText ?? "–"}</b>
       </span>
-      <span role="cell" className="fleet-cell fleet-cell--line fleet-col-disk">
-        {disk === null ? (
-          <b>–</b>
-        ) : (
-          <>
-            <b className={disk.level === "fail" ? "is-fail" : undefined}>
-              {disk.amount} {disk.unit}
-            </b>
-            <small>free</small>
-          </>
-        )}
-      </span>
+      {disk.share === null ? (
+        <span role="cell" className="fleet-cell fleet-cell--line fleet-col-disk">
+          {disk.freeAmount === "" ? (
+            <b>–</b>
+          ) : (
+            <>
+              <b className={disk.level === "fail" ? "is-fail" : undefined}>{disk.freeAmount}</b>
+              <small>free</small>
+            </>
+          )}
+        </span>
+      ) : (
+        <span role="cell" className="fleet-cell fleet-col-disk">
+          <MeterWithValue gauge={disk} />
+          <small>{disk.freeAmount} free</small>
+        </span>
+      )}
       <span role="cell" className="fleet-cell fleet-col-mem">
-        {memory === null ? (
-          <b>–</b>
-        ) : (
-          <span className="fleet-row-meter">
-            <Meter share={memory.share} level={memory.level} />
-            <b className={memory.level === "normal" ? undefined : `is-${memory.level}`}>
-              {memory.percent}%
-            </b>
-          </span>
-        )}
+        {memory.share === null ? <b>–</b> : <MeterWithValue gauge={memory} />}
       </span>
       <span role="cell" className="fleet-row-need">
         <NeedLine need={need} allow={allow} />
@@ -94,7 +104,9 @@ export function MachineRow({
  * Machine, Sessions, Room, Disk, Memory and Needs you. Under 1030px of width
  * the Room and Memory columns go, because the machine's page shows them, and
  * under 720px the Disk column goes too. The rows draw what a card draws, with
- * the sessions smaller and the disk as its free space alone.
+ * the sessions smaller. The disk is a meter and its percentage with the free
+ * space under it, or the free space alone when the runner does not report the
+ * disk's size.
  */
 export function MachineList({ children }: { readonly children: ReactNode }): JSX.Element {
   return (

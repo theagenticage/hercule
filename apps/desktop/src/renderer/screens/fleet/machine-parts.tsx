@@ -1,5 +1,10 @@
 import type { JSX, ReactNode } from "react";
-import type { GaugeLevel, MachineNeed, MachineStatus } from "@hercule/client-core/fleet";
+import type {
+  GaugeLevel,
+  MachineGauge,
+  MachineNeed,
+  MachineStatus,
+} from "@hercule/client-core/fleet";
 import "./machine-parts.css";
 
 /**
@@ -45,15 +50,32 @@ export function Meter({
 }
 
 /**
+ * Renders a gauge's big number with its unit in small after it. A unit of ""
+ * draws no unit, as for a gauge with nothing reported.
+ */
+export function GaugeValue({
+  gauge,
+}: {
+  readonly gauge: Pick<MachineGauge, "value" | "unit">;
+}): JSX.Element {
+  return (
+    <b>
+      {gauge.value}
+      {gauge.unit === "" ? null : <small>{gauge.unit}</small>}
+    </b>
+  );
+}
+
+/**
  * Renders the line that says what a machine needs from the user, with the
  * button that fixes it, as siblings for the parent to lay out. Renders nothing
  * when the machine needs nothing.
  *
  * - A waiting need has `allow`, the button that raises the session cap, which
  *   the caller builds because it owns what pressing it does.
- * - A full disk has `Clean up…`, drawn inert because the cleanup dialog is not
- *   built yet. It stays `aria-disabled` rather than `disabled` so its tooltip
- *   still shows.
+ * - A disk below its limit, or 85% full or more, has `Clean up…`, drawn inert
+ *   because the cleanup dialog is not built yet. It stays `aria-disabled`
+ *   rather than `disabled` so its tooltip still shows.
  * - An offline or unreachable machine has no button.
  */
 export function NeedLine({
@@ -64,13 +86,14 @@ export function NeedLine({
   readonly allow: ReactNode;
 }): JSX.Element | null {
   if (need === undefined) return null;
+  const hasCleanUp = need.kind === "disk-below-limit" || need.kind === "disk-nearly-full";
   return (
     <>
       <span className={`fleet-attn is-${need.hue}`} title={need.line}>
         {need.line}
       </span>
       {need.kind === "waiting" && allow}
-      {need.kind === "disk-below-limit" && (
+      {hasCleanUp && (
         <button
           type="button"
           className="btn btn--sm fleet-attn-btn"

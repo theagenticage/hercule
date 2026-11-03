@@ -41,7 +41,7 @@ export const BARE: Runner = {
     adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
-  watermark: null,
+  metrics: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-09-05T09:14:00.000Z",

@@ -38,7 +38,7 @@ const HETZNER: Fixture = {
     adapters: ["claude-code/claude-code"],
     identityPort: 5000,
   },
-  watermark: { diskFreeBytes: 42 * GIB, availableMemoryBytes: 4 * GIB },
+  metrics: { diskFreeBytes: 42 * GIB, availableMemoryBytes: 4 * GIB },
   maxConcurrentSessions: 2,
   lastSeenAt: "2026-09-05T08:02:00.000Z",
 };
@@ -192,7 +192,7 @@ describe("Fleet", () => {
     expect(moss).toContain("2.50.1");
     expect(moss).toContain("2.99.0");
     expect(showsSize(moss, MOSS.facts!.totalMemoryBytes), `memory in: ${moss}`).toBe(true);
-    expect(showsSize(moss, MOSS.watermark!.diskFreeBytes), `free disk in: ${moss}`).toBe(true);
+    expect(showsSize(moss, MOSS.metrics!.diskFreeBytes), `free disk in: ${moss}`).toBe(true);
 
     const hetzner = readPageText(await findRunnerRow(HETZNER.name, [MOSS.name]));
     expect(hetzner).toContain("unreachable");
@@ -200,7 +200,7 @@ describe("Fleet", () => {
     expect(hetzner).toContain("x64");
     expect(hetzner).toContain("2.43.0");
     expect(showsSize(hetzner, HETZNER.facts!.totalMemoryBytes), `memory in: ${hetzner}`).toBe(true);
-    expect(showsSize(hetzner, HETZNER.watermark!.diskFreeBytes), `free disk in: ${hetzner}`).toBe(
+    expect(showsSize(hetzner, HETZNER.metrics!.diskFreeBytes), `free disk in: ${hetzner}`).toBe(
       true,
     );
   });

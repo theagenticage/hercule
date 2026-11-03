@@ -38,7 +38,7 @@ export const buildRunner = (id: string, name: string): Runner => ({
     adapters: ["claude-code/claude-code", "codex/codex"],
     identityPort: 4939,
   },
-  watermark: null,
+  metrics: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 1024,
   lastSeenAt: AT,

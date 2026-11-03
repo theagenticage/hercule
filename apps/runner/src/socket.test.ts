@@ -128,7 +128,7 @@ const waitUntil = async (ready: () => boolean): Promise<void> => {
 /**
  * Waits until the runner has accepted this stub as its controller.
  *
- * The watermark report shows this, because the runner only sends it to a
+ * The metrics report shows this, because the runner only sends it to a
  * peer that has proved its identity. The runner's own hello does not: the stub
  * records that frame before it has even signed its hello. A test that sends a
  * request as soon as it sees the runner's hello could send it before the
@@ -343,7 +343,10 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         pin,
         facts: FACTS,
         probe: Effect.succeed(FACTS),
-        headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
+        readDiskAndMemory: Effect.succeed({
+          diskFreeBytes: 200 * 1024 ** 3,
+          availableMemoryBytes: 1,
+        }),
         storageDir: STORAGE_DIR,
         scratchDir: SCRATCH_DIR,
         attachmentsDir: "/nonexistent/hercule-runner-attachments",
@@ -499,7 +502,7 @@ describe("which controller a runner accepts", () => {
     });
 
     await stub.connected();
-    // The watermark is only sent to a peer that has proved its identity, so it
+    // The metrics are only sent to a peer that has proved its identity, so it
     // shows the runner accepted the real hello.
     await waitUntilProven(stub);
     // A hello claiming another identity, after the real one was accepted. It
@@ -527,7 +530,7 @@ describe("which controller a runner accepts", () => {
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 
-  it("sends the watermark as soon as the controller has proved its identity", async () => {
+  it("sends the metrics as soon as the controller has proved its identity", async () => {
     const stub = await stubController();
 
     let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
@@ -542,9 +545,11 @@ describe("which controller a runner accepts", () => {
     await waitUntilProven(stub);
     expect(stub.received.find((frame) => frame._tag === "watermarkReport")).toEqual({
       _tag: "watermarkReport",
-      watermark: {
+      metrics: {
         diskFreeBytes: 200 * 1024 ** 3,
         availableMemoryBytes: 1,
+        // No minute of CPU has been read yet on the report right after hello.
+        cpu: null,
       },
     });
 
