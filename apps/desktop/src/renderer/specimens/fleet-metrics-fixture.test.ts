@@ -9,7 +9,7 @@ import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
 import { ATLAS, BEELINK, BOSGAME, FLEET_RECORDS, MINI, STUDIO } from "./fleet-fixture";
 import { SPECIMEN_NOW } from "./sidebar-fixture";
 
-const { fiveMinutesByRunner, hoursByRunner, fleetHours } = FLEET_RECORDS.metrics;
+const { fiveMinutesByRunner, hoursByRunner } = FLEET_RECORDS.metrics;
 const fiveMinutes = fiveMinutesByRunner[ATLAS.id]!;
 const hours = hoursByRunner[ATLAS.id]!;
 
@@ -31,7 +31,7 @@ describe("the Fleet specimen's Runner Metrics", () => {
       ATLAS,
       fiveMinutes,
       hours,
-      forecastDiskLimit(fleetHours.points, ATLAS, SPECIMEN_NOW),
+      forecastDiskLimit(hours.points, ATLAS, SPECIMEN_NOW),
     );
 
     expect(graphs.sessions.waiting.length).toBe(2);
@@ -44,7 +44,10 @@ describe("the Fleet specimen's Runner Metrics", () => {
 
   it("give no other machine a forecast", () => {
     for (const runner of [BEELINK, BOSGAME, MINI, STUDIO]) {
-      expect(forecastDiskLimit(fleetHours.points, runner, SPECIMEN_NOW), runner.name).toBeNull();
+      expect(
+        forecastDiskLimit(hoursByRunner[runner.id]!.points, runner, SPECIMEN_NOW),
+        runner.name,
+      ).toBeNull();
     }
   });
 });

@@ -100,9 +100,6 @@ import type { Bridge } from "../../ipc/bridge";
 import {
   agentsQuery,
   assistantsQuery,
-  buildMachineFiveMinuteScope,
-  buildMachineHourScope,
-  FLEET_HOUR_METRICS_SCOPE,
   connectionsQuery,
   controllerQuery,
   conversationMessagesQuery,
@@ -126,7 +123,6 @@ import {
   profilesQuery,
   projectsQuery,
   harnessesQuery,
-  runnerMetricsQuery,
   providerAccountsQuery,
   providersQuery,
   queuedInputsQuery,
@@ -176,6 +172,12 @@ import { createQueryClient } from "../app/query-client";
 import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
+import {
+  buildMachineFiveMinuteScope,
+  buildMachineHourScope,
+  buildRunnerMetricsKey,
+  FLEET_HOUR_METRICS_SCOPE,
+} from "../screens/fleet/runner-metrics-scope";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { useKeepRequestDrafts } from "../app/request-drafts";
 import { AgentPage } from "../screens/thread/agent-page";
@@ -794,17 +796,15 @@ const seedQueryCache = (
     queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
     queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
     const { fiveMinutesByRunner, hoursByRunner, fleetHours } = fleet.metrics;
-    queryClient.setQueryData(
-      runnerMetricsQuery(client, FLEET_HOUR_METRICS_SCOPE).queryKey,
-      fleetHours,
-    );
+    queryClient.setQueryData(buildRunnerMetricsKey(FLEET_HOUR_METRICS_SCOPE), fleetHours);
     for (const [runnerId, history] of Object.entries(fiveMinutesByRunner)) {
-      const scope = buildMachineFiveMinuteScope(runnerId);
-      queryClient.setQueryData(runnerMetricsQuery(client, scope).queryKey, history);
+      queryClient.setQueryData(
+        buildRunnerMetricsKey(buildMachineFiveMinuteScope(runnerId)),
+        history,
+      );
     }
     for (const [runnerId, history] of Object.entries(hoursByRunner)) {
-      const scope = buildMachineHourScope(runnerId);
-      queryClient.setQueryData(runnerMetricsQuery(client, scope).queryKey, history);
+      queryClient.setQueryData(buildRunnerMetricsKey(buildMachineHourScope(runnerId)), history);
     }
   }
   if (workflows !== undefined) {

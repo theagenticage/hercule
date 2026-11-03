@@ -31,8 +31,10 @@ import type {
   RunnerFacts,
   Session,
 } from "@hercule/contract";
-import { FORECAST_HISTORY_MS } from "@hercule/client-core/fleet";
-import type { RunnerMetricsHistory } from "@hercule/client-core/metrics-history";
+import {
+  FORECAST_HISTORY_MS,
+  type RunnerMetricsHistory,
+} from "@hercule/client-core/metrics-history";
 import { HARNESSES } from "@hercule/client-core/testing";
 import { buildSession } from "@hercule/client-core/threads/testing";
 import {

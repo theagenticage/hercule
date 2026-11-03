@@ -11,8 +11,11 @@
  * last 14 days, as the controller does.
  */
 import type { RunnerMetricsPoint } from "@hercule/contract";
-import { FIVE_MINUTE_HISTORY_MS, HOUR_HISTORY_MS } from "@hercule/client-core/machine-graphs";
-import type { RunnerMetricsHistory } from "@hercule/client-core/metrics-history";
+import {
+  FIVE_MINUTE_HISTORY_MS,
+  HOUR_HISTORY_MS,
+  type RunnerMetricsHistory,
+} from "@hercule/client-core/metrics-history";
 import { SPECIMEN_NOW } from "./sidebar-fixture";
 
 const MINUTE_MS = 60_000;
