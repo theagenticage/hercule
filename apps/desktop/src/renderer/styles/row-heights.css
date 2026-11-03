@@ -150,6 +150,21 @@
   initial-value: 28px;
 }
 
+/* ---------- A machine's Running here ---------- */
+
+/* A group's row: its title over what it is and its status. */
+@property --fleet-running-height-work {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 54px;
+}
+/* A session's row: one line. */
+@property --fleet-running-height-session {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 46px;
+}
+
 :root {
   --side-height-header: calc(24px + var(--text-size-step));
   --side-height-waiting-row: calc(38px + 2 * var(--text-size-step));
@@ -174,4 +189,7 @@
   --fleet-activity-height-entry: calc(var(--line-18) + 17px);
   --fleet-activity-height-detail: calc(var(--line-16) + 3px);
   --fleet-activity-height-last-detail: calc(var(--line-16) + 12px);
+
+  --fleet-running-height-work: calc(54px + 2 * var(--text-size-step));
+  --fleet-running-height-session: calc(46px + var(--text-size-step));
 }

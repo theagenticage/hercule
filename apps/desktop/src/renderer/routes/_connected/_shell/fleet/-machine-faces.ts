@@ -15,7 +15,8 @@ import { useWindowVisible } from "../../../../app/window-visibility";
  *   reads the list again but draws nothing again.
  * - The rows' members come from the shell (`useRowMembers`), which keeps their
  *   identity while no row's key, title or lead changes. The sessions are
- *   grouped the way the sidebar groups them.
+ *   grouped as a machine's Running here groups them, so a card's faces and
+ *   the page's groups agree.
  * - While the window is hidden the query is not observed (`subscribed: false`),
  *   so a push reads nothing in a window nobody sees. See
  *   `useRunnerSessionCounts`.

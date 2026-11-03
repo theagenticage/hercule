@@ -659,7 +659,7 @@ export interface FleetRecords {
   readonly harnesses: ReadonlyArray<Harness>;
   /** Every session that has not exited, which the machines' counts are made from. */
   readonly sessions: ReadonlyArray<Session>;
-  /** The running runs, as `run.query { status: running }` lists them, which name the runs in Running here. */
+  /** The running runs, as `run.query { status: running }` lists them. Their workflow names are what a machine's Running here names the runs by. */
   readonly runningRuns: ReadonlyArray<RunSummary>;
   readonly controller: ControllerInfo;
   /** The Runner Metrics history the graphs and the forecasts are drawn from. */

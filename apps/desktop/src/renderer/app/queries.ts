@@ -1195,6 +1195,31 @@ export const runQuery = (client: HerculeClient, runId: string) =>
   });
 
 /**
+ * Reads the name of the workflow run `runId` was started from, and keeps
+ * only that string, for a machine's Running here.
+ *
+ * A run's plan is frozen when the run starts, so the name never changes and
+ * is read once per run for the life of the window (`staleTime` and `gcTime`
+ * are `Infinity`). The key is outside the `run` and `runs` prefixes on
+ * purpose: a `run` push, which comes with every step, would otherwise read
+ * the whole run again just to find the same name. The cache holds the name
+ * only, not the run, whose step records change.
+ *
+ * Fails like `runQuery` when no run has the id. It is not tried again: the
+ * caller draws the session's own title instead.
+ */
+export const runWorkflowNameQuery = (client: HerculeClient, runId: string) =>
+  queryOptions({
+    queryKey: ["run-workflow-name", runId],
+    queryFn: async () => (await client.run.read({ params: { id: runId } })).plan.name,
+    retry: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+/**
  * Reads every session a run's agent steps started, for the run's page: what
  * a waiting step asks, and a step's model, tokens and tool calls. Its key
  * sits under the `sessions` prefix, so a push on the `session` topic, which

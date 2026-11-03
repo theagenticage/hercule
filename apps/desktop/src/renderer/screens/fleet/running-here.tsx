@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import { useCallback, useRef, type JSX } from "react";
 import { Link, linkOptions } from "@tanstack/react-router";
 import type {
   MachineWork,
@@ -7,10 +7,12 @@ import type {
   WorkDestination,
 } from "@hercule/client-core/machine-work";
 import { useAgeLabel } from "../../app/age-clock";
+import { readLengths, useMeasuredAtTextSize } from "../../app/text-size";
 import { WorkflowsIcon } from "../../icons/workflows";
+import { VirtualList } from "../virtual-list";
 import { ViewSwitch } from "../workflows/view-switch";
 import { MachinePageSection } from "./machine-page-section";
-import { MachineWorkFace } from "./work-faces";
+import { MachineFacesStack, MachineWorkFace } from "./work-faces";
 import "./running-here.css";
 
 /** The two ways to show the work, in the order the switch lists them. */
@@ -43,47 +45,86 @@ const buildDestinationLink = (destination: WorkDestination) => {
   }
 };
 
-/** Renders one group: its face, title, what it is and its status, its sessions' faces, and since when. */
+/**
+ * The custom property that holds the height of each kind of row, at the
+ * default Text size: a group's row (two lines) and a session's (one line).
+ * The expanded lists place their rows by these heights, and the rows' CSS
+ * draws them at the same properties (styles/row-heights.css).
+ */
+const ROW_HEIGHT_PROPERTIES = {
+  work: "--fleet-running-height-work",
+  session: "--fleet-running-height-session",
+} as const;
+
+/** Reads the heights of the two kinds of row from the page's CSS, in CSS pixels. */
+const readRowHeights = () => readLengths(ROW_HEIGHT_PROPERTIES);
+
+/** A session as an item of the expanded Sessions list, which keys its items. */
+interface SessionEntry {
+  readonly key: string;
+  readonly session: MachineWorkSession;
+}
+
+/**
+ * Returns the key of the item to focus when the focused item `goneKey` leaves
+ * the list: the item that takes its place, or the last one, or `null` when
+ * the list is empty.
+ */
+const pickNeighbourKey = (
+  goneKey: string,
+  before: ReadonlyArray<{ readonly key: string }>,
+  after: ReadonlyArray<{ readonly key: string }>,
+): string | null => {
+  const index = before.findIndex((item) => item.key === goneKey);
+  return after[Math.max(0, Math.min(index, after.length - 1))]?.key ?? null;
+};
+
+/**
+ * Renders one group's row, a link: its face, title, its kind, its members and its
+ * status, its sessions' faces, and since when. Its `data-key` is how the
+ * expanded list finds it to keep focus.
+ */
 function WorkRow({ group }: { readonly group: MachineWorkGroup }): JSX.Element {
   return (
-    <li>
-      <Link
-        {...buildDestinationLink(group.opens)}
-        className={group.waitingForSlot ? "running-here-row is-waiting" : "running-here-row"}
-      >
-        <span className="running-here-glyph">
-          {group.kind === "run" ? (
-            <span className="running-here-icon">
-              <WorkflowsIcon size={15} />
-            </span>
-          ) : (
-            <MachineWorkFace face={group.face} size={28} />
-          )}
-        </span>
-        <span className="running-here-text">
-          <b>{group.title}</b>
-          <span className="running-here-line">
-            <span className="running-here-detail">{group.detail}</span>
-            <span className="running-here-separator"> · </span>
-            <span className="running-here-status">{group.status}</span>
+    <Link
+      {...buildDestinationLink(group.opens)}
+      data-key={group.key}
+      className={group.waitingForSlot ? "running-here-row is-waiting" : "running-here-row"}
+    >
+      <span className="running-here-glyph">
+        {group.opens.kind === "run" ? (
+          <span className="running-here-icon">
+            <WorkflowsIcon size={15} />
           </span>
+        ) : (
+          <MachineWorkFace face={group.face} size={28} />
+        )}
+      </span>
+      <span className="running-here-text">
+        <b>{group.title}</b>
+        <span className="running-here-line">
+          <span className="running-here-kind">{group.kindLabel}</span>
+          {/* The separator is part of the members, so it goes when they do. */}
+          {group.memberLabels === "" ? null : (
+            <span className="running-here-members"> · {group.memberLabels}</span>
+          )}
+          <span className="running-here-separator"> · </span>
+          <span className="running-here-status">{group.status}</span>
         </span>
-        <span className="running-here-faces">
-          {group.faces.map((face, index) => (
-            <MachineWorkFace key={index} face={face} size={18} />
-          ))}
-        </span>
-        <span className="running-here-since">{group.since}</span>
-      </Link>
-    </li>
+      </span>
+      <span className="running-here-faces">
+        <MachineFacesStack faces={group.faces} size={18} unit="session" />
+      </span>
+      <span className="running-here-since">{group.since}</span>
+    </Link>
   );
 }
 
 /**
- * Renders one session of the plain list: its face, title, status, and how
- * long it has run. The runtime is the only part that changes with time, so
- * this item alone draws again when the age clock ticks. `isCounting` is
- * whether the runtime is kept current, which it is only while the window can
+ * Renders one session of the plain list as a link: its face, title, status,
+ * and how long it has run. The runtime is the only part that changes with
+ * time, so this item alone draws again when the age clock ticks. `isCounting`
+ * is whether the runtime is kept current, which it is only while the item can
  * be seen.
  */
 function SessionItem({
@@ -93,21 +134,114 @@ function SessionItem({
   readonly session: MachineWorkSession;
   readonly isCounting: boolean;
 }): JSX.Element {
-  const runtime = useAgeLabel(session.runningSince, isCounting);
+  const runtime = useAgeLabel(session.startedAt, isCounting);
   return (
-    <li>
-      <Link
-        {...buildDestinationLink(session.opens)}
-        className={
-          session.waitingForSlot ? "running-here-session is-waiting" : "running-here-session"
-        }
-      >
-        <MachineWorkFace face={session.face} size={24} />
-        <b>{session.title}</b>
-        <span className="running-here-status">{session.status}</span>
-        <span className="running-here-runtime">{runtime}</span>
-      </Link>
-    </li>
+    <Link
+      {...buildDestinationLink(session.opens)}
+      data-key={session.id}
+      className={
+        session.waitingForSlot ? "running-here-session is-waiting" : "running-here-session"
+      }
+    >
+      <MachineWorkFace face={session.face} size={24} />
+      <b>{session.title}</b>
+      <span className="running-here-status">{session.status}</span>
+      <span className="running-here-runtime">{runtime}</span>
+    </Link>
+  );
+}
+
+/**
+ * Renders the first `SHOWN_GROUPS` groups as a plain list, before "Show all".
+ * Ten rows cost nothing to keep in the page.
+ */
+function ShortWorkList({ groups }: { readonly groups: readonly MachineWorkGroup[] }): JSX.Element {
+  return (
+    <ul className="running-here-list running-here-list--work">
+      {groups.map((group) => (
+        <li key={group.key}>
+          <WorkRow group={group} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Renders the first `SHOWN_SESSIONS` sessions as a plain list, in two columns when the section is wide. */
+function ShortSessionList({
+  sessions,
+  isCounting,
+}: {
+  readonly sessions: readonly MachineWorkSession[];
+  readonly isCounting: boolean;
+}): JSX.Element {
+  return (
+    <ul className="running-here-list running-here-list--sessions">
+      {sessions.map((session) => (
+        <li key={session.id}>
+          <SessionItem session={session} isCounting={isCounting} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Renders every group, after "Show all", as a virtualized list in a scroll
+ * area of its own: a machine can have a long queue, so the page never holds
+ * all the rows (spec 17 §Rules, rule 1). The rows' heights follow the Text
+ * size.
+ */
+function ExpandedWorkList({
+  groups,
+}: {
+  readonly groups: readonly MachineWorkGroup[];
+}): JSX.Element {
+  const scrollRef = useRef<HTMLElement>(null);
+  const heights = useMeasuredAtTextSize(readRowHeights);
+  const computeItemHeight = useCallback(() => heights.work, [heights]);
+  return (
+    <VirtualList
+      scrollRef={scrollRef}
+      className="running-here-scroll"
+      aria-label="All the work running here"
+      items={groups}
+      computeItemHeight={computeItemHeight}
+      renderItem={(group) => <WorkRow key={group.key} group={group} />}
+      pickFocusFallback={pickNeighbourKey}
+    />
+  );
+}
+
+/**
+ * Renders every session, after "Show all", as a virtualized list in a scroll
+ * area of its own, in one column: the list places its items one under the
+ * other, so it cannot draw the two columns the short list has. A session's
+ * runtime is kept current only while its row is in the visible part.
+ */
+function ExpandedSessionList({
+  sessions,
+  isCounting,
+}: {
+  readonly sessions: readonly MachineWorkSession[];
+  readonly isCounting: boolean;
+}): JSX.Element {
+  const scrollRef = useRef<HTMLElement>(null);
+  const heights = useMeasuredAtTextSize(readRowHeights);
+  const computeItemHeight = useCallback(() => heights.session, [heights]);
+  const entries = sessions.map((session): SessionEntry => ({ key: session.id, session }));
+  return (
+    <VirtualList
+      scrollRef={scrollRef}
+      className="running-here-scroll"
+      aria-label="All the sessions running here"
+      items={entries}
+      computeItemHeight={computeItemHeight}
+      renderItem={({ key, session }, _index, onScreen) => (
+        <SessionItem key={key} session={session} isCounting={isCounting && onScreen} />
+      )}
+      pickFocusFallback={pickNeighbourKey}
+    />
   );
 }
 
@@ -119,6 +253,10 @@ function SessionItem({
  *
  * - Only the first 10 groups, or 20 sessions, show until `isShowingAll`; the
  *   button below them calls `onToggleShowAll`.
+ * - After "Show all" the rows are a virtualized list in a scroll area of
+ *   their own, about two thirds of the window tall at most, so the page still
+ *   scrolls past it. Each view has its own list, drawn afresh at the top when
+ *   the view or "Show fewer" brings it back.
  * - A machine with no work shows one line saying so, and no switch.
  * - A group or session that waits for a free slot is drawn in the marigold
  *   ink, with its faces dimmed.
@@ -149,7 +287,6 @@ export function RunningHere({
   }
   const limit = view === "work" ? SHOWN_GROUPS : SHOWN_SESSIONS;
   const total = view === "work" ? work.groups.length : work.sessions.length;
-  const shown = isShowingAll ? total : Math.min(total, limit);
   return (
     <MachinePageSection
       id={id}
@@ -166,17 +303,15 @@ export function RunningHere({
       }
     >
       {view === "work" ? (
-        <ul className="running-here-list running-here-list--work">
-          {work.groups.slice(0, shown).map((group) => (
-            <WorkRow key={group.key} group={group} />
-          ))}
-        </ul>
+        isShowingAll ? (
+          <ExpandedWorkList groups={work.groups} />
+        ) : (
+          <ShortWorkList groups={work.groups.slice(0, limit)} />
+        )
+      ) : isShowingAll ? (
+        <ExpandedSessionList sessions={work.sessions} isCounting={isCounting} />
       ) : (
-        <ul className="running-here-list running-here-list--sessions">
-          {work.sessions.slice(0, shown).map((session) => (
-            <SessionItem key={session.id} session={session} isCounting={isCounting} />
-          ))}
-        </ul>
+        <ShortSessionList sessions={work.sessions.slice(0, limit)} isCounting={isCounting} />
       )}
       {total > limit && (
         <button type="button" className="running-here-more" onClick={onToggleShowAll}>

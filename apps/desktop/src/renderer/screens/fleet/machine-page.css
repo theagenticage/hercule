@@ -230,9 +230,8 @@
 }
 
 /* A section whose heading has a control at its far end, such as Running here's
-   Work | Sessions. The control is taller than the heading's text, and the
-   first row's rule sits closer to it than to a bare heading (10px, as in the
-   Fleet prototype). */
+   Work | Sessions. The control is taller than the heading's text, so the first
+   row's rule sits 10px under the heading's row, where a bare heading has 14px. */
 .machine-page-section-head-with-actions {
   align-items: center;
   justify-content: space-between;

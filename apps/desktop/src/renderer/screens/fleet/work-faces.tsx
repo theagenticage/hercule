@@ -16,35 +16,44 @@ export function MachineWorkFace({
   readonly size: number;
 }): JSX.Element {
   const look =
-    face.look === "assistant"
+    face.kind === "assistant"
       ? buildAssistantLook(face.seed)
-      : buildSessionLook(face.seed, face.look);
+      : buildSessionLook(face.seed, face.kind);
   return <Face look={look} pose={face.pose} size={size} />;
 }
 
 /**
- * Renders the faces of the work on a machine side by side, a pixel apart, then
- * "+n" for the groups of work they leave out. The stack is one image to a screen reader,
- * labelled with the number of groups, such as "7 groups at work here".
+ * Renders `faces` side by side, a pixel apart, then "+n" for the ones they
+ * leave out. `unit` is what a face stands for: the groups of work on a
+ * machine (a Fleet card) or the sessions of one group (a row of Running
+ * here). The stack is one image to a screen reader, labelled with the whole
+ * count, such as "7 groups at work here" or "14 sessions at work here", so
+ * the "+n" needs no label of its own.
  */
 export function MachineFacesStack({
-  faces,
+  faces: { faces, moreCount },
   size,
+  unit,
 }: {
   readonly faces: MachineFaces;
   readonly size: number;
+  readonly unit: "group" | "session";
 }): JSX.Element {
-  const groupCount = faces.faces.length + faces.moreCount;
+  const count = faces.length + moreCount;
   return (
     <span
       className="work-faces"
       role="img"
-      aria-label={`${String(groupCount)} ${groupCount === 1 ? "group" : "groups"} at work here`}
+      aria-label={`${String(count)} ${unit}${count === 1 ? "" : "s"} at work here`}
     >
-      {faces.faces.map((face) => (
-        <MachineWorkFace key={`${face.look}:${face.seed}`} face={face} size={size} />
+      {faces.map((face, index) => (
+        <MachineWorkFace
+          key={`${face.kind}:${face.seed}:${String(index)}`}
+          face={face}
+          size={size}
+        />
       ))}
-      {faces.moreCount > 0 && <small>+{faces.moreCount}</small>}
+      {moreCount > 0 && <small>+{moreCount}</small>}
     </span>
   );
 }

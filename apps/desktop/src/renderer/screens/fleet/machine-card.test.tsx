@@ -32,7 +32,7 @@ const renderCard = (
 
 const buildFaces = (shown: number, moreCount: number): MachineFaces => ({
   faces: Array.from({ length: shown }, (_, index): WorkFace => ({
-    look: "thread",
+    kind: "thread",
     seed: `session-${String(index)}`,
     pose: "working",
   })),

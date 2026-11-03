@@ -4,12 +4,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import { buildMachineWork, listMachineRunIds } from "@hercule/client-core/machine-work";
 import type { Runner } from "@hercule/contract";
 import { useRowMembers } from "../../../../app/session-presentation";
-import {
-  assistantsQuery,
-  fleetSessionsQuery,
-  liveRunsQuery,
-  runQuery,
-} from "../../../../app/queries";
+import { assistantsQuery, fleetSessionsQuery, runWorkflowNameQuery } from "../../../../app/queries";
 import { useWindowVisible } from "../../../../app/window-visibility";
 import { RunningHere, type RunningHereView } from "../../../../screens/fleet/running-here";
 
@@ -25,10 +20,15 @@ import { RunningHere, type RunningHereView } from "../../../../screens/fleet/run
  *   again but leaves the work equal, so nothing here draws again.
  * - While the window is hidden no query here is observed, as on the Fleet
  *   page (`useRunnerSessionCounts`).
- * - A run is named by its workflow's name. The running runs' list holds most
- *   names. A run that ended can still have a session someone writes to, so
- *   its record is read once by id; until that read answers, the group is
- *   named by its session's title.
+ * - A run is named by its workflow's name, which is frozen when the run
+ *   starts. Each run on this machine is read once by id
+ *   (`runWorkflowNameQuery`) and never again, so a push about runs, or a
+ *   run ending, redraws no name. While that read is pending, or after it
+ *   fails, the group is named by its session's own title. That is a
+ *   best-effort fallback: the title is "<workflow name> · <step id>" cut at
+ *   80 characters, so a long name may be cut and the step shows.
+ * - The assistants are read as id and name only, so a change to anything
+ *   else about an assistant draws nothing here.
  * - Both views start with ten groups or twenty sessions, and "Show all"
  *   opens each view on its own. The caller keys this component by runner,
  *   so another machine starts at the Work view again.
@@ -57,24 +57,19 @@ export function MachineRunningHere({
     select: (sessions) => listMachineRunIds(sessions, runner.id),
     subscribed,
   });
-  const { data: runningRuns } = useSuspenseQuery({
-    ...liveRunsQuery(client, "running"),
-    subscribed,
-  });
-  const endedRunNames = useQueries({
-    queries: runIds
-      .filter((runId) => !runningRuns.some((run) => run.id === runId))
-      .map((runId) => ({ ...runQuery(client, runId), subscribed })),
+  // `subscribed` is set here, not on each query: `useQueries` ignores it there.
+  const workflowNames = useQueries({
+    queries: runIds.map((runId) => runWorkflowNameQuery(client, runId)),
     combine: (results) =>
       Object.fromEntries(
-        results.flatMap(({ data }) => (data === undefined ? [] : [[data.id, data.plan.name]])),
+        results.flatMap(({ data }, index) => (data === undefined ? [] : [[runIds[index]!, data]])),
       ),
+    subscribed,
   });
-  const workflowNames = {
-    ...endedRunNames,
-    ...Object.fromEntries(runningRuns.map((run) => [run.id, run.workflowName])),
-  };
-  const { data: assistants } = useSuspenseQuery(assistantsQuery(client));
+  const { data: assistants } = useSuspenseQuery({
+    ...assistantsQuery(client),
+    select: (all) => all.map(({ id: assistantId, name }) => ({ id: assistantId, name })),
+  });
   const rowMembers = useRowMembers();
 
   const { data: work } = useSuspenseQuery({
@@ -100,7 +95,7 @@ export function MachineRunningHere({
       isShowingAll={allShown[view]}
       isCounting={subscribed}
       onPickView={setView}
-      onToggleShowAll={() => setAllShown({ ...allShown, [view]: !allShown[view] })}
+      onToggleShowAll={() => setAllShown((current) => ({ ...current, [view]: !current[view] }))}
     />
   );
 }

@@ -140,6 +140,7 @@ import {
   runningTurnQuery,
   runQuery,
   runSessionsQuery,
+  runWorkflowNameQuery,
   senderSessionQuery,
   sessionQuery,
   sessionSkillsQuery,
@@ -798,6 +799,10 @@ const seedQueryCache = (
     queryClient.setQueryData(harnessesQuery(client).queryKey, fleet.harnesses);
     queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
     queryClient.setQueryData(liveRunsQuery(client, "running").queryKey, fleet.runningRuns);
+    // Running here names each run by its own read of the workflow's name.
+    for (const run of fleet.runningRuns) {
+      queryClient.setQueryData(runWorkflowNameQuery(client, run.id).queryKey, run.workflowName);
+    }
     queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
     const { fiveMinutesByRunner, hoursByRunner, fleetHours } = fleet.metrics;
     queryClient.setQueryData(queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE), fleetHours);

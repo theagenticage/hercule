@@ -108,7 +108,7 @@ export function MachineCard({
         </Gauge>
       </div>
       <div className="fleet-card-crew">
-        {faces !== undefined && <MachineFacesStack faces={faces} size={20} />}
+        {faces !== undefined && <MachineFacesStack faces={faces} size={20} unit="group" />}
         {machine.roomText !== null && <span className="fleet-room">{machine.roomText}</span>}
       </div>
       <div className="fleet-card-foot">

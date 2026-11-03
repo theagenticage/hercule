@@ -15,13 +15,12 @@ import {
   controllerQuery,
   fleetSessionsQuery,
   harnessesQuery,
-  liveRunsQuery,
   machineRecentActivityQuery,
   providerAccountsQuery,
   providersQuery,
   readOnOpen,
   runnersQuery,
-  runQuery,
+  runWorkflowNameQuery,
   settingsQuery,
 } from "../../../../app/queries";
 import { AddMachineDialog } from "../../../../screens/fleet/add-machine-dialog";
@@ -65,10 +64,10 @@ const SECTIONS = [
  * of the last 24 hours and hour points of the last 14 days, for its graphs.
  * They are read only for a machine that exists, and a cached read is used as
  * it is: a `runnerMetrics` push brings them up to date (see
- * `useRunnerMetricsLive`). The runs that have a session on the machine are
- * named by the running runs' list, or by their own record when they are not
- * running. When no runner has the id, or the runner is retired, the route
- * shows `RunnerNotFound`: retired machines are not shown anywhere on Fleet.
+ * `useRunnerMetricsLive`). The workflow name of each run that has a session
+ * on the machine is read once (`runWorkflowNameQuery`). When no runner has
+ * the id, or the runner is retired, the route shows `RunnerNotFound`: retired
+ * machines are not shown anywhere on Fleet.
  */
 export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
   staticData: { title: "Fleet" },
@@ -89,15 +88,13 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
       queryClient.ensureQueryData(harnessesQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
       queryClient.ensureQueryData(providerAccountsQuery(client)),
-      Promise.all([
-        queryClient.fetchQuery(fleetSessionsQuery(client)),
-        queryClient.ensureQueryData(liveRunsQuery(client, "running")),
-      ]).then(([sessions, runningRuns]) =>
-        // A failed read of one run leaves its group named by its session's title.
+      queryClient.fetchQuery(fleetSessionsQuery(client)).then((sessions) =>
+        // `prefetchQuery` never fails: a failed read of one run's name leaves its group named
+        // by its session's title.
         Promise.all(
-          listMachineRunIds(sessions, runnerId)
-            .filter((runId) => !runningRuns.some((run) => run.id === runId))
-            .map((runId) => queryClient.prefetchQuery(runQuery(client, runId))),
+          listMachineRunIds(sessions, runnerId).map((runId) =>
+            queryClient.prefetchQuery(runWorkflowNameQuery(client, runId)),
+          ),
         ),
       ),
       readOnOpen(queryClient, controllerQuery(client)),

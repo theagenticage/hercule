@@ -5,8 +5,9 @@
  * Settings rows with their saves, refusals and Retire.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { queryKeys } from "@hercule/client-core";
 import { HARNESSES } from "@hercule/client-core/testing";
 import type {
   Assistant,
@@ -17,17 +18,21 @@ import type {
   Runner,
   Session,
 } from "@hercule/contract";
+import { runWorkflowNameQuery } from "../../../../app/queries";
 import {
   buildErrorBody,
   buildFixtureAssistant,
   buildFixtureAssistantSession,
   buildSidebarHandlers,
+  changeTextSize,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_ACCOUNT,
+  FIXTURE_THREAD_IDS,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
+  stubElementSize,
   stubIntersectionObserver,
   type Call,
   type Handler,
@@ -381,11 +386,12 @@ describe("the Running here section", () => {
     activeStepIds: ["review"],
     awaitedSignalIds: [],
   };
-  const ENDED_RUN: Run = {
-    id: ENDED_RUN_ID,
+  /** A run as `run.read` returns it. Only its plan's name matters here. */
+  const buildRunRecord = (id: string, name: string): Run => ({
+    id,
     workflowId: "01a06d02-7800-7000-8000-000000000001",
     plan: {
-      name: "Old cleanup",
+      name,
       inputs: [],
       triggers: [],
       steps: [{ id: "clean", kind: "action", action: "github/pr.create" }],
@@ -401,14 +407,21 @@ describe("the Running here section", () => {
     finishedAt: "2026-11-02T13:30:00.000Z",
     steps: [],
     edgeTraversals: [],
-  };
+  });
 
   const WORLD = {
     extraSessions: [STEP, ENDED_STEP, ADA_SESSION, QUEUED],
     runs: [LIVE_RUN],
     assistants: [ADA],
-    overrides: { [`GET /api/v1/runs/${ENDED_RUN_ID}`]: { body: ENDED_RUN } },
+    overrides: {
+      [`GET /api/v1/runs/${LIVE_RUN_ID}`]: { body: buildRunRecord(LIVE_RUN_ID, "Nightly review") },
+      [`GET /api/v1/runs/${ENDED_RUN_ID}`]: { body: buildRunRecord(ENDED_RUN_ID, "Old cleanup") },
+    },
   } as const;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   const getWork = () => screen.getByRole("region", { name: "Running here" });
   /** Returns the text of each row or item the section lists, in order. */
@@ -429,15 +442,72 @@ describe("the Running here section", () => {
     );
     expect(readItems()).toEqual([
       "Port the importerThread · 1 waits for a slotsince 13:48",
-      "Sketch the pricing pageThreads · 1 idlesince 10 Sep 09:00",
-      "Bump the Bun pinThreads · 1 idlesince 10 Sep 09:00",
+      "Sketch the pricing pageThread · 1 idlesince 10 Sep 09:00",
+      "Bump the Bun pinThread · 1 idlesince 10 Sep 09:00",
       "Fix flaky webhook testsThreads · Write the retry runbook · 1 working · 1 waits for yousince 10 Sep 09:00",
       "AdaAssistant · 1 workingsince 13:48",
       "Nightly reviewWorkflow run · review · 1 workingsince 13:48",
       "Old cleanupWorkflow run · review · 1 workingsince 13:48",
     ]);
-    // The run that ended is named by its own record, which the loader read once.
+    // Each run is named by its own record, which the loader read once.
+    expect(readCalls(calls, "GET", `/api/v1/runs/${LIVE_RUN_ID}`)).toHaveLength(1);
     expect(readCalls(calls, "GET", `/api/v1/runs/${ENDED_RUN_ID}`)).toHaveLength(1);
+  });
+
+  it("reads a run's name once: a run push marks the run lists out of date but not the names, and renames nothing", async () => {
+    const { calls, live, context } = await openMachine(WORLD);
+    const { client } = context.controller!;
+    const runList = queryKeys.runs({ status: "running" });
+    context.queryClient.setQueryData(runList, []);
+
+    // The shell subscribes to the run topic once the connection is up, so the push waits for it.
+    await waitFor(() => {
+      act(() => live.pushInvalidation("run", [LIVE_RUN_ID, ENDED_RUN_ID]));
+    });
+
+    // The push reached the run lists, so it would have reached the names if they sat under them.
+    expect(context.queryClient.getQueryState(runList)?.isInvalidated).toBe(true);
+    for (const runId of [LIVE_RUN_ID, ENDED_RUN_ID]) {
+      const { queryKey } = runWorkflowNameQuery(client, runId);
+      expect(context.queryClient.getQueryState(queryKey)?.isInvalidated).toBe(false);
+      expect(readCalls(calls, "GET", `/api/v1/runs/${runId}`)).toHaveLength(1);
+    }
+    expect(readItems()).toContain("Nightly reviewWorkflow run · review · 1 workingsince 13:48");
+    expect(readItems()).toContain("Old cleanupWorkflow run · review · 1 workingsince 13:48");
+  });
+
+  it("names a run by its session's title when the read of its name fails, and still draws the page", async () => {
+    await openMachine({
+      ...WORLD,
+      overrides: {
+        ...WORLD.overrides,
+        [`GET /api/v1/runs/${ENDED_RUN_ID}`]: {
+          status: 500,
+          body: buildErrorBody("internal", "the controller failed"),
+        },
+      },
+    });
+
+    expect(readItems()).toEqual([
+      expect.stringContaining("Port the importer"),
+      expect.stringContaining("Sketch the pricing page"),
+      expect.stringContaining("Bump the Bun pin"),
+      expect.stringContaining("Fix flaky webhook tests"),
+      expect.stringContaining("Ada"),
+      "Nightly reviewWorkflow run · review · 1 workingsince 13:48",
+      "Review the main branchWorkflow run · review · 1 workingsince 13:48",
+    ]);
+  });
+
+  it("draws at most 12 faces in a row, then how many more, in a label a screen reader hears", async () => {
+    const steps = Array.from({ length: 14 }, (_, index) =>
+      buildStep(`01a06d02-b400-7000-8000-${String(index).padStart(12, "0")}`, LIVE_RUN_ID),
+    );
+    await openMachine({ ...WORLD, extraSessions: [...WORLD.extraSessions, ...steps] });
+
+    const faces = within(getWork()).getByRole("img", { name: "15 sessions at work here" });
+    expect(faces.querySelectorAll("svg")).toHaveLength(12);
+    expect(faces.textContent).toBe("+3");
   });
 
   it("lists the sessions in the Sessions view, those that wait for a slot first, and goes back to Work", async () => {
@@ -447,13 +517,13 @@ describe("the Running here section", () => {
 
     expect(readItems()).toEqual([
       "Port the importerWaits for a slot12m",
+      "Sketch the pricing pageIdle7w",
+      "Bump the Bun pinIdle7w",
       "Fix flaky webhook testsWorking7w",
       "Write the retry runbookWaits for you7w",
-      "Bump the Bun pinIdle7w",
-      "Sketch the pricing pageIdle7w",
-      "Review the main branchWorking12m",
-      "Review the main branchWorking12m",
       "AdaWorking12m",
+      "Review the main branchWorking12m",
+      "Review the main branchWorking12m",
     ]);
     expect(
       within(getWork()).getByRole("button", { name: "Sessions" }).getAttribute("aria-pressed"),
@@ -473,6 +543,8 @@ describe("the Running here section", () => {
         title: `Thread ${String(index)}`,
       }),
     );
+    // A list that measures 2000px tall mounts every row of these lists.
+    stubElementSize(900, 2000);
     await openMachine({ extraSessions: threads });
 
     expect(readItems()).toHaveLength(10);
@@ -525,6 +597,119 @@ describe("the Running here section", () => {
     );
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/assistants/${ADA.id}`);
+    });
+  });
+
+  it("opens the lead's Thread from a row of several sessions, and a Thread from a session of the Sessions view", async () => {
+    const { router } = await openMachine(WORLD);
+
+    await userEvent.click(
+      within(getWork()).getByRole("link", { name: /^Fix flaky webhook tests/ }),
+    );
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
+    });
+    await router.navigate({ to: "/fleet/$runnerId", params: { runnerId: ATLAS.id } });
+
+    const work = await screen.findByRole("region", { name: "Running here" });
+    await userEvent.click(within(work).getByRole("button", { name: "Sessions" }));
+    await userEvent.click(within(work).getByRole("link", { name: /^Bump the Bun pin/ }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.bunPin}`);
+    });
+  });
+
+  describe("after Show all", () => {
+    /** Sixty Threads, each in a group of its own, and the fixture's three groups. */
+    const buildThreads = () =>
+      Array.from({ length: 60 }, (_, index) =>
+        buildExtra(`01a06d02-b300-7000-8000-${String(index).padStart(12, "0")}`, {
+          kind: "thread",
+          title: `Thread ${String(index)}`,
+        }),
+      );
+
+    it("mounts only the rows near the visible part and reaches the others by scrolling, from the top again after Show fewer", async () => {
+      // The list measures itself: 400px tall shows seven 54px rows.
+      stubElementSize(900, 400);
+      await openMachine({ extraSessions: buildThreads() });
+      await userEvent.click(within(getWork()).getByRole("button", { name: "Show all 63" }));
+
+      const list = within(getWork()).getByRole("navigation", { name: "All the work running here" });
+      const mounted = within(list).getAllByRole("link");
+      expect(mounted.length).toBeGreaterThan(5);
+      expect(mounted.length).toBeLessThan(30);
+      expect(within(list).queryByRole("link", { name: /^Thread 59/ })).toBeNull();
+
+      act(() => {
+        list.scrollTop = 63 * 54;
+        fireEvent.scroll(list);
+      });
+      expect(await within(list).findByRole("link", { name: /^Thread 59/ })).toBeTruthy();
+      expect(within(list).queryByRole("link", { name: /^Thread 0\b/ })).toBeNull();
+
+      await userEvent.click(within(getWork()).getByRole("button", { name: "Show fewer" }));
+      expect(within(getWork()).queryByRole("navigation")).toBeNull();
+      await userEvent.click(within(getWork()).getByRole("button", { name: "Show all 63" }));
+      const again = within(getWork()).getByRole("navigation", {
+        name: "All the work running here",
+      });
+      expect(again.scrollTop).toBe(0);
+    });
+
+    it("lists the sessions in one column the same way, and each view starts at the top", async () => {
+      stubElementSize(900, 400);
+      await openMachine({ extraSessions: buildThreads() });
+      await userEvent.click(within(getWork()).getByRole("button", { name: "Sessions" }));
+      await userEvent.click(within(getWork()).getByRole("button", { name: "Show all 64" }));
+
+      const list = within(getWork()).getByRole("navigation", {
+        name: "All the sessions running here",
+      });
+      expect(within(list).getAllByRole("link").length).toBeLessThan(30);
+      act(() => {
+        list.scrollTop = 64 * 46;
+        fireEvent.scroll(list);
+      });
+      expect(await within(list).findByRole("link", { name: /^Thread 59/ })).toBeTruthy();
+
+      await userEvent.click(within(getWork()).getByRole("button", { name: "Work" }));
+      expect(
+        within(getWork()).queryByRole("navigation", { name: "All the sessions running here" }),
+      ).toBeNull();
+    });
+
+    it("places the rows by heights that follow the Text size", async () => {
+      stubElementSize(900, 400);
+      await openMachine({ extraSessions: buildThreads() });
+      await userEvent.click(within(getWork()).getByRole("button", { name: "Show all 63" }));
+      const list = within(getWork()).getByRole("navigation", { name: "All the work running here" });
+      const items = list.querySelector<HTMLElement>(".virtual-list-items")!;
+      expect(items.style.height).toBe(`${String(63 * 54)}px`);
+
+      await changeTextSize(3, { "--fleet-running-height-work": "58px" });
+
+      await waitFor(() => {
+        expect(items.style.height).toBe(`${String(63 * 58)}px`);
+      });
+    });
+
+    it("keeps keyboard focus in the list: Tab reaches a row, and the row stays focused", async () => {
+      stubElementSize(900, 400);
+      await openMachine({ extraSessions: buildThreads() });
+      await userEvent.click(within(getWork()).getByRole("button", { name: "Show all 63" }));
+      const list = within(getWork()).getByRole("navigation", { name: "All the work running here" });
+
+      const first = within(list).getAllByRole("link")[0]!;
+      first.focus();
+      expect(document.activeElement).toBe(first);
+      act(() => {
+        list.scrollTop = 63 * 54;
+        fireEvent.scroll(list);
+      });
+      // The focused row stays mounted though it is far above the visible part.
+      expect(document.activeElement).toBe(first);
+      expect(list.contains(first)).toBe(true);
     });
   });
 });
