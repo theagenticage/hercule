@@ -339,6 +339,14 @@ interface ArrivedStart {
    * hold, this is a no-op.
    */
   releaseGithubToken: () => void;
+  /**
+   * Whether the start told the workspace session observer that a session is
+   * about to work in the workspace. The start tells it before resolving the
+   * context, because that is the first step that writes to the workspace. The
+   * start owns the report until the session's entry exists, and ends it when
+   * the start ends before that. Once the entry owns it, this is false.
+   */
+  workspaceStartReported: boolean;
 }
 
 /**
@@ -1486,6 +1494,21 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
             buildCrashedStartFromText,
           );
         }
+        // Resolving the context switches the branch and writes the root
+        // boundary, so the workspace must be marked as used before it, or a
+        // crash in between would leave changed files under a clean mark.
+        if (frame.spec.workspaceId !== null && workspaceSessions !== undefined) {
+          const observer = workspaceSessions;
+          const workspaceId = frame.spec.workspaceId;
+          yield* Effect.uninterruptible(
+            Effect.andThen(
+              observer.sessionStarted(workspaceId),
+              Effect.sync(() => {
+                arrived.workspaceStartReported = true;
+              }),
+            ),
+          );
+        }
         const resolved = yield* Effect.mapError(
           resolveSessionContext(frame, connection.machine, adapter.binaryName, githubToken),
           buildCrashedStartFromText,
@@ -1636,7 +1659,9 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
           // entry ends releases it.
           releaseGithubToken: arrived.releaseGithubToken,
           step: undefined,
-          workspaceStartReported: false,
+          // The report was made while the start was prepared. The entry owns
+          // its end from here on.
+          workspaceStartReported: arrived.workspaceStartReported,
         };
         // In the same step, with no yield between, so a stop finds either the
         // arrived start or this entry, and is never lost between the two.
@@ -1648,6 +1673,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
         arrived.directories = undefined;
         arrived.sessionSkillsFolder = undefined;
         arrived.releaseGithubToken = () => undefined;
+        arrived.workspaceStartReported = false;
         // Check `stopped` again. A shutdown that began after `prepareStart`
         // checked it would not see this session, because `listSessions` and
         // `resolveSessionContext` both yield to other fibers before this
@@ -1674,12 +1700,6 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
             error: buildInputStopped(),
             exitReason: "stopped",
           });
-        }
-        // Tell the observer before the harness exists, so the workspace is
-        // marked as used before the session can write a file in it.
-        if (frame.spec.workspaceId !== null && workspaceSessions !== undefined) {
-          held.workspaceStartReported = true;
-          yield* workspaceSessions.sessionStarted(frame.spec.workspaceId);
         }
         // Start the absolute timer here, not on `session.started`: the
         // runner itself promises to end the session at the deadline,
@@ -1869,6 +1889,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
           librarySkills: frame.skills ?? [],
           sessionSkillsFolder: undefined,
           releaseGithubToken: () => undefined,
+          workspaceStartReported: false,
         };
         // Added now, not when the work begins, so a stop that arrives while
         // the start waits behind earlier frames of the session finds it.
@@ -1912,6 +1933,12 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
               yield* removeSessionDirectories(arrived.directories);
               yield* removeSessionSkillsFolder(arrived.sessionSkillsFolder);
               arrived.releaseGithubToken();
+              // A start that ended before the session's entry existed still
+              // owes the observer the end of its report.
+              if (arrived.workspaceStartReported && frame.spec.workspaceId !== null) {
+                arrived.workspaceStartReported = false;
+                yield* workspaceSessions?.sessionEnded(frame.spec.workspaceId) ?? Effect.void;
+              }
               yield* Deferred.succeed(arrived.harnessReady, undefined);
               arrivedStarts.delete(arrived);
             }),

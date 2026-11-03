@@ -20,6 +20,17 @@
  * storage directory, so a restart keeps them and the first report after a
  * restart carries real numbers. The file is only a cache of measurements: a
  * missing or invalid file makes every workspace dirty.
+ *
+ * Two kinds of change are saved differently, because the file holds every
+ * workspace and rewriting it is costly:
+ *
+ * - A counter change (a session starts or exits, a workspace appears or is
+ *   removed) is saved at once. A start must be on disk before the session can
+ *   write a file, or a crash would leave the new files unmeasured.
+ * - A measurement result is saved at most once every `REPORT_INTERVAL`, and
+ *   once more when the daemon's scope closes at a clean stop. A crash can lose
+ *   a result that was not saved yet. That costs one more walk of the
+ *   workspace after the restart and nothing else, so it is safe.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -87,6 +98,8 @@ const StoredState = Schema.Struct({
 
 const decodeState = Schema.decodeUnknownResult(StoredState);
 
+export type SavedState = Schema.Schema.Type<typeof StoredState>;
+
 /** A workspace's mutable record while the daemon runs. */
 type WorkspaceRecord = { -readonly [K in keyof StoredWorkspace]: StoredWorkspace[K] };
 
@@ -133,6 +146,11 @@ export interface DiskMeasurementsOptions {
    */
   readonly registry: Pick<Registry, "all" | "held">;
   readonly measureFolder: MeasureFolder;
+  /**
+   * Writes the saved state. Defaults to an atomic write of `disk-usage.json`
+   * in the storage directory; tests pass one that fails.
+   */
+  readonly writeState?: (storageDir: string, state: SavedState) => void;
 }
 
 const buildStatePath = (storageDir: string): string => joinPath(storageDir, "disk-usage.json");
@@ -172,9 +190,7 @@ const startingRecord = (root: string): WorkspaceRecord => ({
  * invalid file is logged and also gives an empty state, because the file only
  * caches what a new walk finds again.
  */
-const readSavedState = (
-  storageDir: string,
-): Effect.Effect<Schema.Schema.Type<typeof StoredState> | undefined> =>
+const readSavedState = (storageDir: string): Effect.Effect<SavedState | undefined> =>
   Effect.suspend(() => {
     let content: string;
     try {
@@ -204,10 +220,7 @@ const readSavedState = (
   });
 
 /** Writes the state to a temporary file and renames it over the saved one, so a crash never leaves half a file. */
-const writeSavedState = (
-  storageDir: string,
-  state: Schema.Schema.Type<typeof StoredState>,
-): void => {
+const writeSavedState = (storageDir: string, state: SavedState): void => {
   const path = buildStatePath(storageDir);
   mkdirSync(storageDir, { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -230,7 +243,8 @@ export const makeDiskMeasurements = (
   options: DiskMeasurementsOptions,
 ): Effect.Effect<DiskMeasurements, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const { storageDir, registry, measureFolder } = options;
+    const { storageDir, registry, measureFolder, writeState = writeSavedState } = options;
+    const scope = yield* Effect.scope;
     const saved = yield* readSavedState(storageDir);
     const records = new Map<string, WorkspaceRecord>(
       Object.entries(saved?.workspaces ?? {}).map(([id, record]) => [id, { ...record }]),
@@ -245,21 +259,65 @@ export const makeDiskMeasurements = (
     // Set once the repository caches and Harness Homes have been measured in this process.
     let sharedMeasuredAt: number | undefined;
 
+    // Whether a measurement result is in memory but not in the file yet.
+    let resultsUnsaved = false;
+    // Whether a fiber is waiting to save those results.
+    let saveScheduled = false;
+
+    /**
+     * Writes the whole state to the file, results included.
+     *
+     * When the write fails, the older file on disk may hold a generation that
+     * is now behind the workspaces, and a restart after a crash would trust
+     * it. So the file is deleted, which works even on a full disk, and the
+     * next start measures every workspace. The state in memory stays marked as
+     * unsaved, and the next write tries again.
+     */
     const persist: Effect.Effect<void> = Effect.suspend(() => {
+      resultsUnsaved = false;
       try {
-        writeSavedState(storageDir, {
+        writeState(storageDir, {
           version: 1,
           workspaces: Object.fromEntries(records),
           runner,
         });
         return Effect.void;
       } catch (error) {
+        resultsUnsaved = true;
+        try {
+          rmSync(buildStatePath(storageDir), { force: true });
+        } catch (removal) {
+          return Effect.logWarning(
+            "The runner could not save its disk usage, and could not delete the older saved file either. " +
+              "If the runner stops without a clean exit, it may trust numbers that are out of date.",
+            { writeError: error, deleteError: removal },
+          );
+        }
         return Effect.logWarning(
-          "The runner could not save its disk usage, so a restart may measure again",
+          "The runner could not save its disk usage. It deleted the older saved file, so the next start measures every workspace again.",
           error,
         );
       }
     });
+
+    /** Saves the measurement results once `REPORT_INTERVAL` has passed, unless a counter change saved them sooner. */
+    const saveResultsSoon: Effect.Effect<void> = Effect.suspend(() => {
+      resultsUnsaved = true;
+      if (saveScheduled) return Effect.void;
+      saveScheduled = true;
+      return Effect.forkIn(
+        Effect.andThen(
+          Effect.sleep(REPORT_INTERVAL),
+          Effect.suspend(() => {
+            saveScheduled = false;
+            return resultsUnsaved ? persist : Effect.void;
+          }),
+        ),
+        scope,
+      ).pipe(Effect.asVoid);
+    });
+
+    yield* Effect.addFinalizer(() => (resultsUnsaved ? persist : Effect.void));
 
     const readRegistered = (workspaceId: string): Effect.Effect<RegisteredWorkspace | undefined> =>
       registry.held(workspaceId).pipe(Effect.catch(() => Effect.succeed(undefined)));
@@ -336,7 +394,7 @@ export const makeDiskMeasurements = (
         } else {
           record.error = shortenError(outcome.failure.message);
         }
-        yield* persist;
+        yield* saveResultsSoon;
         yield* signalReportChanged;
       });
 
@@ -365,7 +423,7 @@ export const makeDiskMeasurements = (
         harnessHomeBytes: outcome.success[1],
         measuredAt: new Date().toISOString(),
       };
-      yield* persist;
+      yield* saveResultsSoon;
       yield* signalReportChanged;
     });
 

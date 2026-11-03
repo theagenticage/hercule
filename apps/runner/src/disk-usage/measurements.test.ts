@@ -4,19 +4,46 @@
  * in this process, wrapped to count and to hold walks back; the one test about
  * a deadline runs a real child process.
  */
-import { mkdirSync, mkdtempSync, linkSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Duration, Effect, Exit, Scope } from "effect";
-import type { DiskUsageReport, RunnerDiskUsageReport } from "@hercule/protocol";
+import { TestClock } from "effect/testing";
+import {
+  MAX_MEASURED_WORKSPACES,
+  type DiskUsageReport,
+  type RunnerDiskUsageReport,
+} from "@hercule/protocol";
 import { makeRegistry, type RegisteredWorkspace } from "../workspaces/registry";
 import { makeFolderMeasurer, MeasuringFailed, type MeasureFolder } from "./folder-measurer";
-import { makeDiskMeasurements, type DiskMeasurements } from "./measurements";
+import {
+  makeDiskMeasurements,
+  type DiskMeasurements,
+  type DiskMeasurementsOptions,
+} from "./measurements";
 import { walkFolder } from "./walker";
 
 const folders: string[] = [];
 const scopes: Scope.Closeable[] = [];
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Waits in real time, which a `TestClock` does not move, until `ready` holds. */
+const waitUntil = async (ready: () => boolean | Promise<boolean>): Promise<void> => {
+  const deadline = Date.now() + 10_000;
+  while (!(await ready()) && Date.now() < deadline) await delay(10);
+  expect(await ready()).toBe(true);
+};
 
 afterEach(async () => {
   for (const scope of scopes.splice(0)) await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -48,15 +75,29 @@ const makeRunner = () => {
         new MeasuringFailed({ message: error instanceof Error ? error.message : String(error) }),
     });
 
-  const start = async (measure: MeasureFolder = measureFolder): Promise<DiskMeasurements> => {
+  const daemonScopes = new Map<DiskMeasurements, Scope.Closeable>();
+
+  const start = async (
+    measure: MeasureFolder = measureFolder,
+    writeState?: DiskMeasurementsOptions["writeState"],
+  ): Promise<DiskMeasurements> => {
     const scope = Scope.makeUnsafe();
     scopes.push(scope);
-    return Effect.runPromise(
-      makeDiskMeasurements({ storageDir, registry, measureFolder: measure }).pipe(
-        Scope.provide(scope),
-      ),
+    const measurements = await Effect.runPromise(
+      makeDiskMeasurements({
+        storageDir,
+        registry,
+        measureFolder: measure,
+        ...(writeState === undefined ? {} : { writeState }),
+      }).pipe(Scope.provide(scope)),
     );
+    daemonScopes.set(measurements, scope);
+    return measurements;
   };
+
+  /** Stops a daemon cleanly, as the runner does when it is told to stop. */
+  const stop = (measurements: DiskMeasurements): Promise<void> =>
+    Effect.runPromise(Scope.close(daemonScopes.get(measurements)!, Exit.void));
 
   /** Registers a ready workspace with a few files, and returns its folder. */
   const addWorkspace = async (
@@ -110,8 +151,11 @@ const makeRunner = () => {
 
   return {
     storageDir,
+    registry,
+    measureFolder,
     walked,
     start,
+    stop,
     addWorkspace,
     addRepositoryCache,
     countWalks,
@@ -206,8 +250,9 @@ describe("disk measurements", () => {
     const before = await waitForReport(first, isMeasured("ws-a"));
     await runner.waitForWalks(cache, 1);
 
-    // A second daemon over the same storage, as after a restart. Its first
+    // A second daemon over the same storage, after a clean stop. Its first
     // pass ends with the walk of the repository cache.
+    await runner.stop(first);
     const second = await runner.start();
     await runner.waitForWalks(cache, 2);
 
@@ -230,6 +275,30 @@ describe("disk measurements", () => {
     );
 
     expect(entryOf(found, "ws-crashed")!.diskUsage!.sizeBytes).toBeGreaterThanOrEqual(340_000);
+  });
+
+  it("deletes its saved file when it cannot write it, so the next start measures everything", async () => {
+    const runner = makeRunner();
+    const root = await runner.addWorkspace("ws-unsaved");
+    const cache = runner.addRepositoryCache();
+    const first = await runner.start();
+    await waitForReport(first, isMeasured("ws-unsaved"));
+    await runner.stop(first);
+    expect(existsSync(join(runner.storageDir, "disk-usage.json"))).toBe(true);
+
+    // The file now says the workspace is clean. A session starts in it, and
+    // the disk refuses the write that would record that.
+    const failing = await runner.start(undefined, () => {
+      throw new Error("No space left on device");
+    });
+    await Effect.runPromise(failing.sessionStarted("ws-unsaved"));
+    expect(existsSync(join(runner.storageDir, "disk-usage.json"))).toBe(false);
+
+    // A restart (a crash, as nothing stopped the failing daemon cleanly)
+    // trusts no file and measures the workspace again.
+    await runner.start();
+    await runner.waitForWalks(root, 2);
+    await runner.waitForWalks(cache, 3);
   });
 
   it("waits to measure a workspace while a session works in it", async () => {
@@ -266,6 +335,7 @@ describe("disk measurements", () => {
     await waitForReport(first, isMeasured("ws-raced"));
     await runner.waitForWalks(cache, 1);
     expect(runner.countWalks(root)).toBe(1);
+    await runner.stop(first);
     await runner.start();
 
     await runner.waitForWalks(root, 2);
@@ -286,6 +356,7 @@ describe("disk measurements", () => {
     await waitForReport(measurements, isMeasured("ws-after"));
 
     expect(entryOf(await report(measurements), "ws-removed")).toBeUndefined();
+    await runner.stop(measurements);
     const restarted = await runner.start();
     expect(entryOf(await report(restarted), "ws-removed")).toBeUndefined();
   });
@@ -361,25 +432,103 @@ describe("disk measurements", () => {
     });
   });
 
-  it("sends a report as soon as it is asked to report, then stays quiet until something is measured", async () => {
+  it("reports at once, then at most every 10 seconds, with the last change sent when the wait ends", async () => {
     const runner = makeRunner();
     await runner.addWorkspace("ws-reported");
-    const measurements = await runner.start();
-    await waitForReport(measurements, (r) => isMeasured("ws-reported")(r) && r.runner !== null);
-
     const sent: DiskUsageReport[] = [];
-    const scope = Scope.makeUnsafe();
-    scopes.push(scope);
-    Effect.runFork(
-      measurements
-        .reportTo((frame) => Effect.sync(() => void sent.push(frame)))
-        .pipe(Scope.provide(scope)),
-    );
-    const deadline = Date.now() + 5000;
-    while (sent.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!._tag).toBe("diskUsageReport");
-    expect(entryOf(sent[0]!.diskUsage, "ws-reported")?.diskUsage).not.toBeNull();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const measurements = yield* makeDiskMeasurements({
+            storageDir: runner.storageDir,
+            registry: runner.registry,
+            measureFolder: runner.measureFolder,
+          });
+          yield* Effect.forkScoped(
+            measurements.reportTo((frame) => Effect.sync(() => void sent.push(frame))),
+          );
+          yield* Effect.promise(() => waitUntil(() => sent.length === 1));
+          yield* Effect.promise(() =>
+            waitForReport(measurements, (r) => isMeasured("ws-reported")(r) && r.runner !== null),
+          );
+
+          // The measurement is a change, but 10 seconds have not passed.
+          yield* TestClock.adjust(Duration.millis(9_999));
+          yield* Effect.promise(() => delay(30));
+          expect(sent).toHaveLength(1);
+
+          yield* TestClock.adjust(Duration.millis(1));
+          yield* Effect.promise(() => waitUntil(() => sent.length === 2));
+          expect(entryOf(sent[1]!.diskUsage, "ws-reported")?.diskUsage).not.toBeNull();
+
+          // Nothing changed since, so nothing more is sent.
+          yield* TestClock.adjust(Duration.minutes(1));
+          yield* Effect.promise(() => delay(30));
+          expect(sent).toHaveLength(2);
+        }),
+      ).pipe(Effect.provide(TestClock.layer())),
+    );
+  });
+
+  it("saves measurement results once per interval, not once per result", async () => {
+    const runner = makeRunner();
+    await runner.addWorkspace("ws-saved");
+    const readSaved = () =>
+      (
+        JSON.parse(readFileSync(join(runner.storageDir, "disk-usage.json"), "utf8")) as {
+          workspaces: Record<string, { diskUsage: unknown }>;
+        }
+      ).workspaces["ws-saved"]?.diskUsage;
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const measurements = yield* makeDiskMeasurements({
+            storageDir: runner.storageDir,
+            registry: runner.registry,
+            measureFolder: runner.measureFolder,
+          });
+          yield* Effect.promise(() => waitForReport(measurements, isMeasured("ws-saved")));
+          yield* Effect.promise(() => delay(30));
+          expect(readSaved()).toBeNull();
+
+          yield* TestClock.adjust(Duration.seconds(10));
+          yield* Effect.promise(() => waitUntil(() => readSaved() !== null));
+        }),
+      ).pipe(Effect.provide(TestClock.layer())),
+    );
+  });
+
+  it("reports the 2,000 most recently used workspaces and says it left some out", async () => {
+    const runner = makeRunner();
+    const count = MAX_MEASURED_WORKSPACES + 1;
+    const entries = Array.from({ length: count }, (_, at): RegisteredWorkspace => {
+      const root = join(runner.storageDir, "workspaces", `ws-${String(at)}`);
+      mkdirSync(root, { recursive: true });
+      // A workspace the runner meets for the first time is as recently used as its folder changed.
+      utimesSync(root, 1_700_000_000 + at, 1_700_000_000 + at);
+      return {
+        workspaceId: `ws-${String(at)}`,
+        kind: "ephemeral",
+        root,
+        checkouts: [],
+        ownership: "managed",
+      };
+    });
+    await Effect.runPromise(runner.registry.update(() => entries));
+
+    const measurements = await runner.start(() => Effect.succeed({ sizeBytes: 1, freesBytes: 1 }));
+    const found = await waitForReport(
+      measurements,
+      (r) =>
+        r.workspaces.length === MAX_MEASURED_WORKSPACES &&
+        r.workspaces.every((e) => e.diskUsage !== null),
+    );
+
+    expect(found.truncated).toBe(true);
+    expect(entryOf(found, "ws-0")).toBeUndefined();
+    expect(entryOf(found, "ws-1")).toBeDefined();
+    expect(entryOf(found, `ws-${String(count - 1)}`)).toBeDefined();
   });
 });

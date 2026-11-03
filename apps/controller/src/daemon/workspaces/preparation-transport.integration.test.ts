@@ -165,7 +165,7 @@ describe("preparation after a real runner process dies", () => {
           pin, facts, probe: Effect.succeed(facts),
           readDiskAndMemory: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1024 ** 3 }),
           storageDir, scratchDir: storageDir + "/scratch",
-          workspaces, workspaceSteps: makeWorkspaceSteps({ storageDir, workspaces, socketPath, baseEnv: process.env }),
+          workspaces, diskMeasurements: { reportTo: () => Effect.never }, workspaceSteps: makeWorkspaceSteps({ storageDir, workspaces, socketPath, baseEnv: process.env }),
           socketPath, credentials: makeCredentialRelay(), harnessLogins, sessions,
           binDir: storageDir + "/bin", herculeTool: { skill: "# fixture", claudePluginDir: storageDir + "/claude-plugin" }
         });

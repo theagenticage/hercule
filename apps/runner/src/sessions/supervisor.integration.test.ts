@@ -4142,6 +4142,100 @@ describe("an agent step's turn", () => {
   });
 });
 
+describe("the workspace sessions the supervisor reports to the disk measurements", () => {
+  /**
+   * Builds a connection with a primary workspace, and an observer that notes
+   * the branch the workspace is on each time a session starts in it. The
+   * branch shows whether the workspace was marked as used before the start
+   * switched it.
+   */
+  const buildObservedWorkspace = async (fake: Fake) => {
+    const connection = buildConnection(fake);
+    const remote = makeRemote();
+    addBranch(remote, "release");
+    const frame = buildProvisionFrame({
+      kind: "primary",
+      checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+    });
+    expect((await Effect.runPromise(connection.machine.workspaces.provision(frame))).status).toBe(
+      "ready",
+    );
+    const cwd = Effect.runSync(connection.machine.workspaces.resolve(frame.workspaceId))!.cwd;
+    const initialBranch = runGitOrThrow(cwd, "rev-parse", "--abbrev-ref", "HEAD");
+    const calls: Array<string> = [];
+    connection.runner.observeWorkspaceSessions({
+      sessionStarted: () =>
+        Effect.sync(
+          () =>
+            void calls.push(
+              `started on ${runGitOrThrow(cwd, "rev-parse", "--abbrev-ref", "HEAD")}`,
+            ),
+        ),
+      sessionEnded: () => Effect.sync(() => void calls.push("ended")),
+    });
+    return { ...connection, calls, cwd, initialBranch, workspaceId: frame.workspaceId };
+  };
+
+  it("hears of a start before the start switches the branch, and of the exit after it", async () => {
+    const fake = createFake();
+    const { supervisor, calls, cwd, initialBranch, workspaceId } =
+      await buildObservedWorkspace(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          spec: { ...SPEC, workspaceId },
+          checkoutBranch: "release",
+        });
+        yield* waitUntil("started the session", () => fake.contexts.length > 0);
+        expect(runGitOrThrow(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
+        expect(calls).toEqual([`started on ${initialBranch}`]);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("reported the exit", () => calls.length === 2);
+      }),
+    );
+
+    expect(calls).toEqual([`started on ${initialBranch}`, "ended"]);
+  });
+
+  it("hears of the end of a start whose branch cannot be selected", async () => {
+    const fake = createFake();
+    const { supervisor, sent, calls, initialBranch, workspaceId } =
+      await buildObservedWorkspace(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({
+        ...START,
+        spec: { ...SPEC, workspaceId },
+        checkoutBranch: "no-such-branch",
+      }),
+    );
+
+    expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toContain("session.exited");
+    expect(fake.contexts).toEqual([]);
+    expect(calls).toEqual([`started on ${initialBranch}`, "ended"]);
+  });
+
+  it("hears of the end of a start whose harness cannot be started", async () => {
+    const fake = createFake();
+    fake.fails = new AdapterFailed({ message: "could not write the settings file" });
+    const { supervisor, calls, initialBranch, workspaceId } = await buildObservedWorkspace(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+    );
+
+    expect(calls).toEqual([`started on ${initialBranch}`, "ended"]);
+  });
+});
+
 it("reports current checkout facts after start and resume before any turn ends, without repeating setup", async () => {
   const fake = createFake();
   const { supervisor, sent, machine, under } = buildConnection(fake);

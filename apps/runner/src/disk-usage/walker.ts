@@ -39,6 +39,10 @@ const describeFailure = (path: string, error: unknown): Error => {
  *   not give its blocks back while another path still links to them.
  * - Directories count in both numbers.
  *
+ * A directory that a session replaces with a symbolic link during the walk is
+ * not guarded against: sessions run as the same operating system user and the
+ * walk reads only metadata, so nothing crosses a privilege boundary.
+ *
  * A file or directory that disappears during the walk is skipped. Fails when
  * `root` does not exist or anything else cannot be read, because a total that
  * silently left a folder out would be wrong.
