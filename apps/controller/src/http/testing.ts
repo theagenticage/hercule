@@ -58,6 +58,7 @@ import {
   LostRunnerSweepInterval,
   OpenSignalsLayer,
   RunFibers,
+  RunnerMetricsPruneInterval,
   SchedulerInterval,
   AttachmentSweepInterval,
   SkillUpdateCheckInterval,
@@ -119,6 +120,7 @@ import {
 import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
+import { RunnerMetricsServiceLayer } from "../runner-metrics";
 import { SettingsLayer } from "../settings";
 import { AccountUsageLayer } from "../usage";
 import { GithubSkillSources } from "../skills";
@@ -212,6 +214,7 @@ const buildServices = (
         Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: readLocalRunnerId })),
         Layer.provideMerge(HarnessAccountsLayer),
         Layer.provideMerge(RunnerConnectionsLayer),
+        Layer.provideMerge(RunnerMetricsServiceLayer),
         Layer.provideMerge(
           PluginHostLayer.pipe(
             Layer.provide([IngestExecutorLayer, OpenSignalsLayer]),
@@ -495,6 +498,8 @@ export interface ServerOptions {
   readonly workspaceSweepInterval?: Duration.Duration;
   /** The default hour is longer than a test can wait. */
   readonly attachmentSweepInterval?: Duration.Duration;
+  /** The default hour is longer than a test can wait. */
+  readonly runnerMetricsPruneInterval?: Duration.Duration;
   /** The default three hours is longer than a test can wait. */
   readonly skillUpdateCheckInterval?: Duration.Duration;
   /**
@@ -729,6 +734,7 @@ const provideTimings =
     provideIfSet(SessionInputDeadline, options.inputDeadline);
     provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
     provideIfSet(AttachmentSweepInterval, options.attachmentSweepInterval);
+    provideIfSet(RunnerMetricsPruneInterval, options.runnerMetricsPruneInterval);
     provideIfSet(SkillUpdateCheckInterval, options.skillUpdateCheckInterval);
     provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);

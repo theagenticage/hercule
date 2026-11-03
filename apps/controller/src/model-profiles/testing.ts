@@ -29,6 +29,7 @@ import {
   type AccountServices,
 } from "../provider-accounts/testing";
 import { RunnerConnectionsLayer } from "../runners";
+import { RunnerMetricsServiceLayer } from "../runner-metrics";
 import { SettingsLayer } from "../settings";
 import { AccountUsageLayer } from "../usage";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -48,9 +49,10 @@ const buildStack = (providerApi: HttpClient.HttpClient) =>
     Layer.provideMerge(ModelCatalogsLayer),
     Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(HarnessAccountsLayer),
-    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(RunnerConnectionsLayer),
+    Layer.provideMerge(RunnerMetricsServiceLayer),
+    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(ModelProfileMembershipLayer),
     Layer.provideMerge(buildPluginStack()),

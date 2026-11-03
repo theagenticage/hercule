@@ -49,9 +49,13 @@ import {
   type Connection,
   type Departure,
 } from "./connections";
+import { RunnerMetricsServiceLayer } from "../runner-metrics";
+import { SettingsLayer } from "../settings";
 import { runnerRepository } from "./repository";
 
 const layer = RunnerConnectionsLayer.pipe(
+  Layer.provideMerge(RunnerMetricsServiceLayer),
+  Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(ServingPromotionStateLayer),
   Layer.provideMerge(AuditLogLayer),
@@ -511,7 +515,7 @@ describe("a draining runner whose socket drops", () => {
 
 describe("a report from a connection the runner has replaced", () => {
   it("is dropped, so the older connection cannot overwrite what the newer one reported", async () => {
-    const row = await Effect.runPromise(
+    const { row, history } = await Effect.runPromise(
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
@@ -537,7 +541,9 @@ describe("a report from a connection the runner has replaced", () => {
         yield* connections.reportedFacts(runner!.id, older, { ...FACTS, docker: false });
         yield* connections.reportedMetrics(runner!.id, older, METRICS);
 
-        return yield* runners.read(runner!.id);
+        const sql = yield* SqlClient.SqlClient;
+        const history = yield* sql<{ minute: number }>`SELECT minute FROM runner_metrics`;
+        return { row: yield* runners.read(runner!.id), history };
       }).pipe(Effect.provide(layer)),
     );
 
@@ -545,6 +551,7 @@ describe("a report from a connection the runner has replaced", () => {
     const one = Option.getOrThrow(row);
     expect(one.facts?.docker, "the newer connection's hello still stands").toBe(true);
     expect(one.metrics, "stale metrics are not a reading of this machine").toBeNull();
+    expect(history, "stale metrics add nothing to the history").toEqual([]);
   });
 });
 
@@ -782,6 +789,8 @@ describe("sendFrameCarryingInput", () => {
  * around a promotion, not the key.
  */
 const promotableLayer = RunnerConnectionsLayer.pipe(
+  Layer.provideMerge(RunnerMetricsServiceLayer),
+  Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(
     PromotionStateLayer.pipe(

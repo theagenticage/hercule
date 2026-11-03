@@ -40,6 +40,7 @@ import {
   runnerRepository,
 } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
+import { RunnerMetricsServiceLayer } from "../runner-metrics";
 import { SettingsLayer } from "../settings";
 import { AccountUsage, AccountUsageLayer } from "../usage";
 import { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
@@ -366,9 +367,10 @@ const buildStack = (
     Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: () => undefined })),
     Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(HarnessAccountsLayer),
-    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(RunnerConnectionsLayer),
+    Layer.provideMerge(RunnerMetricsServiceLayer),
+    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(buildPluginStack()),
   );

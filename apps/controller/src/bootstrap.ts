@@ -97,6 +97,7 @@ import {
   type LocalRunnerOptions,
 } from "./runners";
 import { PluginIntake } from "./intake-settings";
+import { RunnerMetricsService, RunnerMetricsServiceLayer } from "./runner-metrics";
 import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "./model-profiles";
 import type { ModelProfileLookup } from "./projects";
 import {
@@ -270,6 +271,7 @@ export type ControllerServices =
   | IngestLoops
   | ConnectionTypes
   | RunnerConnections
+  | RunnerMetricsService
   | HarnessAccounts
   | ModelCatalogs
   | ModelProfileLookup
@@ -410,6 +412,7 @@ export const bootWith = <A, E>(
       Layer.provideMerge(localRunnerIdLayer),
       Layer.provideMerge(HarnessAccountsLayer),
       Layer.provideMerge(RunnerConnectionsLayer),
+      Layer.provideMerge(RunnerMetricsServiceLayer),
       Layer.provideMerge(catalog),
     );
 

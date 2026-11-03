@@ -89,6 +89,7 @@ import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
+import { RunnerMetricsService } from "../runner-metrics";
 import { announceProviderRunnerChange } from "./announce-provider-change";
 import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
@@ -338,6 +339,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const promotion = yield* PromotionState;
+  const runnerMetrics = yield* RunnerMetricsService;
 
   const reachable = new Map<string, Reachable>();
   // The departures whose write a promotion freeze is holding, by runner id.
@@ -966,14 +968,23 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Stores a runner's Runner Metrics. An audit entry is written only when
-     * the runner starts or stops accepting placements, because that is what
-     * placement acts on.
+     * Stores a runner's Runner Metrics as the runner's latest report, and
+     * adds them to the runner's history of Runner Metrics. An audit entry is
+     * written only when the runner starts or stops accepting placements,
+     * because that is what placement acts on.
+     *
+     * Every routine report writes its history row, and announces the runner
+     * on the `runnerMetrics` live topic once the write commits. It does not
+     * publish on the `runner` topic: a routine report changes no Runner
+     * record that a screen lists, and every client holding a runner read
+     * would read it again once a minute per runner.
      *
      * Skipped while a promotion freezes the controller, and once it is
-     * sealed. The runner reports its metrics every minute, and each report
-     * is compared with the stored one, so the first report after a thaw
-     * records any change the skipped ones carried.
+     * sealed, so a frozen controller writes no history and pushes nothing.
+     * The runner reports its metrics every minute, and each report is
+     * compared with the stored one, so the first report after a thaw
+     * records any change the skipped ones carried. The history keeps a gap
+     * for the minutes that were skipped.
      */
     reportedMetrics: (
       id: string,
@@ -988,6 +999,7 @@ const make = Effect.gen(function* () {
               if (reachable.get(id)?.connection !== connection) return false;
               const at = yield* nowIso;
               const result = yield* runners.recordMetrics(id, metrics, at);
+              yield* runnerMetrics.record(id, metrics, at);
               if (!result.crossed) return false;
               yield* audit.append({
                 kind: "runner.placementsChanged",
@@ -1102,5 +1114,5 @@ export class RunnerConnections extends Context.Service<
 export const RunnerConnectionsLayer: Layer.Layer<
   RunnerConnections,
   never,
-  SqlClient.SqlClient | AuditLog | Notifier | PromotionState
+  SqlClient.SqlClient | AuditLog | Notifier | PromotionState | RunnerMetricsService
 > = Layer.effect(RunnerConnections)(make);

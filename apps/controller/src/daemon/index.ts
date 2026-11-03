@@ -128,6 +128,8 @@ export {
   recordDeparturesAfterThaws,
   Retirement,
   RetirementLayer,
+  RunnerMetricsPruneInterval,
+  runRunnerMetricsPruneLoop,
   sweepUnreachableRunners,
 } from "./runners";
 export {

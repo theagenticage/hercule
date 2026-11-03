@@ -31,7 +31,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Option, Redacted, Stream } from "effect";
+import { Duration, Effect, Fiber, Option, Redacted, Stream } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   FILES_EDITED_CAPABILITY,
@@ -52,7 +52,7 @@ import {
   type RunnerFacts,
   type RunnerHello,
 } from "@hercule/protocol";
-import type { RunnerDetail } from "@hercule/contract";
+import type { LiveMessage, RunnerDetail, RunnerMetricsPoint } from "@hercule/contract";
 import { nowIso, uuidFromString, withTransaction } from "../db";
 import { registry } from "../plugins";
 import { modelCatalogRepository, providerAccountRepository } from "../provider-accounts";
@@ -65,7 +65,19 @@ import {
   sealController,
   QUIET_LOOP_TIMINGS,
 } from "../promotion/testing";
-import { completeSetup, get, send, withServer, type ServerHarness } from "../http/testing";
+import {
+  collectPushes,
+  completeSetup,
+  expectHeld,
+  fetchTicket,
+  get,
+  onSocket,
+  send,
+  waitForLiveToSettle,
+  waitWithin,
+  withServer,
+  type ServerHarness,
+} from "../http/testing";
 // The two default durations are imported from the socket module, so the test
 // checks the values the controller actually uses.
 import { RUNNER_PING_INTERVAL, RUNNER_SILENCE_LIMIT } from "./socket";
@@ -950,6 +962,75 @@ describe("what a runner reports about its machine", () => {
         expect(recorded).toBeDefined();
         expect(recorded!.actor).toBe("system");
         expect(recorded!.payload).toMatchObject({ runnerId: joined.runnerId });
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
+  it("adds each report to the history and nudges the runnerMetrics subscribers, not the runner ones", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+        // The hello and the setup also announce runners. Subscribing after they
+        // settle leaves only what the report causes.
+        await waitForLiveToSettle();
+        const ticket = await fetchTicket(harness.base, token);
+
+        let metricsPushes: ReadonlyArray<LiveMessage> = [];
+        let runnerPushes: ReadonlyArray<LiveMessage> = [];
+        await onSocket(harness.base, (client) =>
+          Effect.gen(function* () {
+            yield* client.hello({ v: 1, ticket });
+            const metrics = yield* collectPushes(client, "runnerMetrics");
+            const runner = yield* collectPushes(client, "runner");
+            yield* Effect.promise(() => expectHeld(harness.live, 1, "runnerMetrics"));
+            yield* Effect.promise(() => expectHeld(harness.live, 1, "runner"));
+
+            wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
+            const arrived = yield* Effect.promise(() =>
+              waitWithin(2000, () => metrics.received.length > 0),
+            );
+            expect(arrived).toBe(true);
+            // Long enough for a push on `runner` to have arrived, had there been one.
+            yield* Effect.promise(waitForLiveToSettle);
+
+            metricsPushes = metrics.received;
+            runnerPushes = runner.received;
+            yield* Fiber.interrupt(metrics.fiber);
+            yield* Fiber.interrupt(runner.fiber);
+          }),
+        );
+
+        expect(metricsPushes).toHaveLength(1);
+        expect((metricsPushes[0] as { ids: ReadonlyArray<string> }).ids).toEqual([joined.runnerId]);
+        expect(runnerPushes, "a routine report is not news about the runner record").toEqual([]);
+
+        const since = new Date(Date.now() - 60 * 60_000).toISOString();
+        const response = await get(
+          harness.base,
+          `/api/v1/runner-metrics?runnerId=${joined.runnerId}&since=${since}&resolution=fiveMinutes`,
+          token,
+        );
+        expect(response.status).toBe(200);
+        const history = (await response.json()) as { items: ReadonlyArray<RunnerMetricsPoint> };
+        expect(history.items).toHaveLength(1);
+        expect(history.items[0]).toMatchObject({
+          runnerId: joined.runnerId,
+          minutes: 1,
+          diskFreeBytes: 200 * GIB,
+          sessionsRunning: 0,
+          sessionsQueued: 0,
+        });
 
         wire.close();
       },
