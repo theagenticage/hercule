@@ -345,6 +345,21 @@ describe("describeMachineActivity folding", () => {
     expect(day?.entries.map((each) => each.count)).toEqual([1, 1, 1, 1, 1, 1]);
   });
 
+  it("does not fold two runs whose ids end the same, though both read as the same label", () => {
+    const sameTailRun = "01990000-0000-7000-8000-11110000bbbb";
+    const [day] = describe_(
+      [
+        spawn("2026-11-03T09:12:05.000Z", { actor: `run:${RUN_ID}` }),
+        spawn("2026-11-03T09:12:30.000Z", { actor: `run:${sameTailRun}` }),
+      ].reverse(),
+    );
+    expect(day?.entries.map((each) => each.count)).toEqual([1, 1]);
+    expect(day?.entries.map((each) => each.actor)).toEqual([
+      { kind: "other", label: "run 0000bbbb" },
+      { kind: "other", label: "run 0000bbbb" },
+    ]);
+  });
+
   it("folds an entry without an actor with one stamped system, as both read as the controller", () => {
     const [day] = describe_(
       [

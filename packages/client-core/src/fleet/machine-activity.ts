@@ -627,7 +627,12 @@ export const describeMachineActivity = (
       ...(reading.sessionId === undefined ? {} : { sessionId: reading.sessionId }),
     };
     const actor = describeEntryActor(event.actor);
-    const foldKey = [event.kind, reading.foldVariant, JSON.stringify(actor), minute].join("\u0000");
+    // Keyed by the full actor, not the displayed one: two runs whose ids end the same
+    // read alike ("run 0000bbbb") but are different actors. A missing actor is the
+    // controller's own act, like "system".
+    const foldKey = [event.kind, reading.foldVariant, event.actor ?? "system", minute].join(
+      "\u0000",
+    );
     const folded = entriesByFold.get(foldKey);
     if (folded !== undefined) {
       folded.members.push(member);

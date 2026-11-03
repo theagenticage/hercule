@@ -1352,7 +1352,6 @@ function persistRunnerAuditEntries(options: {
         runnerId: seeded,
         requestId,
         message: "The runner refused safe removal. The workspace is retained.",
-        runnerMessage: "The runner refused safe removal.",
       }),
       entry(seeded, "workspace.detached", { workspaceId: ws, runnerId: seeded, requestId }),
       entry(seeded, "workspace.attachmentRetried", { workspaceId: ws, runnerId: seeded }),
