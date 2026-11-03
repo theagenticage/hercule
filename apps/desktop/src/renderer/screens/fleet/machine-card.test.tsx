@@ -31,6 +31,7 @@ const renderCard = (
       faces={faces}
       updatesText={updatesText}
       allow={null}
+      cleanUp={<button type="button">Clean up…</button>}
       onOpen={onOpen}
     />,
   );
@@ -139,13 +140,11 @@ describe("MachineCard", () => {
     expect(card.querySelector(".fleet-meter--you")).toBeTruthy();
   });
 
-  it("names the 87% in its need line, with the Clean up button drawn inert", () => {
+  it("names the 87% in its need line, with the Clean up button it is given", () => {
     const card = renderCard(NEARLY_FULL_DISK_MACHINE);
 
     expect(within(card).getByText("Disk 87% full")).toBeTruthy();
-    expect(
-      within(card).getByRole("button", { name: "Clean up…" }).getAttribute("aria-disabled"),
-    ).toBe("true");
+    expect(within(card).getByRole("button", { name: "Clean up…" })).toBeTruthy();
   });
 
   it("draws the faces of the machine's work left of its room, with the count they leave out", () => {

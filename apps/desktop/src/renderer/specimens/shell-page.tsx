@@ -177,6 +177,7 @@ import {
 import { createAppearanceStore } from "../app/appearance";
 import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
+import { CleanupProvider } from "../app/cleanup";
 import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
@@ -207,6 +208,7 @@ import { applySheetAppearance, readSheetAppearance } from "./sheet-page";
 import type { DiscussionsRecords } from "./discussions-fixture";
 import type { RunRecords } from "./run-fixture";
 import type { WikiRecords } from "./wiki-fixture";
+import { createCleanupSession } from "./fleet-cleanup-fixture";
 import type { FleetRecords } from "./fleet-fixture";
 import type { WorkflowsRecords } from "./workflows-fixture";
 
@@ -943,9 +945,11 @@ function ShellLayout(): JSX.Element {
   return (
     <SessionPresentationProvider>
       <DoneMovesProvider client={client}>
-        <Shell onNewThread={() => undefined}>
-          <Outlet />
-        </Shell>
+        <CleanupProvider client={client}>
+          <Shell onNewThread={() => undefined}>
+            <Outlet />
+          </Shell>
+        </CleanupProvider>
       </DoneMovesProvider>
     </SessionPresentationProvider>
   );
@@ -1408,23 +1412,27 @@ async function mountShellSpecimen(
     Promise.resolve(
       new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }),
     );
+  const fetchRecords: FetchLike =
+    created !== undefined
+      ? // The add-account sheet creates an account, and the page then reads the list again.
+        // A model picker reads the account's catalog.
+        (url, init) =>
+          init?.method === "POST" && url.endsWith("/api/v1/provider-accounts")
+            ? answerJson(created)
+            : catalog !== undefined &&
+                (init?.method ?? "GET") === "GET" &&
+                url.endsWith(`/api/v1/provider-accounts/${catalog.providerAccountId}/catalog`)
+              ? answerJson(catalog)
+              : refuseRequest(url, init)
+      : answerMove === undefined
+        ? refuseRequest
+        : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init));
+  const cleanupAnswers = screens.fleet?.cleanupAnswers;
+  const cleanupSession =
+    cleanupAnswers === undefined ? undefined : createCleanupSession(cleanupAnswers);
   const client = createClient({
     baseUrl: CONTROLLER_URL,
-    fetch:
-      created !== undefined
-        ? // The add-account sheet creates an account, and the page then reads the list again.
-          // A model picker reads the account's catalog.
-          (url, init) =>
-            init?.method === "POST" && url.endsWith("/api/v1/provider-accounts")
-              ? answerJson(created)
-              : catalog !== undefined &&
-                  (init?.method ?? "GET") === "GET" &&
-                  url.endsWith(`/api/v1/provider-accounts/${catalog.providerAccountId}/catalog`)
-                ? answerJson(catalog)
-                : refuseRequest(url, init)
-        : answerMove === undefined
-          ? refuseRequest
-          : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
+    fetch: (url, init) => cleanupSession?.answer(url, init) ?? fetchRecords(url, init),
   });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);

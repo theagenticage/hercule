@@ -67,6 +67,7 @@ import { buildAtlasLog, buildJoinedLog } from "./fleet-activity-fixture";
 import { RUN_RECORDS } from "./run-fixture";
 import { ADA, buildAssistantSession } from "./assistant-states-fixture";
 import { SPECIMEN_ACCOUNTS, SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
+import type { CleanupAnswers } from "./fleet-cleanup-fixture";
 import type { SidebarRecords } from "./shell-page";
 
 const GIB = 1024 ** 3;
@@ -791,6 +792,15 @@ export interface FleetRecords {
   readonly activity: Readonly<Record<string, ReadonlyArray<EventWithFacts>>>;
   /** The runs that spawned sessions on a machine, which name the workflow in an entry's sentence. */
   readonly runs: ReadonlyArray<Run>;
+  /** The capabilities each machine negotiated, by runner id, as `runner.read` gives them. */
+  readonly negotiatedCapabilities: Readonly<Record<string, readonly string[] | null>>;
+  /** The Threads that used the idle workspaces, which Storage's "Largest idle workspaces" are named by. */
+  readonly cleanupThreads: ReadonlyArray<Session>;
+  /**
+   * The controller's answers to a cleanup of studio, when the specimen has
+   * idle workspaces to clean up (see fleet-cleanup-fixture.ts).
+   */
+  readonly cleanupAnswers?: CleanupAnswers;
 }
 
 export const FLEET_RECORDS: FleetRecords = {

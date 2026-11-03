@@ -31,6 +31,7 @@ const renderList = (
           machine={machine}
           updatesText={updates[machine.runnerId]}
           allow={null}
+          cleanUp={<button type="button">Clean up…</button>}
           onOpen={onOpen}
         />
       ))}
