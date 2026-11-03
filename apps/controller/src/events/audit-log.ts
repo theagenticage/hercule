@@ -14,7 +14,13 @@
 import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { Actor, InvalidateKind, MutableLiveTopic } from "@hercule/contract";
+import {
+  RUNNER_ACTIVITY_KINDS,
+  type Actor,
+  type InvalidateKind,
+  type MutableLiveTopic,
+  type RunnerActivityKind,
+} from "@hercule/contract";
 import { announce, nowIso } from "../db";
 import { appendPlatformSourceEvent } from "./platform-source-event";
 
@@ -139,47 +145,9 @@ export const AUDIT_KINDS = [
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
-/**
- * The audit kinds a machine's activity shows: the changes to a runner, to a
- * workspace on it and to a session on it. An entry of one of these kinds names
- * its runner in `payload.runnerId`, and the writer copies that id into the
- * event's `runner_id` column, so `event.query` can read one runner's activity
- * as a single index range.
- *
- * Two families are left out on purpose:
- *
- * - `workspace.observed` is written on most observations of a workspace, and
- *   would bury the rest of the activity.
- * - `runner.joinToken.*` concerns a token, not a runner: no runner has joined
- *   yet when a token is minted.
- *
- * Every other audit kind, and every other event, is stored with no runner.
- */
-export const RUNNER_ACTIVITY_KINDS = [
-  "runner.joined",
-  "runner.stateChanged",
-  "runner.updated",
-  "runner.drained",
-  "runner.undrained",
-  "runner.placementsChanged",
-  "runner.crashLooping",
-  "runner.retired",
-  "workspace.created",
-  "workspace.disposalRequested",
-  "workspace.disposalRefused",
-  "workspace.deleted",
-  "workspace.detached",
-  "workspace.attachmentRetried",
-  "session.spawned",
-  "session.stopped",
-  "session.reconciled",
-  "session.archived",
-  "providerAccount.signedIn",
-] as const satisfies ReadonlyArray<AuditKind>;
-
-type RunnerActivityKind = (typeof RUNNER_ACTIVITY_KINDS)[number];
-
-const RUNNER_ACTIVITY_KIND_SET: ReadonlySet<string> = new Set(RUNNER_ACTIVITY_KINDS);
+// Typing the set as `AuditKind` makes the compiler check that every
+// runner-activity kind the contract lists is a kind this build emits.
+const RUNNER_ACTIVITY_KIND_SET: ReadonlySet<AuditKind> = new Set<AuditKind>(RUNNER_ACTIVITY_KINDS);
 
 /**
  * The kind prefixes whose entries are about a credential, a secret or the
@@ -331,11 +299,14 @@ type AuditPayload = Readonly<Record<string, unknown>>;
  * the runner of the actor that caused it.
  *
  * The key is required, so a call site cannot forget it. It is `undefined` only
- * when the entry is about a runner whose id is not known yet: the local
- * runner's crash loop can be reported before the runner has announced its id.
- * Such an entry is stored with no runner.
+ * for `runner.crashLooping`: the local runner's crash loop can be reported
+ * before the runner has announced its id. Such an entry is stored with no
+ * runner. Every other runner-activity kind names a runner that exists.
  */
-type RunnerAuditPayload = AuditPayload & { readonly runnerId: string | undefined };
+type RunnerAuditPayload = AuditPayload & { readonly runnerId: string };
+
+/** The payload of a `runner.crashLooping` entry, whose runner may not be known yet. */
+type CrashLoopAuditPayload = AuditPayload & { readonly runnerId: string | undefined };
 
 /**
  * One audit entry: what happened, who caused it, and what it was about. The
@@ -357,13 +328,17 @@ type RecordPart =
 
 /** The second question: a runner-activity entry must name its runner, any other has any payload. */
 type RunnerPart =
-  | { readonly kind: RunnerActivityKind; readonly payload: RunnerAuditPayload }
+  | {
+      readonly kind: Exclude<RunnerActivityKind, "runner.crashLooping">;
+      readonly payload: RunnerAuditPayload;
+    }
+  | { readonly kind: "runner.crashLooping"; readonly payload: CrashLoopAuditPayload }
   | { readonly kind: Exclude<AuditKind, RunnerActivityKind>; readonly payload: AuditPayload };
 
 /** Returns true if the entry is of a runner-activity kind, so its payload names its runner. */
 const hasRunnerPayload = (
   entry: AuditEntry,
-): entry is Extract<AuditEntry, { readonly payload: RunnerAuditPayload }> =>
+): entry is Extract<AuditEntry, { readonly kind: RunnerActivityKind }> =>
   RUNNER_ACTIVITY_KIND_SET.has(entry.kind);
 
 const make = Effect.gen(function* () {

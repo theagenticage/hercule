@@ -293,7 +293,7 @@ Retention (this document owns the final statement; other documents link here):
 
 ### Events by runner
 
-*(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* `event.query`'s `runnerId` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#event)) reads a nullable `runner_id` column on the event log, indexed with the event's id (`runner_id`, `id`), so a machine's activity is one index range read newest first.
+*(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* `event.query`'s `runnerId` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#event)) reads a nullable `runner_id` column on the event log, indexed with the event's id (`runner_id`, `id`), so a machine's activity is one index range read newest first. *(Amended 2026-11-03, [#988](https://github.com/theagenticage/hercule/issues/988).)* The index is partial (`WHERE runner_id IS NOT NULL`), since most events have no runner.
 
 - **Which entries have it.** Exactly these kinds, the activity a machine shows. The audit writer sets the column when it appends one of them, from the runner the entry is about, and on no other event:
   - `runner.joined`, `runner.stateChanged`, `runner.updated`, `runner.drained`, `runner.undrained`, `runner.placementsChanged`, `runner.crashLooping` and `runner.retired`;
@@ -302,6 +302,8 @@ Retention (this document owns the final statement; other documents link here):
   - `providerAccount.signedIn`, for a sign-in on that runner.
 
   `workspace.observed` is left out: it is written on most observations and would bury the rest. `runner.joinToken.*` concerns no runner yet.
+
+  *(Amended 2026-11-03, [#988](https://github.com/theagenticage/hercule/issues/988).)* The writer reads the column from the entry's `payload.runnerId`. Every entry of these kinds names its runner there: the runner of the session or workspace it records, not the actor's. The writer's entry type refuses one without it at compile time. The one exception is the local runner's crash loop, reported before the runner announced its id: it is stored with no runner.
 - **The migration fills it for the entries already in the log**: from the payload's `runnerId` where it has one, and through the workspace's or the session's runner where the payload names only those. This rewrites existing rows, so it adds a fixture to the upgrade test (AGENTS.md): audit entries of each of those kinds, written by the previous edge build, that read back with their runner after the migration.
 - **No promise of how far back it reaches.** The event log's prune is not built yet ([#101](https://github.com/theagenticage/hercule/issues/101)); a machine's activity shows what the log holds.
 

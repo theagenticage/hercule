@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   MACHINE_ACTIVITY_FILTERS,
+  describeEmptyMachineActivity,
   describeMachineActivity,
+  describeRecentMachineActivity,
   type MachineActivityDay,
   type MachineActivityFilter,
 } from "./machine-activity";
@@ -67,7 +69,7 @@ describe("describeMachineActivity sentences", () => {
       "Joined and became the default machine",
       "connection",
     ],
-    ["runner.stateChanged", { state: "online" }, "Came online", "connection"],
+    ["runner.stateChanged", { state: "online" }, "Back online", "connection"],
     ["runner.stateChanged", { state: "offline" }, "Went offline", "connection", true],
     ["runner.stateChanged", { state: "unreachable" }, "Became unreachable", "connection", true],
     ["runner.stateChanged", { state: "asleep" }, "Changed state to asleep", "connection"],
@@ -168,11 +170,15 @@ describe("describeMachineActivity sentences", () => {
     ],
     [
       "workspace.disposalRefused",
-      {
-        message:
-          "The runner refused safe removal. The workspace is retained. Automatic cleanup will not retry this removal. Inspect it, resolve the refusal, and explicitly retry removal.",
-      },
-      "Could not remove a workspace: The runner refused safe removal",
+      { runnerMessage: "The runner refused safe removal." },
+      "Could not remove a workspace: The runner refused safe removal.",
+      "workspaces",
+      true,
+    ],
+    [
+      "workspace.disposalRefused",
+      { message: "Old entries hold their message only here." },
+      "Could not remove a workspace",
       "workspaces",
       true,
     ],
@@ -277,9 +283,7 @@ describe("describeMachineActivity sentences", () => {
     expect(single(entry("session.spawned", { sessionId: SESSION_ID })).members[0]?.sessionId).toBe(
       SESSION_ID,
     );
-    expect(
-      single(entry("runner.drained", { sessionId: SESSION_ID })).members[0],
-    ).not.toHaveProperty("sessionId");
+    expect(single(entry("runner.drained", { sessionId: SESSION_ID })).members).toEqual([]);
   });
 });
 
@@ -324,7 +328,8 @@ describe("describeMachineActivity folding", () => {
     expect(folded.sentence).toBe("3 sessions spawned");
     expect(folded.key).toBe(String(events[0]!.id));
     expect(folded.members.map((member) => member.eventId)).toEqual(events.map((e) => e.id));
-    expect(folded.members.every((member) => member.line === "Session spawned")).toBe(true);
+    // Every line is the same, so no member repeats it.
+    expect(folded.members.every((member) => member.line === undefined)).toBe(true);
   });
 
   it("does not fold across minutes, actors, wordings or runs", () => {
@@ -337,7 +342,57 @@ describe("describeMachineActivity folding", () => {
       entry("session.archived", { sessionId: SESSION_ID }, "2026-11-03T09:13:40.000Z", "user"),
     ].reverse();
     const [day] = describe_(events);
-    expect(day?.entries.map((each) => each.members.length)).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(day?.entries.map((each) => each.count)).toEqual([1, 1, 1, 1, 1, 1]);
+  });
+
+  it("folds an entry without an actor with one stamped system, as both read as the controller", () => {
+    const [day] = describe_(
+      [
+        entry("session.archived", { sessionId: SESSION_ID }, "2026-11-03T09:12:05.000Z", null),
+        entry("session.archived", { sessionId: SESSION_ID }, "2026-11-03T09:12:30.000Z", "system"),
+      ].reverse(),
+    );
+    expect(day?.entries).toHaveLength(1);
+    expect(day?.entries[0]?.count).toBe(2);
+    expect(day?.entries[0]?.actor).toEqual({ kind: "system" });
+  });
+
+  it("counts the log entries an entry stands for", () => {
+    const [day] = describe_(
+      [1, 2, 3].map((second) => spawn(`2026-11-03T09:12:0${second}.000Z`)).reverse(),
+    );
+    expect(day?.entries[0]?.count).toBe(3);
+    expect(single(spawn("2026-11-03T09:12:01.000Z")).count).toBe(1);
+  });
+
+  it("lists members only when they tell more than the sentence", () => {
+    const deleted = (second: number) =>
+      entry("workspace.deleted", { reason: "none" }, `2026-11-03T09:12:0${second}.000Z`);
+    const refused = (second: number, runnerMessage: string) =>
+      entry("workspace.disposalRefused", { runnerMessage }, `2026-11-03T09:12:0${second}.000Z`);
+
+    // Identical lines and no session: nothing to unfold, folded or not.
+    const [identical] = describe_([deleted(1), deleted(2), deleted(3)].reverse());
+    expect(identical?.entries[0]).toMatchObject({ count: 3, members: [] });
+    expect(single(deleted(1)).members).toEqual([]);
+
+    // Lines that differ: the members say what the sentence does not.
+    const [differing] = describe_([refused(1, "In use."), refused(2, "Dirty.")].reverse());
+    expect(differing?.entries[0]?.members.map((member) => member.line)).toEqual([
+      "Could not remove a workspace: Dirty.",
+      "Could not remove a workspace: In use.",
+    ]);
+
+    // A session: the screen names it beside the line, for one entry and for a fold.
+    // The lines are all the same, so each member is its session alone.
+    const lone = single(spawn("2026-11-03T09:12:01.000Z")).members;
+    expect(lone.map((member) => member.sessionId)).toEqual([SESSION_ID]);
+    expect("line" in lone[0]!).toBe(false);
+    const [sessions] = describe_(
+      [spawn("2026-11-03T09:12:01.000Z"), spawn("2026-11-03T09:12:02.000Z")].reverse(),
+    );
+    expect(sessions?.entries[0]?.members).toHaveLength(2);
+    expect(sessions?.entries[0]?.members.every((member) => "line" in member)).toBe(false);
   });
 
   it("does not fold a state with another state, nor a stop reason with another", () => {
@@ -389,7 +444,7 @@ describe("describeMachineActivity folding", () => {
     );
     expect(day?.entries.map((each) => each.sentence)).toEqual([
       "Went offline (2 times)",
-      "Came online",
+      "Back online",
       "6 workspaces of finished runs removed",
     ]);
   });
@@ -397,15 +452,15 @@ describe("describeMachineActivity folding", () => {
   it("words a folded refusal by its count and keeps each message in its member", () => {
     const [day] = describe_(
       [
-        entry("workspace.disposalRefused", { message: "It has uncommitted changes." }),
-        entry("workspace.disposalRefused", { message: "It is in use." }),
+        entry("workspace.disposalRefused", { runnerMessage: "It has uncommitted changes." }),
+        entry("workspace.disposalRefused", { runnerMessage: "It is in use." }),
       ].reverse(),
     );
     expect(day?.entries).toHaveLength(1);
     expect(day?.entries[0]?.sentence).toBe("Could not remove 2 workspaces");
     expect(day?.entries[0]?.members.map((member) => member.line)).toEqual([
-      "Could not remove a workspace: It is in use",
-      "Could not remove a workspace: It has uncommitted changes",
+      "Could not remove a workspace: It is in use.",
+      "Could not remove a workspace: It has uncommitted changes.",
     ]);
   });
 
@@ -432,7 +487,7 @@ describe("describeMachineActivity filters", () => {
     entry("runner.stateChanged", { state: "offline" }, "2026-11-03T08:02:00.000Z"),
     entry("runner.stateChanged", { state: "unreachable" }, "2026-11-03T08:03:00.000Z"),
     entry("workspace.deleted", {}, "2026-11-03T08:04:00.000Z"),
-    entry("workspace.disposalRefused", { message: "In use." }, "2026-11-03T08:05:00.000Z"),
+    entry("workspace.disposalRefused", { runnerMessage: "In use." }, "2026-11-03T08:05:00.000Z"),
     entry("session.reconciled", { reason: "runner_restart" }, "2026-11-03T08:06:00.000Z"),
     entry("session.reconciled", { reason: "runner_lost" }, "2026-11-03T08:07:00.000Z"),
     entry("runner.placementsChanged", { acceptingPlacements: true }, "2026-11-03T08:08:00.000Z"),
@@ -456,7 +511,7 @@ describe("describeMachineActivity filters", () => {
     expect(sentences("problems")).toEqual([
       "Takes no new sessions: free disk is below its limit",
       "Session lost: contact with the machine was lost",
-      "Could not remove a workspace: In use",
+      "Could not remove a workspace: In use.",
       "Became unreachable",
       "Went offline",
     ]);
@@ -464,7 +519,7 @@ describe("describeMachineActivity filters", () => {
 
   it("keeps a category's entries under its filter", () => {
     expect(sentences("workspaces")).toEqual([
-      "Could not remove a workspace: In use",
+      "Could not remove a workspace: In use.",
       "Removed a workspace",
     ]);
     expect(sentences("sessions")).toEqual([
@@ -487,7 +542,7 @@ describe("describeMachineActivity filters", () => {
       { filter: "problems" },
     );
     expect(day?.entries).toHaveLength(1);
-    expect(day?.entries[0]?.members).toHaveLength(2);
+    expect(day?.entries[0]?.count).toBe(2);
     expect(day?.entries[0]?.sentence).toBe("Went offline (2 times)");
   });
 
@@ -532,6 +587,82 @@ describe("describeMachineActivity days", () => {
     expect(utc.map((day) => [day.heading, day.entries[0]?.time])).toEqual([["Today", "03:30"]]);
     expect(losAngeles.map((day) => [day.key, day.heading, day.entries[0]?.time])).toEqual([
       ["2026-11-02", "Yesterday", "19:30"],
+    ]);
+  });
+});
+
+describe("describeRecentMachineActivity", () => {
+  const at = (iso: string) => entry("runner.drained", {}, iso);
+  const describeRecent = (
+    events: ReadonlyArray<Input>,
+    over: { timezone?: string; today?: Date } = {},
+  ) =>
+    describeRecentMachineActivity(events, {
+      timezone: over.timezone ?? "UTC",
+      today: over.today ?? TODAY,
+      accounts: [],
+    });
+
+  it("returns the newest five entries, unfiltered", () => {
+    const events = [1, 2, 3, 4, 5, 6, 7].map((minute) => at(`2026-11-03T08:0${minute}:00.000Z`));
+    const recent = describeRecent([...events].reverse());
+    expect(recent.map((each) => each.key)).toEqual(
+      [...events]
+        .reverse()
+        .slice(0, 5)
+        .map((each) => String(each.id)),
+    );
+    expect(describeRecent([entry("runner.stateChanged", { state: "online" })])).toHaveLength(1);
+  });
+
+  it("gives the day of an entry that is not from today, and none for one that is", () => {
+    const recent = describeRecent(
+      [
+        at("2026-10-30T10:00:00.000Z"),
+        at("2026-11-02T10:00:00.000Z"),
+        at("2026-11-03T09:12:00.000Z"),
+      ].reverse(),
+    );
+    expect(recent.map((each) => each.day)).toEqual([undefined, "Yesterday", "Fri 30 Oct"]);
+  });
+
+  it("decides today by date in the timezone, not by the heading", () => {
+    // 03:30 UTC on 3 November is 19:30 on 2 November in Los Angeles, where today is 2 November.
+    const events = [at("2026-11-03T03:30:00.000Z")];
+    expect(describeRecent(events)[0]?.day).toBeUndefined();
+    expect(
+      describeRecent(events, {
+        timezone: "America/Los_Angeles",
+        today: new Date("2026-11-03T06:00:00Z"),
+      })[0]?.day,
+    ).toBeUndefined();
+    expect(
+      describeRecent(events, {
+        timezone: "America/Los_Angeles",
+        today: new Date("2026-11-03T12:00:00Z"),
+      })[0]?.day,
+    ).toBe("Yesterday");
+  });
+
+  it("returns nothing for a zone this runtime cannot format", () => {
+    expect(describeRecent([at("2026-11-03T09:12:00.000Z")], { timezone: "Not/A_Zone" })).toEqual(
+      [],
+    );
+  });
+});
+
+describe("describeEmptyMachineActivity", () => {
+  it("words the empty list for each filter", () => {
+    const words = MACHINE_ACTIVITY_FILTERS.map((each) =>
+      describeEmptyMachineActivity(each.filter, "atlas"),
+    );
+    expect(words).toEqual([
+      "Nothing has happened on atlas yet.",
+      "No problems on atlas.",
+      "No connection changes on atlas.",
+      "No session activity on atlas.",
+      "No workspace activity on atlas.",
+      "No settings changes on atlas.",
     ]);
   });
 });

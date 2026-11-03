@@ -36,22 +36,30 @@ const ACTIVITY_PATH = `/fleet/${ATLAS.id}/activity`;
 
 /** Yesterday's two entries, then today's four, with three sessions spawned in one minute among them. */
 const buildSixEntries = () => [
-  buildWentOffline(1000),
-  buildCameOnline(990),
-  buildStoppedNewWork(300),
-  buildSessionSpawned(120, "01a06d02-0000-7000-8000-0000000000a1"),
-  buildSessionSpawned(120, "01a06d02-0000-7000-8000-0000000000a2"),
-  buildSessionSpawned(120, "01a06d02-0000-7000-8000-0000000000a3"),
-  buildWentOffline(60),
+  buildWentOffline(1, 1000),
+  buildCameOnline(2, 990),
+  buildStoppedNewWork(3, 300),
+  buildSessionSpawned(4, 120, "01a06d02-0000-7000-8000-0000000000a1"),
+  buildSessionSpawned(5, 120, "01a06d02-0000-7000-8000-0000000000a2"),
+  buildSessionSpawned(6, 120, "01a06d02-0000-7000-8000-0000000000a3"),
+  buildWentOffline(7, 60),
 ];
 
 /**
  * Builds `count` entries of the machine coming online, one every two minutes
- * going back from two minutes ago, so no two fold into one. The oldest is
- * built first.
+ * going back from two minutes ago, so no two fold into one. The oldest has the
+ * id `firstId`.
  */
-const buildQuietEntries = (count: number): EventWithFacts[] =>
-  Array.from({ length: count }, (_, index) => buildCameOnline((count - index) * 2));
+const buildQuietEntries = (count: number, firstId = 1): EventWithFacts[] =>
+  Array.from({ length: count }, (_, index) =>
+    buildCameOnline(firstId + index, (count - index) * 2),
+  );
+
+/** Builds `count` sessions spawned in one minute, by the same actor, which fold into one entry. The oldest has the id 1. */
+const buildSpawnBurst = (count: number): EventWithFacts[] =>
+  Array.from({ length: count }, (_, index) =>
+    buildSessionSpawned(index + 1, 5, `01a06d02-0000-7000-8000-${String(index).padStart(12, "0")}`),
+  );
 
 const openActivity = async (events: readonly EventWithFacts[]) => {
   const opened = await openMachineWithEvents(ACTIVITY_PATH, events);
@@ -132,7 +140,7 @@ describe("the Activity page's entries", () => {
       "12:003 sessions spawnedby HerculeShow 3",
       "09:00Set to take no new workby you",
       "Yesterday",
-      "21:30Came onlineby Hercule",
+      "21:30Back onlineby Hercule",
       "21:20Went offlineby Hercule",
     ]);
   });
@@ -153,11 +161,6 @@ describe("the Activity page's entries", () => {
     await waitFor(() => expect(readLines()).not.toHaveLength(0));
 
     expect(document.querySelectorAll(".machine-activity-row").length).toBeLessThan(40);
-  });
-
-  it("makes no promise of how far back it reaches", async () => {
-    await openActivity(buildSixEntries());
-    expect(screen.queryByText(/last \d+ days|keeps \d+ days|90 days/i)).toBeNull();
   });
 });
 
@@ -192,7 +195,7 @@ describe("the filters", () => {
     );
   });
 
-  it("shows a count on no filter", async () => {
+  it("shows no count on any filter button", async () => {
     await openActivity(buildSixEntries());
     const buttons = within(screen.getByRole("group", { name: "Show" })).getAllByRole("button");
 
@@ -219,7 +222,7 @@ describe("the filters", () => {
   });
 
   it("says that nothing went wrong when no entry is a problem", async () => {
-    await openActivity([buildCameOnline(30)]);
+    await openActivity([buildCameOnline(1, 30)]);
     await userEvent.click(screen.getByRole("button", { name: "Problems" }));
 
     expect(await screen.findByText("No problems on atlas.")).toBeTruthy();
@@ -252,8 +255,8 @@ describe("reading older pages", () => {
 
   it("keeps reading while the filter leaves the view empty, until it finds an entry", async () => {
     // The only problem is the oldest entry, on the second page.
-    const oldestProblem = buildWentOffline(700);
-    const { calls } = await openActivity([oldestProblem, ...buildQuietEntries(150)]);
+    const oldestProblem = buildWentOffline(1, 700);
+    const { calls } = await openActivity([oldestProblem, ...buildQuietEntries(150, 2)]);
     await waitFor(() => expect(readLines()).not.toHaveLength(0));
 
     await userEvent.click(screen.getByRole("button", { name: "Problems" }));
@@ -261,6 +264,51 @@ describe("reading older pages", () => {
     expect(await screen.findByText("Went offline")).toBeTruthy();
     expect(readEventCalls(calls).filter((call) => call.search.includes("cursor="))).toHaveLength(1);
     expect(screen.queryByText(/Reading older activity/)).toBeNull();
+  });
+
+  it("stops reading on its own after five pages that add no entry, and reads five more on Read older", async () => {
+    // Seven pages of 100 entries, none of them a problem.
+    const { calls } = await openActivity(buildQuietEntries(700));
+    await waitFor(() => expect(readLines()).not.toHaveLength(0));
+    const countCursorReads = () =>
+      readEventCalls(calls).filter((call) => call.search.includes("cursor=")).length;
+
+    await userEvent.click(screen.getByRole("button", { name: "Problems" }));
+
+    expect(await screen.findByText("No problems in the latest 600 entries.")).toBeTruthy();
+    expect(countCursorReads()).toBe(5);
+    expect(screen.queryByText("No problems on atlas.")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Read older" }));
+
+    // The seventh page is the last one, so the log has been read to its end.
+    expect(await screen.findByText("No problems on atlas.")).toBeTruthy();
+    expect(countCursorReads()).toBe(6);
+    expect(screen.queryByRole("button", { name: "Read older" })).toBeNull();
+  });
+
+  it("keeps reading while log entries that fold into one entry still match, however many pages that takes", async () => {
+    // 700 log entries make one entry whose members grow with each page, which is a gain.
+    const { calls } = await openActivity(buildSpawnBurst(700));
+    const countCursorReads = () =>
+      readEventCalls(calls).filter((call) => call.search.includes("cursor=")).length;
+
+    expect(await screen.findByRole("button", { name: "Show 700" })).toBeTruthy();
+    expect(countCursorReads()).toBe(6);
+    expect(screen.queryByText(/Nothing older matched/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Read older" })).toBeNull();
+  });
+
+  it("does not read the loaded pages again when the runner topic pushes", async () => {
+    const { calls, app } = await openActivity(buildSixEntries());
+    await waitFor(() => expect(readLines()).not.toHaveLength(0));
+    const countReads = () => readEventCalls(calls).length;
+    const before = countReads();
+
+    app.live.pushInvalidation("runner", [ATLAS.id]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(countReads()).toBe(before);
   });
 
   it("says that nothing matches once the whole log is read", async () => {

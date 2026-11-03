@@ -155,13 +155,13 @@ export function TrackingSheet({
     (item: SheetItem) => estimateLineHeight(heights, item),
     [heights],
   );
-  const { lines, totalSize, scrollToSelected } = useVirtualLines(
-    drawn,
+  const { lines, totalSize, scrollToSelected } = useVirtualLines({
+    items: drawn,
     scrollRef,
     estimateSize,
-    selectedTaskId,
-    focusedTaskId,
-  );
+    selectedKey: selectedTaskId,
+    focusedKey: focusedTaskId,
+  });
   useLineFade(
     drawn.flatMap((item) => (item.kind === "row" ? [item.facts] : [])),
     scrollRef,

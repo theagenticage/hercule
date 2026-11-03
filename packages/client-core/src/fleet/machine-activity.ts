@@ -10,9 +10,14 @@
  * and is not re-exported from the package index, so the first screen does
  * not carry it.
  */
-import type { Event, ProviderAccount } from "@hercule/contract";
+import {
+  RUNNER_ACTIVITY_KINDS,
+  type Event,
+  type ProviderAccount,
+  type RunnerActivityKind,
+} from "@hercule/contract";
 import { describeActor, readActorSessionId } from "../actor-display";
-import { computeWeekday, readWallClock, type WallClock } from "../time-context";
+import { formatClock, formatDayStampWithWeekday, readCalendarDate } from "../time-context";
 import { splitDiskSize } from "./machine";
 
 /** Which entries the activity list shows. */
@@ -51,10 +56,12 @@ export type MachineActivityActor =
 /** One audit log entry inside a folded entry. */
 export interface MachineActivityMember {
   readonly eventId: number;
-  /** When it happened, "09:12": 24-hour, in the display timezone. */
-  readonly time: string;
-  /** What this one entry was, from its payload alone. */
-  readonly line: string;
+  /**
+   * What this one entry was, from its payload alone. Left out when every
+   * member of the entry has the same line, because it would only repeat the
+   * entry's sentence.
+   */
+  readonly line?: string;
   /** The session the entry is about, for the screen to name beside `line`. */
   readonly sessionId?: string;
 }
@@ -66,16 +73,25 @@ export interface MachineActivityMember {
 export interface MachineActivityEntry {
   /** The newest member's event id, as text. */
   readonly key: string;
-  /** The newest member's time, "09:12". */
+  /** When the entry happened, "09:12": 24-hour, in the display timezone. Every member happened in this minute. */
   readonly time: string;
-  readonly category: "connection" | "sessions" | "workspaces" | "settings";
+  readonly category: MachineActivityCategory;
   readonly problem: boolean;
   /** Complete without any name that needs a read: "Went offline", "12 sessions spawned". */
   readonly sentence: string;
   /** Set when every member was spawned for one workflow run. The screen appends "for <the run's workflow name>". */
   readonly runId?: string;
   readonly actor: MachineActivityActor;
-  /** Newest first. Exactly one member when nothing folded into the entry. */
+  /** How many audit log entries this entry stands for: the number in "12 sessions spawned", 1 when nothing folded. */
+  readonly count: number;
+  /**
+   * The audit log entries behind this entry, newest first, listed only when
+   * they tell the user something the sentence does not: at least one has a
+   * `sessionId`, or their lines are not all the same. Otherwise empty, because
+   * there is nothing to unfold: "3 workspaces of finished runs removed" would
+   * unfold into three identical lines. This holds for a single entry too, so
+   * one member without a `sessionId` is not kept: its line is the sentence.
+   */
   readonly members: ReadonlyArray<MachineActivityMember>;
 }
 
@@ -88,62 +104,67 @@ export interface MachineActivityDay {
   readonly entries: ReadonlyArray<MachineActivityEntry>;
 }
 
-type Category = MachineActivityEntry["category"];
+/** Which filter besides "all" and "problems" an entry belongs to. */
+export type MachineActivityCategory = "connection" | "sessions" | "workspaces" | "settings";
 
-/** The words of an entry: for one member, and for `count` members folded together. */
+/** The words of an entry: for one member, and for several members folded together. */
 interface Wording {
-  readonly one: string;
-  readonly many: (count: number) => string;
+  readonly forOne: string;
+  readonly forCount: (count: number) => string;
 }
 
 /** What one audit log entry stands for. */
 interface Reading {
-  readonly category: Category;
+  readonly category: MachineActivityCategory;
   readonly problem: boolean;
   readonly wording: Wording;
   /**
    * Entries fold only when this is equal as well as their kind, actor and
    * minute. It is whatever changes the words, such as the connection state.
    */
-  readonly variant: string;
+  readonly foldVariant: string;
   readonly sessionId?: string;
   readonly runId?: string;
 }
 
-type Payload = Event["payload"];
+type EventPayload = Event["payload"];
 
 const formatCount = (count: number): string => count.toLocaleString("en-US");
 
-/** Words for a kind whose entries are things to count: "12 sessions spawned". */
-const countable = (one: string, many: string): Wording => ({
-  one,
-  many: (count) => many.replace("#", formatCount(count)),
+/**
+ * Builds the words for a kind whose entries are things to count. `forMany`
+ * holds a `#` where the count goes: "# sessions spawned" reads "12 sessions
+ * spawned".
+ */
+const buildCountedWording = (forOne: string, forMany: string): Wording => ({
+  forOne,
+  forCount: (count) => forMany.replace("#", formatCount(count)),
 });
 
-/** Words for an entry that is not a thing to count; folded, it reads "Went offline (2 times)". */
-const repeatable = (one: string): Wording => ({
-  one,
-  many: (count) => `${one} (${formatCount(count)} times)`,
+/** Builds the words for an entry that is not a thing to count; folded, it reads "Went offline (2 times)". */
+const buildRepeatedWording = (forOne: string): Wording => ({
+  forOne,
+  forCount: (count) => `${forOne} (${formatCount(count)} times)`,
 });
 
-const readText = (payload: Payload, key: string): string | undefined => {
+const readText = (payload: EventPayload, key: string): string | undefined => {
   const value = payload[key];
   return typeof value === "string" ? value : undefined;
 };
 
-const readFlag = (payload: Payload, key: string): boolean | undefined => {
+const readFlag = (payload: EventPayload, key: string): boolean | undefined => {
   const value = payload[key];
   return typeof value === "boolean" ? value : undefined;
 };
 
-const readNumber = (payload: Payload, key: string): number | undefined => {
+const readNumber = (payload: EventPayload, key: string): number | undefined => {
   const value = payload[key];
   return typeof value === "number" ? value : undefined;
 };
 
-/** Reads `value` as the `{ old, new }` pair that a `runner.updated` entry holds for one field. */
+/** Reads the `{ old, new }` pair that the `changes` of a `runner.updated` entry hold for `field`, or `undefined` when the field is missing or not a pair. */
 const readChange = (
-  changes: Payload,
+  changes: EventPayload,
   field: string,
 ): { old: unknown; new: unknown } | undefined => {
   const change = changes[field];
@@ -160,7 +181,7 @@ const formatDiskLimit = (bytes: number): string => {
   return `${size.amount} ${size.unit}`;
 };
 
-/** Words the change of the labels: "added label gpu", "removed labels a, b", or both. */
+/** Describes the change of the labels: "added label gpu", "removed labels a, b", or both. */
 const describeLabelChange = (
   before: ReadonlyArray<string>,
   after: ReadonlyArray<string>,
@@ -187,9 +208,9 @@ const describeLabelChange = (
  * shape the controller writes is left out; when nothing is left, it reads
  * "Settings changed".
  */
-const describeSettingsChange = (payload: Payload): string => {
+const describeSettingsChange = (payload: EventPayload): string => {
   const changes = payload["changes"];
-  const record = (typeof changes === "object" && changes !== null ? changes : {}) as Payload;
+  const record = (typeof changes === "object" && changes !== null ? changes : {}) as EventPayload;
   const fragments: string[] = [];
 
   const name = readChange(record, "name");
@@ -233,38 +254,33 @@ const SWEPT_WORKSPACES: ReadonlyMap<string, readonly [string, string]> = new Map
 
 /** Words for a session that was stopped, by the reason the entry records. */
 const STOPPED_SESSIONS: ReadonlyMap<string, Wording> = new Map([
-  ["crash", countable("Session crashed", "# sessions crashed")],
+  ["crash", buildCountedWording("Session crashed", "# sessions crashed")],
   [
     "workspace_failed",
-    countable(
+    buildCountedWording(
       "Session could not start: its workspace failed",
       "# sessions could not start: their workspaces failed",
     ),
   ],
   [
     "runner_retired",
-    countable(
+    buildCountedWording(
       "Session ended: the machine was retired",
       "# sessions ended: the machine was retired",
     ),
   ],
 ]);
 
-/** The advice the controller adds to every refused removal. It is the same for all, so the sentence leaves it out. */
-const REFUSED_REMOVAL_ADVICE =
-  " The workspace is retained. Automatic cleanup will not retry this removal. Inspect it, resolve the refusal, and explicitly retry removal.";
-
-/** Words the runner's message for a refused removal as the end of a sentence: no advice, no final period. */
-const trimRefusalMessage = (message: string): string => {
-  const reason = message.endsWith(REFUSED_REMOVAL_ADVICE)
-    ? message.slice(0, -REFUSED_REMOVAL_ADVICE.length)
-    : message;
-  return reason.replace(/\.$/, "");
-};
+/** Checks whether the controller writes `kind` for a machine's activity. A newer controller may write kinds this list does not know. */
+const isRunnerActivityKind = (kind: string): kind is RunnerActivityKind =>
+  (RUNNER_ACTIVITY_KINDS as ReadonlyArray<string>).includes(kind);
 
 /**
- * Reads what one audit log entry stands for. Returns `undefined` for a kind
- * this list does not show, such as one a newer controller writes.
+ * Interprets what one audit log entry stands for. Returns `undefined` for a
+ * kind this list does not show, such as one a newer controller writes.
+ *
+ * The switch names every kind in `RUNNER_ACTIVITY_KINDS`, and the compiler
+ * fails when a kind is added to that list without a case here.
  *
  * Categories:
  * - connection: whether the controller can use the machine. Besides its
@@ -274,83 +290,94 @@ const trimRefusalMessage = (message: string): string => {
  *   new work) and the accounts signed in on it.
  * - sessions and workspaces: by the kind's prefix.
  */
-const readEvent = (
+const interpretAuditEntry = (
   event: Pick<Event, "kind" | "payload">,
   accountLabels: ReadonlyMap<string, string | null>,
 ): Reading | undefined => {
-  const { payload } = event;
+  const { payload, kind } = event;
+  if (!isRunnerActivityKind(kind)) return undefined;
+
   const sessionId = readText(payload, "sessionId");
-  const reading = (
-    category: Category,
+  const buildReading = (
+    category: MachineActivityCategory,
     wording: Wording,
-    more: { problem?: boolean; variant?: string; runId?: string } = {},
+    options: { problem?: boolean; foldVariant?: string; runId?: string } = {},
   ): Reading => ({
     category,
-    problem: more.problem ?? false,
+    problem: options.problem ?? false,
     wording,
-    variant: more.variant ?? wording.one,
+    foldVariant: options.foldVariant ?? wording.forOne,
     ...(sessionId === undefined || category !== "sessions" ? {} : { sessionId }),
-    ...(more.runId === undefined ? {} : { runId: more.runId }),
+    ...(options.runId === undefined ? {} : { runId: options.runId }),
   });
 
-  switch (event.kind) {
+  switch (kind) {
     case "runner.joined": {
       const reserved = readFlag(payload, "reserved") === true;
       const isDefault = readFlag(payload, "becameDefaultRunner") === true;
-      return reading(
+      return buildReading(
         "connection",
-        repeatable(
+        buildRepeatedWording(
           `Joined${reserved ? " as a reserved machine" : ""}${isDefault ? " and became the default machine" : ""}`,
         ),
       );
     }
     case "runner.stateChanged": {
       const state = readText(payload, "state");
-      if (state === "online") return reading("connection", repeatable("Came online"));
+      if (state === "online")
+        return buildReading("connection", buildRepeatedWording("Back online"));
       if (state === "offline") {
-        return reading("connection", repeatable("Went offline"), { problem: true });
+        return buildReading("connection", buildRepeatedWording("Went offline"), { problem: true });
       }
       if (state === "unreachable") {
-        return reading("connection", repeatable("Became unreachable"), { problem: true });
+        return buildReading("connection", buildRepeatedWording("Became unreachable"), {
+          problem: true,
+        });
       }
-      return reading("connection", repeatable(`Changed state to ${state ?? "an unknown state"}`));
+      return buildReading(
+        "connection",
+        buildRepeatedWording(`Changed state to ${state ?? "an unknown state"}`),
+      );
     }
     case "runner.updated":
-      return reading("settings", repeatable(describeSettingsChange(payload)));
+      return buildReading("settings", buildRepeatedWording(describeSettingsChange(payload)));
     case "runner.drained":
-      return reading("settings", repeatable("Set to take no new work"));
+      return buildReading("settings", buildRepeatedWording("Set to take no new work"));
     case "runner.undrained":
-      return reading("settings", repeatable("Set to take new work again"));
+      return buildReading("settings", buildRepeatedWording("Set to take new work again"));
     case "runner.placementsChanged": {
       const accepting = readFlag(payload, "acceptingPlacements");
       if (accepting === true) {
-        return reading(
+        return buildReading(
           "connection",
-          repeatable("Takes new sessions again: free disk is above its limit"),
+          buildRepeatedWording("Takes new sessions again: free disk is above its limit"),
         );
       }
       if (accepting === false) {
-        return reading(
+        return buildReading(
           "connection",
-          repeatable("Takes no new sessions: free disk is below its limit"),
+          buildRepeatedWording("Takes no new sessions: free disk is below its limit"),
           { problem: true },
         );
       }
-      return reading("connection", repeatable("Changed whether it takes new sessions"));
+      return buildReading(
+        "connection",
+        buildRepeatedWording("Changed whether it takes new sessions"),
+      );
     }
     case "runner.crashLooping": {
       const count = readNumber(payload, "count");
-      return reading(
+      return buildReading(
         "connection",
-        repeatable(
+        buildRepeatedWording(
           `Runner stopped ${count === undefined ? "again and again" : `${formatCount(count)} times`} in a few minutes and is being started again`,
         ),
       );
     }
     case "runner.retired":
-      return reading(
+      return buildReading(
         "connection",
-        repeatable(
+        buildRepeatedWording(
           readFlag(payload, "forced") === true
             ? "Retired without checking for sessions"
             : "Retired",
@@ -358,91 +385,109 @@ const readEvent = (
       );
 
     case "workspace.created":
-      return reading("workspaces", countable("Workspace created", "# workspaces created"));
+      return buildReading(
+        "workspaces",
+        buildCountedWording("Workspace created", "# workspaces created"),
+      );
     case "workspace.disposalRequested":
       return readText(payload, "operation") === "workspaceDetach"
-        ? reading(
+        ? buildReading(
             "workspaces",
-            countable("Asked to detach a main workspace", "Asked to detach # main workspaces"),
+            buildCountedWording(
+              "Asked to detach a main workspace",
+              "Asked to detach # main workspaces",
+            ),
           )
-        : reading(
+        : buildReading(
             "workspaces",
-            countable("Asked to remove a workspace", "Asked to remove # workspaces"),
+            buildCountedWording("Asked to remove a workspace", "Asked to remove # workspaces"),
           );
     case "workspace.disposalRefused": {
-      const message = readText(payload, "message");
-      const one =
-        message === undefined
-          ? "Could not remove a workspace"
-          : `Could not remove a workspace: ${trimRefusalMessage(message)}`;
-      return reading(
+      const runnerMessage = readText(payload, "runnerMessage");
+      return buildReading(
         "workspaces",
-        { one, many: (count) => `Could not remove ${formatCount(count)} workspaces` },
-        { problem: true, variant: "refused" },
+        {
+          forOne:
+            runnerMessage === undefined
+              ? "Could not remove a workspace"
+              : `Could not remove a workspace: ${runnerMessage}`,
+          forCount: (count) => `Could not remove ${formatCount(count)} workspaces`,
+        },
+        { problem: true, foldVariant: "refused" },
       );
     }
     case "workspace.deleted": {
       const swept = SWEPT_WORKSPACES.get(readText(payload, "reason") ?? "");
-      return reading(
+      return buildReading(
         "workspaces",
         swept === undefined
-          ? countable("Removed a workspace", "# workspaces removed")
-          : countable(`Removed ${swept[0]}`, `# ${swept[1]} removed`),
+          ? buildCountedWording("Removed a workspace", "# workspaces removed")
+          : buildCountedWording(`Removed ${swept[0]}`, `# ${swept[1]} removed`),
       );
     }
     case "workspace.detached":
-      return reading(
+      return buildReading(
         "workspaces",
-        countable(
+        buildCountedWording(
           "Detached a main workspace, files kept",
           "# main workspaces detached, files kept",
         ),
       );
     case "workspace.attachmentRetried":
-      return reading("workspaces", repeatable("Retried attaching a main workspace"));
+      return buildReading("workspaces", buildRepeatedWording("Retried attaching a main workspace"));
 
     case "session.spawned": {
       const runId = readText(payload, "runId");
-      return reading("sessions", countable("Session spawned", "# sessions spawned"), {
-        variant: `run:${runId ?? ""}`,
-        ...(runId === undefined ? {} : { runId }),
-      });
+      return buildReading(
+        "sessions",
+        buildCountedWording("Session spawned", "# sessions spawned"),
+        {
+          foldVariant: `run:${runId ?? ""}`,
+          ...(runId === undefined ? {} : { runId }),
+        },
+      );
     }
     case "session.stopped":
-      return reading(
+      return buildReading(
         "sessions",
         STOPPED_SESSIONS.get(readText(payload, "reason") ?? "") ??
-          countable("Session stopped", "# sessions stopped"),
+          buildCountedWording("Session stopped", "# sessions stopped"),
       );
     case "session.reconciled":
       return readText(payload, "reason") === "runner_lost"
-        ? reading(
+        ? buildReading(
             "sessions",
-            countable(
+            buildCountedWording(
               "Session lost: contact with the machine was lost",
               "# sessions lost: contact with the machine was lost",
             ),
             { problem: true },
           )
         : readText(payload, "reason") === "runner_restart"
-          ? reading(
+          ? buildReading(
               "sessions",
-              countable(
+              buildCountedWording(
                 "Session ended when the runner restarted",
                 "# sessions ended when the runner restarted",
               ),
             )
-          : reading("sessions", countable("Session ended", "# sessions ended"));
+          : buildReading("sessions", buildCountedWording("Session ended", "# sessions ended"));
     case "session.archived":
-      return reading("sessions", countable("Session archived", "# sessions archived"));
+      return buildReading(
+        "sessions",
+        buildCountedWording("Session archived", "# sessions archived"),
+      );
 
     case "providerAccount.signedIn": {
       const accountId = readText(payload, "providerAccountId");
       const label = accountId === undefined ? undefined : accountLabels.get(accountId);
-      return reading("settings", repeatable(`${label ?? "An account"} signed in here`));
+      return buildReading(
+        "settings",
+        buildRepeatedWording(`${label ?? "An account"} signed in here`),
+      );
     }
     default:
-      return undefined;
+      return kind satisfies never;
   }
 };
 
@@ -459,38 +504,49 @@ const describeEntryActor = (actor: string | null): MachineActivityActor => {
   return { kind: "other", label: describeActor(actor).label };
 };
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
+const MS_PER_MINUTE = 60_000;
 
-const pad = (value: number): string => String(value).padStart(2, "0");
+const MS_PER_DAY = 86_400_000;
 
-/** Counts the days from 1 January 1970 to a calendar date, so two consecutive dates differ by 1. */
-const countDays = (date: WallClock): number =>
-  Date.UTC(date.year, date.month - 1, date.day) / 86_400_000;
+/** Builds the key of a local day, "2026-11-03", from its number of days since 1 January 1970. */
+const buildDayKey = (dayNumber: number): string =>
+  new Date(dayNumber * MS_PER_DAY).toISOString().slice(0, 10);
 
-/** Words a day for the head of its group: "Today", "Yesterday", "Sun 1 Nov", or "Sun 1 Nov 2025" in another year. */
-const describeDay = (date: WallClock, today: WallClock): string => {
-  const days = countDays(today) - countDays(date);
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  const text = `${WEEKDAYS[computeWeekday(date)]} ${String(date.day)} ${MONTHS[date.month - 1]}`;
-  return date.year === today.year ? text : `${text} ${String(date.year)}`;
+/** A member while its entry is built: it always has its line, which `selectListedMembers` may leave out. */
+type PendingMember = MachineActivityMember & { readonly line: string };
+
+/**
+ * Returns the members to list under an entry, or an empty list when they tell
+ * the user nothing the sentence does not: no member has a session and every
+ * line is the same. A member keeps its `line` only when the lines differ,
+ * because otherwise it would only repeat the sentence.
+ */
+const selectListedMembers = (
+  members: ReadonlyArray<PendingMember>,
+): ReadonlyArray<MachineActivityMember> => {
+  const linesDiffer = members.some((member) => member.line !== members[0]?.line);
+  if (linesDiffer) return members;
+  if (members.every((member) => member.sessionId === undefined)) return [];
+  return members.map(({ eventId, sessionId }) => ({
+    eventId,
+    ...(sessionId === undefined ? {} : { sessionId }),
+  }));
 };
 
-const MS_PER_MINUTE = 60_000;
+/** What the display timezone shows for one minute: the clock time and the local day. */
+interface MinuteDisplay {
+  readonly time: string;
+  readonly dayKey: string;
+}
+
+/** Reads the clock time and the local day of the minute that holds `instant`, or `undefined` when either cannot be read. */
+const readMinuteDisplay = (instant: Date, timezone: string): MinuteDisplay | undefined => {
+  const time = formatClock(instant, timezone);
+  const date = readCalendarDate(instant, timezone);
+  return time === undefined || date === undefined
+    ? undefined
+    : { time, dayKey: buildDayKey(date.dayNumber) };
+};
 
 /** An entry being built: its members are added while the list is read. */
 interface PendingEntry {
@@ -498,7 +554,7 @@ interface PendingEntry {
   readonly time: string;
   readonly reading: Reading;
   readonly actor: MachineActivityActor;
-  readonly members: MachineActivityMember[];
+  readonly members: PendingMember[];
 }
 
 /** One day being built, in the order the list reaches it. */
@@ -519,7 +575,8 @@ interface PendingDay {
  * - Entries fold into one when they have the same kind, the same wording, the
  *   same actor and, for spawned sessions, the same run, and happened in the
  *   same minute. They need not be next to each other in the list. The folded
- *   entry stands where its newest member stands.
+ *   entry stands where its newest member stands. The actor is compared as it
+ *   is shown, so an entry without an actor folds with one stamped `system`.
  * - The minute is counted from the instant (a whole number of minutes since
  *   1970), not from the clock the screen shows, because in the hour that
  *   repeats when daylight saving time ends two different minutes show the
@@ -538,20 +595,17 @@ export const describeMachineActivity = (
     readonly accounts: ReadonlyArray<Pick<ProviderAccount, "id" | "label">>;
   },
 ): ReadonlyArray<MachineActivityDay> => {
-  const { filter, timezone } = options;
-  const today = readWallClock(options.today, timezone);
-  if (today === undefined) return [];
+  const { filter, timezone, today } = options;
   const accountLabels = new Map(options.accounts.map((account) => [account.id, account.label]));
 
-  // Entries of one minute share a time and a day, and a burst of spawns
-  // shares one minute, so each minute reads the clock once.
-  const clocks = new Map<number, WallClock | undefined>();
+  // A burst of entries shares one minute, so each minute is read once.
+  const displaysByMinute = new Map<number, MinuteDisplay | undefined>();
   const days: PendingDay[] = [];
   const daysByKey = new Map<string, PendingDay>();
   const entriesByFold = new Map<string, PendingEntry>();
 
   for (const event of events) {
-    const reading = readEvent(event, accountLabels);
+    const reading = interpretAuditEntry(event, accountLabels);
     if (reading === undefined) continue;
     if (
       filter === "problems" ? !reading.problem : filter !== "all" && filter !== reading.category
@@ -561,36 +615,38 @@ export const describeMachineActivity = (
 
     const instant = Date.parse(event.receivedAt);
     const minute = Math.floor(instant / MS_PER_MINUTE);
-    if (!clocks.has(minute)) clocks.set(minute, readWallClock(new Date(instant), timezone));
-    const clock = clocks.get(minute);
-    if (clock === undefined) continue;
-    const time = `${pad(clock.hour)}:${pad(clock.minute)}`;
+    if (!displaysByMinute.has(minute)) {
+      displaysByMinute.set(minute, readMinuteDisplay(new Date(instant), timezone));
+    }
+    const display = displaysByMinute.get(minute);
+    if (display === undefined) continue;
 
-    const member: MachineActivityMember = {
+    const member: PendingMember = {
       eventId: event.id,
-      time,
-      line: reading.wording.one,
+      line: reading.wording.forOne,
       ...(reading.sessionId === undefined ? {} : { sessionId: reading.sessionId }),
     };
-    const foldKey = [event.kind, reading.variant, event.actor ?? "", minute].join("\u0000");
+    const actor = describeEntryActor(event.actor);
+    const foldKey = [event.kind, reading.foldVariant, JSON.stringify(actor), minute].join("\u0000");
     const folded = entriesByFold.get(foldKey);
     if (folded !== undefined) {
       folded.members.push(member);
       continue;
     }
 
-    const dayKey = `${String(clock.year)}-${pad(clock.month)}-${pad(clock.day)}`;
-    let day = daysByKey.get(dayKey);
+    let day = daysByKey.get(display.dayKey);
     if (day === undefined) {
-      day = { key: dayKey, heading: describeDay(clock, today), entries: [] };
-      daysByKey.set(dayKey, day);
+      const heading = formatDayStampWithWeekday(new Date(instant), timezone, today);
+      if (heading === undefined) continue;
+      day = { key: display.dayKey, heading, entries: [] };
+      daysByKey.set(display.dayKey, day);
       days.push(day);
     }
     const entry: PendingEntry = {
       key: String(event.id),
-      time,
+      time: display.time,
       reading,
-      actor: describeEntryActor(event.actor),
+      actor,
       members: [member],
     };
     entriesByFold.set(foldKey, entry);
@@ -605,10 +661,72 @@ export const describeMachineActivity = (
       time,
       category: reading.category,
       problem: reading.problem,
-      sentence: members.length === 1 ? reading.wording.one : reading.wording.many(members.length),
+      sentence:
+        members.length === 1 ? reading.wording.forOne : reading.wording.forCount(members.length),
       ...(reading.runId === undefined ? {} : { runId: reading.runId }),
       actor,
-      members,
+      count: members.length,
+      members: selectListedMembers(members),
     })),
   }));
+};
+
+/** One of Recent's entries: a machine activity entry and the day it happened, or undefined when it happened today. */
+export interface RecentMachineActivityEntry extends MachineActivityEntry {
+  readonly day: string | undefined;
+}
+
+/** How many entries Recent lists. */
+const RECENT_ENTRY_COUNT = 5;
+
+/**
+ * Returns the newest five entries of a machine's activity, unfiltered, each
+ * with its day unless it happened today. Recent lists entries without day
+ * headings, so an entry from another day carries its day to show beside it.
+ *
+ * It describes `events` as `describeMachineActivity` does with the filter
+ * "all". Whether an entry is from today is decided by comparing dates in
+ * `timezone`, not by the words of the day heading.
+ */
+export const describeRecentMachineActivity = (
+  events: ReadonlyArray<Pick<Event, "id" | "kind" | "payload" | "actor" | "receivedAt">>,
+  options: {
+    readonly timezone: string;
+    readonly today: Date;
+    readonly accounts: ReadonlyArray<Pick<ProviderAccount, "id" | "label">>;
+  },
+): ReadonlyArray<RecentMachineActivityEntry> => {
+  const todayDate = readCalendarDate(options.today, options.timezone);
+  if (todayDate === undefined) return [];
+  const todayKey = buildDayKey(todayDate.dayNumber);
+
+  return describeMachineActivity(events, { ...options, filter: "all" })
+    .flatMap((day) =>
+      day.entries.map((entry) => ({
+        ...entry,
+        day: day.key === todayKey ? undefined : day.heading,
+      })),
+    )
+    .slice(0, RECENT_ENTRY_COUNT);
+};
+
+/** Describes why no entry shows for `filter` on the machine `machineName`, as a sentence for the empty list. */
+export const describeEmptyMachineActivity = (
+  filter: MachineActivityFilter,
+  machineName: string,
+): string => {
+  switch (filter) {
+    case "all":
+      return `Nothing has happened on ${machineName} yet.`;
+    case "problems":
+      return `No problems on ${machineName}.`;
+    case "connection":
+      return `No connection changes on ${machineName}.`;
+    case "sessions":
+      return `No session activity on ${machineName}.`;
+    case "workspaces":
+      return `No workspace activity on ${machineName}.`;
+    case "settings":
+      return `No settings changes on ${machineName}.`;
+  }
 };

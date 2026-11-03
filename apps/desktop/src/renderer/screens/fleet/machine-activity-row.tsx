@@ -4,7 +4,7 @@ import type {
   MachineActivityMember,
 } from "@hercule/client-core/machine-activity";
 import { SessionName } from "../actor/actor-mark";
-import { MachineActivityBy, useRunWorkflowName } from "./machine-activity-names";
+import { MachineActivityActorName, useRunWorkflowName } from "./machine-activity-names";
 import "./machine-activity.css";
 
 /** Returns the class of an entry's line: its category, and whether it is a problem, whether the thread joins it to the line above, and whether it is unfolded. */
@@ -29,7 +29,7 @@ const buildRowClass = (entry: MachineActivityEntry, joinsAbove: boolean, isOpen:
  *   under day headings and passes none.
  * - When every log entry folded into this one was spawned for one workflow
  *   run, the sentence ends with " for <the workflow's name>", once it is read.
- * - An entry that folded several log entries has a "Show 12" button, "Hide"
+ * - An entry with several members to list has a "Show 12" button, "Hide"
  *   while it is unfolded. Pressing it calls `onToggle`. The caller draws the
  *   members under the line, as `MachineActivityMemberRow`s.
  * - An entry of one log entry about a session names that session after the
@@ -57,10 +57,10 @@ export function MachineActivityRow({
   const workflowName = useRunWorkflowName(entry.runId);
   const sentence =
     workflowName === undefined ? entry.sentence : `${entry.sentence} for ${workflowName}`;
-  const isFolded = entry.members.length > 1;
-  const sessionId = isFolded ? undefined : entry.members[0]?.sessionId;
+  const canUnfold = entry.members.length > 1;
+  const sessionId = entry.count === 1 ? entry.members[0]?.sessionId : undefined;
   return (
-    <div className={buildRowClass(entry, joinsAbove, isOpen)}>
+    <div className={buildRowClass(entry, joinsAbove, isOpen)} data-entry-key={entry.key}>
       <time className="machine-activity-time">
         {dayHeading === undefined ? "" : `${dayHeading}, `}
         {entry.time}
@@ -70,14 +70,14 @@ export function MachineActivityRow({
         <span className="machine-activity-sentence" title={sentence}>
           {sentence}
         </span>
-        <MachineActivityBy actor={entry.actor} />
+        <MachineActivityActorName actor={entry.actor} />
         {sessionId === undefined ? null : (
           <span className="machine-activity-about">
             {"· "}
             <SessionName sessionId={sessionId} />
           </span>
         )}
-        {isFolded ? (
+        {canUnfold ? (
           <button
             type="button"
             className="machine-activity-more"
@@ -93,23 +93,28 @@ export function MachineActivityRow({
 }
 
 /**
- * Renders one log entry inside an unfolded entry: its time, what it was, and
- * the session it is about, when there is one. Its text is cut with an
- * ellipsis, like the entry's.
+ * Renders one log entry inside an unfolded entry: what it was, when it has a
+ * line of its own, and the session it is about, when there is one. The line
+ * alone, the session's title alone, or "line · title". It has no time of its own, because
+ * every log entry folded into an entry happened in the entry's minute. Its
+ * text is cut with an ellipsis, like the entry's, and is in the line's tooltip
+ * whole. `isLast` is true for the last member of the entry, which has room
+ * below it before the next entry.
  */
 export function MachineActivityMemberRow({
   member,
+  isLast,
 }: {
   readonly member: MachineActivityMember;
+  readonly isLast: boolean;
 }): JSX.Element {
   return (
-    <div className="machine-activity-member">
-      <time className="machine-activity-time">{member.time}</time>
-      <span className="machine-activity-member-text">
+    <div className={isLast ? "machine-activity-member is-last" : "machine-activity-member"}>
+      <span className="machine-activity-member-text" title={member.line}>
         {member.line}
         {member.sessionId === undefined ? null : (
           <>
-            {" · "}
+            {member.line === undefined ? null : " · "}
             <SessionName sessionId={member.sessionId} />
           </>
         )}

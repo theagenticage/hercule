@@ -27,6 +27,7 @@ const SHAPES = {
   weekday: { weekday: "long" },
   shortWeekday: { weekday: "short" },
   day: { day: "numeric", month: "short" },
+  weekdayAndDay: { weekday: "short", day: "numeric", month: "short" },
   date: { year: "numeric", month: "numeric", day: "numeric" },
   stamp: {
     day: "numeric",
@@ -228,6 +229,44 @@ export const readCalendarDate = (
 };
 
 /**
+ * Formats the day an instant falls on in `timezone`, with its weekday:
+ * "Sun 1 Nov". Returns `undefined` in the same cases as `formatTimeContext`.
+ */
+const formatDayWithWeekday = (instant: Date, timezone: string): string | undefined => {
+  const part = buildPartReader("weekdayAndDay", instant, timezone);
+  if (part === undefined) return undefined;
+
+  const day = part("day");
+  if (day === "") return undefined;
+  return `${part("weekday")} ${day} ${part("month")}`;
+};
+
+/**
+ * Formats the date of `instant` relative to `now` in `timezone`, with
+ * `formatDate` writing any date that is neither today nor yesterday. The
+ * year is added when it differs from the year of `now`.
+ *
+ * Dates are compared as calendar dates in the zone, never by subtracting 24
+ * hours, because the day a clock moves for daylight saving time is 23 or 25
+ * hours long.
+ */
+const formatDateRelativeToNow = (
+  instant: Date,
+  timezone: string,
+  now: Date,
+  formatDate: (instant: Date, timezone: string) => string | undefined,
+): string | undefined => {
+  const date = readCalendarDate(instant, timezone);
+  const today = readCalendarDate(now, timezone);
+  if (date === undefined || today === undefined) return undefined;
+  if (date.dayNumber === today.dayNumber) return "Today";
+  if (date.dayNumber === today.dayNumber - 1) return "Yesterday";
+  const day = formatDate(instant, timezone);
+  if (day === undefined) return undefined;
+  return date.year === today.year ? day : `${day} ${String(date.year)}`;
+};
+
+/**
  * Formats the day stamp shown above the first message of each day in a
  * conversation, relative to `now` in `timezone`:
  *
@@ -235,21 +274,22 @@ export const readCalendarDate = (
  * - "4 Sep" for any other date in the year of `now`;
  * - "4 Sep 2025" for a date in another year.
  *
- * Dates are compared as calendar dates in the zone, never by subtracting 24
- * hours, because the day a clock moves for daylight saving time is 23 or 25
- * hours long. Returns `undefined` when either instant is not a valid date or
- * the zone cannot be formatted.
+ * Returns `undefined` when either instant is not a valid date or the zone
+ * cannot be formatted.
  */
-export const formatDayStamp = (instant: Date, timezone: string, now: Date): string | undefined => {
-  const date = readCalendarDate(instant, timezone);
-  const today = readCalendarDate(now, timezone);
-  if (date === undefined || today === undefined) return undefined;
-  if (date.dayNumber === today.dayNumber) return "Today";
-  if (date.dayNumber === today.dayNumber - 1) return "Yesterday";
-  const day = formatDay(instant, timezone);
-  if (day === undefined) return undefined;
-  return date.year === today.year ? day : `${day} ${String(date.year)}`;
-};
+export const formatDayStamp = (instant: Date, timezone: string, now: Date): string | undefined =>
+  formatDateRelativeToNow(instant, timezone, now, formatDay);
+
+/**
+ * Formats the day stamp like `formatDayStamp`, but names the weekday of any
+ * date that is neither today nor yesterday: "Sun 1 Nov", or "Sun 1 Nov 2025"
+ * in another year. Returns `undefined` in the same cases as `formatDayStamp`.
+ */
+export const formatDayStampWithWeekday = (
+  instant: Date,
+  timezone: string,
+  now: Date,
+): string | undefined => formatDateRelativeToNow(instant, timezone, now, formatDayWithWeekday);
 
 /** Formats the time context as the moment a screen counts from: "since Sunday 22:10". */
 export const formatSince = (instant: Date, timezone: string): string | undefined => {

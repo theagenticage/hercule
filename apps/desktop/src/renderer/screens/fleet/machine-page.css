@@ -212,10 +212,21 @@
   margin-top: 48px;
   scroll-margin-top: var(--fleet-header-clearance);
 }
-.machine-page-section > h3 {
+.machine-page-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   margin: 0 0 14px;
+}
+.machine-page-section-head h3 {
+  margin: 0;
   font-size: var(--t-14);
   font-weight: var(--w-bold);
+}
+.machine-page-section-head small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
 }
 
 /* ---------- Software ---------- */

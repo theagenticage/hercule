@@ -24,7 +24,12 @@ export type MachineActivityItem =
       readonly kind: "member";
       readonly key: string;
       readonly member: MachineActivityMember;
+      /** True for the last member of an unfolded entry, which has room below it before the next entry. */
+      readonly isLast: boolean;
     };
+
+/** Returns the key of the line for the entry with the key `entryKey`. */
+export const buildEntryItemKey = (entryKey: string): string => `entry:${entryKey}`;
 
 /**
  * Returns the lines of `days` in the order they are drawn: each day's heading,
@@ -43,19 +48,20 @@ export const buildMachineActivityItems = (
       const isOpen = entry.members.length > 1 && openEntryKeys.has(entry.key);
       items.push({
         kind: "entry",
-        key: `entry:${entry.key}`,
+        key: buildEntryItemKey(entry.key),
         entry,
         isOpen,
         joinsAbove: index > 0,
       });
       if (!isOpen) return;
-      for (const member of entry.members) {
+      entry.members.forEach((member, memberIndex) => {
         items.push({
           kind: "member",
           key: `member:${entry.key}:${String(member.eventId)}`,
           member,
+          isLast: memberIndex === entry.members.length - 1,
         });
-      }
+      });
     });
   }
   return items;

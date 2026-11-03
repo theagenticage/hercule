@@ -761,6 +761,8 @@ export {
   EventTaskFact,
   EventWithFacts,
   MAX_EVENT_SOURCE_LENGTH,
+  RUNNER_ACTIVITY_KINDS,
+  type RunnerActivityKind,
 } from "./groups/event";
 export {
   SUBSCRIPTION_SORT_FIELDS,

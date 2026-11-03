@@ -785,13 +785,14 @@ describe("preparation during pending disposal", () => {
       const refusal = await Effect.runPromise(world.manager.dispose(removal));
       expect(refusal.status, refusal.message).toBe("failed");
       arranged.wire.send(refusal);
-      await waitUntil("recorded the correlated refusal", async () =>
-        (await arranged.harness.audit("workspace.disposalRefused")).some(
+      const refused = await waitUntil("recorded the correlated refusal", async () =>
+        (await arranged.harness.audit("workspace.disposalRefused")).find(
           (entry) => entry.payload["workspaceId"] === workspace.id,
-        )
-          ? true
-          : undefined,
+        ),
       );
+      // The runner's own words sit beside the longer message, which ends with advice.
+      expect(refused.payload["runnerMessage"]).toBe(refusal.message);
+      expect(String(refused.payload["message"]).startsWith(String(refusal.message))).toBe(true);
       expect((await readWorkspace(arranged, workspace.id)).status).toBe("ready");
       expect(
         existsSync(

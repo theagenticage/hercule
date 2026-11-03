@@ -942,6 +942,8 @@ const make = Effect.gen(function* () {
           runnerId,
           requestId: report.requestId,
           message,
+          // The runner's own words, without the advice `message` ends with.
+          ...(report.message === undefined ? {} : { runnerMessage: report.message }),
         },
         at,
       });

@@ -12,9 +12,9 @@ const buildEntry = (key: string, memberCount: number): MachineActivityEntry => (
   problem: false,
   sentence: memberCount === 1 ? "Session spawned" : `${String(memberCount)} sessions spawned`,
   actor: { kind: "system" },
+  count: memberCount,
   members: Array.from({ length: memberCount }, (_, index) => ({
     eventId: Number(key) * 100 + index,
-    time: "09:12",
     line: "Session spawned",
   })),
 });
@@ -62,7 +62,17 @@ describe("buildMachineActivityItems", () => {
     ]);
   });
 
-  it("opens only an entry that folded several, whatever the keys say", () => {
+  it("marks the last member of an open entry", () => {
+    const items = buildMachineActivityItems(DAYS, new Set(["5"]));
+
+    expect(items.flatMap((item) => (item.kind === "member" ? [item.isLast] : []))).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it("opens only an entry that has several members, whatever the keys say", () => {
     const items = buildMachineActivityItems(DAYS, new Set(["4"]));
 
     expect(items.some((item) => item.kind === "member")).toBe(false);

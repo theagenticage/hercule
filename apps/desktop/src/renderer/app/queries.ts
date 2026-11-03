@@ -1760,22 +1760,9 @@ const MACHINE_ACTIVITY_PAGE_SIZE = 100;
 const MACHINE_RECENT_PAGE_SIZE = 50;
 
 /**
- * Returns the key of a read of the audit entries about the machine
- * `runnerId`: the runner's own key (`["runner", runnerId]`) and `read` after
- * it. Typed as the read-only key a query client takes, which the spread alone
- * does not give.
- */
-const buildMachineActivityKey = (runnerId: string, read: string): QueryKey => [
-  ...queryKeys.runner(runnerId),
-  read,
-];
-
-/**
  * Reads the first page of the audit entries about the machine `runnerId`,
  * newest first, for the machine page's Recent section. The Activity page
- * reads the same log with `machineActivityQuery`, as a read of its own: a push
- * that read this one again must not read every page the Activity page has
- * gathered.
+ * reads the same log with `machineActivityQuery`, as a read of its own.
  *
  * The key sits under the runner's own (`["runner", runnerId, ...]`), so a push
  * on the `runner` topic that names the machine, or names no runner, reads it
@@ -1786,7 +1773,7 @@ const buildMachineActivityKey = (runnerId: string, read: string): QueryKey => [
  */
 export const machineRecentActivityQuery = (client: HerculeClient, runnerId: string) =>
   queryOptions({
-    queryKey: buildMachineActivityKey(runnerId, "recent-activity"),
+    queryKey: [...queryKeys.runner(runnerId), "recent-activity"] as QueryKey,
     queryFn: () => client.event.query({ query: { runnerId, limit: MACHINE_RECENT_PAGE_SIZE } }),
     retry: isWorthRetrying,
     ...READ_ON_OPEN_OPTIONS,
@@ -1797,17 +1784,16 @@ export const machineRecentActivityQuery = (client: HerculeClient, runnerId: stri
  * at a time, for its Activity page. The page reads the next one as the user
  * nears the end of what is loaded.
  *
- * The key sits under the runner's own (`["runner", runnerId, ...]`), so a push
- * on the `runner` topic that names the machine, or names no runner, reads
- * every page loaded so far again. That is rare: a machine connects, goes
- * away, is changed by a user or starts refusing new sessions. Sessions and
- * workspaces push far more often and do not read it, so their entries show the
- * next time the page opens: `readInfiniteOnOpen` starts again from the first
- * page.
+ * The page reads the log when it opens and no other time: no push reads it
+ * again. The key is kept out of the runner's own (`["runner", runnerId, ...]`)
+ * on purpose, because a push on the `runner` topic would read every page
+ * loaded so far again, and a machine that connects and goes away pushes often.
+ * New entries show the next time the page opens: `readInfiniteOnOpen` starts
+ * again from the first page.
  */
 export const machineActivityQuery = (client: HerculeClient, runnerId: string) =>
   infiniteQueryOptions({
-    queryKey: buildMachineActivityKey(runnerId, "activity"),
+    queryKey: ["machine-activity", runnerId] as QueryKey,
     queryFn: ({ pageParam }) =>
       client.event.query({
         query: {

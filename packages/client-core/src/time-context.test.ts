@@ -13,6 +13,7 @@ import {
   readWallClock,
   formatDay,
   formatDayStamp,
+  formatDayStampWithWeekday,
   formatPreciseStamp,
   formatSince,
   formatStamp,
@@ -274,6 +275,45 @@ describe("formatDayStamp", () => {
     assert.isUndefined(formatDayStamp(new Date("not a date"), "UTC", NOW));
     assert.isUndefined(formatDayStamp(NOW, "UTC", new Date(Number.NaN)));
     assert.isUndefined(formatDayStamp(NOW, "Not/A_Zone", NOW));
+  });
+});
+
+describe("formatDayStampWithWeekday", () => {
+  const NOW = new Date("2026-11-03T10:00:00Z");
+
+  it('returns "Today" and "Yesterday" like formatDayStamp', () => {
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2026-11-03T06:00:00Z"), "UTC", NOW),
+      "Today",
+    );
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2026-11-02T23:59:00Z"), "UTC", NOW),
+      "Yesterday",
+    );
+  });
+
+  it("names the weekday of any other date, and the year when it is not this year", () => {
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2026-11-01T12:00:00Z"), "UTC", NOW),
+      "Sun 1 Nov",
+    );
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2025-12-29T12:00:00Z"), "UTC", NOW),
+      "Mon 29 Dec 2025",
+    );
+  });
+
+  it("reads the date in the given zone", () => {
+    // 03:30 UTC on 3 November is 19:30 on 2 November in Los Angeles.
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2026-11-03T03:30:00Z"), "America/Los_Angeles", NOW),
+      "Yesterday",
+    );
+  });
+
+  it("returns undefined for an invalid date or a zone this runtime cannot format", () => {
+    assert.isUndefined(formatDayStampWithWeekday(new Date("not a date"), "UTC", NOW));
+    assert.isUndefined(formatDayStampWithWeekday(NOW, "Not/A_Zone", NOW));
   });
 });
 

@@ -12,17 +12,22 @@ export interface ViewChoice<View extends string> {
  * pressing another calls `onPick` with its view. ← and → pick the view before
  * or after the pressed one and move focus to its button, as a segmented
  * control on the Mac does. At either end, the arrow keeps the view.
+ *
+ * The group has the class `className`, `seg` unless the caller draws the
+ * buttons itself.
  */
 export function ViewSwitch<View extends string>({
   label,
   choices,
   view,
   onPick,
+  className,
 }: {
   readonly label: string;
   readonly choices: ReadonlyArray<ViewChoice<View>>;
   readonly view: View;
   readonly onPick: (view: View) => void;
+  readonly className?: string;
 }): JSX.Element {
   const pickWithArrow = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -35,7 +40,7 @@ export function ViewSwitch<View extends string>({
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-view="${next.view}"]`)?.focus();
   };
   return (
-    <div className="seg" role="group" aria-label={label} onKeyDown={pickWithArrow}>
+    <div className={className ?? "seg"} role="group" aria-label={label} onKeyDown={pickWithArrow}>
       {choices.map((each) => (
         <button
           key={each.view}

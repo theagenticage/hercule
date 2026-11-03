@@ -28,17 +28,17 @@ afterEach(() => {
   localStorage.clear();
 });
 
-/** Seven entries, built oldest first: two from yesterday, then today's, with three sessions spawned in one minute. */
+/** Nine entries, built oldest first: three from yesterday, then today's, with three sessions spawned in one minute. */
 const buildSevenEntries = () => [
-  buildCameOnline(1500),
-  buildWentOffline(1000),
-  buildCameOnline(990),
-  buildStoppedNewWork(300),
-  buildSessionSpawned(120, "01a06d02-0000-7000-8000-0000000000a1"),
-  buildSessionSpawned(120, "01a06d02-0000-7000-8000-0000000000a2"),
-  buildSessionSpawned(120, "01a06d02-0000-7000-8000-0000000000a3"),
-  buildWentOffline(60),
-  buildCameOnline(30),
+  buildCameOnline(1, 1500),
+  buildWentOffline(2, 1000),
+  buildCameOnline(3, 990),
+  buildStoppedNewWork(4, 300),
+  buildSessionSpawned(5, 120, "01a06d02-0000-7000-8000-0000000000a1"),
+  buildSessionSpawned(6, 120, "01a06d02-0000-7000-8000-0000000000a2"),
+  buildSessionSpawned(7, 120, "01a06d02-0000-7000-8000-0000000000a3"),
+  buildWentOffline(8, 60),
+  buildCameOnline(9, 30),
 ];
 
 const openRecent = async (events = buildSevenEntries()) => {
@@ -57,11 +57,11 @@ describe("the Recent section", () => {
     await waitFor(() => expect(readEntries(recent)).not.toHaveLength(0));
 
     expect(readEntries(recent)).toEqual([
-      "13:30Came onlineby Hercule",
+      "13:30Back onlineby Hercule",
       "13:00Went offlineby Hercule",
       "12:003 sessions spawnedby HerculeShow 3",
       "09:00Set to take no new workby you",
-      "Yesterday, 21:30Came onlineby Hercule",
+      "Yesterday, 21:30Back onlineby Hercule",
     ]);
   });
 
@@ -80,10 +80,10 @@ describe("the Recent section", () => {
     expect(within(recent).getByRole("button", { name: "Hide" }).getAttribute("aria-expanded")).toBe(
       "true",
     );
-    expect(within(recent).getAllByText(/^Session spawned/)).toHaveLength(3);
+    expect(recent.querySelectorAll(".machine-activity-member")).toHaveLength(3);
 
     await userEvent.click(within(recent).getByRole("button", { name: "Hide" }));
-    expect(within(recent).queryAllByText(/^Session spawned/)).toHaveLength(0);
+    expect(recent.querySelectorAll(".machine-activity-member")).toHaveLength(0);
   });
 
   it("opens the Activity page from All activity", async () => {
@@ -94,13 +94,13 @@ describe("the Recent section", () => {
     expect(app.router.state.location.pathname).toBe(`/fleet/${ATLAS.id}/activity`);
   });
 
-  it("says so in one line, with no way to more, when nothing has happened", async () => {
+  it("says so in one line when nothing has happened, and still offers All activity", async () => {
     const { recent } = await openRecent([]);
     expect(await within(recent).findByText("Nothing has happened on atlas yet.")).toBeTruthy();
-    expect(within(recent).queryByRole("link", { name: /All activity/ })).toBeNull();
+    expect(within(recent).getByRole("link", { name: /All activity/ })).toBeTruthy();
   });
 
-  it("shows a failed read as a line with a Retry, and the rest of the page stays", async () => {
+  it("shows a failed read as a line with a Retry and All activity, and the rest of the page stays", async () => {
     await openMachineWithEvents(`/fleet/${ATLAS.id}`, [], {
       overrides: {
         "GET /api/v1/events": {
@@ -112,7 +112,33 @@ describe("the Recent section", () => {
     const recent = await screen.findByRole("region", { name: "Recent" });
     expect(await within(recent).findByRole("alert")).toBeTruthy();
     expect(within(recent).getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(within(recent).getByRole("link", { name: /All activity/ })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "atlas" })).toBeTruthy();
+  });
+
+  it("keeps the entries it has and adds a line with a Retry when a refresh fails", async () => {
+    const events = buildSevenEntries();
+    let isFailing = false;
+    const { app } = await openMachineWithEvents(`/fleet/${ATLAS.id}`, events, {
+      overrides: {
+        "GET /api/v1/events": () =>
+          isFailing
+            ? { status: 500, body: { error: { code: "internal", message: "Down" } } }
+            : { body: { items: events.toSorted((a, b) => b.id - a.id) } },
+      },
+    });
+    const recent = await screen.findByRole("region", { name: "Recent" });
+    await waitFor(() => expect(readEntries(recent)).toHaveLength(5));
+    await app.live.waitForFirstPushes();
+
+    isFailing = true;
+    app.live.pushInvalidation("runner", [ATLAS.id]);
+
+    const alert = await within(recent).findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't refresh the activity.");
+    expect(within(alert).getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(readEntries(recent)).toHaveLength(5);
+    expect(within(recent).getByRole("link", { name: /All activity/ })).toBeTruthy();
   });
 
   it("shows a change of the machine as soon as the runner topic pushes it", async () => {
@@ -121,7 +147,7 @@ describe("the Recent section", () => {
     await waitFor(() => expect(readEntries(recent)).not.toHaveLength(0));
     await app.live.waitForFirstPushes();
 
-    setEvents([...events, buildStoppedNewWork(0)]);
+    setEvents([...events, buildStoppedNewWork(10, 0)]);
     app.live.pushInvalidation("runner", [ATLAS.id]);
 
     await waitFor(() => {

@@ -71,6 +71,47 @@ export const EventHandling = Schema.Literals(EVENT_HANDLINGS);
 export type EventHandling = Schema.Schema.Type<typeof EventHandling>;
 
 /**
+ * The audit kinds a machine's activity shows: the changes to a runner, to a
+ * workspace on it and to a session on it. An entry of one of these kinds names
+ * its runner in `payload.runnerId`, and the writer copies that id into the
+ * event's `runner_id` column, so `event.query` can read one runner's activity
+ * as a single index range.
+ *
+ * Two families are left out on purpose:
+ *
+ * - `workspace.observed` is written on most observations of a workspace, and
+ *   would bury the rest of the activity.
+ * - `runner.joinToken.*` concerns a token, not a runner: no runner has joined
+ *   yet when a token is minted.
+ *
+ * Every other audit kind, and every other event, is stored with no runner.
+ * `event.query`'s `runnerId` returns only entries of these kinds.
+ */
+export const RUNNER_ACTIVITY_KINDS = [
+  "runner.joined",
+  "runner.stateChanged",
+  "runner.updated",
+  "runner.drained",
+  "runner.undrained",
+  "runner.placementsChanged",
+  "runner.crashLooping",
+  "runner.retired",
+  "workspace.created",
+  "workspace.disposalRequested",
+  "workspace.disposalRefused",
+  "workspace.deleted",
+  "workspace.detached",
+  "workspace.attachmentRetried",
+  "session.spawned",
+  "session.stopped",
+  "session.reconciled",
+  "session.archived",
+  "providerAccount.signedIn",
+] as const;
+
+export type RunnerActivityKind = (typeof RUNNER_ACTIVITY_KINDS)[number];
+
+/**
  * The longest `source` the filter accepts. A source is a plugin's id or a
  * core emitter's name, both far shorter.
  */

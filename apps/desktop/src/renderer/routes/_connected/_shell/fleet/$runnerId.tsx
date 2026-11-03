@@ -1,5 +1,5 @@
 import { useRef, useState, type JSX } from "react";
-import { noop, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
@@ -59,9 +59,8 @@ const SECTIONS = [
  * 24 hours and hour points of the last 14 days, for its graphs. They are read
  * only for a machine that exists, and a cached read is used as it is: a
  * `runnerMetrics` push brings them up to date (see `useRunnerMetricsLive`).
- * When no runner has
- * the id, or the runner is retired, the route shows `RunnerNotFound`: retired
- * machines are not shown anywhere on Fleet.
+ * When no runner has the id, or the runner is retired, the route shows
+ * `RunnerNotFound`: retired machines are not shown anywhere on Fleet.
  */
 export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
   staticData: { title: "Fleet" },
@@ -87,7 +86,7 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
       readOnOpen(queryClient, settingsQuery(client)),
       // Recent shows a failed read as a line of its own with a Retry, so a read that fails
       // must not fail the whole page.
-      readOnOpen(queryClient, machineRecentActivityQuery(client, runnerId)).catch(noop),
+      readOnOpen(queryClient, machineRecentActivityQuery(client, runnerId)).catch(() => undefined),
     ]);
   },
   component: MachinePage,
@@ -145,10 +144,13 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   return (
     <>
       <FleetHeader
-        place={{ page: "machine", machine: { name: page.head.name, kind: page.head.kind } }}
-        sections={SECTIONS}
-        activeSectionId={activeSectionId}
-        onJump={scrollToSection}
+        place={{
+          page: "machine",
+          machine: { name: page.head.name, kind: page.head.kind },
+          sections: SECTIONS,
+          activeSectionId,
+          onJump: scrollToSection,
+        }}
         onAddMachine={() => setAdding(true)}
       />
       <FleetScroll scrollRef={scrollRef}>

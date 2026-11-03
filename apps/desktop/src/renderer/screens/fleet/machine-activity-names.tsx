@@ -30,7 +30,7 @@ export const useRunWorkflowName = (runId: string | undefined): string | undefine
  * its name, "by Hercule" for the controller's own acts, or the label of
  * anything else (a run, a plugin).
  */
-export function MachineActivityBy({
+export function MachineActivityActorName({
   actor,
 }: {
   readonly actor: MachineActivityActor;

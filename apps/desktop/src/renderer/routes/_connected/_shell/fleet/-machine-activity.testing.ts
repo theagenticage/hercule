@@ -25,14 +25,13 @@ export const ATLAS: Runner = buildRunner({
 /** The day the tests run on, which `vi.useFakeTimers` sets in each test file. */
 export const NOW = new Date("2026-11-02T14:00:00.000Z");
 
-let nextEventId = 1;
-
 /**
- * Builds the audit entry of `kind` that happened `minutesAgo` minutes before
- * `NOW`. Entries are numbered in the order they are built, so build the
- * oldest first.
+ * Builds the audit entry of `kind` with the id `id` that happened `minutesAgo`
+ * minutes before `NOW`. The log is paged by id, newest first, so a newer entry
+ * needs a bigger id.
  */
 export const buildAuditEvent = (
+  id: number,
   kind: string,
   minutesAgo: number,
   over: {
@@ -40,14 +39,14 @@ export const buildAuditEvent = (
     readonly actor?: EventWithFacts["actor"];
   } = {},
 ): EventWithFacts => ({
-  id: nextEventId++,
+  id,
   source: "platform",
   connectionId: null,
   system: "hercule",
   kind,
   occurredAt: new Date(NOW.getTime() - minutesAgo * 60_000).toISOString(),
   receivedAt: new Date(NOW.getTime() - minutesAgo * 60_000).toISOString(),
-  dedupKey: `audit-${String(nextEventId)}`,
+  dedupKey: `audit-${String(id)}`,
   refs: [],
   url: null,
   payload: over.payload ?? {},
@@ -62,20 +61,23 @@ export const buildAuditEvent = (
 });
 
 /** Builds the entry for the machine going offline, `minutesAgo` before `NOW`: a problem, by the controller. */
-export const buildWentOffline = (minutesAgo: number): EventWithFacts =>
-  buildAuditEvent("runner.stateChanged", minutesAgo, { payload: { state: "offline" } });
+export const buildWentOffline = (id: number, minutesAgo: number): EventWithFacts =>
+  buildAuditEvent(id, "runner.stateChanged", minutesAgo, { payload: { state: "offline" } });
 
 /** Builds the entry for the machine coming online, `minutesAgo` before `NOW`, by the controller. */
-export const buildCameOnline = (minutesAgo: number): EventWithFacts =>
-  buildAuditEvent("runner.stateChanged", minutesAgo, { payload: { state: "online" } });
+export const buildCameOnline = (id: number, minutesAgo: number): EventWithFacts =>
+  buildAuditEvent(id, "runner.stateChanged", minutesAgo, { payload: { state: "online" } });
 
 /** Builds the entry for Stop new work, `minutesAgo` before `NOW`, by the user. */
-export const buildStoppedNewWork = (minutesAgo: number): EventWithFacts =>
-  buildAuditEvent("runner.drained", minutesAgo, { actor: "user" });
+export const buildStoppedNewWork = (id: number, minutesAgo: number): EventWithFacts =>
+  buildAuditEvent(id, "runner.drained", minutesAgo, { actor: "user" });
 
 /** Builds the entry for a session spawned for no run, `minutesAgo` before `NOW`, by the controller. */
-export const buildSessionSpawned = (minutesAgo: number, sessionId: string): EventWithFacts =>
-  buildAuditEvent("session.spawned", minutesAgo, { payload: { sessionId } });
+export const buildSessionSpawned = (
+  id: number,
+  minutesAgo: number,
+  sessionId: string,
+): EventWithFacts => buildAuditEvent(id, "session.spawned", minutesAgo, { payload: { sessionId } });
 
 /** What a test opens the machine's pages with. */
 export interface OpenedMachine {

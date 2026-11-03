@@ -224,12 +224,12 @@ export const IntakeList = memo(function IntakeList({
     (item: ListItem) => estimateItemHeight(heights, item),
     [heights],
   );
-  const { lines, totalSize, lastDrawnIndex, selectedIndex, scrollToSelected } = useVirtualLines(
+  const { lines, totalSize, lastDrawnIndex, selectedIndex, scrollToSelected } = useVirtualLines({
     items,
     scrollRef,
     estimateSize,
-    selectedId,
-  );
+    selectedKey: selectedId,
+  });
 
   useEffect(() => {
     if (selectedIndex < 0) return;

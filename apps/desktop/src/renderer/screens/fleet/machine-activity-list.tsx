@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useRef, type JSX, type ReactNode, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type JSX,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { MachineActivityDay } from "@hercule/client-core/machine-activity";
 import { useMeasuredAtTextSize } from "../../app/text-size";
 import { useVirtualLines } from "../use-virtual-lines";
@@ -6,7 +15,11 @@ import {
   readMachineActivityHeights,
   type MachineActivityHeights,
 } from "./machine-activity-heights";
-import { buildMachineActivityItems, type MachineActivityItem } from "./machine-activity-items";
+import {
+  buildEntryItemKey,
+  buildMachineActivityItems,
+  type MachineActivityItem,
+} from "./machine-activity-items";
 import {
   MachineActivityDayHeading,
   MachineActivityMemberRow,
@@ -23,7 +36,7 @@ const estimateItemHeight = (heights: MachineActivityHeights, item: MachineActivi
     case "entry":
       return heights.entry;
     case "member":
-      return heights.member;
+      return item.isLast ? heights.lastMember : heights.member;
   }
 };
 
@@ -39,6 +52,8 @@ const estimateItemHeight = (heights: MachineActivityHeights, item: MachineActivi
  *   view.
  * - `openEntryKeys` are the keys of the unfolded entries, and pressing an
  *   entry's Show or Hide calls `onToggleEntry` with its key.
+ * - The entry that holds the keyboard focus stays drawn when it scrolls out
+ *   of view, so its Show or Hide button keeps the focus.
  * - `onEndReached` is called once the last line is drawn, and again each time
  *   the days change while it still is. A list that holds no lines at all is
  *   at its end, too. The caller passes the call that reads the next page, and
@@ -70,14 +85,15 @@ export function MachineActivityList({
     (item: MachineActivityItem) => estimateItemHeight(heights, item),
     [heights],
   );
-  const { lines, totalSize, lastDrawnIndex } = useVirtualLines(
+  // The entry whose button holds the focus, which the virtual list keeps drawn.
+  const [focusedEntryKey, setFocusedEntryKey] = useState<string | null>(null);
+  const { lines, totalSize, lastDrawnIndex } = useVirtualLines({
     items,
     scrollRef,
     estimateSize,
-    null,
-    null,
-    listTop,
-  );
+    focusedKey: focusedEntryKey === null ? null : buildEntryItemKey(focusedEntryKey),
+    scrollMargin: listTop,
+  });
 
   const isEndDrawn = items.length === 0 || (lastDrawnIndex ?? -1) >= items.length - 1;
   useEffect(() => {
@@ -87,7 +103,19 @@ export function MachineActivityList({
   return (
     <>
       <div ref={headRef}>{head}</div>
-      <div ref={listRef} className="machine-activity" style={{ height: totalSize }}>
+      <div
+        ref={listRef}
+        className="machine-activity"
+        style={{ height: totalSize }}
+        onFocus={(event: FocusEvent<HTMLElement>) => {
+          setFocusedEntryKey(
+            event.target.closest<HTMLElement>("[data-entry-key]")?.dataset.entryKey ?? null,
+          );
+        }}
+        onBlur={(event: FocusEvent<HTMLElement>) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setFocusedEntryKey(null);
+        }}
+      >
         {lines.map((line) =>
           line.kind === "gap" ? (
             <div key={line.key} style={{ height: line.height }} aria-hidden="true" />
@@ -123,6 +151,6 @@ function MachineActivityLine({
         />
       );
     case "member":
-      return <MachineActivityMemberRow member={item.member} />;
+      return <MachineActivityMemberRow member={item.member} isLast={item.isLast} />;
   }
 }

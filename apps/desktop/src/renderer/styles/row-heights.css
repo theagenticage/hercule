@@ -125,23 +125,29 @@
 
 /* ---------- A machine's activity ---------- */
 
-/* A day's heading, with the space above it. */
+/* A day's heading: one small line between 23px above and 9px below. */
 @property --fleet-activity-height-day {
   syntax: "<length>";
   inherits: true;
-  initial-value: 36px;
+  initial-value: 48px;
 }
-/* An entry: one line of text between 8px above and below. */
+/* An entry: one line of text between 8px above and 9px below. */
 @property --fleet-activity-height-entry {
   syntax: "<length>";
   inherits: true;
-  initial-value: 34px;
+  initial-value: 35px;
 }
-/* A line of an unfolded entry: one small line between 3px above and below. */
+/* A line of an unfolded entry: one small line and 3px below it. */
 @property --fleet-activity-height-member {
   syntax: "<length>";
   inherits: true;
-  initial-value: 22px;
+  initial-value: 19px;
+}
+/* The last line of an unfolded entry: a line of an entry and 9px more below it. */
+@property --fleet-activity-height-last-member {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 28px;
 }
 
 :root {
@@ -164,7 +170,8 @@
 
   --model-browser-height-row: calc(46px + 2 * var(--text-size-step));
 
-  --fleet-activity-height-day: calc(var(--line-16) + 20px);
-  --fleet-activity-height-entry: calc(var(--line-18) + 16px);
-  --fleet-activity-height-member: calc(var(--line-16) + 6px);
+  --fleet-activity-height-day: calc(var(--line-16) + 32px);
+  --fleet-activity-height-entry: calc(var(--line-18) + 17px);
+  --fleet-activity-height-member: calc(var(--line-16) + 3px);
+  --fleet-activity-height-last-member: calc(var(--line-16) + 12px);
 }

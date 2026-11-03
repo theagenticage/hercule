@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import type { JSX } from "react";
 import {
   MACHINE_ACTIVITY_FILTERS,
   type MachineActivityFilter,
@@ -14,7 +14,7 @@ const FILTER_CHOICES = MACHINE_ACTIVITY_FILTERS.map(({ filter, label }) => ({
 
 /**
  * Renders the top of the Activity page: the heading "Activity", one line on
- * what the page lists, and the filters as a segmented control. Pressing a
+ * what the page lists, and the filters as a row of flat buttons. Pressing a
  * filter calls `onPickFilter` with it.
  */
 export function MachineActivityHead({
@@ -33,52 +33,29 @@ export function MachineActivityHead({
         What the controller recorded about {machineName}: its connection, its settings, the sessions
         it started and the workspaces it removed.
       </p>
-      <ViewSwitch label="Show" choices={FILTER_CHOICES} view={filter} onPick={onPickFilter} />
+      <ViewSwitch
+        label="Show"
+        choices={FILTER_CHOICES}
+        view={filter}
+        onPick={onPickFilter}
+        className="machine-activity-filters"
+      />
     </header>
   );
 }
 
-/** Returns the line that tells the user why no entry shows for `filter` on the machine `machineName`. */
-export const describeEmptyActivity = (
-  filter: MachineActivityFilter,
-  machineName: string,
-): string => {
-  switch (filter) {
-    case "all":
-      return `Nothing has happened on ${machineName} yet.`;
-    case "problems":
-      return `No problems on ${machineName}.`;
-    case "connection":
-      return `No connection changes on ${machineName}.`;
-    case "sessions":
-      return `No session activity on ${machineName}.`;
-    case "workspaces":
-      return `No workspace activity on ${machineName}.`;
-    case "settings":
-      return `No settings changes on ${machineName}.`;
-  }
-};
-
 /**
- * Renders a quiet line under or in place of the entries, such as "Reading
- * older activity…". With `onRetry`, the line is an alert about a failed read,
- * with a Retry button.
+ * Returns the line shown when the page stopped reading older pages on its own
+ * because `filter` found nothing new in the `loadedCount` log entries read so
+ * far. `hasEntries` is whether the list shows any entry. The line does not say
+ * how far back the log reaches.
  */
-export function MachineActivityNote({
-  children,
-  onRetry,
-}: {
-  readonly children: ReactNode;
-  readonly onRetry: (() => void) | undefined;
-}): JSX.Element {
-  return onRetry === undefined ? (
-    <p className="machine-activity-note">{children}</p>
-  ) : (
-    <p className="machine-activity-note" role="alert">
-      <span>{children}</span>
-      <button type="button" className="btn btn--sm btn--quiet" onClick={onRetry}>
-        Retry
-      </button>
-    </p>
-  );
-}
+export const describeBoundedActivity = (
+  filter: MachineActivityFilter,
+  loadedCount: number,
+  hasEntries: boolean,
+): string => {
+  const latest = `in the latest ${String(loadedCount)} entries`;
+  if (hasEntries) return `Nothing older matched ${latest}.`;
+  return filter === "problems" ? `No problems ${latest}.` : `Nothing matched ${latest}.`;
+};

@@ -147,7 +147,12 @@ export function ModelBrowserList({
   }, [models]);
   // The row that holds the focus, which the virtual list keeps mounted.
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
-  const { lines, totalSize } = useVirtualLines(rows, scrollRef, estimateSize, null, focusedKey);
+  const { lines, totalSize } = useVirtualLines({
+    items: rows,
+    scrollRef,
+    estimateSize,
+    focusedKey,
+  });
   return (
     <div
       className="mb-main"
