@@ -19,6 +19,7 @@ import { NotifierLayer } from "../notifications";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { readEventsOfKind } from "../events/testing";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
+import { RunnerMetricsServiceLayer } from "../runner-metrics";
 import { Settings, SettingsLayer } from "../settings";
 import { runnerRepository } from "./repository";
 import {
@@ -29,8 +30,10 @@ import {
 } from "./index";
 
 const layer = RunnerServiceLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(JoinTokensLayer, SettingsLayer)),
+  Layer.provideMerge(JoinTokensLayer),
   Layer.provideMerge(RunnerConnectionsLayer),
+  Layer.provideMerge(RunnerMetricsServiceLayer),
+  Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(ServingPromotionStateLayer),
   Layer.provideMerge(AuditLogLayer),

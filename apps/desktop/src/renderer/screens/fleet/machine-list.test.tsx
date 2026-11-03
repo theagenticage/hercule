@@ -94,6 +94,18 @@ describe("MachineList", () => {
     expect(within(orbit!).getByRole("button", { name: "Clean up…" })).toBeTruthy();
   });
 
+  it("draws the forecast under the disk meter in the you colour in place of the free space", () => {
+    const forecast: MachineSummary = {
+      ...NEARLY_FULL_DISK_MACHINE,
+      diskCaption: { text: "Limit in 12 days", isForecast: true },
+    };
+    const { rows } = renderList([forecast]);
+    const disk = within(rows()[0]!).getAllByRole("cell")[4]!;
+
+    expect(within(disk).getByText("Limit in 12 days").className).toBe("is-you");
+    expect(within(disk).queryByText("69.8 GB free")).toBeNull();
+  });
+
   it("words the sessions against the cap, with the waiting ones in the you colour, and a dash while away", () => {
     const { rows } = renderList([BUSY_MACHINE, OFFLINE_MACHINE]);
     // The cells are the dot, Machine, Sessions: the third.

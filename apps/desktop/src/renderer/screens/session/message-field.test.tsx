@@ -6,7 +6,7 @@
  */
 import { createRef, useEffect, useState, type ComponentProps } from "react";
 import { describe, expect, it, vi, type Mock } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   EMPTY_REQUEST_DRAFT,
@@ -208,6 +208,20 @@ function RequestAnswers({
 }
 
 const readField = (): HTMLElement => screen.getByRole("textbox", { name: "Message" });
+
+/**
+ * Focuses the field and waits until the caret is inside its text. ProseMirror
+ * moves the caret to the end of the text a moment after the focus event, from
+ * a timer and a `selectionchange` event. A key pressed before that acts on the
+ * start of the field: a Backspace deletes nothing and a letter lands in front
+ * of the text. On a busy machine a key can come first.
+ */
+const focusFieldAtItsText = async (): Promise<void> => {
+  readField().focus();
+  await waitFor(() => {
+    expect(window.getSelection()?.anchorNode).not.toBe(readField());
+  });
+};
 
 /** Returns a clipboard that holds `text` and `html`, and no files. */
 const buildClipboard = (text: string, html = ""): object => ({
@@ -434,7 +448,7 @@ describe("the message field", () => {
     const user = userEvent.setup();
     renderField({ text: "Draft\n\nend" });
     expect(readFieldText(readField())).toBe("Draft\n\nend");
-    readField().focus();
+    await focusFieldAtItsText();
     await user.keyboard("!");
     expect(readFieldText(readField())).toBe("Draft\n\nend!");
   });
@@ -525,7 +539,7 @@ describe("the message field", () => {
     it("does not bring the previous text back with undo", async () => {
       const user = userEvent.setup();
       render(<Switching onTextChange={vi.fn()} />);
-      readField().focus();
+      await focusFieldAtItsText();
       // The draft is deleted, so the answer starts empty as well: the field
       // has no text to replace, and only the history can leak the draft.
       await user.keyboard("{Backspace>10/}");
@@ -548,7 +562,7 @@ describe("the message field", () => {
     it("forgets the undo history even when the text stays the same", async () => {
       const user = userEvent.setup();
       render(<Switching onTextChange={vi.fn()} />);
-      readField().focus();
+      await focusFieldAtItsText();
       await user.keyboard("!");
       fireEvent.click(screen.getByRole("button", { name: "Same text" }));
       undo();

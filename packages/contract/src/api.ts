@@ -34,6 +34,7 @@ import { project } from "./groups/project";
 import { resource } from "./groups/resource";
 import { run } from "./groups/run";
 import { runner } from "./groups/runner";
+import { runnerMetrics } from "./groups/runner-metrics";
 import { secret } from "./groups/secret";
 import { session } from "./groups/session";
 import { settings } from "./groups/settings";
@@ -76,6 +77,7 @@ export const api = HttpApi.make("hercule")
     eventKind,
     run,
     runner,
+    runnerMetrics,
     plugin,
     harness,
     provider,

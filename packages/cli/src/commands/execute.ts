@@ -500,7 +500,10 @@ export const execute = async (
   const inPath = command.positionals.filter((field) => field.carriedIn === "path");
   const writtenParams: Record<string, unknown> = {};
   const writtenPayload: Record<string, unknown> = { ...args.payload };
+  const writtenQuery: Record<string, unknown> = { ...args.query };
   for (const [index, field] of command.positionals.entries()) {
+    // An optional positional the command line left out sends nothing.
+    if (args.positionals[index] === undefined) continue;
     // Check every positional against its field here, while a failure is still
     // a usage error and nothing has been sent. A numeric path parameter is the
     // value itself, never a tail of a longer id: the event log numbers its
@@ -508,10 +511,11 @@ export const execute = async (
     // A list positional is the last one and takes every word left.
     const value = field.repeated
       ? args.positionals.slice(index).map((text) => coerceFieldValue(field, text, command.spelling))
-      : coerceFieldValue(field, args.positionals[index]!, command.spelling);
-    // A positional is a route parameter or a payload field, and is sent in
-    // the part of the request its field declares.
+      : coerceFieldValue(field, args.positionals[index], command.spelling);
+    // A positional is a route parameter, a payload field or an optional query
+    // parameter, and is sent in the part of the request its field declares.
     if (field.carriedIn === "payload") writtenPayload[field.name] = value;
+    else if (field.carriedIn === "query") writtenQuery[field.name] = value;
     else writtenParams[field.name] = value;
   }
   // A path parameter is resolved through a list of its own, never one read
@@ -531,8 +535,8 @@ export const execute = async (
   const query: Record<string, unknown> = await resolveTails(
     client,
     command,
-    command.query,
-    { ...args.query },
+    [...command.query, ...command.positionals.filter((field) => field.carriedIn === "query")],
+    writtenQuery,
     params,
   );
 

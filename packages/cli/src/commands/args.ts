@@ -53,11 +53,16 @@ export const formatFieldName = (field: Field): string =>
       : `--${field.spelling}`;
 
 /**
- * Returns how a positional is shown in usage lines: `<signal-id>`, or
- * `<signal-id>...` for a list positional, which takes one or more words.
+ * Returns how a positional is shown in usage lines: `<signal-id>`,
+ * `<signal-id>...` for a list positional, which takes one or more words, or
+ * `[<runner-id>]` for one that may be left out.
  */
 export const formatPositionalShape = (field: Field): string =>
-  field.repeated ? `<${field.spelling}>...` : `<${field.spelling}>`;
+  field.optional
+    ? `[<${field.spelling}>]`
+    : field.repeated
+      ? `<${field.spelling}>...`
+      : `<${field.spelling}>`;
 
 /**
  * Converts the text given for a field into the field's value. Throws a
@@ -86,15 +91,18 @@ export const coerceFieldValue = (field: Field, text: string, help: string): unkn
       throw new UsageError(`${formatFieldName(field)}: ${refusal}`, help);
     }
   }
-  if (field.choices !== undefined && !field.choices.includes(text)) {
+  if (field.choices !== undefined && !field.choices.has(text)) {
     throw new UsageError(
-      `${formatFieldName(field)}: ${text} is not one of ${field.choices.join(", ")}`,
+      `${formatFieldName(field)}: ${text} is not one of ${[...field.choices.keys()].join(", ")}`,
       help,
     );
   }
+  // The schema's own value for a choice, which differs from the typed one
+  // when a camelCase value is typed in kebab case.
+  const choice = field.choices?.get(text);
   switch (field.kind) {
     case "string":
-      return text;
+      return choice ?? text;
     case "number": {
       const value = Number(text);
       if (!Number.isFinite(value))
@@ -386,6 +394,14 @@ export const parseArguments = async (
     );
   }
 
+  // A flag with a default takes it when the command line left the flag out.
+  for (const field of [...command.payload, ...command.query]) {
+    const into = field.carriedIn === "payload" ? payload : query;
+    if (field.defaultText !== undefined && !(field.name in into)) {
+      assignFieldValue(into, field, parseWrittenValue(field, field.defaultText, help), help);
+    }
+  }
+
   // A required content field is always read; an optional one only when its
   // marker was given, so an empty pipe never clears a field nobody named.
   const reading = command.payload.filter(
@@ -397,14 +413,19 @@ export const parseArguments = async (
   // A list positional is always the last, and takes every word left, one
   // or more.
   const takesList = command.positionals.at(-1)?.repeated === true;
+  const required = command.positionals.filter((field) => !field.optional).length;
   if (
     takesList
-      ? positionals.length < command.positionals.length
-      : positionals.length !== command.positionals.length
+      ? positionals.length < required
+      : positionals.length < required || positionals.length > command.positionals.length
   ) {
     const expected = command.positionals.map(formatPositionalShape).join(" ");
+    const count =
+      required === command.positionals.length
+        ? String(required)
+        : `${required} to ${command.positionals.length}`;
     throw new UsageError(
-      `${help} takes ${command.positionals.length}${takesList ? " or more" : ""} argument(s): ${expected || "none"}`,
+      `${help} takes ${count}${takesList ? " or more" : ""} argument(s): ${expected || "none"}`,
       help,
     );
   }

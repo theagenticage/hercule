@@ -92,9 +92,15 @@ import {
   type FetchLike,
   type HerculeClient,
   type Live,
+  queryKeys,
   type RecentModel,
   type ThreadPicks,
 } from "@hercule/client-core";
+import {
+  buildMachineFiveMinuteScope,
+  buildMachineHourScope,
+  FLEET_HOUR_METRICS_SCOPE,
+} from "@hercule/client-core/metrics-history";
 import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
 import type { Bridge } from "../../ipc/bridge";
 import {
@@ -789,6 +795,17 @@ const seedQueryCache = (
     queryClient.setQueryData(harnessesQuery(client).queryKey, fleet.harnesses);
     queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
     queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
+    const { fiveMinutesByRunner, hoursByRunner, fleetHours } = fleet.metrics;
+    queryClient.setQueryData(queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE), fleetHours);
+    for (const [runnerId, history] of Object.entries(fiveMinutesByRunner)) {
+      queryClient.setQueryData(
+        queryKeys.runnerMetrics(buildMachineFiveMinuteScope(runnerId)),
+        history,
+      );
+    }
+    for (const [runnerId, history] of Object.entries(hoursByRunner)) {
+      queryClient.setQueryData(queryKeys.runnerMetrics(buildMachineHourScope(runnerId)), history);
+    }
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);

@@ -1,5 +1,13 @@
 import type { JSX, ReactNode } from "react";
 import type { MachineInstruments, MeterInstrument } from "@hercule/client-core/machine-page";
+import type { MachineGraphs } from "@hercule/client-core/machine-graphs";
+import {
+  CpuGraphFigure,
+  DiskGraphFigure,
+  MemoryGraphFigure,
+  SessionsGraphFigure,
+  UnavailableGraphFrame,
+} from "./machine-graph";
 import { GaugeValue, Meter } from "./machine-parts";
 import { SessionsFigure } from "./sessions-drawing";
 import "./machine-page.css";
@@ -7,16 +15,24 @@ import "./machine-page.css";
 /**
  * Renders one instrument: its label, its big value with the unit in small
  * after it, what draws it (`children`: a meter, or the sessions' drawing),
- * and the note under that. The value and the meter take the colour of the
- * instrument's level.
+ * its graph (`graph`), and the note under that. The value and the meter take
+ * the colour of the instrument's level. `note` is `null` when the graph is an
+ * unavailable frame, which shows the note itself. `forecastText` is the line under the note that says
+ * when the disk reaches its limit.
  */
 function Instrument({
   label,
   instrument,
+  note,
+  forecastText,
+  graph,
   children,
 }: {
   readonly label: string;
-  readonly instrument: Pick<MeterInstrument, "value" | "unit" | "level" | "note">;
+  readonly instrument: Pick<MeterInstrument, "value" | "unit" | "level">;
+  readonly note: string | null;
+  readonly forecastText: string | null;
+  readonly graph: ReactNode;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -24,7 +40,11 @@ function Instrument({
       <span className="machine-page-instrument-label">{label}</span>
       <GaugeValue gauge={instrument} />
       {children}
-      <span className="machine-page-instrument-note">{instrument.note}</span>
+      {graph}
+      {note === null ? null : <span className="machine-page-instrument-note">{note}</span>}
+      {forecastText === null ? null : (
+        <span className="machine-page-instrument-forecast">{forecastText}</span>
+      )}
     </div>
   );
 }
@@ -32,7 +52,12 @@ function Instrument({
 /**
  * Renders the four instruments of a machine's page, in a row: Sessions, CPU,
  * Memory and Disk. Sessions is drawn as the cards draw it, the others as a
- * meter.
+ * meter. Each has its graph between the meter and the note (`graphs`).
+ *
+ * - The Disk graph is marigold while the disk gauge is marigold or red. Its
+ *   forecast, when there is one, is a line of its own under the note.
+ * - A graph with nothing to draw shows the instrument's note in its frame, and
+ *   the note line under it is left out, so the tile never says it twice.
  *
  * An away machine (its Sessions drawing says so) is drawn in quieter inks, as
  * on its card, and its Sessions drawing is an outline. The instruments
@@ -41,23 +66,67 @@ function Instrument({
  */
 export function MachinePageInstruments({
   instruments,
+  graphs,
 }: {
   readonly instruments: MachineInstruments;
+  readonly graphs: MachineGraphs;
 }): JSX.Element {
   const { sessions, cpu, memory, disk } = instruments;
   return (
     <div className={`machine-page-instruments-box${sessions.drawing.isAway ? " is-away" : ""}`}>
       <div className="machine-page-instruments">
-        <Instrument label="Sessions" instrument={sessions}>
+        <Instrument
+          label="Sessions"
+          instrument={sessions}
+          note={sessions.note}
+          forecastText={null}
+          graph={<SessionsGraphFigure graph={graphs.sessions} />}
+        >
           <SessionsFigure drawing={sessions.drawing} size="card" />
         </Instrument>
-        <Instrument label="CPU" instrument={cpu}>
+        <Instrument
+          label="CPU"
+          instrument={cpu}
+          note={graphs.cpu.kind === "drawn" ? cpu.note : null}
+          forecastText={null}
+          graph={
+            graphs.cpu.kind === "drawn" ? (
+              <CpuGraphFigure graph={graphs.cpu} />
+            ) : (
+              <UnavailableGraphFrame note={cpu.note} />
+            )
+          }
+        >
           <Meter share={cpu.share} level={cpu.level} />
         </Instrument>
-        <Instrument label="Memory" instrument={memory}>
+        <Instrument
+          label="Memory"
+          instrument={memory}
+          note={graphs.memory.kind === "drawn" ? memory.note : null}
+          forecastText={null}
+          graph={
+            graphs.memory.kind === "drawn" ? (
+              <MemoryGraphFigure graph={graphs.memory} />
+            ) : (
+              <UnavailableGraphFrame note={memory.note} />
+            )
+          }
+        >
           <Meter share={memory.share} level={memory.level} />
         </Instrument>
-        <Instrument label="Disk" instrument={disk}>
+        <Instrument
+          label="Disk"
+          instrument={disk}
+          note={graphs.disk.kind === "drawn" ? disk.note : null}
+          forecastText={graphs.disk.kind === "drawn" ? graphs.disk.forecastText : null}
+          graph={
+            graphs.disk.kind === "drawn" ? (
+              <DiskGraphFigure graph={graphs.disk} tone={disk.level === "normal" ? "ink" : "you"} />
+            ) : (
+              <UnavailableGraphFrame note={disk.note} />
+            )
+          }
+        >
           <Meter share={disk.share} level={disk.level} />
         </Instrument>
       </div>

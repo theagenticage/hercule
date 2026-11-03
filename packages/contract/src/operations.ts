@@ -448,6 +448,12 @@ const TABLE = {
     path: "/api/v1/runners/join-tokens/:id",
   },
 
+  "runnerMetrics.query": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/runner-metrics",
+  },
+
   "plugin.query": { requires: "infra.read", method: "GET", path: "/api/v1/plugins" },
   "plugin.read": { requires: "infra.read", method: "GET", path: "/api/v1/plugins/:id" },
   "plugin.enable": {

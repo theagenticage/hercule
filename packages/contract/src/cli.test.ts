@@ -178,6 +178,7 @@ const COMMANDS: Record<string, string> = {
   "runner.query": "runner list",
   "runner.read": "runner read",
   "runner.update": "runner update",
+  "runnerMetrics.query": "runner metrics",
   "runner.drain": "runner drain",
   "runner.undrain": "runner undrain",
   "runner.retire": "runner retire",
@@ -401,6 +402,7 @@ const RESOLVES: Record<string, string> = {
 
   "runner.read id": "runner.query",
   "runner.update id": "runner.query",
+  "runnerMetrics.query runnerId": "runner.query",
   "runner.drain id": "runner.query",
   "runner.undrain id": "runner.query",
   "runner.retire id": "runner.query",

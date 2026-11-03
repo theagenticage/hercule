@@ -70,8 +70,14 @@ export interface Field {
   readonly optional: boolean;
   /** Whether the field accepts `null`, which is written `--field null` on the command line. */
   readonly nullable: boolean;
-  /** The closed set of accepted values, when the schema declares one. */
-  readonly choices: ReadonlyArray<string> | undefined;
+  /**
+   * The closed set of accepted values, when the schema declares one, from the
+   * word as it is typed to the schema's own value. A camelCase value is typed
+   * in kebab case, as a flag name is, so the two differ for it only.
+   */
+  readonly choices: ReadonlyMap<string, string> | undefined;
+  /** The text used when the flag is left out, from the field's CLI row. */
+  readonly defaultText: string | undefined;
   /**
    * Whether the field holds a Hercule id. The schema decides: the field's
    * type is the contract's `Id`, not a name or free text that happens to be in
@@ -275,6 +281,18 @@ const isRecordOfText = (ast: Ast): boolean =>
   ast.indexSignatures[0]!.parameter._tag === "String" &&
   ast.indexSignatures[0]!.type._tag === "String";
 
+/** Returns how a closed set's value is typed: a camelCase value in kebab case, any other as it is. */
+const spellChoice = (value: string): string =>
+  /^[a-z][a-zA-Z0-9]*$/.test(value) ? toKebabCase(value) : value;
+
+/** Returns the closed set of a type as a map from the typed word to the value, or `undefined` when the type is not one. */
+const readChoices = (ast: Ast): ReadonlyMap<string, string> | undefined => {
+  const literals = readStringLiterals(ast);
+  return literals === undefined
+    ? undefined
+    : new Map(literals.map((literal) => [spellChoice(literal), literal]));
+};
+
 /** Converts a camelCase field name to kebab case: `sessionId` becomes `session-id`. */
 const toKebabCase = (name: string): string =>
   name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
@@ -314,9 +332,12 @@ const buildField = (
     // A row can make a field required on the command line even when the
     // operation's schema makes it optional. This is for a field that is the
     // only way to pass its value on the command line.
-    optional: ast.context?.isOptional === true && !("required" in row && row.required === true),
+    optional:
+      (ast.context?.isOptional === true && !("required" in row && row.required === true)) ||
+      "default" in row,
     nullable: isNullable(ast) || isNullable(value),
-    choices: readStringLiterals(stripNull(value)),
+    choices: readChoices(stripNull(value)),
+    defaultText: "default" in row ? row.default : undefined,
     holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
     uploads: "upload" in row && row.upload === true,
@@ -365,8 +386,8 @@ const buildFields = (
       // A positional is a route parameter or a payload field. A positional
       // query parameter would be parsed and then sent nowhere, so the table
       // is wrong, and this says so.
-      if (carriedIn === "query" && "positional" in row) {
-        throw new Error(`${id}: ${name} is a query parameter and cannot be a bare word`);
+      if (carriedIn === "query" && "positional" in row && type.context?.isOptional !== true) {
+        throw new Error(`${id}: ${name} is a required query parameter and cannot be a bare word`);
       }
       // A field that takes named values is repeatable. As a bare word it
       // would take every word after it, so the table is wrong.
@@ -513,6 +534,17 @@ const buildCommands = (): ReadonlyArray<Command> => {
       ) {
         throw new Error(
           `${id}: ${folder.name} reads a skill folder, so it must be a query field and the only positional, and the operation can have no payload fields`,
+        );
+      }
+      // A positional that may be left out must come after the required ones,
+      // or the words given could not tell which one they are.
+      const lateRequired = positionals.findIndex(
+        (field, index) =>
+          !field.optional && positionals.slice(0, index).some((one) => one.optional),
+      );
+      if (lateRequired !== -1) {
+        throw new Error(
+          `${id}: ${positionals[lateRequired]!.name} is required but follows an optional positional`,
         );
       }
       // A list positional takes every word left, so a positional after it

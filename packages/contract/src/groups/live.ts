@@ -62,6 +62,9 @@ export const MUTABLE_LIVE_TOPICS = [
   "connection",
   "notification",
   "runner",
+  // A push names the runners a new Runner Metrics row was written for, once
+  // a minute per runner. Only screens that draw metrics subscribe.
+  "runnerMetrics",
   "workspace",
   "plugin",
   "provider",

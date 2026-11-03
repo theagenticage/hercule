@@ -1,0 +1,95 @@
+/* The graphs of a machine's instruments. The strokes, fills and dashes are the
+   fleet prototype's sparkline (`fx-spark*`), and the Sessions, CPU and Memory
+   graphs draw the same way. Every class starts with `machine-graph`. */
+
+.machine-graph {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+.machine-graph path {
+  vector-effect: non-scaling-stroke;
+}
+.machine-graph-line {
+  fill: none;
+  stroke: color-mix(in oklab, var(--ink) 55%, transparent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.machine-graph-area {
+  fill: color-mix(in oklab, var(--ink) 6%, transparent);
+  stroke: none;
+}
+/* A band is stronger than the area under a line, because it carries a value of
+   its own (the peak, the highest memory) and sits over empty ground. */
+.machine-graph-band {
+  fill: color-mix(in oklab, var(--ink) 12%, transparent);
+  stroke: none;
+}
+/* Where sessions waited. Solid marigold, as the prototype's day strip. */
+.machine-graph-waiting {
+  fill: var(--you);
+  stroke: none;
+}
+/* A run of one point has no area, so it is a vertical stroke in the band's own ink. */
+.machine-graph-band-single,
+.machine-graph-waiting-single {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.machine-graph-band-single {
+  stroke: color-mix(in oklab, var(--ink) 12%, transparent);
+}
+.machine-graph-waiting-single {
+  stroke: var(--you);
+}
+.machine-graph-forecast {
+  fill: none;
+  stroke: color-mix(in oklab, var(--ink) 55%, transparent);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+/* The reference lines are dashed 2 3: the session cap in ink, the memory
+   threshold in marigold, and the memory and disk limits in red. They are
+   mixed with transparent instead of dimmed with opacity. */
+.machine-graph-cap,
+.machine-graph-you-line,
+.machine-graph-limit {
+  fill: none;
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+.machine-graph-cap {
+  stroke: color-mix(in oklab, var(--ink) 45%, transparent);
+}
+.machine-graph-you-line {
+  stroke: color-mix(in oklab, var(--you) 75%, transparent);
+}
+.machine-graph-limit {
+  stroke: color-mix(in oklab, var(--fail) 75%, transparent);
+}
+.machine-graph--you .machine-graph-line,
+.machine-graph--you .machine-graph-forecast {
+  stroke: var(--you);
+}
+.machine-graph--you .machine-graph-area {
+  fill: color-mix(in oklab, var(--you) 16%, transparent);
+}
+
+/* The frame of a graph with nothing to draw: a graph's height, with the same
+   hairline the quiet meters of an away machine have. */
+.machine-graph-frame {
+  display: grid;
+  align-content: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}

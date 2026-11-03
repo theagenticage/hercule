@@ -212,8 +212,12 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     contentSelector: ".machine-page .machine-page-sw-row",
     nonTextParts: [
       { selector: ".machine-page-number-field", kind: "boundary" },
-      { selector: ".toggle", kind: "boundary" },
       { selector: ".machine-page-head .fleet-dot", kind: "mark" },
+      // The graphs are not listed: a `mark` passes by covering as many
+      // contrasting pixels as its box's width plus height, which a 1.5px line
+      // across a graph cannot do (three of the four lines and the waiting band
+      // fail it). The Settings toggle is not listed either: it is below the
+      // captured window now that the graphs make the page taller.
     ],
   },
   {

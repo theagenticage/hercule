@@ -1716,6 +1716,8 @@ export const buildConversationHandlers = (
  * - `POST /api/v1/auth/ws-ticket` answers with a ticket, so the live
  *   connection opens.
  * - The sidebar's reads answer from `NO_SIDEBAR_RECORDS`.
+ * - `GET /api/v1/runner-metrics` answers an empty page, because both Fleet
+ *   pages read their graphs' history as they open.
  *
  * Any other unstubbed path returns 404, so a test that forgot a route notices.
  */
@@ -1723,6 +1725,7 @@ export const stubApi = (handlers: Readonly<Record<string, Handler>> = {}): reado
   const { fetch, calls } = createApiStub({
     "GET /api/v1/setup": { body: { complete: true } },
     "POST /api/v1/auth/ws-ticket": { body: { ticket: "ws-ticket" } },
+    "GET /api/v1/runner-metrics": { body: { items: [] } },
     ...buildSidebarHandlers(NO_SIDEBAR_RECORDS),
     ...handlers,
   });

@@ -29,7 +29,7 @@ import type {
   SpawnWorkspace,
   TranscriptRow,
 } from "../../../packages/contract/src/index";
-import type { TurnState } from "../../../packages/protocol/src/index";
+import type { RunnerFacts, TurnState } from "../../../packages/protocol/src/index";
 import { PASSWORD, USERNAME } from "../../../scripts/controller-process.ts";
 import { enlistScriptedRunner, type ScriptedRunner, type ScriptStep } from "./scripted-runner.ts";
 import { pollUntil } from "./poll.ts";
@@ -100,6 +100,9 @@ export interface Fleet {
    *   reports a port nothing serves.
    * - `joinToken` is the join token the runner joins with, such as the one an
    *   Add a machine dialog showed. Without it, a token is minted.
+   * - `machine` sets the size the runner reports for its memory and for the
+   *   disk that holds its storage. A machine page draws its Memory and Disk
+   *   graphs only for a runner that reports the disk size.
    */
   readonly enlistRunner: (
     name: string,
@@ -107,6 +110,7 @@ export interface Fleet {
       readonly maxConcurrentSessions?: number;
       readonly identityPort?: number;
       readonly joinToken?: string;
+      readonly machine?: Partial<Pick<RunnerFacts, "totalMemoryBytes" | "diskTotalBytes">>;
     },
   ) => Promise<ScriptedRunner>;
   readonly createProject: (name: string) => Promise<Project>;
@@ -259,11 +263,11 @@ export async function connectFleet(url: string): Promise<Fleet> {
     call,
     enlistRunner: async (
       name,
-      { identityPort = UNSERVED_IDENTITY_PORT, joinToken, ...settings } = {},
+      { identityPort = UNSERVED_IDENTITY_PORT, joinToken, machine, ...settings } = {},
     ) => {
       const joinSecret =
         joinToken ?? (await call<{ readonly token: string }>("POST", "/runners/join-tokens")).token;
-      const runner = await enlistScriptedRunner(url, joinSecret, identityPort);
+      const runner = await enlistScriptedRunner(url, joinSecret, identityPort, machine);
       runners.push(runner);
       await call("PATCH", `/runners/${runner.runnerId}`, { name, ...settings });
       providerAccountId = await waitForSignedInProbe(call, runner.runnerId);

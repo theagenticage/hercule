@@ -143,6 +143,7 @@ export const seed: Effect.Effect<
       yield* settings.setIfAbsent("retention.events", 90);
       yield* settings.setIfAbsent("retention.security", 90);
       yield* settings.setIfAbsent("retention.conversations", 90);
+      yield* settings.setIfAbsent("retention.runnerMetrics", 14);
       yield* settings.setIfAbsent("backup.time", "03:30");
       yield* settings.setIfAbsent("backup.keep", 14);
     }),

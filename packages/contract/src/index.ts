@@ -499,6 +499,12 @@ export {
   RunnerUpdateInput,
 } from "./groups/runner";
 export {
+  RUNNER_METRICS_POINT_MS,
+  RunnerMetricsPoint,
+  RunnerMetricsQuery,
+  RunnerMetricsResolution,
+} from "./groups/runner-metrics";
+export {
   HandoffLeg,
   HandoffLegs,
   Label,

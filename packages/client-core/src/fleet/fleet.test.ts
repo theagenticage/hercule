@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
-import type { Runner, RunnerFacts, Session, SessionKind, SessionStatus } from "@hercule/contract";
+import type {
+  Runner,
+  RunnerFacts,
+  RunnerMetricsPoint,
+  Session,
+  SessionKind,
+  SessionStatus,
+} from "@hercule/contract";
 import {
   countRunnerSessions,
   describeFleetPage,
-  findMachineNeeds,
   type FleetLead,
   type MachineSummary,
   type SessionCountsByRunner,
 } from "./fleet";
+import { forecastDiskLimit } from "./disk-forecast";
+import { buildFleetMachine, decideMachineNeed } from "./machine";
+import { EMPTY_RUNNER_METRICS_HISTORY, type RunnerMetricsHistory } from "./metrics-history";
 
 const GIB = 1024 ** 3;
 const TIMEZONE = "UTC";
@@ -126,14 +135,45 @@ const buildFullMachine = (waiting: number, runnerOverrides: Partial<Runner> = {}
     { running: 12, waiting, waitingThreads: waiting },
   );
 
+const HOUR_MS = 60 * 60 * 1000;
+const READ_AT = TODAY.getTime();
+const FALL_PER_DAY = 20e9;
+
+/**
+ * Returns the hour points of a machine whose free disk falls 20 GB a day and,
+ * on that line, reaches the machine's disk limit `daysToLimit` days after
+ * `READ_AT`, which is when the points were read. They span the last 3 days.
+ */
+const buildHistory = ({ runner }: TestMachine, daysToLimit: number): RunnerMetricsHistory => {
+  const freeAtReadAt = runner.diskWatermarkBytes + daysToLimit * FALL_PER_DAY;
+  const points = Array.from({ length: 73 }, (_, hour): RunnerMetricsPoint => ({
+    runnerId: runner.id,
+    at: new Date(READ_AT - (72 - hour) * HOUR_MS).toISOString(),
+    minutes: 60,
+    diskFreeBytes: freeAtReadAt + ((72 - hour) / 24) * FALL_PER_DAY,
+    availableMemoryBytes: 8 * GIB,
+    availableMemoryLowestBytes: 8 * GIB,
+    cpuAveragePercent: null,
+    cpuPeakPercent: null,
+    sessionsRunning: 0,
+    sessionsQueued: 0,
+  }));
+  return { points, readAt: READ_AT };
+};
+
+/** Returns a machine with a 1,000 GB disk that is 75% full, as a forecast needs the disk's total size. */
+const buildForecastMachine = (): TestMachine => buildMachine(withDisk(250e9));
+
 const describePage = (
   machines: readonly TestMachine[],
   localRunnerId: string | null = null,
   timezone = TIMEZONE,
+  metricsHistory: RunnerMetricsHistory = EMPTY_RUNNER_METRICS_HISTORY,
 ) =>
   describeFleetPage(
     machines.map(({ runner }) => runner),
     Object.fromEntries(machines.map(({ runner, counts }) => [runner.id, counts])),
+    metricsHistory,
     localRunnerId,
     timezone,
     TODAY,
@@ -145,8 +185,17 @@ const summarize = (
   counts: Partial<Counts> = {},
 ): MachineSummary => describePage([buildMachine(runnerOverrides, counts)]).machines[0]!;
 
-const findNeeds = ({ runner, counts }: TestMachine, timezone = TIMEZONE) =>
-  findMachineNeeds(runner, { [runner.id]: counts }, timezone, TODAY);
+const findNeed = (
+  { runner, counts }: TestMachine,
+  timezone = TIMEZONE,
+  metricsHistory: RunnerMetricsHistory = EMPTY_RUNNER_METRICS_HISTORY,
+) =>
+  decideMachineNeed(
+    buildFleetMachine(runner, { [runner.id]: counts }),
+    forecastDiskLimit(metricsHistory.points, runner, metricsHistory.readAt),
+    timezone,
+    TODAY,
+  );
 
 const readText = (parts: FleetLead["headline"]): string => parts.map((part) => part.text).join("");
 
@@ -198,7 +247,14 @@ describe("describeFleetPage machines", () => {
       lifecycle: "retired",
     });
 
-    const { machines } = describeFleetPage([second, retired, first], {}, null, TIMEZONE, TODAY);
+    const { machines } = describeFleetPage(
+      [second, retired, first],
+      {},
+      EMPTY_RUNNER_METRICS_HISTORY,
+      null,
+      TIMEZONE,
+      TODAY,
+    );
 
     expect(machines.map((machine) => machine.name)).toEqual(["first", "second"]);
   });
@@ -211,7 +267,14 @@ describe("describeFleetPage machines", () => {
       buildSession(atlas.id, "queued"),
     ]);
 
-    const { machines } = describeFleetPage([atlas, moss], counts, null, TIMEZONE, TODAY);
+    const { machines } = describeFleetPage(
+      [atlas, moss],
+      counts,
+      EMPTY_RUNNER_METRICS_HISTORY,
+      null,
+      TIMEZONE,
+      TODAY,
+    );
 
     expect(machines.map((machine) => [machine.drawing.running, machine.drawing.waiting])).toEqual([
       [1, 1],
@@ -225,9 +288,34 @@ describe("describeFleetPage machines", () => {
       buildSession("01a06d02-9999-7000-8000-000000000001", "busy"),
     ]);
 
-    const page = describeFleetPage([atlas], counts, null, TIMEZONE, TODAY);
+    const page = describeFleetPage(
+      [atlas],
+      counts,
+      EMPTY_RUNNER_METRICS_HISTORY,
+      null,
+      TIMEZONE,
+      TODAY,
+    );
 
-    expect(page.machines).toEqual(describeFleetPage([atlas], {}, null, TIMEZONE, TODAY).machines);
+    expect(page.machines).toEqual(
+      describeFleetPage([atlas], {}, EMPTY_RUNNER_METRICS_HISTORY, null, TIMEZONE, TODAY).machines,
+    );
+  });
+
+  it("forecasts each machine from the points of its own runner", () => {
+    const soon = buildMachine({ ...withDisk(250e9), id: "01a06d02-0001-7000-8000-000000000001" });
+    const later = buildMachine({ ...withDisk(250e9), id: "01a06d02-0002-7000-8000-000000000001" });
+    const history: RunnerMetricsHistory = {
+      points: [...buildHistory(soon, 12).points, ...buildHistory(later, 40).points],
+      readAt: READ_AT,
+    };
+
+    const { machines } = describePage([later, soon], null, TIMEZONE, history);
+
+    expect(machines.map((machine) => machine.need?.line)).toEqual([
+      "Disk reaches its limit in about 12 days",
+      undefined,
+    ]);
   });
 
   it("names the machine, the runner it is and the icon it gets", () => {
@@ -241,13 +329,13 @@ describe("describeFleetPage machines", () => {
   });
 });
 
-describe("findMachineNeeds", () => {
-  it("is empty for a healthy machine", () => {
-    expect(findNeeds(buildMachine())).toEqual([]);
+describe("decideMachineNeed", () => {
+  it("is none for a healthy machine", () => {
+    expect(findNeed(buildMachine())).toBeUndefined();
   });
 
   it("says when an offline machine was last seen", () => {
-    const [need] = findNeeds(buildMachine({ connectivity: "offline" }));
+    const need = findNeed(buildMachine({ connectivity: "offline" }));
 
     expect(need).toEqual({ kind: "offline", hue: "fail", line: "Offline since 09:12" });
   });
@@ -258,11 +346,11 @@ describe("findMachineNeeds", () => {
       lastSeenAt: "2026-10-30T09:12:00.000Z",
     });
 
-    expect(findNeeds(machine)[0]?.line).toBe("Offline since Fri 09:12");
+    expect(findNeed(machine)?.line).toBe("Offline since Fri 09:12");
   });
 
   it("reads the time in the user's timezone", () => {
-    expect(findNeeds(buildMachine({ connectivity: "offline" }), "Europe/Amsterdam")[0]?.line).toBe(
+    expect(findNeed(buildMachine({ connectivity: "offline" }), "Europe/Amsterdam")?.line).toBe(
       "Offline since 10:12",
     );
   });
@@ -271,17 +359,19 @@ describe("findMachineNeeds", () => {
     const { runner } = buildMachine({ connectivity: "offline" });
     const startOfDay = new Date("2026-11-02T00:00:00.000Z");
 
-    expect(findMachineNeeds(runner, {}, TIMEZONE, startOfDay)[0]?.line).toBe("Offline since 09:12");
+    expect(decideMachineNeed(buildFleetMachine(runner, {}), null, TIMEZONE, startOfDay)?.line).toBe(
+      "Offline since 09:12",
+    );
   });
 
   it("leaves out the time of a machine that was never seen", () => {
     const machine = buildMachine({ connectivity: "offline", lastSeenAt: null });
 
-    expect(findNeeds(machine)[0]?.line).toBe("Offline");
+    expect(findNeed(machine)?.line).toBe("Offline");
   });
 
   it("says when an unreachable machine was last heard from", () => {
-    const [need] = findNeeds(buildMachine({ connectivity: "unreachable" }));
+    const need = findNeed(buildMachine({ connectivity: "unreachable" }));
 
     expect(need).toEqual({
       kind: "unreachable",
@@ -295,29 +385,25 @@ describe("findMachineNeeds", () => {
       metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
-    expect(findNeeds(machine)).toEqual([
-      {
-        kind: "disk-below-limit",
-        hue: "fail",
-        line: "Disk below its limit. It takes no new sessions.",
-      },
-    ]);
+    expect(findNeed(machine)).toEqual({
+      kind: "disk-below-limit",
+      hue: "fail",
+      line: "Disk below its limit. It takes no new sessions.",
+    });
   });
 
   it("reports waiting Threads with the cap that lets them start", () => {
-    expect(findNeeds(buildFullMachine(3))).toEqual([
-      {
-        kind: "waiting",
-        hue: "you",
-        line: "3 threads wait for a slot",
-        allow: 15,
-        allowHint: "Lets 15 sessions run here at once: the 12 running and the 3 waiting.",
-      },
-    ]);
+    expect(findNeed(buildFullMachine(3))).toEqual({
+      kind: "waiting",
+      hue: "you",
+      line: "3 threads wait for a slot",
+      allow: 15,
+      allowHint: "Lets 15 sessions run here at once: the 12 running and the 3 waiting.",
+    });
   });
 
   it("uses singular words for one waiting Thread", () => {
-    const [need] = findNeeds(buildFullMachine(1));
+    const need = findNeed(buildFullMachine(1));
 
     expect(need).toMatchObject({
       line: "1 thread waits for a slot",
@@ -336,8 +422,8 @@ describe("findMachineNeeds", () => {
       { running: 2, waiting: 1, waitingThreads: 0 },
     );
 
-    expect(findNeeds(some)[0]?.line).toBe("3 sessions wait for a slot");
-    expect(findNeeds(one)[0]?.line).toBe("1 session waits for a slot");
+    expect(findNeed(some)?.line).toBe("3 sessions wait for a slot");
+    expect(findNeed(one)?.line).toBe("1 session waits for a slot");
   });
 
   it("leaves out the running part of the hint when nothing runs", () => {
@@ -347,12 +433,12 @@ describe("findMachineNeeds", () => {
     );
     const idle = buildMachine({ maxConcurrentSessions: 1 }, { running: 0, waiting: 1 });
 
-    expect(findNeeds(machine)[0]).toMatchObject({
+    expect(findNeed(machine)).toMatchObject({
       allow: 2,
       allowHint: "Lets 2 sessions run here at once: the 1 running and the 1 waiting.",
     });
     // A free slot means the session starts by itself: no need, so no hint.
-    expect(findNeeds(idle)).toEqual([]);
+    expect(findNeed(idle)).toBeUndefined();
   });
 
   it("reports waiting sessions when only some of them would fit under the cap", () => {
@@ -361,13 +447,13 @@ describe("findMachineNeeds", () => {
       { running: 10, waiting: 3, waitingThreads: 3 },
     );
 
-    expect(findNeeds(machine)[0]).toMatchObject({ kind: "waiting", allow: 13 });
+    expect(findNeed(machine)).toMatchObject({ kind: "waiting", allow: 13 });
   });
 
   it("does not report sessions that wait while a slot is free", () => {
     const machine = buildMachine({}, { running: 3, waiting: 2, waitingThreads: 2 });
 
-    expect(findNeeds(machine)).toEqual([]);
+    expect(findNeed(machine)).toBeUndefined();
   });
 
   it.each([
@@ -377,9 +463,7 @@ describe("findMachineNeeds", () => {
     ["short of disk", { metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB } }],
   ])("does not report waiting sessions while the machine is %s", (_name, overrides) => {
     // Raising the cap would start none of them, so Allow would do nothing.
-    const kinds = findNeeds(buildFullMachine(3, overrides)).map((need) => need.kind);
-
-    expect(kinds).not.toContain("waiting");
+    expect(findNeed(buildFullMachine(3, overrides))?.kind).not.toBe("waiting");
   });
 
   it("reports waiting sessions when the free disk equals the limit", () => {
@@ -387,26 +471,28 @@ describe("findMachineNeeds", () => {
       metrics: { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
-    expect(findNeeds(machine)[0]?.kind).toBe("waiting");
+    expect(findNeed(machine)?.kind).toBe("waiting");
   });
 
   it("does not report waiting sessions when the cap is not what holds them", () => {
     // Running plus waiting is exactly the cap: every one of them fits.
     const machine = buildMachine({ maxConcurrentSessions: 5 }, { running: 3, waiting: 2 });
 
-    expect(findNeeds(machine)).toEqual([]);
+    expect(findNeed(machine)).toBeUndefined();
   });
 
   it("reports a disk that is 85% full, with its percentage rounded down", () => {
-    expect(findNeeds(buildMachine(withDisk(130e9)))).toEqual([
-      { kind: "disk-nearly-full", hue: "you", line: "Disk 87% full" },
-    ]);
-    expect(findNeeds(buildMachine(withDisk(150e9)))[0]?.line).toBe("Disk 85% full");
-    expect(findNeeds(buildMachine(withDisk(120.4e9)))[0]?.line).toBe("Disk 87% full");
+    expect(findNeed(buildMachine(withDisk(130e9)))).toEqual({
+      kind: "disk-nearly-full",
+      hue: "you",
+      line: "Disk 87% full",
+    });
+    expect(findNeed(buildMachine(withDisk(150e9)))?.line).toBe("Disk 85% full");
+    expect(findNeed(buildMachine(withDisk(120.4e9)))?.line).toBe("Disk 87% full");
   });
 
   it("does not report a disk that is 84.6% full", () => {
-    expect(findNeeds(buildMachine(withDisk(154e9)))).toEqual([]);
+    expect(findNeed(buildMachine(withDisk(154e9)))).toBeUndefined();
   });
 
   it("does not report a nearly full disk when the runner does not report its size", () => {
@@ -415,40 +501,76 @@ describe("findMachineNeeds", () => {
       metrics: { diskFreeBytes: 11e9, availableMemoryBytes: 8 * GIB },
     });
 
-    expect(findNeeds(machine)).toEqual([]);
+    expect(findNeed(machine)).toBeUndefined();
   });
 
-  it("lists a nearly full disk after the waiting sessions, and several needs together", () => {
-    const machine = buildMachine(
-      { maxConcurrentSessions: 12, ...withDisk(130e9) },
-      { running: 12, waiting: 3, waitingThreads: 3 },
-    );
-    const belowLimit = buildMachine(
-      { maxConcurrentSessions: 12, ...withDisk(5 * GIB) },
-      { running: 12, waiting: 3 },
-    );
+  describe("when the disk is forecast to reach its limit", () => {
+    it("reports it within 21 days, in days", () => {
+      const machine = buildForecastMachine();
 
-    expect(findNeeds(machine).map((need) => need.kind)).toEqual(["waiting", "disk-nearly-full"]);
-    // A disk below its limit is also over 85% full here: both rows apply, the serious one first.
-    expect(findNeeds(belowLimit).map((need) => need.kind)).toEqual([
-      "disk-below-limit",
-      "disk-nearly-full",
-    ]);
+      expect(findNeed(machine, TIMEZONE, buildHistory(machine, 12))).toEqual({
+        kind: "disk-reaches-limit",
+        hue: "you",
+        line: "Disk reaches its limit in about 12 days",
+      });
+      expect(findNeed(machine, TIMEZONE, buildHistory(machine, 21))?.line).toBe(
+        "Disk reaches its limit in about 21 days",
+      );
+    });
+
+    it("uses the singular for one day", () => {
+      const machine = buildForecastMachine();
+
+      expect(findNeed(machine, TIMEZONE, buildHistory(machine, 1))?.line).toBe(
+        "Disk reaches its limit in about 1 day",
+      );
+    });
+
+    it("reports nothing at 22 days", () => {
+      const machine = buildForecastMachine();
+
+      expect(findNeed(machine, TIMEZONE, buildHistory(machine, 22))).toBeUndefined();
+    });
   });
 
-  it("lists every need that applies, the most serious first", () => {
-    const machine = buildMachine(
-      {
-        connectivity: "unreachable",
-        metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
-      },
-      { running: 12, waiting: 3 },
-    );
+  describe("when several needs apply, shows the most serious", () => {
+    const waitingUnderFullDisk = { maxConcurrentSessions: 12 };
+    const waitingCounts = { running: 12, waiting: 3, waitingThreads: 3 };
+    const lowDisk = { metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB } };
 
-    expect(findNeeds(machine).map((need) => need.kind)).toEqual([
-      "unreachable",
-      "disk-below-limit",
-    ]);
+    it("offline over a disk below its limit", () => {
+      const machine = buildMachine({ connectivity: "offline", ...lowDisk }, waitingCounts);
+
+      expect(findNeed(machine)?.kind).toBe("offline");
+    });
+
+    it("unreachable over a disk below its limit", () => {
+      const machine = buildMachine({ connectivity: "unreachable", ...lowDisk }, waitingCounts);
+
+      expect(findNeed(machine)?.kind).toBe("unreachable");
+    });
+
+    it("a disk below its limit over a disk that is 85% full", () => {
+      // 5 GiB free of 1,000 GB is 99% full: both rows apply.
+      const machine = buildMachine(
+        { ...withDisk(5 * GIB), maxConcurrentSessions: 12 },
+        waitingCounts,
+      );
+
+      expect(findNeed(machine)?.kind).toBe("disk-below-limit");
+    });
+
+    it("waiting sessions over a disk that is 85% full", () => {
+      const machine = buildMachine({ ...waitingUnderFullDisk, ...withDisk(130e9) }, waitingCounts);
+
+      expect(findNeed(machine)?.kind).toBe("waiting");
+    });
+
+    it("a disk that is 85% full over a disk forecast to reach its limit", () => {
+      const machine = buildMachine(withDisk(130e9));
+
+      expect(findNeed(machine, TIMEZONE, buildHistory(machine, 5))?.kind).toBe("disk-nearly-full");
+    });
   });
 });
 
@@ -820,6 +942,33 @@ describe("MachineSummary disk", () => {
 
   it("is not reported until the runner reports its disk", () => {
     expect(summarize({ metrics: null }).disk).toEqual(NOT_REPORTED);
+  });
+});
+
+describe("MachineSummary diskCaption", () => {
+  const readCaption = (daysToLimit: number | null, runnerOverrides: Partial<Runner> = {}) => {
+    const machine = buildMachine({ ...withDisk(250e9), ...runnerOverrides });
+    const history = daysToLimit === null ? undefined : buildHistory(machine, daysToLimit);
+    return describePage([machine], null, TIMEZONE, history).machines[0]!.diskCaption;
+  };
+
+  it("names the free space while there is no forecast", () => {
+    expect(readCaption(null)).toEqual({ text: "250 GB free", isForecast: false });
+  });
+
+  it("words the days until the limit while the forecast shows", () => {
+    expect(readCaption(12)).toEqual({ text: "Limit in 12 days", isForecast: true });
+    expect(readCaption(1)).toEqual({ text: "Limit in 1 day", isForecast: true });
+  });
+
+  it("shows the forecast up to 60 days, beyond the 21 days that make the machine need the user", () => {
+    expect(readCaption(22)).toEqual({ text: "Limit in 22 days", isForecast: true });
+    expect(readCaption(60)).toEqual({ text: "Limit in 60 days", isForecast: true });
+    expect(readCaption(62)).toEqual({ text: "250 GB free", isForecast: false });
+  });
+
+  it("shows the forecast of a machine that is away", () => {
+    expect(readCaption(12, { connectivity: "offline" }).text).toBe("Limit in 12 days");
   });
 });
 

@@ -151,6 +151,7 @@ describe("the controller settings defaults", () => {
             events: yield* settings.get("retention.events"),
             security: yield* settings.get("retention.security"),
             conversations: yield* settings.get("retention.conversations"),
+            runnerMetrics: yield* settings.get("retention.runnerMetrics"),
             time: yield* settings.get("backup.time"),
             keep: yield* settings.get("backup.keep"),
           };
@@ -161,6 +162,7 @@ describe("the controller settings defaults", () => {
       events: 90,
       security: 90,
       conversations: 90,
+      runnerMetrics: 14,
       time: "03:30",
       keep: 14,
     });
@@ -206,7 +208,7 @@ describe("seeding twice", () => {
     );
     expect(second).toEqual(first);
     expect(first.profiles).toHaveLength(3);
-    expect(first.settings).toHaveLength(5);
+    expect(first.settings).toHaveLength(6);
   });
 
   it("leaves an edited shipped profile and an edited setting alone", async () => {

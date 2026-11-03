@@ -76,6 +76,7 @@ import type {
   RepositorySkill,
   RequestResolution,
   RunnerFacts,
+  RunnerMetrics,
   RunnerToController,
   SessionBinding,
   SessionInput,
@@ -451,6 +452,12 @@ export interface ScriptedRunner {
    * change.
    */
   readonly setSignedIn: (signedIn: boolean) => void;
+  /**
+   * Sends one Runner Metrics report, as a runner's periodic check does. A
+   * scripted runner sends none on its own, so a machine's card and page show
+   * no metrics until a test calls this. Fails if the runner is not connected.
+   */
+  readonly reportMetrics: (metrics: RunnerMetrics) => void;
 }
 
 /** The skills a scripted runner knows about; see `ScriptedRunner.setSkills`. */
@@ -483,11 +490,17 @@ export interface ScriptedSkills {
  * itself. There is no default, because the natural one, the first identity
  * port, is where the developer's own runner listens: a client would find
  * that runner instead.
+ *
+ * `machine` overrides the facts about the machine's size: its total memory,
+ * and the size of the disk that holds its storage, which the facts leave out
+ * unless a test names it. The machine page cannot draw a Memory or a Disk
+ * graph without them.
  */
 export async function enlistScriptedRunner(
   url: string,
   joinToken: string,
   identityPort: number,
+  machine: Partial<Pick<RunnerFacts, "totalMemoryBytes" | "diskTotalBytes">> = {},
 ): Promise<ScriptedRunner> {
   const joined = await fetch(`${url}/api/v1/runners/join`, {
     method: "POST",
@@ -1350,7 +1363,7 @@ export async function enlistScriptedRunner(
             ],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
-            facts: { ...FACTS, identityPort },
+            facts: { ...FACTS, ...machine, identityPort },
           } satisfies RunnerToController),
         );
       };
@@ -1424,6 +1437,9 @@ export async function enlistScriptedRunner(
     setSignedIn: (next) => {
       signedIn = next;
     },
+    // The wire keeps the report's old name: the frame is `watermarkReport`
+    // and its key `watermark`.
+    reportMetrics: (metrics) => send({ _tag: "watermarkReport", watermark: metrics }),
     goOffline: async () => {
       if (socket.readyState === WebSocket.OPEN) send({ _tag: "goodbye" });
       await closeSocket();

@@ -121,6 +121,7 @@ describe("the first run", () => {
       "backup.time",
       "retention.conversations",
       "retention.events",
+      "retention.runnerMetrics",
       "retention.security",
     ]);
   });
@@ -416,7 +417,7 @@ describe("a second boot", () => {
     await serve();
     await serve();
     expect(query("SELECT name FROM permission_profiles")).toHaveLength(3);
-    expect(query("SELECT key FROM settings")).toHaveLength(5);
+    expect(query("SELECT key FROM settings")).toHaveLength(6);
   });
 });
 

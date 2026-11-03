@@ -1,5 +1,10 @@
 import { assert, describe, it } from "vitest";
 import { LIVE_SESSION_STATUSES, MUTABLE_LIVE_TOPICS } from "@hercule/contract";
+import {
+  buildMachineFiveMinuteScope,
+  buildMachineHourScope,
+  FLEET_HOUR_METRICS_SCOPE,
+} from "../fleet/metrics-history";
 import { buildQueryKeys, queryKeys, type LiveQueryKey } from "./keys";
 
 describe("workspace pushes", () => {
@@ -349,5 +354,30 @@ describe("the composer's skill list keys", () => {
     );
     assert.isTrue(isPrefixOf(queryKeys.sessionSkills(), queryKeys.sessionSkills("s1")));
     assert.notDeepEqual(queryKeys.sessionSkills("s1"), queryKeys.sessionSkills("s2"));
+  });
+});
+
+describe("the Runner Metrics history keys", () => {
+  it("is read by no push: the runnerMetrics topic maps to no key, and no other topic's keys cover it", () => {
+    assert.deepEqual(buildQueryKeys("runnerMetrics", []), []);
+    assert.deepEqual(buildQueryKeys("runnerMetrics", ["r1"]), []);
+    const key = queryKeys.runnerMetrics(buildMachineFiveMinuteScope("r1"));
+    for (const topic of ["runner", "session", "provider"] as const) {
+      assert.isFalse(buildQueryKeys(topic, []).some((pushed) => isPrefixOf(pushed, key)));
+    }
+  });
+
+  it("tells the histories of different scopes apart", () => {
+    const keys = [
+      queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE),
+      queryKeys.runnerMetrics(buildMachineFiveMinuteScope("r1")),
+      queryKeys.runnerMetrics(buildMachineHourScope("r1")),
+      queryKeys.runnerMetrics(buildMachineHourScope("r2")),
+    ];
+    assert.strictEqual(new Set(keys.map((key) => JSON.stringify(key))).size, keys.length);
+    assert.deepEqual(
+      queryKeys.runnerMetrics(buildMachineHourScope("r1")),
+      queryKeys.runnerMetrics(buildMachineHourScope("r1")),
+    );
   });
 });

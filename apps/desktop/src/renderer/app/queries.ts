@@ -147,7 +147,7 @@ export const macUserQuery = (bridge: Bridge) =>
  * `useRelatedReads`) marks it out of date. An app that is idle then makes no
  * requests at all.
  */
-const LIVE_KEPT_READ_OPTIONS = {
+export const LIVE_KEPT_READ_OPTIONS = {
   staleTime: Infinity,
   refetchOnWindowFocus: false,
   refetchOnReconnect: false,

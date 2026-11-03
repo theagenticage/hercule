@@ -31,8 +31,21 @@ import type {
   RunnerFacts,
   Session,
 } from "@hercule/contract";
+import {
+  FORECAST_HISTORY_MS,
+  type RunnerMetricsHistory,
+} from "@hercule/client-core/metrics-history";
 import { HARNESSES } from "@hercule/client-core/testing";
 import { buildSession } from "@hercule/client-core/threads/testing";
+import {
+  buildMachineMetrics,
+  interpolate,
+  driftWobble,
+  wobble,
+  workingDay,
+  type MachineMetrics,
+  type MachineStory,
+} from "./fleet-metrics-fixture";
 import { SPECIMEN_ACCOUNTS, SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { SidebarRecords } from "./shell-page";
 
@@ -378,6 +391,144 @@ const FLEET_CONTROLLER: ControllerInfo = {
   textGeneration: { model: null, lastFailure: null, unavailableReason: null },
 };
 
+/** How busy a working day is at the specimen's clock, which the quiet machines' numbers are scaled by. */
+const BUSYNESS_NOW = workingDay(0);
+
+/** Returns a story of `runner` whose numbers at the specimen's clock are the ones its record holds. */
+const buildQuietStory = (
+  runner: Runner,
+  running: number,
+  diskGrowthBytesPerDay: number,
+  silentForHours: number,
+): MachineStory => {
+  const { facts, metrics } = runner;
+  if (facts === null || metrics === null || metrics.cpu === undefined || metrics.cpu === null) {
+    throw new Error(`The Fleet specimen needs ${runner.name} to report its facts and its CPU.`);
+  }
+  const totalMemoryBytes = facts.totalMemoryBytes;
+  const diskTotalBytes = facts.diskTotalBytes ?? 0;
+  const { averagePercent, peakPercent } = metrics.cpu;
+  const memoryShareNow = 1 - metrics.availableMemoryBytes / totalMemoryBytes;
+  const diskInUseNow = diskTotalBytes - metrics.diskFreeBytes;
+  const busyness = (hoursAgo: number): number => workingDay(hoursAgo) / BUSYNESS_NOW;
+  const cpuAverage = (hoursAgo: number): number =>
+    averagePercent * (0.5 + 0.5 * busyness(hoursAgo)) * (1 + 0.25 * wobble(hoursAgo, 1));
+  return {
+    runnerId: runner.id,
+    totalMemoryBytes,
+    diskTotalBytes,
+    sessionsRunning: (hoursAgo) => running * (0.4 + 0.6 * Math.min(1, busyness(hoursAgo))),
+    sessionsQueued: () => 0,
+    cpuAveragePercent: cpuAverage,
+    cpuPeakPercent: (hoursAgo) =>
+      cpuAverage(hoursAgo) + (peakPercent - averagePercent) * (0.6 + 0.4 * wobble(hoursAgo, 2)),
+    memoryInUseShare: (hoursAgo) =>
+      memoryShareNow + 0.02 * wobble(hoursAgo, 5) + 0.03 * (workingDay(hoursAgo) - BUSYNESS_NOW),
+    diskInUseBytes: (hoursAgo) =>
+      diskInUseNow - (diskGrowthBytesPerDay * hoursAgo) / 24 + 0.5 * GB * driftWobble(hoursAgo, 3),
+    gaps: [],
+    silentForHours,
+  };
+};
+
+/**
+ * Atlas's last 14 days. Yesterday from 14:00 to 16:30 it ran at its cap of 16
+ * with 3 to 6 Threads waiting, and its CPU peaked near 100 %. From 16:40 to
+ * 21:40 its memory stood near 80 %. Between 22:00 and 23:00 it sent nothing,
+ * so every graph has a gap there. Its disk has filled by 33 GB a day, so the
+ * limit is about 12 days away. At the clock it runs 12 sessions with 5
+ * waiting.
+ */
+const ATLAS_STORY: MachineStory = (() => {
+  const isWaiting = (hoursAgo: number): boolean => hoursAgo >= 17.2 && hoursAgo <= 19.7;
+  const cpuAverage = (hoursAgo: number): number =>
+    hoursAgo < 0.05
+      ? 34
+      : 6 + 30 * workingDay(hoursAgo) + 6 * wobble(hoursAgo, 1) + (isWaiting(hoursAgo) ? 28 : 0);
+  return {
+    runnerId: ATLAS_ID,
+    totalMemoryBytes: 64 * GIB,
+    diskTotalBytes: 1000 * GB,
+    sessionsRunning: (hoursAgo) =>
+      hoursAgo < 0.5 ? 12 : isWaiting(hoursAgo) ? 16 : 2 + 13 * workingDay(hoursAgo),
+    sessionsQueued: (hoursAgo) =>
+      hoursAgo < 0.55 ? 5 : isWaiting(hoursAgo) ? 4.5 + 1.5 * wobble(hoursAgo, 7) : 0,
+    cpuAveragePercent: cpuAverage,
+    cpuPeakPercent: (hoursAgo) =>
+      hoursAgo < 0.05
+        ? 71
+        : cpuAverage(hoursAgo) +
+          12 +
+          30 * (0.5 + 0.5 * wobble(hoursAgo, 2)) +
+          (isWaiting(hoursAgo) ? 8 : 0),
+    memoryInUseShare: (hoursAgo) =>
+      interpolate(
+        [
+          [0, 0.547],
+          [0.5, 0.55],
+          [3, 0.52],
+          [9, 0.5],
+          [12, 0.78],
+          [13, 0.81],
+          [16, 0.8],
+          [17, 0.82],
+          [18.5, 0.6],
+          [24, 0.46],
+          [400, 0.5],
+        ],
+        hoursAgo,
+      ) +
+      0.012 * wobble(hoursAgo, 6),
+    diskInUseBytes: (hoursAgo) =>
+      588 * GB - (33 * GB * hoursAgo) / 24 + 1.2 * GB * driftWobble(hoursAgo, 3),
+    gaps: [[11.7, 10.7]],
+    silentForHours: 0,
+  };
+})();
+
+/** The histories of the five machines, by runner id. Mini went offline at 09:12 and sent nothing since. */
+const FLEET_METRICS_BY_RUNNER: Readonly<Record<string, MachineMetrics>> = Object.fromEntries(
+  (
+    [
+      ATLAS_STORY,
+      buildQuietStory(BEELINK, 9, 8 * GB, 0),
+      buildQuietStory(BOSGAME, 3, 0.4 * GB, 0),
+      buildQuietStory(
+        MINI,
+        2,
+        1 * GB,
+        (SPECIMEN_NOW - Date.parse(MINI.lastSeenAt ?? "")) / 3_600_000,
+      ),
+      buildQuietStory(STUDIO, 2, 0, 0),
+    ] as const
+  ).map((story) => [story.runnerId, buildMachineMetrics(story)]),
+);
+
+/** The Runner Metrics the Fleet page and a machine's page read. */
+export interface FleetMetricsRecords {
+  /** A machine's five-minute points of the last 24 hours, by runner id. */
+  readonly fiveMinutesByRunner: Readonly<Record<string, RunnerMetricsHistory>>;
+  /** A machine's hour points of the last 14 days, by runner id. */
+  readonly hoursByRunner: Readonly<Record<string, RunnerMetricsHistory>>;
+  /** Every machine's hour points of the last 7 days, which the Fleet page forecasts from. */
+  readonly fleetHours: RunnerMetricsHistory;
+}
+
+const FLEET_METRICS: FleetMetricsRecords = {
+  fiveMinutesByRunner: Object.fromEntries(
+    Object.entries(FLEET_METRICS_BY_RUNNER).map(([id, metrics]) => [id, metrics.fiveMinutes]),
+  ),
+  hoursByRunner: Object.fromEntries(
+    Object.entries(FLEET_METRICS_BY_RUNNER).map(([id, metrics]) => [id, metrics.hours]),
+  ),
+  fleetHours: {
+    points: Object.values(FLEET_METRICS_BY_RUNNER).flatMap(({ hours }) =>
+      hours.points.filter((point) => Date.parse(point.at) >= SPECIMEN_NOW - FORECAST_HISTORY_MS),
+    ),
+    readAt: SPECIMEN_NOW,
+  },
+};
+
 /** What the Fleet page and a machine's page read besides the shell's lists. */
 export interface FleetRecords {
   /** The harnesses with what each machine reports of them. */
@@ -385,12 +536,15 @@ export interface FleetRecords {
   /** Every session that has not exited, which the machines' counts are made from. */
   readonly sessions: ReadonlyArray<Session>;
   readonly controller: ControllerInfo;
+  /** The Runner Metrics history the graphs and the forecasts are drawn from. */
+  readonly metrics: FleetMetricsRecords;
 }
 
 export const FLEET_RECORDS: FleetRecords = {
   harnesses: FLEET_HARNESSES,
   sessions: FLEET_SESSIONS,
   controller: FLEET_CONTROLLER,
+  metrics: FLEET_METRICS,
 };
 
 /** The sidebar's lists with the five machines and their accounts, for a specimen that opens Fleet. */

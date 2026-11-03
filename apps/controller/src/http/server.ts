@@ -107,6 +107,7 @@ import {
   runAccountUsageReadingLoop,
   runAttachmentSweepLoop,
   runIngestReconciler,
+  runRunnerMetricsPruneLoop,
   runSkillUpdateCheckLoop,
   runScheduler,
   sweepSessionsOnLostRunners,
@@ -456,6 +457,8 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* Effect.forkScoped(Effect.flatMap(Provisioning, (provisioning) => provisioning.driving));
     // Images nobody sent within a day of their upload are deleted, with their files.
     yield* Effect.forkScoped(runAttachmentSweepLoop);
+    // Runner Metrics rows older than the retention window are deleted once an hour.
+    yield* Effect.forkScoped(runRunnerMetricsPruneLoop);
     // Skills with a GitHub source are checked for updates at start and then
     // every 3 hours.
     yield* Effect.forkScoped(runSkillUpdateCheckLoop);

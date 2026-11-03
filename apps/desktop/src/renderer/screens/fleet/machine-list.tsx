@@ -40,7 +40,7 @@ export function MachineRow({
   readonly allow: ReactNode;
   readonly onOpen: (runnerId: string) => void;
 }): JSX.Element {
-  const { runnerId, status, isAway, drawing, disk, memory, roomText, need } = machine;
+  const { runnerId, status, isAway, drawing, disk, diskCaption, memory, roomText, need } = machine;
 
   return (
     <div
@@ -85,7 +85,9 @@ export function MachineRow({
       ) : (
         <span role="cell" className="fleet-cell fleet-col-disk">
           <MeterWithValue gauge={disk} />
-          <small>{disk.freeAmount} free</small>
+          <small className={diskCaption.isForecast ? "is-you" : undefined}>
+            {diskCaption.text}
+          </small>
         </span>
       )}
       <span role="cell" className="fleet-cell fleet-col-mem">

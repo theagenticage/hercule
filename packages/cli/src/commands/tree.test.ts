@@ -130,7 +130,12 @@ describe("the spelling of a command", () => {
       // a skill folder, sent as the query field that names each skill.
       const rest = command.positionals.slice(inPath.length);
       expect(
-        rest.every((field) => field.carriedIn === "payload" || field.readsSkillFolder),
+        rest.every(
+          (field) =>
+            field.carriedIn === "payload" ||
+            field.readsSkillFolder ||
+            (field.carriedIn === "query" && field.optional),
+        ),
         `${readSpelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
       ).toBe(true);
     }
@@ -155,8 +160,9 @@ describe("a command's fields against the schema", () => {
 
   it("gives every paged command a non-empty sort field list, except a list with one fixed order", () => {
     // `signal list` reads each view in the one order the view is defined by,
-    // so it pages with --limit and --cursor but takes no --sort.
-    const FIXED_ORDER = ["signal list"];
+    // and `runner metrics` reads points by runner and then oldest first, so
+    // they page with --limit and --cursor but take no --sort.
+    const FIXED_ORDER = ["signal list", "runner metrics"];
     const paged = COMMANDS.filter((command) => command.paged);
     expect(paged.length).toBeGreaterThan(0);
     for (const command of paged) {
@@ -283,13 +289,13 @@ describe("a command's fields against the schema", () => {
     });
     const grants = create.payload.find((field) => field.name === "grants")!;
     expect(grants.repeated).toBe(true);
-    expect(grants.choices).toContain("permission.write");
+    expect(grants.choices?.has("permission.write")).toBe(true);
 
     expect(
       findCommandByWords(["profile", "update"])!.payload.every((field) => field.optional),
     ).toBe(true);
 
-    expect(findCommandByWords(["secret", "set"])!.positionals[0]?.choices).toEqual([
+    expect([...findCommandByWords(["secret", "set"])!.positionals[0]!.choices!.keys()]).toEqual([
       "connection",
       "plugin",
       "runner",
@@ -370,6 +376,7 @@ describe("the placeholders a usage line shows", () => {
     "skill read": "<name>",
     "skill delete": "<name>",
     "skill import": "<folder>",
+    "runner metrics": "[<runner-id>]",
     "skill diff": "<name> <revision-hash>",
     "skill apply": "<name> <revision-hash>",
   };

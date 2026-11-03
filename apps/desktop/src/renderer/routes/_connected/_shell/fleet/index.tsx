@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeFleetPage } from "@hercule/client-core/fleet";
+import { FLEET_HOUR_METRICS_SCOPE } from "@hercule/client-core/metrics-history";
 import {
   controllerQuery,
   fleetSessionsQuery,
@@ -17,6 +18,7 @@ import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
 import { MachinesSection } from "./-machines-section";
+import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { useRunnerSessionCounts } from "./-session-counts";
 
 /**
@@ -29,6 +31,9 @@ import { useRunnerSessionCounts } from "./-session-counts";
  *   keeps current while Fleet is open. `fetchQuery` reads it again on open
  *   only when a push marked the cached read out of date while Fleet was
  *   closed;
+ * - every runner's hour points of the last 7 days, for the disk forecasts.
+ *   A `runnerMetrics` push reads them again at most once an hour (see
+ *   `useRunnerMetricsLive`), so a cached read is used as it is;
  * - the controller's record, whose `localRunnerId` the page needs when the
  *   fleet is empty, and the settings, whose time zone the times are shown in.
  *   No topic covers either, so they are read each time the page opens.
@@ -40,6 +45,7 @@ export const Route = createFileRoute("/_connected/_shell/fleet/")({
     await Promise.all([
       queryClient.ensureQueryData(runnersQuery(client)),
       queryClient.fetchQuery(fleetSessionsQuery(client)),
+      queryClient.ensureQueryData(runnerMetricsQuery(client, FLEET_HOUR_METRICS_SCOPE)),
       readOnOpen(queryClient, controllerQuery(client)),
       readOnOpen(queryClient, settingsQuery(client)),
     ]);
@@ -56,9 +62,11 @@ const SECTION_IDS = ["machines"];
  * transition (see `decideMachineTransitionTypes`).
  */
 function FleetPage(): JSX.Element {
-  const { controller } = Route.useRouteContext();
+  const { controller, queryClient } = Route.useRouteContext();
   const { client, url } = controller;
+  useRunnerMetricsLive(controller.live, queryClient, null);
   const { data: runners } = useSuspenseQuery(runnersQuery(client));
+  const { data: hours } = useSuspenseQuery(runnerMetricsQuery(client, FLEET_HOUR_METRICS_SCOPE));
   const sessionCounts = useRunnerSessionCounts(client);
   const { data: record } = useSuspenseQuery(controllerQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
@@ -75,7 +83,15 @@ function FleetPage(): JSX.Element {
     timezone,
     runners.some((runner) => runner.lifecycle !== "retired" && runner.connectivity !== "online"),
   );
-  const page = describeFleetPage(runners, sessionCounts, record.localRunnerId, timezone, today);
+  // The page is built in the runners' `select`, not in the render. Query keeps
+  // the identity of every part of a selected result that is equal to the
+  // previous one, so a nudge for one machine gives the other machines' cards
+  // the same summary objects they had, and only the card that changed draws.
+  const { data: page } = useSuspenseQuery({
+    ...runnersQuery(client),
+    select: (each) =>
+      describeFleetPage(each, sessionCounts, hours, record.localRunnerId, timezone, today),
+  });
 
   return (
     <div className="fleet-page">
