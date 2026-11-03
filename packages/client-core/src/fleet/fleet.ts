@@ -311,13 +311,14 @@ export const describeFleet = (machines: readonly FleetMachine[]): FleetLead => {
 
 /**
  * Describes how much room a machine has. `short` is the text of a card or a
- * list row ("Room for 4", "Full", "Takes no new work"). `line` is the machine
+ * list row ("Room for 4" or "Full"). `line` is the machine
  * page's sentence about it, in parts so the number can be drawn in bold.
  *
  * - Both are `null` while the machine is offline or unreachable, because the
  *   screen shows that state instead.
  * - `short` is also `null` while the machine is told to take no new work,
- *   because its status word already says so.
+ *   because its status word already says so, and while its disk is below its
+ *   limit, because the line of what needs the user already says so.
  * - When the disk is below its limit and the machine is also set to take no
  *   new work, the line names the disk, because that is the one the user can
  *   fix by cleaning up.
@@ -336,7 +337,7 @@ export const describeRoom = (
   const isDraining = runner.lifecycle === "draining";
   if (isDiskBelowLimit(runner)) {
     return {
-      short: isDraining ? null : "Takes no new work",
+      short: null,
       line: [buildPlainPart("No room: its disk is below its limit, so it takes no new sessions")],
     };
   }

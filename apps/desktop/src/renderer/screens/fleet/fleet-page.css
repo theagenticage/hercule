@@ -223,14 +223,14 @@
 }
 
 /* ---------- What needs the user ---------- */
-/* The line wraps to at most two lines and ends in an ellipsis after that. Its
+/* The line wraps to at most three lines and ends in an ellipsis after that. Its
    line is 18px tall, a little above the surrounding text's, so the first line
    centres on the 26px button beside it with a whole-pixel margin; the button
    and the first line stay level however many lines follow. */
 .fleet-attn {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   flex: 1;
   min-width: 0;
   margin-block-start: 4px;

@@ -511,12 +511,12 @@ describe("describeRoom", () => {
     expect(readLine(machine)).toBe("No room: it runs its cap of 1 session");
   });
 
-  it("names a disk below its limit", () => {
+  it("leaves the short text out for a disk below its limit, and names the disk in the line", () => {
     const machine = buildMachine({
       watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
-    expect(describeRoom(machine).short).toBe("Takes no new work");
+    expect(describeRoom(machine).short).toBeNull();
     expect(readLine(machine)).toBe(
       "No room: its disk is below its limit, so it takes no new sessions",
     );
@@ -761,7 +761,7 @@ describe("summarizeMachine", () => {
 
     expect(summary.disk?.level).toBe("fail");
     expect(summary.need?.kind).toBe("disk-below-limit");
-    expect(summary.roomText).toBe("Takes no new work");
+    expect(summary.roomText).toBeNull();
   });
 
   it("has no room text for a machine told to take no new work, because its status word says so", () => {

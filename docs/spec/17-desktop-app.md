@@ -1964,7 +1964,7 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 - **sessions against the cap**, drawn by the rule below, with "12 of 16" beside them;
 - **Disk** and **Memory** as two gauges with their percentages, coloured by the rules below; a click on a gauge opens the machine's page at that gauge's section;
 - the small faces of who works there: one per Thread row, run and assistant running on the machine, at most 5, then "+n";
-- **Room** for more: "Room for 4", "Full", or ~~"Takes no new work"~~ "Takes no new work" while the disk is below its limit; *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* A machine told to take no new work shows no Room, because its status word already says so;
+- **Room** for more: "Room for 4", "Full", or ~~"Takes no new work" while the disk is below its limit~~; *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* The card's Room reads only "Room for 4" or "Full". No Room shows while the machine is away, told to take no new work, or has its disk below its limit, because the status word or the line of what needs the user already says so. The list's Room cell shows "–" then;
 - **what needs the user,** at most one line, the most serious first (below), with the button that fixes it.
 
 A click anywhere else on the card opens the machine's page.

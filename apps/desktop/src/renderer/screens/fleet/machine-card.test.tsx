@@ -6,7 +6,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, within } from "@testing-library/react";
 import type { FleetMachine } from "@hercule/client-core/fleet";
-import { BUSY_MACHINE, DRAINING_MACHINE, NOW, OFFLINE_MACHINE, TIMEZONE } from "./fleet.testing";
+import {
+  BUSY_MACHINE,
+  DRAINING_MACHINE,
+  FULL_DISK_MACHINE,
+  NOW,
+  OFFLINE_MACHINE,
+  TIMEZONE,
+} from "./fleet.testing";
 import { MachineCard } from "./machine-card";
 import { buildMachineTransitionName } from "./machine-transition";
 
@@ -37,6 +44,13 @@ describe("MachineCard", () => {
     const card = renderCard(DRAINING_MACHINE);
 
     expect(within(card).getAllByText("Takes no new work")).toHaveLength(1);
+  });
+
+  it("shows no room for a machine whose disk is below its limit, because its need line says so", () => {
+    const card = renderCard(FULL_DISK_MACHINE);
+
+    expect(within(card).queryByText(/^Room for|^Full$|^Takes no new work$/)).toBeNull();
+    expect(within(card).getByText(/^Disk below its limit/)).toBeTruthy();
   });
 
   it("shows an offline machine's word and when it was last heard from, with no room and no button but its name", () => {
