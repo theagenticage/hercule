@@ -259,7 +259,7 @@ export interface MachineStorageSources {
   readonly negotiatedCapabilities: readonly string[] | null;
   /** Every workspace the shell holds, of any machine. The machine's own are picked out here. */
   readonly workspaces: readonly Workspace[];
-  /** The Threads `readCleanupThreads` read for the machine's cleanup candidates. `[]` before they are read. */
+  /** The Threads `readWorkspaceThreads` read for the machine's cleanup candidates. `[]` before they are read. */
   readonly threads: readonly Session[];
   /** The hour points of this machine alone, oldest first, for the forecast. */
   readonly hourPoints: readonly RunnerMetricsPoint[];
