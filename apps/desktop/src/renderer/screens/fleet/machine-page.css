@@ -142,7 +142,7 @@
   white-space: nowrap;
 }
 .machine-page-instrument > b small {
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-13);
   font-weight: var(--w-regular);
   letter-spacing: 0;
@@ -162,6 +162,8 @@
   margin: 8px 0;
 }
 .machine-page-instrument .fleet-sessions {
+  /* Square blocks: a 1.5px corner would add a radius to the page. */
+  --r-block: 0;
   margin: 4px 0;
 }
 .machine-page-instrument .fleet-sessions--blocks i {

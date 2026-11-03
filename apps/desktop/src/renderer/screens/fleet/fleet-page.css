@@ -60,6 +60,7 @@
 
 /* ---------- Sessions against the cap ---------- */
 .fleet-sessions {
+  --r-block: 1.5px;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -79,8 +80,8 @@
   width: 5px;
   height: 10px;
   /* The prototype's 1.5px. No radius token fits a block this small: the
-     smallest, --r-xs, would make it a capsule. */
-  border-radius: 1.5px;
+     smallest, --r-xs, would make it a capsule. `.fleet-sessions` names it. */
+  border-radius: var(--r-block);
   background: color-mix(in oklab, var(--ink) 8%, transparent);
 }
 .fleet-sessions--blocks i.is-run {
@@ -426,7 +427,7 @@
   justify-content: space-between;
   gap: 8px;
   min-height: 26px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 /* ---------- The card that adds a machine ---------- */
@@ -634,7 +635,7 @@
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 6px 10px;
+  gap: 8px;
   min-width: 0;
 }
 .fleet-row-need .fleet-attn {
