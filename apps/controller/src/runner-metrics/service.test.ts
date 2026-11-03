@@ -635,7 +635,7 @@ describe("a query's limits", () => {
     expect(page.items).toEqual([]);
   });
 
-  it("refuses hour points beyond the longer of the retention and 7 days, and accepts up to it", async () => {
+  it("refuses hour points beyond the longer of the retention and 14 days, and accepts up to it", async () => {
     const hours = (days: number, extraMs = 0) => ({
       resolution: "hour" as const,
       since: instant(0),
@@ -652,25 +652,25 @@ describe("a query's limits", () => {
         // Unset, the retention is 14 days.
         const defaultRefused = yield* Effect.flip(query(hours(14, 1)));
         const defaultAccepted = yield* query(hours(14));
-        // A retention below 7 days still allows the 7 days the disk forecast reads.
-        yield* withRetention(3);
-        const shortAccepted = yield* query(hours(7));
-        const shortRefused = yield* Effect.flip(query(hours(7, 1)));
-        // A retention above 7 days allows its own length and no more.
-        yield* withRetention(10);
-        const midAccepted = yield* query(hours(10));
-        const midRefused = yield* Effect.flip(query(hours(10, 1)));
+        // A retention below 14 days still allows 14 days.
+        yield* withRetention(7);
+        const shortAccepted = yield* query(hours(14));
+        const shortRefused = yield* Effect.flip(query(hours(14, 1)));
+        // A longer retention allows its own length and no more.
+        yield* withRetention(30);
+        const longAccepted = yield* query(hours(30));
+        const longRefused = yield* Effect.flip(query(hours(30, 1)));
         return {
-          accepted: [defaultAccepted, shortAccepted, midAccepted].map((page) => page.items),
-          refused: [defaultRefused, shortRefused, midRefused],
+          accepted: [defaultAccepted, shortAccepted, longAccepted].map((page) => page.items),
+          refused: [defaultRefused, shortRefused, longRefused],
         };
       }),
     );
     expect(result.accepted).toEqual([[], [], []]);
     expect(result.refused.map((error) => readIssues(error)[0]?.message)).toEqual([
       expect.stringContaining("at most 14 days"),
-      expect.stringContaining("at most 7 days"),
-      expect.stringContaining("at most 10 days"),
+      expect.stringContaining("at most 14 days"),
+      expect.stringContaining("at most 30 days"),
     ]);
   });
 

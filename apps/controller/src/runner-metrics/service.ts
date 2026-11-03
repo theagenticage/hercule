@@ -29,14 +29,13 @@ import { runnerMetricsRepository } from "./repository";
 const DEFAULT_RETENTION_DAYS = 14;
 
 /**
- * The days of hour points the Fleet page's disk forecast reads (the client's
- * value is `FORECAST_HISTORY_MS` in `packages/client-core/src/fleet/metrics-history.ts`;
- * the controller cannot import client-core). A query for hour points may cover
- * this many days even when the retention is shorter: the days beyond the
- * retention hold no rows, so refusing them would protect nothing and only make
- * the page fail.
+ * The fewest days of hour points a query may cover. A query for hour points
+ * may cover this many days, the default retention, even when the retention is
+ * set shorter: the days beyond the retention hold no rows, so refusing them
+ * would protect nothing and only make a client fail. A client written against
+ * the default retention keeps working.
  */
-const DISK_FORECAST_DAYS = 7;
+const MIN_HOUR_SPAN_DAYS = 14;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -90,8 +89,8 @@ const make = Effect.gen(function* () {
      *
      * Fails with `Validation` when the span is empty, or is longer than a
      * query may read (24 hours of five-minute points, or the longer of the
-     * retention period and 7 days of hour points), or when the cursor was
-     * issued for another runner or resolution.
+     * retention period and 14 days of hour points), or when the cursor was issued for another
+     * runner or resolution.
      */
     query: (
       input: RunnerMetricsQuery,
@@ -117,11 +116,11 @@ const make = Effect.gen(function* () {
           );
         }
         if (input.resolution === "hour") {
-          const days = Math.max(yield* readRetentionDays, DISK_FORECAST_DAYS);
+          const days = Math.max(yield* readRetentionDays, MIN_HOUR_SPAN_DAYS);
           if (spanMs > days * DAY_MS) {
             return yield* Effect.fail(
               refuseSpan(
-                `hour points cover at most ${String(days)} days, the longer of the history kept and the ${String(DISK_FORECAST_DAYS)} days the Fleet page's disk forecast reads; ask for a shorter span.`,
+                `hour points cover at most ${String(days)} days, the longer of the history kept and ${String(MIN_HOUR_SPAN_DAYS)} days; ask for a shorter span.`,
               ),
             );
           }

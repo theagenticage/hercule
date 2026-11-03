@@ -2368,7 +2368,7 @@ export const CLI = {
 
   "runnerMetrics.query": {
     command: "runner metrics",
-    help: "Shows how busy a machine was: free disk, memory, CPU and sessions. The history is the controller's own, in points of five minutes or one hour, never single minutes. `minutes` says how many minutes of a point have a report, so a gap shows as fewer minutes, not as an invented value. Five-minute points cover at most 24 hours; hour points cover the history kept, or 7 days if that is longer.",
+    help: "Shows how busy a machine was: free disk, memory, CPU and sessions. The history is the controller's own, in points of five minutes or one hour, never single minutes. `minutes` says how many minutes of a point have a report, so a gap shows as fewer minutes, not as an invented value. Five-minute points cover at most 24 hours; hour points cover the history kept, or 14 days if that is longer.",
     examples: [
       {
         args: [
