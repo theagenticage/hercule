@@ -20,7 +20,7 @@ import {
 import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
 import { openFileClock } from "./edit-marks";
 import { serveIdentity } from "./identity";
-import { probeFacts, thisMachine } from "./probe";
+import { buildThisMachine, probeFacts } from "./probe";
 import { harnessLogins, removeStaleSetupTokenFolders } from "./harnesses";
 import { sessions } from "./sessions";
 import { makeSessionSkillsFolders } from "./skills";
@@ -169,8 +169,6 @@ export const runDaemon = (
         readControllerUrl: () => controllerUrl,
         port: IDENTITY_PORT,
       });
-      const probe = probeFacts(thisMachine, identityPort);
-      const readMetrics = readRunnerMetrics(home);
       // Everything this machine stores for its controller lives in this
       // directory. So when the machine joins again, every harness login,
       // workspace and cache stays behind with the old runner identity.
@@ -178,6 +176,10 @@ export const runDaemon = (
       // No other user on the machine may read a session's workspace or the
       // credential socket.
       mkdirSync(storageDir, { recursive: true, mode: 0o700 });
+      // The disk the facts and the metrics describe is the one this directory
+      // is on, because that is where the sessions' files grow.
+      const probe = probeFacts(buildThisMachine(storageDir), identityPort);
+      const readMetrics = readRunnerMetrics(storageDir);
       // The working directories of sessions without a workspace, one per
       // session. They can be deleted at any time.
       const scratchDir = joinPath(storageDir, "scratch");

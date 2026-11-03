@@ -14,20 +14,12 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import type * as Scope from "effect/Scope";
+import type { RunnerCpu } from "@hercule/protocol";
 
 /** The processors' cumulative counters, in kernel ticks, summed over all cores. */
 export interface CpuTimes {
   readonly busyTicks: number;
   readonly totalTicks: number;
-}
-
-/**
- * The CPU use over one minute. Both values are percentages from 0 to 100 and
- * are rounded to one decimal.
- */
-export interface RunnerCpu {
-  readonly averagePercent: number;
-  readonly peakPercent: number;
 }
 
 /** What one minute has collected so far. */

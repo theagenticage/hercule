@@ -957,6 +957,62 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
+  it("returns the CPU of the metrics and the disk size of the facts as reported", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        // `null` is not the same as an absent `cpu`: it says the runner reads
+        // CPU and has no minute yet, so it must survive the store.
+        wire.send({
+          _tag: "watermarkReport",
+          watermark: { ...buildResourceReport(200 * GIB), cpu: null },
+        });
+        const first = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.metrics !== null,
+        );
+        expect(first.metrics).toEqual({ ...buildResourceReport(200 * GIB), cpu: null });
+
+        const cpu = { averagePercent: 21, peakPercent: 80 };
+        wire.send({
+          _tag: "watermarkReport",
+          watermark: { ...buildResourceReport(150 * GIB), cpu },
+        });
+        const minute = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.metrics?.diskFreeBytes === 150 * GIB,
+        );
+        expect(minute.metrics).toEqual({ ...buildResourceReport(150 * GIB), cpu });
+
+        const withDisk: RunnerFacts = { ...FACTS, diskTotalBytes: 1024 * GIB };
+        wire.send({ _tag: "factsReport", facts: withDisk });
+        const grown = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.facts?.diskTotalBytes !== undefined,
+        );
+        expect(grown.facts).toEqual(withDisk);
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
   it("records a runner whose first report shows no room left", async () => {
     await withServer(
       async (harness) => {

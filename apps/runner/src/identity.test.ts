@@ -109,6 +109,7 @@ const findLanAddress = (): string | undefined =>
 const bareMachine: Machine = {
   locate: () => undefined,
   version: () => Effect.succeed(undefined),
+  diskTotalBytes: Effect.succeed(undefined),
 };
 
 describe("the identity response", () => {

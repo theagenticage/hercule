@@ -16,14 +16,14 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { arch, platform, totalmem } from "node:os";
+import { arch, platform, tmpdir, totalmem } from "node:os";
 import { IDENTITY_PORT, MAX_FACT_LENGTH, RunnerFacts } from "@hercule/protocol";
 import {
   FACTS_REFRESH,
   VERSION_DEADLINE,
   probeFacts,
   refreshFacts,
-  thisMachine,
+  buildThisMachine,
   type Machine,
 } from "./probe";
 
@@ -38,7 +38,11 @@ type Printed = Record<string, string>;
 const buildMachine = (printed: Printed): Machine => ({
   locate: (binary) => (binary in printed ? `/usr/local/bin/${binary}` : undefined),
   version: (path) => Effect.succeed(printed[path.slice("/usr/local/bin/".length)]),
+  diskTotalBytes: Effect.succeed(DISK),
 });
+
+/** The size of the stub machine's disk: 1 TiB. */
+const DISK = 1024 ** 4;
 
 /** Real `--version` output, captured from the pinned toolchain. */
 const GIT = "git version 2.50.1";
@@ -73,6 +77,23 @@ describe("probeFacts", () => {
     // A plain number of bytes, because the session cap is computed from it.
     expect(Number.isInteger(facts.totalMemoryBytes)).toBe(true);
     expect(facts.totalMemoryBytes).toBeGreaterThan(0);
+  });
+
+  it("reports the size of the disk, and leaves it out when the disk cannot be read", async () => {
+    const facts = await probePrinted(FULL);
+    expect(facts.diskTotalBytes).toBe(DISK);
+
+    const unreadable = await Effect.runPromise(
+      probeFacts(
+        { ...buildMachine(FULL), diskTotalBytes: Effect.succeed(undefined) },
+        IDENTITY_PORT,
+      ),
+    );
+    // Absent, not null or zero: the schema allows the key to be missing, and a
+    // missing disk must not fail the whole probe.
+    expect("diskTotalBytes" in unreadable).toBe(false);
+    expect(unreadable.toolchains).toHaveLength(2);
+    expect(Schema.is(RunnerFacts)(unreadable)).toBe(true);
   });
 
   it("reports the identity port it was given, defaulting to 4939", async () => {
@@ -153,6 +174,7 @@ describe("toolchains", () => {
             {
               locate: (binary) => (binary === "git" ? "/usr/local/bin/git" : undefined),
               version: () => Effect.never,
+              diskTotalBytes: Effect.succeed(DISK),
             },
             IDENTITY_PORT,
           ),
@@ -178,6 +200,7 @@ describe("toolchains", () => {
         {
           locate: (binary) => (binary === "git" ? "/usr/local/bin/git" : undefined),
           version: () => Effect.succeed(undefined),
+          diskTotalBytes: Effect.succeed(DISK),
         },
         IDENTITY_PORT,
       ),
@@ -193,6 +216,7 @@ describe("toolchains", () => {
         {
           locate: (binary) => (binary === "git" ? `${deep}git` : undefined),
           version: () => Effect.succeed("x".repeat(900)),
+          diskTotalBytes: Effect.succeed(DISK),
         },
         IDENTITY_PORT,
       ),
@@ -231,15 +255,23 @@ describe("harness binaries", () => {
   });
 });
 
-describe("thisMachine", () => {
+describe("buildThisMachine", () => {
   it("does not find a binary that is not installed, and probes the machine the test runs on", async () => {
+    const thisMachine = buildThisMachine(tmpdir());
     expect(thisMachine.locate("a-binary-no-machine-has-installed")).toBeUndefined();
 
     const facts = await Effect.runPromise(probeFacts(thisMachine, IDENTITY_PORT));
+    expect(facts.diskTotalBytes).toBeGreaterThan(0);
     expect(facts.os).toBe(platform());
     expect(facts.arch).toBe(arch());
     expect(facts.totalMemoryBytes).toBe(totalmem());
     expect(facts.harnesses.map((one) => one.name)).toEqual(["claude", "codex", "pi"]);
+  });
+
+  it("leaves the disk size out of the facts when the storage directory cannot be read", async () => {
+    const machine = buildThisMachine("/no/such/directory/on/this/machine");
+
+    expect(await Effect.runPromise(machine.diskTotalBytes)).toBeUndefined();
   });
 });
 

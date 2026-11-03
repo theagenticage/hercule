@@ -58,7 +58,6 @@ import {
   type ProbeResult,
   type RepositorySkillsInspection,
   type RunnerFacts,
-  type RunnerMetrics,
   MAX_MESSAGE_LENGTH,
   MAX_WORKSPACE_STEPS,
   type WorkspaceReport,
@@ -88,7 +87,7 @@ import {
   previewRepositorySkills,
   type SessionSkillsFolders,
 } from "./skills";
-import { reportMetrics } from "./metrics";
+import { reportMetrics, type MetricsReading } from "./metrics";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
 import type { Workspaces } from "./workspaces";
@@ -154,7 +153,7 @@ export interface ConnectOptions {
   readonly pin: ControllerPin;
   readonly facts: RunnerFacts;
   readonly probe: Effect.Effect<RunnerFacts>;
-  readonly readMetrics: Effect.Effect<RunnerMetrics, Cause.UnknownError>;
+  readonly readMetrics: Effect.Effect<MetricsReading, Cause.UnknownError>;
   /**
    * The runner's storage directory. A Harness Home is a path the controller
    * names, joined to this directory. Each account has its own home, so two

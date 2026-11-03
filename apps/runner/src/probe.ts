@@ -10,6 +10,7 @@ import { arch, platform, totalmem } from "node:os";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { HarnessBinary, RunnerFacts, Toolchain } from "@hercule/protocol";
+import { readDiskSpace } from "./disk";
 import { ADAPTER_IDS } from "./harnesses";
 import { truncateFact } from "./harnesses/text";
 
@@ -35,9 +36,16 @@ export interface Machine {
   readonly locate: (binary: string) => string | undefined;
   /** Returns what `<binary> --version` printed, or undefined when it could not be run. */
   readonly version: (path: string) => Effect.Effect<string | undefined>;
+  /** Returns the size of the disk that holds the runner's storage directory, or undefined when it could not be read. */
+  readonly diskTotalBytes: Effect.Effect<number | undefined>;
 }
 
-export const thisMachine: Machine = {
+/**
+ * Returns the machine this process runs on. `storageDir` is the runner's
+ * storage directory: the disk size is the size of the file system that holds
+ * it, the same file system the metrics read the free space from.
+ */
+export const buildThisMachine = (storageDir: string): Machine => ({
   locate: (binary) => Bun.which(binary) ?? undefined,
   version: (path) =>
     Effect.tryPromise(async (signal) => {
@@ -55,7 +63,13 @@ export const thisMachine: Machine = {
       // A machine without the tool is normal, not a failed probe.
       Effect.orElseSucceed(() => undefined),
     ),
-};
+  // An unreadable disk leaves the size out of the facts. It must not fail the
+  // probe: the facts hold much that the fleet needs besides the disk size.
+  diskTotalBytes: readDiskSpace(storageDir).pipe(
+    Effect.map((disk) => disk.totalBytes),
+    Effect.orElseSucceed(() => undefined),
+  ),
+});
 
 /**
  * Returns the semantic version in a binary's `--version` output. Each binary
@@ -94,10 +108,13 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
         ? { name, present: false }
         : { name, present: true, path: truncateFact(path) };
     });
+    const diskTotalBytes = yield* machine.diskTotalBytes;
     return {
       os: truncateFact(platform()),
       arch: truncateFact(arch()),
       totalMemoryBytes: totalmem(),
+      // Left out, not null, when unreadable: the schema allows the key to be absent.
+      ...(diskTotalBytes === undefined ? {} : { diskTotalBytes }),
       docker: machine.locate(DOCKER) !== undefined,
       toolchains,
       harnesses,
@@ -123,7 +140,8 @@ export interface FactsRefresh<E> {
  * anyway would rewrite every runner row in the fleet with nothing new.
  *
  * The comparison uses the JSON text of the facts. That works because the probe
- * builds its result in the same order every time.
+ * builds its result in the same order every time, including the optional
+ * `diskTotalBytes`, which sits at a fixed place or is absent.
  */
 export const refreshFacts = <E>(refresh: FactsRefresh<E>): Effect.Effect<never, E> =>
   Effect.gen(function* () {

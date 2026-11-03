@@ -545,6 +545,8 @@ describe("which controller a runner accepts", () => {
       metrics: {
         diskFreeBytes: 200 * 1024 ** 3,
         availableMemoryBytes: 1,
+        // No minute of CPU has been read yet on the report right after hello.
+        cpu: null,
       },
     });
 
