@@ -24,7 +24,7 @@
  *    (`decideRemovalOutcome`).
  * 4. When no row is left being removed, the result is worded
  *    (`describeCleanupOutcome`) and the toast shows it, unless the dialog is
- *    open and shows it in its own head.
+ *    open and shows it itself, in a paragraph under its title.
  */
 import { matchQuery, type QueryClient } from "@tanstack/react-query";
 import { readErrorMessage, type HerculeClient } from "@hercule/client-core";
@@ -69,7 +69,9 @@ export interface CleanupStore {
   /**
    * Archives the Threads of `plan` and removes its workspaces on the machine
    * `runnerId`. `rows` are the dialog's rows of those workspaces, in the
-   * order of `plan.items`. Replaces any progress that has ended.
+   * order of `plan.items`. Replaces any progress the machine has. The Clean
+   * up… button's guard keeps it from calling this while a cleanup is in
+   * progress, so the store does not check that itself.
    */
   readonly start: (runnerId: string, rows: readonly CleanupRow[], plan: CleanupPlan) => void;
   /**
@@ -88,7 +90,7 @@ export interface CleanupStore {
    * Tells the store that a dialog shows the machine's progress, until the
    * returned function is called. The result of a cleanup that ends with some
    * refusals is shown as a toast only when no dialog is watching, because the
-   * dialog's head shows it.
+   * dialog shows it under its title.
    */
   readonly watch: (runnerId: string) => () => void;
   /**
@@ -182,7 +184,7 @@ export const createCleanupStore = ({
   /**
    * Shows the toast of a cleanup that has ended, when its words belong there:
    * always when everything was removed, and when some rows were refused only
-   * if no dialog shows the words in its head.
+   * if no dialog shows the words under its title.
    */
   const announce = (runnerId: string, result: CleanupOutcomeWords): void => {
     const isWatched = (watchers.get(runnerId) ?? 0) > 0;
@@ -239,11 +241,15 @@ export const createCleanupStore = ({
    * Starts settling the rows of every machine whenever the shell's workspaces
    * have been read. A read that succeeds while a machine awaits its fresh read
    * began after that machine's answer (see `startFreshRead`), so it opens the
-   * machine's gate.
+   * machine's gate. Writes made with `setQueryData` are ignored: only a real
+   * read can open the gate.
    */
   const startWatchingCache = (): void => {
     stopWatchingCache ??= queryClient.getQueryCache().subscribe((event) => {
       if (event.type !== "updated" || event.action.type !== "success") return;
+      // A `setQueryData` write is not a read: it carries whatever list the
+      // writer held, which may be from before the answer.
+      if (event.action.manual === true) return;
       if (!matchQuery({ queryKey: workspacesKey, exact: true }, event.query)) return;
       for (const [runnerId, entry] of [...entries]) {
         if (entry.awaitingFreshRead) entries.set(runnerId, { ...entry, awaitingFreshRead: false });
@@ -274,7 +280,7 @@ export const createCleanupStore = ({
     runnerId: string,
     run: object,
     asked: readonly string[],
-    answer: Exclude<CleanupStart, { status: "archiveRefused" }>,
+    answer: Exclude<CleanupStart, { status: "archiveRefused" | "archiveUnconfirmed" }>,
   ): void => {
     const entry = readRun(runnerId, run);
     if (entry === undefined) return;
@@ -333,7 +339,8 @@ export const createCleanupStore = ({
       };
       void archiveAndRemoveWorkspaces(client, plan).then(
         (answer) => {
-          if (answer.status === "archiveRefused") stop(answer.message);
+          if (answer.status === "archiveRefused" || answer.status === "archiveUnconfirmed")
+            stop(answer.message);
           else
             applyAnswer(
               runnerId,
@@ -387,7 +394,8 @@ export const createCleanupStore = ({
       };
       void archiveAndRemoveWorkspaces(client, { threadIds: [], items: [toItem(row)] }).then(
         (answer) => {
-          if (answer.status === "archiveRefused") refuse(answer.message);
+          if (answer.status === "archiveRefused" || answer.status === "archiveUnconfirmed")
+            refuse(answer.message);
           else applyAnswer(runnerId, run, [workspaceId], answer);
         },
         (error: unknown) => {

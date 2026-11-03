@@ -839,12 +839,12 @@ const seedQueryCache = (
         fleet.negotiatedCapabilities[runner.id] ?? null,
       );
       const idleIds = listCleanupCandidateIds(records.workspaces, runner.id, storageNow);
-      queryClient.setQueryData(
-        cleanupThreadsQuery(client, runner.id, idleIds).queryKey,
-        fleet.cleanupThreads.filter(
+      queryClient.setQueryData(cleanupThreadsQuery(client, runner.id, idleIds).queryKey, {
+        workspaceIds: idleIds,
+        threads: fleet.cleanupThreads.filter(
           ({ workspaceId }) => workspaceId !== null && idleIds.includes(workspaceId),
         ),
-      );
+      });
     }
   }
   if (workflows !== undefined) {

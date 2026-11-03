@@ -262,17 +262,18 @@ describe("a machine's Storage section", () => {
   it("lists the five largest idle workspaces by the Thread that named them", async () => {
     const { storage } = await openStorage(buildWorld());
 
-    // "of 62 GB" under the first and the fourth, whose removal frees less than they take.
+    // Largest by what removing frees, not by what the workspace takes: the 62 GB one frees
+    // 25 GB, so it comes third, with "of 62 GB" under it, as the 22 GB one that frees 9 GB.
     // The fifth's newest measuring failed three days after its last good one.
     expect(readIdleRows(storage)).toEqual([
-      "Move the checkout to Stripe Elements5 weeks ago25 GBof 62 GB",
       "Rebuild the search index3 weeks ago40 GB",
       "Fix the flaky payout test2 weeks ago27 GB",
-      "Spike: move the cron jobs to a queue7 weeks ago9 GBof 22 GB",
+      "Move the checkout to Stripe Elements5 weeks ago25 GBof 62 GB",
       "Draft the Q3 ops runbookSizes from 3 days ago: measuring took longer than 10 minutes.1 week ago14.6 GB",
+      "Spike: move the cron jobs to a queue7 weeks ago9 GBof 22 GB",
     ]);
     const frees = storage.querySelector(".machine-storage-idle-frees")!;
-    expect(frees.getAttribute("title")).toBe("62 GB on disk; removing it frees 25 GB");
+    expect(frees.getAttribute("title")).toBe("41 GB on disk; removing it frees 40 GB");
   });
 
   it("words the last removal the sweep made, and lists the rules in the info popover", async () => {
@@ -337,6 +338,33 @@ describe("a machine's Storage section", () => {
     expect(readThreadReads(calls)[1]).toContain(added.id);
   });
 
+  it("reads no Threads when the set of idle workspaces shrinks, and drops the removed workspace's row", async () => {
+    const world = buildWorld();
+    const { storage, calls, app } = await openStorage(world);
+    await waitFor(() => expect(app.live.readTopics()).toContain("workspace"));
+    await app.live.waitForFirstPushes();
+    expect(readIdleRows(storage)).toHaveLength(5);
+    expect(readThreadReads(calls)).toHaveLength(1);
+
+    // A cleanup removes the largest idle workspace.
+    const removed = IDLE[1]!;
+    world.workspaces = world.workspaces.filter(({ id }) => id !== removed.id);
+    act(() => app.live.pushInvalidation("workspace", [removed.id]));
+
+    await waitFor(() => expect(readIdleRows(storage)[0]).toContain("Fix the flaky payout test"));
+    await waitFor(() => expect(app.context.queryClient.isFetching()).toBe(0));
+    expect(readIdleRows(storage)).toHaveLength(5);
+    expect(readThreadReads(calls)).toHaveLength(1);
+  });
+
+  it("shows the empty line once the Threads are read and none of them used an idle workspace", async () => {
+    const world = buildWorld();
+    world.threads = [];
+    const { storage } = await openStorage(world);
+
+    expect(await within(storage).findByText("No idle workspaces.")).toBeTruthy();
+  });
+
   it("shows a failed read of the Threads as a line with a Retry, and the rest of the section stays", async () => {
     const world = buildWorld();
     world.threadsFail = "The controller is busy";
@@ -344,6 +372,9 @@ describe("a machine's Storage section", () => {
 
     const alert = await within(storage).findByRole("alert");
     expect(alert.textContent).toContain("Couldn't read the idle workspaces.");
+    // A failed read is not an empty list.
+    expect(within(storage).queryByText("No idle workspaces.")).toBeNull();
+    expect(readIdleRows(storage)).toEqual([]);
     expect(readHead(storage)).toBe("412 GB free of 1,000 GB");
 
     world.threadsFail = null;

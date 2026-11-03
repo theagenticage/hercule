@@ -199,6 +199,9 @@ function IdleWorkspace({ row }: { readonly row: IdleWorkspaceRow }): JSX.Element
  *   the button that opens the cleanup dialog.
  * - `readFailure` is drawn under that head when reading the idle workspaces'
  *   Threads failed.
+ * - `isLargestIdleKnown` is false while the Threads of the idle workspaces are
+ *   unread or their read failed. The list then shows neither rows nor "No idle
+ *   workspaces.", because `storage.largestIdle` is empty only for want of them.
  * - A runner that is too old to measure storage has an empty bar and the
  *   line that says so. A runner that has reported no disk has the head alone.
  */
@@ -206,11 +209,13 @@ export function MachineStoragePanel({
   id,
   storage,
   cleanUp,
+  isLargestIdleKnown,
   readFailure,
 }: {
   readonly id: string;
   readonly storage: MachineStorage;
   readonly cleanUp: ReactNode;
+  readonly isLargestIdleKnown: boolean;
   readonly readFailure: ReactNode;
 }): JSX.Element {
   const { head, bar, tooOld, automaticCleanup, largestIdle } = storage;
@@ -236,7 +241,7 @@ export function MachineStoragePanel({
             {cleanUp}
           </div>
           {readFailure}
-          {largestIdle.length === 0 ? (
+          {!isLargestIdleKnown ? null : largestIdle.length === 0 ? (
             <p className="machine-storage-idle-empty">No idle workspaces.</p>
           ) : (
             <ul className="machine-storage-idle-list" aria-labelledby={headingId}>

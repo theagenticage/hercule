@@ -1,5 +1,5 @@
-import type { JSX, ReactNode } from "react";
-import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useEffect, type JSX, type ReactNode } from "react";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
 import { canMeasureStorage, describeMachineStorage } from "@hercule/client-core/machine-storage";
@@ -7,7 +7,9 @@ import { FLEET_HOUR_METRICS_SCOPE } from "@hercule/client-core/metrics-history";
 import type { Runner } from "@hercule/contract";
 import {
   cleanupThreadsQuery,
+  coversWorkspaces,
   listCleanupCandidateIds,
+  listThreadsOf,
   negotiatedCapabilitiesQuery,
 } from "../../../../app/machine-storage-queries";
 import { machineRecentActivityQuery, workspacesQuery } from "../../../../app/queries";
@@ -27,10 +29,14 @@ import { runnerMetricsQuery } from "./-runner-metrics";
  * - The workspaces are the shell's own read, which the `workspace` push keeps
  *   current. The section is built in that read's `select`, so a push that
  *   changes nothing the section draws re-renders nothing.
- * - The Threads of the idle workspaces tell which of them a Thread used. They
- *   are read once per set of idle workspaces (`cleanupThreadsQuery`), and not
- *   at all for a runner that cannot measure storage. A read that fails shows
- *   a line with a Retry, and the rows wait for it.
+ * - The Threads of the idle workspaces tell which of them a Thread used
+ *   (`cleanupThreadsQuery`). They are read when the section first draws, and
+ *   again only when an idle workspace appears that the data does not cover. A
+ *   workspace that leaves the set, for example one a cleanup removes, reads
+ *   nothing: its Threads are filtered out of the data. A runner that cannot
+ *   measure storage reads none. While the Threads are unread, or the read
+ *   failed, the list shows neither rows nor "No idle workspaces."; a failed
+ *   read shows a line with a Retry.
  * - The forecast in the head comes from the Fleet page's hour points, read
  *   again at most once an hour (`useRunnerMetricsLive`). The last sweep comes
  *   from the first page of the machine's audit log, which Recent reads.
@@ -63,8 +69,22 @@ export function MachineStorage({
   const threads = useQuery({
     ...cleanupThreadsQuery(client, runner.id, candidateIds),
     enabled: isMeasured && candidateIds.length > 0,
-    placeholderData: keepPreviousData,
   });
+  // The query is kept for good, so a new candidate does not read by itself:
+  // this does, once, when the data lacks it. A failed read waits for Retry.
+  const { refetch: readThreadsAgain } = threads;
+  const mustReadAgain =
+    isMeasured &&
+    candidateIds.length > 0 &&
+    !coversWorkspaces(threads.data, candidateIds) &&
+    threads.data !== undefined &&
+    !threads.isFetching &&
+    !threads.isError;
+  useEffect(() => {
+    if (mustReadAgain) void readThreadsAgain();
+  }, [mustReadAgain, readThreadsAgain]);
+  const areThreadsKnown =
+    candidateIds.length === 0 || (threads.data !== undefined && !threads.isError);
 
   const { data: storage } = useSuspenseQuery({
     ...workspacesQuery(client),
@@ -73,7 +93,7 @@ export function MachineStorage({
         runner,
         negotiatedCapabilities: capabilities,
         workspaces,
-        threads: threads.data ?? [],
+        threads: listThreadsOf(threads.data, candidateIds),
         hourPoints: hours.points.filter((point) => point.runnerId === runner.id),
         events: recent.data?.items ?? [],
         timezone,
@@ -86,6 +106,7 @@ export function MachineStorage({
       id={id}
       storage={storage}
       cleanUp={cleanUp}
+      isLargestIdleKnown={areThreadsKnown}
       readFailure={
         threads.isError ? (
           <MachineActivityNote onRetry={() => void threads.refetch()}>

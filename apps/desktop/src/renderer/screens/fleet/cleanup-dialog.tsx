@@ -267,8 +267,9 @@ function CleanupRowOutcome({
 /**
  * Renders the body and the foot of the dialog while workspaces are being
  * removed, and after: one line for each of `rows`, with its outcome. `result`
- * is the head's words (such as "Archived 9 threads. Removed 4 of 6
- * workspaces.") once every row has an outcome, else `null`. A refused row
+ * is the words of the result (such as "Archived 9 threads. Removed 4 of 6
+ * workspaces."), drawn as a paragraph at the top of the body, under the
+ * title, once every row has an outcome; else `null`. A refused row
  * shows its reason under the name and Try again, which calls `onRetry` with
  * the workspace's id, unless asking again cannot succeed. The Close button
  * takes the focus when the view appears and after a Try again, because the

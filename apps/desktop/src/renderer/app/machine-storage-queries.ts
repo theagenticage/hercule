@@ -11,7 +11,7 @@
 import { queryOptions, type QueryKey } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
 import { listCleanupCandidates, readCleanupThreads } from "@hercule/client-core/cleanup";
-import type { Workspace } from "@hercule/contract";
+import type { Session, Workspace } from "@hercule/contract";
 import { LIVE_KEPT_READ_OPTIONS } from "./queries";
 
 /**
@@ -46,12 +46,26 @@ export const listCleanupCandidateIds = (
     .toSorted();
 
 /**
+ * The Threads read for the idle workspaces of a machine, with the ids of the
+ * workspaces they were read for. A workspace of `workspaceIds` that no Thread
+ * used has none in `threads`, so the ids are what tells that it was covered.
+ */
+export interface CleanupThreadsRead {
+  readonly workspaceIds: readonly string[];
+  readonly threads: readonly Session[];
+}
+
+/**
  * Reads the Threads, archived ones included, that were placed in the
  * workspaces `workspaceIds` of the machine `runnerId` (`readCleanupThreads`).
- * Pass the ids `listCleanupCandidateIds` returns: the key holds them, so the
- * Threads are read again only when the set of candidates changes. An idle
- * workspace cannot gain or lose a Thread without its last use changing, which
- * takes it out of the set.
+ * Pass the ids `listCleanupCandidateIds` returns.
+ *
+ * The key holds the runner alone, not the ids. A cleanup removes its
+ * workspaces one by one, and a key that held the ids would read the Threads of
+ * every workspace left after each removal. The Storage section reads again
+ * only when a candidate appears that `coversWorkspaces` says the data lacks.
+ * An idle workspace cannot gain or lose a Thread without its last use
+ * changing, which takes it out of the set.
  *
  * No push reads this again. The key is outside the `sessions` prefix on
  * purpose, because a `session` push arrives about once a second while agents
@@ -64,7 +78,31 @@ export const cleanupThreadsQuery = (
   workspaceIds: readonly string[],
 ) =>
   queryOptions({
-    queryKey: ["cleanup-threads", runnerId, workspaceIds] as QueryKey,
-    queryFn: () => readCleanupThreads(client, workspaceIds),
+    queryKey: ["cleanup-threads", runnerId] as QueryKey,
+    queryFn: async (): Promise<CleanupThreadsRead> => ({
+      workspaceIds,
+      threads: await readCleanupThreads(client, workspaceIds),
+    }),
     ...LIVE_KEPT_READ_OPTIONS,
   });
+
+/** Checks whether `read` holds the Threads of every one of `workspaceIds`. */
+export const coversWorkspaces = (
+  read: CleanupThreadsRead | undefined,
+  workspaceIds: readonly string[],
+): boolean => {
+  if (read === undefined) return false;
+  const covered = new Set(read.workspaceIds);
+  return workspaceIds.every((id) => covered.has(id));
+};
+
+/** Returns the Threads of `read` that were placed in one of `workspaceIds`. */
+export const listThreadsOf = (
+  read: CleanupThreadsRead | undefined,
+  workspaceIds: readonly string[],
+): readonly Session[] => {
+  const wanted = new Set(workspaceIds);
+  return (read?.threads ?? []).filter(
+    (thread) => thread.workspaceId !== null && wanted.has(thread.workspaceId),
+  );
+};

@@ -33,8 +33,11 @@ const ARCHIVING_HINT = "Archiving threads…";
  * - While the machine is not `isOnline` (offline or unreachable), the button
  *   does nothing and its tooltip says why. It stays focusable
  *   (`aria-disabled`) so the tooltip shows.
- * - Pressing the button reads the Threads of the machine's idle workspaces
- *   afresh, builds the dialog's rows once from them and the shell's
+ * - Pressing the button decides which workspaces are idle at that moment
+ *   (`new Date()`), not at the time the Storage section counts at
+ *   (`decideStorageNow`, which can be an hour old). A workspace that turned
+ *   idle within that hour can be in the dialog and not yet in the page's list.
+ *   It then reads the Threads of those workspaces afresh, builds the dialog's rows once from them and the shell's
  *   workspaces, and opens the dialog. The rows do not change as pushes arrive:
  *   what the user saw is what goes. When the read fails, the failure shows as
  *   a toast and no dialog opens.
@@ -76,14 +79,16 @@ export function CleanUpButton({
       const threads =
         candidates.length === 0
           ? []
-          : await queryClient.fetchQuery({
-              ...cleanupThreadsQuery(
-                client,
-                runnerId,
-                candidates.map((workspace) => workspace.id).toSorted(),
-              ),
-              staleTime: 0,
-            });
+          : (
+              await queryClient.fetchQuery({
+                ...cleanupThreadsQuery(
+                  client,
+                  runnerId,
+                  candidates.map((workspace) => workspace.id).toSorted(),
+                ),
+                staleTime: 0,
+              })
+            ).threads;
       return buildCleanupSnapshot(runnerName, candidates, threads, now);
     },
     onSuccess: (snapshot) => {

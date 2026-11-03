@@ -24,6 +24,13 @@ import { runnerMetricsQuery } from "./-runner-metrics";
  * since that read, as it has for a machine that has been away for days or just
  * after midnight, it is the start of the day (`today`) instead, so "yesterday"
  * and the idle weeks are never counted from the past.
+ *
+ * The time can lag the clock by up to an hour (the hour points are read about
+ * once an hour). The cleanup dialog does not use it: the Clean up… button
+ * decides which workspaces are idle at the moment it is pressed. A workspace
+ * that turned idle within the last hour can therefore be in the dialog before
+ * it is in the page's list of the largest idle workspaces. Both are kept so
+ * that no timer has to run.
  */
 export const decideStorageNow = (hourPointsReadAt: number, today: Date): Date =>
   new Date(Math.max(hourPointsReadAt, today.getTime()));

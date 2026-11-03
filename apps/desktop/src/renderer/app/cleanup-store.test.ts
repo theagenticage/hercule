@@ -2,7 +2,8 @@
  * Tests `createCleanupStore`: that rows settle only from a read of the
  * workspaces that began after the controller's answer, also when that read
  * is paused (the Mac is offline) or fails, with no timer; that a read which
- * changes nothing draws nothing; that a refused archive shows a toast when no
+ * changes nothing draws nothing; that a write with `setQueryData` is not a
+ * read and settles nothing; that a refused archive shows a toast when no
  * dialog watches; and that a disposed store drops every answer still on its
  * way.
  */
@@ -161,6 +162,32 @@ describe("createCleanupStore", () => {
     });
   });
 
+  it("does not settle from a write to the cached workspaces while the fresh read is paused", async () => {
+    const { world, queryClient, client, showNotice, store } = await buildStore();
+    onlineManager.setOnline(false);
+    store.start(RUNNER_ID, [ROW], PLAN);
+    await vi.waitFor(() => {
+      expect(store.read(RUNNER_ID)?.kind).toBe("removing");
+    });
+
+    // A screen that saves a workspace writes the list it holds, which is from before the answer.
+    queryClient.setQueryData(workspacesQuery(client).queryKey, [
+      buildStored("ready", "A process had a file open."),
+    ]);
+
+    const progress = store.read(RUNNER_ID);
+    expect(progress?.kind === "removing" && progress.outcomes.get(WORKSPACE_ID)).toEqual({
+      kind: "removing",
+    });
+    expect(showNotice).not.toHaveBeenCalled();
+
+    world.workspace = buildStored("deleted");
+    onlineManager.setOnline(true);
+    await vi.waitFor(() => {
+      expect(showNotice).toHaveBeenCalledWith(REMOVED_TOAST);
+    });
+  });
+
   it("keeps the rows removing when the fresh read fails, runs no timer, and settles from the next successful read", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "setInterval"] });
     const { world, calls, readsBefore, queryClient, client, showNotice, store } =
@@ -190,7 +217,7 @@ describe("createCleanupStore", () => {
     });
   });
 
-  it("TMP settles from the first fresh read when the controller already shows the result", async () => {
+  it("settles at once from the fresh read when the controller already lists the workspace as deleted", async () => {
     const { world, showNotice, store } = await buildStore();
     world.workspace = buildStored("deleted");
     store.start(RUNNER_ID, [ROW], PLAN);
