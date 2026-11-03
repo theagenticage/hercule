@@ -140,8 +140,11 @@ interface SamplerState {
  * The first failure of a run of failures is logged as a warning, and the
  * following ones are not, so a counter that stays unreadable does not fill the
  * log. Without that, a failed read would stop the sampler for good and the
- * reports would show "no CPU yet" for ever. The sample after a failed read is
- * measured from the last successful read, so it covers the whole gap.
+ * reports would show "no CPU yet" for ever. A failed read also clears the
+ * baseline, so the first read after the failures only sets a fresh baseline and
+ * adds no sample. Otherwise its sample would span the whole gap and put time
+ * that belongs to earlier minutes into the latest one. Samples already in the
+ * current minute are kept.
  */
 export const startCpuSampler = (
   readCpuTimes: () => CpuTimes = readMachineCpuTimes,
@@ -155,12 +158,15 @@ export const startCpuSampler = (
         Effect.suspend(() => {
           const alreadyLogged = lastReadFailed;
           lastReadFailed = true;
-          return alreadyLogged
-            ? Effect.void
-            : Effect.logWarning(
-                "The runner could not read the machine's CPU counters, so it skips CPU samples until it can",
-                error,
-              );
+          return Effect.andThen(
+            Ref.update(state, ({ minute }) => ({ previous: undefined, minute })),
+            alreadyLogged
+              ? Effect.void
+              : Effect.logWarning(
+                  "The runner could not read the machine's CPU counters, so it skips CPU samples until it can",
+                  error,
+                ),
+          );
         }),
       onSuccess: (next) =>
         Effect.suspend(() => {

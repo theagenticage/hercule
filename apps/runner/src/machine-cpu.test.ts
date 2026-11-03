@@ -193,7 +193,7 @@ describe("startCpuSampler", () => {
     );
   });
 
-  it("skips reads that throw, warns once, and measures a proper minute after they recover", async () => {
+  it("skips reads that throw, warns once, and attributes no time across the gap", async () => {
     const warnings: Array<unknown> = [];
     const logger = Logger.make<unknown, void>((options) => {
       if (options.logLevel === "Warn") warnings.push(options.message);
@@ -201,28 +201,59 @@ describe("startCpuSampler", () => {
     await run(
       Effect.gen(function* () {
         let call = 0;
-        // Call 0 is the baseline. Calls 1 to 3 throw. After that every second
-        // adds 100 ticks of which 40 are busy.
+        // Read 0 is the baseline and read 1 is fully busy. Reads 2 to 9 throw.
+        // From read 10 on, the machine is idle: each read adds 100 total ticks
+        // and no busy ticks. The counters kept running during the failures, so
+        // a delta across the gap would be mostly idle ticks of the second
+        // minute mixed with the busy tick of the first.
         const reader = (): CpuTimes => {
           const index = call++;
-          if (index >= 1 && index <= 3) throw new Error("the counters are gone");
-          return at(index * 40, index * 100);
+          if (index >= 2 && index <= 9) throw new Error("the counters are gone");
+          return index === 0 ? at(0, 0) : index === 1 ? at(100, 100) : at(100, index * 100);
         };
         const scope = yield* Scope.make();
         const sampler = yield* Scope.provide(startCpuSampler(reader), scope);
 
-        yield* TestClock.adjust(Duration.seconds(3));
-        // Nothing could be measured yet, and the failures were logged once.
+        yield* TestClock.adjust(Duration.seconds(1));
+        // The busy minute, taken before the failures end.
+        yield* TestClock.adjust(Duration.millis(500));
+        expect(yield* sampler.takeMinute).toEqual({ averagePercent: 100, peakPercent: 100 });
+
+        yield* TestClock.adjust(Duration.seconds(8));
+        // Reads 2 to 9 threw, and they were logged once.
         expect(yield* sampler.takeMinute).toBeNull();
         expect(warnings).toHaveLength(1);
 
-        // The sampler is still running: it samples again. Its first sample
-        // spans the gap back to the baseline and measures the same 40%.
+        // Read 10 only sets a new baseline. Read 11 is the first sample of the
+        // idle minute: 0%, not a share of the gap.
+        yield* TestClock.adjust(Duration.seconds(1));
+        expect(yield* sampler.takeMinute).toBeNull();
         yield* TestClock.adjust(Duration.seconds(2));
-        expect(yield* sampler.takeMinute).toEqual({ averagePercent: 40, peakPercent: 40 });
+        expect(yield* sampler.takeMinute).toEqual({ averagePercent: 0, peakPercent: 0 });
         expect(warnings).toHaveLength(1);
         yield* Scope.close(scope, Exit.void);
       }).pipe(Effect.provide(Logger.layer([logger]))),
+    );
+  });
+
+  it("keeps the samples already in the minute when a read throws", async () => {
+    await run(
+      Effect.gen(function* () {
+        let call = 0;
+        const reader = (): CpuTimes => {
+          const index = call++;
+          if (index === 2) throw new Error("one bad read");
+          return at(index * 50, index * 100);
+        };
+        const scope = yield* Scope.make();
+        const sampler = yield* Scope.provide(startCpuSampler(reader), scope);
+
+        // Read 1 is a sample of 50%. Read 2 throws. Read 3 is a new baseline.
+        yield* TestClock.adjust(Duration.seconds(3));
+
+        expect(yield* sampler.takeMinute).toEqual({ averagePercent: 50, peakPercent: 50 });
+        yield* Scope.close(scope, Exit.void);
+      }),
     );
   });
 
