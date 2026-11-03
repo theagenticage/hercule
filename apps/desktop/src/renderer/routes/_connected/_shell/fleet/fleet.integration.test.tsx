@@ -444,14 +444,16 @@ describe("the Software section", () => {
   const getSoftwareTable = (): HTMLElement =>
     screen.getByRole("table", { name: "Software on each machine" });
 
-  /** Returns the cells of the tool `name` after its Latest cell, as text, one per machine in the column order. */
+  /** Returns the cells of the tool `name` after its Latest cell, as text (a check or a dash by its accessible name), one per machine in the column order. */
   const readToolCells = (name: string): string[] => {
     const row = within(getSoftwareTable())
       .getAllByRole("row")
       .find((each) => within(each).queryByRole("button", { name }) !== null)!;
     return within(row)
       .getAllByRole("cell")
-      .map((cell) => cell.textContent ?? "");
+      .map(
+        (cell) => cell.querySelector("[role=img]")?.getAttribute("aria-label") ?? cell.textContent,
+      );
   };
 
   it("shows each tool against its latest release, on every machine", async () => {
@@ -464,20 +466,15 @@ describe("the Software section", () => {
         .map((head) => head.textContent),
     ).toEqual(["Tool", "Latest", "atlas", "forge", "nomad"]);
     // Latest, then atlas (the latest, a check), forge (older), nomad (not installed).
-    // A dash for a missing tool has "Not installed" as hidden text.
-    expect(readToolCells("Claude Code")).toEqual([
-      "2.0.84",
-      "2.0.84",
-      "2.0.78",
-      "\u2013Not installed",
-    ]);
+    // A dash for a missing tool is named "Not installed".
+    expect(readToolCells("Claude Code")).toEqual(["2.0.84", "2.0.84", "2.0.78", "Not installed"]);
     // A runner updates to its controller's version, which is also theirs.
     expect(readToolCells("Hercule runner")).toEqual(["0.9.3", "0.9.3", "0.9.3", "0.9.3"]);
     expect(readToolCells("git")).toEqual([
       "Not tracked",
       "2.50.1",
-      "\u2013Not installed",
-      "\u2013Not installed",
+      "Not installed",
+      "Not installed",
     ]);
   });
 

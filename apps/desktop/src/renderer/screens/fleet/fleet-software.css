@@ -129,8 +129,11 @@
 }
 
 /* ---------- A tool's name ---------- */
+/* The right padding keeps the name's focus ring off the Latest column's text,
+   without changing the column's width. */
 .fleet-sw-tool {
   min-width: 0;
+  padding-right: 12px;
 }
 .fleet-sw-name {
   display: flex;
@@ -244,14 +247,11 @@
   color: var(--muted);
 }
 
-/* Text for assistive technology only: a check and a dash say nothing as text. */
-.fleet-sw-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+/* The drawn check or dash. It carries the cell's accessible name, so it must
+   be a box of its own that wraps the icon without a line's gap under it. */
+.fleet-sw-mark {
+  display: inline-flex;
+  align-items: center;
 }
 
 /* ---------- A tool's detail ---------- */

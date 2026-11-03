@@ -20,11 +20,11 @@ const buildDetailId = (key: string): string => `fleet-software-detail-${key.repl
 /**
  * Renders one machine's cell of a tool's row, as its kind says:
  *
- * - `latest`: a check, with the version as text for assistive technology;
+ * - `latest`: a check, named by the version for assistive technology;
  * - `older`: the version in the marigold ink;
  * - `below-floor`: the version in the failure ink, with its tooltip;
- * - `not-installed`: a short dash, with "Not installed" as text for
- *   assistive technology;
+ * - `not-installed`: a short dash, named "Not installed" for assistive
+ *   technology;
  * - `version`, `unknown-version` and `not-probed`: the version, "Installed"
  *   or "Unknown" (with a tooltip for the last two).
  *
@@ -44,15 +44,13 @@ function SoftwareCellView({ cell }: { readonly cell: SoftwareCell }): JSX.Elemen
   return (
     <div role="cell" className={className} title={title}>
       {showsCheck ? (
-        <>
+        <span role="img" aria-label={cell.text} className="fleet-sw-mark">
           <CheckIcon size={13} />
-          <span className="fleet-sw-hidden">{cell.text}</span>
-        </>
+        </span>
       ) : cell.kind === "not-installed" ? (
-        <>
-          <span aria-hidden="true">{NOT_INSTALLED_DASH}</span>
-          <span className="fleet-sw-hidden">{cell.text}</span>
-        </>
+        <span role="img" aria-label={cell.text} className="fleet-sw-mark">
+          {NOT_INSTALLED_DASH}
+        </span>
       ) : (
         cell.text
       )}

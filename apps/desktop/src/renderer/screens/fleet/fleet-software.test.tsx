@@ -171,14 +171,15 @@ describe("FleetSoftwarePanel", () => {
     const getMachineCells = (table: HTMLElement, name: string): HTMLElement[] =>
       within(getToolRow(table, name)).getAllByRole("cell").slice(1);
 
-    it("draws a check for the latest version, with the version as hidden text", () => {
+    it("draws a check for the latest version, named by the version", () => {
       const { table } = renderPanel();
 
       const [atlas] = getMachineCells(table, "Claude Code");
 
       expect(atlas!.className).toContain("is-latest");
       expect(atlas!.querySelector("svg")).not.toBeNull();
-      expect(atlas!.textContent).toBe("2.0.84");
+      expect(atlas!.textContent).toBe("");
+      expect(within(atlas!).getByRole("img", { name: "2.0.84" })).toBeTruthy();
       expect(atlas!.title).toBe("2.0.84");
     });
 
@@ -201,8 +202,8 @@ describe("FleetSoftwarePanel", () => {
       const [, mini] = getMachineCells(table, "Codex");
 
       expect(mini!.className).toContain("is-not-installed");
-      expect(mini!.querySelector("[aria-hidden]")!.textContent).toBe("–");
-      expect(within(mini!).getByText("Not installed")).toBeTruthy();
+      expect(mini!.textContent).toBe("–");
+      expect(within(mini!).getByRole("img", { name: "Not installed" })).toBeTruthy();
     });
 
     it("draws Installed, with its tooltip, for a version that is not known", () => {
@@ -245,7 +246,7 @@ describe("FleetSoftwarePanel", () => {
       expect(latest!.querySelector("svg")).toBeNull();
       expect(belowFloor!.textContent).toBe("0.9.0");
       expect(version!.textContent).toBe("go1.25.3");
-      expect(missing!.querySelector("[aria-hidden]")!.textContent).toBe("–");
+      expect(missing!.textContent).toBe("–");
     });
 
     it("draws Unknown, with its tooltip, for a toolchain the machine's runner is too old to look for", () => {
