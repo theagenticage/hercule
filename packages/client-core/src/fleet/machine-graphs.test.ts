@@ -21,7 +21,6 @@ const buildRunner = (overrides: Partial<Runner> = {}): Runner => ({
   facts: { ...BARE.facts!, totalMemoryBytes: MEMORY },
   metrics: { diskFreeBytes: 500, availableMemoryBytes: 500, cpu: null },
   maxConcurrentSessions: 4,
-  diskWatermarkBytes: 100,
   ...overrides,
 });
 

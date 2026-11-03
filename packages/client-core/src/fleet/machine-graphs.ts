@@ -116,14 +116,13 @@ const pickRunnerPoints = (
 
 /**
  * Splits `points` into runs and returns what `describe` made of each point.
- * A run is unbroken: a point that starts more than `spanMs` after the one
+ * A run is unbroken: a point that starts more than five minutes after the one
  * before it begins a new run, so a gap in the history stays a gap. So does a
  * point `describe` returns `null` for, which is a point with no value to draw.
  * The points come oldest first.
  */
 const splitIntoRuns = <Drawn>(
   points: readonly DatedPoint[],
-  spanMs: number,
   describe: (point: RunnerMetricsPoint, at: number) => readonly Drawn[] | null,
 ): Drawn[][] => {
   const runs: Drawn[][] = [];
@@ -135,7 +134,7 @@ const splitIntoRuns = <Drawn>(
       run = undefined;
       continue;
     }
-    if (run === undefined || at - previousAt > spanMs) {
+    if (run === undefined || at - previousAt > FIVE_MINUTES_MS) {
       run = [];
       runs.push(run);
     }
@@ -145,9 +144,10 @@ const splitIntoRuns = <Drawn>(
   return runs;
 };
 
-/** Returns the scale of a graph whose width starts at `left` and is `widthMs` long. */
-const buildTimeScale = (left: number, widthMs: number): TimeScale => {
-  return (time) => (time - left) / widthMs;
+/** Returns the scale of a graph that ends at `readAt` and spans `FIVE_MINUTE_HISTORY_MS`. */
+const buildTimeScale = (readAt: number): TimeScale => {
+  const left = readAt - FIVE_MINUTE_HISTORY_MS;
+  return (time) => (time - left) / FIVE_MINUTE_HISTORY_MS;
 };
 
 /**
@@ -163,9 +163,9 @@ const locateStep = (at: number, readAt: number, x: TimeScale): readonly [number,
 const describeSessionsGraph = (
   runner: Runner,
   points: readonly DatedPoint[],
-  history: RunnerMetricsHistory,
+  x: TimeScale,
+  readAt: number,
 ): SessionsGraph => {
-  const x = buildTimeScale(history.readAt - FIVE_MINUTE_HISTORY_MS, FIVE_MINUTE_HISTORY_MS);
   const cap = runner.maxConcurrentSessions;
   let top = cap;
   for (const { point } of points) {
@@ -174,16 +174,16 @@ const describeSessionsGraph = (
   const y = (sessions: number): number => sessions / top;
   return {
     kind: "drawn",
-    running: splitIntoRuns(points, FIVE_MINUTES_MS, ({ sessionsRunning }, at) => {
-      const [start, end] = locateStep(at, history.readAt, x);
+    running: splitIntoRuns(points, ({ sessionsRunning }, at) => {
+      const [start, end] = locateStep(at, readAt, x);
       return [
         { x: start, y: y(sessionsRunning) },
         { x: end, y: y(sessionsRunning) },
       ];
     }),
-    waiting: splitIntoRuns(points, FIVE_MINUTES_MS, ({ sessionsRunning, sessionsQueued }, at) => {
+    waiting: splitIntoRuns(points, ({ sessionsRunning, sessionsQueued }, at) => {
       if (sessionsQueued === 0) return null;
-      const [start, end] = locateStep(at, history.readAt, x);
+      const [start, end] = locateStep(at, readAt, x);
       const low = y(sessionsRunning);
       const high = y(sessionsRunning + sessionsQueued);
       return [
@@ -198,17 +198,16 @@ const describeSessionsGraph = (
 const describeCpuGraph = (
   runner: Runner,
   points: readonly DatedPoint[],
-  history: RunnerMetricsHistory,
+  x: TimeScale,
 ): CpuGraph | UnavailableGraph => {
   if (runner.metrics === null) return { kind: "unavailable" };
   if (runner.metrics.cpu === undefined) return { kind: "unavailable" };
-  const x = buildTimeScale(history.readAt - FIVE_MINUTE_HISTORY_MS, FIVE_MINUTE_HISTORY_MS);
   return {
     kind: "drawn",
-    average: splitIntoRuns(points, FIVE_MINUTES_MS, ({ cpuAveragePercent }, at) =>
+    average: splitIntoRuns(points, ({ cpuAveragePercent }, at) =>
       cpuAveragePercent === null ? null : [{ x: x(at), y: clamp(cpuAveragePercent / 100) }],
     ),
-    peak: splitIntoRuns(points, FIVE_MINUTES_MS, ({ cpuAveragePercent, cpuPeakPercent }, at) =>
+    peak: splitIntoRuns(points, ({ cpuAveragePercent, cpuPeakPercent }, at) =>
       cpuAveragePercent === null || cpuPeakPercent === null
         ? null
         : [
@@ -225,25 +224,20 @@ const describeCpuGraph = (
 const describeMemoryGraph = (
   runner: Runner,
   points: readonly DatedPoint[],
-  history: RunnerMetricsHistory,
+  x: TimeScale,
 ): MemoryGraph | UnavailableGraph => {
   const total = runner.facts?.totalMemoryBytes;
   if (total === undefined || total <= 0) return { kind: "unavailable" };
-  const x = buildTimeScale(history.readAt - FIVE_MINUTE_HISTORY_MS, FIVE_MINUTE_HISTORY_MS);
   const y = (availableBytes: number): number => clamp((total - availableBytes) / total);
   return {
     kind: "drawn",
-    inUse: splitIntoRuns(points, FIVE_MINUTES_MS, ({ availableMemoryBytes }, at) => [
+    inUse: splitIntoRuns(points, ({ availableMemoryBytes }, at) => [
       { x: x(at), y: y(availableMemoryBytes) },
     ]),
-    highest: splitIntoRuns(
-      points,
-      FIVE_MINUTES_MS,
-      ({ availableMemoryBytes, availableMemoryLowestBytes }, at) => {
-        const low = y(availableMemoryBytes);
-        return [{ x: x(at), low, high: y(availableMemoryLowestBytes) }];
-      },
-    ),
+    highest: splitIntoRuns(points, ({ availableMemoryBytes, availableMemoryLowestBytes }, at) => {
+      const low = y(availableMemoryBytes);
+      return [{ x: x(at), low, high: y(availableMemoryLowestBytes) }];
+    }),
     youY: MEMORY_YOU_FROM_PERCENT / 100,
     failY: MEMORY_FAIL_FROM_PERCENT / 100,
   };
@@ -273,9 +267,10 @@ export const describeMachineGraphs = (
   fiveMinutes: RunnerMetricsHistory,
 ): MachineGraphs => {
   const fiveMinutePoints = pickRunnerPoints(fiveMinutes, runner.id);
+  const x = buildTimeScale(fiveMinutes.readAt);
   return {
-    sessions: describeSessionsGraph(runner, fiveMinutePoints, fiveMinutes),
-    cpu: describeCpuGraph(runner, fiveMinutePoints, fiveMinutes),
-    memory: describeMemoryGraph(runner, fiveMinutePoints, fiveMinutes),
+    sessions: describeSessionsGraph(runner, fiveMinutePoints, x, fiveMinutes.readAt),
+    cpu: describeCpuGraph(runner, fiveMinutePoints, x),
+    memory: describeMemoryGraph(runner, fiveMinutePoints, x),
   };
 };

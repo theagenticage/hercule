@@ -656,7 +656,7 @@ describe("a query's limits", () => {
         yield* withRetention(3);
         const shortAccepted = yield* query(hours(7));
         const shortRefused = yield* Effect.flip(query(hours(7, 1)));
-        // A retention between 7 and 14 days allows its own length and no more.
+        // A retention above 7 days allows its own length and no more.
         yield* withRetention(10);
         const midAccepted = yield* query(hours(10));
         const midRefused = yield* Effect.flip(query(hours(10, 1)));

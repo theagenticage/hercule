@@ -121,7 +121,7 @@ const make = Effect.gen(function* () {
           if (spanMs > days * DAY_MS) {
             return yield* Effect.fail(
               refuseSpan(
-                `hour points cover at most ${String(days)} days, the longer of the history kept and the ${String(DISK_FORECAST_DAYS)} days the disk forecast reads; ask for a shorter span.`,
+                `hour points cover at most ${String(days)} days, the longer of the history kept and the ${String(DISK_FORECAST_DAYS)} days the Fleet page's disk forecast reads; ask for a shorter span.`,
               ),
             );
           }
