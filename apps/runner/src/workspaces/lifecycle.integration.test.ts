@@ -205,9 +205,9 @@ describe("safe managed disposal", () => {
       storageDir: fixture.storageDir,
       observer: {
         workspaceReady: note("ready"),
-        workspaceRemovalStarted: note("started"),
-        workspaceRemovalFailed: note("failed"),
-        workspaceRemoved: note("removed"),
+        beginChange: note("began"),
+        endChange: note("ended"),
+        forget: note("forgot"),
       },
     });
     const dispose = (discardChanges?: true) =>
@@ -220,10 +220,10 @@ describe("safe managed disposal", () => {
       );
 
     expect((await dispose()).status).toBe("failed");
-    expect(calls).toEqual(["started", "failed"]);
+    expect(calls).toEqual(["began", "ended"]);
 
     expect((await dispose(true)).status).toBe("deleted");
-    expect(calls).toEqual(["started", "failed", "started", "removed"]);
+    expect(calls).toEqual(["began", "ended", "began", "forgot"]);
   });
 
   it.each(["dirty second checkout", "root file"] as const)(

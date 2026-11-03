@@ -4164,14 +4164,14 @@ describe("the workspace sessions the supervisor reports to the disk measurements
     const initialBranch = runGitOrThrow(cwd, "rev-parse", "--abbrev-ref", "HEAD");
     const calls: Array<string> = [];
     connection.runner.observeWorkspaceSessions({
-      sessionStarted: () =>
+      beginChange: () =>
         Effect.sync(
           () =>
             void calls.push(
               `started on ${runGitOrThrow(cwd, "rev-parse", "--abbrev-ref", "HEAD")}`,
             ),
         ),
-      sessionEnded: () => Effect.sync(() => void calls.push("ended")),
+      endChange: () => Effect.sync(() => void calls.push("ended")),
     });
     return { ...connection, calls, cwd, initialBranch, workspaceId: frame.workspaceId };
   };

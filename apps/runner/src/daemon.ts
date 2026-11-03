@@ -204,7 +204,7 @@ export const runDaemon = (
         registry: makeRegistry(storageDir),
         measureFolder: makeFolderMeasurer(),
       });
-      sessions.observeWorkspaceSessions(diskMeasurements);
+      sessions.observeWorkspaceSessions(diskMeasurements.sessionChanges);
       const workspaces = yield* makeWorkspaces({
         storageDir,
         gitEnv: buildGitCredentialEnv({ socketPath }),

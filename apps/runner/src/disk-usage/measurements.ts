@@ -2,21 +2,27 @@
  * Keeps the disk usage of this runner's managed workspaces, repository caches
  * and Harness Homes, and reports it to the controller (spec 03 section 6.9).
  *
- * The rule that decides what to measure is a per-workspace counter:
+ * One idea drives it: something is changing the workspace's files. A session
+ * running in it changes them, and so does its removal. Each of those calls
+ * `beginChange` before it can write or delete, and `endChange` when it is done
+ * (a removal that succeeds calls `forget` instead, because the workspace is
+ * gone). The rule that decides what to measure is a per-workspace counter:
  *
- * - `generation` goes up, and is saved, each time a session starts or exits in
- *   the workspace, and each time its removal begins (a removal that fails can
- *   leave the workspace half emptied). A start is recorded before the session
- *   can write a file.
+ * - `generation` goes up, and is saved, at every `beginChange` and every
+ *   `endChange`. The begin is saved before the change can touch a file.
  * - `measuredGeneration` is the generation the last walk began at, whether it
  *   succeeded or failed.
  * - A workspace is dirty when `generation > measuredGeneration`. It is measured
- *   when it is dirty and no session works in it.
+ *   when it is dirty and no change is in progress in it.
+ * - A walk saves its result only if the generation is still the one it began
+ *   at. Otherwise something changed the files while it walked, so the result
+ *   may describe files that no longer exist: it is dropped, the earlier
+ *   numbers stay, and the workspace stays dirty.
  *
- * So a workspace nobody used since its last walk is never walked again, a
- * failed walk does not retry in a loop, a session that starts or exits during a
- * walk leaves the workspace dirty, and a runner that crashed with sessions
- * working measures those workspaces once at boot.
+ * So a workspace nobody changed since its last walk is never walked again, a
+ * failed walk does not retry in a loop, a change that starts or ends during a
+ * walk leaves the workspace dirty, and a runner that crashed in the middle of a
+ * change measures that workspace once at boot.
  *
  * The counters and the last results are saved in `disk-usage.json` in the
  * storage directory, so a restart keeps them and the first report after a
@@ -26,9 +32,8 @@
  * Two kinds of change are saved differently, because the file holds every
  * workspace and rewriting it is costly:
  *
- * - A counter change (a session starts or exits, a removal begins, a workspace
- *   appears or is removed) is saved at once, before the session can write or
- *   the removal can delete. The write is atomic but not synced to the disk, so
+ * - A counter change (a change begins or ends, a workspace appears or is
+ *   forgotten) is saved at once, before the change can write or delete. The write is atomic but not synced to the disk, so
  *   the save survives a crash of this process, not a power loss. A lost save
  *   only means one more walk.
  * - A measurement result is saved at most once every `REPORT_INTERVAL`, and
@@ -118,42 +123,44 @@ export type SavedState = Schema.Schema.Type<typeof StoredState>;
 /** A workspace's mutable record while the daemon runs. */
 type WorkspaceRecord = { -readonly [K in keyof StoredWorkspace]: StoredWorkspace[K] };
 
-/** What the session supervisor tells this module. */
-export interface WorkspaceSessionObserver {
+/** What the code that changes a workspace's files tells this module. */
+export interface WorkspaceChangeObserver {
   /**
-   * Records that a session is about to run in the workspace, and saves it.
-   * Call it before the session can write. Never fails.
+   * Records that something is about to change the workspace's files, and
+   * saves it. The workspace is not measured until the matching `endChange`.
+   * Call it before the first write or delete. Never fails.
    */
-  readonly sessionStarted: (workspaceId: string) => Effect.Effect<void>;
-  /** Records that a session in the workspace has exited, saves it, and measures the workspace once none works in it. Never fails. */
-  readonly sessionEnded: (workspaceId: string) => Effect.Effect<void>;
+  readonly beginChange: (workspaceId: string) => Effect.Effect<void>;
+  /**
+   * Records that the change is over, whether it worked or not, and saves it.
+   * The workspace is measured once no other change is in progress in it.
+   * Never fails.
+   */
+  readonly endChange: (workspaceId: string) => Effect.Effect<void>;
 }
 
 /** What the workspaces tell this module about their own lifecycle. */
-export interface WorkspaceLifecycleObserver {
-  /** Records that the workspace is ready, so it is measured. Never fails. */
+export interface WorkspaceLifecycleObserver extends WorkspaceChangeObserver {
+  /**
+   * Records that the workspace is ready, so it is measured. This is not a
+   * change: the registry does not know the workspace while it is prepared, so
+   * no record can hold it until now. Never fails.
+   */
   readonly workspaceReady: (workspaceId: string) => Effect.Effect<void>;
   /**
-   * Records that the workspace's removal is about to begin, and saves it. The
-   * workspace counts as changed from here on, because a removal that fails can
-   * leave it half emptied, and a walk that ends meanwhile cannot save its
-   * numbers. Call it before the removal deletes anything. Never fails.
+   * Forgets the workspace, because its removal succeeded. A walk that is
+   * still running cannot save its numbers afterwards. Never fails.
    */
-  readonly workspaceRemovalStarted: (workspaceId: string) => Effect.Effect<void>;
-  /**
-   * Records that the removal ended and the workspace remains, wholly or in
-   * part. The workspace is measured again once no session works in it. Never
-   * fails.
-   */
-  readonly workspaceRemovalFailed: (workspaceId: string) => Effect.Effect<void>;
-  /**
-   * Forgets the workspace, so a walk that is still running cannot save its
-   * numbers afterwards. Never fails.
-   */
-  readonly workspaceRemoved: (workspaceId: string) => Effect.Effect<void>;
+  readonly forget: (workspaceId: string) => Effect.Effect<void>;
 }
 
-export interface DiskMeasurements extends WorkspaceSessionObserver, WorkspaceLifecycleObserver {
+export interface DiskMeasurements extends WorkspaceLifecycleObserver {
+  /**
+   * The changes of sessions. Like the methods above, and each one also
+   * records the workspace as used now. A removal is a change but not a use,
+   * and the report keeps the most recently used workspaces when it must cut.
+   */
+  readonly sessionChanges: WorkspaceChangeObserver;
   /** Builds the report from what is known now. */
   readonly buildReport: Effect.Effect<RunnerDiskUsageReport>;
   /**
@@ -264,9 +271,9 @@ const writeSavedState = (storageDir: string, state: SavedState): void => {
 /**
  * Creates the disk measurements of this runner and starts their worker, which
  * lives as long as `Scope`. The worker measures every dirty workspace once the
- * registry has been read, then waits until a session exits, a workspace becomes
- * ready, or a removal fails and leaves its workspace. A completed removal does
- * not wake it: that workspace is gone. It runs one walk at a time.
+ * registry has been read, then waits until a change ends or a workspace becomes
+ * ready. A removal that succeeds does not wake it: that workspace is gone. It
+ * runs one walk at a time.
  */
 export const makeDiskMeasurements = (
   options: DiskMeasurementsOptions,
@@ -279,12 +286,9 @@ export const makeDiskMeasurements = (
       Object.entries(saved?.workspaces ?? {}).map(([id, record]) => [id, { ...record }]),
     );
     let runner = saved?.runner ?? null;
-    // Sessions working in each workspace now. A crash loses it on purpose:
-    // no session survives the process.
-    const working = new Map<string, number>();
-    // Workspaces whose removal has begun and not ended. A walk of one of them
-    // must not save its numbers: its files are being deleted.
-    const removing = new Set<string>();
+    // Changes in progress in each workspace now. A crash loses it on purpose:
+    // no change survives the process.
+    const holders = new Map<string, number>();
     const wake = yield* Queue.sliding<void>(1);
     // Where a report change is signalled, while a connection is reporting.
     let reportChanged: Queue.Queue<void> | undefined;
@@ -367,30 +371,26 @@ export const makeDiskMeasurements = (
         return created;
       });
 
-    const noteSession = (workspaceId: string, change: 1 | -1): Effect.Effect<void> =>
+    const beginChange = (workspaceId: string, isUse: boolean): Effect.Effect<void> =>
       Effect.gen(function* () {
         const record = yield* ensureRecord(workspaceId);
         if (record === undefined) return;
         record.generation += 1;
-        record.lastUsedAt = Date.now();
-        working.set(workspaceId, Math.max(0, (working.get(workspaceId) ?? 0) + change));
+        if (isUse) record.lastUsedAt = Date.now();
+        holders.set(workspaceId, (holders.get(workspaceId) ?? 0) + 1);
         yield* persist;
-        if (change === -1) Queue.offerUnsafe(wake, undefined);
       });
 
-    const noteRemovalStarted = (workspaceId: string): Effect.Effect<void> =>
+    const endChange = (workspaceId: string, isUse: boolean): Effect.Effect<void> =>
       Effect.gen(function* () {
         const record = yield* ensureRecord(workspaceId);
         if (record === undefined) return;
-        removing.add(workspaceId);
         record.generation += 1;
+        if (isUse) record.lastUsedAt = Date.now();
+        const remaining = (holders.get(workspaceId) ?? 0) - 1;
+        if (remaining > 0) holders.set(workspaceId, remaining);
+        else holders.delete(workspaceId);
         yield* persist;
-      });
-
-    const noteRemovalFailed = (workspaceId: string): Effect.Effect<void> =>
-      Effect.sync(() => {
-        removing.delete(workspaceId);
-        // The generation went up when the removal began, so the workspace is dirty.
         Queue.offerUnsafe(wake, undefined);
       });
 
@@ -407,8 +407,7 @@ export const makeDiskMeasurements = (
       for (const id of [...records.keys()]) {
         if (managed.has(id)) continue;
         records.delete(id);
-        working.delete(id);
-        removing.delete(id);
+        holders.delete(id);
         changed = true;
       }
       for (const [id, entry] of managed) {
@@ -424,18 +423,19 @@ export const makeDiskMeasurements = (
       if (reportChanged !== undefined) Queue.offerUnsafe(reportChanged, undefined);
     });
 
-    /** Walks one workspace and saves the outcome, unless its removal began or finished meanwhile. */
+    /** Walks one workspace and saves the outcome, unless a change touched the workspace during the walk. */
     const measureWorkspace = (entry: RegisteredWorkspace): Effect.Effect<void> =>
       Effect.gen(function* () {
         const walkedGeneration = records.get(entry.workspaceId)?.generation;
         if (walkedGeneration === undefined) return;
         const outcome = yield* Effect.result(measureFolder(entry.root));
         const measuredAt = new Date().toISOString();
-        // A finished removal dropped the record. A removal that began during
-        // the walk is in `removing`, and a failed one made the workspace dirty
-        // again, so the walk's generation never covers what it deleted.
+        // A forgotten workspace has no record. Any change that began, or began
+        // and ended, during the walk moved the generation: the walk may have
+        // seen files that are gone or half written, so its outcome is dropped
+        // and the workspace stays dirty.
         const record = records.get(entry.workspaceId);
-        if (record === undefined || removing.has(entry.workspaceId)) return;
+        if (record === undefined || record.generation !== walkedGeneration) return;
         record.measuredGeneration = walkedGeneration;
         if (Result.isSuccess(outcome)) {
           record.diskUsage = { ...outcome.success, measuredAt };
@@ -477,7 +477,7 @@ export const makeDiskMeasurements = (
     });
 
     /**
-     * Measures every workspace that is dirty and has no session working in
+     * Measures every workspace that is dirty and has no change in progress in
      * it, newest use first, one at a time. Then measures the repository
      * caches and Harness Homes when this call measured a workspace or it is
      * the first call, and the last time was at least
@@ -486,7 +486,7 @@ export const makeDiskMeasurements = (
      * The registry is read once, up front: reading it again for each walk
      * would parse the whole file thousands of times at boot. A workspace that
      * becomes dirty meanwhile is picked up by the next call, which every
-     * session exit and ready workspace schedules.
+     * change that ends and ready workspace schedules.
      */
     const measureDirtyWorkspaces: Effect.Effect<void> = Effect.gen(function* () {
       const measurable = [...(yield* syncWithRegistry)].sort(
@@ -497,8 +497,7 @@ export const makeDiskMeasurements = (
         const record = records.get(entry.workspaceId);
         if (
           record === undefined ||
-          (working.get(entry.workspaceId) ?? 0) > 0 ||
-          removing.has(entry.workspaceId) ||
+          holders.has(entry.workspaceId) ||
           record.generation <= record.measuredGeneration
         )
           continue;
@@ -535,19 +534,20 @@ export const makeDiskMeasurements = (
     });
 
     return {
-      sessionStarted: (workspaceId) => noteSession(workspaceId, 1),
-      sessionEnded: (workspaceId) => noteSession(workspaceId, -1),
+      beginChange: (workspaceId) => beginChange(workspaceId, false),
+      endChange: (workspaceId) => endChange(workspaceId, false),
+      sessionChanges: {
+        beginChange: (workspaceId) => beginChange(workspaceId, true),
+        endChange: (workspaceId) => endChange(workspaceId, true),
+      },
       workspaceReady: (workspaceId) =>
         Effect.gen(function* () {
           yield* ensureRecord(workspaceId);
           Queue.offerUnsafe(wake, undefined);
         }),
-      workspaceRemovalStarted: noteRemovalStarted,
-      workspaceRemovalFailed: noteRemovalFailed,
-      workspaceRemoved: (workspaceId) =>
+      forget: (workspaceId) =>
         Effect.gen(function* () {
-          working.delete(workspaceId);
-          removing.delete(workspaceId);
+          holders.delete(workspaceId);
           if (records.delete(workspaceId)) yield* persist;
         }),
       buildReport,

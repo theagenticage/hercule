@@ -323,10 +323,8 @@ export const makeWorkspaces = (options: {
           const work = Effect.gen(function* () {
             if (preparation !== undefined) yield* Deferred.await(preparation.result);
             // A removal that fails can leave the workspace half emptied, so
-            // the observer hears of it before anything is deleted.
-            yield* (
-              options.observer?.workspaceRemovalStarted(instruction.workspaceId) ?? Effect.void
-            );
+            // the observer hears of the change before anything is deleted.
+            yield* options.observer?.beginChange(instruction.workspaceId) ?? Effect.void;
             return yield* instruction._tag === "workspaceDispose"
               ? disposeWorkspace(substrate, instruction)
               : detachWorkspace(substrate, instruction);
@@ -336,8 +334,8 @@ export const makeWorkspaces = (options: {
             ),
             Effect.tap((report) =>
               report.status === "deleted"
-                ? (options.observer?.workspaceRemoved(report.workspaceId) ?? Effect.void)
-                : (options.observer?.workspaceRemovalFailed(report.workspaceId) ?? Effect.void),
+                ? (options.observer?.forget(report.workspaceId) ?? Effect.void)
+                : (options.observer?.endChange(report.workspaceId) ?? Effect.void),
             ),
           );
           yield* startWorkspaceOperation(result, restore(work), () =>

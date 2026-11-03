@@ -7,5 +7,5 @@ export {
   makeDiskMeasurements,
   type DiskMeasurements,
   type WorkspaceLifecycleObserver,
-  type WorkspaceSessionObserver,
+  type WorkspaceChangeObserver,
 } from "./measurements";

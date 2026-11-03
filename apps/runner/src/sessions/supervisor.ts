@@ -25,7 +25,7 @@ import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import type { WorkspaceSessionObserver } from "../disk-usage";
+import type { WorkspaceChangeObserver } from "../disk-usage";
 import {
   AdapterFailed,
   InputNotDelivered,
@@ -486,11 +486,11 @@ export interface Supervising {
    */
   readonly shutdown: (reason: ExitReason) => Effect.Effect<void>;
   /**
-   * Tells the observer each time a session starts or exits in a workspace,
-   * from now on. The observer lives as long as the process, like this
+   * Tells the observer each time a session starts in a workspace (a change
+   * begins) and exits (it ends), from now on. The observer lives as long as the process, like this
    * supervisor. A second call replaces the first observer.
    */
-  readonly observeWorkspaceSessions: (observer: WorkspaceSessionObserver) => void;
+  readonly observeWorkspaceSessions: (observer: WorkspaceChangeObserver) => void;
 }
 
 /**
@@ -605,7 +605,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
   // up, and then the events are dropped (spec 03 section 2.3).
   let attached: Connection | undefined;
   // Told when a session starts or exits in a workspace. Set by `observeWorkspaceSessions`.
-  let workspaceSessions: WorkspaceSessionObserver | undefined;
+  let workspaceSessions: WorkspaceChangeObserver | undefined;
   // Whether the attached controller reads `filesEdited` frames. Set with `attached`.
   let attachedReadsFilesEdited = false;
   // The edit watch of each workspace that has one, by workspace id. A watch
@@ -707,7 +707,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
       held.releaseGithubToken();
       if (held.workspaceStartReported && held.workspaceId !== null) {
         held.workspaceStartReported = false;
-        yield* workspaceSessions?.sessionEnded(held.workspaceId) ?? Effect.void;
+        yield* workspaceSessions?.endChange(held.workspaceId) ?? Effect.void;
       }
       yield* Deferred.succeed(held.gone, undefined);
     });
@@ -1502,7 +1502,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
           const workspaceId = frame.spec.workspaceId;
           yield* Effect.uninterruptible(
             Effect.andThen(
-              observer.sessionStarted(workspaceId),
+              observer.beginChange(workspaceId),
               Effect.sync(() => {
                 arrived.workspaceStartReported = true;
               }),
@@ -1937,7 +1937,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
               // owes the observer the end of its report.
               if (arrived.workspaceStartReported && frame.spec.workspaceId !== null) {
                 arrived.workspaceStartReported = false;
-                yield* workspaceSessions?.sessionEnded(frame.spec.workspaceId) ?? Effect.void;
+                yield* workspaceSessions?.endChange(frame.spec.workspaceId) ?? Effect.void;
               }
               yield* Deferred.succeed(arrived.harnessReady, undefined);
               arrivedStarts.delete(arrived);

@@ -232,8 +232,8 @@ describe("disk measurements", () => {
       (r) => isMeasured("ws-unused")(r) && isMeasured("ws-busy")(r),
     );
 
-    await Effect.runPromise(measurements.sessionStarted("ws-busy"));
-    await Effect.runPromise(measurements.sessionEnded("ws-busy"));
+    await Effect.runPromise(measurements.sessionChanges.beginChange("ws-busy"));
+    await Effect.runPromise(measurements.sessionChanges.endChange("ws-busy"));
     // The pass the exit scheduled walks ws-busy again; it ends before the
     // report shows a second measurement time for it.
     const busyWalks = () => runner.walked.filter((folder) => folder.endsWith("ws-busy")).length;
@@ -267,7 +267,7 @@ describe("disk measurements", () => {
     const root = await runner.addWorkspace("ws-crashed");
     const first = await runner.start();
     await waitForReport(first, isMeasured("ws-crashed"));
-    await Effect.runPromise(first.sessionStarted("ws-crashed"));
+    await Effect.runPromise(first.sessionChanges.beginChange("ws-crashed"));
     writeFileSync(join(root, "written-by-the-session.bin"), Buffer.alloc(300_000, 4));
 
     const second = await runner.start();
@@ -293,7 +293,7 @@ describe("disk measurements", () => {
     const failing = await runner.start(undefined, () => {
       throw new Error("No space left on device");
     });
-    await Effect.runPromise(failing.sessionStarted("ws-unsaved"));
+    await Effect.runPromise(failing.sessionChanges.beginChange("ws-unsaved"));
     expect(existsSync(join(runner.storageDir, "disk-usage.json"))).toBe(false);
 
     // A restart (a crash, as nothing stopped the failing daemon cleanly)
@@ -308,7 +308,7 @@ describe("disk measurements", () => {
     const measurements = await runner.start();
     await runner.addWorkspace("ws-working");
     await runner.addWorkspace("ws-other");
-    await Effect.runPromise(measurements.sessionStarted("ws-working"));
+    await Effect.runPromise(measurements.sessionChanges.beginChange("ws-working"));
     await Effect.runPromise(measurements.workspaceReady("ws-working"));
     await Effect.runPromise(measurements.workspaceReady("ws-other"));
     // Passes run one after another, so once ws-other is measured the pass
@@ -317,11 +317,11 @@ describe("disk measurements", () => {
 
     expect(runner.walked.some((folder) => folder.endsWith("ws-working"))).toBe(false);
 
-    await Effect.runPromise(measurements.sessionEnded("ws-working"));
+    await Effect.runPromise(measurements.sessionChanges.endChange("ws-working"));
     await waitForReport(measurements, isMeasured("ws-working"));
   });
 
-  it("leaves a workspace dirty when a session starts during its walk", async () => {
+  it("drops the result of a walk that a session started during, and measures the workspace again after a restart", async () => {
     const runner = makeRunner();
     const root = await runner.addWorkspace("ws-raced");
     const cache = runner.addRepositoryCache();
@@ -329,18 +329,60 @@ describe("disk measurements", () => {
     const first = await runner.start();
     await walk.beganWalking;
 
-    await Effect.runPromise(first.sessionStarted("ws-raced"));
+    await Effect.runPromise(first.sessionChanges.beginChange("ws-raced"));
     walk.release();
-    // The numbers of the walk are kept, but the workspace is still dirty:
-    // a daemon that starts over the same storage, as after a crash with the
-    // session still working, measures it again.
-    await waitForReport(first, isMeasured("ws-raced"));
+    // The pass ends with the walk of the repository cache. The session may
+    // already have written files the walk missed, so its numbers are dropped
+    // and the workspace stays dirty: a daemon that starts over the same
+    // storage, as after a crash with the session still working, measures it again.
     await runner.waitForWalks(cache, 1);
     expect(runner.countWalks(root)).toBe(1);
+    expect(findEntry(await report(first), "ws-raced")).toEqual({
+      workspaceId: "ws-raced",
+      diskUsage: null,
+      error: null,
+    });
     await runner.stop(first);
     await runner.start();
 
     await runner.waitForWalks(root, 2);
+  });
+
+  it("drops the result of a walk that a change began and ended during, and keeps the earlier numbers", async () => {
+    const runner = makeRunner();
+    await runner.addWorkspace("ws-flicker");
+    // Walk 1 answers 1,000 at once. Walks 2 and 3 wait for their gates and answer 2,000 and 3,000.
+    let walks = 0;
+    const gates = [undefined, Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    const measure: MeasureFolder = () =>
+      Effect.promise(async () => {
+        walks += 1;
+        const number = walks;
+        await gates[number - 1]?.promise;
+        return { sizeBytes: number * 1000, freesBytes: number * 1000 };
+      });
+    const measurements = await runner.start(measure);
+    await waitForReport(measurements, (r) => findEntry(r, "ws-flicker")?.diskUsage != null);
+    const sizeBytes = async () =>
+      findEntry(await report(measurements), "ws-flicker")!.diskUsage!.sizeBytes;
+    expect(await sizeBytes()).toBe(1000);
+
+    await Effect.runPromise(measurements.sessionChanges.beginChange("ws-flicker"));
+    await Effect.runPromise(measurements.sessionChanges.endChange("ws-flicker"));
+    await waitUntil(() => walks === 2);
+    // A change begins and ends while walk 2 runs, so nobody works in the
+    // workspace when walk 2 ends, but its files may have changed under the walk.
+    await Effect.runPromise(measurements.beginChange("ws-flicker"));
+    await Effect.runPromise(measurements.endChange("ws-flicker"));
+    gates[1]!.resolve();
+    await waitUntil(() => walks === 3);
+
+    expect(await sizeBytes()).toBe(1000);
+    gates[2]!.resolve();
+    await waitForReport(
+      measurements,
+      (r) => findEntry(r, "ws-flicker")?.diskUsage?.sizeBytes === 3000,
+    );
   });
 
   it("does not bring back a workspace removed during its walk", async () => {
@@ -351,7 +393,7 @@ describe("disk measurements", () => {
     await walk.beganWalking;
 
     await runner.removeFromRegistry("ws-removed");
-    await Effect.runPromise(measurements.workspaceRemoved("ws-removed"));
+    await Effect.runPromise(measurements.forget("ws-removed"));
     walk.release();
     await runner.addWorkspace("ws-after");
     await Effect.runPromise(measurements.workspaceReady("ws-after"));
@@ -370,7 +412,7 @@ describe("disk measurements", () => {
     const measurements = await runner.start();
     await walk.beganWalking;
 
-    await Effect.runPromise(measurements.workspaceRemovalStarted("ws-leaving"));
+    await Effect.runPromise(measurements.beginChange("ws-leaving"));
     walk.release();
     await runner.addWorkspace("ws-after");
     await Effect.runPromise(measurements.workspaceReady("ws-after"));
@@ -383,7 +425,7 @@ describe("disk measurements", () => {
 
     // The removal failed and the workspace stays: the first walk is measured again.
     runner.holdWalks(root).release();
-    await Effect.runPromise(measurements.workspaceRemovalFailed("ws-leaving"));
+    await Effect.runPromise(measurements.endChange("ws-leaving"));
     await waitForReport(measurements, isMeasured("ws-leaving"));
     expect(runner.countWalks(root)).toBe(2);
   });
@@ -399,9 +441,9 @@ describe("disk measurements", () => {
     )!;
 
     // The removal deletes one file and fails on the next.
-    await Effect.runPromise(measurements.workspaceRemovalStarted("ws-partial"));
+    await Effect.runPromise(measurements.beginChange("ws-partial"));
     rmSync(join(root, "second.bin"));
-    await Effect.runPromise(measurements.workspaceRemovalFailed("ws-partial"));
+    await Effect.runPromise(measurements.endChange("ws-partial"));
     const after = findEntry(
       await waitForReport(
         measurements,
@@ -419,7 +461,7 @@ describe("disk measurements", () => {
     const root = await runner.addWorkspace("ws-crashed-removal");
     const first = await runner.start();
     await waitForReport(first, isMeasured("ws-crashed-removal"));
-    await Effect.runPromise(first.workspaceRemovalStarted("ws-crashed-removal"));
+    await Effect.runPromise(first.beginChange("ws-crashed-removal"));
 
     await runner.start();
     await runner.waitForWalks(root, 2);
@@ -443,8 +485,8 @@ describe("disk measurements", () => {
     const good = findEntry(await waitForReport(measurements, isMeasured("ws-flaky")), "ws-flaky")!;
 
     runner.failWalks("Cannot read /x\nbecause it is broken");
-    await Effect.runPromise(measurements.sessionStarted("ws-flaky"));
-    await Effect.runPromise(measurements.sessionEnded("ws-flaky"));
+    await Effect.runPromise(measurements.sessionChanges.beginChange("ws-flaky"));
+    await Effect.runPromise(measurements.sessionChanges.endChange("ws-flaky"));
     const failed = findEntry(
       await waitForReport(measurements, (r) => findEntry(r, "ws-flaky")?.error != null),
       "ws-flaky",
@@ -455,8 +497,8 @@ describe("disk measurements", () => {
     expect(failed.error).toBe("Cannot read /x because it is broken");
 
     runner.failWalks(undefined);
-    await Effect.runPromise(measurements.sessionStarted("ws-flaky"));
-    await Effect.runPromise(measurements.sessionEnded("ws-flaky"));
+    await Effect.runPromise(measurements.sessionChanges.beginChange("ws-flaky"));
+    await Effect.runPromise(measurements.sessionChanges.endChange("ws-flaky"));
     await waitForReport(measurements, (r) => findEntry(r, "ws-flaky")?.error === null);
   });
 
