@@ -940,8 +940,8 @@ const renderSignalRaised = (result: SignalRaiseResult): ReadonlyArray<string> =>
 
 /**
  * Returns the lines of `harness list`: the generic table, with the newest
- * release of each harness as a `latest` column holding its version, empty
- * until a read of the publisher has succeeded. The column sits before the
+ * release of each harness as a `latest` column holding the version of its last
+ * good read, empty until a read of the publisher has succeeded. The column sits before the
  * wide JSON cells, so it stays in view. The error of a failed read is left to
  * `--json`.
  */
@@ -951,7 +951,7 @@ const renderHarnessList = (harnesses: ReadonlyArray<Harness>): ReadonlyArray<str
       id: harness.id,
       displayName: harness.displayName,
       binaryName: harness.binaryName,
-      latest: harness.latestRelease?.version ?? "",
+      latest: harness.latestRelease.lastGoodRead?.version ?? "",
       declared: harness.declared,
       runs: harness.runs,
       runners: harness.runners,

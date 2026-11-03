@@ -30,7 +30,8 @@ const make = Effect.gen(function* () {
      * list its binary as present. Its version is the one the newest probe
      * reported, and `null` when the harness is not installed there or no probe
      * has seen it. Its latest release is what the controller last read from
-     * the harness's publisher, and `null` before the first attempt.
+     * the harness's publisher, and has neither a good read nor an error
+     * before the first attempt.
      */
     query: (): Effect.Effect<ReadonlyArray<Harness>, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {
@@ -60,7 +61,7 @@ const make = Effect.gen(function* () {
               versionVerdict: computeVersionVerdict(version, findVersionFloor(definition.id)),
             };
           }),
-          latestRelease: releases.get(definition.id) ?? null,
+          latestRelease: releases.get(definition.id) ?? { lastGoodRead: null, error: null },
         }));
       }),
   };

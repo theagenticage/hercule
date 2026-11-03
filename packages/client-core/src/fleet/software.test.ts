@@ -5,7 +5,7 @@ import { PROBED_TOOLCHAINS } from "@hercule/contract";
 import { BARE, HARNESSES } from "../providers.testing";
 import {
   describeFleetSoftware,
-  describeMachineUpdates,
+  describeFleetUpdates,
   listMachineTools,
   type FleetSoftware,
   type SoftwareCell,
@@ -68,7 +68,18 @@ const findRow = (grid: FleetSoftware, key: string): SoftwareRow => {
 const kindsOf = (row: SoftwareRow): readonly SoftwareCell["kind"][] =>
   row.cells.map((cell) => cell.kind);
 
-const successfulRelease = { version: "2.1.90", checkedAt: "2026-11-02T09:00:00.000Z", error: null };
+type LatestRelease = Harness["latestRelease"];
+
+/** A harness whose latest release has not been read yet. */
+const NOT_READ: LatestRelease = { lastGoodRead: null, error: null };
+
+/** Builds a latest release whose last good read was at 09:00, with the error of a later failed read if any. */
+const buildRelease = (version: string, error: string | null = null): LatestRelease => ({
+  lastGoodRead: { version, checkedAt: "2026-11-02T09:00:00.000Z" },
+  error,
+});
+
+const successfulRelease = buildRelease("2.1.90");
 
 describe("describeFleetSoftware columns and groups", () => {
   it("has a column per machine in the order of the Fleet cards, without retired machines", () => {
@@ -105,14 +116,13 @@ describe("describeFleetSoftware columns and groups", () => {
 });
 
 describe("describeFleetSoftware Latest", () => {
-  const latestOf = (release: Harness["latestRelease"]) =>
+  const latestOf = (release: LatestRelease) =>
     findRow(describeGrid([ATLAS], withClaude({ latestRelease: release })), CLAUDE).latest;
 
   it("says a harness was not checked yet before any read", () => {
     const expected = { text: "Not checked yet", tone: "muted", note: null, tooltip: null };
 
-    expect(latestOf(null)).toEqual(expected);
-    expect(latestOf({ version: null, checkedAt: null, error: null })).toEqual(expected);
+    expect(latestOf(NOT_READ)).toEqual(expected);
   });
 
   it("shows the version after a successful read", () => {
@@ -125,7 +135,7 @@ describe("describeFleetSoftware Latest", () => {
   });
 
   it("keeps the last good version with the time it was read when the latest read failed", () => {
-    expect(latestOf({ ...successfulRelease, error: "GitHub answered 503" })).toEqual({
+    expect(latestOf(buildRelease("2.1.90", "GitHub answered 503"))).toEqual({
       text: "2.1.90",
       tone: "ink",
       note: "checked 09:00",
@@ -140,7 +150,7 @@ describe("describeFleetSoftware Latest", () => {
   });
 
   it("explains a failed read when no read has succeeded", () => {
-    expect(latestOf({ version: null, checkedAt: null, error: "No network" })).toEqual({
+    expect(latestOf({ lastGoodRead: null, error: "No network" })).toEqual({
       text: "Not checked yet",
       tone: "muted",
       note: null,
@@ -175,7 +185,7 @@ describe("describeFleetSoftware harness cells", () => {
     const runners = [ATLAS, MOSS];
     const harnesses = withClaude({
       runners: entries.filter((entry) => entry !== undefined),
-      latestRelease: latest === null ? null : { ...successfulRelease, version: latest },
+      latestRelease: latest === null ? NOT_READ : buildRelease(latest),
     });
     return findRow(describeGrid(runners, harnesses), CLAUDE).cells;
   };
@@ -236,7 +246,7 @@ describe("describeFleetSoftware harness cells", () => {
   it("compares with the last good version after a failed read", () => {
     const harnesses = withClaude({
       runners: [onMachine(ATLAS, { version: "2.1.80" })],
-      latestRelease: { ...successfulRelease, error: "offline" },
+      latestRelease: buildRelease("2.1.90", "offline"),
     });
 
     expect(kindsOf(findRow(describeGrid([ATLAS], harnesses), CLAUDE))).toEqual(["older"]);
@@ -403,18 +413,18 @@ describe("describeFleetSoftware detail", () => {
   });
 
   it("words the latest release and when it was checked", () => {
-    const line = (release: Harness["latestRelease"]) =>
+    const line = (release: LatestRelease) =>
       findRow(describeGrid([ATLAS], withClaude({ latestRelease: release })), CLAUDE).detail
         .latestLine;
 
     expect(line(successfulRelease)).toBe("Latest release 2.1.90, checked 09:00.");
-    expect(line(null)).toBe("Not checked yet.");
-    expect(line({ ...successfulRelease, error: "offline" })).toBe(
+    expect(line(NOT_READ)).toBe("Not checked yet.");
+    expect(line(buildRelease("2.1.90", "offline"))).toBe(
       "Latest release 2.1.90, checked 09:00. The last check for a newer release failed. offline.",
     );
-    expect(
-      line({ version: null, checkedAt: null, error: "Could not reach the npm registry." }),
-    ).toBe("No release read yet: the last check failed. Could not reach the npm registry.");
+    expect(line({ lastGoodRead: null, error: "Could not reach the npm registry." })).toBe(
+      "No release read yet: the last check failed. Could not reach the npm registry.",
+    );
     const grid = describeGrid([ATLAS]);
     expect(findRow(grid, "runner").detail.latestLine).toBe(
       "Latest release 0.4.2, this controller's version: a runner updates to its controller's version.",
@@ -453,43 +463,39 @@ describe("describeFleetSoftware detail", () => {
   });
 });
 
-describe("describeMachineUpdates", () => {
+describe("describeFleetUpdates", () => {
   const harnessesFor = (runner: Runner, entry: Partial<HarnessOnRunner>): readonly Harness[] =>
     withClaude({
       runners: [onMachine(runner, entry)],
       latestRelease: successfulRelease,
     });
 
+  /** Returns the update line of a single machine, or `undefined` when it has none. */
+  const updatesOf = (runner: Runner, harnesses: readonly Harness[]): string | undefined =>
+    describeFleetUpdates([runner], harnesses, CONTROLLER)[runner.id];
+
   it("counts the runner and each harness older than its latest release", () => {
     const old = buildRunner(ATLAS, { version: "0.4.1" });
 
-    expect(describeMachineUpdates(old, harnessesFor(old, { version: "2.1.89" }), CONTROLLER)).toBe(
-      "2 updates",
-    );
+    expect(updatesOf(old, harnessesFor(old, { version: "2.1.89" }))).toBe("2 updates");
   });
 
   it("says 1 update in the singular", () => {
     const old = buildRunner(ATLAS, { version: "0.4.1" });
 
-    expect(describeMachineUpdates(old, harnessesFor(old, { version: "2.1.90" }), CONTROLLER)).toBe(
-      "1 update",
-    );
-    expect(
-      describeMachineUpdates(ATLAS, harnessesFor(ATLAS, { version: "2.1.89" }), CONTROLLER),
-    ).toBe("1 update");
+    expect(updatesOf(old, harnessesFor(old, { version: "2.1.90" }))).toBe("1 update");
+    expect(updatesOf(ATLAS, harnessesFor(ATLAS, { version: "2.1.89" }))).toBe("1 update");
   });
 
-  it("is null when nothing is older", () => {
-    expect(
-      describeMachineUpdates(ATLAS, harnessesFor(ATLAS, { version: "2.2.0" }), CONTROLLER),
-    ).toBeNull();
-    expect(describeMachineUpdates(ATLAS, HARNESSES, CONTROLLER)).toBeNull();
+  it("has no entry for a machine with nothing older", () => {
+    expect(updatesOf(ATLAS, harnessesFor(ATLAS, { version: "2.2.0" }))).toBeUndefined();
+    expect(updatesOf(ATLAS, HARNESSES)).toBeUndefined();
   });
 
   it("counts a version below the floor that is also older than the latest release", () => {
     const harnesses = harnessesFor(ATLAS, { version: "1.0.0", versionVerdict: "below-floor" });
 
-    expect(describeMachineUpdates(ATLAS, harnesses, CONTROLLER)).toBe("1 update");
+    expect(updatesOf(ATLAS, harnesses)).toBe("1 update");
   });
 
   it("does not count toolchains, unknown versions, versions with no order, or tools not installed", () => {
@@ -498,19 +504,11 @@ describe("describeMachineUpdates", () => {
       facts: { ...BARE.facts!, toolchains: [{ name: "git", version: "1.0.0", path: "/bin/git" }] },
     });
 
+    expect(updatesOf(unknown, harnessesFor(unknown, { version: null }))).toBeUndefined();
+    expect(updatesOf(unknown, harnessesFor(unknown, { version: "2.43" }))).toBeUndefined();
     expect(
-      describeMachineUpdates(unknown, harnessesFor(unknown, { version: null }), CONTROLLER),
-    ).toBeNull();
-    expect(
-      describeMachineUpdates(unknown, harnessesFor(unknown, { version: "2.43" }), CONTROLLER),
-    ).toBeNull();
-    expect(
-      describeMachineUpdates(
-        unknown,
-        harnessesFor(unknown, { installed: false, version: null }),
-        CONTROLLER,
-      ),
-    ).toBeNull();
+      updatesOf(unknown, harnessesFor(unknown, { installed: false, version: null })),
+    ).toBeUndefined();
   });
 
   it("agrees with the grid on which cells are older", () => {
@@ -521,9 +519,24 @@ describe("describeMachineUpdates", () => {
       .flatMap((group) => group.rows)
       .filter((row) => row.cells[0]!.kind === "older");
 
-    expect(describeMachineUpdates(old, harnesses, CONTROLLER)).toBe(
-      `${String(olderRows.length)} updates`,
-    );
+    expect(updatesOf(old, harnesses)).toBe(`${String(olderRows.length)} updates`);
+  });
+
+  it("gives each machine the Fleet page shows its own line, and none to a retired machine", () => {
+    const old = buildRunner(ATLAS, { version: "0.4.1" });
+    const retired = buildRunner(MOSS, { version: "0.4.1", lifecycle: "retired" });
+    const current = buildRunner(MOSS, {
+      id: "01a06d02-0003-7000-8000-000000000003",
+      name: "current",
+    });
+    const harnesses = withClaude({
+      runners: [onMachine(old, { version: "2.1.89" }), onMachine(current), onMachine(retired)],
+      latestRelease: successfulRelease,
+    });
+
+    expect(describeFleetUpdates([old, retired, current], harnesses, CONTROLLER)).toEqual({
+      [old.id]: "2 updates",
+    });
   });
 });
 

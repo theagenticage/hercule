@@ -11,7 +11,7 @@ import { TestClock } from "effect/testing";
 import * as HttpClient from "effect/http/HttpClient";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { Harness } from "@hercule/contract";
-import { AfterCommit, withTransaction, type Change } from "../db";
+import { AfterCommit, type Change } from "../db";
 import { PluginHost } from "../plugins";
 import {
   asUser,
@@ -101,8 +101,6 @@ const run = <A, E>(
 
 const refresh = Effect.flatMap(HarnessReleases, (releases) => releases.refreshLatestReleases());
 
-const readUnread = Effect.flatMap(HarnessReleases, (releases) => releases.readUnreadReleases());
-
 const queryLatest = (
   harnessId: string,
 ): Effect.Effect<Harness["latestRelease"], unknown, HarnessService> =>
@@ -116,12 +114,12 @@ const queryLatest = (
   );
 
 describe("reading the latest releases", () => {
-  it("answers null for a harness the controller has not tried to read", async () => {
+  it("answers no good read and no error for a harness the controller has not tried to read", async () => {
     const { client } = buildRegistry(() => buildReleaseResponse("1.0.0"));
 
     const latest = await run(client, () => queryLatest(SCOPED_HARNESS));
 
-    expect(latest).toBeNull();
+    expect(latest).toEqual({ lastGoodRead: null, error: null });
   });
 
   it("stores the version and when it was read, for each harness", async () => {
@@ -140,8 +138,8 @@ describe("reading the latest releases", () => {
     );
 
     const checkedAt = new Date(TIME_OF_FIRST_READ).toISOString();
-    expect(scoped).toEqual({ version: "2.4.1", checkedAt, error: null });
-    expect(plain).toEqual({ version: "0.9.0", checkedAt, error: null });
+    expect(scoped).toEqual({ lastGoodRead: { version: "2.4.1", checkedAt }, error: null });
+    expect(plain).toEqual({ lastGoodRead: { version: "0.9.0", checkedAt }, error: null });
   });
 
   it("asks the registry once for each harness, with a scoped package's name encoded", async () => {
@@ -173,13 +171,17 @@ describe("reading the latest releases", () => {
     );
 
     expect(outcome.failed).toEqual({
-      version: "1.0.0",
-      checkedAt: new Date(TIME_OF_FIRST_READ).toISOString(),
+      lastGoodRead: {
+        version: "1.0.0",
+        checkedAt: new Date(TIME_OF_FIRST_READ).toISOString(),
+      },
       error: "The npm registry answered 503.",
     });
     expect(outcome.recovered).toEqual({
-      version: "1.1.0",
-      checkedAt: new Date(TIME_OF_FIRST_READ + 2 * 60 * 60_000).toISOString(),
+      lastGoodRead: {
+        version: "1.1.0",
+        checkedAt: new Date(TIME_OF_FIRST_READ + 2 * 60 * 60_000).toISOString(),
+      },
       error: null,
     });
   });
@@ -225,7 +227,7 @@ describe("reading the latest releases", () => {
         }),
       );
 
-      expect(latest).toEqual({ version: null, checkedAt: null, error });
+      expect(latest).toEqual({ lastGoodRead: null, error });
     },
   );
 
@@ -247,9 +249,9 @@ describe("reading the latest releases", () => {
       }),
     );
 
-    expect(scoped?.error).toBe("The npm registry did not answer in time.");
-    expect(scoped?.version).toBeNull();
-    expect(plain?.version).toBe("3.0.0");
+    expect(scoped.error).toBe("The npm registry did not answer in time.");
+    expect(scoped.lastGoodRead).toBeNull();
+    expect(plain.lastGoodRead?.version).toBe("3.0.0");
   });
 
   it("announces one update to the clients' harness list after a read, whether it succeeded or failed", async () => {
@@ -285,7 +287,7 @@ describe("reading the latest releases", () => {
       }),
     );
 
-    expect(latest?.version).toBe("2.0.0-beta.1+build.5");
+    expect(latest.lastGoodRead?.version).toBe("2.0.0-beta.1+build.5");
   });
 
   it("sends the registry no trace headers, even from inside a span", async () => {
@@ -330,13 +332,15 @@ describe("reading the latest releases", () => {
     );
 
     expect(outcome.successRepeated.announced).toEqual([]);
-    expect(outcome.successRepeated.latest?.checkedAt).toBe(
+    expect(outcome.successRepeated.latest.lastGoodRead?.checkedAt).toBe(
       new Date(TIME_OF_FIRST_READ + 60 * 60_000).toISOString(),
     );
     expect(outcome.failureRepeated.announced).toEqual([]);
     expect(outcome.failureRepeated.latest).toEqual({
-      version: "1.0.0",
-      checkedAt: new Date(TIME_OF_FIRST_READ + 60 * 60_000).toISOString(),
+      lastGoodRead: {
+        version: "1.0.0",
+        checkedAt: new Date(TIME_OF_FIRST_READ + 60 * 60_000).toISOString(),
+      },
       error: "The npm registry answered 500.",
     });
   });
@@ -359,58 +363,6 @@ describe("reading the latest releases", () => {
 
     expect(announced).toEqual([
       { _tag: "record", topic: "provider", id: SCOPED_HARNESS, kind: "updated" },
-    ]);
-  });
-});
-
-describe("reading only the harnesses that were never read", () => {
-  it("reads every harness when none has been read", async () => {
-    const { client, requests } = buildRegistry(() => buildReleaseResponse("1.0.0"));
-
-    await run(client, () => readUnread);
-
-    expect(requests.map((request) => request.url).sort()).toEqual([PLAIN_URL, SCOPED_URL].sort());
-  });
-
-  it("makes no request, write or announcement when every harness has been read", async () => {
-    const { client, requests } = buildRegistry(() => buildReleaseResponse("1.0.0"));
-
-    const announced = await run(client, (changes) =>
-      Effect.gen(function* () {
-        yield* refresh;
-        requests.length = 0;
-        changes.splice(0);
-        yield* TestClock.adjust(Duration.hours(1));
-        yield* readUnread;
-        return changes.splice(0);
-      }),
-    );
-
-    expect(requests).toEqual([]);
-    expect(announced).toEqual([]);
-  });
-
-  it("reads only the harness that has no result, as a newly added harness plugin has none", async () => {
-    const { client, requests } = buildRegistry(() => buildReleaseResponse("1.0.0"));
-
-    const announced = await run(client, (changes) =>
-      Effect.gen(function* () {
-        yield* refresh;
-        const sql = yield* SqlClient.SqlClient;
-        yield* withTransaction(
-          sql,
-          sql`DELETE FROM harness_releases WHERE harness_id = ${PLAIN_HARNESS}`,
-        );
-        requests.length = 0;
-        changes.splice(0);
-        yield* readUnread;
-        return changes.splice(0);
-      }),
-    );
-
-    expect(requests.map((request) => request.url)).toEqual([PLAIN_URL]);
-    expect(announced).toEqual([
-      { _tag: "record", topic: "provider", id: PLAIN_HARNESS, kind: "updated" },
     ]);
   });
 });

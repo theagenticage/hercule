@@ -1,22 +1,16 @@
 /**
  * The periodic read of the latest release of every harness (spec 06 section
- * 2): every harness at controller start and then every hour, and, soon after
- * any plugin changes, only the harnesses that have never been read, because a
- * plugin change can add a harness and nothing else it does needs a new read.
+ * 2): every installed harness, enabled or not, at controller start and then
+ * every hour. Installed means compiled into the binary, so the list is fixed
+ * when the controller starts and enabling a plugin never adds a harness to
+ * read.
  *
- * What is read and what is stored is decided by `HarnessReleases`
- * (`refreshLatestReleases` and `readUnreadReleases`). This module only
- * repeats them.
+ * What is read and what is stored is decided by
+ * `HarnessReleases.refreshLatestReleases`. This module only repeats it.
  */
-import * as Clock from "effect/Clock";
-import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
 import { HarnessReleases } from "../../harnesses";
-import { PluginObserver } from "../../plugins";
 import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../absorbing";
 
@@ -24,53 +18,9 @@ import { absorbFailures } from "../absorbing";
 const HARNESS_RELEASE_CHECK_INTERVAL: Duration.Duration = Duration.hours(1);
 
 /**
- * A request for the loop to read the latest releases now instead of waiting
- * for the next interval. Requests made while the loop is busy or before it
- * waits collapse into one: the queue holds at most one, the newest.
- */
-export class HarnessReleaseWake extends Context.Service<
-  HarnessReleaseWake,
-  { readonly queue: Queue.Queue<void> }
->()("hercule/controller/daemon/HarnessReleaseWake") {}
-
-export const HarnessReleaseWakeLayer: Layer.Layer<HarnessReleaseWake> = Layer.effect(
-  HarnessReleaseWake,
-)(Effect.map(Queue.sliding<void>(1), (queue) => ({ queue })));
-
-/**
- * Replaces the `PluginObserver` below it with one that does what that one
- * does and then asks for a read of the harnesses that have not been read. It only signals, and
- * never waits for the read: the plugin service calls its observer while it
- * holds the host's lifecycle permit, so waiting would keep that permit for as
- * long as the requests take.
- */
-export const WakeHarnessReleaseCheckOnPluginChangeLayer: Layer.Layer<
-  PluginObserver,
-  never,
-  PluginObserver | HarnessReleaseWake
-> = Layer.effect(PluginObserver)(
-  Effect.gen(function* () {
-    const next = yield* PluginObserver;
-    const { queue } = yield* HarnessReleaseWake;
-    return {
-      pluginStatusChanged: () =>
-        Effect.andThen(next.pluginStatusChanged(), Queue.offer(queue, undefined)),
-    };
-  }),
-);
-
-/**
- * Reads the latest release of every harness at once, then again one interval
- * after the end of each such full read. When `HarnessReleaseWake` is asked
- * first, reads only the harnesses that have no stored result, and then waits
- * only for the time left until the full read is due. So requests never push
- * the full read back, however often they come. Never returns. A pass that
- * fails is logged, and the next one runs.
- *
- * A request that arrives while a pass runs leads to exactly one more pass
- * after it, however many arrive. A request that arrived before the pass
- * started is dropped when the pass starts: the pass reads at least what the
- * request would have.
+ * Reads the latest release of every harness at once, then again after each
+ * `HARNESS_RELEASE_CHECK_INTERVAL`. Never returns. A pass that fails is
+ * logged, and the next one runs.
  *
  * A pass starts only while the controller serves, and never once it is
  * sealed. The pass itself is not counted as running work, because a freeze
@@ -82,26 +32,18 @@ export const WakeHarnessReleaseCheckOnPluginChangeLayer: Layer.Layer<
 export const runHarnessReleaseCheckLoop: Effect.Effect<
   never,
   never,
-  HarnessReleases | HarnessReleaseWake | PromotionState
+  HarnessReleases | PromotionState
 > = Effect.gen(function* () {
   const releases = yield* HarnessReleases;
-  const { queue } = yield* HarnessReleaseWake;
   const promotion = yield* PromotionState;
-  let pass = releases.refreshLatestReleases();
-  let isFullRead = true;
-  let nextFullReadAt = 0;
   while (true) {
+    // Only waits until the controller serves. The pass is not run inside
+    // `whenServing`, because that would make a freeze wait for it.
     yield* promotion.whenServing(Effect.void);
-    yield* Queue.clear(queue);
-    yield* absorbFailures("Reading the latest releases of the harnesses failed", pass);
-    const now = yield* Clock.currentTimeMillis;
-    if (isFullRead) nextFullReadAt = now + Duration.toMillis(HARNESS_RELEASE_CHECK_INTERVAL);
-    // A read of the unread harnesses can run past the due time: then the full read starts at once.
-    const wake =
-      nextFullReadAt > now
-        ? yield* Effect.timeoutOption(Queue.take(queue), Duration.millis(nextFullReadAt - now))
-        : Option.none();
-    isFullRead = Option.isNone(wake);
-    pass = isFullRead ? releases.refreshLatestReleases() : releases.readUnreadReleases();
+    yield* absorbFailures(
+      "Reading the latest releases of the harnesses failed",
+      releases.refreshLatestReleases(),
+    );
+    yield* Effect.sleep(HARNESS_RELEASE_CHECK_INTERVAL);
   }
 });

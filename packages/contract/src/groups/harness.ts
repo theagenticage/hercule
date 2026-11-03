@@ -37,22 +37,27 @@ export const HarnessOnRunner = Schema.Struct({
 
 export type HarnessOnRunner = Schema.Schema.Type<typeof HarnessOnRunner>;
 
+/** A successful read of the newest release a harness's publisher lists. */
+export const HarnessReleaseRead = Schema.Struct({
+  /** The newest release the publisher lists. */
+  version: Schema.String,
+  /** When the read happened, so it is the age of `version`. */
+  checkedAt: Timestamp,
+});
+
+export type HarnessReleaseRead = Schema.Schema.Type<typeof HarnessReleaseRead>;
+
 /**
  * The newest release of a harness that its publisher lists, as the controller
  * last read it. It is only what the user is told is available. It is not the
  * version Hercule installs, and not the floor `versionVerdict` checks.
+ *
+ * `{ lastGoodRead: null, error: null }` means the controller has not read it
+ * yet.
  */
 export const HarnessLatestRelease = Schema.Struct({
-  /**
-   * The newest release the publisher lists, from the last read that succeeded.
-   * `null` before a read has succeeded.
-   */
-  version: Schema.NullOr(Schema.String),
-  /**
-   * When that successful read happened, so it is the age of `version`. `null`
-   * together with `version`.
-   */
-  checkedAt: Schema.NullOr(Timestamp),
+  /** The last read that succeeded, or `null` when none has. */
+  lastGoodRead: Schema.NullOr(HarnessReleaseRead),
   /** Why the most recent read failed, or `null` when it succeeded. */
   error: Schema.NullOr(Schema.String),
 });
@@ -74,8 +79,7 @@ export const Harness = Schema.Struct({
   runs: Schema.Array(HarnessProviderSupport),
   /** One entry per runner the controller knows, in the order the runners were added. */
   runners: Schema.Array(HarnessOnRunner),
-  /** `null` before the controller has tried to read the harness's latest release. */
-  latestRelease: Schema.NullOr(HarnessLatestRelease),
+  latestRelease: HarnessLatestRelease,
 });
 
 export type Harness = Schema.Schema.Type<typeof Harness>;

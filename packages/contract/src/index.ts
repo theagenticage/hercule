@@ -229,6 +229,7 @@ export {
 export {
   Harness,
   HarnessLatestRelease,
+  HarnessReleaseRead,
   HarnessOnRunner,
   DeclaredCapabilities,
   VersionVerdict,

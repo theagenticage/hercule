@@ -1,7 +1,7 @@
 /**
  * Tests the quiet updates line of the Fleet page's cards and rows, through the
  * rendered app. Which versions count as an update is decided by
- * `describeMachineUpdates` in `@hercule/client-core/software`.
+ * `describeFleetUpdates` in `@hercule/client-core/software`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
@@ -62,7 +62,10 @@ const OLD_CLAUDE_CODE: readonly Harness[] = HARNESSES.map((harness) =>
   harness.id === "claude-code/claude-code"
     ? {
         ...harness,
-        latestRelease: { version: "1.2.0", checkedAt: "2026-11-02T13:00:00.000Z", error: null },
+        latestRelease: {
+          lastGoodRead: { version: "1.2.0", checkedAt: "2026-11-02T13:00:00.000Z" },
+          error: null,
+        },
         runners: [
           { runnerId: ATLAS.id, installed: true, version: "1.0.0", versionVerdict: "ok" },
           { runnerId: FORGE.id, installed: true, version: "1.2.0", versionVerdict: "ok" },

@@ -76,8 +76,6 @@ import {
   revalidateStoredWorkflowsOrLog,
   WorkflowValidityObserversLayer,
   WorkspaceSweepInterval,
-  HarnessReleaseWakeLayer,
-  WakeHarnessReleaseCheckOnPluginChangeLayer,
 } from "../daemon";
 import { CurrentActor, type Actor } from "../actor";
 import { ExpressionBudget } from "../expressions";
@@ -200,9 +198,7 @@ const buildServices = (
         Layer.provideMerge(DiscussionInputsReferenceLayer),
         // As in the real boot: a plugin's lifecycle change and a Connection's
         // or an agent's delete validate the stored workflows again.
-        Layer.provideMerge(WakeHarnessReleaseCheckOnPluginChangeLayer),
         Layer.provideMerge(WorkflowValidityObserversLayer),
-        Layer.provideMerge(HarnessReleaseWakeLayer),
         Layer.provideMerge(
           HarnessReleasesLayer.pipe(
             Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableRegistryClient)),

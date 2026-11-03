@@ -161,24 +161,18 @@ afterAll(() => {
   homes.length = 0;
 });
 
-/** A `PluginObserver` that does nothing, for a stack that stores no workflows. */
-const idleObserver: Layer.Layer<PluginObserver> = Layer.succeed(PluginObserver)({
-  pluginStatusChanged: () => Effect.void,
-});
-
 /**
  * Builds the real plugin services on a temporary database file, including a real
- * master key file, with the `PluginObserver` given, which by default does
- * nothing. A plugin's secrets are rows in the secrets table, so the
- * encryption is part of what is tested.
+ * master key file, with a `PluginObserver` that does nothing. A plugin's
+ * secrets are rows in the secrets table, so the encryption is part of what
+ * is tested.
  */
-export const buildPluginStack = <RIn = never>(
-  observer: Layer.Layer<PluginObserver, never, RIn> = idleObserver,
-) => {
+export const buildPluginStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(
-    Layer.provide(observer),
+    // This stack stores no workflows, so no one listens to a status change.
+    Layer.provide(Layer.succeed(PluginObserver)({ pluginStatusChanged: () => Effect.void })),
     Layer.provideMerge(
       PluginHostLayer.pipe(
         Layer.provide(IngestExecutorLayer),

@@ -9,12 +9,7 @@ import { useState, type JSX } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {
-  FleetSoftware,
-  SoftwareCell,
-  SoftwareCellKind,
-  SoftwareRow,
-} from "@hercule/client-core/software";
+import type { FleetSoftware, SoftwareCell, SoftwareRow } from "@hercule/client-core/software";
 import { FleetSoftwarePanel } from "./fleet-software";
 
 const COLUMNS = [
@@ -23,7 +18,7 @@ const COLUMNS = [
 ] as const;
 
 const buildCell = (
-  kind: SoftwareCellKind,
+  kind: SoftwareCell["kind"],
   text: string,
   over: Partial<SoftwareCell> = {},
 ): SoftwareCell => ({ kind, text, tooltip: null, isAway: false, ...over });

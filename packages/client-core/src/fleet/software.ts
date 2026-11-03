@@ -37,7 +37,7 @@ import { compareReleaseVersions, isReleaseVersion } from "./versions";
  * - `not-probed`: the machine's runner is too old to have looked for this
  *   toolchain, so nothing is known about it. Draws "Unknown".
  */
-export type SoftwareCellKind =
+type SoftwareCellKind =
   | "latest"
   | "older"
   | "below-floor"
@@ -70,7 +70,7 @@ export interface SoftwareLatest {
 }
 
 /** A group of machines that have one version of a tool, in the row's detail. */
-export interface SoftwareVersionGroup {
+interface SoftwareVersionGroup {
   /**
    * The version, "Installed" when the machines have it with no known version,
    * "Not looked for" when their runners are too old to look for the tool, or
@@ -82,7 +82,7 @@ export interface SoftwareVersionGroup {
 }
 
 /** What a row shows when it is opened in place under the row. */
-export interface SoftwareDetail {
+interface SoftwareDetail {
   /** One line on what the tool is, or `null` for a harness this list does not know. */
   readonly description: string | null;
   /** The latest release and when it was last checked, or why there is none. */
@@ -114,7 +114,7 @@ export interface SoftwareColumn {
 }
 
 /** A group of rows of the grid: "Harnesses" or "Toolchains". */
-export interface SoftwareGroup {
+interface SoftwareGroup {
   readonly name: string;
   readonly rows: readonly SoftwareRow[];
 }
@@ -233,11 +233,8 @@ const rankHarness = (onMachine: HarnessOnRunner | undefined, latest: string | nu
  * `hasVersion` says whether an earlier read succeeded. Returns `null` when the
  * last read did not fail.
  */
-const describeReadFailure = (
-  release: HarnessLatestRelease | null,
-  hasVersion: boolean,
-): string | null => {
-  if (release?.error == null) return null;
+const describeReadFailure = (release: HarnessLatestRelease, hasVersion: boolean): string | null => {
+  if (release.error === null) return null;
   const reason = release.error.replace(/\.$/, "");
   return hasVersion
     ? `The last check for a newer release failed. ${reason}.`
@@ -250,13 +247,13 @@ const describeReadFailure = (
  * or the time cannot be formatted.
  */
 const formatCheckedAt = (
-  release: HarnessLatestRelease | null,
+  release: HarnessLatestRelease,
   timezone: string,
   today: Date,
 ): string | null =>
-  release?.checkedAt == null
+  release.lastGoodRead === null
     ? null
-    : (formatShortMoment(new Date(release.checkedAt), today, timezone) ?? null);
+    : (formatShortMoment(new Date(release.lastGoodRead.checkedAt), today, timezone) ?? null);
 
 const HARNESSES_GROUP = "Harnesses";
 const TOOLCHAINS_GROUP = "Toolchains";
@@ -369,7 +366,7 @@ const buildHarnessRow = (
   today: Date,
 ): SoftwareRow => {
   const release = harness.latestRelease;
-  const latestVersion = release?.version ?? null;
+  const latestVersion = release.lastGoodRead?.version ?? null;
   const failure = describeReadFailure(release, latestVersion !== null);
   const checkedAt = formatCheckedAt(release, timezone, today);
   const byRunner = new Map(harness.runners.map((entry) => [entry.runnerId, entry]));
@@ -487,26 +484,43 @@ export const describeFleetSoftware = (
 };
 
 /**
- * Describes how many updates a machine has, for its card: "1 update" or "2
- * updates". Returns `null` for none. It counts the runner and each harness
- * that is older than its latest release, including a version below the floor
- * that is also older. Toolchains never count, and neither does a version that
- * is not known or has no order.
+ * Counts the updates a machine has: the runner and each harness that is older
+ * than its latest release, including a version below the floor that is also
+ * older. Toolchains never count, and neither does a version that is not known
+ * or has no order.
  */
-export const describeMachineUpdates = (
+const countMachineUpdates = (
   runner: Runner,
   harnesses: readonly Harness[],
   controllerVersion: string,
-): string | null => {
+): number => {
   const outdatedHarnesses = harnesses.filter(
     (harness) =>
       rankHarness(
         harness.runners.find((entry) => entry.runnerId === runner.id),
-        harness.latestRelease?.version ?? null,
+        harness.latestRelease.lastGoodRead?.version ?? null,
       ).isOlder,
   ).length;
-  const count = outdatedHarnesses + (rankRunner(runner, controllerVersion).isOlder ? 1 : 0);
-  return count === 0 ? null : `${String(count)} ${plural(count, "update", "updates")}`;
+  return outdatedHarnesses + (rankRunner(runner, controllerVersion).isOlder ? 1 : 0);
+};
+
+/**
+ * Describes the updates of each machine the Fleet page shows, for its cards
+ * and rows. Returns the line by runner id: "1 update" or "2 updates". A
+ * machine with no update has no entry. See `countMachineUpdates` for what
+ * counts as an update.
+ */
+export const describeFleetUpdates = (
+  runners: readonly Runner[],
+  harnesses: readonly Harness[],
+  controllerVersion: string,
+): Readonly<Record<string, string>> => {
+  const lines: Record<string, string> = {};
+  for (const runner of listFleetRunners(runners)) {
+    const count = countMachineUpdates(runner, harnesses, controllerVersion);
+    if (count > 0) lines[runner.id] = `${String(count)} ${plural(count, "update", "updates")}`;
+  }
+  return lines;
 };
 
 /**

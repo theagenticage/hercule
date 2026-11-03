@@ -428,7 +428,10 @@ describe("the Software section", () => {
       { runnerId: FORGE.id, installed: true, version: "2.0.78", versionVerdict: "ok" },
       { runnerId: NOMAD.id, installed: false, version: null, versionVerdict: "unknown" },
     ],
-    latestRelease: { version: "2.0.84", checkedAt: "2026-11-02T09:00:00.000Z", error: null },
+    latestRelease: {
+      lastGoodRead: { version: "2.0.84", checkedAt: "2026-11-02T09:00:00.000Z" },
+      error: null,
+    },
   };
   const ATLAS_WITH_GIT = {
     ...ATLAS,

@@ -101,7 +101,10 @@ const decideWrite = (
   if (outcome._tag === "read") {
     return {
       write: true,
-      announce: stored === undefined || stored.version !== outcome.version || stored.error !== null,
+      announce:
+        stored === undefined ||
+        stored.lastGoodRead?.version !== outcome.version ||
+        stored.error !== null,
     };
   }
   const changed = stored === undefined || stored.error !== outcome.error;
@@ -215,20 +218,6 @@ const make = Effect.gen(function* () {
      */
     refreshLatestReleases: (): Effect.Effect<void, SqlError> =>
       Effect.flatMap(host.harnesses(), readAndStore),
-
-    /**
-     * Reads the newest release only of the registered harnesses that have no
-     * stored result yet, which means a harness plugin added since the last
-     * read. Stores and announces as `refreshLatestReleases` does. Makes no
-     * request, no write and no announcement when every harness has a result.
-     * Fails only with a `SqlError`.
-     */
-    readUnreadReleases: (): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        const definitions = yield* host.harnesses();
-        const stored = yield* releases.readLatestReleases();
-        yield* readAndStore(definitions.filter((definition) => !stored.has(definition.id)));
-      }),
   };
 });
 

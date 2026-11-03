@@ -380,19 +380,21 @@ const FLEET_RUNNERS: ReadonlyArray<Runner> = FLEET_MACHINES.map(({ runner }) => 
  */
 const CHECKED_AT = minutesAgo(41);
 const LATEST_RELEASES: Readonly<Record<string, HarnessLatestRelease>> = {
-  "claude-code/claude-code": { version: "2.0.84", checkedAt: CHECKED_AT, error: null },
+  "claude-code/claude-code": {
+    lastGoodRead: { version: "2.0.84", checkedAt: CHECKED_AT },
+    error: null,
+  },
   "codex/codex": {
-    version: "0.46.0",
-    checkedAt: CHECKED_AT,
+    lastGoodRead: { version: "0.46.0", checkedAt: CHECKED_AT },
     error: "The npm registry did not answer in time.",
   },
-  "pi/pi": { version: "0.9.2", checkedAt: CHECKED_AT, error: null },
+  "pi/pi": { lastGoodRead: { version: "0.9.2", checkedAt: CHECKED_AT }, error: null },
 };
 
 /** The shipped harnesses with what each machine reports of them and their latest releases. */
 const FLEET_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => ({
   ...harness,
-  latestRelease: LATEST_RELEASES[harness.id] ?? null,
+  latestRelease: LATEST_RELEASES[harness.id] ?? { lastGoodRead: null, error: null },
   runners: FLEET_MACHINES.map(({ runner, versions }) => {
     const version = versions[harness.id] ?? null;
     return {

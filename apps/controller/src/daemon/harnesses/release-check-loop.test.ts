@@ -1,210 +1,66 @@
 /**
  * Tests when the latest releases of the harnesses are read: every harness at
- * start and every hour, and soon after any plugin changes only the harnesses
- * that were never read, and never in a pile of reads when several changes
- * arrive together. The reads themselves are counted with a stand-in for
+ * start and then every hour, and a pass that fails does not stop the next
+ * one. The reads themselves are counted with a stand-in for
  * `HarnessReleases`; what a read stores is tested with the real one.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
+import { TestDatabase } from "../../db/testing";
 import { HarnessReleases } from "../../harnesses";
-import { Plugins, PluginHost, PluginObserver } from "../../plugins";
-import {
-  asUser,
-  buildHarnessDefinition,
-  buildPluginStack,
-  createPluginFixture,
-} from "../../plugins/testing";
-import { PromotionState } from "../../promotion";
-import {
-  HarnessReleaseWake,
-  HarnessReleaseWakeLayer,
-  runHarnessReleaseCheckLoop,
-  WakeHarnessReleaseCheckOnPluginChangeLayer,
-} from "./release-check-loop";
-
-const buildPlugins = () => [
-  createPluginFixture({
-    id: "scoped",
-    definitions: [buildHarnessDefinition("scoped")],
-  }).plugin,
-];
+import { ServingPromotionStateLayer } from "../../promotion/testing";
+import { runHarnessReleaseCheckLoop } from "./release-check-loop";
 
 /**
- * Runs `body` with the loop's services, where the plugin service reports to
- * the observer that wakes the loop, as in the real boot. A read of the
- * unread harnesses takes `unreadDuration`. `previousObserverCalls` counts the
- * calls the wrapped observer received.
+ * Runs the loop on a test clock, and returns how many reads had started right
+ * after the start and after each minute in `checkpoints`. `readOnPass` is what
+ * the nth read does.
  */
-const run = <A>(
-  unreadDuration: Duration.Duration,
-  body: (context: {
-    readonly refreshes: () => number;
-    readonly unreadReads: () => number;
-    readonly previousObserverCalls: () => number;
-  }) => Effect.Effect<
-    A,
-    unknown,
-    HarnessReleases | HarnessReleaseWake | PromotionState | Plugins | PluginHost
-  >,
+const countReadsAt = (
+  checkpoints: ReadonlyArray<number>,
+  readOnPass: (pass: number) => Effect.Effect<void>,
 ) => {
-  let refreshes = 0;
-  let unreadReads = 0;
-  let previous = 0;
+  let reads = 0;
   const releases = Layer.succeed(HarnessReleases)({
     refreshLatestReleases: () =>
-      Effect.sync(() => {
-        refreshes += 1;
-      }),
-    readUnreadReleases: () =>
-      Effect.andThen(
-        Effect.sync(() => {
-          unreadReads += 1;
-        }),
-        Effect.sleep(unreadDuration),
-      ),
-  });
-  const previousObserver = Layer.succeed(PluginObserver)({
-    pluginStatusChanged: () =>
-      Effect.sync(() => {
-        previous += 1;
+      Effect.suspend(() => {
+        reads += 1;
+        return readOnPass(reads);
       }),
   });
-  const observer = WakeHarnessReleaseCheckOnPluginChangeLayer.pipe(Layer.provide(previousObserver));
-  const stack = Layer.merge(
-    releases,
-    buildPluginStack(observer).pipe(Layer.provideMerge(HarnessReleaseWakeLayer)),
+  const layer = Layer.merge(releases, ServingPromotionStateLayer).pipe(
+    Layer.provideMerge(TestDatabase),
   );
   return Effect.runPromise(
     Effect.gen(function* () {
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(buildPlugins()));
-      return yield* body({
-        refreshes: () => refreshes,
-        unreadReads: () => unreadReads,
-        previousObserverCalls: () => previous,
-      });
-    }).pipe(Effect.provide(stack), Effect.provide(TestClock.layer()), asUser),
+      const loop = yield* Effect.forkChild(runHarnessReleaseCheckLoop);
+      yield* TestClock.adjust(Duration.zero);
+      const counts: Array<number> = [reads];
+      let minute = 0;
+      for (const checkpoint of checkpoints) {
+        yield* TestClock.adjust(Duration.minutes(checkpoint - minute));
+        minute = checkpoint;
+        counts.push(reads);
+      }
+      yield* Fiber.interrupt(loop);
+      return counts;
+    }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.orDie),
   );
 };
 
 describe("runHarnessReleaseCheckLoop", () => {
   it("reads every harness at once, then again every hour and not before", async () => {
-    const counts = await run(Duration.zero, ({ refreshes }) =>
-      Effect.gen(function* () {
-        const loop = yield* Effect.forkChild(runHarnessReleaseCheckLoop);
-        yield* TestClock.adjust(Duration.zero);
-        const atStart = refreshes();
-        yield* TestClock.adjust(Duration.minutes(59));
-        const beforeTheHour = refreshes();
-        yield* TestClock.adjust(Duration.minutes(1));
-        const afterTheHour = refreshes();
-        yield* Fiber.interrupt(loop);
-        return { atStart, beforeTheHour, afterTheHour };
-      }),
-    );
+    const counts = await countReadsAt([59, 60, 119, 120], () => Effect.void);
 
-    expect(counts).toEqual({ atStart: 1, beforeTheHour: 1, afterTheHour: 2 });
+    expect(counts).toEqual([1, 1, 2, 2, 3]);
   });
 
-  it("reads every harness every hour even when plugin changes come less than an hour apart", async () => {
-    const counts = await run(Duration.zero, ({ refreshes, unreadReads }) =>
-      Effect.gen(function* () {
-        const plugins = yield* Plugins;
-        const loop = yield* Effect.forkChild(runHarnessReleaseCheckLoop);
-        yield* TestClock.adjust(Duration.zero);
-        const reads: Array<{ readonly minute: number; refreshes: number; unreadReads: number }> =
-          [];
-        let minute = 0;
-        let enabled = true;
-        for (const [target, change] of [
-          [50, true],
-          [60, false],
-          [100, true],
-          [120, false],
-          [150, true],
-        ] as const) {
-          yield* TestClock.adjust(Duration.minutes(target - minute));
-          minute = target;
-          if (change) {
-            // Alternate, because disabling a disabled plugin changes nothing and wakes nobody.
-            yield* enabled ? plugins.disable("scoped") : plugins.enable("scoped");
-            enabled = !enabled;
-            yield* TestClock.adjust(Duration.zero);
-          }
-          reads.push({ minute, refreshes: refreshes(), unreadReads: unreadReads() });
-        }
-        yield* Fiber.interrupt(loop);
-        return reads;
-      }),
+  it("reads again an hour later when a pass fails", async () => {
+    const counts = await countReadsAt([60], (pass) =>
+      pass === 1 ? Effect.die("the registry broke") : Effect.void,
     );
 
-    expect(counts).toEqual([
-      { minute: 50, refreshes: 1, unreadReads: 1 },
-      { minute: 60, refreshes: 2, unreadReads: 1 },
-      { minute: 100, refreshes: 2, unreadReads: 2 },
-      { minute: 120, refreshes: 3, unreadReads: 2 },
-      { minute: 150, refreshes: 3, unreadReads: 3 },
-    ]);
-  });
-
-  it("reads only the unread harnesses at once when a plugin is disabled or enabled, and the observer that was there before still hears of it", async () => {
-    const outcome = await run(Duration.zero, ({ refreshes, unreadReads, previousObserverCalls }) =>
-      Effect.gen(function* () {
-        const plugins = yield* Plugins;
-        const loop = yield* Effect.forkChild(runHarnessReleaseCheckLoop);
-        yield* TestClock.adjust(Duration.zero);
-        const atStart = { refreshes: refreshes(), unreadReads: unreadReads() };
-        yield* plugins.disable("scoped");
-        yield* TestClock.adjust(Duration.zero);
-        const afterDisable = { refreshes: refreshes(), unreadReads: unreadReads() };
-        yield* plugins.enable("scoped");
-        yield* TestClock.adjust(Duration.zero);
-        const afterEnable = { refreshes: refreshes(), unreadReads: unreadReads() };
-        yield* Fiber.interrupt(loop);
-        return {
-          atStart,
-          afterDisable,
-          afterEnable,
-          previousObserverCalls: previousObserverCalls(),
-        };
-      }),
-    );
-
-    expect(outcome).toEqual({
-      atStart: { refreshes: 1, unreadReads: 0 },
-      afterDisable: { refreshes: 1, unreadReads: 1 },
-      afterEnable: { refreshes: 1, unreadReads: 2 },
-      previousObserverCalls: 2,
-    });
-  });
-
-  it("reads once more after a read that was running when changes arrived, however many arrived", async () => {
-    const counts = await run(Duration.seconds(10), ({ refreshes, unreadReads }) =>
-      Effect.gen(function* () {
-        const plugins = yield* Plugins;
-        const loop = yield* Effect.forkChild(runHarnessReleaseCheckLoop);
-        yield* TestClock.adjust(Duration.seconds(1));
-        yield* plugins.disable("scoped");
-        yield* TestClock.adjust(Duration.seconds(1));
-        // Three more changes while the first read of unread harnesses runs.
-        yield* plugins.enable("scoped");
-        yield* plugins.disable("scoped");
-        yield* plugins.enable("scoped");
-        const duringTheRead = unreadReads();
-        yield* TestClock.adjust(Duration.seconds(9));
-        const afterTheRead = unreadReads();
-        yield* TestClock.adjust(Duration.minutes(30));
-        const later = { unreadReads: unreadReads(), refreshes: refreshes() };
-        yield* Fiber.interrupt(loop);
-        return { duringTheRead, afterTheRead, later };
-      }),
-    );
-
-    expect(counts).toEqual({
-      duringTheRead: 1,
-      afterTheRead: 2,
-      later: { unreadReads: 2, refreshes: 1 },
-    });
+    expect(counts).toEqual([1, 2]);
   });
 });

@@ -464,7 +464,7 @@ export const serve = (bundle: WebBundle | undefined) =>
     // every 3 hours.
     yield* Effect.forkScoped(runSkillUpdateCheckLoop);
     // The newest release of each harness is read from its publisher at start,
-    // then every hour, and again when a plugin changes.
+    // then every hour.
     yield* Effect.forkScoped(runHarnessReleaseCheckLoop);
     // The controller daemon's two inbound drivers, also before the listener:
     // the queues they read are created with the layer, so nothing a runner

@@ -151,7 +151,7 @@ const buildHarness = (
   declared: DECLARED,
   runs,
   runners: [],
-  latestRelease: null,
+  latestRelease: { lastGoodRead: null, error: null },
 });
 
 /** The harnesses of the shipped plugins, as `harness.query` lists them. */

@@ -2324,13 +2324,12 @@ describe("hercule harness list", () => {
       {
         kind: "value",
         value: [
-          harness("a/a", { version: "2.1.0", checkedAt: "2026-11-03T08:00:00.000Z", error: null }),
-          harness("b/b", {
-            version: null,
-            checkedAt: null,
-            error: "The npm registry answered 404.",
+          harness("a/a", {
+            lastGoodRead: { version: "2.1.0", checkedAt: "2026-11-03T08:00:00.000Z" },
+            error: null,
           }),
-          harness("c/c", null),
+          harness("b/b", { lastGoodRead: null, error: "The npm registry answered 404." }),
+          harness("c/c", { lastGoodRead: null, error: null }),
         ],
       },
       lookUpCommand("harness", "list"),

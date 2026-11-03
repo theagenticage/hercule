@@ -66,7 +66,13 @@ const make = Effect.gen(function* () {
           new Map(
             rows.map((row) => [
               row.harness_id,
-              { version: row.version, checkedAt: row.checked_at, error: row.error },
+              {
+                lastGoodRead:
+                  row.version !== null && row.checked_at !== null
+                    ? { version: row.version, checkedAt: row.checked_at }
+                    : null,
+                error: row.error,
+              },
             ]),
           ),
       ),
