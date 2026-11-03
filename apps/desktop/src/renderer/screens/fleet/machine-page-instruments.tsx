@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from "react";
 import type { MachineInstruments, MeterInstrument } from "@hercule/client-core/machine-page";
-import type { MachineGraphs, UnavailableGraph } from "@hercule/client-core/machine-graphs";
+import type { MachineGraphs } from "@hercule/client-core/machine-graphs";
 import {
   CpuGraphFigure,
   DiskGraphFigure,
@@ -13,22 +13,11 @@ import { SessionsFigure } from "./sessions-drawing";
 import "./machine-page.css";
 
 /**
- * Returns the note to draw under an instrument's graph, or `null` for none.
- * A graph that has nothing to draw shows its own sentence in its frame, so an
- * instrument note that is the same sentence is left out, and the tile never
- * says it twice.
- */
-const pickNote = (
-  note: string,
-  graph: { readonly kind: "drawn" } | UnavailableGraph,
-): string | null => (graph.kind === "unavailable" && graph.note === note ? null : note);
-
-/**
  * Renders one instrument: its label, its big value with the unit in small
  * after it, what draws it (`children`: a meter, or the sessions' drawing),
  * its graph (`graph`), and the note under that. The value and the meter take
- * the colour of the instrument's level. `note` is `null` when the graph's
- * frame already says it. `forecastText` is the line under the note that says
+ * the colour of the instrument's level. `note` is `null` when the graph is an
+ * unavailable frame, which shows the note itself. `forecastText` is the line under the note that says
  * when the disk reaches its limit.
  */
 function Instrument({
@@ -67,8 +56,8 @@ function Instrument({
  *
  * - The Disk graph is marigold while the disk gauge is marigold or red. Its
  *   forecast, when there is one, is a line of its own under the note.
- * - A graph with nothing to draw shows its sentence in its frame, and the
- *   note under it is left out when it is the same sentence.
+ * - A graph with nothing to draw shows the instrument's note in its frame, and
+ *   the note line under it is left out, so the tile never says it twice.
  *
  * An away machine (its Sessions drawing says so) is drawn in quieter inks, as
  * on its card, and its Sessions drawing is an outline. The instruments
@@ -98,13 +87,13 @@ export function MachinePageInstruments({
         <Instrument
           label="CPU"
           instrument={cpu}
-          note={pickNote(cpu.note, graphs.cpu)}
+          note={graphs.cpu.kind === "drawn" ? cpu.note : null}
           forecastText={null}
           graph={
             graphs.cpu.kind === "drawn" ? (
               <CpuGraphFigure graph={graphs.cpu} />
             ) : (
-              <UnavailableGraphFrame graph={graphs.cpu} />
+              <UnavailableGraphFrame note={cpu.note} />
             )
           }
         >
@@ -113,13 +102,13 @@ export function MachinePageInstruments({
         <Instrument
           label="Memory"
           instrument={memory}
-          note={pickNote(memory.note, graphs.memory)}
+          note={graphs.memory.kind === "drawn" ? memory.note : null}
           forecastText={null}
           graph={
             graphs.memory.kind === "drawn" ? (
               <MemoryGraphFigure graph={graphs.memory} />
             ) : (
-              <UnavailableGraphFrame graph={graphs.memory} />
+              <UnavailableGraphFrame note={memory.note} />
             )
           }
         >
@@ -128,13 +117,13 @@ export function MachinePageInstruments({
         <Instrument
           label="Disk"
           instrument={disk}
-          note={pickNote(disk.note, graphs.disk)}
+          note={graphs.disk.kind === "drawn" ? disk.note : null}
           forecastText={graphs.disk.kind === "drawn" ? graphs.disk.forecastText : null}
           graph={
             graphs.disk.kind === "drawn" ? (
               <DiskGraphFigure graph={graphs.disk} tone={disk.level === "normal" ? "ink" : "you"} />
             ) : (
-              <UnavailableGraphFrame graph={graphs.disk} />
+              <UnavailableGraphFrame note={disk.note} />
             )
           }
         >

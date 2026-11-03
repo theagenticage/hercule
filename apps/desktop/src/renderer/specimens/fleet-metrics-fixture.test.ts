@@ -27,12 +27,7 @@ describe("the Fleet specimen's Runner Metrics", () => {
   });
 
   it("show atlas waiting for slots in the afternoon, and its disk reaching the limit in 12 days", () => {
-    const graphs = describeMachineGraphs(
-      ATLAS,
-      fiveMinutes,
-      hours,
-      forecastDiskLimit(hours.points, ATLAS, SPECIMEN_NOW),
-    );
+    const graphs = describeMachineGraphs(ATLAS, fiveMinutes, hours);
 
     expect(graphs.sessions.waiting.length).toBe(2);
     expect(graphs.sessions.running.length).toBe(2);

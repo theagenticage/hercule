@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Runner, RunnerMetricsPoint } from "@hercule/contract";
 import { BARE } from "../providers.testing";
-import type { DiskForecast } from "./disk-forecast";
+import { describeMachinePage } from "./machine-page";
 import {
   describeMachineGraphs,
   type CpuGraph,
@@ -66,9 +66,8 @@ const describeGraphs = (
   fiveMinutePoints: RunnerMetricsPoint[],
   runner: Runner = buildRunner(),
   hourPoints: RunnerMetricsPoint[] = [],
-  forecast: DiskForecast | null = null,
 ): MachineGraphs =>
-  describeMachineGraphs(runner, toHistory(fiveMinutePoints), toHistory(hourPoints), forecast);
+  describeMachineGraphs(runner, toHistory(fiveMinutePoints), toHistory(hourPoints));
 
 const drawnCpu = (graphs: MachineGraphs): CpuGraph => {
   if (graphs.cpu.kind !== "drawn") throw new Error("expected a drawn CPU graph");
@@ -191,22 +190,18 @@ describe("describeMachineGraphs cpu", () => {
     expect(drawnCpu(graphs).peak.map((run) => run.length)).toEqual([1, 1]);
   });
 
-  it("says what to do on a machine whose runner reports no CPU", () => {
+  it("draws no CPU graph on a machine whose runner reports no CPU", () => {
     const graphs = describeGraphs(
       [buildPoint(10)],
       buildRunner({ metrics: { diskFreeBytes: 1, availableMemoryBytes: 1 } }),
     );
 
-    expect(graphs.cpu).toEqual({
-      kind: "unavailable",
-      note: "This machine's runner is too old to report CPU. Update it.",
-    });
+    expect(graphs.cpu).toEqual({ kind: "unavailable" });
   });
 
-  it("says nothing was reported before the first report", () => {
+  it("draws no CPU graph before the first report", () => {
     expect(describeGraphs([], buildRunner({ metrics: null })).cpu).toEqual({
       kind: "unavailable",
-      note: "Not reported yet",
     });
   });
 });
@@ -234,14 +229,11 @@ describe("describeMachineGraphs memory", () => {
   it("draws no graph before the machine's memory is known", () => {
     expect(describeGraphs([], buildRunner({ facts: null })).memory).toEqual({
       kind: "unavailable",
-      note: "Not reported yet",
     });
   });
 });
 
 describe("describeMachineGraphs disk", () => {
-  const FORECAST_FROM = { at: READ_AT, freeBytes: 400 };
-
   /** Hour points that use 500 and then 600 of the disk. */
   const filling = [
     buildHourPoint(2, { diskFreeBytes: 500 }),
@@ -282,81 +274,84 @@ describe("describeMachineGraphs disk", () => {
     expect(drawnDisk(graphs).inUse.map((run) => run.length)).toEqual([2, 1]);
   });
 
+  /**
+   * Hour points on a straight line: the free space is `freeBytesAtNewest` at
+   * the newest point, which starts `newestHoursBeforeRead` before the read, and
+   * it falls `fallBytesPerDay`. They span the 3 days before the newest point,
+   * so there is a forecast.
+   */
+  const buildFillingPoints = (
+    freeBytesAtNewest: number,
+    fallBytesPerDay: number,
+    newestHoursBeforeRead = 0,
+  ): RunnerMetricsPoint[] =>
+    Array.from({ length: 73 }, (_, index) => {
+      const hoursBeforeNewest = 72 - index;
+      return buildHourPoint(newestHoursBeforeRead + hoursBeforeNewest, {
+        diskFreeBytes: freeBytesAtNewest + (hoursBeforeNewest / 24) * fallBytesPerDay,
+      });
+    });
+
   it("makes the graph wider to the right for the forecast, and draws the dashed line to the limit", () => {
-    const forecast: DiskForecast = {
-      days: 3,
-      from: FORECAST_FROM,
-      reachesAt: READ_AT + 3 * DAY_MS,
-    };
+    // In use 600 now and the limit at 900, so 3 days at 100 a day. The lowest
+    // point is 300, which puts the bottom of the scale under 0, so at 0.
+    const graphs = describeGraphs([], buildRunner(), buildFillingPoints(400, 100));
 
-    const graphs = describeGraphs([], buildRunner(), filling, forecast);
-
-    const width = 17 * DAY_MS;
-    expect(drawnDisk(graphs).inUse[0]!.at(-1)!.x).toBeCloseTo((HOUR_HISTORY_MS - HOUR_MS) / width);
-    expect(drawnDisk(graphs).forecast).toEqual([
-      { x: HOUR_HISTORY_MS / width, y: 340 / 640 },
-      { x: 1, y: 1 },
-    ]);
+    const width = HOUR_HISTORY_MS + 3 * DAY_MS;
+    const line = drawnDisk(graphs).forecast!;
+    expect(line[0]!.x).toBeCloseTo(HOUR_HISTORY_MS / width);
+    expect(line[0]!.y).toBeCloseTo(600 / 900);
+    expect(line[1]!.x).toBeCloseTo(1);
+    expect(line[1]!.y).toBeCloseTo(1);
+    expect(drawnDisk(graphs).inUse[0]!.at(-1)!.x).toBeCloseTo(HOUR_HISTORY_MS / width);
     expect(drawnDisk(graphs).forecastText).toBe("Reaches its limit in about 3 days");
   });
 
   it("widens the graph to the moment of the limit, not to the rounded days, so the dash ends on the limit line", () => {
-    const forecast: DiskForecast = {
-      days: 12,
-      from: FORECAST_FROM,
-      reachesAt: READ_AT + 12.4 * DAY_MS,
-    };
-
-    const disk = drawnDisk(describeGraphs([], buildRunner(), filling, forecast));
+    // 12.4 days at 50 a day from 720 free to the limit at 100 free.
+    const disk = drawnDisk(describeGraphs([], buildRunner(), buildFillingPoints(720, 50)));
 
     const width = HOUR_HISTORY_MS + 12.4 * DAY_MS;
     expect(disk.forecast![0]!.x).toBeCloseTo(HOUR_HISTORY_MS / width);
     expect(disk.forecast![1]!.x).toBeCloseTo(1);
     expect(disk.forecast![1]!.y).toBeCloseTo(disk.limitY);
+    expect(disk.forecastText).toBe("Reaches its limit in about 12 days");
   });
 
   it("draws a line that reached the limit before the read without widening the graph", () => {
-    const forecast: DiskForecast = {
-      days: 1,
-      from: { at: READ_AT - HOUR_MS, freeBytes: 400 },
-      reachesAt: READ_AT - HOUR_MS / 2,
-    };
+    // The newest point is 2 hours old and the line crosses the limit an hour later.
+    const disk = drawnDisk(describeGraphs([], buildRunner(), buildFillingPoints(110, 240, 2)));
 
-    const disk = drawnDisk(describeGraphs([], buildRunner(), filling, forecast));
-
-    expect(disk.forecast![0]!.x).toBeCloseTo(1 - HOUR_MS / HOUR_HISTORY_MS);
-    expect(disk.forecast![1]!.x).toBeCloseTo(1 - HOUR_MS / 2 / HOUR_HISTORY_MS);
+    expect(disk.forecast![0]!.x).toBeCloseTo(1 - (2 * HOUR_MS) / HOUR_HISTORY_MS);
+    expect(disk.forecast![1]!.x).toBeCloseTo(1 - HOUR_MS / HOUR_HISTORY_MS);
   });
 
   it("cuts a forecast further out than 14 days at the right edge", () => {
-    const forecast: DiskForecast = {
-      days: 30,
-      from: FORECAST_FROM,
-      reachesAt: READ_AT + 30 * DAY_MS,
-    };
+    // 30 days at 10 a day from 400 free. In use goes from 570 to 600 over the points, so
+    // the bottom of the scale is 570 - (900 - 570) * 0.6 = 372, and the top is the limit.
+    const line = drawnDisk(
+      describeGraphs([], buildRunner(), buildFillingPoints(400, 10)),
+    ).forecast!;
 
-    const line = drawnDisk(describeGraphs([], buildRunner(), filling, forecast)).forecast!;
-
-    // 14 of the 30 days from 600 to the limit at 900: 740, which is (740 - 260) / 640 up.
+    // 14 of the 30 days from 600 to the limit at 900: 740.
     expect(line[1]!.x).toBe(1);
-    expect(line[1]!.y).toBeCloseTo(480 / 640);
+    expect(line[1]!.y).toBeCloseTo((740 - 372) / (900 - 372));
   });
 
   it("words one day in the singular", () => {
-    const forecast: DiskForecast = { days: 1, from: FORECAST_FROM, reachesAt: READ_AT + DAY_MS };
+    const disk = drawnDisk(describeGraphs([], buildRunner(), buildFillingPoints(200, 100)));
 
-    expect(drawnDisk(describeGraphs([], buildRunner(), filling, forecast)).forecastText).toBe(
-      "Reaches its limit in about 1 day",
-    );
+    expect(disk.forecastText).toBe("Reaches its limit in about 1 day");
   });
 
-  it("says what to do on a machine whose runner does not report its disk's size", () => {
+  it("draws no forecast for a history of less than two days", () => {
+    expect(drawnDisk(describeGraphs([], buildRunner(), filling)).forecast).toBeNull();
+  });
+
+  it("draws no Disk graph on a machine whose runner does not report its disk's size", () => {
     const runner = buildRunner({ facts: { ...BARE.facts!, totalMemoryBytes: MEMORY } });
 
-    expect(describeGraphs([], runner, filling).disk).toEqual({
-      kind: "unavailable",
-      note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
-    });
+    expect(describeGraphs([], runner, filling).disk).toEqual({ kind: "unavailable" });
   });
 
   it("draws the limit and no line for a machine with no history", () => {
@@ -375,5 +370,53 @@ describe("describeMachineGraphs history shorter than the range", () => {
       .map((place) => place.x);
     expect(Math.min(...xs)).toBeGreaterThan(0.99);
     expect(Math.max(...xs)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("describeMachineGraphs unavailable graphs", () => {
+  /** The notes of the instruments of `runner`, which are what a page shows in place of an unavailable graph. */
+  const describeInstrumentNotes = (runner: Runner) => {
+    const { instruments } = describeMachinePage(
+      runner,
+      {},
+      "0.4.2",
+      "UTC",
+      new Date("2026-11-03T12:00:00.000Z"),
+    );
+    return {
+      cpu: instruments.cpu.note,
+      memory: instruments.memory.note,
+      disk: instruments.disk.note,
+    };
+  };
+
+  it("has an instrument note that says what to do, for each graph with nothing to draw", () => {
+    const withoutCpu = buildRunner({ metrics: { diskFreeBytes: 500, availableMemoryBytes: 500 } });
+    const withoutFacts = buildRunner({ facts: null });
+    const withoutDiskTotal = buildRunner({
+      facts: { ...BARE.facts!, totalMemoryBytes: MEMORY },
+    });
+
+    expect(describeGraphs([], withoutCpu).cpu.kind).toBe("unavailable");
+    expect(describeInstrumentNotes(withoutCpu).cpu).toBe(
+      "This machine's runner is too old to report CPU. Update it.",
+    );
+    expect(describeGraphs([], withoutFacts).memory.kind).toBe("unavailable");
+    expect(describeInstrumentNotes(withoutFacts).memory).toBe("Not reported yet");
+    expect(describeGraphs([], withoutDiskTotal).disk.kind).toBe("unavailable");
+    expect(describeInstrumentNotes(withoutDiskTotal).disk).toBe(
+      "This machine's runner does not report its disk size. Update it to see how full the disk is.",
+    );
+  });
+
+  it("has the instrument say it was not reported yet, before the first report", () => {
+    const unreported = buildRunner({ metrics: null });
+
+    expect(describeGraphs([], unreported).cpu.kind).toBe("unavailable");
+    expect(describeInstrumentNotes(unreported)).toEqual({
+      cpu: "Not reported yet",
+      memory: "Not reported yet",
+      disk: "Not reported yet",
+    });
   });
 });

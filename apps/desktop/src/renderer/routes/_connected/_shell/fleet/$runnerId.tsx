@@ -2,7 +2,6 @@ import { useRef, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
-import { forecastDiskLimit } from "@hercule/client-core/fleet";
 import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
 import { describeMachinePage } from "@hercule/client-core/machine-page";
 import type { Runner } from "@hercule/contract";
@@ -145,12 +144,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
     timezone,
     today,
   );
-  const graphs = describeMachineGraphs(
-    runner,
-    fiveMinutes,
-    hours,
-    forecastDiskLimit(hours.points, runner, hours.readAt),
-  );
+  const graphs = describeMachineGraphs(runner, fiveMinutes, hours);
 
   return (
     <>

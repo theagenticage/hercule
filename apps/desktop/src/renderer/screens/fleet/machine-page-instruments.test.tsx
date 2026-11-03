@@ -164,10 +164,7 @@ describe("MachinePageInstruments", () => {
       <MachinePageInstruments
         graphs={{
           ...GRAPHS,
-          disk: {
-            kind: "unavailable",
-            note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
-          },
+          disk: { kind: "unavailable" },
         }}
         instruments={{
           ...INSTRUMENTS,
@@ -316,11 +313,11 @@ describe("MachinePageInstruments", () => {
     expect(readTiles(container)[3]).toBe("Disk87%500 GB free of 4,000 GB");
   });
 
-  it("shows a graph's sentence once, in its frame, when the instrument's note is the same", () => {
+  it("shows the instrument's note once, in the frame of a graph with nothing to draw", () => {
     const sentence = "This machine's runner is too old to report CPU. Update it.";
     const { container } = render(
       <MachinePageInstruments
-        graphs={{ ...GRAPHS, cpu: { kind: "unavailable", note: sentence } }}
+        graphs={{ ...GRAPHS, cpu: { kind: "unavailable" } }}
         instruments={{
           ...INSTRUMENTS,
           cpu: { ...GAUGE, value: "–", unit: "", level: "normal", share: null, note: sentence },
@@ -333,16 +330,5 @@ describe("MachinePageInstruments", () => {
     expect(cpu.querySelector(".machine-graph-frame")!.textContent).toBe(sentence);
     expect(cpu.textContent).toBe(`CPU–${sentence}`);
     expect(cpu.querySelector(".machine-page-instrument-note")).toBeNull();
-  });
-
-  it("keeps an instrument's note under a frame that says something else", () => {
-    const { container } = render(
-      <MachinePageInstruments
-        graphs={{ ...GRAPHS, disk: { kind: "unavailable", note: "Update the runner." } }}
-        instruments={INSTRUMENTS}
-      />,
-    );
-
-    expect(readTiles(container)[3]).toBe("Disk87%Update the runner.500 GB free of 4,000 GB");
   });
 });

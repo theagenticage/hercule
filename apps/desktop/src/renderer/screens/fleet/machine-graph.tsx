@@ -6,7 +6,6 @@ import type {
   GraphLine,
   MemoryGraph,
   SessionsGraph,
-  UnavailableGraph,
 } from "@hercule/client-core/machine-graphs";
 import "./machine-graph.css";
 
@@ -199,13 +198,9 @@ export function DiskGraphFigure({
 
 /**
  * Renders the frame of a graph that has nothing to draw, as tall as a graph,
- * with the sentence that says why and what to do. The sentence grows the frame
- * when it needs more than one graph's height.
+ * with `note`: the sentence of the instrument that says why and what to do. The
+ * sentence grows the frame when it needs more than one graph's height.
  */
-export function UnavailableGraphFrame({
-  graph,
-}: {
-  readonly graph: UnavailableGraph;
-}): JSX.Element {
-  return <p className="machine-graph-frame">{graph.note}</p>;
+export function UnavailableGraphFrame({ note }: { readonly note: string }): JSX.Element {
+  return <p className="machine-graph-frame">{note}</p>;
 }

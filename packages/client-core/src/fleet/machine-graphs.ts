@@ -14,9 +14,8 @@
  * right.
  */
 import { RUNNER_METRICS_POINT_MS, type Runner, type RunnerMetricsPoint } from "@hercule/contract";
-import type { DiskForecast } from "./disk-forecast";
+import { forecastDiskLimit, type DiskForecast } from "./disk-forecast";
 import { describeForecastDays, MEMORY_FAIL_FROM_PERCENT, MEMORY_YOU_FROM_PERCENT } from "./machine";
-import { CPU_TOO_OLD_NOTE, DISK_TOTAL_MISSING_NOTE, NOT_REPORTED_NOTE } from "./machine-page";
 import {
   FIVE_MINUTE_HISTORY_MS,
   HOUR_HISTORY_MS,
@@ -53,10 +52,13 @@ export interface GraphBandPoint {
 /** One unbroken stretch of a band. A gap in the history starts a new one. */
 export type GraphBand = readonly GraphBandPoint[];
 
-/** A graph that has nothing to draw, with the line that says why and what to do. */
+/**
+ * A graph that has nothing to draw. The caller shows the note of the matching
+ * instrument in its place (`MachineInstruments`), which says why and what to
+ * do.
+ */
 export interface UnavailableGraph {
   readonly kind: "unavailable";
-  readonly note: string;
 }
 
 /**
@@ -231,8 +233,8 @@ const describeCpuGraph = (
   points: readonly DatedPoint[],
   history: RunnerMetricsHistory,
 ): CpuGraph | UnavailableGraph => {
-  if (runner.metrics === null) return { kind: "unavailable", note: NOT_REPORTED_NOTE };
-  if (runner.metrics.cpu === undefined) return { kind: "unavailable", note: CPU_TOO_OLD_NOTE };
+  if (runner.metrics === null) return { kind: "unavailable" };
+  if (runner.metrics.cpu === undefined) return { kind: "unavailable" };
   const x = buildTimeScale(history.readAt - FIVE_MINUTE_HISTORY_MS, FIVE_MINUTE_HISTORY_MS);
   return {
     kind: "drawn",
@@ -259,7 +261,7 @@ const describeMemoryGraph = (
   history: RunnerMetricsHistory,
 ): MemoryGraph | UnavailableGraph => {
   const total = runner.facts?.totalMemoryBytes;
-  if (total === undefined || total <= 0) return { kind: "unavailable", note: NOT_REPORTED_NOTE };
+  if (total === undefined || total <= 0) return { kind: "unavailable" };
   const x = buildTimeScale(history.readAt - FIVE_MINUTE_HISTORY_MS, FIVE_MINUTE_HISTORY_MS);
   const y = (availableBytes: number): number => clamp((total - availableBytes) / total);
   return {
@@ -312,12 +314,16 @@ const describeDiskGraph = (
   runner: Runner,
   points: readonly DatedPoint[],
   history: RunnerMetricsHistory,
-  forecast: DiskForecast | null,
 ): DiskGraph | UnavailableGraph => {
   const total = runner.facts?.diskTotalBytes;
   if (total === undefined || total <= 0) {
-    return { kind: "unavailable", note: DISK_TOTAL_MISSING_NOTE };
+    return { kind: "unavailable" };
   }
+  const forecast = forecastDiskLimit(
+    points.map(({ point }) => point),
+    runner,
+    history.readAt,
+  );
   const left = history.readAt - HOUR_HISTORY_MS;
   // Widened to the moment the forecast reaches the limit, not to its rounded
   // days, so the dashed line ends exactly on the limit line. A line that
@@ -361,31 +367,33 @@ const describeDiskGraph = (
  *
  * `fiveMinutes` holds five-minute points over `FIVE_MINUTE_HISTORY_MS` and
  * `hours` holds hour points over `HOUR_HISTORY_MS`. Both may hold the points of
- * other runners; only those of `runner` are used. `forecast` is the machine's
- * disk forecast, or `null` for none.
+ * other runners; only those of `runner` are used. The Disk graph's forecast
+ * is made from the hour points (`forecastDiskLimit`, read at `hours.readAt`).
  *
  * - A series is a list of lines or bands. A gap in the history (two points more
  *   than one point apart) starts a new one, so a point the controller has no
  *   row for is a break, never a zero. A point with no CPU breaks the CPU series.
  * - Sessions: the scale is 0 to the larger of the cap and the most sessions
  *   running and queued at once.
- * - CPU: `unavailable` with a note when the runner is too old to report CPU
- *   or has not reported yet.
+ * - CPU: `unavailable` when the runner is too old to report CPU or has not
+ *   reported yet.
  * - Memory: `unavailable` until the runner's total memory is known.
- * - Disk: `unavailable` with a note to update the runner when it does not
- *   report its disk's total size.
+ * - Disk: `unavailable` when the runner does not report its disk's total size.
+ *
+ * An `unavailable` graph says nothing itself. The note of the matching
+ * instrument (`describeMachinePage`) says why and what to do, and is the one
+ * place that sentence is written.
  */
 export const describeMachineGraphs = (
   runner: Runner,
   fiveMinutes: RunnerMetricsHistory,
   hours: RunnerMetricsHistory,
-  forecast: DiskForecast | null,
 ): MachineGraphs => {
   const fiveMinutePoints = pickRunnerPoints(fiveMinutes, runner.id);
   return {
     sessions: describeSessionsGraph(runner, fiveMinutePoints, fiveMinutes),
     cpu: describeCpuGraph(runner, fiveMinutePoints, fiveMinutes),
     memory: describeMemoryGraph(runner, fiveMinutePoints, fiveMinutes),
-    disk: describeDiskGraph(runner, pickRunnerPoints(hours, runner.id), hours, forecast),
+    disk: describeDiskGraph(runner, pickRunnerPoints(hours, runner.id), hours),
   };
 };
