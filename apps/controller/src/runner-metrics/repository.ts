@@ -6,7 +6,7 @@
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { Statement } from "effect/sql/Statement";
+import type { Fragment, Statement } from "effect/sql/Statement";
 import {
   RUNNER_METRICS_POINT_MS,
   type RunnerMetrics,
@@ -148,125 +148,60 @@ export interface Resume {
   readonly minuteMs: number;
 }
 
-/**
- * One range of the primary key that a page reads. `after` reads the runners
- * that sort after `runnerId`.
- */
-export interface ReadArm {
-  readonly runners:
-    | { readonly kind: "one"; readonly runnerId: string }
-    | { readonly kind: "these"; readonly runnerIds: ReadonlyArray<string> };
-  readonly fromMs: number;
-  readonly toMs: number;
-}
-
-/**
- * Returns how many runners a read for every runner takes at once: enough to
- * fill a page of `limit + 1` points, and one more because a runner may have
- * fewer points than the span could hold. A runner has at most one point per
- * point length of the span, plus one for a span that does not start on a
- * boundary.
- */
-export const computeRunnerBatchSize = (request: PointsRequest): number => {
-  const pointMs = RUNNER_METRICS_POINT_MS[request.resolution];
-  const pointsPerRunner = Math.ceil((request.endMs - request.startMs) / pointMs) + 1;
-  return Math.ceil((request.limit + 1) / pointsPerRunner) + 1;
-};
-
-/**
- * Plans the ranges one page reads, so a page starts where the previous one
- * stopped instead of reading the rows it skips:
- *
- * - For one runner, a page reads from the first minute not yet read, and no
- *   further than the minutes `limit + 1` points would hold. That is the most
- *   a page can use. A stretch with gaps may hold fewer points than that, and
- *   `readPoints` then continues from the end of the range.
- * - For every runner, a page reads the rest of the cursor's runner, then
- *   `laterRunnerIds`: the next runners after it, `computeRunnerBatchSize` of
- *   them. A page never groups more runners than it can fill itself with, and
- *   `readPoints` continues after the last of them.
- */
-export const planReads = (
-  request: PointsRequest,
-  resume: Resume | undefined,
-  laterRunnerIds: ReadonlyArray<string>,
-): ReadonlyArray<ReadArm> => {
-  const fromMs = Math.max(request.startMs, resume?.minuteMs ?? request.startMs);
-  if (request.runnerId !== undefined) {
-    const pageMs = (request.limit + 1) * RUNNER_METRICS_POINT_MS[request.resolution];
-    return [
-      {
-        runners: { kind: "one", runnerId: request.runnerId },
-        fromMs,
-        toMs: Math.min(request.endMs, fromMs + pageMs),
-      },
-    ];
-  }
-  const later: ReadArm = {
-    runners: { kind: "these", runnerIds: laterRunnerIds },
-    fromMs: request.startMs,
-    toMs: request.endMs,
-  };
-  return resume === undefined
-    ? [later]
-    : [{ runners: { kind: "one", runnerId: resume.runnerId }, fromMs, toMs: request.endMs }, later];
-};
-
-const buildArmStatement = (sql: SqlClient.SqlClient, arm: ReadArm) => {
-  const runners =
-    arm.runners.kind === "one"
-      ? sql`runner_id = ${uuidFromString(arm.runners.runnerId)}`
-      : sql`runner_id IN (${sql.csv(arm.runners.runnerIds.map((id) => sql`${uuidFromString(id)}`))})`;
-  return sql`
-    SELECT runner_id, minute, disk_free_bytes, available_memory_bytes, cpu_average_percent,
-           cpu_peak_percent, sessions_running, sessions_queued
-    FROM runner_metrics
-    WHERE ${runners} AND minute >= ${arm.fromMs} AND minute < ${arm.toMs}
-  `;
-};
-
-/**
- * Builds the statement that lists the ids of the first `count` runners that
- * sort after `afterRunnerId`, or the first `count` runners when it is
- * undefined. It reads the runners' primary key in order and stops at `count`.
- */
-export const buildRunnerBatchStatement = (
-  sql: SqlClient.SqlClient,
-  afterRunnerId: string | undefined,
-  count: number,
-): Statement<{ readonly id: Uint8Array }> =>
-  afterRunnerId === undefined
-    ? sql<{ readonly id: Uint8Array }>`SELECT id FROM runners ORDER BY id LIMIT ${count}`
-    : sql<{ readonly id: Uint8Array }>`
-        SELECT id FROM runners WHERE id > ${uuidFromString(afterRunnerId)}
-        ORDER BY id LIMIT ${count}
-      `;
+const READ_COLUMNS =
+  "runner_id, minute, disk_free_bytes, available_memory_bytes, cpu_average_percent, " +
+  "cpu_peak_percent, sessions_running, sessions_queued";
 
 /**
  * Builds the statement that reads one page of points, plus one point more than
- * the page holds. It is one statement:
+ * the page holds.
  *
- * - Each arm of `planReads` is a range on the raw `minute` column under one
- *   runner or a short list of them, so the primary key serves it and SQLite
- *   seeks each runner's range rather than reading every row of the table.
- * - A point is a group of rows. Its start is `minute` less its remainder in the
- *   point's length, so points fall on fixed UTC boundaries.
- * - The page boundary is on the raw rows, before they are grouped: the arms
- *   start at the first minute after the cursor's point. A point is therefore
- *   never split between two pages.
+ * The inner select reads the raw rows in primary-key order, `(runner_id,
+ * minute)`, from where the cursor stopped, and keeps the first `(limit + 1) *
+ * rowsPerPoint` of them. SQLite walks the key in that order, so the order costs
+ * no sort, and the `LIMIT` stops the walk. The outer select groups those rows
+ * into points, which are `minute` less its remainder in the point's length, so
+ * they fall on fixed UTC boundaries, and keeps `limit + 1` points.
  *
- * `GROUP BY` sorts the rows of the arms in a temporary b-tree before `LIMIT`
- * applies, because a point's start is an expression and no index is ordered
- * by it. So a page costs the rows of its ranges, which `planReads` keeps near
- * the size of a page.
+ * Why the first `limit` points are whole: the rows of one point are next to
+ * each other in key order, and a point has at most `rowsPerPoint` rows, so
+ * the cap reaches at least `limit + 1` points, and only the last of them can
+ * be cut short by it. The extra point says that a next page exists, and the
+ * next page reads it again from its first row.
+ *
+ * - One runner is `runner_id = ?`. Every runner is `runner_id IN (SELECT id
+ *   FROM runners)`, which makes SQLite seek each runner's range in order.
+ * - After a cursor for every runner, two reads are merged in key order: the
+ *   rest of the cursor's runner from its next minute, and the runners after
+ *   it from the start of the span.
+ *
+ * The outer `GROUP BY` sorts at most one page of rows in a temporary b-tree,
+ * because a point's start is an expression and no index is ordered by it.
  */
 export const buildPointsStatement = (
   sql: SqlClient.SqlClient,
   request: PointsRequest,
-  arms: ReadonlyArray<ReadArm>,
+  resume: Resume | undefined,
 ): Statement<PointRow> => {
   const pointMs = RUNNER_METRICS_POINT_MS[request.resolution];
-  const reads = sql.join(" UNION ALL ", false)(arms.map((arm) => buildArmStatement(sql, arm)));
+  const rowsPerPoint = pointMs / MINUTE_MS;
+  const buildRead = (runners: Fragment, fromMs: number) => sql`
+    SELECT ${sql.literal(READ_COLUMNS)} FROM runner_metrics
+    WHERE ${runners} AND minute >= ${fromMs} AND minute < ${request.endMs}
+  `;
+  const fromMs = Math.max(request.startMs, resume?.minuteMs ?? request.startMs);
+  const reads =
+    request.runnerId !== undefined
+      ? [buildRead(sql`runner_id = ${uuidFromString(request.runnerId)}`, fromMs)]
+      : resume === undefined
+        ? [buildRead(sql`runner_id IN (SELECT id FROM runners)`, fromMs)]
+        : [
+            buildRead(sql`runner_id = ${uuidFromString(resume.runnerId)}`, fromMs),
+            buildRead(
+              sql`runner_id IN (SELECT id FROM runners WHERE id > ${uuidFromString(resume.runnerId)})`,
+              request.startMs,
+            ),
+          ];
   return sql<PointRow>`
     SELECT runner_id,
            minute - (minute % ${pointMs}) AS bucket,
@@ -278,27 +213,15 @@ export const buildPointsStatement = (
            MAX(cpu_peak_percent) AS cpu_peak_percent,
            MAX(sessions_running) AS sessions_running,
            MAX(sessions_queued) AS sessions_queued
-    FROM (${reads})
+    FROM (
+      ${sql.join(" UNION ALL ", false)(reads)}
+      ORDER BY runner_id, minute LIMIT ${(request.limit + 1) * rowsPerPoint}
+    )
     GROUP BY runner_id, bucket
     ORDER BY runner_id, bucket
     LIMIT ${request.limit + 1}
   `;
 };
-
-/**
- * Builds the statement that finds the first minute a runner has a row in
- * `[fromMs, toMs)`. It reads one entry of the primary key.
- */
-export const buildNextMinuteStatement = (
-  sql: SqlClient.SqlClient,
-  runnerId: string,
-  fromMs: number,
-  toMs: number,
-): Statement<{ readonly minute: number }> => sql<{ readonly minute: number }>`
-  SELECT minute FROM runner_metrics
-  WHERE runner_id = ${uuidFromString(runnerId)} AND minute >= ${fromMs} AND minute < ${toMs}
-  ORDER BY minute LIMIT 1
-`;
 
 /**
  * Builds the statement that deletes the rows before `cutoffMs`. Each runner's
@@ -331,21 +254,12 @@ const make = Effect.gen(function* () {
       Effect.asVoid(buildRecordStatement(sql, runnerId, floorToMinute(atMs), metrics)),
 
     /**
-     * Returns one page of points, ordered by runner and then oldest first.
-     * Fails with `CursorError` when the cursor was not issued for this runner,
-     * resolution and span.
+     * Returns one page of points, ordered by runner and then oldest first. A
+     * page is full unless the read has ended. Fails with `CursorError` when
+     * the cursor was not issued for this runner, resolution and span.
      *
      * The end of the span is fixed by the first page and carried in every
      * cursor, so every page of one read ends at the same instant.
-     *
-     * A page may hold fewer than `limit` points and still have a `nextCursor`,
-     * because a read is bounded to the work one page needs (see `planReads`):
-     *
-     * - For one runner, the range ended before the span did. The cursor
-     *   resumes at the next point that has any row, so a gap costs no empty
-     *   page, and is absent when the runner has none.
-     * - For every runner, runners remain after the ones the page took. The
-     *   cursor resumes after the last of them.
      */
     readPoints: (
       request: PointsRequest,
@@ -362,45 +276,13 @@ const make = Effect.gen(function* () {
           cursor === undefined
             ? undefined
             : { runnerId: cursor.id, minuteMs: Number(cursor.values[0]) + pointMs };
-        const encodeNextCursor = (runnerId: string, pointStartMs: number): string =>
-          encodeCursor(scope, [pointStartMs, read.endMs], runnerId);
-
-        let laterRunnerIds: ReadonlyArray<string> = [];
-        let runnersRemain = false;
-        if (read.runnerId === undefined) {
-          const batchSize = computeRunnerBatchSize(read);
-          const ids = yield* buildRunnerBatchStatement(sql, resume?.runnerId, batchSize + 1);
-          laterRunnerIds = ids.slice(0, batchSize).map((row) => uuidToString(row.id));
-          runnersRemain = ids.length > batchSize;
-        }
-        const arms = planReads(read, resume, laterRunnerIds);
-        const rows = yield* buildPointsStatement(sql, read, arms);
-        const page = yield* buildPage(
+        const rows = yield* buildPointsStatement(sql, read, resume);
+        return yield* buildPage(
           rows,
           read.limit,
           (pageRows) => Effect.succeed(pageRows.map(toPoint)),
-          (last) => encodeNextCursor(last.runnerId, Date.parse(last.at)),
+          (last) => encodeCursor(scope, [Date.parse(last.at), read.endMs], last.runnerId),
         );
-        if (page.nextCursor !== undefined) return page;
-
-        if (read.runnerId === undefined) {
-          const lastRunnerId = laterRunnerIds.at(-1);
-          // A point start at the end of the span makes the cursor skip the
-          // rest of that runner.
-          return runnersRemain && lastRunnerId !== undefined
-            ? { items: page.items, nextCursor: encodeNextCursor(lastRunnerId, read.endMs) }
-            : page;
-        }
-
-        const rangeEndMs = arms[0]!.toMs;
-        if (rangeEndMs >= read.endMs) return page;
-        const [next] = yield* buildNextMinuteStatement(sql, read.runnerId, rangeEndMs, read.endMs);
-        if (next === undefined) return page;
-        const nextPointMs = next.minute - (next.minute % pointMs);
-        return {
-          items: page.items,
-          nextCursor: encodeNextCursor(read.runnerId, nextPointMs - pointMs),
-        };
       }),
 
     /** Deletes the rows of every minute before `cutoffMs`. Must run inside a transaction. */

@@ -545,14 +545,15 @@ describe("a read of several pages", () => {
     expect(found.later.map((point) => point.at)).toEqual([instant(20)]);
   });
 
-  it("takes only the next few runners for a page, and hands back a cursor when runners remain, even when the page is empty", async () => {
+  it("fills every page but the last, across runners that have few points or none", async () => {
     const found = await runAsUser(
       Effect.gen(function* () {
         const service = yield* RunnerMetricsService;
-        const created = yield* Effect.forEach(["a", "b", "c", "d"], insertRunner);
-        const [first, , , last] = created.toSorted() as [string, string, string, string];
-        // Only the runner that sorts last has rows, so the first pages hold none.
-        for (const minute of [0, 5, 10]) yield* record(last, report(50, 8), instant(minute));
+        const created = yield* Effect.forEach(["a", "b", "c", "d", "e"], insertRunner);
+        const runners = created.toSorted();
+        // The runners that sort second and fourth have rows. The others have none.
+        for (const minute of [0, 5, 10]) yield* record(runners[1]!, report(50, 8), instant(minute));
+        for (const minute of [0, 5]) yield* record(runners[3]!, report(50, 8), instant(minute));
         const pages: Array<ReadonlyArray<string>> = [];
         const cursors: Array<string | undefined> = [];
         let cursor: string | undefined;
@@ -568,18 +569,18 @@ describe("a read of several pages", () => {
           cursors.push(page.nextCursor);
           cursor = page.nextCursor;
         } while (cursor !== undefined && pages.length < 20);
-        return { pages, cursors, last, first };
+        return { pages, cursors, runners };
       }),
     );
 
-    // A five-minute point holds 13 per runner at most over the hour, so two
-    // points need one runner and a page takes two runners.
-    expect(found.pages[0]).toEqual([]);
-    expect(found.cursors[0]).toBeDefined();
-    expect(found.pages.flat()).toEqual(
-      [0, 5, 10].map((minute) => `${found.last} ${instant(minute)}`),
-    );
-    expect(found.cursors.at(-1)).toBeUndefined();
+    const point = (runner: string, minute: number) => `${runner} ${instant(minute)}`;
+    const [, second, , fourth] = found.runners as [string, string, string, string, string];
+    expect(found.pages).toEqual([
+      [point(second, 0), point(second, 5)],
+      [point(second, 10), point(fourth, 0)],
+      [point(fourth, 5)],
+    ]);
+    expect(found.cursors.map((cursor) => cursor !== undefined)).toEqual([true, true, false]);
   });
 });
 
@@ -707,7 +708,7 @@ describe("a query's limits", () => {
     }
   });
 
-  it("follows a gap longer than a page: a short page of one runner still hands back a cursor", async () => {
+  it("reads across a gap longer than a page, one point per page", async () => {
     const found = await runAsUser(
       Effect.gen(function* () {
         const service = yield* RunnerMetricsService;
