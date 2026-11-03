@@ -184,6 +184,11 @@ export const buildRunBranch = (runId: string): string => `hercule/run-${runId}`;
 
 const ALREADY_GONE = "that workspace is already gone";
 
+const MAIN_REMOVED_ON_ITS_OWN = "A main workspace is removed on its own, with workspace.dispose.";
+
+const USED_SINCE_LOOKED =
+  "Someone used this workspace since you looked. Check it again before you remove it.";
+
 /**
  * Builds the refusal for disposing of a workspace that holders still use. It
  * names every holder and what to do about each: a run is cancelled, because
@@ -878,6 +883,24 @@ const make = Effect.gen(function* () {
         );
     });
 
+  /** Returns the workspace if `disposable` accepts it, else fails with `InvalidState` saying why. */
+  const requireDisposable = (
+    workspace: StoredWorkspace,
+  ): Effect.Effect<StoredWorkspace, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      if (workspace.ownership === "adopted")
+        return yield* Effect.fail(createInvalidStateError(EXISTING_DISPOSAL));
+      if (workspace.status === "deleted" || workspace.status === "lost") {
+        return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
+      }
+      const active = (yield* workspaces.listActiveHolders([workspace.id])).get(workspace.id) ?? [];
+      if (active.length > 0) {
+        return yield* Effect.fail(createInvalidStateError(describeActiveHolders(active)));
+      }
+      yield* requireRemovalSupport(workspace.runnerId);
+      return workspace;
+    });
+
   /** Records a removal receipt or preserves preparation facts while removal is still pending. */
   const recordRemovalOutcome = (
     runnerId: string,
@@ -1151,19 +1174,30 @@ const make = Effect.gen(function* () {
      * The message names every run and session to stop first.
      */
     disposable: (id: string): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
+      Effect.flatMap(readStoredWorkspace(id), requireDisposable),
+
+    /**
+     * Returns the workspace `workspace.disposeMany` may remove, read fresh in
+     * the transaction that reserves its removal. Fails with `NotFound` for an
+     * unknown id, and with `InvalidState` if:
+     *
+     * - it is a main workspace, which is removed on its own;
+     * - `expectedLastUsedAt` is given and the workspace's `lastUsedAt` is no
+     *   longer that time, because a session started or exited in it after the
+     *   caller looked;
+     * - `disposable` refuses it, with that check's own message.
+     */
+    disposableInBatch: (
+      id: string,
+      expectedLastUsedAt: string | undefined,
+    ): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
       Effect.gen(function* () {
         const workspace = yield* readStoredWorkspace(id);
-        if (workspace.ownership === "adopted")
-          return yield* Effect.fail(createInvalidStateError(EXISTING_DISPOSAL));
-        if (workspace.status === "deleted" || workspace.status === "lost") {
-          return yield* Effect.fail(createInvalidStateError(ALREADY_GONE));
-        }
-        const active = (yield* workspaces.listActiveHolders([id])).get(id) ?? [];
-        if (active.length > 0) {
-          return yield* Effect.fail(createInvalidStateError(describeActiveHolders(active)));
-        }
-        yield* requireRemovalSupport(workspace.runnerId);
-        return workspace;
+        if (workspace.kind === "primary")
+          return yield* Effect.fail(createInvalidStateError(MAIN_REMOVED_ON_ITS_OWN));
+        if (expectedLastUsedAt !== undefined && workspace.lastUsedAt !== expectedLastUsedAt)
+          return yield* Effect.fail(createInvalidStateError(USED_SINCE_LOOKED));
+        return yield* requireDisposable(workspace);
       }),
 
     /** Returns an attached main whose registration may be forgotten without removing its files. */
