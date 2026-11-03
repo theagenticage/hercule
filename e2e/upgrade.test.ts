@@ -91,7 +91,7 @@
  * whose session lease is still active. After the upgrade both workspaces read
  * with the same holders and kept-until time, so the rebuild lost no lease.
  *
- * Migration 105 gives audit entries a `runner_id`, filled from the payload's
+ * Migration 106 gives audit entries a `runner_id`, filled from the payload's
  * runner, or through its workspace's or session's runner. The edge binary
  * writes five of the 19 kinds the migration fills itself: the real runner's
  * joining and connectivity, and the update, drain and undrain the fixture asks
@@ -282,7 +282,7 @@ const SEEDED_ACTIVE_LEASE_HOLDER_ID = "0199e0e7-0000-7000-8000-0000000009c2";
 const SEEDED_LEASE_KEPT_UNTIL = "2099-01-01T00:00:00.000Z";
 
 /** The migration that adds `events.runner_id` and fills it for the audit entries already in the log. */
-const EVENTS_RUNNER_ID_MIGRATION = 105;
+const EVENTS_RUNNER_ID_MIGRATION = 106;
 
 /** The kinds of audit entry the edge binary writes itself about the real runner. */
 const EDGE_RUNNER_AUDIT_KINDS = [
@@ -1237,7 +1237,7 @@ interface RunnerAuditFixture {
  * Collects the audit entries of `EDGE_RUNNER_AUDIT_KINDS` the edge binary wrote
  * about the real or the seeded runner, and inserts the other 14 kinds the
  * migration fills as legacy rows. Returns the entries to read back. When the
- * edge database already ran migration 105, it has filled `runner_id` itself and
+ * edge database already ran migration 106, it has filled `runner_id` itself and
  * writes it on new entries, so only the edge entries are returned.
  *
  * The edge entries are only collected, so their payloads must name a runner the
@@ -2400,7 +2400,7 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
-      // Migration 105 filled `runner_id` on the audit entries of the edge
+      // Migration 106 filled `runner_id` on the audit entries of the edge
       // binary: each kind reads back under its own runner and under no other,
       // and the entries that name no runner stay out of both.
       const activityOptions = { url: controller.url, apiKey: readApiKey(home) };
