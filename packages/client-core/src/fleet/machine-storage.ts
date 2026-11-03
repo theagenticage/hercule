@@ -20,6 +20,7 @@ import {
 import { formatDayStamp } from "../time-context";
 import {
   buildIdleWorkspaceRows,
+  describeCleanUpDisabledHint,
   formatDiskSize,
   isIdleWorkspace,
   listCleanupCandidates,
@@ -38,15 +39,13 @@ const OTHER_TOOLTIP =
   "Everything else on the disk: your own files, and package stores such as pnpm's, which workspaces link to.";
 
 /** The name of a part of the bar. */
-export type StoragePartKey =
-  | "inUse"
-  | "idle"
-  | "repositoryCaches"
-  | "sessionData"
-  | "other"
-  | "free";
+export type StoragePartKey = "inUse" | "idle" | "repositoryCaches" | "sessionData" | "other";
 
-/** One part of the bar, which is also one entry of the legend under it. */
+/**
+ * One part of the bar, which is also one entry of the legend under it. Free
+ * space is not a part: it is the bar's own background, and the head says how
+ * much there is.
+ */
 export interface StoragePart {
   readonly key: StoragePartKey;
   /** Such as "Workspaces in use", "Idle workspaces" or "Session data". */
@@ -79,6 +78,18 @@ export interface AutomaticCleanup {
   readonly rules: AutomaticCleanupRules;
 }
 
+/** The disk as one bar, the free space being the bar's background. */
+export interface StorageBar {
+  /** Left to right. Empty for a runner that is too old to measure storage. */
+  readonly parts: readonly StoragePart[];
+  /**
+   * Where the disk limit mark sits: the limit's share of the disk, counted
+   * from the right edge of the bar (the free end). `null` when the disk's
+   * total size is unknown.
+   */
+  readonly limitShare: number | null;
+}
+
 /** Everything the Storage section draws. */
 export interface MachineStorage {
   readonly head: {
@@ -87,14 +98,8 @@ export interface MachineStorage {
     /** Such as "limit in about 12 days", drawn after a dot in the `you` ink. `null` when there is no forecast. */
     readonly forecastText: string | null;
   };
-  /** Empty before the runner has reported its disk. Just Free for a runner that does not measure storage. */
-  readonly parts: readonly StoragePart[];
-  /**
-   * Where the disk limit mark sits: the limit's share of the disk, counted
-   * from the right edge of the bar (the free end). `null` when the disk's
-   * total size is unknown.
-   */
-  readonly limitShare: number | null;
+  /** The disk as one bar. `null` before the runner has reported its disk. */
+  readonly bar: StorageBar | null;
   /**
    * The line shown in place of everything under the bar when the runner is too
    * old to measure its storage, else `null`.
@@ -109,6 +114,16 @@ export interface MachineStorage {
     readonly disabledHint: string | null;
   };
 }
+
+/**
+ * Checks whether the runner with these `negotiatedCapabilities`
+ * (`RunnerDetail.negotiatedCapabilities`, from `runner.read`) can measure the
+ * disk usage of its workspaces. Capabilities that are not known yet (`null`)
+ * count as yes: the section then draws what it has, and a runner that turns
+ * out to be too old shows its line once they arrive.
+ */
+export const canMeasureStorage = (negotiatedCapabilities: readonly string[] | null): boolean =>
+  negotiatedCapabilities === null || negotiatedCapabilities.includes(DISK_USAGE_CAPABILITY);
 
 /** The sum of `pick` over `items`. */
 const sum = <Item>(items: readonly Item[], pick: (item: Item) => number): number =>
@@ -167,8 +182,8 @@ const AUTOMATIC_CLEANUP_RULES: AutomaticCleanupRules = {
  *   measurement older than the free-space reading can make that negative, so
  *   it is floored at 0.
  * - Every share is a part's drawn bytes over the disk's real total, the same
- *   total the disk limit mark (`limitShare`) uses, so Free and the mark line
- *   up. Free is never shrunk.
+ *   total the disk limit mark (`limitShare`) uses, so the free space left
+ *   over and the mark line up.
  * - Stale measurements can make the counted parts bigger than the disk's
  *   used space. The bar then draws the workspace parts smaller, in the same
  *   proportion, until the parts fit; their texts keep the measured sizes. If
@@ -217,7 +232,6 @@ const buildStorageParts = (
     repositoryCaches: fixedDrawn,
     sessionData: fixedDrawn,
     other: 1,
-    free: 1,
   };
 
   const part = (
@@ -239,7 +253,6 @@ const buildStorageParts = (
     part("repositoryCaches", "Repository caches", repositoryCacheBytes),
     part("sessionData", "Session data", sessionDataBytes),
     part("other", "Other", otherBytes, OTHER_TOOLTIP),
-    part("free", "Free", freeBytes),
   ];
 };
 
@@ -270,13 +283,14 @@ export interface MachineStorageSources {
  *
  * - The head has the free space and, when `forecastDiskLimit` finds one, the
  *   forecast. A runner that reported no disk yet has "Disk not reported yet".
- * - A runner known to lack the disk usage capability shows only Free and the
- *   line that says it is too old. The workspaces, the activity and the
- *   Threads are not read for it.
+ * - A runner known to lack the disk usage capability (`canMeasureStorage`)
+ *   shows its bar empty, all free, and the line that says it is too old. The
+ *   workspaces, the activity and the Threads are not read for it.
  * - "Largest idle workspaces" are the machine's cleanup candidates that a
  *   Thread used, the five with the biggest `sizeBytes` first. A workspace
  *   never measured goes last.
- * - Clean up… is disabled while the machine is not online.
+ * - Clean up… is disabled while the machine is not online
+ *   (`describeCleanUpDisabledHint`).
  */
 export const describeMachineStorage = ({
   runner,
@@ -290,14 +304,10 @@ export const describeMachineStorage = ({
 }: MachineStorageSources): MachineStorage => {
   const disk = measureDisk(runner);
   const totalBytes = disk?.use?.totalBytes ?? null;
-  const tooOld =
-    negotiatedCapabilities !== null && !negotiatedCapabilities.includes(DISK_USAGE_CAPABILITY);
+  const tooOld = !canMeasureStorage(negotiatedCapabilities);
   const forecast = forecastDiskLimit(hourPoints, runner, now.getTime());
   const cleanUp = {
-    disabledHint:
-      runner.connectivity === "online"
-        ? null
-        : `${runner.name} is offline. Cleaning up needs it online.`,
+    disabledHint: describeCleanUpDisabledHint(runner.name, runner.connectivity === "online"),
   };
   const head = {
     freeText:
@@ -313,8 +323,7 @@ export const describeMachineStorage = ({
   if (disk === null) {
     return {
       head,
-      parts: [],
-      limitShare,
+      bar: null,
       tooOld: null,
       automaticCleanup: null,
       largestIdle: [],
@@ -322,13 +331,9 @@ export const describeMachineStorage = ({
     };
   }
   if (tooOld) {
-    const parts = buildStorageParts(runner, [], disk.freeBytes, totalBytes, now).filter(
-      (part) => part.key === "free",
-    );
     return {
       head,
-      parts,
-      limitShare,
+      bar: { parts: [], limitShare },
       tooOld:
         "This machine's runner is too old to measure its storage. Update it to see what fills the disk.",
       automaticCleanup: null,
@@ -345,8 +350,10 @@ export const describeMachineStorage = ({
     .slice(0, LARGEST_IDLE_COUNT);
   return {
     head,
-    parts: buildStorageParts(runner, workspaces, disk.freeBytes, totalBytes, now),
-    limitShare,
+    bar: {
+      parts: buildStorageParts(runner, workspaces, disk.freeBytes, totalBytes, now),
+      limitShare,
+    },
     tooOld: null,
     automaticCleanup: {
       text: "Hercule cleans up by itself.",

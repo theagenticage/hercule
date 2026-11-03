@@ -4,7 +4,7 @@
  * hold. These components draw and read nothing: the route-local
  * `-clean-up-button.tsx` owns the ticks and the progress.
  */
-import type { JSX, ReactNode, RefObject } from "react";
+import { useEffect, useRef, type JSX, type ReactNode, type RefObject } from "react";
 import type {
   CleanupDialog as CleanupDialogDescription,
   CleanupDialogGroup,
@@ -208,32 +208,34 @@ export function CleanupChoices({
             {note}
           </p>
         )}
-        <button
-          type="button"
-          className={empty === null ? "btn btn--quiet" : "btn"}
-          onClick={onClose}
-        >
-          {empty === null ? "Cancel" : "Close"}
-        </button>
-        {empty === null && (
+        <div className="cleanup-foot-buttons">
           <button
             type="button"
-            className="btn btn--danger"
-            aria-disabled={button.disabled || isStarting || undefined}
-            title={button.hint ?? undefined}
-            onClick={() => {
-              if (!button.disabled && !isStarting) onConfirm();
-            }}
+            className={empty === null ? "btn btn--quiet" : "btn"}
+            onClick={onClose}
           >
-            {isStarting ? (
-              <>
-                <span className="spin" aria-hidden="true" /> Archiving…
-              </>
-            ) : (
-              button.label
-            )}
+            {empty === null ? "Cancel" : "Close"}
           </button>
-        )}
+          {empty === null && (
+            <button
+              type="button"
+              className="btn btn--danger"
+              aria-disabled={button.disabled || isStarting || undefined}
+              title={button.hint ?? undefined}
+              onClick={() => {
+                if (!button.disabled && !isStarting) onConfirm();
+              }}
+            >
+              {isStarting ? (
+                <>
+                  <span className="spin" aria-hidden="true" /> Archiving…
+                </>
+              ) : (
+                button.label
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </>
   );
@@ -268,7 +270,9 @@ function CleanupRowOutcome({
  * is the head's words (such as "Archived 9 threads. Removed 4 of 6
  * workspaces.") once every row has an outcome, else `null`. A refused row
  * shows its reason under the name and Try again, which calls `onRetry` with
- * the workspace's id, unless asking again cannot succeed.
+ * the workspace's id, unless asking again cannot succeed. The Close button
+ * takes the focus when the view appears and after a Try again, because the
+ * button that had it is gone by then.
  */
 export function CleanupProgressView({
   rows,
@@ -283,6 +287,10 @@ export function CleanupProgressView({
   readonly onRetry: (workspaceId: string) => void;
   readonly onClose: () => void;
 }): JSX.Element {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
   return (
     <>
       <div className="cleanup-body">
@@ -305,6 +313,7 @@ export function CleanupProgressView({
                 <CleanupRowOutcome
                   outcome={outcome}
                   onRetry={() => {
+                    closeRef.current?.focus();
                     onRetry(row.workspaceId);
                   }}
                 />
@@ -315,9 +324,11 @@ export function CleanupProgressView({
         </ul>
       </div>
       <div className="cleanup-foot">
-        <button type="button" className="btn" onClick={onClose}>
-          Close
-        </button>
+        <div className="cleanup-foot-buttons">
+          <button ref={closeRef} type="button" className="btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
       </div>
     </>
   );

@@ -13,6 +13,7 @@ import {
   archiveAndRemoveWorkspaces,
   buildCleanupSnapshot,
   decideRemovalOutcome,
+  describeCleanUpDisabledHint,
   describeCleanupDialog,
   describeCleanupOutcome,
   listCleanupCandidates,
@@ -70,6 +71,18 @@ const buildThread = (
     ...(isDone || isArchived ? { done: { at: daysAgo(9), by: "user" } } : {}),
     ...(isArchived ? { archived: { at: daysAgo(8), by: "user" } } : {}),
   });
+
+describe("describeCleanUpDisabledHint", () => {
+  it("is null while the machine is online", () => {
+    expect(describeCleanUpDisabledHint("atlas", true)).toBeNull();
+  });
+
+  it("names the machine and says it must be online otherwise", () => {
+    expect(describeCleanUpDisabledHint("atlas", false)).toBe(
+      "atlas is offline. Cleaning up needs it online.",
+    );
+  });
+});
 
 describe("listCleanupCandidates", () => {
   it("lists the machine's idle ephemeral workspaces that are ready or failed", () => {

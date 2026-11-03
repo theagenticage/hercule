@@ -261,6 +261,8 @@ describe("the cleanup dialog", () => {
     await user.click(within(dialog).getByRole("button", { name: /^Archive and remove/ }));
 
     await within(dialog).findAllByText("Removing…");
+    // The button that had the focus is gone, so Close takes it.
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Close" }));
     const archive = calls.find((call) => call.path === ARCHIVE_PATH);
     expect(archive?.body).toEqual({ sessionIds: [uuid(101), uuid(102), uuid(103)] });
     const dispose = calls.find((call) => call.path === DISPOSE_PATH);
@@ -387,6 +389,27 @@ describe("the cleanup dialog", () => {
     expect(calls.some((call) => call.path === DISPOSE_PATH)).toBe(false);
     // The groups are still there, so the user may change the ticks and press again.
     expect(within(dialog).getByRole("button", { name: /^Archive and remove/ })).toBeTruthy();
+  });
+
+  it("opens a fresh dialog when the user left with a refused archive and comes back", async () => {
+    const user = userEvent.setup();
+    const { world, router } = await openFleet();
+    world.archiveAnswer = {
+      status: 409,
+      body: buildErrorBody("invalid_state", "Thread 104 started working again."),
+    };
+    const dialog = await openDialog();
+    await user.click(within(dialog).getByRole("button", { name: /^Archive and remove/ }));
+    await within(dialog).findByRole("alert");
+
+    // The dialog goes with the screen; the refused archive stays in the store.
+    await act(() => router.navigate({ to: "/settings/appearance" }));
+    world.archiveAnswer = null;
+    await act(() => router.navigate({ to: "/fleet" }));
+    const reopened = await openDialog();
+
+    expect(within(reopened).queryByRole("alert")).toBeNull();
+    expect(within(reopened).getByRole("button", { name: /^Archive and remove/ })).toBeTruthy();
   });
 
   it("says there is nothing to clean up when no workspace is idle", async () => {

@@ -7,7 +7,7 @@
 import type { Event, Runner, RunnerFacts, RunnerMetricsPoint, Workspace } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildSession, buildWorkspace } from "../threads/workspaces.testing";
-import { describeMachineStorage, type MachineStorage } from "./machine-storage";
+import { canMeasureStorage, describeMachineStorage, type MachineStorage } from "./machine-storage";
 
 const GB = 1e9;
 const HOUR_MS = 3_600_000;
@@ -85,7 +85,7 @@ const describeStorage = (
 
 /** Returns the bytes of each part by key. */
 const bytesByKey = (storage: MachineStorage): Record<string, number> =>
-  Object.fromEntries(storage.parts.map((part) => [part.key, part.bytes / GB]));
+  Object.fromEntries(storage.bar!.parts.map((part) => [part.key, part.bytes / GB]));
 
 /** Returns hour points over 3 days whose free space falls 1.5 GB an hour, from 500 GB to 392 GB. */
 const fallingPoints = (): RunnerMetricsPoint[] =>
@@ -124,19 +124,19 @@ describe("describeMachineStorage head", () => {
     const storage = describeStorage(buildRunner({ facts: buildFacts() }));
 
     expect(storage.head.freeText).toBe("412 GB free");
-    expect(storage.limitShare).toBeNull();
-    expect(storage.parts.every((part) => part.share === null)).toBe(true);
+    expect(storage.bar!.limitShare).toBeNull();
+    expect(storage.bar!.parts.every((part) => part.share === null)).toBe(true);
   });
 
   it("says the disk is not reported before the runner has reported it", () => {
     const storage = describeStorage(buildRunner({ metrics: null }));
 
     expect(storage.head.freeText).toBe("Disk not reported yet");
-    expect(storage.parts).toEqual([]);
+    expect(storage.bar).toBeNull();
   });
 
   it("places the disk limit mark at its share of the disk", () => {
-    expect(describeStorage(buildRunner()).limitShare).toBe(0.1);
+    expect(describeStorage(buildRunner()).bar!.limitShare).toBe(0.1);
   });
 });
 
@@ -154,13 +154,13 @@ describe("describeMachineStorage parts", () => {
 
     const storage = describeStorage(buildRunner(), { workspaces });
 
-    expect(storage.parts.map((part) => part.label)).toEqual([
+    // Free is the bar's background, not a part.
+    expect(storage.bar!.parts.map((part) => part.label)).toEqual([
       "Workspaces in use",
       "Idle workspaces",
       "Repository caches",
       "Session data",
       "Other",
-      "Free",
     ]);
     // 1000 total - 412 free - (30 in use + 30 idle + 20 caches + 5 session data) = 503 other.
     expect(bytesByKey(storage)).toEqual({
@@ -169,41 +169,42 @@ describe("describeMachineStorage parts", () => {
       repositoryCaches: 20,
       sessionData: 5,
       other: 503,
-      free: 412,
     });
-    expect(storage.parts.map((part) => part.sizeText)).toEqual([
+    expect(storage.bar!.parts.map((part) => part.sizeText)).toEqual([
       "30 GB",
       "30 GB",
       "20 GB",
       "5 GB",
       "503 GB",
-      "412 GB",
     ]);
-    expect(storage.parts.find((part) => part.key === "other")!.tooltip).toBe(
+    expect(storage.bar!.parts.find((part) => part.key === "other")!.tooltip).toBe(
       "Everything else on the disk: your own files, and package stores such as pnpm's, which workspaces link to.",
     );
-    expect(storage.parts.find((part) => part.key === "free")!.tooltip).toBeNull();
-    expect(storage.parts.reduce((sum, part) => sum + (part.share ?? 0), 0)).toBeCloseTo(1);
+    // The parts fill the used space, and the free space is what is left of the bar.
+    expect(storage.bar!.parts.reduce((sum, part) => sum + (part.share ?? 0), 0)).toBeCloseTo(
+      1 - 0.412,
+    );
   });
 
-  it("floors Other at zero and shrinks the workspace parts, not Free, when stale measurements add up to too much", () => {
+  it("floors Other at zero and shrinks the workspace parts when stale measurements add up to too much", () => {
     const workspaces = [buildMeasured("w-big", 700, 1)];
 
     const storage = describeStorage(buildRunner(), { workspaces });
 
     const share = (key: string): number | null =>
-      storage.parts.find((part) => part.key === key)!.share;
+      storage.bar!.parts.find((part) => part.key === key)!.share;
     expect(bytesByKey(storage)["other"]).toBe(0);
     // The texts keep the measured sizes.
     expect(bytesByKey(storage)["inUse"]).toBe(700);
-    // Free is still free / total, so it lines up with the disk limit mark.
-    expect(share("free")).toBe(0.412);
     expect(share("repositoryCaches")).toBe(0.02);
     expect(share("sessionData")).toBe(0.005);
     // 1000 - 412 free - 25 for caches and session data leaves 563 for the workspace.
     expect(share("inUse")).toBeCloseTo(0.563);
-    expect(storage.parts.reduce((sum, part) => sum + (part.share ?? 0), 0)).toBeCloseTo(1);
-    expect(storage.limitShare).toBe(0.1);
+    // The parts still leave the free space free, so it lines up with the disk limit mark.
+    expect(storage.bar!.parts.reduce((sum, part) => sum + (part.share ?? 0), 0)).toBeCloseTo(
+      1 - 0.412,
+    );
+    expect(storage.bar!.limitShare).toBe(0.1);
   });
 
   it("counts a runner that has not yet measured its caches as holding none", () => {
@@ -359,13 +360,13 @@ describe("describeMachineStorage automatic cleanup", () => {
 });
 
 describe("describeMachineStorage on a runner too old to measure", () => {
-  it("shows only Free and the line that says to update", () => {
+  it("shows an empty bar and the line that says to update", () => {
     const storage = describeStorage(buildRunner({ diskUsage: null }), {
       negotiatedCapabilities: ["somethingElse"],
       workspaces: [buildMeasured("w-1", 10, 20)],
     });
 
-    expect(storage.parts.map((part) => part.key)).toEqual(["free"]);
+    expect(storage.bar).toEqual({ parts: [], limitShare: 0.1 });
     expect(storage.tooOld).toBe(
       "This machine's runner is too old to measure its storage. Update it to see what fills the disk.",
     );
@@ -377,7 +378,19 @@ describe("describeMachineStorage on a runner too old to measure", () => {
     const storage = describeStorage(buildRunner(), { negotiatedCapabilities: null });
 
     expect(storage.tooOld).toBeNull();
-    expect(storage.parts).toHaveLength(6);
+    expect(storage.bar!.parts).toHaveLength(5);
+  });
+});
+
+describe("canMeasureStorage", () => {
+  it("says yes while the capabilities are not known, and when they list disk usage", () => {
+    expect(canMeasureStorage(null)).toBe(true);
+    expect(canMeasureStorage(["diskUsage"])).toBe(true);
+  });
+
+  it("says no for a runner whose capabilities lack disk usage", () => {
+    expect(canMeasureStorage([])).toBe(false);
+    expect(canMeasureStorage(["somethingElse"])).toBe(false);
   });
 });
 

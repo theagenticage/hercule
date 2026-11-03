@@ -649,121 +649,186 @@ interface IdleWorkspaceRecord {
 }
 
 /**
- * Returns the idle workspace `id` on the machine `runnerId`, last used `idleDays`
- * ago by a Thread called `title`. `usage` is what the runner measured, `sizeGB`
- * on disk of which removing it frees `freesGB`, or `null` for a workspace never
- * measured. `diskUsageError` is why the newest measuring failed.
+ * Returns a canonical UUIDv7 for the idle workspace or Thread numbered
+ * `number`. The cleanup specimen's fetch answers with these records, and the
+ * client decodes every answer, so none of their ids may be a plain label.
+ */
+const buildIdleRecordId = (group: "workspace" | "thread", number: number): string =>
+  `01a0f0c0-${group === "workspace" ? "1000" : "1100"}-7000-8000-${String(number).padStart(12, "0")}`;
+
+/**
+ * Returns the idle workspace numbered `number` on the machine `runnerId`, last
+ * used `idleDays` ago by a Thread called `title`, which is Done when `isDone`.
+ * `usage` is what the runner measured, `sizeGB` on disk of which removing it
+ * frees `freesGB`, or `null` for a workspace never measured. `diskUsageError`
+ * is why the newest measuring failed.
  */
 const buildIdleWorkspace = (
-  id: string,
+  number: number,
   runnerId: string,
   idleDays: number,
   title: string,
+  isDone: boolean,
   usage: {
     readonly sizeGB: number;
     readonly freesGB: number;
     readonly measuredDaysAgo: number;
   } | null,
   diskUsageError: string | null = null,
-): IdleWorkspaceRecord => ({
-  workspace: buildWorkspace({
-    id,
-    runnerId,
-    kind: "ephemeral",
-    checkouts: [{ ...buildCheckout(PAYMENTS_REPO.id, `rogier/${id}`), form: "worktree" }],
-    sessionIds: [],
-    createdAt: daysAgo(idleDays + 2),
-    lastUsedAt: daysAgo(idleDays),
-    diskUsage:
-      usage === null
-        ? null
-        : {
-            sizeBytes: usage.sizeGB * GB,
-            freesBytes: usage.freesGB * GB,
-            measuredAt: daysAgo(usage.measuredDaysAgo),
-          },
-    diskUsageError,
-  }),
-  thread: buildSession({
-    id: `${id}-thread`,
-    title,
-    runnerId,
-    workspaceId: id,
-    status: "exited",
-    createdAt: daysAgo(idleDays + 2),
-    startedAt: daysAgo(idleDays + 2),
-    exitedAt: daysAgo(idleDays),
-    lastActivityAt: daysAgo(idleDays),
-  }),
-});
+): IdleWorkspaceRecord => {
+  const id = buildIdleRecordId("workspace", number);
+  return {
+    workspace: buildWorkspace({
+      id,
+      runnerId,
+      kind: "ephemeral",
+      sessionIds: [],
+      createdAt: daysAgo(idleDays + 2),
+      lastUsedAt: daysAgo(idleDays),
+      diskUsage:
+        usage === null
+          ? null
+          : {
+              sizeBytes: Math.round(usage.sizeGB * GB),
+              freesBytes: Math.round(usage.freesGB * GB),
+              measuredAt: daysAgo(usage.measuredDaysAgo),
+            },
+      diskUsageError,
+    }),
+    thread: buildSession({
+      id: buildIdleRecordId("thread", number),
+      permissionProfileId: buildIdleRecordId("thread", 900),
+      providerAccountId: buildIdleRecordId("thread", 901),
+      title,
+      runnerId,
+      workspaceId: id,
+      status: "exited",
+      createdAt: daysAgo(idleDays + 2),
+      startedAt: daysAgo(idleDays + 2),
+      exitedAt: daysAgo(idleDays),
+      lastActivityAt: daysAgo(idleDays),
+      ...(isDone ? { done: { at: daysAgo(idleDays), by: "user" as const } } : {}),
+    }),
+  };
+};
 
 /**
- * The idle workspaces of atlas and bosgame. Atlas has nine: eight measured,
- * where removing the first and the fourth frees less than they take (their
- * packages are linked to a store that stays), the fifth's newest measuring
- * failed three days after its last good one, and one never measured. Bosgame,
- * whose disk is full, has three.
+ * The idle workspaces of atlas, bosgame and studio. Atlas has nine: eight
+ * measured, where removing the first and the fourth frees less than they take
+ * (their packages are linked to a store that stays), the fifth's newest
+ * measuring failed three days after its last good one, and one never measured.
+ * Bosgame, whose disk is full, has three.
  */
-const IDLE_WORKSPACE_RECORDS: ReadonlyArray<IdleWorkspaceRecord> = [
-  buildIdleWorkspace("ws-atlas-idle-1", ATLAS_ID, 38, "Move the checkout to Stripe Elements", {
+const ATLAS_AND_BOSGAME_IDLE_RECORDS: ReadonlyArray<IdleWorkspaceRecord> = [
+  buildIdleWorkspace(1, ATLAS_ID, 38, "Move the checkout to Stripe Elements", true, {
     sizeGB: 62,
     freesGB: 25,
     measuredDaysAgo: 1,
   }),
-  buildIdleWorkspace("ws-atlas-idle-2", ATLAS_ID, 22, "Rebuild the search index", {
+  buildIdleWorkspace(2, ATLAS_ID, 22, "Rebuild the search index", true, {
     sizeGB: 41,
     freesGB: 40,
     measuredDaysAgo: 1,
   }),
-  buildIdleWorkspace("ws-atlas-idle-3", ATLAS_ID, 16, "Fix the flaky payout test", {
+  buildIdleWorkspace(3, ATLAS_ID, 16, "Fix the flaky payout test", true, {
     sizeGB: 28,
     freesGB: 27,
     measuredDaysAgo: 1,
   }),
-  buildIdleWorkspace("ws-atlas-idle-4", ATLAS_ID, 52, "Spike: move the cron jobs to a queue", {
+  buildIdleWorkspace(4, ATLAS_ID, 52, "Spike: move the cron jobs to a queue", true, {
     sizeGB: 22,
     freesGB: 9,
     measuredDaysAgo: 1,
   }),
   buildIdleWorkspace(
-    "ws-atlas-idle-5",
+    5,
     ATLAS_ID,
     12,
     "Draft the Q3 ops runbook",
+    false,
     { sizeGB: 15, freesGB: 14.6, measuredDaysAgo: 3 },
     "Measuring took longer than 10 minutes",
   ),
-  buildIdleWorkspace("ws-atlas-idle-6", ATLAS_ID, 9, "Bump the Terraform provider", {
+  buildIdleWorkspace(6, ATLAS_ID, 9, "Bump the Terraform provider", true, {
     sizeGB: 10,
     freesGB: 9.5,
     measuredDaysAgo: 1,
   }),
-  buildIdleWorkspace("ws-atlas-idle-7", ATLAS_ID, 27, "Try the new dashboard layout", {
+  buildIdleWorkspace(7, ATLAS_ID, 27, "Try the new dashboard layout", false, {
     sizeGB: 8.4,
     freesGB: 3.4,
     measuredDaysAgo: 1,
   }),
-  buildIdleWorkspace("ws-atlas-idle-8", ATLAS_ID, 8, "Update the onboarding copy", {
+  buildIdleWorkspace(8, ATLAS_ID, 8, "Update the onboarding copy", true, {
     sizeGB: 3.2,
     freesGB: 3.2,
     measuredDaysAgo: 1,
   }),
-  buildIdleWorkspace("ws-atlas-idle-9", ATLAS_ID, 31, "Sketch the invoice export", null),
-  buildIdleWorkspace("ws-bosgame-idle-1", BOSGAME_ID, 19, "Rework the ingest pipeline", {
+  buildIdleWorkspace(9, ATLAS_ID, 31, "Sketch the invoice export", false, null),
+  buildIdleWorkspace(10, BOSGAME_ID, 19, "Rework the ingest pipeline", true, {
     sizeGB: 96,
     freesGB: 88,
     measuredDaysAgo: 0,
   }),
-  buildIdleWorkspace("ws-bosgame-idle-2", BOSGAME_ID, 44, "Profile the nightly import", {
+  buildIdleWorkspace(11, BOSGAME_ID, 44, "Profile the nightly import", true, {
     sizeGB: 61,
     freesGB: 58,
     measuredDaysAgo: 0,
   }),
-  buildIdleWorkspace("ws-bosgame-idle-3", BOSGAME_ID, 13, "Try Postgres 17", {
+  buildIdleWorkspace(12, BOSGAME_ID, 13, "Try Postgres 17", true, {
     sizeGB: 12,
     freesGB: 12,
     measuredDaysAgo: 0,
   }),
+];
+
+/**
+ * Studio's nine idle workspaces, for the cleanup dialog (see
+ * fleet-cleanup-fixture.ts): six whose Threads are all Done and three that
+ * still have a Thread that is not. One has a name too long for its row, and
+ * one was never measured. Removing each frees 80% of what it takes.
+ */
+export const STUDIO_IDLE_RECORDS: ReadonlyArray<IdleWorkspaceRecord> = (
+  [
+    {
+      title: "Migrate the payout report to the new ledger",
+      freesGB: 14.2,
+      idleDays: 12,
+      isDone: true,
+    },
+    { title: "Fix the flaky checkout test", freesGB: 9.8, idleDays: 19, isDone: true },
+    {
+      title: "Upgrade the search index to the new analyzer and re-run every fixture",
+      freesGB: 7.4,
+      idleDays: 8,
+      isDone: false,
+    },
+    {
+      title: "Spike: stream invoices over the websocket",
+      freesGB: 6.1,
+      idleDays: 24,
+      isDone: true,
+    },
+    { title: "Draft the 2026 pricing page", freesGB: 3.3, idleDays: 31, isDone: true },
+    { title: "Investigate the slow dashboard query", freesGB: 2.6, idleDays: 15, isDone: false },
+    { title: "Rename the billing module", freesGB: 1.2, idleDays: 40, isDone: true },
+    { title: "Try the new date picker", freesGB: 0.48, idleDays: 22, isDone: true },
+    { title: "Backfill the audit log", freesGB: null, idleDays: 10, isDone: false },
+  ] as const
+).map(({ title, freesGB, idleDays, isDone }, index) =>
+  buildIdleWorkspace(
+    13 + index,
+    STUDIO_ID,
+    idleDays,
+    title,
+    isDone,
+    freesGB === null ? null : { sizeGB: freesGB * 1.25, freesGB, measuredDaysAgo: 1 },
+  ),
+);
+
+const IDLE_WORKSPACE_RECORDS: ReadonlyArray<IdleWorkspaceRecord> = [
+  ...ATLAS_AND_BOSGAME_IDLE_RECORDS,
+  ...STUDIO_IDLE_RECORDS,
 ];
 
 /**

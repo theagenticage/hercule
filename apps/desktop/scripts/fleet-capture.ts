@@ -12,6 +12,8 @@
  * - `machine-storage-narrow`: the same section in a window of the smallest width, 800;
  * - `machine-storage-rules`: the same section in the smallest window with the
  *   info popover of automatic cleanup open;
+ * - `machine-software-narrow`: atlas's page scrolled to its Software section in the
+ *   smallest window, where each note sits under its name;
  * - `machine-storage-too-old`: mini's page scrolled to its Storage section, where
  *   the runner is too old to measure;
  * - `activity`: atlas's Activity page, filter All;
@@ -140,6 +142,17 @@ const STATES: ReadonlyArray<State> = [
     script: `(async () => {
       await ${SCROLL_TO_STORAGE};
       document.querySelector(".machine-storage-info").click();
+      await ${WAIT_FOR_FRAMES};
+    })()`,
+  },
+  {
+    name: "machine-software-narrow",
+    query: "machine=atlas",
+    windowWidth: NARROW_WINDOW_WIDTH,
+    script: `(async () => {
+      const section = document.getElementById("machine-software");
+      if (section === null) throw new Error("The machine's page has no Software section.");
+      section.scrollIntoView({ block: "start" });
       await ${WAIT_FOR_FRAMES};
     })()`,
   },

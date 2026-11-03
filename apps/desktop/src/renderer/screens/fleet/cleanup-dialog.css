@@ -175,19 +175,22 @@
   white-space: normal;
 }
 
+/* Two rows: the line on what removing does, which takes the dialog's whole
+   width so it does not wrap beside the buttons, then the buttons. */
 .cleanup-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 12px 18px;
+  border-top: 1px solid var(--divider);
+}
+.cleanup-foot-buttons {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 14px 12px 18px;
-  border-top: 1px solid var(--divider);
 }
-/* The line before the buttons says what removing does; it wraps rather than
-   push the buttons off the dialog. */
 .cleanup-note {
-  flex: 1;
-  min-width: 0;
   margin: 0;
   color: var(--muted);
   font-size: var(--t-12);

@@ -9,8 +9,9 @@
  *   captures atlas; `?machine=mini` shows the page of the offline machine;
  * - `?machine=atlas&activity`: the Activity page of that machine, which lists
  *   the machine's audit log (fleet-activity-fixture.ts);
- * - `?cleanup`: the Fleet page with nine idle workspaces on studio
- *   (fleet-cleanup-fixture.ts), for the cleanup dialog its Clean up… opens.
+ * - `?cleanup`: the Fleet page where the controller plays a cleanup of studio's
+ *   nine idle workspaces (fleet-cleanup-fixture.ts), for the cleanup dialog its
+ *   Clean up… opens.
  *   `?cleanup=pending` has the controller never answer the read that follows a
  *   removal, so the rows stay "Removing…"; `?cleanup=partial` answers it with
  *   some workspaces deleted and some refused;
@@ -24,17 +25,14 @@
 // its module loads.
 import "./fixed-clock";
 import { rememberMachineView } from "../screens/fleet/machine-view";
-import { buildCleanupAnswers, STUDIO_CLEANUP_WORKSPACES } from "./fleet-cleanup-fixture";
+import { buildCleanupAnswers } from "./fleet-cleanup-fixture";
 import { FLEET_ALONE_SIDEBAR_RECORDS, FLEET_RECORDS, FLEET_SIDEBAR_RECORDS } from "./fleet-fixture";
 import { mountFleetSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 
 const params = new URLSearchParams(location.search);
 const machineName = params.get("machine");
-const baseRecords = params.has("empty") ? FLEET_ALONE_SIDEBAR_RECORDS : FLEET_SIDEBAR_RECORDS;
-const records = params.has("cleanup")
-  ? { ...baseRecords, workspaces: [...baseRecords.workspaces, ...STUDIO_CLEANUP_WORKSPACES] }
-  : baseRecords;
+const records = params.has("empty") ? FLEET_ALONE_SIDEBAR_RECORDS : FLEET_SIDEBAR_RECORDS;
 const machine =
   machineName === null ? undefined : records.runners.find((runner) => runner.name === machineName);
 if (machineName !== null && machine === undefined) {

@@ -251,8 +251,9 @@ describe("a machine's Storage section", () => {
       "Repository caches40 GB",
       "Session data20 GB",
       "Other404 GB",
-      "Free412 GB",
     ]);
+    // The free space is the bar's background and the head's words, not a legend entry.
+    expect(within(storage).getByText(/412 GB free of 1,000 GB/)).toBeTruthy();
     expect(within(storage).getByText("Other").closest("li")!.getAttribute("title")).toBe(
       "Everything else on the disk: your own files, and package stores such as pnpm's, which workspaces link to.",
     );
@@ -281,9 +282,10 @@ describe("a machine's Storage section", () => {
       });
     const { storage } = await openStorage(buildWorld(), [sweep(2), sweep(1)]);
 
-    expect(
-      within(storage).getByText("Last: removed 2 workspaces of finished runs, today."),
-    ).toBeTruthy();
+    // The last word shares a span with the info button, so the sentence is read whole from the line.
+    expect(storage.querySelector(".machine-storage-auto-last")!.textContent).toBe(
+      "Last: removed 2 workspaces of finished runs, today.",
+    );
     const info = within(storage).getByRole("button", {
       name: "When Hercule removes a workspace by itself",
     });
@@ -306,7 +308,8 @@ describe("a machine's Storage section", () => {
         "This machine's runner is too old to measure its storage. Update it to see what fills the disk.",
       ),
     ).toBeTruthy();
-    expect(readLegend(storage)).toEqual(["Free412 GB"]);
+    expect(readLegend(storage)).toEqual([]);
+    expect(storage.querySelector(".machine-storage-bar")).not.toBeNull();
     expect(within(storage).queryByText("Largest idle workspaces")).toBeNull();
     expect(readThreadReads(calls)).toEqual([]);
   });

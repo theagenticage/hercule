@@ -6,9 +6,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import { computeDayStart } from "@hercule/client-core/list-time";
+import { canMeasureStorage } from "@hercule/client-core/machine-storage";
 import { FLEET_HOUR_METRICS_SCOPE } from "@hercule/client-core/metrics-history";
 import {
-  canMeasureStorage,
   cleanupThreadsQuery,
   listCleanupCandidateIds,
   negotiatedCapabilitiesQuery,

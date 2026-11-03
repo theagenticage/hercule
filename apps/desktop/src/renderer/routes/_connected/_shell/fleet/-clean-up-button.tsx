@@ -4,12 +4,13 @@ import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
 import {
   buildCleanupSnapshot,
+  describeCleanUpDisabledHint,
   describeCleanupDialog,
   listCleanupCandidates,
   type CleanupGroupId,
   type CleanupSnapshot,
 } from "@hercule/client-core/cleanup";
-import { useCleanupProgress, useCleanupStore } from "../../../../app/cleanup";
+import { useCleanupProgress, useCleanupStore } from "../../../../app/cleanup-hooks";
 import { useDoneMoves } from "../../../../app/done-moves";
 import { cleanupThreadsQuery } from "../../../../app/machine-storage-queries";
 import { workspacesQuery } from "../../../../app/queries";
@@ -18,6 +19,9 @@ import {
   CleanupDialogFrame,
   CleanupProgressView,
 } from "../../../../screens/fleet/cleanup-dialog";
+
+/** Why the button does nothing while the Threads of an earlier press are being archived. */
+const ARCHIVING_HINT = "Archiving threads…";
 
 /**
  * Renders the Clean up… button of the machine `runnerId`, named `runnerName`,
@@ -36,7 +40,10 @@ import {
  *   a toast and no dialog opens.
  * - While the machine has a cleanup in progress (see `createCleanupStore`),
  *   pressing the button opens the dialog on that progress, without reading
- *   anything.
+ *   anything. A cleanup whose archive was refused or failed while the user was
+ *   away is forgotten first, and the press opens a fresh dialog. While the
+ *   archive is still running the button does nothing, because there is
+ *   nothing to show yet but the wait.
  */
 export function CleanUpButton({
   runnerId,
@@ -49,11 +56,13 @@ export function CleanUpButton({
   readonly isOnline: boolean;
   readonly className: string;
 }): JSX.Element {
-  const disabledHint = isOnline ? null : `${runnerName} is offline. Cleaning up needs it online.`;
+  const offlineHint = describeCleanUpDisabledHint(runnerName, isOnline);
   const queryClient = useQueryClient();
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { toasts } = useDoneMoves();
+  const store = useCleanupStore();
   const progress = useCleanupProgress(runnerId);
+  const disabledHint = offlineHint ?? (progress?.kind === "starting" ? ARCHIVING_HINT : null);
   // The snapshot is `null` when the dialog was opened on a cleanup already in progress.
   const [dialog, setDialog] = useState<{ readonly snapshot: CleanupSnapshot | null } | null>(null);
 
@@ -97,8 +106,12 @@ export function CleanUpButton({
         aria-disabled={disabledHint !== null || open.isPending || undefined}
         onClick={() => {
           if (disabledHint !== null || open.isPending) return;
-          if (progress === null) open.mutate();
-          else setDialog({ snapshot: null });
+          if (progress?.kind === "removing") {
+            setDialog({ snapshot: null });
+            return;
+          }
+          store.dismiss(runnerId);
+          open.mutate();
         }}
       >
         Clean up…

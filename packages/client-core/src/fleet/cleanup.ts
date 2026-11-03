@@ -90,6 +90,16 @@ export const listCleanupCandidates = (
   );
 
 /**
+ * Returns why the Clean up… button of the machine named `runnerName` is
+ * disabled, or `null` when it is enabled. Cleaning up needs the machine
+ * online, because the removal is sent to its runner.
+ */
+export const describeCleanUpDisabledHint = (
+  runnerName: string,
+  isOnline: boolean,
+): string | null => (isOnline ? null : `${runnerName} is offline. Cleaning up needs it online.`);
+
+/**
  * Reads every Thread, archived ones included, that was placed in one of
  * `workspaceIds`, in as many reads as the filter's limit of ids needs. Fails
  * when a read fails.

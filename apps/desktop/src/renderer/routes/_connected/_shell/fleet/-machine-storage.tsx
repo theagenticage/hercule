@@ -2,11 +2,10 @@ import type { JSX, ReactNode } from "react";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
-import { describeMachineStorage } from "@hercule/client-core/machine-storage";
+import { canMeasureStorage, describeMachineStorage } from "@hercule/client-core/machine-storage";
 import { FLEET_HOUR_METRICS_SCOPE } from "@hercule/client-core/metrics-history";
 import type { Runner } from "@hercule/contract";
 import {
-  canMeasureStorage,
   cleanupThreadsQuery,
   listCleanupCandidateIds,
   negotiatedCapabilitiesQuery,
@@ -95,24 +94,5 @@ export function MachineStorage({
         ) : null
       }
     />
-  );
-}
-
-/**
- * Renders the Clean up… button as the machine's page draws it until the
- * cleanup dialog is wired in: inert, with a tooltip that says so. It stays
- * `aria-disabled` rather than `disabled` so its tooltip still shows.
- */
-export function PendingCleanUp(): JSX.Element {
-  return (
-    <button
-      type="button"
-      className="btn btn--sm"
-      aria-disabled="true"
-      data-unready=""
-      title="Not built yet"
-    >
-      Clean up…
-    </button>
   );
 }

@@ -32,7 +32,6 @@
 .machine-storage-seg {
   flex: none;
   height: 100%;
-  transition: width var(--dur-3) var(--ease-out);
 }
 .machine-storage-seg + .machine-storage-seg {
   box-shadow: inset 1px 0 0 var(--surface);
@@ -51,13 +50,6 @@
 }
 .machine-storage-part--other {
   background: color-mix(in oklab, var(--ink) 17%, transparent);
-}
-/* Free has no segment, so its swatch is the bar's own background. The prototype
-   draws no swatch for it; a 5% wash alone would vanish beside the others, so
-   it has a 1px rim. */
-.machine-storage-part--free {
-  background: color-mix(in oklab, var(--ink) 5%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
 }
 /* Where the disk limit is: below it the machine takes no new sessions. */
 .machine-storage-limit {
@@ -104,32 +96,39 @@
 }
 
 /* ---------- Automatic cleanup ---------- */
+/* The text, the last removal and the info button flow as one line of text, so
+   when the line wraps the button follows the last word and is never alone. */
 .machine-storage-auto {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
   margin: 14px 0 0;
   color: var(--muted);
   font-size: var(--t-12);
 }
 .machine-storage-auto-last {
+  margin-left: 4px;
   color: var(--faint);
+}
+.machine-storage-nowrap {
+  white-space: nowrap;
 }
 /* The button is 22px in a 12px line; the negative margin keeps the line's
    height at the text's. */
 .machine-storage-info {
-  margin: -4px 0;
+  display: inline-flex;
+  vertical-align: middle;
+  margin: -4px 0 -4px 4px;
   color: var(--faint);
 }
 .pop.machine-storage-rules {
   inset: auto;
-  /* Anchored to the whole line, not to its button, which can sit anywhere along
-     a wrapped line. It starts at the line's left edge and runs rightwards. */
+  /* Under the button, running rightwards from its left edge. Where that leaves
+     the window (the button is at the end of the line, wherever it wrapped),
+     the popover runs leftwards instead, and above the button when there is no
+     room below. */
   position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-inline, flip-block;
   width: 380px;
   max-width: calc(100vw - 32px);
-  margin: 6px 0 0 -8px;
+  margin: 6px 0;
   padding: 12px 14px 13px;
   font-size: var(--t-12);
   line-height: 1.5;

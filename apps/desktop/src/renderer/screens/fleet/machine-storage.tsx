@@ -2,7 +2,7 @@ import { useId, type JSX, type ReactNode } from "react";
 import type {
   AutomaticCleanup,
   MachineStorage,
-  StoragePart,
+  StorageBar as StorageBarModel,
 } from "@hercule/client-core/machine-storage";
 import type { IdleWorkspaceRow } from "@hercule/client-core/cleanup";
 import { QuestionIcon } from "../../icons/question";
@@ -32,22 +32,16 @@ function StorageHeadNote({ head }: { readonly head: MachineStorage["head"] }): J
 }
 
 /**
- * Renders the disk as one bar: the parts that take space, left to right, then
- * the free space as the bar itself, and a mark where the disk limit is.
+ * Renders the disk as one bar: the parts that take space, left to right, and
+ * a mark where the disk limit is. The free space is the bar's own background.
  * `limitShare` is the limit's share of the disk, counted from the right edge.
  * The bar is decoration: the legend under it says every size in words.
  */
-function StorageBar({
-  parts,
-  limitShare,
-}: {
-  readonly parts: readonly StoragePart[];
-  readonly limitShare: number | null;
-}): JSX.Element {
+function StorageBar({ bar }: { readonly bar: StorageBarModel }): JSX.Element {
   return (
     <div className="machine-storage-bar" aria-hidden="true">
-      {parts.map((part) =>
-        part.key === "free" || part.share === null || part.share <= 0 ? null : (
+      {bar.parts.map((part) =>
+        part.share === null || part.share <= 0 ? null : (
           <i
             key={part.key}
             className={`machine-storage-seg machine-storage-part--${part.key}`}
@@ -55,18 +49,19 @@ function StorageBar({
           />
         ),
       )}
-      {limitShare === null ? null : (
-        <b className="machine-storage-limit" style={{ right: `${limitShare * 100}%` }} />
+      {bar.limitShare === null ? null : (
+        <b className="machine-storage-limit" style={{ right: `${bar.limitShare * 100}%` }} />
       )}
     </div>
   );
 }
 
-/** Renders one entry per part under the bar: its colour, its name and its size. Free is drawn as the bar's own background. */
-function StorageLegend({ parts }: { readonly parts: readonly StoragePart[] }): JSX.Element {
+/** Renders one entry per part under the bar: its colour, its name and its size. */
+function StorageLegend({ bar }: { readonly bar: StorageBarModel }): JSX.Element | null {
+  if (bar.parts.length === 0) return null;
   return (
     <ul className="machine-storage-legend">
-      {parts.map((part) => (
+      {bar.parts.map((part) => (
         <li key={part.key} title={part.tooltip ?? undefined}>
           <i
             className={`machine-storage-swatch machine-storage-part--${part.key}`}
@@ -81,12 +76,34 @@ function StorageLegend({ parts }: { readonly parts: readonly StoragePart[] }): J
 }
 
 /**
- * Renders the line on automatic cleanup, with an info button after its first
- * sentence that opens a popover listing the rules. The button sits there, not
- * at the end, so a narrow window that wraps the last removal never leaves it
- * alone on a line. The popover is the browser's own (`popover`), so
- * Esc and a press outside close it; CSS anchors it under the line, at its
- * left edge, where it fits in the narrowest window.
+ * Renders `sentence` with `button` after its last word. The two sit in one
+ * nowrap group, so a line that wraps never leaves the button alone.
+ */
+function SentenceEndingWith({
+  sentence,
+  button,
+}: {
+  readonly sentence: string;
+  readonly button: ReactNode;
+}): JSX.Element {
+  const lastWordStart = sentence.lastIndexOf(" ") + 1;
+  return (
+    <>
+      {sentence.slice(0, lastWordStart)}
+      <span className="machine-storage-nowrap">
+        {sentence.slice(lastWordStart)}
+        {button}
+      </span>
+    </>
+  );
+}
+
+/**
+ * Renders the line on automatic cleanup, with an info button at its end that
+ * opens a popover listing the rules. The popover is the browser's own
+ * (`popover`), so Esc and a press outside close it. CSS anchors it under the
+ * button and flips it to the other side when it would leave the window, which
+ * a wrapped line can make happen.
  */
 function AutomaticCleanupLine({
   automaticCleanup,
@@ -96,17 +113,31 @@ function AutomaticCleanupLine({
   const popoverId = useId();
   const anchorName = `--storage-rules-${popoverId.replace(/\W/g, "")}`;
   const { rules } = automaticCleanup;
+  const button = (
+    <button
+      type="button"
+      className="icon-btn icon-btn--sm machine-storage-info"
+      style={{ anchorName }}
+      popoverTarget={popoverId}
+      aria-label="When Hercule removes a workspace by itself"
+    >
+      <QuestionIcon size={14} />
+    </button>
+  );
   return (
-    <div className="machine-storage-auto" style={{ anchorName }}>
-      <span>{automaticCleanup.text}</span>
-      <button
-        type="button"
-        className="icon-btn icon-btn--sm machine-storage-info"
-        popoverTarget={popoverId}
-        aria-label="When Hercule removes a workspace by itself"
-      >
-        <QuestionIcon size={14} />
-      </button>
+    <div className="machine-storage-auto">
+      {automaticCleanup.last === null ? (
+        <span>
+          <SentenceEndingWith sentence={automaticCleanup.text} button={button} />
+        </span>
+      ) : (
+        <>
+          <span>{automaticCleanup.text}</span>{" "}
+          <span className="machine-storage-auto-last">
+            <SentenceEndingWith sentence={automaticCleanup.last} button={button} />
+          </span>
+        </>
+      )}
       <div
         id={popoverId}
         popover="auto"
@@ -121,9 +152,6 @@ function AutomaticCleanupLine({
         </ul>
         <span>{rules.closing}</span>
       </div>
-      {automaticCleanup.last === null ? null : (
-        <span className="machine-storage-auto-last">{automaticCleanup.last}</span>
-      )}
     </div>
   );
 }
@@ -171,9 +199,8 @@ function IdleWorkspace({ row }: { readonly row: IdleWorkspaceRow }): JSX.Element
  *   the button that opens the cleanup dialog.
  * - `readFailure` is drawn under that head when reading the idle workspaces'
  *   Threads failed.
- * - A runner that is too old to measure storage has only the bar's Free and
- *   the line that says so. A runner that has reported no disk has the head
- *   alone.
+ * - A runner that is too old to measure storage has an empty bar and the
+ *   line that says so. A runner that has reported no disk has the head alone.
  */
 export function MachineStoragePanel({
   id,
@@ -186,16 +213,16 @@ export function MachineStoragePanel({
   readonly cleanUp: ReactNode;
   readonly readFailure: ReactNode;
 }): JSX.Element {
-  const { head, parts, limitShare, tooOld, automaticCleanup, largestIdle } = storage;
+  const { head, bar, tooOld, automaticCleanup, largestIdle } = storage;
   const headingId = `${id}-idle`;
   // Without a disk report, or on a runner too old to measure, there is nothing to list.
-  const isMeasured = tooOld === null && parts.length > 0;
+  const isMeasured = tooOld === null && bar !== null;
   return (
     <MachinePageSection id={id} title="Storage" note={<StorageHeadNote head={head} />}>
-      {parts.length === 0 ? null : (
+      {bar === null ? null : (
         <>
-          <StorageBar parts={parts} limitShare={limitShare} />
-          <StorageLegend parts={parts} />
+          <StorageBar bar={bar} />
+          <StorageLegend bar={bar} />
         </>
       )}
       {tooOld === null ? null : <p className="machine-storage-old">{tooOld}</p>}

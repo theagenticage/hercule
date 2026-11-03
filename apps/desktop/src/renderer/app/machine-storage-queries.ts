@@ -11,7 +11,7 @@
 import { queryOptions, type QueryKey } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
 import { listCleanupCandidates, readCleanupThreads } from "@hercule/client-core/cleanup";
-import { DISK_USAGE_CAPABILITY, type Workspace } from "@hercule/contract";
+import type { Workspace } from "@hercule/contract";
 import { LIVE_KEPT_READ_OPTIONS } from "./queries";
 
 /**
@@ -30,15 +30,6 @@ export const negotiatedCapabilitiesQuery = (client: HerculeClient, runnerId: str
       (await client.runner.read({ params: { id: runnerId } })).negotiatedCapabilities,
     ...LIVE_KEPT_READ_OPTIONS,
   });
-
-/**
- * Checks whether the runner with these `capabilities` can measure the disk
- * usage of its workspaces. Capabilities that are not known yet count as yes:
- * the section then draws what it has, and a runner that turns out to be too
- * old shows its line once they arrive.
- */
-export const canMeasureStorage = (capabilities: readonly string[] | null): boolean =>
-  capabilities === null || capabilities.includes(DISK_USAGE_CAPABILITY);
 
 /**
  * Lists the ids of the workspaces of the machine `runnerId` that a cleanup may

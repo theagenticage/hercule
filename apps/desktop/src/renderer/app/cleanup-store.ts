@@ -9,10 +9,16 @@
  *
  * 1. `start` archives the Threads and asks the controller to remove the
  *    workspaces (`archiveAndRemoveWorkspaces`).
- * 2. When the controller has answered, the store reads every workspace once
- *    more. Only a read that began after the answer can tell a workspace that
- *    is being removed from one that was refused: a refusal leaves its reason
- *    in `Workspace.message`, which asking again does not clear.
+ * 2. When the controller has answered, the store starts a fresh read of every
+ *    workspace. Only a read that began after the answer can tell a workspace
+ *    that is being removed from one that was refused: a refusal leaves its
+ *    reason in `Workspace.message`, which asking again does not clear. The
+ *    store does not trust the promise of that read, which resolves at once
+ *    when the read is paused (the Mac is offline) and leaves the old data. It
+ *    watches the query cache and opens only on the first successful read after
+ *    it started the fresh one. When that read fails or is paused, the next
+ *    successful read opens the gate: the live connection causes one on the
+ *    next `workspace` push and on a reconnect. The store runs no timer.
  * 3. From then on, every read of the workspaces that the `workspace` topic's
  *    pushes cause settles the rows still being removed
  *    (`decideRemovalOutcome`).
@@ -34,9 +40,6 @@ import {
   type RemovalOutcome,
 } from "@hercule/client-core/cleanup";
 import { workspacesQuery } from "./queries";
-
-/** How long the store waits before it reads the workspaces again after a failed read. */
-const READ_AGAIN_AFTER_MS = 5_000;
 
 /** What the dialog shows of a cleanup, from the moment the button is pressed. */
 export type CleanupProgress =
@@ -88,6 +91,12 @@ export interface CleanupStore {
    * dialog's head shows it.
    */
   readonly watch: (runnerId: string) => () => void;
+  /**
+   * Ends the store's work: stops watching the query cache and forgets every
+   * cleanup, so that no answer still on its way shows a toast or changes
+   * anything. The shell calls it when it unmounts, for example on sign-out.
+   */
+  readonly dispose: () => void;
   /** Calls `listener` after every change; returns the function that stops that. */
   readonly subscribe: (listener: () => void) => () => void;
   /** Returns the machine's progress, or `null` for none. */
@@ -102,18 +111,27 @@ interface Entry {
    * cleanup that was replaced is dropped.
    */
   readonly run: object;
+  /** How many calls to the controller have been sent and not yet answered. */
+  readonly unansweredCalls: number;
   /**
-   * How many calls have been sent and not yet followed by a fresh read of the
-   * workspaces. While it is above 0, the cached workspaces may still show a
-   * state from before the call, so no row is settled.
+   * Whether a call has answered and no read of the workspaces that began after
+   * its answer has succeeded yet. While it is true, or while any call is
+   * unanswered, the cached workspaces may still show a state from before the
+   * call, so no row is settled.
    */
-  readonly callsAwaitingRead: number;
+  readonly awaitingFreshRead: boolean;
   /**
    * The reason to show for each workspace whose removal call failed, so that
    * it is unknown whether it was asked for. See `decideRemovalOutcome`.
    */
   readonly failureMessages: ReadonlyMap<string, string>;
 }
+
+/** Checks whether two outcomes of one row are the same, so that a read that changes nothing draws nothing. */
+const isSameOutcome = (a: RemovalOutcome, b: RemovalOutcome): boolean =>
+  a.kind === b.kind &&
+  (a.kind !== "refused" ||
+    (b.kind === "refused" && a.message === b.message && a.retry === b.retry));
 
 /** Returns the `CleanupItem` the result's words and the retry are built from. */
 const toItem = (row: CleanupRow): CleanupItem => ({
@@ -122,19 +140,21 @@ const toItem = (row: CleanupRow): CleanupItem => ({
   freesBytes: row.freesBytes ?? 0,
 });
 
-/**
- * Creates the store. `showNotice` shows its argument as the app's toast.
- * `queryClient` holds the workspaces the shell reads, which settle the rows.
- */
+/** What the store needs from the shell. */
+export interface CleanupStoreDependencies {
+  readonly client: HerculeClient;
+  /** Holds the workspaces the shell reads, which settle the rows. */
+  readonly queryClient: QueryClient;
+  /** Shows its argument as the app's toast. */
+  readonly showNotice: (text: string) => void;
+}
+
+/** Creates the store. */
 export const createCleanupStore = ({
   client,
   queryClient,
   showNotice,
-}: {
-  readonly client: HerculeClient;
-  readonly queryClient: QueryClient;
-  readonly showNotice: (text: string) => void;
-}): CleanupStore => {
+}: CleanupStoreDependencies): CleanupStore => {
   const entries = new Map<string, Entry>();
   const watchers = new Map<string, number>();
   const listeners = new Set<() => void>();
@@ -176,29 +196,37 @@ export const createCleanupStore = ({
   /**
    * Settles the rows of `runnerId` that are being removed from the cached
    * workspaces, and words the result when none is left. Does nothing while a
-   * call of the machine awaits its fresh read.
+   * call of the machine awaits its answer or its fresh read, and draws
+   * nothing when the read changed no row.
    */
   const settle = (runnerId: string): void => {
     const entry = entries.get(runnerId);
     const workspaces = queryClient.getQueryData(workspacesKey);
-    if (entry === undefined || workspaces === undefined || entry.callsAwaitingRead > 0) return;
+    if (entry === undefined || workspaces === undefined) return;
+    if (entry.unansweredCalls > 0 || entry.awaitingFreshRead) return;
     const { progress } = entry;
     if (progress.kind !== "removing" || progress.result !== null) return;
     const byId = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
     const outcomes = new Map(progress.outcomes);
+    let isChanged = false;
     for (const row of progress.rows) {
       const workspace = byId.get(row.workspaceId);
-      if (outcomes.get(row.workspaceId)?.kind !== "removing" || workspace === undefined) continue;
-      outcomes.set(
-        row.workspaceId,
-        decideRemovalOutcome(workspace, entry.failureMessages.get(row.workspaceId) ?? null),
+      const current = outcomes.get(row.workspaceId);
+      if (current?.kind !== "removing" || workspace === undefined) continue;
+      const decided = decideRemovalOutcome(
+        workspace,
+        entry.failureMessages.get(row.workspaceId) ?? null,
       );
+      if (isSameOutcome(decided, current)) continue;
+      outcomes.set(row.workspaceId, decided);
+      isChanged = true;
     }
     const result = describeCleanupOutcome(
       progress.archivedCount,
       progress.rows.map(toItem),
       outcomes,
     );
+    if (!isChanged && result === null) return;
     replace(runnerId, { ...entry, progress: { ...progress, outcomes, result } });
     if (result !== null) announce(runnerId, result);
     if (!hasRowsBeingRemoved()) {
@@ -207,43 +235,40 @@ export const createCleanupStore = ({
     }
   };
 
-  /** Starts settling the rows of every machine whenever the shell's workspaces have been read. */
+  /**
+   * Starts settling the rows of every machine whenever the shell's workspaces
+   * have been read. A read that succeeds while a machine awaits its fresh read
+   * began after that machine's answer (see `startFreshRead`), so it opens the
+   * machine's gate.
+   */
   const startWatchingCache = (): void => {
     stopWatchingCache ??= queryClient.getQueryCache().subscribe((event) => {
       if (event.type !== "updated" || event.action.type !== "success") return;
       if (!matchQuery({ queryKey: workspacesKey, exact: true }, event.query)) return;
-      for (const runnerId of [...entries.keys()]) settle(runnerId);
+      for (const [runnerId, entry] of [...entries]) {
+        if (entry.awaitingFreshRead) entries.set(runnerId, { ...entry, awaitingFreshRead: false });
+        settle(runnerId);
+      }
     });
   };
 
   /**
-   * Reads the workspaces again, so that the read began after the call that
-   * just answered, then settles the machine's rows from it. A failed read is
-   * tried again after a pause, for as long as the cleanup stays the machine's.
+   * Starts a read of the workspaces that cancels one already running, so that
+   * every successful read after this call began after it. The promise is
+   * ignored on purpose: it resolves at once, with the old data, when the read
+   * is paused. The cache watch (`startWatchingCache`) hears the success.
    */
-  const settleFromFreshRead = async (runnerId: string, run: object): Promise<void> => {
-    for (;;) {
-      try {
-        await queryClient.refetchQueries(
-          { queryKey: workspacesKey, exact: true },
-          { throwOnError: true, cancelRefetch: true },
-        );
-        break;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, READ_AGAIN_AFTER_MS));
-        if (readRun(runnerId, run) === undefined) return;
-      }
-    }
-    const entry = readRun(runnerId, run);
-    if (entry === undefined) return;
-    entries.set(runnerId, { ...entry, callsAwaitingRead: entry.callsAwaitingRead - 1 });
-    settle(runnerId);
+  const startFreshRead = (): void => {
+    startWatchingCache();
+    void queryClient
+      .refetchQueries({ queryKey: workspacesKey, exact: true }, { cancelRefetch: true })
+      .catch(() => undefined);
   };
 
   /**
    * Records what the call that asked for the removals of `asked` answered,
-   * then settles from a fresh read. The call was counted in
-   * `callsAwaitingRead` when it was sent.
+   * then starts a fresh read to settle from. The call was counted in
+   * `unansweredCalls` when it was sent.
    */
   const applyAnswer = (
     runnerId: string,
@@ -266,6 +291,8 @@ export const createCleanupStore = ({
     const previous = entry.progress.kind === "removing" ? entry.progress : null;
     replace(runnerId, {
       ...entry,
+      unansweredCalls: entry.unansweredCalls - 1,
+      awaitingFreshRead: true,
       failureMessages,
       progress: {
         kind: "removing",
@@ -275,8 +302,7 @@ export const createCleanupStore = ({
         result: null,
       },
     });
-    startWatchingCache();
-    void settleFromFreshRead(runnerId, run);
+    startFreshRead();
   };
 
   return {
@@ -285,15 +311,23 @@ export const createCleanupStore = ({
       replace(runnerId, {
         progress: { kind: "starting", rows },
         run,
-        callsAwaitingRead: 1,
+        unansweredCalls: 1,
+        awaitingFreshRead: false,
         failureMessages: new Map(),
       });
       const stop = (message: string): void => {
         const entry = readRun(runnerId, run);
         if (entry === undefined) return;
+        // A dialog that is closed cannot show the reason, so the toast does,
+        // and there is nothing left to reopen.
+        if ((watchers.get(runnerId) ?? 0) === 0) {
+          showNotice(message);
+          replace(runnerId, null);
+          return;
+        }
         replace(runnerId, {
           ...entry,
-          callsAwaitingRead: 0,
+          unansweredCalls: 0,
           progress: { kind: "stopped", rows, message },
         });
       };
@@ -325,7 +359,7 @@ export const createCleanupStore = ({
       replace(runnerId, {
         ...entry,
         failureMessages,
-        callsAwaitingRead: entry.callsAwaitingRead + 1,
+        unansweredCalls: entry.unansweredCalls + 1,
         progress: {
           ...progress,
           outcomes: new Map(progress.outcomes).set(workspaceId, { kind: "removing" }),
@@ -339,7 +373,7 @@ export const createCleanupStore = ({
         if (current?.progress.kind !== "removing") return;
         replace(runnerId, {
           ...current,
-          callsAwaitingRead: current.callsAwaitingRead - 1,
+          unansweredCalls: current.unansweredCalls - 1,
           progress: {
             ...current.progress,
             outcomes: new Map(current.progress.outcomes).set(workspaceId, {
@@ -374,6 +408,13 @@ export const createCleanupStore = ({
       return () => {
         watchers.set(runnerId, Math.max(0, (watchers.get(runnerId) ?? 0) - 1));
       };
+    },
+
+    dispose: () => {
+      stopWatchingCache?.();
+      stopWatchingCache = null;
+      entries.clear();
+      watchers.clear();
     },
 
     subscribe: (listener) => {
