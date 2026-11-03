@@ -3,15 +3,17 @@ import type { Runner, RunnerMetricsPoint } from "@hercule/contract";
 import { BARE } from "../providers.testing";
 import type { DiskForecast } from "./disk-forecast";
 import {
-  FIVE_MINUTE_HISTORY_MS,
-  HOUR_HISTORY_MS,
   describeMachineGraphs,
   type CpuGraph,
   type DiskGraph,
   type MachineGraphs,
   type MemoryGraph,
 } from "./machine-graphs";
-import type { RunnerMetricsHistory } from "./metrics-history";
+import {
+  FIVE_MINUTE_HISTORY_MS,
+  HOUR_HISTORY_MS,
+  type RunnerMetricsHistory,
+} from "./metrics-history";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -98,7 +100,6 @@ describe("describeMachineGraphs sessions", () => {
       ],
     ]);
     expect(graphs.sessions.capY).toBe(1);
-    expect(graphs.sessions.resolution).toBe("fiveMinutes");
   });
 
   it("ends the step of the point that is still filling where the history was read", () => {
@@ -256,7 +257,6 @@ describe("describeMachineGraphs disk", () => {
     expect(second!.y).toBeCloseTo(340 / 640);
     expect(second!.x).toBeCloseTo(1 - HOUR_MS / HOUR_HISTORY_MS);
     expect(drawnDisk(graphs).limitY).toBe(1);
-    expect(drawnDisk(graphs).resolution).toBe("hour");
     expect(drawnDisk(graphs).forecast).toBeNull();
     expect(drawnDisk(graphs).forecastText).toBeNull();
   });
@@ -298,6 +298,34 @@ describe("describeMachineGraphs disk", () => {
       { x: 1, y: 1 },
     ]);
     expect(drawnDisk(graphs).forecastText).toBe("Reaches its limit in about 3 days");
+  });
+
+  it("widens the graph to the moment of the limit, not to the rounded days, so the dash ends on the limit line", () => {
+    const forecast: DiskForecast = {
+      days: 12,
+      from: FORECAST_FROM,
+      reachesAt: READ_AT + 12.4 * DAY_MS,
+    };
+
+    const disk = drawnDisk(describeGraphs([], buildRunner(), filling, forecast));
+
+    const width = HOUR_HISTORY_MS + 12.4 * DAY_MS;
+    expect(disk.forecast![0]!.x).toBeCloseTo(HOUR_HISTORY_MS / width);
+    expect(disk.forecast![1]!.x).toBeCloseTo(1);
+    expect(disk.forecast![1]!.y).toBeCloseTo(disk.limitY);
+  });
+
+  it("draws a line that reached the limit before the read without widening the graph", () => {
+    const forecast: DiskForecast = {
+      days: 1,
+      from: { at: READ_AT - HOUR_MS, freeBytes: 400 },
+      reachesAt: READ_AT - HOUR_MS / 2,
+    };
+
+    const disk = drawnDisk(describeGraphs([], buildRunner(), filling, forecast));
+
+    expect(disk.forecast![0]!.x).toBeCloseTo(1 - HOUR_MS / HOUR_HISTORY_MS);
+    expect(disk.forecast![1]!.x).toBeCloseTo(1 - HOUR_MS / 2 / HOUR_HISTORY_MS);
   });
 
   it("cuts a forecast further out than 14 days at the right edge", () => {

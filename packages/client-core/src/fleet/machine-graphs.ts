@@ -13,25 +13,22 @@
  * flips it. A graph with fewer points than its range holds draws them from the
  * right.
  */
-import type { Runner, RunnerMetricsPoint, RunnerMetricsResolution } from "@hercule/contract";
+import { RUNNER_METRICS_POINT_MS, type Runner, type RunnerMetricsPoint } from "@hercule/contract";
 import type { DiskForecast } from "./disk-forecast";
 import { describeForecastDays, MEMORY_FAIL_FROM_PERCENT, MEMORY_YOU_FROM_PERCENT } from "./machine";
 import { CPU_TOO_OLD_NOTE, DISK_TOTAL_MISSING_NOTE, NOT_REPORTED_NOTE } from "./machine-page";
-import type { RunnerMetricsHistory } from "./metrics-history";
+import {
+  FIVE_MINUTE_HISTORY_MS,
+  HOUR_HISTORY_MS,
+  type RunnerMetricsHistory,
+} from "./metrics-history";
 
-const MINUTE_MS = 60 * 1000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** The time the Sessions, CPU and Memory graphs cover: their history holds five-minute points. */
-export const FIVE_MINUTE_HISTORY_MS = DAY_MS;
+const FIVE_MINUTES_MS = RUNNER_METRICS_POINT_MS.fiveMinutes;
+const HOUR_MS = RUNNER_METRICS_POINT_MS.hour;
 
-/** The time the Disk graph covers: its history holds hour points. */
-export const HOUR_HISTORY_MS = 14 * DAY_MS;
-
-const FIVE_MINUTES_MS = 5 * MINUTE_MS;
-
-/** The Disk graph's dashed forecast reaches this many days past the newest point, at most. */
+/** The Disk graph is wider than its history by this many days at most, for the dashed forecast. */
 const MAX_FORECAST_DRAWN_DAYS = 14;
 
 /** A bottom of the Disk graph's scale this far under its lowest point, in parts of the way to the top. */
@@ -68,7 +65,6 @@ export interface UnavailableGraph {
  */
 export interface SessionsGraph {
   readonly kind: "drawn";
-  readonly resolution: Extract<RunnerMetricsResolution, "fiveMinutes">;
   /** The sessions running, as the outline of a step area that fills down to y 0. */
   readonly running: readonly GraphLine[];
   /** Where sessions waited: the band from the running sessions up to running plus queued. */
@@ -80,7 +76,6 @@ export interface SessionsGraph {
 /** The CPU graph, from five-minute points, on a scale of 0 to 100%. */
 export interface CpuGraph {
   readonly kind: "drawn";
-  readonly resolution: Extract<RunnerMetricsResolution, "fiveMinutes">;
   /** The average, as a line. A point with no CPU breaks it. */
   readonly average: readonly GraphLine[];
   /** The band from the average up to the peak. */
@@ -90,7 +85,6 @@ export interface CpuGraph {
 /** The Memory graph, from five-minute points, on a scale of 0 to the machine's memory. */
 export interface MemoryGraph {
   readonly kind: "drawn";
-  readonly resolution: Extract<RunnerMetricsResolution, "fiveMinutes">;
   /** The memory in use, as a line. */
   readonly inUse: readonly GraphLine[];
   /** The band from the memory in use up to the most that was in use. */
@@ -109,7 +103,6 @@ export interface MemoryGraph {
  */
 export interface DiskGraph {
   readonly kind: "drawn";
-  readonly resolution: Extract<RunnerMetricsResolution, "hour">;
   /** The space in use, as a line that has an area under it down to y 0. */
   readonly inUse: readonly GraphLine[];
   /** The `y` of the line of the disk limit. */
@@ -212,7 +205,6 @@ const describeSessionsGraph = (
   const y = (sessions: number): number => sessions / top;
   return {
     kind: "drawn",
-    resolution: "fiveMinutes",
     running: splitIntoRuns(points, FIVE_MINUTES_MS, ({ sessionsRunning }, at) => {
       const [start, end] = locateStep(at, history.readAt, x);
       return [
@@ -244,18 +236,17 @@ const describeCpuGraph = (
   const x = buildTimeScale(history.readAt - FIVE_MINUTE_HISTORY_MS, FIVE_MINUTE_HISTORY_MS);
   return {
     kind: "drawn",
-    resolution: "fiveMinutes",
     average: splitIntoRuns(points, FIVE_MINUTES_MS, ({ cpuAveragePercent }, at) =>
       cpuAveragePercent === null ? null : [{ x: x(at), y: clamp(cpuAveragePercent / 100) }],
     ),
     peak: splitIntoRuns(points, FIVE_MINUTES_MS, ({ cpuAveragePercent, cpuPeakPercent }, at) =>
-      cpuAveragePercent === null
+      cpuAveragePercent === null || cpuPeakPercent === null
         ? null
         : [
             {
               x: x(at),
               low: clamp(cpuAveragePercent / 100),
-              high: clamp((cpuPeakPercent ?? cpuAveragePercent) / 100),
+              high: clamp(cpuPeakPercent / 100),
             },
           ],
     ),
@@ -273,7 +264,6 @@ const describeMemoryGraph = (
   const y = (availableBytes: number): number => clamp((total - availableBytes) / total);
   return {
     kind: "drawn",
-    resolution: "fiveMinutes",
     inUse: splitIntoRuns(points, FIVE_MINUTES_MS, ({ availableMemoryBytes }, at) => [
       { x: x(at), y: y(availableMemoryBytes) },
     ]),
@@ -282,7 +272,7 @@ const describeMemoryGraph = (
       FIVE_MINUTES_MS,
       ({ availableMemoryBytes, availableMemoryLowestBytes }, at) => {
         const low = y(availableMemoryBytes);
-        return [{ x: x(at), low, high: Math.max(low, y(availableMemoryLowestBytes)) }];
+        return [{ x: x(at), low, high: y(availableMemoryLowestBytes) }];
       },
     ),
     youY: MEMORY_YOU_FROM_PERCENT / 100,
@@ -329,8 +319,16 @@ const describeDiskGraph = (
     return { kind: "unavailable", note: DISK_TOTAL_MISSING_NOTE };
   }
   const left = history.readAt - HOUR_HISTORY_MS;
+  // Widened to the moment the forecast reaches the limit, not to its rounded
+  // days, so the dashed line ends exactly on the limit line. A line that
+  // reached the limit before the read needs no room.
   const forecastDrawnMs =
-    forecast === null ? 0 : Math.min(forecast.days, MAX_FORECAST_DRAWN_DAYS) * DAY_MS;
+    forecast === null
+      ? 0
+      : Math.max(
+          0,
+          Math.min(forecast.reachesAt - history.readAt, MAX_FORECAST_DRAWN_DAYS * DAY_MS),
+        );
   const x = buildTimeScale(left, HOUR_HISTORY_MS + forecastDrawnMs);
 
   const limitBytes = total - runner.diskWatermarkBytes;
@@ -348,7 +346,6 @@ const describeDiskGraph = (
 
   return {
     kind: "drawn",
-    resolution: "hour",
     inUse: splitIntoRuns(points, HOUR_MS, ({ diskFreeBytes }, at) => [
       { x: x(at), y: y(total - diskFreeBytes) },
     ]),
