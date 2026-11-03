@@ -59,12 +59,18 @@ const step = (id: string, runId: string, stepId: string, minute: number): Sessio
   });
 
 /** Returns a session of the assistant `assistantId`. */
-const assistantSession = (id: string, assistantId: string, minute: number): Session =>
+const assistantSession = (
+  id: string,
+  assistantId: string,
+  minute: number,
+  over: Partial<Session> = {},
+): Session =>
   thread(id, minute, {
     agentId: assistantId,
     conversationId: "conv-1",
     workspaceId: null,
     title: "Good morning",
+    ...over,
   });
 
 /** Returns what the shell holds of the sidebar's rows for `sessions`, as `buildMachineWork` takes it. */
@@ -108,16 +114,19 @@ describe("grouping", () => {
     expect(groups).toEqual([
       expect.objectContaining({
         key: "run:run-1",
-        kind: "run",
         title: "Review PRs",
-        detail: "Workflow run · review, tests",
+        kindLabel: "Workflow run",
+        memberLabels: "review, tests",
         status: "2 working",
         since: "since 09:05",
-        face: { look: "run", seed: "run-1", pose: "working" },
-        faces: [
-          { look: "run", seed: "s-1", pose: "working" },
-          { look: "run", seed: "s-2", pose: "working" },
-        ],
+        face: { kind: "run", seed: "run-1", pose: "working" },
+        faces: {
+          faces: [
+            { kind: "run", seed: "s-1", pose: "working" },
+            { kind: "run", seed: "s-2", pose: "working" },
+          ],
+          moreCount: 0,
+        },
         opens: { kind: "run", runId: "run-1" },
       }),
     ]);
@@ -140,25 +149,34 @@ describe("grouping", () => {
     expect(groups).toEqual([
       expect.objectContaining({
         key: "workspace:w-1",
-        kind: "threads",
         title: "Fix the flaky test",
-        detail: "Threads · review, tests",
+        kindLabel: "Threads",
+        memberLabels: "review, tests",
         status: "3 working",
-        face: { look: "thread", seed: "lead", pose: "working" },
-        faces: [
-          { look: "thread", seed: "lead", pose: "working" },
-          { look: "agent", seed: "helper", pose: "working" },
-          { look: "agent", seed: "tester", pose: "working" },
-        ],
+        face: { kind: "thread", seed: "lead", pose: "working" },
+        faces: {
+          faces: [
+            { kind: "thread", seed: "lead", pose: "working" },
+            { kind: "agent", seed: "helper", pose: "working" },
+            { kind: "agent", seed: "tester", pose: "working" },
+          ],
+          moreCount: 0,
+        },
         opens: { kind: "thread", sessionId: "lead" },
       }),
     ]);
   });
 
-  it("words a row whose only session here is its lead as just Threads", () => {
+  it("words a row whose only session here is a Thread as just Thread", () => {
     const { groups } = work([thread("lead", 0), agentSession("helper", 1, { status: "exited" })]);
 
-    expect(groups[0]?.detail).toBe("Threads");
+    expect(groups[0]).toMatchObject({ kindLabel: "Thread", memberLabels: "" });
+  });
+
+  it("words a row with several sessions here as Threads", () => {
+    const { groups } = work([thread("lead", 0), agentSession("helper", 1, { role: "review" })]);
+
+    expect(groups[0]).toMatchObject({ kindLabel: "Threads", memberLabels: "review" });
   });
 
   it("keeps the sidebar's name for a row whose Threads exited while its Agent session works", () => {
@@ -171,7 +189,8 @@ describe("grouping", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
       title: "Title of lead",
-      detail: "Threads · review",
+      kindLabel: "Threads",
+      memberLabels: "review",
       status: "1 working",
       opens: { kind: "thread", sessionId: "lead" },
     });
@@ -182,10 +201,10 @@ describe("grouping", () => {
     const { groups } = work(sessions, { rowMembers: holdRows([sessions[0]!]) });
 
     expect(groups.find((group) => group.key === "session:stray")).toMatchObject({
-      kind: "threads",
       title: "Title of stray",
-      detail: "Agent session",
-      face: { look: "agent", seed: "stray", pose: "working" },
+      kindLabel: "Agent session",
+      memberLabels: "",
+      face: { kind: "agent", seed: "stray", pose: "working" },
       opens: { kind: "thread", sessionId: "stray" },
     });
   });
@@ -197,10 +216,10 @@ describe("grouping", () => {
     expect(groups).toEqual([
       expect.objectContaining({
         key: "assistant:asst-1",
-        kind: "assistant",
         title: "Maya",
-        detail: "Assistant",
-        face: { look: "assistant", seed: "asst-1", pose: "working" },
+        kindLabel: "Assistant",
+        memberLabels: "",
+        face: { kind: "assistant", seed: "asst-1", pose: "working" },
         opens: { kind: "assistant", assistantId: "asst-1" },
       }),
     ]);
@@ -228,13 +247,11 @@ describe("status", () => {
     thread("e", 4, { workspaceId: "w-e", status: "queued", startedAt: null }),
     thread("f", 5, { workspaceId: "w-f", status: "idle" }),
   ];
+  // The same sessions in one workspace, so the sidebar puts them in one row.
+  const allInOneRow = sessions.map((session) => ({ ...session, workspaceId: "w-1" }));
 
   it("counts a machine's sessions in words, in a fixed order", () => {
-    const rowMembers = holdRows(sessions);
-    const oneRow = Object.fromEntries(
-      Object.entries(rowMembers).map(([id, row]) => [id, { ...row, rowKey: "all" }]),
-    );
-    const { groups } = work(sessions, { rowMembers: oneRow });
+    const { groups } = work(allInOneRow);
 
     expect(groups[0]?.status).toBe("2 working · 1 waits for you · 2 wait for a slot · 1 idle");
   });
@@ -325,7 +342,48 @@ describe("order", () => {
   });
 
   it("does not depend on the order the sessions are listed in", () => {
-    expect(work(sessions.toReversed())).toEqual(work(sessions));
+    // The run has no workflow name and the assistant is not in the list, so each is named by the
+    // title of its first session, which must be the first in the page's order.
+    const all = [
+      ...sessions,
+      step("s-late", "run-1", "tests", 12),
+      step("s-early", "run-1", "review", 11),
+      assistantSession("a-late", "asst-1", 22, { title: "Good evening" }),
+      assistantSession("a-early", "asst-1", 21, { title: "Good morning" }),
+    ];
+    const expected = work(all);
+
+    expect(work(all.toReversed())).toEqual(expected);
+    expect(expected.groups.find((group) => group.key === "run:run-1")?.title).toBe(
+      "Review PRs · review",
+    );
+    expect(expected.groups.find((group) => group.key === "assistant:asst-1")?.title).toBe(
+      "Good morning",
+    );
+  });
+});
+
+describe("faces of a group", () => {
+  it("lists one face per session, at most 12, and counts the rest", () => {
+    const lead = thread("lead", 0);
+    const helpers = Array.from({ length: 13 }, (_, index) =>
+      agentSession(`h-${String(index).padStart(2, "0")}`, index + 1),
+    );
+    const { groups } = work([lead, ...helpers]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.faces.faces.map((face) => face.seed)).toEqual([
+      "lead",
+      ...helpers.slice(0, 11).map((session) => session.id),
+    ]);
+    expect(groups[0]?.faces.moreCount).toBe(2);
+  });
+
+  it("counts none left out for a group with fewer", () => {
+    const { groups } = work([thread("lead", 0), agentSession("helper", 1)]);
+
+    expect(groups[0]?.faces).toMatchObject({ moreCount: 0 });
+    expect(groups[0]?.faces.faces).toHaveLength(2);
   });
 });
 

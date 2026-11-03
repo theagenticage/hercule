@@ -3,8 +3,10 @@
  * Fleet's cards: the sessions open on one machine, grouped into what the user
  * knows them as (a workflow run, a row of Threads, an assistant).
  *
- * Both functions share one grouping step, so the cards and the page always
- * agree on what a group is and in which order the groups come.
+ * The three exports share one grouping step, so the cards and the page always
+ * agree on what a group is and in which order the groups come. Only
+ * `buildMachineWork` describes the groups (title, words, time), because the
+ * cards are rebuilt on every session push and need nothing of that.
  *
  * The desktop calls these inside a query's `select`. Structural sharing keeps
  * the result's identity only if it is equal, so the result holds plain data
@@ -23,9 +25,12 @@ import type { RowMember } from "../threads/row-members";
 /** The most faces a machine's card shows before it folds the rest into "+n". */
 const MAX_CARD_FACES = 5;
 
-/** One face: who it looks like (`look`), what it is drawn from (`seed`) and its state. */
+/** The most faces a group lists for its own sessions before it folds the rest into "+n". */
+const MAX_ROW_FACES = 12;
+
+/** One face: which kind of session it is (`kind`), what it is drawn from (`seed`) and its state. */
 export interface WorkFace {
-  readonly look: "thread" | "agent" | "run" | "assistant";
+  readonly kind: "thread" | "agent" | "run" | "assistant";
   readonly seed: string;
   readonly pose: Pose;
 }
@@ -36,15 +41,25 @@ export type WorkDestination =
   | { readonly kind: "run"; readonly runId: string }
   | { readonly kind: "assistant"; readonly assistantId: string };
 
+/** The faces of a machine's card or of a group, and how many sessions or groups they leave out. */
+export interface MachineFaces {
+  readonly faces: readonly WorkFace[];
+  readonly moreCount: number;
+}
+
 /** One group of "Running here": a run, a row of Threads or an assistant. */
 export interface MachineWorkGroup {
   /** Tells groups apart and stays the same across renders. */
   readonly key: string;
-  readonly kind: "threads" | "run" | "assistant";
   /** The row's title, the workflow's name or the assistant's name. */
   readonly title: string;
-  /** What the group is and which of its sessions run here, such as "Threads · review, tests", which leaves out the row's lead, or "Threads" when it is the only session here. */
-  readonly detail: string;
+  /** What kind of group it is: "Workflow run", "Thread", "Threads", "Assistant" or "Agent session". "Thread" is a lone Thread; a row of Threads, or a lone Agent session in one, is "Threads". */
+  readonly kindLabel: string;
+  /**
+   * Which of the group's sessions run here, joined by ", ": a run's step ids, or the labels of a
+   * row's sessions without the row's lead. Empty when there is nothing to list.
+   */
+  readonly memberLabels: string;
   /** The group's sessions in words, such as "2 working · 1 waits for you". */
   readonly status: string;
   /** Whether a session of the group is queued for a free slot, whatever the others do. */
@@ -53,8 +68,8 @@ export interface MachineWorkGroup {
   readonly since: string | null;
   /** The group's own face, in the pose of its most urgent session. */
   readonly face: WorkFace;
-  /** One face per session of the group here. */
-  readonly faces: readonly WorkFace[];
+  /** One face per session of the group here, at most 12, and how many more there are. */
+  readonly faces: MachineFaces;
   readonly opens: WorkDestination;
 }
 
@@ -63,10 +78,10 @@ export interface MachineWorkSession {
   readonly id: string;
   readonly face: WorkFace;
   readonly title: string;
-  readonly status: "Working" | "Waits for you" | "Waits for a slot" | "Idle" | "Away" | "Asleep";
+  readonly status: "Working" | "Waits for you" | "Waits for a slot" | "Idle" | "Away";
   readonly waitingForSlot: boolean;
   /** When the session started, or was created if it has not started: an ISO timestamp. */
-  readonly runningSince: string;
+  readonly startedAt: string;
   readonly opens: WorkDestination;
 }
 
@@ -76,35 +91,25 @@ export interface MachineWork {
   readonly sessions: readonly MachineWorkSession[];
 }
 
-/** The faces a machine's card shows, and how many groups they leave out. */
-export interface MachineFaces {
-  readonly faces: readonly WorkFace[];
-  readonly moreCount: number;
-}
+/** The poses an open session can be in. It is never `asleep`, which needs an exited session. */
+type OpenPose = Exclude<SessionPose, "asleep">;
 
 /**
  * What a session is doing, as the page words it. It is the session's pose,
  * except that a queued session (by its status) waits for a slot, whatever its
  * pose.
  */
-type WorkState = SessionPose | "queued";
+type WorkState = OpenPose | "queued";
 
 /** The states in the order a group's status words list them. */
-const STATE_ORDER: readonly WorkState[] = [
-  "working",
-  "waiting",
-  "queued",
-  "idle",
-  "away",
-  "asleep",
-];
+const STATE_ORDER: readonly WorkState[] = ["working", "waiting", "queued", "idle", "away"];
 
 /**
  * The poses in the order a group takes its own from, most urgent first. A
  * group in a pose that needs the user comes before one that works, and one
  * that works before one that idles.
  */
-const POSE_URGENCY: readonly Pose[] = ["waiting", "working", "idle", "away", "asleep"];
+const POSE_URGENCY: readonly OpenPose[] = ["waiting", "working", "idle", "away"];
 
 const SESSION_STATUS: Readonly<Record<WorkState, MachineWorkSession["status"]>> = {
   working: "Working",
@@ -112,7 +117,6 @@ const SESSION_STATUS: Readonly<Record<WorkState, MachineWorkSession["status"]>> 
   queued: "Waits for a slot",
   idle: "Idle",
   away: "Away",
-  asleep: "Asleep",
 };
 
 /** Returns the count of sessions in `state` in words, such as "2 wait for you". */
@@ -128,188 +132,139 @@ const describeStateCount = (state: WorkState, count: number): string => {
   }
 };
 
+/** Checks that the session has not exited. */
+const isOpen = (session: Session): boolean => session.status !== "exited";
+
 /** A session open on the machine, with what the page needs to know of it. */
 interface OpenSession {
   readonly session: Session;
   readonly state: WorkState;
   readonly face: WorkFace;
+  /** Where the session itself leads. */
   readonly opens: WorkDestination;
-}
-
-/** A group before its time is formatted: the group and what orders it. */
-interface GroupedWork {
-  readonly group: Omit<MachineWorkGroup, "since">;
-  /** The sessions of the group, in the order of the "Sessions" list. */
-  readonly members: readonly OpenSession[];
-  /** The earliest start among the members, as milliseconds. */
+  /** The sidebar row that lists the session; only a Thread or an Agent session has one. */
+  readonly row: RowMember | undefined;
+  /** The group the session belongs to, and what the group is drawn from and leads to. */
+  readonly group: {
+    readonly key: string;
+    readonly kind: WorkFace["kind"];
+    readonly seed: string;
+    readonly opens: WorkDestination;
+  };
+  /** When the session started, or was created if it has not started, in milliseconds. */
   readonly startedAtMs: number;
-  /** The creation time of the oldest queued member, as milliseconds, or `null` when none is queued. */
-  readonly queuedAtMs: number | null;
+  /** What orders the sessions: the creation time of a queued session, the start of any other. */
+  readonly orderMs: number;
 }
 
-const startedAtMs = (session: Session): number =>
-  Date.parse(session.startedAt ?? session.createdAt);
+/** A group of open sessions, with what orders it and what the cards draw. */
+interface OpenGroup {
+  readonly key: string;
+  readonly face: WorkFace;
+  readonly opens: WorkDestination;
+  /** The group's sessions in the order of the "Sessions" list. */
+  readonly members: readonly OpenSession[];
+}
 
-/** Orders by milliseconds, oldest first, then by `tieBreak` so the order never depends on input order. */
-const compareOldestFirst = (a: number, b: number, tieA: string, tieB: string): number =>
-  a - b || (tieA < tieB ? -1 : tieA > tieB ? 1 : 0);
-
-/** Describes `session` as an open session of a machine whose runner is `runner`. */
-const describeOpenSession = (session: Session, runner: Runner | undefined): OpenSession => {
-  const pose = decideThreadPose(session, runner);
+/**
+ * Describes `session` as an open session of a machine whose runner is
+ * `runner`, and decides its group:
+ *
+ * - a run's step session belongs to its run;
+ * - an assistant's session belongs to the assistant;
+ * - a Thread or an Agent session belongs to the sidebar's row that lists it
+ *   (`row`), and leads to the row's lead;
+ * - a Thread or an Agent session no row lists is a group of its own.
+ *
+ * A group is drawn from, and leads to, its session, unless a row lists the
+ * session.
+ */
+const describeOpenSession = (
+  session: Session,
+  runner: Runner | undefined,
+  row: RowMember | undefined,
+): OpenSession => {
+  // An open session is never asleep: `decideThreadPose` returns that only for an exited one.
+  const pose = decideThreadPose(session, runner) as OpenPose;
   const state: WorkState = session.status === "queued" ? "queued" : pose;
   // A queued session that would otherwise work is not at work yet, so its face is idle. One that
   // waits on the user, or whose machine is away, keeps that pose.
   const facePose = state === "queued" && pose === "working" ? "idle" : pose;
-  switch (session.kind) {
-    case "run":
-      return {
-        session,
-        state,
-        face: { look: "run", seed: session.id, pose: facePose },
-        opens: { kind: "run", runId: session.runId! },
-      };
-    case "assistant":
-      return {
-        session,
-        state,
-        face: { look: "assistant", seed: session.agentId!, pose: facePose },
-        opens: { kind: "assistant", assistantId: session.agentId! },
-      };
-    case "thread":
-    case "agent":
-      return {
-        session,
-        state,
-        face: { look: session.kind, seed: session.id, pose: facePose },
-        opens: { kind: "thread", sessionId: session.id },
-      };
-  }
-};
-
-/** Everything a group's key, kind, title, detail, face and destination are decided from. */
-interface GroupIdentity {
-  readonly key: string;
-  readonly kind: MachineWorkGroup["kind"];
-  readonly title: string;
-  readonly detail: (members: readonly OpenSession[]) => string;
-  readonly look: WorkFace["look"];
-  readonly seed: string;
-  readonly opens: WorkDestination;
-}
-
-/**
- * Returns the group `open` belongs to, as the user knows it:
- *
- * - a run's step session belongs to its run, named by the workflow's name in
- *   `workflowNames`, or by the session's own title when that has no entry for
- *   the run;
- * - an assistant's session belongs to the assistant;
- * - a Thread or an Agent session belongs to the sidebar's row that lists it
- *   (`rowMembers`), named as the sidebar names it;
- * - a Thread or an Agent session no row lists is a group of its own.
- */
-const identifyGroup = (
-  { session }: OpenSession,
-  rowMembers: Readonly<Record<string, RowMember>>,
-  workflowNames: Readonly<Record<string, string>>,
-  assistantNames: ReadonlyMap<string, string>,
-): GroupIdentity => {
+  const startedAtMs = Date.parse(session.startedAt ?? session.createdAt);
+  const common = {
+    session,
+    state,
+    startedAtMs,
+    orderMs: state === "queued" ? Date.parse(session.createdAt) : startedAtMs,
+  };
   switch (session.kind) {
     case "run": {
       const runId = session.runId!;
+      const opens: WorkDestination = { kind: "run", runId };
       return {
-        key: `run:${runId}`,
-        kind: "run",
-        title: workflowNames[runId] ?? session.title,
-        detail: (members) => {
-          const steps = new Set(members.flatMap((member) => member.session.stepId ?? []));
-          return `Workflow run · ${[...steps].join(", ")}`;
-        },
-        look: "run",
-        seed: runId,
-        opens: { kind: "run", runId },
+        ...common,
+        face: { kind: "run", seed: session.id, pose: facePose },
+        opens,
+        row: undefined,
+        group: { key: `run:${runId}`, kind: "run", seed: runId, opens },
       };
     }
     case "assistant": {
-      const agentId = session.agentId!;
+      const assistantId = session.agentId!;
+      const opens: WorkDestination = { kind: "assistant", assistantId };
       return {
-        key: `assistant:${agentId}`,
-        kind: "assistant",
-        title: assistantNames.get(agentId) ?? session.title,
-        detail: () => "Assistant",
-        look: "assistant",
-        seed: agentId,
-        opens: { kind: "assistant", assistantId: agentId },
+        ...common,
+        face: { kind: "assistant", seed: assistantId, pose: facePose },
+        opens,
+        row: undefined,
+        group: { key: `assistant:${assistantId}`, kind: "assistant", seed: assistantId, opens },
       };
     }
     case "thread":
     case "agent": {
-      const row = rowMembers[session.id];
-      if (row === undefined)
-        return {
-          key: `session:${session.id}`,
-          kind: "threads",
-          title: session.title,
-          detail: () => (session.kind === "thread" ? "Thread" : "Agent session"),
-          look: session.kind,
-          seed: session.id,
-          opens: { kind: "thread", sessionId: session.id },
-        };
+      const opens: WorkDestination = { kind: "thread", sessionId: session.id };
       return {
-        key: row.rowKey,
-        kind: "threads",
-        title: row.rowTitle,
-        // The lead's label is the row's name, which the title already shows, so only the other
-        // sessions are listed, in the order of the "Sessions" list.
-        detail: (members) => {
-          const others = members.filter((member) => member.session.id !== row.leadId);
-          return others.length === 0
-            ? "Threads"
-            : `Threads · ${others.map((member) => rowMembers[member.session.id]!.label).join(", ")}`;
-        },
-        look: "thread",
-        seed: row.leadId,
-        opens: { kind: "thread", sessionId: row.leadId },
+        ...common,
+        face: { kind: session.kind, seed: session.id, pose: facePose },
+        opens,
+        row,
+        group:
+          row === undefined
+            ? { key: `session:${session.id}`, kind: session.kind, seed: session.id, opens }
+            : {
+                key: row.rowKey,
+                kind: "thread",
+                seed: row.leadId,
+                opens: { kind: "thread", sessionId: row.leadId },
+              },
       };
     }
   }
 };
 
-/** Returns the order of the "Sessions" list: queued sessions first, then the oldest start first. */
-const compareSessions = (a: OpenSession, b: OpenSession): number => {
-  const queuedA = a.session.status === "queued";
-  if (queuedA !== (b.session.status === "queued")) return queuedA ? -1 : 1;
-  return queuedA
-    ? compareOldestFirst(
-        Date.parse(a.session.createdAt),
-        Date.parse(b.session.createdAt),
-        a.session.id,
-        b.session.id,
-      )
-    : compareOldestFirst(
-        startedAtMs(a.session),
-        startedAtMs(b.session),
-        a.session.id,
-        b.session.id,
-      );
-};
-
-/** Returns the order of the groups: those that wait first, by their oldest queued session, then the oldest start first. */
-const compareGroups = (a: GroupedWork, b: GroupedWork): number => {
-  if ((a.queuedAtMs === null) !== (b.queuedAtMs === null)) return a.queuedAtMs === null ? 1 : -1;
-  return compareOldestFirst(
-    a.queuedAtMs ?? a.startedAtMs,
-    b.queuedAtMs ?? b.startedAtMs,
-    a.group.key,
-    b.group.key,
-  );
-};
+/** Compares text by code unit, so the order never depends on the locale. */
+const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
- * Returns the groups of `sessions`, in the order they are shown. `sessions`
- * are the open sessions of one machine, whose runner is `runner` (or
+ * Returns the order of the "Sessions" list: queued sessions first, oldest
+ * creation first, then the other sessions, oldest start first. The group key
+ * and the session id break ties, so the order never depends on input order.
+ */
+const compareOpenSessions = (a: OpenSession, b: OpenSession): number =>
+  Number(b.state === "queued") - Number(a.state === "queued") ||
+  a.orderMs - b.orderMs ||
+  compareText(a.group.key, b.group.key) ||
+  compareText(a.session.id, b.session.id);
+
+/**
+ * Groups the open sessions of one machine, whose runner is `runner` (or
  * `undefined` when the runner list does not hold it, which counts as online).
+ * Returns the sessions in the order of the "Sessions" list, and the groups.
+ *
+ * A group's place is the place of its first session in the sessions' order, so
+ * groups that wait for a slot come first, by their oldest queued session, and
+ * the rest follow, the oldest start first. Each group's `members` come in the
+ * sessions' order too.
  *
  * This is the one place that decides what a group is, so the page and the
  * cards cannot disagree.
@@ -318,62 +273,93 @@ const groupOpenSessions = ({
   sessions,
   runner,
   rowMembers,
-  workflowNames,
-  assistants,
 }: {
   readonly sessions: readonly Session[];
   readonly runner: Runner | undefined;
   readonly rowMembers: Readonly<Record<string, RowMember>>;
-  readonly workflowNames: Readonly<Record<string, string>>;
-  readonly assistants: readonly Pick<Assistant, "id" | "name">[];
-}): readonly GroupedWork[] => {
-  const assistantNames = new Map(assistants.map((each) => [each.id, each.name]));
+}): { readonly ordered: readonly OpenSession[]; readonly groups: readonly OpenGroup[] } => {
+  const ordered = sessions
+    .map((session) => describeOpenSession(session, runner, rowMembers[session.id]))
+    .toSorted(compareOpenSessions);
 
-  const grouped = new Map<string, { identity: GroupIdentity; members: OpenSession[] }>();
-  for (const open of sessions.map((session) => describeOpenSession(session, runner))) {
-    const identity = identifyGroup(open, rowMembers, workflowNames, assistantNames);
-    const entry = grouped.get(identity.key) ?? { identity, members: [] };
-    entry.members.push(open);
-    grouped.set(identity.key, entry);
+  const membersByKey = new Map<string, OpenSession[]>();
+  for (const open of ordered) {
+    const members = membersByKey.get(open.group.key);
+    if (members === undefined) membersByKey.set(open.group.key, [open]);
+    else members.push(open);
   }
 
-  return [...grouped.values()]
-    .map(({ identity, members }): GroupedWork => {
-      const sorted = members.toSorted(compareSessions);
-      const counts = STATE_ORDER.map(
-        (state) => [state, sorted.filter((member) => member.state === state).length] as const,
-      );
-      const queued = sorted.filter((member) => member.session.status === "queued");
-      const pose = POSE_URGENCY.find((each) => sorted.some((m) => m.face.pose === each))!;
+  const groups = [...membersByKey.values()].map((members): OpenGroup => {
+    const { group } = members[0]!;
+    const pose = POSE_URGENCY.find((each) => members.some((member) => member.face.pose === each))!;
+    return {
+      key: group.key,
+      face: { kind: group.kind, seed: group.seed, pose },
+      opens: group.opens,
+      members,
+    };
+  });
+  return { ordered, groups };
+};
+
+/** Returns the title, kind label and member labels of `group`, as `MachineWorkGroup` describes them. */
+const nameGroup = (
+  { members }: OpenGroup,
+  workflowNames: Readonly<Record<string, string>>,
+  assistantNames: ReadonlyMap<string, string>,
+): {
+  readonly title: string;
+  readonly kindLabel: string;
+  readonly memberLabels: string;
+} => {
+  // The group's first session in the sessions' order names it, so the name never depends on input order.
+  const { session, row } = members[0]!;
+  switch (session.kind) {
+    case "run": {
+      const steps = new Set(members.flatMap((member) => member.session.stepId ?? []));
       return {
-        group: {
-          key: identity.key,
-          kind: identity.kind,
-          title: identity.title,
-          detail: identity.detail(sorted),
-          status: counts
-            .filter(([, count]) => count > 0)
-            .map(([state, count]) => describeStateCount(state, count))
-            .join(" · "),
-          waitingForSlot: queued.length > 0,
-          face: { look: identity.look, seed: identity.seed, pose },
-          faces: sorted.map((member) => member.face),
-          opens: identity.opens,
-        },
-        members: sorted,
-        startedAtMs: Math.min(...sorted.map((member) => startedAtMs(member.session))),
-        // The queued members come first in `sorted`, oldest first.
-        queuedAtMs: queued[0] === undefined ? null : Date.parse(queued[0].session.createdAt),
+        title: workflowNames[session.runId!] ?? session.title,
+        kindLabel: "Workflow run",
+        memberLabels: [...steps].join(", "),
       };
-    })
-    .toSorted(compareGroups);
+    }
+    case "assistant":
+      return {
+        title: assistantNames.get(session.agentId!) ?? session.title,
+        kindLabel: "Assistant",
+        memberLabels: "",
+      };
+    case "thread":
+    case "agent": {
+      if (row === undefined)
+        return {
+          title: session.title,
+          kindLabel: session.kind === "thread" ? "Thread" : "Agent session",
+          memberLabels: "",
+        };
+      // The lead's label is the row's name, which the title already shows, so only the other
+      // sessions are listed.
+      const labels = members.flatMap((member) =>
+        member.row !== undefined && member.session.id !== member.row.leadId
+          ? [member.row.label]
+          : [],
+      );
+      // Only a lone Thread is "Thread"; a lone Agent session is still part of a row of Threads.
+      return {
+        title: row.rowTitle,
+        kindLabel: members.length === 1 && session.kind === "thread" ? "Thread" : "Threads",
+        memberLabels: labels.join(", "),
+      };
+    }
+  }
 };
 
 /**
  * Returns the ids of the runs that have an open step session on `runnerId`,
  * each once and sorted. The caller looks up the workflow names of these runs
- * for `workflowNames`. The result is a plain array, so it keeps its identity
- * while the runs stay the same.
+ * for `workflowNames`. The result is a plain array; a query's `select` keeps
+ * its identity while the runs stay the same, because structural sharing
+ * returns the previous array when the new one is equal.
  */
 export const listMachineRunIds = (
   sessions: readonly Session[],
@@ -381,17 +367,13 @@ export const listMachineRunIds = (
 ): readonly string[] => {
   const ids = new Set(
     sessions.flatMap((session) =>
-      session.kind === "run" && session.status !== "exited" && session.runnerId === runnerId
+      session.kind === "run" && isOpen(session) && session.runnerId === runnerId
         ? [session.runId!]
         : [],
     ),
   );
   return [...ids].toSorted();
 };
-
-/** Returns the sessions of `sessions` that have not exited. */
-const listOpenSessions = (sessions: readonly Session[]): readonly Session[] =>
-  sessions.filter((session) => session.status !== "exited");
 
 /**
  * Builds what "Running here" shows for `runner`: its open sessions grouped
@@ -404,7 +386,8 @@ const listOpenSessions = (sessions: readonly Session[]): readonly Session[] =>
  *   included). A row is here when one of its sessions on this runner is open,
  *   and it keeps the sidebar's name even if only its Agent session still works.
  * - `workflowNames` maps a run id to the workflow's name. A run missing from
- *   it is named by its first session's title.
+ *   it is named by the title of its first session in the order of the list.
+ *   An assistant missing from `assistants` is named the same way.
  * - `since` is worded as the Fleet words a time ("since 09:12"), in
  *   `timezone`, relative to `today`.
  *
@@ -430,31 +413,49 @@ export const buildMachineWork = ({
   readonly timezone: string;
   readonly today: Date;
 }): MachineWork => {
-  const open = listOpenSessions(sessions.filter((session) => session.runnerId === runner.id));
-  const grouped = groupOpenSessions({
-    sessions: open,
+  const { ordered, groups } = groupOpenSessions({
+    sessions: sessions.filter((session) => session.runnerId === runner.id && isOpen(session)),
     runner,
     rowMembers,
-    workflowNames,
-    assistants,
   });
-  const groups = grouped.map(({ group, startedAtMs: startMs }): MachineWorkGroup => {
-    const moment = formatShortMoment(new Date(startMs), today, timezone);
-    return { ...group, since: moment === undefined ? null : `since ${moment}` };
-  });
-  const listed = grouped
-    .flatMap(({ members }) => members)
-    .toSorted(compareSessions)
-    .map(({ session, state, face, opens }): MachineWorkSession => ({
+  const assistantNames = new Map(assistants.map((each) => [each.id, each.name]));
+
+  return {
+    groups: groups.map((group): MachineWorkGroup => {
+      const { members } = group;
+      const moment = formatShortMoment(
+        new Date(Math.min(...members.map((member) => member.startedAtMs))),
+        today,
+        timezone,
+      );
+      return {
+        key: group.key,
+        ...nameGroup(group, workflowNames, assistantNames),
+        status: STATE_ORDER.flatMap((state) => {
+          const count = members.filter((member) => member.state === state).length;
+          return count === 0 ? [] : [describeStateCount(state, count)];
+        }).join(" · "),
+        // Queued sessions come first in `members`.
+        waitingForSlot: members[0]!.state === "queued",
+        since: moment === undefined ? null : `since ${moment}`,
+        face: group.face,
+        faces: {
+          faces: members.slice(0, MAX_ROW_FACES).map((member) => member.face),
+          moreCount: Math.max(0, members.length - MAX_ROW_FACES),
+        },
+        opens: group.opens,
+      };
+    }),
+    sessions: ordered.map(({ session, state, face, opens }): MachineWorkSession => ({
       id: session.id,
       face,
       title: session.title,
       status: SESSION_STATUS[state],
-      waitingForSlot: session.status === "queued",
-      runningSince: session.startedAt ?? session.createdAt,
+      waitingForSlot: state === "queued",
+      startedAt: session.startedAt ?? session.createdAt,
       opens,
-    }));
-  return { groups, sessions: listed };
+    })),
+  };
 };
 
 /**
@@ -475,25 +476,22 @@ export const buildFleetFaces = ({
 }): Readonly<Record<string, MachineFaces>> => {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
   const openByRunnerId = new Map<string, Session[]>();
-  for (const session of listOpenSessions(sessions)) {
-    const open = openByRunnerId.get(session.runnerId) ?? [];
-    open.push(session);
-    openByRunnerId.set(session.runnerId, open);
+  for (const session of sessions.filter(isOpen)) {
+    const open = openByRunnerId.get(session.runnerId);
+    if (open === undefined) openByRunnerId.set(session.runnerId, [session]);
+    else open.push(session);
   }
   return Object.fromEntries(
     [...openByRunnerId].map(([runnerId, open]) => {
-      // Faces need no names, so no workflow or assistant is passed.
-      const groups = groupOpenSessions({
+      const { groups } = groupOpenSessions({
         sessions: open,
         runner: runnersById.get(runnerId),
         rowMembers,
-        workflowNames: {},
-        assistants: [],
       });
       return [
         runnerId,
         {
-          faces: groups.slice(0, MAX_CARD_FACES).map(({ group }) => group.face),
+          faces: groups.slice(0, MAX_CARD_FACES).map((group) => group.face),
           moreCount: Math.max(0, groups.length - MAX_CARD_FACES),
         },
       ];

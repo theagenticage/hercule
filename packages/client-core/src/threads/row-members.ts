@@ -16,10 +16,11 @@ export interface RowMember {
  * Returns every session of `groupRows` (exited ones included) as a
  * `RowMember`, keyed by session id.
  *
- * The result holds plain strings only, so a query's `select` can return it
- * and keep its identity until a row's key, title or lead, or a session's
- * label, changes. A push that changes only a session's usage or last activity
- * leaves it equal.
+ * The result holds plain strings only, so it is equal from one call to the
+ * next until a row's key, title or lead, or a session's label, changes. A push
+ * that changes only a session's usage or last activity leaves it equal. The
+ * shell keeps it in a provider that holds on to the previous object while the
+ * new one is equal (`replaceEqualDeep`), so what reads it keeps its identity.
  */
 export const indexRowMembers = (
   groupRows: readonly GroupRow[],
