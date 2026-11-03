@@ -138,6 +138,8 @@ export const SETTING_VALUES = {
     "retention.security": PositiveDays,
     /** Retention for conversation messages, in days. */
     "retention.conversations": PositiveDays,
+    /** How long the history of Runner Metrics is kept, in days. */
+    "retention.runnerMetrics": PositiveDays,
     /** When the daily backup snapshot runs, in the user timezone setting. */
     "backup.time": TimeOfDay,
     /** How many daily snapshots to keep. */
