@@ -40,14 +40,38 @@
   font-weight: var(--w-bold);
   letter-spacing: -0.015em;
 }
+/* The line under the name wraps, and a "·" must never end a line or start one.
+   So the dot is not an item of its own: each piece after the first draws its dot
+   (`::before`) in a slot of its own to its left, and the line holds no dot at its
+   end. The row is moved left by one slot and clipped at the text column's edge, so
+   the dot of a piece that wraps to the start of a line falls outside the clip and
+   is not drawn. On one line the slots are what the 6px gaps and the dot used to
+   take. The slot is 6px, the dot (0.29em wide, as Inter draws it), and 6px. */
 .machine-page-head-text p {
+  --machine-page-head-slot: calc(12px + 0.29em);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin: 2px 0 0;
+  row-gap: 6px;
+  margin: 2px 0 0 calc(-1 * var(--machine-page-head-slot));
+  clip-path: inset(-1em 0 -1em var(--machine-page-head-slot));
   color: var(--muted);
   font-size: var(--t-12);
+}
+.machine-page-head-text p > * {
+  position: relative;
+  padding-left: var(--machine-page-head-slot);
+}
+/* `content: "·" / ""` gives the dot an empty text alternative, so screen readers
+   skip it as they skipped the `aria-hidden` span it replaces. */
+.machine-page-head-piece::before {
+  content: "·";
+  content: "·" / "";
+  position: absolute;
+  top: 0;
+  left: 6px;
+  width: 0.29em;
+  text-align: center;
 }
 .machine-page-status {
   display: inline-flex;

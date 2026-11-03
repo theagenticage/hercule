@@ -1,4 +1,4 @@
-import { Fragment, type JSX } from "react";
+import type { JSX } from "react";
 import type { MachineHead } from "@hercule/client-core/machine-page";
 import type { FleetTextPart } from "@hercule/client-core/fleet";
 import { FleetText } from "./fleet-text";
@@ -12,7 +12,8 @@ import "./machine-page.css";
  * under the name its status and the pieces of text after it, drawn with a dot
  * between them: the facts the runner reported, then the runner program's own
  * line with "update available" after it when the controller runs a newer
- * release.
+ * release. The stylesheet draws the dots, so that none ends or starts a line
+ * when the row wraps.
  *
  * The head carries the view-transition name that the machine's card on the
  * Fleet page carries too (`buildMachineTransitionName`).
@@ -46,10 +47,9 @@ export function MachinePageHead({
             {head.status.label}
           </span>
           {pieces.map((piece) => (
-            <Fragment key={piece}>
-              <span aria-hidden="true">·</span>
-              <span>{piece}</span>
-            </Fragment>
+            <span key={piece} className="machine-page-head-piece">
+              {piece}
+            </span>
           ))}
         </p>
       </div>

@@ -235,6 +235,9 @@ const readInstruments = (): readonly string[] =>
     getCapacity().querySelectorAll(".machine-page-instrument"),
     (tile) => tile.textContent,
   );
+/** Returns the text of each piece after the status in a machine's head, in the order drawn. */
+const readHeadPieces = (head: HTMLElement): readonly string[] =>
+  Array.from(head.querySelectorAll(".machine-page-head-piece"), (piece) => piece.textContent);
 const getSettings = () => screen.getByRole("region", { name: "Settings" });
 const getSoftware = () => screen.getByRole("region", { name: "Software" });
 
@@ -243,9 +246,15 @@ describe("a machine's head", () => {
     await openMachine();
 
     const head = screen.getByRole("heading", { level: 2, name: "atlas" }).closest("header")!;
-    expect(head.textContent).toBe(
-      "atlasOnline·macOS·arm64·16 GB memory·500 GB disk·Runner 0.9.3·update available",
-    );
+    expect(within(head).getByText("Online")).toBeTruthy();
+    expect(readHeadPieces(head)).toEqual([
+      "macOS",
+      "arm64",
+      "16 GB memory",
+      "500 GB disk",
+      "Runner 0.9.3",
+      "update available",
+    ]);
     const roomLine = screen.getByText(/^Room for/);
     expect(roomLine.textContent).toBe("Room for 4 more, under its cap of 8");
     expect(within(roomLine).getByText("4").tagName).toBe("B");
