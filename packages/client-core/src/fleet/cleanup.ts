@@ -237,11 +237,6 @@ export const buildCleanupSnapshot = (
           .map((thread) => thread.id),
       };
     })
-    .toSorted(
-      (a, b) =>
-        (b.freesBytes ?? -1) - (a.freesBytes ?? -1) ||
-        (a.workspaceId < b.workspaceId ? -1 : a.workspaceId > b.workspaceId ? 1 : 0),
-    )
     .slice(0, MAX_CLEANUP_ROWS);
   return {
     runnerName,
