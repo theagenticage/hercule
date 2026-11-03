@@ -8,7 +8,7 @@
  * are in `runner-metrics.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Clock, Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { RunnerMetrics, RunnerMetricsQuery } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
@@ -35,12 +35,30 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-/** A UTC hour boundary, so the offsets below fall on known five-minute and hour boundaries. */
-const START = Date.parse("2026-11-03T10:00:00.000Z");
+/**
+ * A UTC hour boundary two days ago, so the offsets below fall on known
+ * five-minute and hour boundaries. It is in the past because a query never
+ * reads beyond now.
+ */
+const START = Math.floor((Date.now() - 2 * DAY) / HOUR) * HOUR;
 
 /** The instant `minutes` after `START`, as the ISO text a report is recorded at. */
 const instant = (minutes: number, extraMs = 0): string =>
   new Date(START + minutes * MINUTE + extraMs).toISOString();
+
+/** Builds a clock that stands at `millis`, for a query that must be answered at a known time. */
+const buildClockAt = (millis: number): Clock.Clock => {
+  const readNanos = () => BigInt(millis) * 1_000_000n;
+  return {
+    currentTimeMillisUnsafe: () => millis,
+    currentTimeMillis: Effect.succeed(millis),
+    currentTimeNanosUnsafe: readNanos,
+    currentTimeNanos: Effect.sync(readNanos),
+    monotonicTimeNanosUnsafe: readNanos,
+    monotonicTimeNanos: Effect.sync(readNanos),
+    sleep: () => Effect.void,
+  };
+};
 
 const GIB = 1024 ** 3;
 
@@ -485,6 +503,83 @@ describe("a query", () => {
     const expected = [result.first, result.second].toSorted().flatMap(pointsOf);
     expect(result.pages.map((page) => page.length)).toEqual([2, 2, 1]);
     expect(result.pages.flat()).toEqual(expected);
+  });
+});
+
+describe("a read of several pages", () => {
+  it("ends every page at the instant the first page was answered, even when until is ahead of the clock", async () => {
+    const found = await runAsUser(
+      Effect.gen(function* () {
+        const service = yield* RunnerMetricsService;
+        const runner = yield* insertRunner("iris");
+        yield* record(runner, report(50, 8), instant(0));
+        yield* record(runner, report(50, 8), instant(20));
+        // A client whose clock is ahead asks for an `until` after the time the
+        // controller answers.
+        const span = {
+          runnerId: runner,
+          since: instant(0),
+          until: instant(180),
+          resolution: "fiveMinutes",
+        } as const;
+        const first = yield* Effect.provideService(
+          service.query({ ...span, limit: 1 }),
+          Clock.Clock,
+          buildClockAt(START + 60 * MINUTE),
+        );
+        // A report arrives after the first page, for a minute that is before
+        // `until` but after the time the first page was answered.
+        yield* record(runner, report(50, 8), instant(90));
+        const later = yield* Effect.provideService(
+          // The limit is large enough that the page's range reaches the new row.
+          service.query({ ...span, limit: 30, cursor: first.nextCursor! }),
+          Clock.Clock,
+          buildClockAt(START + 4 * HOUR),
+        );
+        return { first: first.items, later: later.items, hadCursor: first.nextCursor };
+      }),
+    );
+
+    expect(found.hadCursor).toBeDefined();
+    expect(found.first.map((point) => point.at)).toEqual([instant(0)]);
+    expect(found.later.map((point) => point.at)).toEqual([instant(20)]);
+  });
+
+  it("takes only the next few runners for a page, and hands back a cursor when runners remain, even when the page is empty", async () => {
+    const found = await runAsUser(
+      Effect.gen(function* () {
+        const service = yield* RunnerMetricsService;
+        const created = yield* Effect.forEach(["a", "b", "c", "d"], insertRunner);
+        const [first, , , last] = created.toSorted() as [string, string, string, string];
+        // Only the runner that sorts last has rows, so the first pages hold none.
+        for (const minute of [0, 5, 10]) yield* record(last, report(50, 8), instant(minute));
+        const pages: Array<ReadonlyArray<string>> = [];
+        const cursors: Array<string | undefined> = [];
+        let cursor: string | undefined;
+        do {
+          const page = yield* service.query({
+            since: instant(0),
+            until: instant(60),
+            resolution: "fiveMinutes",
+            limit: 2,
+            ...(cursor === undefined ? {} : { cursor }),
+          });
+          pages.push(page.items.map((point) => `${point.runnerId} ${point.at}`));
+          cursors.push(page.nextCursor);
+          cursor = page.nextCursor;
+        } while (cursor !== undefined && pages.length < 20);
+        return { pages, cursors, last, first };
+      }),
+    );
+
+    // A five-minute point holds 13 per runner at most over the hour, so two
+    // points need one runner and a page takes two runners.
+    expect(found.pages[0]).toEqual([]);
+    expect(found.cursors[0]).toBeDefined();
+    expect(found.pages.flat()).toEqual(
+      [0, 5, 10].map((minute) => `${found.last} ${instant(minute)}`),
+    );
+    expect(found.cursors.at(-1)).toBeUndefined();
   });
 });
 

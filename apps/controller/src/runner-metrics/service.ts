@@ -97,7 +97,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("runnerMetrics.query");
         const sinceMs = Date.parse(input.since);
-        const untilMs = Date.parse(input.until ?? (yield* nowIso));
+        const nowMs = Date.parse(yield* nowIso);
+        const untilMs = input.until === undefined ? nowMs : Date.parse(input.until);
         if (sinceMs >= untilMs) {
           return yield* Effect.fail(
             refuseSpan(
@@ -131,7 +132,10 @@ const make = Effect.gen(function* () {
             since: input.since,
             until: input.until,
             startMs: Math.floor(sinceMs / pointMs) * pointMs,
-            endMs: untilMs,
+            // A client's clock may run ahead of this one. Capping the end at now
+            // keeps a point from being read while it still fills and again
+            // after, and the repository carries this end in every cursor.
+            endMs: Math.min(untilMs, nowMs),
             limit: input.limit ?? DEFAULT_PAGE_LIMIT,
             cursor: input.cursor,
           }),

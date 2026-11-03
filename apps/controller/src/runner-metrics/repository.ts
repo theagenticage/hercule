@@ -45,7 +45,12 @@ export interface PointsRequest {
   readonly until: string | undefined;
   /** The start of the first point. A multiple of the resolution's length. */
   readonly startMs: number;
-  /** The end of the span; rows at this minute or later are not read. */
+  /**
+   * The end of the span; rows at this minute or later are not read. It is the
+   * end of the first page: the caller's `until`, or now, whichever is earlier.
+   * Every cursor carries it, and a page after the first reads to the end its
+   * cursor carries, so rows written while the pages are read are not mixed in.
+   */
   readonly endMs: number;
   readonly limit: number;
   readonly cursor: string | undefined;
@@ -149,26 +154,42 @@ export interface Resume {
  */
 export interface ReadArm {
   readonly runners:
-    | { readonly kind: "all" }
-    | { readonly kind: "one" | "after"; readonly runnerId: string };
+    | { readonly kind: "one"; readonly runnerId: string }
+    | { readonly kind: "these"; readonly runnerIds: ReadonlyArray<string> };
   readonly fromMs: number;
   readonly toMs: number;
 }
 
 /**
- * Plans the ranges one page reads, so a page after the first starts where the
- * previous one stopped instead of reading the rows it skips:
+ * Returns how many runners a read for every runner takes at once: enough to
+ * fill a page of `limit + 1` points, and one more because a runner may have
+ * fewer points than the span could hold. A runner has at most one point per
+ * point length of the span, plus one for a span that does not start on a
+ * boundary.
+ */
+export const computeRunnerBatchSize = (request: PointsRequest): number => {
+  const pointMs = RUNNER_METRICS_POINT_MS[request.resolution];
+  const pointsPerRunner = Math.ceil((request.endMs - request.startMs) / pointMs) + 1;
+  return Math.ceil((request.limit + 1) / pointsPerRunner) + 1;
+};
+
+/**
+ * Plans the ranges one page reads, so a page starts where the previous one
+ * stopped instead of reading the rows it skips:
  *
  * - For one runner, a page reads from the first minute not yet read, and no
  *   further than the minutes `limit + 1` points would hold. That is the most
  *   a page can use. A stretch with gaps may hold fewer points than that, and
  *   `readPoints` then continues from the end of the range.
- * - For every runner, the first page reads each runner's range. A later page
- *   reads the rest of the cursor's runner, then the runners after it.
+ * - For every runner, a page reads the rest of the cursor's runner, then
+ *   `laterRunnerIds`: the next runners after it, `computeRunnerBatchSize` of
+ *   them. A page never groups more runners than it can fill itself with, and
+ *   `readPoints` continues after the last of them.
  */
 export const planReads = (
   request: PointsRequest,
   resume: Resume | undefined,
+  laterRunnerIds: ReadonlyArray<string>,
 ): ReadonlyArray<ReadArm> => {
   const fromMs = Math.max(request.startMs, resume?.minuteMs ?? request.startMs);
   if (request.runnerId !== undefined) {
@@ -181,26 +202,21 @@ export const planReads = (
       },
     ];
   }
-  if (resume === undefined) {
-    return [{ runners: { kind: "all" }, fromMs, toMs: request.endMs }];
-  }
-  return [
-    { runners: { kind: "one", runnerId: resume.runnerId }, fromMs, toMs: request.endMs },
-    {
-      runners: { kind: "after", runnerId: resume.runnerId },
-      fromMs: request.startMs,
-      toMs: request.endMs,
-    },
-  ];
+  const later: ReadArm = {
+    runners: { kind: "these", runnerIds: laterRunnerIds },
+    fromMs: request.startMs,
+    toMs: request.endMs,
+  };
+  return resume === undefined
+    ? [later]
+    : [{ runners: { kind: "one", runnerId: resume.runnerId }, fromMs, toMs: request.endMs }, later];
 };
 
 const buildArmStatement = (sql: SqlClient.SqlClient, arm: ReadArm) => {
   const runners =
-    arm.runners.kind === "all"
-      ? sql`runner_id IN (SELECT id FROM runners)`
-      : arm.runners.kind === "one"
-        ? sql`runner_id = ${uuidFromString(arm.runners.runnerId)}`
-        : sql`runner_id IN (SELECT id FROM runners WHERE id > ${uuidFromString(arm.runners.runnerId)})`;
+    arm.runners.kind === "one"
+      ? sql`runner_id = ${uuidFromString(arm.runners.runnerId)}`
+      : sql`runner_id IN (${sql.csv(arm.runners.runnerIds.map((id) => sql`${uuidFromString(id)}`))})`;
   return sql`
     SELECT runner_id, minute, disk_free_bytes, available_memory_bytes, cpu_average_percent,
            cpu_peak_percent, sessions_running, sessions_queued
@@ -210,13 +226,29 @@ const buildArmStatement = (sql: SqlClient.SqlClient, arm: ReadArm) => {
 };
 
 /**
+ * Builds the statement that lists the ids of the first `count` runners that
+ * sort after `afterRunnerId`, or the first `count` runners when it is
+ * undefined. It reads the runners' primary key in order and stops at `count`.
+ */
+export const buildRunnerBatchStatement = (
+  sql: SqlClient.SqlClient,
+  afterRunnerId: string | undefined,
+  count: number,
+): Statement<{ readonly id: Uint8Array }> =>
+  afterRunnerId === undefined
+    ? sql<{ readonly id: Uint8Array }>`SELECT id FROM runners ORDER BY id LIMIT ${count}`
+    : sql<{ readonly id: Uint8Array }>`
+        SELECT id FROM runners WHERE id > ${uuidFromString(afterRunnerId)}
+        ORDER BY id LIMIT ${count}
+      `;
+
+/**
  * Builds the statement that reads one page of points, plus one point more than
  * the page holds. It is one statement:
  *
- * - Each arm of `planReads` is a range on the raw `minute` column under a
- *   runner, so the primary key serves it. Without a runner,
- *   `runner_id IN (SELECT id FROM runners)` makes SQLite seek each runner's
- *   range, rather than read every row of the table.
+ * - Each arm of `planReads` is a range on the raw `minute` column under one
+ *   runner or a short list of them, so the primary key serves it and SQLite
+ *   seeks each runner's range rather than reading every row of the table.
  * - A point is a group of rows. Its start is `minute` less its remainder in the
  *   point's length, so points fall on fixed UTC boundaries.
  * - The page boundary is on the raw rows, before they are grouped: the arms
@@ -226,8 +258,7 @@ const buildArmStatement = (sql: SqlClient.SqlClient, arm: ReadArm) => {
  * `GROUP BY` sorts the rows of the arms in a temporary b-tree before `LIMIT`
  * applies, because a point's start is an expression and no index is ordered
  * by it. So a page costs the rows of its ranges, which `planReads` keeps near
- * the size of a page for one runner, and shrinks as a read for every runner
- * goes on.
+ * the size of a page.
  */
 export const buildPointsStatement = (
   sql: SqlClient.SqlClient,
@@ -304,11 +335,17 @@ const make = Effect.gen(function* () {
      * Fails with `CursorError` when the cursor was not issued for this runner,
      * resolution and span.
      *
-     * A read for one runner covers a bounded range (see `planReads`). When
-     * that range ends before the span does and holds no more than a page of
-     * points, the page still has a `nextCursor` when the runner has rows
-     * further on, which resumes at the next point that has any. Without it, a
-     * gap in the history would end the read early.
+     * The end of the span is fixed by the first page and carried in every
+     * cursor, so every page of one read ends at the same instant.
+     *
+     * A page may hold fewer than `limit` points and still have a `nextCursor`,
+     * because a read is bounded to the work one page needs (see `planReads`):
+     *
+     * - For one runner, the range ended before the span did. The cursor
+     *   resumes at the next point that has any row, so a gap costs no empty
+     *   page, and is absent when the runner has none.
+     * - For every runner, runners remain after the ones the page took. The
+     *   cursor resumes after the last of them.
      */
     readPoints: (
       request: PointsRequest,
@@ -319,42 +356,50 @@ const make = Effect.gen(function* () {
         const cursor =
           request.cursor === undefined
             ? undefined
-            : yield* decodeCursor(request.cursor, scope, ["number"]);
-        const arms = planReads(
-          request,
+            : yield* decodeCursor(request.cursor, scope, ["number", "number"]);
+        const read = { ...request, endMs: Number(cursor?.values[1] ?? request.endMs) };
+        const resume =
           cursor === undefined
             ? undefined
-            : { runnerId: cursor.id, minuteMs: Number(cursor.values[0]) + pointMs },
-        );
-        const rows = yield* buildPointsStatement(sql, request, arms);
+            : { runnerId: cursor.id, minuteMs: Number(cursor.values[0]) + pointMs };
+        const encodeNextCursor = (runnerId: string, pointStartMs: number): string =>
+          encodeCursor(scope, [pointStartMs, read.endMs], runnerId);
+
+        let laterRunnerIds: ReadonlyArray<string> = [];
+        let runnersRemain = false;
+        if (read.runnerId === undefined) {
+          const batchSize = computeRunnerBatchSize(read);
+          const ids = yield* buildRunnerBatchStatement(sql, resume?.runnerId, batchSize + 1);
+          laterRunnerIds = ids.slice(0, batchSize).map((row) => uuidToString(row.id));
+          runnersRemain = ids.length > batchSize;
+        }
+        const arms = planReads(read, resume, laterRunnerIds);
+        const rows = yield* buildPointsStatement(sql, read, arms);
         const page = yield* buildPage(
           rows,
-          request.limit,
+          read.limit,
           (pageRows) => Effect.succeed(pageRows.map(toPoint)),
-          (last) => encodeCursor(scope, [Date.parse(last.at)], last.runnerId),
+          (last) => encodeNextCursor(last.runnerId, Date.parse(last.at)),
         );
-        const rangeEndMs = arms[0]!.toMs;
-        if (
-          page.nextCursor !== undefined ||
-          request.runnerId === undefined ||
-          rangeEndMs >= request.endMs
-        ) {
-          return page;
+        if (page.nextCursor !== undefined) return page;
+
+        if (read.runnerId === undefined) {
+          const lastRunnerId = laterRunnerIds.at(-1);
+          // A point start at the end of the span makes the cursor skip the
+          // rest of that runner.
+          return runnersRemain && lastRunnerId !== undefined
+            ? { items: page.items, nextCursor: encodeNextCursor(lastRunnerId, read.endMs) }
+            : page;
         }
-        // The range ended before the span did and held no more than a page of
-        // points. If the runner has rows further on, the cursor resumes at the
-        // point of the first of them, so a gap costs no empty page.
-        const [next] = yield* buildNextMinuteStatement(
-          sql,
-          request.runnerId,
-          rangeEndMs,
-          request.endMs,
-        );
+
+        const rangeEndMs = arms[0]!.toMs;
+        if (rangeEndMs >= read.endMs) return page;
+        const [next] = yield* buildNextMinuteStatement(sql, read.runnerId, rangeEndMs, read.endMs);
         if (next === undefined) return page;
         const nextPointMs = next.minute - (next.minute % pointMs);
         return {
           items: page.items,
-          nextCursor: encodeCursor(scope, [nextPointMs - pointMs], request.runnerId),
+          nextCursor: encodeNextCursor(read.runnerId, nextPointMs - pointMs),
         };
       }),
 

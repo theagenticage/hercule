@@ -19,8 +19,11 @@ interface PointsPage {
   readonly nextCursor?: string;
 }
 
-const START = Date.parse("2026-11-03T10:00:00.000Z");
 const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+
+/** A UTC hour boundary two days ago: a query never reads beyond now. */
+const START = Math.floor((Date.now() - 48 * HOUR) / HOUR) * HOUR;
 
 const iso = (minutes: number): string => new Date(START + minutes * MINUTE).toISOString();
 
@@ -125,8 +128,9 @@ describe("runnerMetrics.query over HTTP", () => {
       await writeRows(harness, runner.id, [0, 7]);
 
       const response = await query(harness.base, token, {
-        since: "2026-11-03T12:00:00+02:00",
-        until: "2026-11-03T10:30:00Z",
+        // The same instant as `iso(0)`, written two hours ahead with its offset.
+        since: `${new Date(START + 2 * HOUR).toISOString().replace(".000Z", "")}+02:00`,
+        until: iso(30).replace(".000Z", "Z"),
         resolution: "fiveMinutes",
       });
 
@@ -145,7 +149,7 @@ describe("runnerMetrics.query over HTTP", () => {
         { since: iso(0), resolution: "minute" },
         { since: "yesterday", resolution: "hour" },
         { since: "2026-02-30T10:00:00Z", resolution: "hour" },
-        { since: "2026-11-03T10:00:00", resolution: "hour" },
+        { since: iso(0).replace(".000Z", ""), resolution: "hour" },
       ]) {
         const response = await query(base, token, parameters);
         expect(response.status).toBe(400);
