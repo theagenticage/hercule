@@ -7,7 +7,8 @@
  *   API reads them;
  * - an entry for a workspace the controller does not know is dropped, and the
  *   rest of the report is still stored;
- * - a report without totals keeps the totals stored before it.
+ * - a report without totals keeps the totals stored before it;
+ * - a failure with no measurement adds the error and keeps the stored numbers.
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Runner } from "@hercule/contract";
@@ -91,7 +92,11 @@ describe("a runner's disk usage report", () => {
         return workspace.diskUsageError === null ? undefined : workspace;
       });
       expect(failed.diskUsageError).toBe("Measuring took longer than 10 minutes");
-      expect(failed.diskUsage).toBeNull();
+      expect(failed.diskUsage).toEqual({
+        sizeBytes: 5000,
+        freesBytes: 3000,
+        measuredAt: MEASURED_AT,
+      });
       expect((await readRunner(arranged)).diskUsage?.repositoryCacheBytes).toBe(700);
     });
   });

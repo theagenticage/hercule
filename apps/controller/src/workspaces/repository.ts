@@ -1144,7 +1144,9 @@ const make = Effect.gen(function* () {
      * announced as updated once the transaction commits.
      *
      * Reads the stored values of all the listed workspaces in one statement,
-     * compares them in memory, and writes only the entries that differ. An
+     * compares them in memory, and writes only the entries that differ. An entry
+     * with no measurement keeps the stored numbers and updates only the error,
+     * because a failed attempt leaves the earlier measurement in place. An
      * entry for a workspace that does not exist, or that belongs to another
      * runner, is dropped. A workspace the report does not list is not touched,
      * so a report cut short by the runner clears nothing. When an id is listed
@@ -1172,20 +1174,24 @@ const make = Effect.gen(function* () {
         for (const row of stored) {
           const id = uuidToString(row.id);
           const entry = reported.get(id)!;
-          const usage = entry.diskUsage;
+          // A null measurement means none has succeeded in the runner's memory, which is
+          // not a reason to forget the numbers stored from an earlier success.
+          const sizeBytes = entry.diskUsage?.sizeBytes ?? row.size_bytes;
+          const freesBytes = entry.diskUsage?.freesBytes ?? row.frees_bytes;
+          const measuredAt = entry.diskUsage?.measuredAt ?? row.disk_usage_measured_at;
           if (
-            (usage?.sizeBytes ?? null) === row.size_bytes &&
-            (usage?.freesBytes ?? null) === row.frees_bytes &&
-            (usage?.measuredAt ?? null) === row.disk_usage_measured_at &&
+            sizeBytes === row.size_bytes &&
+            freesBytes === row.frees_bytes &&
+            measuredAt === row.disk_usage_measured_at &&
             entry.error === row.disk_usage_error
           ) {
             continue;
           }
           yield* sql`
             UPDATE workspaces
-            SET size_bytes = ${usage?.sizeBytes ?? null},
-                frees_bytes = ${usage?.freesBytes ?? null},
-                disk_usage_measured_at = ${usage?.measuredAt ?? null},
+            SET size_bytes = ${sizeBytes},
+                frees_bytes = ${freesBytes},
+                disk_usage_measured_at = ${measuredAt},
                 disk_usage_error = ${entry.error}
             WHERE id = ${row.id}
           `;

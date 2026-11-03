@@ -186,6 +186,23 @@ describe("storing the disk usage a runner reports", () => {
     );
   });
 
+  it("keeps the stored numbers when a failure arrives with no measurement, and writes a repeated failure once", async () => {
+    await withWorkspaces(({ a }) =>
+      Effect.gen(function* () {
+        yield* record([measured(a, 100, 40)]);
+        const failure = { workspaceId: a, diskUsage: null, error: "Measuring failed" };
+        const first = yield* record([failure]);
+        expect(first.changed).toEqual([a]);
+        expect(yield* read(a)).toEqual({
+          diskUsage: { sizeBytes: 100, freesBytes: 40, measuredAt: MEASURED_AT },
+          diskUsageError: "Measuring failed",
+        });
+        const repeated = yield* record([failure]);
+        expect(repeated).toEqual({ changed: [], announced: [] });
+      }),
+    );
+  });
+
   it("keeps earlier numbers beside the error of a failed later attempt", async () => {
     await withWorkspaces(({ a }) =>
       Effect.gen(function* () {
