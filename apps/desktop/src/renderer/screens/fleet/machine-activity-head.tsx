@@ -43,19 +43,3 @@ export function MachineActivityHead({
     </header>
   );
 }
-
-/**
- * Returns the line shown when the page stopped reading older pages on its own
- * because `filter` found nothing new in the `loadedCount` log entries read so
- * far. `hasEntries` is whether the list shows any entry. The line does not say
- * how far back the log reaches.
- */
-export const describeBoundedActivity = (
-  filter: MachineActivityFilter,
-  loadedCount: number,
-  hasEntries: boolean,
-): string => {
-  const latest = `in the latest ${String(loadedCount)} entries`;
-  if (hasEntries) return `Nothing older matched ${latest}.`;
-  return filter === "problems" ? `No problems ${latest}.` : `Nothing matched ${latest}.`;
-};

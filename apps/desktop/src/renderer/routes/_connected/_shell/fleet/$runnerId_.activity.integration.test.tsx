@@ -156,6 +156,41 @@ describe("the Activity page's entries", () => {
     expect(document.querySelectorAll(".machine-activity-member")).toHaveLength(0);
   });
 
+  it("lists the lines of an unfolded entry right under it, the last with room below, and joins each entry to the one above", async () => {
+    await openActivity(buildSixEntries());
+    await userEvent.click(await screen.findByRole("button", { name: "Show 3" }));
+
+    const lines = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".machine-activity-day, .machine-activity-row, .machine-activity-member",
+      ),
+    );
+    expect(
+      lines.map((line) => (line.matches(".machine-activity-member") ? "detail" : line.textContent)),
+    ).toEqual([
+      "Today",
+      "13:00Went offlineby Hercule",
+      "12:003 sessions spawnedby HerculeHide",
+      "detail",
+      "detail",
+      "detail",
+      "09:00Set to take no new workby you",
+      "Yesterday",
+      "21:30Back onlineby Hercule",
+      "21:20Went offlineby Hercule",
+    ]);
+    expect(lines.slice(3, 6).map((line) => line.classList.contains("is-last"))).toEqual([
+      false,
+      false,
+      true,
+    ]);
+    expect(
+      lines.flatMap((line) =>
+        line.matches(".machine-activity-row") ? [line.classList.contains("joins-above")] : [],
+      ),
+    ).toEqual([false, true, true, false, true]);
+  });
+
   it("draws only the lines near the view of a long list", async () => {
     await openActivity(buildQuietEntries(100));
     await waitFor(() => expect(readLines()).not.toHaveLength(0));
