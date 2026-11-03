@@ -22,7 +22,7 @@ import {
 } from "./machine-activity-items";
 import {
   MachineActivityDayHeading,
-  MachineActivityMemberRow,
+  MachineActivityDetailRow,
   MachineActivityRow,
 } from "./machine-activity-row";
 import { useListTop } from "./use-list-top";
@@ -35,8 +35,8 @@ const estimateItemHeight = (heights: MachineActivityHeights, item: MachineActivi
       return heights.day;
     case "entry":
       return heights.entry;
-    case "member":
-      return item.isLast ? heights.lastMember : heights.member;
+    case "detail":
+      return item.isLast ? heights.lastDetail : heights.detail;
   }
 };
 
@@ -45,9 +45,9 @@ const estimateItemHeight = (heights: MachineActivityHeights, item: MachineActivi
  * `head` (the page's heading and filters), the days of `days` and `foot`.
  *
  * - The days are a virtual list: each day's heading, each entry and each
- *   member of an unfolded entry is a line of a height the list knows, and
+ *   detail of an unfolded entry is a line of a height the list knows, and
  *   only the lines near the view are drawn (spec 17 §Rules, rule 1). The
- *   members of an unfolded entry are lines of their own, so unfolding a
+ *   details of an unfolded entry are lines of their own, so unfolding a
  *   fold of a hundred log entries draws no more than the few that are in
  *   view.
  * - `openEntryKeys` are the keys of the unfolded entries, and pressing an
@@ -150,7 +150,7 @@ function MachineActivityLine({
           onToggle={() => onToggle(item.entry.key)}
         />
       );
-    case "member":
-      return <MachineActivityMemberRow member={item.member} isLast={item.isLast} />;
+    case "detail":
+      return <MachineActivityDetailRow detail={item.detail} isLast={item.isLast} />;
   }
 }

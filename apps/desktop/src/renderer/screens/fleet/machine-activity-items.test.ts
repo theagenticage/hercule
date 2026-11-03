@@ -5,18 +5,21 @@ import type {
 } from "@hercule/client-core/machine-activity";
 import { buildMachineActivityItems } from "./machine-activity-items";
 
-const buildEntry = (key: string, memberCount: number): MachineActivityEntry => ({
+const buildEntry = (key: string, count: number): MachineActivityEntry => ({
   key,
   time: "09:12",
   category: "sessions",
   problem: false,
-  sentence: memberCount === 1 ? "Session spawned" : `${String(memberCount)} sessions spawned`,
+  sentence: count === 1 ? "Session spawned" : `${String(count)} sessions spawned`,
   actor: { kind: "system" },
-  count: memberCount,
-  members: Array.from({ length: memberCount }, (_, index) => ({
-    eventId: Number(key) * 100 + index,
-    line: "Session spawned",
-  })),
+  count,
+  details:
+    count === 1
+      ? []
+      : Array.from({ length: count }, (_, index) => ({
+          eventId: Number(key) * 100 + index,
+          line: "Session spawned",
+        })),
 });
 
 const DAYS: ReadonlyArray<MachineActivityDay> = [
@@ -47,34 +50,34 @@ describe("buildMachineActivityItems", () => {
     ]);
   });
 
-  it("lists the members of an open entry as lines of their own, right after it", () => {
+  it("lists the details of an open entry as lines of their own, right after it", () => {
     const items = buildMachineActivityItems(DAYS, new Set(["5"]));
 
     expect(items.map((item) => item.key)).toEqual([
       "day:2026-11-03",
       "entry:5",
-      "member:5:500",
-      "member:5:501",
-      "member:5:502",
+      "detail:5:500",
+      "detail:5:501",
+      "detail:5:502",
       "entry:4",
       "day:2026-11-02",
       "entry:2",
     ]);
   });
 
-  it("marks the last member of an open entry", () => {
+  it("marks the last detail of an open entry", () => {
     const items = buildMachineActivityItems(DAYS, new Set(["5"]));
 
-    expect(items.flatMap((item) => (item.kind === "member" ? [item.isLast] : []))).toEqual([
+    expect(items.flatMap((item) => (item.kind === "detail" ? [item.isLast] : []))).toEqual([
       false,
       false,
       true,
     ]);
   });
 
-  it("opens only an entry that has several members, whatever the keys say", () => {
+  it("opens only an entry that has details, whatever the keys say", () => {
     const items = buildMachineActivityItems(DAYS, new Set(["4"]));
 
-    expect(items.some((item) => item.kind === "member")).toBe(false);
+    expect(items.some((item) => item.kind === "detail")).toBe(false);
   });
 });

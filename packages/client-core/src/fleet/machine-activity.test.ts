@@ -280,10 +280,12 @@ describe("describeMachineActivity sentences", () => {
   });
 
   it("names the session an entry is about, and no session for other kinds", () => {
-    expect(single(entry("session.spawned", { sessionId: SESSION_ID })).members[0]?.sessionId).toBe(
+    expect(single(entry("session.spawned", { sessionId: SESSION_ID })).subjectSessionId).toBe(
       SESSION_ID,
     );
-    expect(single(entry("runner.drained", { sessionId: SESSION_ID })).members).toEqual([]);
+    expect(single(entry("runner.drained", { sessionId: SESSION_ID })).subjectSessionId).toBe(
+      undefined,
+    );
   });
 });
 
@@ -327,9 +329,9 @@ describe("describeMachineActivity folding", () => {
     const folded = day!.entries[0]!;
     expect(folded.sentence).toBe("3 sessions spawned");
     expect(folded.key).toBe(String(events[0]!.id));
-    expect(folded.members.map((member) => member.eventId)).toEqual(events.map((e) => e.id));
-    // Every line is the same, so no member repeats it.
-    expect(folded.members.every((member) => member.line === undefined)).toBe(true);
+    expect(folded.details.map((detail) => detail.eventId)).toEqual(events.map((e) => e.id));
+    // Every line is the same, so no detail repeats it.
+    expect(folded.details.every((detail) => detail.line === undefined)).toBe(true);
   });
 
   it("does not fold across minutes, actors, wordings or runs", () => {
@@ -380,7 +382,7 @@ describe("describeMachineActivity folding", () => {
     expect(single(spawn("2026-11-03T09:12:01.000Z")).count).toBe(1);
   });
 
-  it("lists members only when they tell more than the sentence", () => {
+  it("lists details only when they tell more than the sentence", () => {
     const deleted = (second: number) =>
       entry("workspace.deleted", { reason: "none" }, `2026-11-03T09:12:0${second}.000Z`);
     const refused = (second: number, runnerMessage: string) =>
@@ -388,26 +390,31 @@ describe("describeMachineActivity folding", () => {
 
     // Identical lines and no session: nothing to unfold, folded or not.
     const [identical] = describe_([deleted(1), deleted(2), deleted(3)].reverse());
-    expect(identical?.entries[0]).toMatchObject({ count: 3, members: [] });
-    expect(single(deleted(1)).members).toEqual([]);
+    expect(identical?.entries[0]).toMatchObject({ count: 3, details: [] });
+    expect(single(deleted(1)).details).toEqual([]);
 
-    // Lines that differ: the members say what the sentence does not.
+    // Lines that differ: the details say what the sentence does not.
     const [differing] = describe_([refused(1, "In use."), refused(2, "Dirty.")].reverse());
-    expect(differing?.entries[0]?.members.map((member) => member.line)).toEqual([
+    expect(differing?.entries[0]?.details.map((detail) => detail.line)).toEqual([
       "Could not remove a workspace: Dirty.",
       "Could not remove a workspace: In use.",
     ]);
 
-    // A session: the screen names it beside the line, for one entry and for a fold.
-    // The lines are all the same, so each member is its session alone.
-    const lone = single(spawn("2026-11-03T09:12:01.000Z")).members;
-    expect(lone.map((member) => member.sessionId)).toEqual([SESSION_ID]);
-    expect("line" in lone[0]!).toBe(false);
+    // A session: a single entry is about it, and the screen names it after the
+    // sentence. A single entry has nothing to unfold.
+    const lone = single(spawn("2026-11-03T09:12:01.000Z"));
+    expect(lone.subjectSessionId).toBe(SESSION_ID);
+    expect(lone.details).toEqual([]);
+    // A fold has no subject. The lines are all the same, so each detail is its session alone.
     const [sessions] = describe_(
       [spawn("2026-11-03T09:12:01.000Z"), spawn("2026-11-03T09:12:02.000Z")].reverse(),
     );
-    expect(sessions?.entries[0]?.members).toHaveLength(2);
-    expect(sessions?.entries[0]?.members.every((member) => "line" in member)).toBe(false);
+    expect(sessions?.entries[0]?.subjectSessionId).toBe(undefined);
+    expect(sessions?.entries[0]?.details.map((detail) => detail.sessionId)).toEqual([
+      SESSION_ID,
+      SESSION_ID,
+    ]);
+    expect(sessions?.entries[0]?.details.every((detail) => "line" in detail)).toBe(false);
   });
 
   it("does not fold a state with another state, nor a stop reason with another", () => {
@@ -464,7 +471,7 @@ describe("describeMachineActivity folding", () => {
     ]);
   });
 
-  it("words a folded refusal by its count and keeps each message in its member", () => {
+  it("words a folded refusal by its count and keeps each message in its detail", () => {
     const [day] = describe_(
       [
         entry("workspace.disposalRefused", { runnerMessage: "It has uncommitted changes." }),
@@ -473,7 +480,7 @@ describe("describeMachineActivity folding", () => {
     );
     expect(day?.entries).toHaveLength(1);
     expect(day?.entries[0]?.sentence).toBe("Could not remove 2 workspaces");
-    expect(day?.entries[0]?.members.map((member) => member.line)).toEqual([
+    expect(day?.entries[0]?.details.map((detail) => detail.line)).toEqual([
       "Could not remove a workspace: It is in use.",
       "Could not remove a workspace: It has uncommitted changes.",
     ]);

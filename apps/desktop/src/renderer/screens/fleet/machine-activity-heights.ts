@@ -13,15 +13,15 @@ import { readLengths } from "../../app/text-size";
  *
  * - `day` is a day's heading with the space around it, 48px;
  * - `entry` is an entry, 35px;
- * - `member` is a line of an unfolded entry, 19px;
- * - `lastMember` is the last line of an unfolded entry, which has room below
+ * - `detail` is a line of an unfolded entry, 19px;
+ * - `lastDetail` is the last line of an unfolded entry, which has room below
  *   it, 28px.
  */
 const ACTIVITY_HEIGHT_PROPERTIES = {
   day: "--fleet-activity-height-day",
   entry: "--fleet-activity-height-entry",
-  member: "--fleet-activity-height-member",
-  lastMember: "--fleet-activity-height-last-member",
+  detail: "--fleet-activity-height-member",
+  lastDetail: "--fleet-activity-height-last-member",
 } as const;
 
 /** The heights of the Activity list's lines, in CSS pixels. */

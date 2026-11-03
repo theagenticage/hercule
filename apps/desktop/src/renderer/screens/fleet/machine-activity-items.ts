@@ -1,12 +1,12 @@
 import type {
   MachineActivityDay,
+  MachineActivityDetail,
   MachineActivityEntry,
-  MachineActivityMember,
 } from "@hercule/client-core/machine-activity";
 
 /**
  * One line of the Activity page's list. The list is flat so that it can be
- * virtualized: a day's heading, an entry, and the members of an entry that
+ * virtualized: a day's heading, an entry, and the details of an entry that
  * the user unfolded are each a line of their own, at a height the list knows.
  */
 export type MachineActivityItem =
@@ -15,16 +15,16 @@ export type MachineActivityItem =
       readonly kind: "entry";
       readonly key: string;
       readonly entry: MachineActivityEntry;
-      /** True when the entry has members and they are listed below it. */
+      /** True when the entry has details and they are listed below it. */
       readonly isOpen: boolean;
-      /** True when the line above is an entry or a member, so the thread that joins the dots runs into this one. */
+      /** True when the line above is an entry or a detail, so the thread that joins the dots runs into this one. */
       readonly joinsAbove: boolean;
     }
   | {
-      readonly kind: "member";
+      readonly kind: "detail";
       readonly key: string;
-      readonly member: MachineActivityMember;
-      /** True for the last member of an unfolded entry, which has room below it before the next entry. */
+      readonly detail: MachineActivityDetail;
+      /** True for the last detail of an unfolded entry, which has room below it before the next entry. */
       readonly isLast: boolean;
     };
 
@@ -33,9 +33,8 @@ export const buildEntryItemKey = (entryKey: string): string => `entry:${entryKey
 
 /**
  * Returns the lines of `days` in the order they are drawn: each day's heading,
- * then its entries, with the members of every entry whose key is in
- * `openEntryKeys` right after it. Only an entry that folded several log
- * entries can be open.
+ * then its entries, with the details of every entry whose key is in
+ * `openEntryKeys` right after it. Only an entry with details can be open.
  */
 export const buildMachineActivityItems = (
   days: ReadonlyArray<MachineActivityDay>,
@@ -45,7 +44,7 @@ export const buildMachineActivityItems = (
   for (const day of days) {
     items.push({ kind: "day", key: `day:${day.key}`, heading: day.heading });
     day.entries.forEach((entry, index) => {
-      const isOpen = entry.members.length > 1 && openEntryKeys.has(entry.key);
+      const isOpen = entry.details.length > 0 && openEntryKeys.has(entry.key);
       items.push({
         kind: "entry",
         key: buildEntryItemKey(entry.key),
@@ -54,12 +53,12 @@ export const buildMachineActivityItems = (
         joinsAbove: index > 0,
       });
       if (!isOpen) return;
-      entry.members.forEach((member, memberIndex) => {
+      entry.details.forEach((detail, detailIndex) => {
         items.push({
-          kind: "member",
-          key: `member:${entry.key}:${String(member.eventId)}`,
-          member,
-          isLast: memberIndex === entry.members.length - 1,
+          kind: "detail",
+          key: `detail:${entry.key}:${String(detail.eventId)}`,
+          detail,
+          isLast: detailIndex === entry.details.length - 1,
         });
       });
     });

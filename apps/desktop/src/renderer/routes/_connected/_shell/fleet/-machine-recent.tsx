@@ -15,7 +15,7 @@ import {
 import { ChevronRightIcon } from "../../../../icons/chevron-right";
 import { MachineActivityNote } from "../../../../screens/fleet/machine-activity-note";
 import {
-  MachineActivityMemberRow,
+  MachineActivityDetailRow,
   MachineActivityRow,
 } from "../../../../screens/fleet/machine-activity-row";
 import { MachinePageSection } from "../../../../screens/fleet/machine-page-section";
@@ -67,7 +67,7 @@ export function MachineRecent({
       {entries.length > 0 && (
         <div className="machine-activity machine-activity--recent">
           {entries.map((entry, index) => {
-            const isOpen = entry.members.length > 1 && openKeys.has(entry.key);
+            const isOpen = entry.details.length > 0 && openKeys.has(entry.key);
             return (
               <Fragment key={entry.key}>
                 <MachineActivityRow
@@ -78,11 +78,11 @@ export function MachineRecent({
                   onToggle={() => toggle(entry.key)}
                 />
                 {isOpen &&
-                  entry.members.map((member, memberIndex) => (
-                    <MachineActivityMemberRow
-                      key={member.eventId}
-                      member={member}
-                      isLast={memberIndex === entry.members.length - 1}
+                  entry.details.map((detail, detailIndex) => (
+                    <MachineActivityDetailRow
+                      key={detail.eventId}
+                      detail={detail}
+                      isLast={detailIndex === entry.details.length - 1}
                     />
                   ))}
               </Fragment>

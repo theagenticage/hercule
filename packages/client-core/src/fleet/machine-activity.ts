@@ -53,16 +53,16 @@ export type MachineActivityActor =
   /** A run (`run 1f3a9c2e`) or a plugin (`plugin:github`), named as `describeActor` names it. */
   | { readonly kind: "other"; readonly label: string };
 
-/** One audit log entry inside a folded entry. */
-export interface MachineActivityMember {
+/** One audit log entry that a folded entry unfolds into. */
+export interface MachineActivityDetail {
   readonly eventId: number;
   /**
-   * What this one entry was, from its payload alone. Left out when every
-   * member of the entry has the same line, because it would only repeat the
-   * entry's sentence.
+   * What this one audit log entry was, from its payload alone. Left out when
+   * every audit log entry of the folded entry has the same line, because it
+   * would only repeat the entry's sentence.
    */
   readonly line?: string;
-  /** The session the entry is about, for the screen to name beside `line`. */
+  /** The session the audit log entry is about, for the screen to name beside `line`. */
   readonly sessionId?: string;
 }
 
@@ -71,28 +71,34 @@ export interface MachineActivityMember {
  * happened in one minute and were folded into one.
  */
 export interface MachineActivityEntry {
-  /** The newest member's event id, as text. */
+  /** The newest audit log entry's event id, as text. */
   readonly key: string;
-  /** When the entry happened, "09:12": 24-hour, in the display timezone. Every member happened in this minute. */
+  /** When the entry happened, "09:12": 24-hour, in the display timezone. Every audit log entry of the entry happened in this minute. */
   readonly time: string;
   readonly category: MachineActivityCategory;
   readonly problem: boolean;
   /** Complete without any name that needs a read: "Went offline", "12 sessions spawned". */
   readonly sentence: string;
-  /** Set when every member was spawned for one workflow run. The screen appends "for <the run's workflow name>". */
+  /** Set when every audit log entry of the entry was spawned for one workflow run. The screen appends "for <the run's workflow name>". */
   readonly runId?: string;
   readonly actor: MachineActivityActor;
   /** How many audit log entries this entry stands for: the number in "12 sessions spawned", 1 when nothing folded. */
   readonly count: number;
   /**
-   * The audit log entries behind this entry, newest first, listed only when
-   * they tell the user something the sentence does not: at least one has a
-   * `sessionId`, or their lines are not all the same. Otherwise empty, because
-   * there is nothing to unfold: "3 workspaces of finished runs removed" would
-   * unfold into three identical lines. This holds for a single entry too, so
-   * one member without a `sessionId` is not kept: its line is the sentence.
+   * The session a single entry is about, which the screen names after the
+   * sentence: " · <title>". Left out for a folded entry, whose sessions are
+   * its `details`, and when the audit log entry names no session.
    */
-  readonly members: ReadonlyArray<MachineActivityMember>;
+  readonly subjectSessionId?: string;
+  /**
+   * The audit log entries a folded entry unfolds into, newest first. They are
+   * listed only when they tell the user something the sentence does not: at
+   * least one has a `sessionId`, or their lines are not all the same.
+   * Otherwise empty, because there is nothing to unfold: "3 workspaces of
+   * finished runs removed" would unfold into three identical lines. A single
+   * entry never has details.
+   */
+  readonly details: ReadonlyArray<MachineActivityDetail>;
 }
 
 /** The entries of one local day. */
@@ -107,7 +113,7 @@ export interface MachineActivityDay {
 /** Which filter besides "all" and "problems" an entry belongs to. */
 export type MachineActivityCategory = "connection" | "sessions" | "workspaces" | "settings";
 
-/** The words of an entry: for one member, and for several members folded together. */
+/** The words of an entry: for one audit log entry, and for several folded together. */
 interface Wording {
   readonly forOne: string;
   readonly forCount: (count: number) => string;
@@ -512,22 +518,22 @@ const MS_PER_DAY = 86_400_000;
 const buildDayKey = (dayNumber: number): string =>
   new Date(dayNumber * MS_PER_DAY).toISOString().slice(0, 10);
 
-/** A member while its entry is built: it always has its line, which `selectListedMembers` may leave out. */
-type PendingMember = MachineActivityMember & { readonly line: string };
+/** An audit log entry while its entry is built: it always has its line, which `selectDetails` may leave out. */
+type PendingLogEntry = MachineActivityDetail & { readonly line: string };
 
 /**
- * Returns the members to list under an entry, or an empty list when they tell
- * the user nothing the sentence does not: no member has a session and every
- * line is the same. A member keeps its `line` only when the lines differ,
- * because otherwise it would only repeat the sentence.
+ * Returns the details to list under a folded entry, or an empty list when
+ * they tell the user nothing the sentence does not: no audit log entry has a
+ * session and every line is the same. A detail keeps its `line` only when
+ * the lines differ, because otherwise it would only repeat the sentence.
  */
-const selectListedMembers = (
-  members: ReadonlyArray<PendingMember>,
-): ReadonlyArray<MachineActivityMember> => {
-  const linesDiffer = members.some((member) => member.line !== members[0]?.line);
-  if (linesDiffer) return members;
-  if (members.every((member) => member.sessionId === undefined)) return [];
-  return members.map(({ eventId, sessionId }) => ({
+const selectDetails = (
+  logEntries: ReadonlyArray<PendingLogEntry>,
+): ReadonlyArray<MachineActivityDetail> => {
+  const linesDiffer = logEntries.some((each) => each.line !== logEntries[0]?.line);
+  if (linesDiffer) return logEntries;
+  if (logEntries.every((each) => each.sessionId === undefined)) return [];
+  return logEntries.map(({ eventId, sessionId }) => ({
     eventId,
     ...(sessionId === undefined ? {} : { sessionId }),
   }));
@@ -548,13 +554,13 @@ const readMinuteDisplay = (instant: Date, timezone: string): MinuteDisplay | und
     : { time, dayKey: buildDayKey(date.dayNumber) };
 };
 
-/** An entry being built: its members are added while the list is read. */
+/** An entry being built: its audit log entries are added while the list is read. */
 interface PendingEntry {
   readonly key: string;
   readonly time: string;
   readonly reading: Reading;
   readonly actor: MachineActivityActor;
-  readonly members: PendingMember[];
+  readonly logEntries: PendingLogEntry[];
 }
 
 /** One day being built, in the order the list reaches it. */
@@ -575,8 +581,8 @@ interface PendingDay {
  * - Entries fold into one when they have the same kind, the same wording, the
  *   same actor and, for spawned sessions, the same run, and happened in the
  *   same minute. They need not be next to each other in the list. The folded
- *   entry stands where its newest member stands. The actor is compared as it
- *   is shown, so an entry without an actor folds with one stamped `system`.
+ *   entry stands where its newest audit log entry stands. The actor is compared
+ *   as it is shown, so an entry without an actor folds with one stamped `system`.
  * - The minute is counted from the instant (a whole number of minutes since
  *   1970), not from the clock the screen shows, because in the hour that
  *   repeats when daylight saving time ends two different minutes show the
@@ -621,7 +627,7 @@ export const describeMachineActivity = (
     const display = displaysByMinute.get(minute);
     if (display === undefined) continue;
 
-    const member: PendingMember = {
+    const logEntry: PendingLogEntry = {
       eventId: event.id,
       line: reading.wording.forOne,
       ...(reading.sessionId === undefined ? {} : { sessionId: reading.sessionId }),
@@ -635,7 +641,7 @@ export const describeMachineActivity = (
     );
     const folded = entriesByFold.get(foldKey);
     if (folded !== undefined) {
-      folded.members.push(member);
+      folded.logEntries.push(logEntry);
       continue;
     }
 
@@ -652,7 +658,7 @@ export const describeMachineActivity = (
       time: display.time,
       reading,
       actor,
-      members: [member],
+      logEntries: [logEntry],
     };
     entriesByFold.set(foldKey, entry);
     day.entries.push(entry);
@@ -661,18 +667,24 @@ export const describeMachineActivity = (
   return days.map((day) => ({
     key: day.key,
     heading: day.heading,
-    entries: day.entries.map(({ key, time, reading, actor, members }): MachineActivityEntry => ({
-      key,
-      time,
-      category: reading.category,
-      problem: reading.problem,
-      sentence:
-        members.length === 1 ? reading.wording.forOne : reading.wording.forCount(members.length),
-      ...(reading.runId === undefined ? {} : { runId: reading.runId }),
-      actor,
-      count: members.length,
-      members: selectListedMembers(members),
-    })),
+    entries: day.entries.map(({ key, time, reading, actor, logEntries }): MachineActivityEntry => {
+      const [first] = logEntries;
+      const isFolded = logEntries.length > 1;
+      return {
+        key,
+        time,
+        category: reading.category,
+        problem: reading.problem,
+        sentence: isFolded ? reading.wording.forCount(logEntries.length) : reading.wording.forOne,
+        ...(reading.runId === undefined ? {} : { runId: reading.runId }),
+        actor,
+        count: logEntries.length,
+        ...(isFolded || first?.sessionId === undefined
+          ? {}
+          : { subjectSessionId: first.sessionId }),
+        details: isFolded ? selectDetails(logEntries) : [],
+      };
+    }),
   }));
 };
 
