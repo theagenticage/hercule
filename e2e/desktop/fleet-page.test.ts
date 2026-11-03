@@ -9,7 +9,9 @@
  * - the card of the controller's own, real runner shows its disk as a
  *   percentage, from the size the runner reports;
  * - a machine whose session cap holds a thread back says so on its card, and
- *   Allow raises the cap so the waiting thread starts.
+ *   Allow raises the cap so the waiting thread starts;
+ * - a machine's page draws the CPU, Memory and Disk graphs from the metrics
+ *   its runner reports, and draws a report that arrives while it is open.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -42,6 +44,29 @@ function locateCard(page: Page, name: string) {
   return page
     .locator(".fleet-card")
     .filter({ has: page.getByRole("button", { name, exact: true }) });
+}
+
+const GIB = 1024 ** 3;
+
+/**
+ * Returns the path data of the line each of the CPU, Memory and Disk graphs
+ * draws on a machine's page, by the label of its instrument. The svg is hidden
+ * from assistive technology, because the numbers beside a graph carry its
+ * meaning, so a role or a label cannot reach it. The line's `d` is the one
+ * thing that changes when the graph draws another value. An instrument with no
+ * line yet, such as one that shows its "not reported" sentence, has an empty
+ * string.
+ */
+async function readGraphLines(page: Page): Promise<Record<string, string>> {
+  const lines: Record<string, string> = {};
+  for (const label of ["CPU", "Memory", "Disk"]) {
+    const line = page
+      .locator(".machine-page-instrument")
+      .filter({ has: page.locator(".machine-page-instrument-label", { hasText: label }) })
+      .locator(".machine-graph-line");
+    lines[label] = (await line.count()) === 0 ? "" : ((await line.getAttribute("d")) ?? "");
+  }
+  return lines;
 }
 
 describe("the Fleet page", () => {
@@ -146,5 +171,40 @@ describe("the Fleet page", () => {
     await expect
       .poll(async () => (await disk.locator("b").innerText()).replace(/\s+/g, ""))
       .toMatch(/^\d+%$/);
+  });
+
+  it("draws the graphs of a machine's page from its reports, and draws a report that arrives while the page is open", async () => {
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio", {
+      machine: { totalMemoryBytes: 64 * GIB, diskTotalBytes: 1000 * GIB },
+    });
+    runner.reportMetrics({
+      diskFreeBytes: 800 * GIB,
+      availableMemoryBytes: 48 * GIB,
+      cpu: { averagePercent: 10, peakPercent: 20 },
+    });
+    const { page } = await openSignedIn(url);
+    await openFleet(page);
+    await locateCard(page, "studio").getByRole("button", { name: "studio", exact: true }).click();
+
+    // Every graph draws the one report, as a line that has a point in it.
+    await expect
+      .poll(async () => Object.values(await readGraphLines(page)).every((d) => d !== ""))
+      .toBe(true);
+    const first = await readGraphLines(page);
+
+    // A second report in the same minute replaces the first one's point. The
+    // page is not navigated or reloaded: the report reaches it as a push.
+    runner.reportMetrics({
+      diskFreeBytes: 200 * GIB,
+      availableMemoryBytes: 16 * GIB,
+      cpu: { averagePercent: 70, peakPercent: 90 },
+    });
+    await expect
+      .poll(async () => {
+        const next = await readGraphLines(page);
+        return Object.keys(first).filter((label) => next[label] !== first[label]);
+      })
+      .toEqual(["CPU", "Memory", "Disk"]);
   });
 });
