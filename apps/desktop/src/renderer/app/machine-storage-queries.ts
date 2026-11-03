@@ -3,7 +3,7 @@
  * (spec 17 §Fleet, A machine's page, point 5): what the runner negotiated, and
  * the Threads of the workspaces that are idle. The machine page's loader reads
  * both before the page renders, the Storage section draws them, and the
- * cleanup dialog's button reads the same Threads through `cleanupThreadsQuery`.
+ * cleanup dialog's button writes the Threads it reads into the same entry.
  *
  * They live in their own module, not in `queries.ts`, because
  * `@hercule/client-core/cleanup` is not part of the first screen.
@@ -70,7 +70,7 @@ export interface CleanupThreadsRead {
  * No push reads this again. The key is outside the `sessions` prefix on
  * purpose, because a `session` push arrives about once a second while agents
  * work. A caller that needs the Threads fresh, such as the cleanup dialog,
- * reads with `staleTime: 0`.
+ * reads them itself (`readThreadsForDialog`).
  */
 export const cleanupThreadsQuery = (
   client: HerculeClient,
@@ -111,20 +111,20 @@ export const listThreadsOf = (
  * Reads afresh the Threads placed in the workspaces `workspaceIds` of the
  * machine `runnerId` and returns them. Fails when the read fails.
  *
- * A read that is already running under the same key may have been started for
- * an older set of workspaces, and `fetchQuery` joins it. When the result does
- * not cover every id (`coversWorkspaces`), this reads once more for the ids
- * given, so a caller never treats a workspace as unused whose Threads were not
- * read.
+ * The read is the caller's own, not a share of one that is already running
+ * under the page's key: that one may have been started for other workspaces,
+ * and a dialog must list exactly the Threads of the workspaces it offers.
+ * The result is then written to the page's entry, so the Storage section
+ * draws from it.
  */
-export const readThreadsCovering = async (
+export const readThreadsForDialog = async (
   queryClient: QueryClient,
   client: HerculeClient,
   runnerId: string,
   workspaceIds: readonly string[],
 ): Promise<readonly Session[]> => {
-  const options = { ...cleanupThreadsQuery(client, runnerId, workspaceIds), staleTime: 0 };
-  let read = await queryClient.fetchQuery(options);
-  if (!coversWorkspaces(read, workspaceIds)) read = await queryClient.fetchQuery(options);
-  return listThreadsOf(read, workspaceIds);
+  const threads = await readCleanupThreads(client, workspaceIds);
+  const read: CleanupThreadsRead = { workspaceIds, threads };
+  queryClient.setQueryData(cleanupThreadsQuery(client, runnerId, workspaceIds).queryKey, read);
+  return threads;
 };

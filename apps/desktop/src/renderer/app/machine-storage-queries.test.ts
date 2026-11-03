@@ -1,45 +1,56 @@
 /**
- * Tests `readThreadsCovering`: the Threads for the workspaces asked for are
- * read again when a read already running under the same key was started for
- * other workspaces, and a read that covers them all is not repeated.
+ * Tests `readThreadsForDialog`: each call gets exactly the Threads of the
+ * workspaces it asked for, whatever other reads of the same machine are
+ * running, and the page's cache entry receives what it read.
  */
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { createClient } from "@hercule/client-core";
 import { createApiStub, type Answer } from "@hercule/client-core/testing";
 import { buildSession } from "@hercule/client-core/threads/testing";
-import { cleanupThreadsQuery, readThreadsCovering } from "./machine-storage-queries";
+import { cleanupThreadsQuery, readThreadsForDialog } from "./machine-storage-queries";
 import { CONTROLLER_URL } from "./testing";
 
 const RUNNER_ID = "01a06d02-5000-7000-8000-000000000001";
 const WORKSPACE_A = "01a06d02-5000-7000-8000-0000000000a1";
 const WORKSPACE_B = "01a06d02-5000-7000-8000-0000000000b1";
+const WORKSPACE_C = "01a06d02-5000-7000-8000-0000000000c2";
 
-const THREAD_IN_B = buildSession({
-  id: "01a06d02-5000-7000-8000-0000000000c1",
-  permissionProfileId: "01a06d02-5000-7000-8000-000000000900",
-  providerAccountId: "01a06d02-5000-7000-8000-000000000901",
-  runnerId: RUNNER_ID,
-  workspaceId: WORKSPACE_B,
-  title: "Thread in B",
-});
+/** Returns a Thread in `workspaceId` titled "Thread in <title>". */
+const buildThreadIn = (workspaceId: string, title: string, number: number) =>
+  buildSession({
+    id: `01a06d02-5000-7000-8000-0000000000d${String(number)}`,
+    permissionProfileId: "01a06d02-5000-7000-8000-000000000900",
+    providerAccountId: "01a06d02-5000-7000-8000-000000000901",
+    runnerId: RUNNER_ID,
+    workspaceId,
+    title: `Thread in ${title}`,
+  });
+
+const THREADS = [
+  buildThreadIn(WORKSPACE_A, "A", 1),
+  buildThreadIn(WORKSPACE_B, "B", 2),
+  buildThreadIn(WORKSPACE_C, "C", 3),
+];
 
 /**
- * Returns a client over a controller that holds one Thread, in workspace B,
+ * Returns a client over a controller that holds one Thread in each workspace
  * and the ids each read of Threads asked for. A read that asks for A alone is
  * held until `release` is called.
  */
 const openController = () => {
   const reads: string[][] = [];
-  let release: (answer: Answer) => void = () => {};
+  let release: () => void = () => {};
   const { fetch } = createApiStub({
     "GET /api/v1/sessions": (call) => {
       const ids = new URLSearchParams(call.search).getAll("workspaceId");
       reads.push(ids);
-      const items = ids.includes(WORKSPACE_B) ? [THREAD_IN_B] : [];
+      const items = THREADS.filter((thread) => ids.includes(thread.workspaceId ?? ""));
       if (ids.length === 1 && ids[0] === WORKSPACE_A) {
         return new Promise<Answer>((resolve) => {
-          release = resolve;
+          release = () => {
+            resolve({ body: { items } });
+          };
         });
       }
       return { body: { items } };
@@ -49,39 +60,42 @@ const openController = () => {
     client: createClient({ baseUrl: CONTROLLER_URL, fetch }),
     reads,
     release: () => {
-      release({ body: { items: [] } });
+      release();
     },
   };
 };
 
-describe("readThreadsCovering", () => {
-  it("reads again for its own workspaces when it joins a read that was started for fewer", async () => {
+const titles = (threads: readonly { readonly title: string | null }[]) =>
+  threads.map((thread) => thread.title).toSorted();
+
+describe("readThreadsForDialog", () => {
+  it("gives each of two overlapping callers exactly its workspaces while a page read is running", async () => {
     const queryClient = new QueryClient();
     const { client, reads, release } = openController();
     // The Storage section started this read when only workspace A was idle.
     void queryClient.fetchQuery(cleanupThreadsQuery(client, RUNNER_ID, [WORKSPACE_A]));
     await vi.waitFor(() => expect(reads).toHaveLength(1));
 
-    const covering = readThreadsCovering(queryClient, client, RUNNER_ID, [
-      WORKSPACE_A,
-      WORKSPACE_B,
-    ]);
+    const first = readThreadsForDialog(queryClient, client, RUNNER_ID, [WORKSPACE_A, WORKSPACE_B]);
+    const second = readThreadsForDialog(queryClient, client, RUNNER_ID, [WORKSPACE_B, WORKSPACE_C]);
     release();
 
-    expect((await covering).map((thread) => thread.title)).toEqual(["Thread in B"]);
-    expect(reads).toEqual([[WORKSPACE_A], [WORKSPACE_A, WORKSPACE_B]]);
+    expect(titles(await first)).toEqual(["Thread in A", "Thread in B"]);
+    expect(titles(await second)).toEqual(["Thread in B", "Thread in C"]);
+    expect(reads).toEqual([[WORKSPACE_A], [WORKSPACE_A, WORKSPACE_B], [WORKSPACE_B, WORKSPACE_C]]);
   });
 
-  it("reads once when the read it gets already covers its workspaces", async () => {
+  it("writes what it read to the page's entry, with the ids it covers", async () => {
     const queryClient = new QueryClient();
-    const { client, reads } = openController();
+    const { client } = openController();
 
-    const threads = await readThreadsCovering(queryClient, client, RUNNER_ID, [
-      WORKSPACE_A,
-      WORKSPACE_B,
-    ]);
+    await readThreadsForDialog(queryClient, client, RUNNER_ID, [WORKSPACE_B, WORKSPACE_C]);
 
-    expect(threads.map((thread) => thread.title)).toEqual(["Thread in B"]);
-    expect(reads).toEqual([[WORKSPACE_A, WORKSPACE_B]]);
+    const cached = queryClient.getQueryData<{
+      workspaceIds: string[];
+      threads: { title: string | null }[];
+    }>(cleanupThreadsQuery(client, RUNNER_ID, []).queryKey);
+    expect(cached?.workspaceIds).toEqual([WORKSPACE_B, WORKSPACE_C]);
+    expect(titles(cached?.threads ?? [])).toEqual(["Thread in B", "Thread in C"]);
   });
 });

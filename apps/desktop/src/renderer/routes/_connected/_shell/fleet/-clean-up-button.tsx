@@ -12,7 +12,7 @@ import {
 } from "@hercule/client-core/cleanup";
 import { useCleanupProgress, useCleanupStore } from "../../../../app/cleanup-hooks";
 import { useDoneMoves } from "../../../../app/done-moves";
-import { readThreadsCovering } from "../../../../app/machine-storage-queries";
+import { readThreadsForDialog } from "../../../../app/machine-storage-queries";
 import { workspacesQuery } from "../../../../app/queries";
 import {
   CleanupChoices,
@@ -69,8 +69,8 @@ export function CleanUpButton({
   // The snapshot is `null` when the dialog was opened on a cleanup already in progress.
   const [dialog, setDialog] = useState<{ readonly snapshot: CleanupSnapshot | null } | null>(null);
 
-  // A press that reads is a command, not a screen's read: the result is a
-  // snapshot of this moment that nothing keeps in the cache.
+  // A press that reads is a command, not a screen's read: the snapshot is of
+  // this moment and is kept nowhere. Only the Threads it read go to the cache.
   const open = useMutation({
     mutationFn: async (): Promise<CleanupSnapshot> => {
       const workspaces = await queryClient.ensureQueryData(workspacesQuery(client));
@@ -79,7 +79,7 @@ export function CleanUpButton({
       const threads =
         candidates.length === 0
           ? []
-          : await readThreadsCovering(
+          : await readThreadsForDialog(
               queryClient,
               client,
               runnerId,
