@@ -29,6 +29,12 @@ const VERSION_ARGUMENTS: Readonly<Record<string, ReadonlyArray<string>>> = {
   go: ["version"],
 };
 
+/**
+ * The most output of a version command the probe reads. A version line is
+ * short, and a tool that prints more must not fill the runner's memory.
+ */
+const MAX_VERSION_OUTPUT_BYTES = 4096;
+
 const DEFAULT_VERSION_ARGUMENTS: ReadonlyArray<string> = ["--version"];
 
 /**
@@ -68,6 +74,32 @@ export const DISK_SIZE_DEADLINE: Duration.Duration = Duration.seconds(5);
  */
 const SEMVER = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/;
 
+/**
+ * Reads `stream` until it ends or until `limit` bytes are read, and returns
+ * the text read, cut at `limit`. `truncated` is true when the limit was
+ * reached, so more output may have been waiting. Stops reading at that point.
+ */
+const readAtMost = async (
+  stream: ReadableStream<Uint8Array>,
+  limit: number,
+): Promise<{ readonly text: string; readonly truncated: boolean }> => {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (length < limit) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      length += value.length;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const bytes = Buffer.concat(chunks);
+  return { text: bytes.subarray(0, limit).toString("utf8"), truncated: length >= limit };
+};
+
 /** How the probe looks at the machine it runs on. */
 export interface Machine {
   readonly locate: (binary: string) => string | undefined;
@@ -92,16 +124,40 @@ export const buildThisMachine = (storageDir: string): Machine => ({
   locate: (binary) => Bun.which(binary) ?? undefined,
   version: (path, args) =>
     Effect.tryPromise(async (signal) => {
-      const child = Bun.spawn([path, ...args], { stdout: "pipe", stderr: "ignore" });
+      const child = Bun.spawn([path, ...args], {
+        // Not the runner's own folder: `/` under launchd, `$HOME` under
+        // systemd, a repository when started by hand. Version managers
+        // (corepack, mise, rustup) report the version a folder pins, and may
+        // download it. The storage directory holds no such file.
+        cwd: storageDir,
+        env: {
+          ...process.env,
+          // `terraform --version` calls HashiCorp's checkpoint service, and
+          // this probe runs every hour.
+          CHECKPOINT_DISABLE: "1",
+          // rustup would install the toolchain a `rust-toolchain.toml` names.
+          RUSTUP_AUTO_INSTALL: "0",
+          // corepack would download the package manager version it pins.
+          COREPACK_ENABLE_NETWORK: "0",
+        },
+        stdout: "pipe",
+        stderr: "ignore",
+      });
       // Kill the process when the caller stops waiting. Otherwise a binary that
       // hangs on `--version` would be left running, and one more would pile up
-      // every hour.
+      // every hour. SIGKILL, because a wrapper script can ignore SIGTERM.
       signal.addEventListener("abort", () => {
-        child.kill();
+        child.kill("SIGKILL");
       });
-      const printed = await new Response(child.stdout).text();
+      const printed = await readAtMost(child.stdout, MAX_VERSION_OUTPUT_BYTES);
+      if (printed.truncated) {
+        // A tool that floods its output is not printing a version. Stop it
+        // instead of waiting for it to end.
+        child.kill("SIGKILL");
+        return printed.text;
+      }
       await child.exited;
-      return child.exitCode === 0 ? printed : undefined;
+      return child.exitCode === 0 ? printed.text : undefined;
     }).pipe(
       // A machine without the tool is normal, not a failed probe.
       Effect.orElseSucceed(() => undefined),
@@ -180,6 +236,7 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
       ...(diskTotalBytes === undefined ? {} : { diskTotalBytes }),
       docker: machine.locate(DOCKER) !== undefined,
       toolchains,
+      probedToolchains: PROBED_TOOLCHAINS,
       harnesses,
       // A fact about this build, not about the machine: which harnesses
       // this runner can drive when their binaries are installed.

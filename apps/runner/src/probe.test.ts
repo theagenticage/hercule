@@ -13,11 +13,13 @@
  * differs from the one already reported, so the fleet's rows are not rewritten
  * every hour for nothing.
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { Cause, Duration, Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { arch, platform, tmpdir, totalmem } from "node:os";
-import { IDENTITY_PORT, MAX_FACT_LENGTH, RunnerFacts } from "@hercule/protocol";
+import { join } from "node:path";
+import { IDENTITY_PORT, MAX_FACT_LENGTH, PROBED_TOOLCHAINS, RunnerFacts } from "@hercule/protocol";
 import {
   DISK_SIZE_DEADLINE,
   FACTS_REFRESH,
@@ -209,6 +211,11 @@ describe("toolchains", () => {
     expect(facts.toolchains).toEqual([]);
   });
 
+  it("names the tools it looked for, found or not", async () => {
+    expect((await probePrinted(FULL)).probedToolchains).toEqual(PROBED_TOOLCHAINS);
+    expect((await probePrinted({ claude: "1.0.0" })).probedToolchains).toEqual(PROBED_TOOLCHAINS);
+  });
+
   it.each(TOOL_NAMES)("keeps the raw output of %s when it holds no version", async (name) => {
     const facts = await probePrinted({ ...FULL, [name]: `  ${name}: something else entirely\n` });
 
@@ -391,6 +398,52 @@ describe("buildThisMachine", () => {
     expect(facts.arch).toBe(arch());
     expect(facts.totalMemoryBytes).toBe(totalmem());
     expect(facts.harnesses.map((one) => one.name)).toEqual(["claude", "codex", "pi"]);
+  });
+
+  describe("running a version command", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "probe-version-"));
+
+    afterAll(() => {
+      rmSync(scratch, { recursive: true, force: true });
+    });
+
+    /** Writes an executable shell script into the scratch directory and returns its path. */
+    const writeScript = (name: string, body: string): string => {
+      const path = join(scratch, name);
+      writeFileSync(path, `#!/bin/sh\n${body}\n`);
+      chmodSync(path, 0o755);
+      return path;
+    };
+
+    it("runs it in the storage directory, with the tools' network calls switched off", async () => {
+      const storage = mkdtempSync(join(scratch, "storage-"));
+      const script = writeScript(
+        "report",
+        'echo "$PWD|$CHECKPOINT_DISABLE|$RUSTUP_AUTO_INSTALL|$COREPACK_ENABLE_NETWORK"',
+      );
+
+      const printed = await Effect.runPromise(buildThisMachine(storage).version(script, []));
+
+      expect(printed?.trim()).toBe(`${realpathSync(storage)}|1|0|0`);
+    });
+
+    it("stops reading a tool that floods its output, and stops the tool", async () => {
+      const script = writeScript("flood", "exec yes 0123456789");
+
+      const printed = await Effect.runPromise(buildThisMachine(scratch).version(script, []));
+
+      expect(printed).toBeDefined();
+      expect(printed!.length).toBeLessThanOrEqual(4096);
+      expect(printed!.length).toBeGreaterThan(0);
+    });
+
+    it("returns nothing when the tool exits with an error", async () => {
+      const script = writeScript("fail", "echo 1.2.3; exit 1");
+
+      expect(
+        await Effect.runPromise(buildThisMachine(scratch).version(script, [])),
+      ).toBeUndefined();
+    });
   });
 
   it("fails the disk size read when the storage directory cannot be read", async () => {

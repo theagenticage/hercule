@@ -265,7 +265,11 @@ export const PROBED_TOOLCHAINS = [
 
 export const Toolchain = Schema.Struct({
   name: Fact,
-  /** The output of `--version`, unparsed when the runner could not parse it. */
+  /**
+   * The version the tool printed when asked for it (`--version`, or `go
+   * version` for `go`): the semantic version in that text, or the whole text
+   * trimmed when it holds none.
+   */
   version: Fact,
   path: Fact,
 });
@@ -293,6 +297,15 @@ export const RunnerFacts = Schema.Struct({
   totalMemoryBytes: Bytes,
   docker: Schema.Boolean,
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The names of the toolchains the runner looked for, whether it found them
+   * or not. Without it, a client cannot tell "not installed" from "this runner
+   * never looked". Absent means a runner built before the list grew, which
+   * looked for `git` and `gh` only.
+   */
+  probedToolchains: Schema.optionalKey(
+    Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  ),
   harnesses: Schema.Array(HarnessBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /**
    * The qualified harness ids (such as `claude-code/claude-code`) this runner
