@@ -281,11 +281,34 @@ export const RunnerFacts = Schema.Struct({
    * finding out by trying and failing.
    */
   adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The size of the file system that holds the runner's storage directory: the
+   * same file system `RunnerMetrics.diskFreeBytes` is read from. Absent from a
+   * runner built before it was reported; the Fleet screen then shows free
+   * space without a percentage.
+   */
+  diskTotalBytes: Schema.optionalKey(Bytes),
   /** The port that serves `GET /identity`, which is used to resolve the "local" alias. */
   identityPort: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
 });
 
 export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
+
+const Percent = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
+
+/**
+ * How busy the machine's CPU was over the minute before a report. The runner
+ * reads the share of all cores that were busy once a second, as a number from
+ * 0 to 100.
+ */
+export const RunnerCpu = Schema.Struct({
+  /** The mean of the minute's reads. */
+  averagePercent: Percent,
+  /** The highest read of the minute. */
+  peakPercent: Percent,
+});
+
+export type RunnerCpu = Schema.Schema.Type<typeof RunnerCpu>;
 
 /**
  * The Runner Metrics: the fast-changing part of a runner's state. Never
@@ -296,6 +319,15 @@ export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
 export const RunnerMetrics = Schema.Struct({
   diskFreeBytes: Bytes,
   availableMemoryBytes: Bytes,
+  /**
+   * The CPU use over the minute before the report, in one of three states:
+   * - an object: the minute's mean and highest once-a-second read;
+   * - `null`: the runner reads CPU but has no minute yet, as on the report
+   *   right after hello;
+   * - absent: the runner was built before it reported CPU. The Fleet screen
+   *   then says the runner is too old to report CPU.
+   */
+  cpu: Schema.optionalKey(Schema.NullOr(RunnerCpu)),
 });
 
 export type RunnerMetrics = Schema.Schema.Type<typeof RunnerMetrics>;
