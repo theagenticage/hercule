@@ -155,6 +155,8 @@ interface World {
   hourPoints: RunnerMetricsPoint[];
   /** While set, a read of Threads fails with this message. */
   threadsFail: string | null;
+  /** While set, a read of Threads waits for this promise before it answers. */
+  threadsGate: Promise<void> | null;
 }
 
 const buildWorld = (): World => ({
@@ -164,6 +166,7 @@ const buildWorld = (): World => ({
   // The runner has reported for one hour, which is too little for a forecast.
   hourPoints: buildFallingDiskPoints().slice(-1),
   threadsFail: null,
+  threadsGate: null,
 });
 
 /** Returns the reads of Threads by workspace that `calls` holds, each as the workspace ids it asked for. */
@@ -186,9 +189,10 @@ const openStorage = async (world: World, events: readonly EventWithFacts[] = [])
         body: { ...MEASURED_ATLAS, negotiatedCapabilities: world.capabilities, protocolVersion: 1 },
       }),
       "GET /api/v1/workspaces": () => ({ body: { items: world.workspaces } }),
-      "GET /api/v1/sessions": (call) => {
+      "GET /api/v1/sessions": async (call) => {
         const ids = new URLSearchParams(call.search).getAll("workspaceId");
         if (ids.length === 0) return { body: { items: [] } };
+        await world.threadsGate;
         if (world.threadsFail !== null) {
           return { status: 500, body: buildErrorBody("internal", world.threadsFail) };
         }
@@ -363,6 +367,35 @@ describe("a machine's Storage section", () => {
     const { storage } = await openStorage(world);
 
     expect(await within(storage).findByText("No idle workspaces.")).toBeTruthy();
+  });
+
+  it("draws neither rows nor the empty line while the read for a newly idle workspace is on its way", async () => {
+    // The data held covers workspace 1 alone, and no Thread used it.
+    const world = buildWorld();
+    world.workspaces = [IN_USE, IDLE[0]!];
+    world.threads = [];
+    const { storage, calls, app } = await openStorage(world);
+    expect(await within(storage).findByText("No idle workspaces.")).toBeTruthy();
+    await waitFor(() => expect(app.live.readTopics()).toContain("workspace"));
+    await app.live.waitForFirstPushes();
+
+    // Workspace 2 turns idle, and the read that covers it is held.
+    const added = IDLE[1]!;
+    world.workspaces = [...world.workspaces, added];
+    world.threads = [THREADS[1]!];
+    let releaseRead = (): void => {};
+    world.threadsGate = new Promise((resolve) => {
+      releaseRead = resolve;
+    });
+    act(() => app.live.pushInvalidation("workspace", [added.id]));
+    await waitFor(() => expect(readThreadReads(calls)).toHaveLength(2));
+
+    expect(within(storage).queryByText("No idle workspaces.")).toBeNull();
+    expect(readIdleRows(storage)).toEqual([]);
+
+    releaseRead();
+    await waitFor(() => expect(readIdleRows(storage)).toHaveLength(1));
+    expect(readIdleRows(storage)[0]).toContain("Rebuild the search index");
   });
 
   it("shows a failed read of the Threads as a line with a Retry, and the rest of the section stays", async () => {

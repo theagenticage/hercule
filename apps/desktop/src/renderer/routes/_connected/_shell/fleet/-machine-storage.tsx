@@ -83,8 +83,10 @@ export function MachineStorage({
   useEffect(() => {
     if (mustReadAgain) void readThreadsAgain();
   }, [mustReadAgain, readThreadsAgain]);
+  // Data that covers only an older set of workspaces is not known yet: the
+  // list would miss the Threads of the new ones and could read as empty.
   const areThreadsKnown =
-    candidateIds.length === 0 || (threads.data !== undefined && !threads.isError);
+    candidateIds.length === 0 || (coversWorkspaces(threads.data, candidateIds) && !threads.isError);
 
   const { data: storage } = useSuspenseQuery({
     ...workspacesQuery(client),

@@ -12,7 +12,7 @@ import {
 } from "@hercule/client-core/cleanup";
 import { useCleanupProgress, useCleanupStore } from "../../../../app/cleanup-hooks";
 import { useDoneMoves } from "../../../../app/done-moves";
-import { cleanupThreadsQuery } from "../../../../app/machine-storage-queries";
+import { readThreadsCovering } from "../../../../app/machine-storage-queries";
 import { workspacesQuery } from "../../../../app/queries";
 import {
   CleanupChoices,
@@ -79,16 +79,12 @@ export function CleanUpButton({
       const threads =
         candidates.length === 0
           ? []
-          : (
-              await queryClient.fetchQuery({
-                ...cleanupThreadsQuery(
-                  client,
-                  runnerId,
-                  candidates.map((workspace) => workspace.id).toSorted(),
-                ),
-                staleTime: 0,
-              })
-            ).threads;
+          : await readThreadsCovering(
+              queryClient,
+              client,
+              runnerId,
+              candidates.map((workspace) => workspace.id).toSorted(),
+            );
       return buildCleanupSnapshot(runnerName, candidates, threads, now);
     },
     onSuccess: (snapshot) => {
