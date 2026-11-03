@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { describeFleetPage } from "@hercule/client-core/fleet";
+import { EMPTY_RUNNER_METRICS_HISTORY } from "@hercule/client-core/metrics-history";
 import { buildRunner, NOW, TIMEZONE } from "./fleet.testing";
 import { SessionsFigure } from "./sessions-drawing";
 
@@ -19,7 +20,14 @@ const draw = (cap: number, running: number, waiting: number, isAway = false): HT
   const counts = {
     [runner.id]: { running, waiting, waitingThreads: waiting, openThreads: waiting },
   };
-  const [machine] = describeFleetPage([runner], counts, null, TIMEZONE, NOW).machines;
+  const [machine] = describeFleetPage(
+    [runner],
+    counts,
+    EMPTY_RUNNER_METRICS_HISTORY,
+    null,
+    TIMEZONE,
+    NOW,
+  ).machines;
   return render(<SessionsFigure drawing={machine!.drawing} size="card" />).container
     .firstElementChild as HTMLElement;
 };

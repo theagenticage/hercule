@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeFleetPage } from "@hercule/client-core/fleet";
+import { EMPTY_RUNNER_METRICS_HISTORY } from "@hercule/client-core/metrics-history";
 import {
   controllerQuery,
   fleetSessionsQuery,
@@ -75,7 +76,15 @@ function FleetPage(): JSX.Element {
     timezone,
     runners.some((runner) => runner.lifecycle !== "retired" && runner.connectivity !== "online"),
   );
-  const page = describeFleetPage(runners, sessionCounts, record.localRunnerId, timezone, today);
+  // TODO(#983): pass the hour points the page reads once as it opens, for the disk forecasts.
+  const page = describeFleetPage(
+    runners,
+    sessionCounts,
+    EMPTY_RUNNER_METRICS_HISTORY,
+    record.localRunnerId,
+    timezone,
+    today,
+  );
 
   return (
     <div className="fleet-page">

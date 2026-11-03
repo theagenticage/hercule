@@ -14,6 +14,7 @@
  */
 import type { Runner, Session } from "@hercule/contract";
 import { RUNNING_STATUSES } from "../runner-capacity";
+import { forecastDiskLimit, type DiskForecast } from "./disk-forecast";
 import {
   NO_SESSIONS,
   buildFleetMachine,
@@ -23,6 +24,7 @@ import {
   buildSessionsDrawing,
   decideMachineKind,
   describeDiskGauge,
+  describeForecastDays,
   describeMachineStatus,
   describeMemoryGauge,
   describeRoom,
@@ -39,7 +41,9 @@ import {
   type SessionCountsByRunner,
   type SessionsDrawing,
 } from "./machine";
+import type { RunnerMetricsHistory } from "./metrics-history";
 
+export { forecastDiskLimit, type DiskForecast } from "./disk-forecast";
 export type {
   FleetTextPart,
   GaugeLevel,
@@ -80,9 +84,11 @@ export const countRunnerSessions = (sessions: readonly Session[]): SessionCounts
 /**
  * Returns every need that applies to the machine of `runner`, the most serious
  * first: it is offline, it is unreachable, its disk is below its limit,
- * sessions wait for a slot, its disk is 85% full or more. The list is empty
- * when the machine needs nothing. `counts` holds the session counts of the
- * runners (the runner's own entry is used; none means no sessions). A time is
+ * sessions wait for a slot, its disk is 85% full or more, its disk is
+ * forecast to reach its limit within 21 days. The list is empty when the
+ * machine needs nothing. `counts` holds the session counts of the runners (the
+ * runner's own entry is used; none means no sessions). `metricsHistory` holds
+ * the hour points of the runners, from which the forecast is made. A time is
  * worded relative to `today` in `timezone`, and left out when the runner was
  * never seen.
  *
@@ -92,9 +98,16 @@ export const countRunnerSessions = (sessions: readonly Session[]): SessionCounts
 export const findMachineNeeds = (
   runner: Runner,
   counts: SessionCountsByRunner,
+  metricsHistory: RunnerMetricsHistory,
   timezone: string,
   today: Date,
-): readonly MachineNeed[] => listMachineNeeds(buildFleetMachine(runner, counts), timezone, today);
+): readonly MachineNeed[] =>
+  listMachineNeeds(
+    buildFleetMachine(runner, counts),
+    forecastDiskLimit(metricsHistory.points, runner, metricsHistory.readAt),
+    timezone,
+    today,
+  );
 
 /** The Fleet page's lead: a headline, and under it one line of totals. */
 export interface FleetLead {
@@ -183,6 +196,13 @@ export interface MachineSummary {
    * `you` from 85% full, else `normal`.
    */
   readonly disk: MachineGauge;
+  /**
+   * What a list row draws under the disk meter: "Limit in 12 days" while the
+   * disk's forecast shows (`isForecast`, in the you colour), else the free
+   * space, "69.8 GB free". The forecast shows whether or not the machine is
+   * away.
+   */
+  readonly diskCaption: { readonly text: string; readonly isForecast: boolean };
   /** The memory in use as a gauge, as a whole percentage rounded down. */
   readonly memory: MachineGauge;
 }
@@ -191,10 +211,12 @@ export interface MachineSummary {
 const summarizeMachine = (
   machine: FleetMachine,
   needs: readonly MachineNeed[],
+  forecast: DiskForecast | null,
   timezone: string,
   today: Date,
 ): MachineSummary => {
   const { runner } = machine;
+  const disk = describeDiskGauge(measureDisk(runner));
   return {
     runnerId: runner.id,
     name: runner.name,
@@ -204,7 +226,11 @@ const summarizeMachine = (
     drawing: buildSessionsDrawing(machine),
     roomText: describeRoom(machine)?.short ?? null,
     need: needs[0],
-    disk: describeDiskGauge(measureDisk(runner)),
+    disk,
+    diskCaption:
+      forecast === null
+        ? { text: `${disk.freeAmount} free`, isForecast: false }
+        : { text: `Limit in ${describeForecastDays(forecast)}`, isForecast: true },
     memory: describeMemoryGauge(measureMemory(runner)),
   };
 };
@@ -227,7 +253,8 @@ export interface FleetPage {
 
 /**
  * Builds the Fleet page from the runners and the counts of their sessions.
- * `localRunnerId` is the controller's own runner, or `null` when it has none.
+ * `metricsHistory` holds the hour points of every runner, for the disk
+ * forecasts. `localRunnerId` is the controller's own runner, or `null` when it has none.
  * Times are worded in `timezone`, relative to `today`.
  *
  * The page shows one machine per runner that is not retired. Counts of a
@@ -236,12 +263,13 @@ export interface FleetPage {
  * this is the order the machines joined. That order never changes while the
  * page is open, so no card jumps when a state changes.
  *
- * Each machine's needs are computed once, and the lead, the section count and
- * the machines all read the same list.
+ * Each machine's disk forecast and needs are computed once, and the lead, the
+ * section count and the machines all read the same ones.
  */
 export const describeFleetPage = (
   runners: readonly Runner[],
   counts: SessionCountsByRunner,
+  metricsHistory: RunnerMetricsHistory,
   localRunnerId: string | null,
   timezone: string,
   today: Date,
@@ -251,7 +279,8 @@ export const describeFleetPage = (
     .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((runner) => {
       const machine = buildFleetMachine(runner, counts);
-      return { machine, needs: listMachineNeeds(machine, timezone, today) };
+      const forecast = forecastDiskLimit(metricsHistory.points, runner, metricsHistory.readAt);
+      return { machine, forecast, needs: listMachineNeeds(machine, forecast, timezone, today) };
     });
   const machines = entries.map((entry) => entry.machine);
   const needing = entries.filter((entry) => entry.needs.length > 0).length;
@@ -264,8 +293,8 @@ export const describeFleetPage = (
     isEmpty: !machines.some(
       ({ runner }) => runner.id !== localRunnerId && runner.connectivity === "online",
     ),
-    machines: entries.map(({ machine, needs }) =>
-      summarizeMachine(machine, needs, timezone, today),
+    machines: entries.map(({ machine, needs, forecast }) =>
+      summarizeMachine(machine, needs, forecast, timezone, today),
     ),
   };
 };

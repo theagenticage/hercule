@@ -6,6 +6,7 @@
  * what it decides.
  */
 import { describeFleetPage, type MachineSummary } from "@hercule/client-core/fleet";
+import { EMPTY_RUNNER_METRICS_HISTORY } from "@hercule/client-core/metrics-history";
 import type { Runner, RunnerFacts, RunnerMetrics } from "@hercule/contract";
 
 export const GIB = 1024 ** 3;
@@ -85,6 +86,7 @@ const MACHINES = describeFleetPage(
     "runner-full": { running: 2, ...NO_QUEUE },
     "runner-drain": { running: 1, ...NO_QUEUE },
   },
+  EMPTY_RUNNER_METRICS_HISTORY,
   null,
   TIMEZONE,
   NOW,

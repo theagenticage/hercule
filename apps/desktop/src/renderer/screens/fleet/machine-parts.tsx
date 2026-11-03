@@ -73,9 +73,10 @@ export function GaugeValue({
  *
  * - A waiting need has `allow`, the button that raises the session cap, which
  *   the caller builds because it owns what pressing it does.
- * - A disk below its limit, or 85% full or more, has `Clean up…`, drawn inert
- *   because the cleanup dialog is not built yet. It stays `aria-disabled`
- *   rather than `disabled` so its tooltip still shows.
+ * - A disk below its limit, 85% full or more, or forecast to reach its limit,
+ *   has `Clean up…`, drawn inert because the cleanup dialog is not built yet.
+ *   It stays `aria-disabled` rather than `disabled` so its tooltip still
+ *   shows.
  * - An offline or unreachable machine has no button.
  */
 export function NeedLine({
@@ -86,7 +87,10 @@ export function NeedLine({
   readonly allow: ReactNode;
 }): JSX.Element | null {
   if (need === undefined) return null;
-  const hasCleanUp = need.kind === "disk-below-limit" || need.kind === "disk-nearly-full";
+  const hasCleanUp =
+    need.kind === "disk-below-limit" ||
+    need.kind === "disk-nearly-full" ||
+    need.kind === "disk-reaches-limit";
   return (
     <>
       <span className={`fleet-attn is-${need.hue}`} title={need.line}>

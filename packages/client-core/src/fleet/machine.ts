@@ -14,6 +14,7 @@
  */
 import type { Runner, RunnerFacts } from "@hercule/contract";
 import { formatShortMoment } from "../time-context";
+import type { DiskForecast } from "./disk-forecast";
 
 /** How many sessions a runner holds, by what they are doing. */
 export interface RunnerSessionCounts {
@@ -301,8 +302,9 @@ export const splitDiskSize = (
 /** How full a gauge is: `normal`, `you` (getting high), or `fail` (too high). */
 export type GaugeLevel = "normal" | "you" | "fail";
 
-const MEMORY_YOU_FROM_PERCENT = 80;
-const MEMORY_FAIL_FROM_PERCENT = 92;
+/** Memory in use turns `you` from this share, in percent, and `fail` from the next. */
+export const MEMORY_YOU_FROM_PERCENT = 80;
+export const MEMORY_FAIL_FROM_PERCENT = 92;
 const DISK_YOU_FROM_PERCENT = 85;
 
 /**
@@ -508,7 +510,15 @@ export type MachineNeed =
       /** The tooltip of the button that sets the cap to `allow`. */
       readonly allowHint: string;
     }
-  | { readonly kind: "disk-nearly-full"; readonly hue: "you"; readonly line: string };
+  | { readonly kind: "disk-nearly-full"; readonly hue: "you"; readonly line: string }
+  | { readonly kind: "disk-reaches-limit"; readonly hue: "you"; readonly line: string };
+
+/** The forecast reaches the disk limit within this many days: the machine then needs the user. */
+const FORECAST_NEEDS_USER_WITHIN_DAYS = 21;
+
+/** Words the days until the disk limit, such as "1 day" or "12 days". */
+export const describeForecastDays = ({ days }: DiskForecast): string =>
+  `${String(days)} ${plural(days, "day", "days")}`;
 
 const describeWaiting = ({ waiting, waitingThreads }: FleetMachine): string => {
   const noun = waitingThreads === waiting ? "thread" : "session";
@@ -529,9 +539,10 @@ const describeAllowHint = ({ running, waiting }: FleetMachine): string => {
 /**
  * Returns every need that applies to a machine, the most serious first: it is
  * offline, it is unreachable, its disk is below its limit, sessions wait for a
- * slot, its disk is 85% full or more. The list is empty when the machine needs
- * nothing. A time is worded relative to `today` in `timezone`, and left out
- * when the runner was never seen.
+ * slot, its disk is 85% full or more, its disk is forecast to reach its limit
+ * within 21 days (`forecast`, `null` when there is none). The list is empty
+ * when the machine needs nothing. A time is worded relative to `today` in
+ * `timezone`, and left out when the runner was never seen.
  *
  * Sessions wait for a slot only when the cap is what holds them back. That is
  * when the machine takes new sessions (online, not draining, disk not below its
@@ -547,6 +558,7 @@ const describeAllowHint = ({ running, waiting }: FleetMachine): string => {
  */
 export const listMachineNeeds = (
   machine: FleetMachine,
+  forecast: DiskForecast | null,
   timezone: string,
   today: Date,
 ): readonly MachineNeed[] => {
@@ -587,6 +599,13 @@ export const listMachineNeeds = (
   const diskPercent = measureDisk(runner)?.use?.percent;
   if (diskPercent !== undefined && diskPercent >= DISK_YOU_FROM_PERCENT) {
     needs.push({ kind: "disk-nearly-full", hue: "you", line: `Disk ${String(diskPercent)}% full` });
+  }
+  if (forecast !== null && forecast.days <= FORECAST_NEEDS_USER_WITHIN_DAYS) {
+    needs.push({
+      kind: "disk-reaches-limit",
+      hue: "you",
+      line: `Disk reaches its limit in about ${describeForecastDays(forecast)}`,
+    });
   }
   return needs;
 };
