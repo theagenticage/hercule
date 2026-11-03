@@ -243,9 +243,33 @@ const Base64 = Schema.String.check(
 
 const Bytes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
+/**
+ * The tools a runner probes for, in the order it reports them. The list is
+ * fixed in code: there is no setting for it. The runner reads it to know what
+ * to probe, and a client reads it to show the tools in the same order.
+ */
+export const PROBED_TOOLCHAINS = [
+  "git",
+  "gh",
+  "node",
+  "pnpm",
+  "bun",
+  "go",
+  "rustc",
+  "python3",
+  "uv",
+  "docker",
+  "terraform",
+  "dotnet",
+] as const;
+
 export const Toolchain = Schema.Struct({
   name: Fact,
-  /** The output of `--version`, unparsed when the runner could not parse it. */
+  /**
+   * The version the tool printed when asked for it (`--version`, or `go
+   * version` for `go`): the semantic version in that text, or the whole text
+   * trimmed when it holds none.
+   */
   version: Fact,
   path: Fact,
 });
@@ -273,6 +297,15 @@ export const RunnerFacts = Schema.Struct({
   totalMemoryBytes: Bytes,
   docker: Schema.Boolean,
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The names of the toolchains the runner looked for, whether it found them
+   * or not. Without it, a client cannot tell "not installed" from "this runner
+   * never looked". Absent means a runner built before the list grew, which
+   * looked for `git` and `gh` only.
+   */
+  probedToolchains: Schema.optionalKey(
+    Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  ),
   harnesses: Schema.Array(HarnessBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /**
    * The qualified harness ids (such as `claude-code/claude-code`) this runner

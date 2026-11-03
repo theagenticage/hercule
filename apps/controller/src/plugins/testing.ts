@@ -56,6 +56,7 @@ export const buildHarnessDefinition = (
   id,
   displayName: `Harness ${id}`,
   binaryName: "harness",
+  releaseSource: { kind: "npm", package: "harness" },
   declared: {
     steering: "native",
     fork: "native",

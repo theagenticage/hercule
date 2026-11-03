@@ -10,7 +10,7 @@ import { DeclaredCapabilities, HarnessProviderSupport } from "@hercule/plugin-ho
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated } from "../errors";
-import { Id } from "../ids";
+import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
 
 /** Re-exported so a reader of a harness needs only this package. */
@@ -37,6 +37,33 @@ export const HarnessOnRunner = Schema.Struct({
 
 export type HarnessOnRunner = Schema.Schema.Type<typeof HarnessOnRunner>;
 
+/** A successful read of the newest release a harness's publisher lists. */
+export const HarnessReleaseRead = Schema.Struct({
+  /** The newest release the publisher lists. */
+  version: Schema.String,
+  /** When the read happened, so it is the age of `version`. */
+  checkedAt: Timestamp,
+});
+
+export type HarnessReleaseRead = Schema.Schema.Type<typeof HarnessReleaseRead>;
+
+/**
+ * The newest release of a harness that its publisher lists, as the controller
+ * last read it. It is only what the user is told is available. It is not the
+ * version Hercule installs, and not the floor `versionVerdict` checks.
+ *
+ * `{ lastGoodRead: null, error: null }` means the controller has not read it
+ * yet.
+ */
+export const HarnessLatestRelease = Schema.Struct({
+  /** The last read that succeeded, or `null` when none has. */
+  lastGoodRead: Schema.NullOr(HarnessReleaseRead),
+  /** Why the most recent read failed, or `null` when it succeeded. */
+  error: Schema.NullOr(Schema.String),
+});
+
+export type HarnessLatestRelease = Schema.Schema.Type<typeof HarnessLatestRelease>;
+
 export const Harness = Schema.Struct({
   /** The qualified id, such as `claude-code/claude-code`. */
   id: Schema.String,
@@ -52,6 +79,7 @@ export const Harness = Schema.Struct({
   runs: Schema.Array(HarnessProviderSupport),
   /** One entry per runner the controller knows, in the order the runners were added. */
   runners: Schema.Array(HarnessOnRunner),
+  latestRelease: HarnessLatestRelease,
 });
 
 export type Harness = Schema.Schema.Type<typeof Harness>;

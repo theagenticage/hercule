@@ -12,6 +12,7 @@ import {
 import { ViewSwitch } from "../../../../screens/workflows/view-switch";
 import { AllowSessionsButton } from "./-allow-sessions-button";
 import { useMachineFaces } from "./-machine-faces";
+import { useMachineUpdates } from "./-machine-updates";
 
 /** The two ways to show the machines, in the order the switch lists them. */
 const VIEW_CHOICES = [
@@ -25,8 +26,8 @@ const buildAllowButton = ({ runnerId, need }: MachineSummary): ReactNode =>
 
 /**
  * Renders the machines as cards, each with the faces of the work on its
- * machine. It reads the faces here, and not in the section, so the list view
- * reads no sessions.
+ * machine and its updates line. It reads the faces here, and not in the
+ * section, so the list view reads no sessions.
  */
 function MachineCards({
   machines,
@@ -37,6 +38,7 @@ function MachineCards({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const faces = useMachineFaces(client);
+  const updates = useMachineUpdates(client);
   return (
     <>
       {machines.map((machine) => (
@@ -44,11 +46,37 @@ function MachineCards({
           key={machine.runnerId}
           machine={machine}
           faces={faces[machine.runnerId]}
+          updatesText={updates[machine.runnerId]}
           allow={buildAllowButton(machine)}
           onOpen={onOpen}
         />
       ))}
     </>
+  );
+}
+
+/** Renders the machines as rows, each with its updates line. */
+function MachineRows({
+  machines,
+  onOpen,
+}: {
+  readonly machines: readonly MachineSummary[];
+  readonly onOpen: (runnerId: string) => void;
+}): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const updates = useMachineUpdates(client);
+  return (
+    <MachineList>
+      {machines.map((machine) => (
+        <MachineRow
+          key={machine.runnerId}
+          machine={machine}
+          updatesText={updates[machine.runnerId]}
+          allow={buildAllowButton(machine)}
+          onOpen={onOpen}
+        />
+      ))}
+    </MachineList>
   );
 }
 
@@ -97,16 +125,7 @@ export function MachinesSection({
         </MachineGrid>
       ) : (
         <>
-          <MachineList>
-            {machines.map((machine) => (
-              <MachineRow
-                key={machine.runnerId}
-                machine={machine}
-                allow={buildAllowButton(machine)}
-                onOpen={onOpen}
-              />
-            ))}
-          </MachineList>
+          <MachineRows machines={machines} onOpen={onOpen} />
           {emptyCard}
         </>
       )}

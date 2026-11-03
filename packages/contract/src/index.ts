@@ -226,7 +226,14 @@ export {
   ProfileGrants,
   ProfileUpdateInput,
 } from "./groups/profile";
-export { Harness, HarnessOnRunner, DeclaredCapabilities, VersionVerdict } from "./groups/harness";
+export {
+  Harness,
+  HarnessLatestRelease,
+  HarnessReleaseRead,
+  HarnessOnRunner,
+  DeclaredCapabilities,
+  VersionVerdict,
+} from "./groups/harness";
 export { AccountKind, AccountSetupStep, Provider } from "./groups/provider";
 export {
   AccountUsageReading,
@@ -482,6 +489,7 @@ export {
   MAX_RUNNER_LABEL_LENGTH,
   MAX_RUNNER_NAME_LENGTH,
   MintedJoinToken,
+  PROBED_TOOLCHAINS,
   RUNNER_EDIT_FIELDS,
   RUNNER_RETIRE_FIELDS,
   RUNNER_SORT_FIELDS,

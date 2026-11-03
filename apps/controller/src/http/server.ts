@@ -107,6 +107,7 @@ import {
   runAccountUsageReadingLoop,
   runAttachmentSweepLoop,
   runIngestReconciler,
+  runHarnessReleaseCheckLoop,
   runRunnerMetricsPruneLoop,
   runSkillUpdateCheckLoop,
   runScheduler,
@@ -462,6 +463,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     // Skills with a GitHub source are checked for updates at start and then
     // every 3 hours.
     yield* Effect.forkScoped(runSkillUpdateCheckLoop);
+    // The newest release of each harness is read from its publisher at start,
+    // then every hour.
+    yield* Effect.forkScoped(runHarnessReleaseCheckLoop);
     // The controller daemon's two inbound drivers, also before the listener:
     // the queues they read are created with the layer, so nothing a runner
     // reports while these fibers start is missed. Each has its own fiber, so a

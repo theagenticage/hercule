@@ -1,12 +1,15 @@
 /**
- * The one read the harness listing makes on the Capability Snapshots table,
- * which the provider-accounts domain owns. It is read here with SQL because
- * that domain imports this one (for the version floors), so this one cannot
- * import it back.
+ * The harness listing's reads, and the writes of the latest-release record.
+ *
+ * - The Capability Snapshots table belongs to the provider-accounts domain.
+ *   It is read here with SQL because that domain imports this one (for the
+ *   version floors), so this one cannot import it back.
+ * - The `harness_releases` table belongs to this domain.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
+import type { HarnessLatestRelease } from "@hercule/contract";
 import { uuidToString } from "../db";
 
 /** Joins a harness id and a runner id into the key `readReportedVersions` uses. */
@@ -45,6 +48,64 @@ const make = Effect.gen(function* () {
           return versions;
         },
       ),
+
+    /**
+     * Returns the stored latest release of every harness that has one, keyed
+     * by the harness's qualified id, in one query. A harness the controller
+     * has not tried to read has no entry.
+     */
+    readLatestReleases: (): Effect.Effect<ReadonlyMap<string, HarnessLatestRelease>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly harness_id: string;
+          readonly version: string | null;
+          readonly checked_at: string | null;
+          readonly error: string | null;
+        }>`SELECT harness_id, version, checked_at, error FROM harness_releases`,
+        (rows) =>
+          new Map(
+            rows.map((row) => [
+              row.harness_id,
+              {
+                lastGoodRead:
+                  row.version !== null && row.checked_at !== null
+                    ? { version: row.version, checkedAt: row.checked_at }
+                    : null,
+                error: row.error,
+              },
+            ]),
+          ),
+      ),
+
+    /**
+     * Records that a read of the harness's latest release succeeded: stores
+     * the version and `checkedAt`, and clears the error. Runs in the caller's
+     * transaction.
+     */
+    recordReleaseRead: (
+      harnessId: string,
+      version: string,
+      checkedAt: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO harness_releases (harness_id, version, checked_at, error)
+        VALUES (${harnessId}, ${version}, ${checkedAt}, NULL)
+        ON CONFLICT (harness_id) DO UPDATE SET
+          version = excluded.version, checked_at = excluded.checked_at, error = NULL
+      `),
+
+    /**
+     * Records that a read of the harness's latest release failed: stores
+     * `error` and leaves the last good version and its time as they are. A
+     * harness with no row gets one with no version. Runs in the caller's
+     * transaction.
+     */
+    recordReleaseReadFailure: (harnessId: string, error: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT INTO harness_releases (harness_id, version, checked_at, error)
+        VALUES (${harnessId}, NULL, NULL, ${error})
+        ON CONFLICT (harness_id) DO UPDATE SET error = excluded.error
+      `),
   };
 });
 

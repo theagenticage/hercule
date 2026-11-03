@@ -23,9 +23,16 @@ const renderCard = (
   machine: MachineSummary,
   onOpen = vi.fn(),
   faces?: MachineFaces,
+  updatesText?: string,
 ): HTMLElement => {
   const { container } = render(
-    <MachineCard machine={machine} faces={faces} allow={null} onOpen={onOpen} />,
+    <MachineCard
+      machine={machine}
+      faces={faces}
+      updatesText={updatesText}
+      allow={null}
+      onOpen={onOpen}
+    />,
   );
   return container.firstElementChild as HTMLElement;
 };
@@ -162,5 +169,26 @@ describe("MachineCard", () => {
     const card = renderCard(BUSY_MACHINE);
 
     expect(within(card).queryByRole("img", { name: /at work here/ })).toBeNull();
+  });
+
+  it("draws the updates line under the need line, in no hue", () => {
+    const card = renderCard(NEARLY_FULL_DISK_MACHINE, vi.fn(), undefined, "2 updates");
+    const need = within(card).getByText("Disk 87% full");
+    const updates = within(card).getByText("2 updates");
+
+    expect(need.compareDocumentPosition(updates) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(updates.className).toBe("fleet-updates");
+  });
+
+  it("draws the updates line alone, in the need line's place, for a machine that needs nothing", () => {
+    const card = renderCard(DRAINING_MACHINE, vi.fn(), undefined, "1 update");
+
+    expect(card.querySelector(".fleet-card-foot")?.textContent).toBe("1 update");
+  });
+
+  it("draws no updates line for a machine with none", () => {
+    const card = renderCard(NEARLY_FULL_DISK_MACHINE);
+
+    expect(card.querySelector(".fleet-updates")).toBeNull();
   });
 });

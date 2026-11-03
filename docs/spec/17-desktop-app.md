@@ -2006,6 +2006,7 @@ Tools down, machines across, in two groups: **Harnesses** (the Hercule runner fi
 - **A toolchain cell** is the machine's version in `--ink`, or the dash. Nothing is marked older, because nothing says which release is the latest.
 - **A key line** under the grid explains the cells: the check icon and "latest", "1.2.3 older", and the dash and "not installed".
 - **A tool's name opens its row's detail,** in place under the row: one line on what the tool is (from a fixed list in `@hercule/client-core`), the latest release and when it was checked, and the machines by version. The prototype's release notes are left out: nothing reads them.
+- *(Amended 2026-11-03, [#985](https://github.com/theagenticage/hercule/issues/985).)* **A toolchain the machine's runner is too old to look for** is "Unknown" in `--faint`, not a dash, because "not installed" would be false. Its tooltip reads "This machine's runner is too old to look for node. Update it to see it." A runner without `probedToolchains` looked for `git` and `gh` only ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.6); a toolchain that was found is always shown with its version, whatever the list says. In the row's detail, such machines are a group "Not looked for", after the versions and before "Not installed". The runner row's latest line names the version: "Latest release 0.4.2, this controller's version: a runner updates to its controller's version."
 - A click on a machine's column head opens that machine's page at its Software section.
 - **View only.** v1 installs and updates nothing from here ([#974](https://github.com/theagenticage/hercule/issues/974)). A harness is still installed where Settings › Providers' account sheet offers Install on a machine that lacks it.
 
@@ -2030,7 +2031,7 @@ One centred column, in this order. The jump links of the header follow the secti
 6. **Software:**
    - **Harnesses:** one row per harness, with whether it is installed here, its version and the version verdict, as `harness.query` reports them.
    - **Accounts signed in here:** one row per per-machine Provider Account, with who is signed in on this machine, or "Not signed in" and **Sign in**, which opens that account's sign-in dialog for this runner, the one Settings › Providers' account sheet opens ([Providers](#the-sections)). A key or token account is not listed: it works on every machine.
-   - **Tools:** each toolchain found here with its version; then one faint line, "Not installed: terraform, dotnet".
+   - **Tools:** each toolchain found here with its version; then one faint line, "Not installed: terraform, dotnet". *(Amended 2026-11-03, [#985](https://github.com/theagenticage/hercule/issues/985).)* The tools run in the order the runner reported them. "Not installed" names only the toolchains the runner looked for. When the runner is too old to look for some, a second faint line names them: "This runner is too old to look for node, pnpm, bun: update it to see them."
 7. **Recent:** the machine's last five activity entries (below), and **All activity**, which opens `/fleet/$runnerId/activity`.
 8. **Settings**, each saving as Settings' rows save ([The frame](#the-frame)):
    - **Session cap**, "How many sessions run here at once.", a number field;

@@ -287,6 +287,16 @@
   white-space: nowrap;
   font-size: var(--t-12);
 }
+/* A tool's version is a raw string such as "go1.25.3 linux/arm64", so it is
+   cut with an ellipsis (its tooltip has the whole), and its figures line up
+   from one row to the next. */
+.machine-page-sw-version.is-tool {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .machine-page-sw-note.is-fail {
   color: var(--fail-ink);
   font-weight: var(--w-medium);
@@ -301,6 +311,10 @@
 .machine-page-sw-action {
   display: flex;
   justify-content: flex-end;
+}
+/* The Tools rows have a name and a version only: no note, no action. */
+.machine-page-sw--tools .machine-page-sw-row {
+  grid-template-columns: minmax(140px, 190px) minmax(0, 1fr);
 }
 /* In a narrow section the note moves under the name, where it has the whole
    row to wrap in, instead of being cut off. */
@@ -337,6 +351,10 @@
   margin: 8px 0 0;
   color: var(--faint);
   font-size: var(--t-12);
+}
+/* Two lines in a row, such as the tools not installed and the tools not looked for, sit closer. */
+.machine-page-sw-footnote + .machine-page-sw-footnote {
+  margin-top: 4px;
 }
 
 /* ---------- Settings ---------- */
@@ -386,4 +404,10 @@ input.machine-page-label-field {
   padding: 0 9px;
   border-radius: var(--r-pill);
   font-size: var(--t-12);
+}
+@container machine-page-sw (width < 600px) {
+  .machine-page-sw--tools .machine-page-sw-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 60%);
+    grid-template-areas: "name version";
+  }
 }

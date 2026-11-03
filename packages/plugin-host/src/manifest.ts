@@ -20,8 +20,11 @@ import { Schema } from "effect";
  *   catalog from the provider's API, with a `parseCatalogBody` passed at
  *   registration. A usage parser may also return `expiresAt`. A plugin built
  *   against version 6 does not know either, so the host refuses it at load.
+ * - Version 8 made `releaseSource` required on `HarnessDefinition`: where the
+ *   harness's releases are published. A harness plugin built against version 7
+ *   declares none, so the host refuses it at load.
  */
-export const HOST_API = 7;
+export const HOST_API = 8;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are

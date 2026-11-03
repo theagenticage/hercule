@@ -230,6 +230,7 @@ describe("GET /plugins", () => {
         id: "alpha/alpha",
         displayName: "Harness alpha",
         binaryName: "harness",
+        releaseSource: { kind: "npm", package: "harness" },
         runs: [],
       });
 

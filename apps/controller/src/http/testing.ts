@@ -22,6 +22,7 @@ import * as Redacted from "effect/Redacted";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as HttpServer from "effect/http/HttpServer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -99,6 +100,7 @@ import {
   type SecurityRunner,
 } from "../secrets";
 import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "../model-profiles";
+import { HarnessReleasesLayer } from "../harnesses";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import {
   findCredentialSecretName,
@@ -197,6 +199,11 @@ const buildServices = (
         // As in the real boot: a plugin's lifecycle change and a Connection's
         // or an agent's delete validate the stored workflows again.
         Layer.provideMerge(WorkflowValidityObserversLayer),
+        Layer.provideMerge(
+          HarnessReleasesLayer.pipe(
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableRegistryClient)),
+          ),
+        ),
       ),
     ),
     // One connection map and one set of awaited device logins: the socket
@@ -337,6 +344,18 @@ const addTestProviderAccount = Effect.gen(function* () {
  */
 const acceptingProviderKeyClient = HttpClient.make((request) =>
   Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}"))),
+);
+
+/**
+ * The npm registry a test controller reads: no
+ * request gets an answer, so no test reaches the real registry by accident.
+ */
+const unreachableRegistryClient = HttpClient.make((request) =>
+  Effect.fail(
+    new HttpClientError.HttpClientError({
+      reason: new HttpClientError.TransportError({ request, cause: "no registry in this test" }),
+    }),
+  ),
 );
 
 /**

@@ -240,16 +240,25 @@ const groupPointsByRunner = (
 };
 
 /**
+ * Lists the runners the Fleet screens show a machine for: every runner that is
+ * not retired, sorted by runner id. A runner id is a UUIDv7, which starts with
+ * its creation time, so this is the order the machines joined. That order
+ * never changes while the page is open, so no card or column jumps when a
+ * state changes.
+ */
+export const listFleetRunners = (runners: readonly Runner[]): readonly Runner[] =>
+  runners
+    .filter((runner) => runner.lifecycle !== "retired")
+    .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+/**
  * Builds the Fleet page from the runners and the counts of their sessions.
  * `metricsHistory` holds the hour points of every runner, for the disk
  * forecasts. `localRunnerId` is the controller's own runner, or `null` when it
  * has none. Times are worded in `timezone`, relative to `today`.
  *
- * The page shows one machine per runner that is not retired. Counts of a
- * runner that is not in `runners` are ignored. The machines are sorted by
- * runner id. A runner id is a UUIDv7, which starts with its creation time, so
- * this is the order the machines joined. That order never changes while the
- * page is open, so no card jumps when a state changes.
+ * The page shows one machine per runner that `listFleetRunners` lists. Counts
+ * of a runner that is not in `runners` are ignored.
  *
  * Each machine's disk forecast and need are computed once, and the lead, the
  * section count and the machines all read the same ones.
@@ -263,18 +272,15 @@ export const describeFleetPage = (
   today: Date,
 ): FleetPage => {
   const pointsByRunner = groupPointsByRunner(metricsHistory.points);
-  const entries = runners
-    .filter((runner) => runner.lifecycle !== "retired")
-    .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map((runner) => {
-      const machine = buildFleetMachine(runner, counts);
-      const forecast = forecastDiskLimit(
-        pointsByRunner.get(runner.id) ?? [],
-        runner,
-        metricsHistory.readAt,
-      );
-      return { machine, forecast, need: decideMachineNeed(machine, forecast, timezone, today) };
-    });
+  const entries = listFleetRunners(runners).map((runner) => {
+    const machine = buildFleetMachine(runner, counts);
+    const forecast = forecastDiskLimit(
+      pointsByRunner.get(runner.id) ?? [],
+      runner,
+      metricsHistory.readAt,
+    );
+    return { machine, forecast, need: decideMachineNeed(machine, forecast, timezone, today) };
+  });
   const machines = entries.map((entry) => entry.machine);
   const needing = entries.filter((entry) => entry.need !== undefined).length;
   return {

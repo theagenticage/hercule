@@ -109,6 +109,7 @@ import {
   PluginsLayer,
   registry,
 } from "./plugins";
+import { HarnessReleases, HarnessReleasesLayer } from "./harnesses";
 import {
   HarnessAccounts,
   HarnessAccountsLayer,
@@ -272,6 +273,7 @@ export type ControllerServices =
   | ConnectionTypes
   | RunnerConnections
   | RunnerMetricsService
+  | HarnessReleases
   | HarnessAccounts
   | ModelCatalogs
   | ModelProfileLookup
@@ -463,6 +465,7 @@ export const bootWith = <A, E>(
       Layer.provideMerge(RunServiceReferenceLayer),
       Layer.provideMerge(DiscussionInputsReferenceLayer),
       Layer.provideMerge(WorkflowValidityObserversLayer),
+      Layer.provideMerge(HarnessReleasesLayer.pipe(Layer.provide(FetchHttpClient.layer))),
       Layer.provideMerge(withFleet),
     );
 

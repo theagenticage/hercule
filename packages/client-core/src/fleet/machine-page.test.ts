@@ -145,9 +145,18 @@ describe("describeMachinePage head", () => {
     expect(updateText("0.1.0+aaaaaaaaa", "0.1.1+bbbbbbbbb")).toBe("update available");
   });
 
+  it("ranks a pre-release below its release", () => {
+    const updateText = (runner: string, controller: string) =>
+      describePage({ version: runner }, {}, controller).head.runner?.updateText;
+
+    expect(updateText("0.9.3-rc.1", "0.9.3")).toBe("update available");
+    expect(updateText("0.9.3", "0.9.3-rc.1")).toBeNull();
+    expect(updateText("0.9.3-rc.1", "0.9.3-rc.2")).toBe("update available");
+  });
+
   it("says nothing when a version has no known order", () => {
-    expect(describePage({ version: "0.9.3-rc.1" }, {}, "0.9.3").head.runner?.updateText).toBeNull();
     expect(describePage({ version: "0.9.2" }, {}, "edge").head.runner?.updateText).toBeNull();
+    expect(describePage({ version: "edge" }, {}, "0.9.2").head.runner?.updateText).toBeNull();
   });
 });
 

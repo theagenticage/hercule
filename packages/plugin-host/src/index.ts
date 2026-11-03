@@ -55,6 +55,7 @@ export {
   HarnessWord,
   MAX_HARNESS_HOME_SEGMENT_LENGTH,
   HarnessProviderSupport,
+  HarnessReleaseSource,
   QualifiedContributionId,
   SignalDraft,
   SignalDraftAction,

@@ -15,6 +15,7 @@ const definition: HarnessDefinition = {
   id: "pi",
   displayName: "pi",
   binaryName: "pi",
+  releaseSource: { kind: "npm", package: "@earendil-works/pi-coding-agent" },
   declared: {
     steering: "native",
     fork: "native",

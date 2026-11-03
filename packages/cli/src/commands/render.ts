@@ -51,6 +51,7 @@ import {
   type DiscussionCreated,
   type DiscussionSummary,
   type DiscussionWithPosts,
+  type Harness,
   type Input,
   type MemoryDocument,
   type MemoryEntry,
@@ -937,6 +938,26 @@ const renderSignalRaised = (result: SignalRaiseResult): ReadonlyArray<string> =>
   `signal ${result.signalId} raised`,
 ];
 
+/**
+ * Returns the lines of `harness list`: the generic table, with the newest
+ * release of each harness as a `latest` column holding the version of its last
+ * good read, empty until a read of the publisher has succeeded. The column sits before the
+ * wide JSON cells, so it stays in view. The error of a failed read is left to
+ * `--json`.
+ */
+const renderHarnessList = (harnesses: ReadonlyArray<Harness>): ReadonlyArray<string> =>
+  renderTable(
+    harnesses.map((harness) => ({
+      id: harness.id,
+      displayName: harness.displayName,
+      binaryName: harness.binaryName,
+      latest: harness.latestRelease.lastGoodRead?.version ?? "",
+      declared: harness.declared,
+      runs: harness.runs,
+      runners: harness.runners,
+    })),
+  );
+
 /** Returns the lines for the items of a page, or for every item of an `--all` read. */
 type ItemsRenderer = (items: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<string>;
 
@@ -968,6 +989,7 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
   "wikiPage.query": (items) =>
     renderTableColumns(items, ["id", "repository", "slug", "revision", "updatedAt", "title"]),
   "skill.query": (items) => renderSkillList(items as unknown as ReadonlyArray<Skill>),
+  "harness.query": (items) => renderHarnessList(items as unknown as ReadonlyArray<Harness>),
 };
 
 /**

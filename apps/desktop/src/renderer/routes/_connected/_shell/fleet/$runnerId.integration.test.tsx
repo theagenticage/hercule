@@ -9,6 +9,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { queryKeys } from "@hercule/client-core";
 import { HARNESSES } from "@hercule/client-core/testing";
+import { PROBED_TOOLCHAINS } from "@hercule/contract";
 import type {
   Assistant,
   Harness,
@@ -72,6 +73,7 @@ const ATLAS: Runner = {
     diskTotalBytes: 500_000_000_000,
     docker: false,
     toolchains: [],
+    probedToolchains: PROBED_TOOLCHAINS,
     harnesses: [
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: true, path: "/usr/local/bin/codex" },
@@ -826,6 +828,61 @@ describe("the Software section", () => {
       "AnthropicClaude CodeNot signed inSign in",
       "OpenAICodexSigned in as rogier@openai.example",
     ]);
+  });
+
+  it("lists the tools found on the machine in the order the runner reported them, then names the ones that are missing", async () => {
+    await openMachine({
+      runner: {
+        ...ATLAS,
+        facts: {
+          ...ATLAS.facts!,
+          toolchains: [
+            { name: "node", version: "22.11.0", path: "/usr/local/bin/node" },
+            { name: "git", version: "2.47.0", path: "/usr/bin/git" },
+          ],
+        },
+      },
+    });
+
+    const tools = within(getSoftware()).getByRole("list", { name: "Tools" });
+    expect(
+      within(tools)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual(["node22.11.0", "git2.47.0"]);
+    expect(within(getSoftware()).getByText(/^Not installed: gh, /).textContent).not.toMatch(
+      /git|node/,
+    );
+  });
+
+  it("says which tools an older runner did not look for, apart from the ones it found missing", async () => {
+    // An older runner sends no list of what it looked for.
+    const olderFacts = Object.fromEntries(
+      Object.entries(ATLAS.facts!).filter(([key]) => key !== "probedToolchains"),
+    ) as NonNullable<Runner["facts"]>;
+    await openMachine({ runner: { ...ATLAS, facts: olderFacts } });
+
+    const software = getSoftware();
+    expect(within(software).getByText("Not installed: git, gh")).toBeTruthy();
+    expect(
+      within(software).getByText(/^This runner is too old to look for node, pnpm, /),
+    ).toBeTruthy();
+  });
+
+  it("names every probed tool as not installed when the runner found none", async () => {
+    await openMachine();
+
+    const software = getSoftware();
+    expect(within(software).queryByRole("list", { name: "Tools" })).toBeNull();
+    expect(within(software).getByRole("heading", { name: "Tools" })).toBeTruthy();
+    expect(within(software).getByText(/^Not installed: git, gh, node, /)).toBeTruthy();
+  });
+
+  it("says nothing about tools while the runner has not reported its facts", async () => {
+    await openMachine({ runner: { ...ATLAS, facts: null } });
+
+    expect(within(getSoftware()).queryByRole("heading", { name: "Tools" })).toBeNull();
+    expect(within(getSoftware()).queryByText(/^Not installed:/)).toBeNull();
   });
 
   it("opens the account's sign-in dialog for this machine from Sign in", async () => {

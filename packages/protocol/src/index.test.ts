@@ -987,6 +987,30 @@ describe("the size of the disk in the runner facts", () => {
   });
 });
 
+describe("the probed toolchains in the runner facts", () => {
+  const decodeFacts = (value: Record<string, unknown>) =>
+    decodeFromRunner({ _tag: "factsReport", facts: value });
+
+  // What a controller built before the list was reported reads.
+  const OldRunnerFacts = Schema.Struct(Struct.omit(RunnerFacts.fields, ["probedToolchains"]));
+
+  it("decodes facts with and without it", () => {
+    expect(decodeFacts({ ...facts, probedToolchains: ["git", "gh", "node"] })._tag).toBe("Success");
+    expect(decodeFacts(facts)._tag).toBe("Success");
+  });
+
+  it("is read by a controller of the age before it, which drops the extra key", () => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(OldRunnerFacts)({ ...facts, probedToolchains: ["git"] }),
+    );
+    expect(decoded).toEqual(facts);
+  });
+
+  it("rejects an empty name", () => {
+    expect(decodeFacts({ ...facts, probedToolchains: [""] })._tag).toBe("Failure");
+  });
+});
+
 describe("sequence numbers", () => {
   it("is carried by the one frame that extends the envelope, and is required there", () => {
     const event = runnerMessages.find((message) => message._tag === "sessionEvent");

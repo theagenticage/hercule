@@ -4,6 +4,7 @@
  * they share these fixtures. So do the tests of every module that names or
  * sorts Provider Accounts.
  */
+import { PROBED_TOOLCHAINS } from "@hercule/contract";
 import type {
   CapabilitySnapshot,
   Harness,
@@ -33,6 +34,7 @@ export const BARE: Runner = {
     totalMemoryBytes: 64 * GIB,
     docker: true,
     toolchains: [],
+    probedToolchains: PROBED_TOOLCHAINS,
     harnesses: [
       { name: "claude", present: false },
       { name: "codex", present: false },
@@ -149,6 +151,7 @@ const buildHarness = (
   declared: DECLARED,
   runs,
   runners: [],
+  latestRelease: { lastGoodRead: null, error: null },
 });
 
 /** The harnesses of the shipped plugins, as `harness.query` lists them. */

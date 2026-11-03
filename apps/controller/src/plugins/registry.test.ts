@@ -38,6 +38,7 @@ const SHIPPED = [
       id: "claude-code/claude-code",
       displayName: "Claude Code",
       binaryName: "claude",
+      releaseSource: { kind: "npm", package: "@anthropic-ai/claude-code" },
       declared: {
         steering: "native",
         fork: "native",
@@ -76,6 +77,7 @@ const SHIPPED = [
       id: "codex/codex",
       displayName: "Codex",
       binaryName: "codex",
+      releaseSource: { kind: "npm", package: "@openai/codex" },
       declared: {
         steering: "native",
         fork: "native",
@@ -109,6 +111,7 @@ const SHIPPED = [
       id: "pi/pi",
       displayName: "pi",
       binaryName: "pi",
+      releaseSource: { kind: "npm", package: "@earendil-works/pi-coding-agent" },
       declared: {
         steering: "native",
         fork: "native",
