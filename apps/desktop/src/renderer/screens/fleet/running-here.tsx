@@ -258,8 +258,8 @@ function ExpandedSessionList({
  *   scrolls past it. Each view has its own list, drawn afresh at the top when
  *   the view or "Show fewer" brings it back.
  * - A machine with no work shows one line saying so, and no switch.
- * - A group or session that waits for a free slot is drawn in the marigold
- *   ink, with its faces dimmed.
+ * - A group or session that waits for a free slot shows its status in the
+ *   marigold ink.
  */
 export function RunningHere({
   id,

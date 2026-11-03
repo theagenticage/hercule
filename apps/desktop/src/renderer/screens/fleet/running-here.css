@@ -95,7 +95,7 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: color-mix(in oklab, var(--ink) 6%, transparent);
   color: var(--muted);
 }
@@ -173,11 +173,6 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
-}
-/* Work that waits for a free slot: faces dimmed (its status is in marigold, below). */
-.running-here-row.is-waiting .running-here-glyph,
-.running-here-row.is-waiting .running-here-faces {
-  opacity: 0.55;
 }
 
 /* ---------- Sessions ---------- */
