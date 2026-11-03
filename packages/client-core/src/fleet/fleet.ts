@@ -20,25 +20,32 @@ import {
   buildNumberPart,
   buildPlainPart,
   countRoom,
+  buildSessionsDrawing,
   decideMachineKind,
   describeMachineStatus,
   describeRoom,
-  isDiskBelowLimit,
   listMachineNeeds,
+  measureDisk,
+  measureMemory,
   plural,
+  splitDiskSize,
   type FleetMachine,
   type FleetTextPart,
+  type GaugeLevel,
   type MachineKind,
   type MachineNeed,
   type MachineStatus,
   type SessionCountsByRunner,
+  type SessionsDrawing,
 } from "./machine";
 
 export type {
   FleetTextPart,
+  GaugeLevel,
   MachineKind,
   MachineNeed,
   MachineStatus,
+  SessionsDrawing,
   SessionCountsByRunner,
 } from "./machine";
 
@@ -71,8 +78,8 @@ export const countRunnerSessions = (sessions: readonly Session[]): SessionCounts
 /**
  * Returns every need that applies to the machine of `runner`, the most serious
  * first: it is offline, it is unreachable, its disk is below its limit,
- * sessions wait for a slot. The list is empty when the machine needs nothing.
- * `counts` holds the session counts of the runners (the runner's own entry is
+ * sessions wait for a slot, its disk is 85% full or more. The list is empty
+ * when the machine needs nothing. `counts` holds the session counts of the runners (the runner's own entry is
  * used; none means no sessions). A time is worded relative to `today` in
  * `timezone`, and left out when the runner was never seen.
  *
@@ -144,98 +151,6 @@ const describeLead = (machines: readonly FleetMachine[], needing: number): Fleet
   return { headline, detail };
 };
 
-/** The most slots, and the most waiting sessions, drawn one block each. */
-const MAX_BLOCKS = 16;
-
-/**
- * How to draw a machine's sessions against its cap. `blocks` is one block per
- * slot, `bar` is one bar cut every 10 sessions. `running` slots are filled,
- * `free` slots are empty, and `waiting` is the number of sessions waiting for
- * a slot, drawn as marigold after the cap. The drawn total is
- * `max(cap, running) + waiting`: after the user lowers the cap below the
- * sessions running, `free` is 0 and `running` runs past the cap. The renderer
- * needs `cap` to mark where the cap ends in that case, and where the waiting
- * part starts.
- *
- * `waitingBlocks` is how many waiting blocks the `blocks` shape draws: at most
- * 16, because the drawing is clipped to its place anyway and the text beside it
- * carries the count. It is 0 for a `bar`, which draws one stretch for all of
- * `waiting`.
- */
-export interface SessionsDrawing {
-  readonly shape: "blocks" | "bar";
-  readonly cap: number;
-  readonly running: number;
-  readonly free: number;
-  readonly waiting: number;
-  readonly waitingBlocks: number;
-}
-
-/**
- * Returns the counts to draw a machine's sessions from: blocks while both the
- * cap and the sessions running are at most 16, a bar otherwise. A cap lowered
- * from 100 to 4 under 100 running sessions is therefore a bar, not 100
- * blocks. A machine running more sessions than its cap has 0 free slots, never
- * a negative number.
- */
-const buildSessionsDrawing = (machine: FleetMachine): SessionsDrawing => {
-  const cap = machine.runner.maxConcurrentSessions;
-  const shape = cap <= MAX_BLOCKS && machine.running <= MAX_BLOCKS ? "blocks" : "bar";
-  return {
-    shape,
-    cap,
-    running: machine.running,
-    free: Math.max(0, cap - machine.running),
-    waiting: machine.waiting,
-    waitingBlocks: shape === "blocks" ? Math.min(machine.waiting, MAX_BLOCKS) : 0,
-  };
-};
-
-/**
- * Splits a size in bytes into a number and a unit, the way Finder shows it, in
- * units of 10^9 bytes:
- *
- * - under a gigabyte, whole megabytes: "420" "MB";
- * - from a gigabyte, gigabytes with one decimal under 100 GB: "10.7" "GB";
- * - from 100 GB, whole gigabytes, with a thousands separator from 1,000 GB:
- *   "245" "GB", "1,953" "GB". There is no terabyte unit.
- *
- * The tier is picked from the rounded number, so 99.96 GB reads "100 GB" and
- * not "100.0 GB".
- */
-const splitDiskSize = (bytes: number): { readonly amount: string; readonly unit: "MB" | "GB" } => {
-  const megabytes = Math.round(bytes / 1e6);
-  if (megabytes < 1000) return { amount: String(megabytes), unit: "MB" };
-  const gigabytes = bytes / 1e9;
-  const tenths = Math.round(gigabytes * 10) / 10;
-  if (tenths < 100) return { amount: tenths.toFixed(1), unit: "GB" };
-  return { amount: Math.round(gigabytes).toLocaleString("en-US"), unit: "GB" };
-};
-
-/** How full a gauge is: `normal`, `you` (getting high), or `fail` (too high). */
-export type GaugeLevel = "normal" | "you" | "fail";
-
-const MEMORY_YOU_FROM = 0.8;
-const MEMORY_FAIL_FROM = 0.92;
-
-/**
- * Measures the memory in use on a machine: `share` is the part of its RAM
- * that is not available, from 0 to 1, and `level` is `you` from 80% and
- * `fail` from 92%. Returns `null` when the runner has not reported its total
- * memory or its available memory. A high level is only a colour: memory never
- * makes a machine need the user.
- */
-const measureMemory = (
-  runner: Runner,
-): { readonly share: number; readonly level: GaugeLevel } | null => {
-  if (runner.facts === null || runner.metrics === null) return null;
-  const total = runner.facts.totalMemoryBytes;
-  if (total <= 0) return null;
-  const share = Math.min(1, Math.max(0, (total - runner.metrics.availableMemoryBytes) / total));
-  const level = share >= MEMORY_FAIL_FROM ? "fail" : share >= MEMORY_YOU_FROM ? "you" : "normal";
-  return { share, level };
-};
-
 /** What a card or a list row of the Fleet draws for one machine, fully worded. */
 export interface MachineSummary {
   readonly runnerId: string;
@@ -261,19 +176,21 @@ export interface MachineSummary {
   /**
    * The free disk space as a number and a unit, or `null` before the runner has
    * reported its disk. `level` is `fail` while the free space is below the
-   * machine's disk limit, else `normal`. `share` is how full the disk is, from
-   * 0 to 1; it is `null` until the runner reports its total disk size (it does
-   * not yet), and the gauge then draws empty (spec 17 §Graphs).
+   * machine's disk limit, else `you` from 85% full, else `normal`. `share` is
+   * how full the disk is, from 0 to 1, and `percent` is the same rounded down
+   * to a whole number. Both are `null` when the runner does not report its
+   * total disk size, and the gauge then draws empty (spec 17 §Graphs).
    */
   readonly disk: {
     readonly amount: string;
     readonly unit: "MB" | "GB";
     readonly level: GaugeLevel;
     readonly share: number | null;
+    readonly percent: number | null;
   } | null;
   /**
-   * The memory in use as a whole percentage and as a share from 0 to 1, or
-   * `null` before the runner has reported it.
+   * The memory in use as a whole percentage, rounded down, and as a share from
+   * 0 to 1, or `null` before the runner has reported it.
    */
   readonly memory: {
     readonly percent: number;
@@ -290,7 +207,7 @@ const summarizeMachine = (
   today: Date,
 ): MachineSummary => {
   const { runner } = machine;
-  const memory = measureMemory(runner);
+  const disk = measureDisk(runner);
   return {
     runnerId: runner.id,
     name: runner.name,
@@ -301,17 +218,10 @@ const summarizeMachine = (
     roomText: describeRoom(machine)?.short ?? null,
     need: needs[0],
     disk:
-      runner.metrics === null
+      runner.metrics === null || disk === null
         ? null
-        : {
-            ...splitDiskSize(runner.metrics.diskFreeBytes),
-            level: isDiskBelowLimit(runner) ? "fail" : "normal",
-            share: null,
-          },
-    memory:
-      memory === null
-        ? null
-        : { percent: Math.round(memory.share * 100), share: memory.share, level: memory.level },
+        : { ...splitDiskSize(runner.metrics.diskFreeBytes), ...disk },
+    memory: measureMemory(runner),
   };
 };
 

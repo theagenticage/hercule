@@ -208,6 +208,155 @@ export const decideMachineKind = (facts: RunnerFacts | null): MachineKind => {
   return isDesktopOs && facts.totalMemoryBytes >= DESKTOP_MEMORY_BYTES ? "desktop" : "laptop";
 };
 
+/** The most slots, and the most waiting sessions, drawn one block each. */
+const MAX_BLOCKS = 16;
+
+/**
+ * How to draw a machine's sessions against its cap. `blocks` is one block per
+ * slot, `bar` is one bar cut every 10 sessions. `running` slots are filled,
+ * `free` slots are empty, and `waiting` is the number of sessions waiting for
+ * a slot, drawn as marigold after the cap. The drawn total is
+ * `max(cap, running) + waiting`: after the user lowers the cap below the
+ * sessions running, `free` is 0 and `running` runs past the cap. The renderer
+ * needs `cap` to mark where the cap ends in that case, and where the waiting
+ * part starts.
+ *
+ * `waitingBlocks` is how many waiting blocks the `blocks` shape draws: at most
+ * 16, because the drawing is clipped to its place anyway and the text beside it
+ * carries the count. It is 0 for a `bar`, which draws one stretch for all of
+ * `waiting`.
+ */
+export interface SessionsDrawing {
+  readonly shape: "blocks" | "bar";
+  readonly cap: number;
+  readonly running: number;
+  readonly free: number;
+  readonly waiting: number;
+  readonly waitingBlocks: number;
+}
+
+/**
+ * Returns the counts to draw a machine's sessions from: blocks while both the
+ * cap and the sessions running are at most 16, a bar otherwise. A cap lowered
+ * from 100 to 4 under 100 running sessions is therefore a bar, not 100
+ * blocks. A machine running more sessions than its cap has 0 free slots, never
+ * a negative number.
+ */
+export const buildSessionsDrawing = (machine: FleetMachine): SessionsDrawing => {
+  const cap = machine.runner.maxConcurrentSessions;
+  const shape = cap <= MAX_BLOCKS && machine.running <= MAX_BLOCKS ? "blocks" : "bar";
+  return {
+    shape,
+    cap,
+    running: machine.running,
+    free: Math.max(0, cap - machine.running),
+    waiting: machine.waiting,
+    waitingBlocks: shape === "blocks" ? Math.min(machine.waiting, MAX_BLOCKS) : 0,
+  };
+};
+
+/**
+ * Splits a size in bytes into a number and a unit, the way Finder shows it, in
+ * units of 10^9 bytes:
+ *
+ * - under a gigabyte, whole megabytes: "420" "MB";
+ * - from a gigabyte, gigabytes with one decimal under 100 GB: "10.7" "GB";
+ * - from 100 GB, whole gigabytes, with a thousands separator from 1,000 GB:
+ *   "245" "GB", "1,953" "GB". There is no terabyte unit.
+ *
+ * The tier is picked from the rounded number, so 99.96 GB reads "100 GB" and
+ * not "100.0 GB".
+ */
+export const splitDiskSize = (
+  bytes: number,
+): { readonly amount: string; readonly unit: "MB" | "GB" } => {
+  const megabytes = Math.round(bytes / 1e6);
+  if (megabytes < 1000) return { amount: String(megabytes), unit: "MB" };
+  const gigabytes = bytes / 1e9;
+  const tenths = Math.round(gigabytes * 10) / 10;
+  if (tenths < 100) return { amount: tenths.toFixed(1), unit: "GB" };
+  return { amount: Math.round(gigabytes).toLocaleString("en-US"), unit: "GB" };
+};
+
+/** How full a gauge is: `normal`, `you` (getting high), or `fail` (too high). */
+export type GaugeLevel = "normal" | "you" | "fail";
+
+const MEMORY_YOU_FROM_PERCENT = 80;
+const MEMORY_FAIL_FROM_PERCENT = 92;
+const DISK_YOU_FROM_PERCENT = 85;
+
+/**
+ * Measures how much of `totalBytes` is `usedBytes`, which is clamped to the
+ * total first. `share` is the fill from 0 to 1. `percent` is the whole number
+ * shown beside a gauge, rounded down.
+ *
+ * It rounds down, never to the nearest, and the levels below compare that
+ * same whole percent. A gauge that turns `you` at 85% must never show a
+ * normal-coloured "85%", which rounding 84.6 up would: 84.6% shows "84%" and
+ * is normal. The percent is computed from whole bytes before dividing, because
+ * multiplying a share by 100 can land just under a whole number (0.29 * 100 is
+ * 28.999999999999996) and round down to the wrong one.
+ */
+const measureUse = (
+  usedBytes: number,
+  totalBytes: number,
+): { readonly share: number; readonly percent: number } => {
+  const used = Math.min(totalBytes, Math.max(0, usedBytes));
+  return { share: used / totalBytes, percent: Math.floor((used * 100) / totalBytes) };
+};
+
+/**
+ * Measures the memory in use on a machine: `share` is the part of its RAM
+ * that is not available, from 0 to 1, `percent` is that share rounded down
+ * (see `measureUse`), and `level` is `you` from 80% and `fail` from 92%.
+ * Returns `null` when the runner has not reported its total memory or its
+ * available memory. A high level is only a colour: memory never makes a
+ * machine need the user.
+ */
+export const measureMemory = (
+  runner: Runner,
+): { readonly share: number; readonly percent: number; readonly level: GaugeLevel } | null => {
+  if (runner.facts === null || runner.metrics === null) return null;
+  const total = runner.facts.totalMemoryBytes;
+  if (total <= 0) return null;
+  const { share, percent } = measureUse(total - runner.metrics.availableMemoryBytes, total);
+  const level =
+    percent >= MEMORY_FAIL_FROM_PERCENT
+      ? "fail"
+      : percent >= MEMORY_YOU_FROM_PERCENT
+        ? "you"
+        : "normal";
+  return { share, percent, level };
+};
+
+/**
+ * Measures the disk of a machine. `share` and `percent` are how full it is
+ * (see `measureUse`), and are `null` when the runner did not report the disk's
+ * total size. `level` is `fail` while the free space is below the disk limit,
+ * even without a total, else `you` from 85% full, else `normal`. Returns
+ * `null` when the runner has not reported its disk.
+ */
+export const measureDisk = (
+  runner: Runner,
+): {
+  readonly share: number | null;
+  readonly percent: number | null;
+  readonly level: GaugeLevel;
+} | null => {
+  if (runner.metrics === null) return null;
+  const total = runner.facts?.diskTotalBytes;
+  const use =
+    total === undefined || total <= 0
+      ? null
+      : measureUse(total - runner.metrics.diskFreeBytes, total);
+  const level = isDiskBelowLimit(runner)
+    ? "fail"
+    : use !== null && use.percent >= DISK_YOU_FROM_PERCENT
+      ? "you"
+      : "normal";
+  return { share: use?.share ?? null, percent: use?.percent ?? null, level };
+};
+
 /**
  * A reason a machine needs the user. `hue` is the colour family of its line:
  * `fail` for a machine that cannot take work, `you` for work that waits on the
@@ -224,9 +373,20 @@ export type MachineNeed =
       readonly allow: number;
       /** The tooltip of the button that sets the cap to `allow`. */
       readonly allowHint: string;
-    };
+    }
+  | { readonly kind: "disk-nearly-full"; readonly hue: "you"; readonly line: string };
 
 type NeedKind = MachineNeed["kind"];
+
+/**
+ * Returns how full the disk is, in whole percent, when it is 85% full or
+ * more. Returns `null` below that, and when the runner did not report the
+ * disk's total size.
+ */
+const findNearlyFullDiskPercent = (runner: Runner): number | null => {
+  const percent = measureDisk(runner)?.percent ?? null;
+  return percent !== null && percent >= DISK_YOU_FROM_PERCENT ? percent : null;
+};
 
 /**
  * Lists the kinds of need that apply to a machine, in the order the card
@@ -241,6 +401,8 @@ type NeedKind = MachineNeed["kind"];
  * first two needs already name the machine's state. The rule also keeps the
  * Allow button from ever lowering the cap: its value, running plus waiting, is
  * above the cap by construction.
+ *
+ * The needs are independent of each other: a machine can have several.
  */
 const listNeedKinds = (machine: FleetMachine): readonly NeedKind[] => {
   const { runner } = machine;
@@ -253,6 +415,7 @@ const listNeedKinds = (machine: FleetMachine): readonly NeedKind[] => {
     machine.waiting > 0 &&
     machine.running + machine.waiting > runner.maxConcurrentSessions;
   if (isCapHoldingSessionsBack) kinds.push("waiting");
+  if (findNearlyFullDiskPercent(runner) !== null) kinds.push("disk-nearly-full");
   return kinds;
 };
 
@@ -275,7 +438,7 @@ const describeAllowHint = ({ running, waiting }: FleetMachine): string => {
 /**
  * Returns every need that applies to a machine, the most serious first: it is
  * offline, it is unreachable, its disk is below its limit, sessions wait for a
- * slot. The list is empty when the machine needs nothing. A time is worded
+ * slot, its disk is 85% full or more. The list is empty when the machine needs nothing. A time is worded
  * relative to `today` in `timezone`, and left out when the runner was never
  * seen.
  */
@@ -304,6 +467,12 @@ export const listMachineNeeds = (
           line: describeWaiting(machine),
           allow: machine.running + machine.waiting,
           allowHint: describeAllowHint(machine),
+        };
+      case "disk-nearly-full":
+        return {
+          kind,
+          hue: "you",
+          line: `Disk ${String(findNearlyFullDiskPercent(machine.runner))}% full`,
         };
     }
   });

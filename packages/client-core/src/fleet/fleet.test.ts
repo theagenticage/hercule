@@ -43,6 +43,14 @@ const buildFacts = (overrides: Partial<RunnerFacts> = {}): RunnerFacts => ({
   ...overrides,
 });
 
+const DISK_TOTAL = 1000e9;
+
+/** Returns the overrides of a runner whose 1,000 GB disk has `diskFreeBytes` left and whose total it reports. */
+const withDisk = (diskFreeBytes: number): Partial<Runner> => ({
+  facts: buildFacts({ diskTotalBytes: DISK_TOTAL }),
+  metrics: { diskFreeBytes, availableMemoryBytes: 8 * GIB },
+});
+
 let nextSession = 0;
 
 /** Returns a session on a runner; only its runner, status and kind matter here. */
@@ -389,6 +397,45 @@ describe("findMachineNeeds", () => {
     expect(findNeeds(machine)).toEqual([]);
   });
 
+  it("reports a disk that is 85% full, with its percentage rounded down", () => {
+    expect(findNeeds(buildMachine(withDisk(130e9)))).toEqual([
+      { kind: "disk-nearly-full", hue: "you", line: "Disk 87% full" },
+    ]);
+    expect(findNeeds(buildMachine(withDisk(150e9)))[0]?.line).toBe("Disk 85% full");
+    expect(findNeeds(buildMachine(withDisk(120.4e9)))[0]?.line).toBe("Disk 87% full");
+  });
+
+  it("does not report a disk that is 84.6% full", () => {
+    expect(findNeeds(buildMachine(withDisk(154e9)))).toEqual([]);
+  });
+
+  it("does not report a nearly full disk when the runner does not report its size", () => {
+    const machine = buildMachine({
+      facts: buildFacts(),
+      metrics: { diskFreeBytes: 11e9, availableMemoryBytes: 8 * GIB },
+    });
+
+    expect(findNeeds(machine)).toEqual([]);
+  });
+
+  it("lists a nearly full disk after the waiting sessions, and several needs together", () => {
+    const machine = buildMachine(
+      { maxConcurrentSessions: 12, ...withDisk(130e9) },
+      { running: 12, waiting: 3, waitingThreads: 3 },
+    );
+    const belowLimit = buildMachine(
+      { maxConcurrentSessions: 12, ...withDisk(5 * GIB) },
+      { running: 12, waiting: 3 },
+    );
+
+    expect(findNeeds(machine).map((need) => need.kind)).toEqual(["waiting", "disk-nearly-full"]);
+    // A disk below its limit is also over 85% full here: both rows apply, the serious one first.
+    expect(findNeeds(belowLimit).map((need) => need.kind)).toEqual([
+      "disk-below-limit",
+      "disk-nearly-full",
+    ]);
+  });
+
   it("lists every need that applies, the most serious first", () => {
     const machine = buildMachine(
       {
@@ -667,13 +714,44 @@ describe("MachineSummary disk", () => {
     expect(readDisk(bytes)).toMatchObject({ amount, unit });
   });
 
-  it("has no share until the runner reports its disk total, so the gauge draws empty", () => {
-    expect(readDisk(20 * GIB)?.share).toBeNull();
+  it("has no share or percent until the runner reports its disk total, so the gauge draws empty", () => {
+    expect(readDisk(20 * GIB)).toMatchObject({ share: null, percent: null });
   });
 
   it("is failing while the free space is below the limit, normal otherwise", () => {
     expect(readDisk(5 * GIB)?.level).toBe("fail");
     expect(readDisk(10 * GIB)?.level).toBe("normal");
+  });
+
+  describe("with the disk's total size", () => {
+    const readFullDisk = (diskFreeBytes: number) => summarize(withDisk(diskFreeBytes)).disk;
+
+    it.each([
+      [500e9, 0.5, 50, "normal"],
+      [154e9, 0.846, 84, "normal"],
+      [150e9, 0.85, 85, "you"],
+      [130e9, 0.87, 87, "you"],
+      [290e9, 0.71, 71, "normal"],
+      [11e9, 0.989, 98, "you"],
+    ] as const)(
+      "reads %d free bytes as %d full: %d percent, level %s",
+      (free, share, percent, level) => {
+        expect(readFullDisk(free)).toMatchObject({ share, percent, level });
+      },
+    );
+
+    it("is failing while the free space is below the limit, whatever the percentage", () => {
+      expect(readFullDisk(5 * GIB)).toMatchObject({ percent: 99, level: "fail" });
+      expect(readFullDisk(10 * GIB)).toMatchObject({ level: "you" });
+    });
+
+    it("stays between 0 and 100 percent when more is free than the disk holds", () => {
+      expect(readFullDisk(2 * DISK_TOTAL)).toMatchObject({ share: 0, percent: 0 });
+    });
+  });
+
+  it("fails below the limit even when the runner does not report the disk's total", () => {
+    expect(readDisk(5 * GIB)).toMatchObject({ level: "fail", percent: null });
   });
 
   it("is null until the runner reports its disk", () => {
@@ -701,6 +779,14 @@ describe("MachineSummary memory", () => {
       expect(readMemory(total, available)).toEqual({ percent, share: percent / 100, level });
     },
   );
+
+  it("shows the percentage rounded down and colours it on the unrounded share", () => {
+    // 79.9% in use is "79" and normal, never a normal-coloured "80".
+    expect(readMemory(1000, 201)).toMatchObject({ percent: 79, level: "normal" });
+    expect(readMemory(1000, 200)).toMatchObject({ percent: 80, level: "you" });
+    expect(readMemory(1000, 81)).toMatchObject({ percent: 91, level: "you" });
+    expect(readMemory(1000, 79)).toMatchObject({ percent: 92, level: "fail" });
+  });
 
   it("stays between 0 and 100 percent when the runner reports more available than total", () => {
     expect(readMemory(100, 120)).toEqual({ percent: 0, share: 0, level: "normal" });
@@ -763,7 +849,7 @@ describe("MachineSummary", () => {
       isAway: false,
       roomText: "Room for 4",
       need: undefined,
-      disk: { amount: "42.1", unit: "GB", level: "normal", share: null },
+      disk: { amount: "42.1", unit: "GB", level: "normal", share: null, percent: null },
       memory: { percent: 75, share: 0.75, level: "normal" },
     });
   });
