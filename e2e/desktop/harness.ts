@@ -698,6 +698,15 @@ export function runSecondInstance(
   return waitForExit(child, "the second instance");
 }
 
+/**
+ * How long a test waits for the page to learn that its window was hidden or
+ * shown, and to react to it. `document.visibilityState` changes when the
+ * renderer process handles the browser's message, not when `hide()` or
+ * `show()` returns. On a loaded Mac, such as a full run with several apps
+ * open, that took up to 8 s, so the 5 s default of `expect.poll` is too short.
+ */
+export const WINDOW_VISIBILITY_TIMEOUT_MS = 30_000;
+
 /** The test package, started as a plain process by `launchPlainAppForTest`. */
 export interface PlainAppForTest {
   /**

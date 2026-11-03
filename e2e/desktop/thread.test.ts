@@ -56,6 +56,7 @@ import {
   recordScrollFrames,
   signInAndReadToken,
   waitForFrames,
+  WINDOW_VISIBILITY_TIMEOUT_MS,
   type AgentTextSnapshot,
   type ScrollFrame,
 } from "./harness";
@@ -557,7 +558,7 @@ describe("the thread view", () => {
     await expect.poll(async () => (await readLastSnapshot())?.openParagraph ?? "").not.toBe("");
 
     await callWindowMethod("hide");
-    await expect.poll(readVisibility).toBe("hidden");
+    await expect.poll(readVisibility, { timeout: WINDOW_VISIBILITY_TIMEOUT_MS }).toBe("hidden");
     const shownWhenHidden = joinShownText((await readLastSnapshot())!);
     const rowsWhenHidden = await countStoredTextRows(client, thread.id);
     message.resumeAfterHide();
@@ -573,7 +574,7 @@ describe("the thread view", () => {
     expect(joinShownText((await readLastSnapshot())!)).toBe(shownWhenHidden);
 
     await callWindowMethod("show");
-    await expect.poll(readVisibility).toBe("visible");
+    await expect.poll(readVisibility, { timeout: WINDOW_VISIBILITY_TIMEOUT_MS }).toBe("visible");
     // The rows kept aside while the window was hidden are drawn together.
     await expect
       .poll(async () => joinShownText((await readLastSnapshot())!).length, { timeout: 10_000 })
