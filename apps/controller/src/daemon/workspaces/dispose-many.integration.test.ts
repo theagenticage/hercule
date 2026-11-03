@@ -6,8 +6,9 @@
  * - a workspace used after the time the caller looked is refused, keeps its
  *   files, and the runner is told nothing;
  * - a main workspace is refused;
- * - each workspace is reserved on its own: one refusal does not stop the
- *   others, and the results come back in the order given;
+ * - each item is an ordinary disposal: one refusal does not stop the others,
+ *   the results come back in the order given, and asking again for a workspace
+ *   already being removed answers `requested` with the same removal;
  * - a plain workspace is removed as `workspace.dispose` removes it, and an
  *   archived one is removed whole with its archived sessions.
  */
@@ -18,6 +19,7 @@ import { mintUuid, uuidToString } from "../../db";
 import { post } from "../../http/testing";
 import {
   CURRENT_CAPABILITIES,
+  spawnSession,
   spawnThreadWithGrants,
   WAIT_DEADLINE_MS,
   waitUntil,
@@ -36,8 +38,6 @@ const MAIN_REFUSAL = "A main workspace is removed on its own, with workspace.dis
 
 const USED_REFUSAL =
   "Someone used this workspace since you looked. Check it again before you remove it.";
-
-const LISTED_TWICE_REFUSAL = "This workspace is listed more than once in the request.";
 
 interface Item {
   readonly workspaceId: string;
@@ -113,7 +113,7 @@ describe("workspace.disposeMany", () => {
   );
 
   it(
-    "refuses a workspace a session used after expectedLastUsedAt, keeps its files, and removes it once the caller has looked again",
+    "refuses a workspace a session used after expectedLastUsedAt, leaving its status and sending no removal frame, and removes it once the caller has looked again",
     async () => {
       await withFleet(
         async (arranged) => {
@@ -149,7 +149,7 @@ describe("workspace.disposeMany", () => {
   );
 
   it(
-    "answers each workspace in the order given, refuses a main workspace, an unknown id and a repeat without stopping the rest, and removes an archived workspace whole",
+    "answers each workspace in the order given, refuses a main workspace and an unknown id without stopping the rest, and removes an archived workspace whole",
     async () => {
       await withFleet(
         async (arranged) => {
@@ -171,7 +171,6 @@ describe("workspace.disposeMany", () => {
             { workspaceId: unknown },
             { workspaceId: plain },
             { workspaceId: archived },
-            { workspaceId: plain },
           ]);
 
           expect(results).toEqual([
@@ -179,7 +178,6 @@ describe("workspace.disposeMany", () => {
             { workspaceId: unknown, outcome: "refused", message: "no such workspace" },
             { workspaceId: plain, outcome: "requested" },
             { workspaceId: archived, outcome: "requested" },
-            { workspaceId: plain, outcome: "refused", message: LISTED_TWICE_REFUSAL },
           ]);
 
           const plainFrame = await waitUntil(
@@ -195,7 +193,6 @@ describe("workspace.disposeMany", () => {
           expect(archivedFrame.discardChanges).toBe(true);
           expect(archivedFrame.archivedSessions).toMatchObject([{ nativeSessionId: "native-1" }]);
 
-          expect(listDisposals(arranged, plain)).toHaveLength(1);
           expect(listDisposals(arranged, main)).toEqual([]);
           expect((await readWorkspace(arranged, main)).status).toBe("ready");
         },
@@ -203,5 +200,51 @@ describe("workspace.disposeMany", () => {
       );
     },
     WAIT_DEADLINE_MS * 4,
+  );
+
+  it(
+    "answers requested again, with the same removal, for a workspace listed twice or asked for in two calls, and while it is disposing no session can start in it",
+    async () => {
+      await withFleet(
+        async (arranged) => {
+          const workspaceId = (await startIdleThread(arranged, 1)).workspaceId!;
+          const lookedAt = await readLastUsedAt(arranged, workspaceId);
+          const stale = "2020-01-01T00:00:00.000Z";
+
+          // A stale item is refused, and the same workspace later in the call is still an ordinary item.
+          expect(
+            await disposeMany(arranged, [
+              { workspaceId, expectedLastUsedAt: stale },
+              { workspaceId, expectedLastUsedAt: lookedAt },
+              { workspaceId, expectedLastUsedAt: lookedAt },
+            ]),
+          ).toEqual([
+            { workspaceId, outcome: "refused", message: USED_REFUSAL },
+            { workspaceId, outcome: "requested" },
+            { workspaceId, outcome: "requested" },
+          ]);
+          expect(await disposeMany(arranged, [{ workspaceId }])).toEqual([
+            { workspaceId, outcome: "requested" },
+          ]);
+
+          await waitUntil("sent the removal each time", () =>
+            listDisposals(arranged, workspaceId).length === 3 ? true : undefined,
+          );
+          const requestIds = listDisposals(arranged, workspaceId).map((frame) => frame.requestId);
+          expect(requestIds[0]).toBeDefined();
+          expect(new Set(requestIds).size).toBe(1);
+
+          const spawned = await spawnSession(arranged, {
+            prompt: "hello",
+            workspace: { kind: "existing", workspaceId },
+          });
+          expect(spawned.status).toBe(409);
+          expect(await spawned.json()).toMatchObject({ error: { code: "invalid_state" } });
+          expect((await readWorkspace(arranged, workspaceId)).status).toBe("disposing");
+        },
+        { capabilities: CURRENT_CAPABILITIES },
+      );
+    },
+    WAIT_DEADLINE_MS * 3,
   );
 });

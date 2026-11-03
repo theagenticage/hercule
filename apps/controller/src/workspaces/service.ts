@@ -48,6 +48,7 @@ import {
   type GitIdentity,
   type WorkspaceRemoval,
   type WorkspaceProvision,
+  type WorkspaceDiskUsageEntry,
   type WorkspaceReport,
 } from "@hercule/protocol";
 import {
@@ -376,8 +377,8 @@ const make = Effect.gen(function* () {
           .filter((holder) => holder.kind === "session")
           .map((holder) => holder.id),
         keptUntil: keptUntil.get(row.id) ?? null,
-        diskUsage: null,
-        diskUsageError: null,
+        diskUsage: row.diskUsage,
+        diskUsageError: row.diskUsageError,
         createdAt: row.createdAt,
         provisionedAt: row.provisionedAt,
         lastUsedAt: row.lastUsedAt,
@@ -883,7 +884,16 @@ const make = Effect.gen(function* () {
         );
     });
 
-  /** Returns the workspace if `disposable` accepts it, else fails with `InvalidState` saying why. */
+  /**
+   * Returns the workspace if its files may be removed now. Fails with
+   * `InvalidState`, with a message that says why, if:
+   *
+   * - it is an existing checkout (ownership `adopted`), whose files belong to the user;
+   * - it is already `deleted` or `lost`;
+   * - a lease on it is active, held by a run that has not finished or by a
+   *   session that has not exited;
+   * - its runner does not support safe removal.
+   */
   const requireDisposable = (
     workspace: StoredWorkspace,
   ): Effect.Effect<StoredWorkspace, InvalidState | SqlError> =>
@@ -1177,17 +1187,18 @@ const make = Effect.gen(function* () {
       Effect.flatMap(readStoredWorkspace(id), requireDisposable),
 
     /**
-     * Returns the workspace `workspace.disposeMany` may remove, read fresh in
-     * the transaction that reserves its removal. Fails with `NotFound` for an
-     * unknown id, and with `InvalidState` if:
+     * Returns an ephemeral workspace whose files may be removed now, read
+     * fresh. Call it in the transaction that reserves the removal, so the
+     * checks and the reservation see the same row. Fails with `NotFound` for
+     * an unknown id, and with `InvalidState` if:
      *
      * - it is a main workspace, which is removed on its own;
      * - `expectedLastUsedAt` is given and the workspace's `lastUsedAt` is no
      *   longer that time, because a session started or exited in it after the
      *   caller looked;
-     * - `disposable` refuses it, with that check's own message.
+     * - any check of `disposable` refuses it, with that check's own message.
      */
-    disposableInBatch: (
+    requireDisposableEphemeral: (
       id: string,
       expectedLastUsedAt: string | undefined,
     ): Effect.Effect<StoredWorkspace, NotFound | InvalidState | SqlError> =>
@@ -1538,6 +1549,21 @@ const make = Effect.gen(function* () {
             : undefined;
         }),
       ),
+
+    /**
+     * Stores the disk usage a runner reported for its workspaces, and returns
+     * the ids of the workspaces that changed, which are announced after the
+     * commit. Only entries whose values differ from the stored ones are
+     * written. An entry for a workspace the controller does not know, or that
+     * belongs to another runner, is dropped, and a workspace missing from the
+     * report keeps what it has. The controller decides nothing from these
+     * numbers.
+     */
+    recordDiskUsage: (
+      runnerId: string,
+      entries: ReadonlyArray<WorkspaceDiskUsageEntry>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      withTransaction(sql, workspaces.recordDiskUsage(runnerId, entries)),
 
     /** Returns the workspace whose runner should be asked for a current observation. */
     readStoredWorkspace,

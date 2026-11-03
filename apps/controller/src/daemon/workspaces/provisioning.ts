@@ -70,8 +70,6 @@ type WorkspaceError = Unauthenticated | Forbidden | Validation | NotFound | Inva
 const ONLY_THE_USER_REMOVES_MANY =
   "Only the user may remove several workspaces at once. A session may remove a workspace it is done with, one at a time, with workspace.dispose.";
 
-const LISTED_TWICE = "This workspace is listed more than once in the request.";
-
 /** How often the controller looks for workspaces nothing needs any more. */
 const WORKSPACE_SWEEP_INTERVAL: Duration.Duration = Duration.minutes(10);
 
@@ -251,8 +249,9 @@ const make = Effect.gen(function* () {
      * Only the user may call it. Each item is reserved in a transaction of
      * its own, so a refusal does not stop the other items. The check of
      * `expectedLastUsedAt` runs in the same transaction as the reservation, on
-     * the row as it is then. An archived workspace is removed whole and
-     * a workspace listed twice is refused the second time. A database failure
+     * the row as it is then. An archived workspace is removed whole. Each item
+     * is an ordinary disposal: a workspace listed twice is checked twice, and
+     * one already reserved answers `requested` again with the same removal. A database failure
      * fails the whole call: the items already reserved stay reserved, and
      * their runners are told when they connect.
      */
@@ -269,19 +268,13 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const actor = yield* currentStamp;
-        const seen = new Set<string>();
         const results: Array<WorkspaceDisposeManyResult> = [];
         for (const item of decoded.items) {
           const { workspaceId } = item;
-          if (seen.has(workspaceId)) {
-            results.push({ workspaceId, outcome: "refused", message: LISTED_TWICE });
-            continue;
-          }
-          seen.add(workspaceId);
           const outcome = yield* withTransaction(
             sql,
             Effect.gen(function* () {
-              const workspace = yield* workspaces.disposableInBatch(
+              const workspace = yield* workspaces.requireDisposableEphemeral(
                 workspaceId,
                 item.expectedLastUsedAt,
               );
