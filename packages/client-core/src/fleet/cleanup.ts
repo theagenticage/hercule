@@ -456,6 +456,18 @@ export type CleanupStart =
         readonly workspaceId: string;
         readonly outcome: RemovalOutcome;
       }[];
+    }
+  /**
+   * The archive is done, but the call to remove the workspaces failed, so it
+   * is not known what became of them: the controller commits the items one by
+   * one, and some may be `disposing` or `deleted` already. `message` is the
+   * error's. Settle every item from a fresh workspace read with
+   * `decideRemovalOutcome(workspace, message)`.
+   */
+  | {
+      readonly status: "removalUnknown";
+      readonly archivedCount: number;
+      readonly message: string;
     };
 
 /**
@@ -464,9 +476,11 @@ export type CleanupStart =
  * `plan.items`, each with the `lastUsedAt` the dialog showed.
  *
  * A refused archive, such as a Thread that started working again, removes
- * nothing and returns the controller's message. Fails on any other error. A
- * removal the controller accepts answers `removing`: its outcome arrives
- * later, and `decideRemovalOutcome` reads it.
+ * nothing and returns the controller's message. Fails on any other error of
+ * the archive. A removal the controller accepts answers `removing`: its
+ * outcome arrives later, and `decideRemovalOutcome` reads it. Once the archive
+ * is done this never fails, because the archive cannot be undone and its count
+ * must reach the user: when the removal call fails it returns `removalUnknown`.
  *
  * A "Try again" asks for one removal alone: pass `{ threadIds: [], items: [item] }`
  * with the item the plan held, so the original `lastUsedAt` is sent again.
@@ -486,13 +500,22 @@ export const archiveAndRemoveWorkspaces = async (
       throw error;
     }
   }
-  const { results } = await client.workspace.disposeMany({
-    payload: {
-      items: plan.items.map(({ workspaceId, expectedLastUsedAt }) =>
-        expectedLastUsedAt === null ? { workspaceId } : { workspaceId, expectedLastUsedAt },
-      ),
-    },
-  });
+  let results;
+  try {
+    ({ results } = await client.workspace.disposeMany({
+      payload: {
+        items: plan.items.map(({ workspaceId, expectedLastUsedAt }) =>
+          expectedLastUsedAt === null ? { workspaceId } : { workspaceId, expectedLastUsedAt },
+        ),
+      },
+    }));
+  } catch (error) {
+    return {
+      status: "removalUnknown",
+      archivedCount,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
   return {
     status: "started",
     archivedCount,
@@ -505,14 +528,24 @@ export const archiveAndRemoveWorkspaces = async (
 
 /**
  * Decides where the removal of `workspace` stands, from a workspace read that
- * began after `workspace.disposeMany` answered: `deleted` is removed,
- * `disposing` is still being removed, and any other status means the runner
- * refused and the workspace is back, with its reason in `message`.
+ * began after `workspace.disposeMany` answered or failed: `deleted` is
+ * removed, `disposing` is still being removed, and any other status means the
+ * workspace stayed.
+ *
+ * A workspace that stayed is refused with its own reason, `Workspace.message`.
+ * After a failed call (`removalUnknown`) pass the error's message as
+ * `failureMessage`: it is then the reason shown, with `retry` set, because
+ * `Workspace.message` may be left over from an earlier attempt.
  */
-export const decideRemovalOutcome = (workspace: Workspace): RemovalOutcome => {
+export const decideRemovalOutcome = (
+  workspace: Workspace,
+  failureMessage: string | null = null,
+): RemovalOutcome => {
   if (workspace.status === "deleted") return { kind: "removed" };
   if (workspace.status === "disposing") return { kind: "removing" };
-  return buildRefusal(workspace.message);
+  return failureMessage === null
+    ? buildRefusal(workspace.message)
+    : { kind: "refused", message: failureMessage, retry: true };
 };
 
 /** The words that tell the user how a cleanup ended. See `describeCleanupOutcome`. */

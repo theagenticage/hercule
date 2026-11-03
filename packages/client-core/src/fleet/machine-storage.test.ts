@@ -186,13 +186,24 @@ describe("describeMachineStorage parts", () => {
     expect(storage.parts.reduce((sum, part) => sum + (part.share ?? 0), 0)).toBeCloseTo(1);
   });
 
-  it("floors Other at zero and keeps the bar within the disk when stale measurements add up to too much", () => {
+  it("floors Other at zero and shrinks the workspace parts, not Free, when stale measurements add up to too much", () => {
     const workspaces = [buildMeasured("w-big", 700, 1)];
 
     const storage = describeStorage(buildRunner(), { workspaces });
 
+    const share = (key: string): number | null =>
+      storage.parts.find((part) => part.key === key)!.share;
     expect(bytesByKey(storage)["other"]).toBe(0);
-    expect(storage.parts.reduce((sum, part) => sum + (part.share ?? 0), 0)).toBeLessThanOrEqual(1);
+    // The texts keep the measured sizes.
+    expect(bytesByKey(storage)["inUse"]).toBe(700);
+    // Free is still free / total, so it lines up with the disk limit mark.
+    expect(share("free")).toBe(0.412);
+    expect(share("repositoryCaches")).toBe(0.02);
+    expect(share("sessionData")).toBe(0.005);
+    // 1000 - 412 free - 25 for caches and session data leaves 563 for the workspace.
+    expect(share("inUse")).toBeCloseTo(0.563);
+    expect(storage.parts.reduce((sum, part) => sum + (part.share ?? 0), 0)).toBeCloseTo(1);
+    expect(storage.limitShare).toBe(0.1);
   });
 
   it("counts a runner that has not yet measured its caches as holding none", () => {

@@ -127,17 +127,17 @@ const describeLastSweep = (
   timezone: string,
   now: Date,
 ): string | null => {
-  const reasonOf = (event: Pick<Event, "kind" | "payload">): string | undefined => {
+  const readSweepReason = (event: Pick<Event, "kind" | "payload">): string | undefined => {
     const reason = event.kind === "workspace.deleted" ? event.payload["reason"] : undefined;
     return typeof reason === "string" ? reason : undefined;
   };
-  const newest = events.find((event) => reasonOf(event) !== undefined);
+  const newest = events.find((event) => readSweepReason(event) !== undefined);
   if (newest === undefined) return null;
-  const reason = reasonOf(newest)!;
+  const reason = readSweepReason(newest)!;
   const minute = Math.floor(Date.parse(newest.receivedAt) / MS_PER_MINUTE);
   const count = events.filter(
     (event) =>
-      reasonOf(event) === reason &&
+      readSweepReason(event) === reason &&
       Math.floor(Date.parse(event.receivedAt) / MS_PER_MINUTE) === minute,
   ).length;
   const day = formatDayStamp(new Date(newest.receivedAt), timezone, now);
@@ -166,9 +166,15 @@ const AUTOMATIC_CLEANUP_RULES: AutomaticCleanupRules = {
  * - Other is the disk's total, less the free space and every other part. A
  *   measurement older than the free-space reading can make that negative, so
  *   it is floored at 0.
- * - Shares are counted against the larger of the disk's total and the parts'
- *   sum, so the bar never overflows when measurements and the free-space
- *   reading disagree.
+ * - Every share is a part's drawn bytes over the disk's real total, the same
+ *   total the disk limit mark (`limitShare`) uses, so Free and the mark line
+ *   up. Free is never shrunk.
+ * - Stale measurements can make the counted parts bigger than the disk's
+ *   used space. The bar then draws the workspace parts smaller, in the same
+ *   proportion, until the parts fit; their texts keep the measured sizes. If
+ *   the repository caches and the session data alone do not fit, they are
+ *   drawn smaller in the same proportion too, and the workspace parts are not
+ *   drawn.
  */
 const buildStorageParts = (
   runner: Runner,
@@ -184,21 +190,35 @@ const buildStorageParts = (
       workspace.status !== "deleted" &&
       workspace.status !== "lost",
   );
-  const freesOf = (workspace: Workspace): number => workspace.diskUsage?.freesBytes ?? 0;
+  const readFreesBytes = (workspace: Workspace): number => workspace.diskUsage?.freesBytes ?? 0;
   const idleBytes = sum(
     measured.filter((workspace) => isIdleWorkspace(workspace, now)),
-    freesOf,
+    readFreesBytes,
   );
   const inUseBytes = sum(
     measured.filter((workspace) => !isIdleWorkspace(workspace, now)),
-    freesOf,
+    readFreesBytes,
   );
   const repositoryCacheBytes = runner.diskUsage?.repositoryCacheBytes ?? 0;
   const sessionDataBytes = runner.diskUsage?.harnessHomeBytes ?? 0;
   const counted = inUseBytes + idleBytes + repositoryCacheBytes + sessionDataBytes;
   const otherBytes = totalBytes === null ? 0 : Math.max(0, totalBytes - freeBytes - counted);
-  const shareBase =
-    totalBytes === null ? null : Math.max(totalBytes, counted + otherBytes + freeBytes);
+
+  // How much of each part the bar draws: all of it unless the parts overflow the used space.
+  const usedBytes = totalBytes === null ? 0 : Math.max(0, totalBytes - freeBytes);
+  const fixedBytes = repositoryCacheBytes + sessionDataBytes;
+  const workspaceBytes = inUseBytes + idleBytes;
+  const workspaceDrawn =
+    workspaceBytes === 0 ? 1 : Math.min(1, Math.max(0, usedBytes - fixedBytes) / workspaceBytes);
+  const fixedDrawn = fixedBytes === 0 ? 1 : Math.min(1, usedBytes / fixedBytes);
+  const drawnFraction: Readonly<Record<StoragePartKey, number>> = {
+    inUse: workspaceDrawn * fixedDrawn,
+    idle: workspaceDrawn * fixedDrawn,
+    repositoryCaches: fixedDrawn,
+    sessionData: fixedDrawn,
+    other: 1,
+    free: 1,
+  };
 
   const part = (
     key: StoragePartKey,
@@ -210,7 +230,7 @@ const buildStorageParts = (
     label,
     bytes,
     sizeText: formatDiskSize(bytes),
-    share: shareBase === null ? null : bytes / shareBase,
+    share: totalBytes === null ? null : (bytes * drawnFraction[key]) / totalBytes,
     tooltip,
   });
   return [

@@ -437,6 +437,21 @@ describe("archiveAndRemoveWorkspaces", () => {
     expect(start).toMatchObject({ status: "started", archivedCount: 0 });
   });
 
+  it("still returns the archived count when the archive is done and the removal call fails", async () => {
+    const { client } = buildController(archiveAll, {
+      status: 500,
+      body: buildErrorBody("internal", "The controller is restarting."),
+    });
+
+    const start = await archiveAndRemoveWorkspaces(client, plan);
+
+    expect(start).toEqual({
+      status: "removalUnknown",
+      archivedCount: 2,
+      message: "The controller is restarting.",
+    });
+  });
+
   it("fails on an error that is not the controller's refusal", async () => {
     const { client } = buildController(
       () => {
@@ -466,6 +481,20 @@ describe("decideRemovalOutcome", () => {
       kind: "refused",
       message: "The runner refused safe removal.",
       retry: true,
+    });
+  });
+
+  it("shows the failure of the removal call, not a reason left from an earlier attempt", () => {
+    const stale = buildIdle(10, 1, { message: "Refused last week." });
+
+    expect(decideRemovalOutcome(stale, "The controller is restarting.")).toEqual({
+      kind: "refused",
+      message: "The controller is restarting.",
+      retry: true,
+    });
+    expect(decideRemovalOutcome({ ...stale, status: "deleted" }, "x")).toEqual({ kind: "removed" });
+    expect(decideRemovalOutcome({ ...stale, status: "disposing" }, "x")).toEqual({
+      kind: "removing",
     });
   });
 
