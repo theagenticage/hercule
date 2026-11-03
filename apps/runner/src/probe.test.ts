@@ -16,7 +16,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Cause, Duration, Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { arch, platform, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
 import { IDENTITY_PORT, MAX_FACT_LENGTH, PROBED_TOOLCHAINS, RunnerFacts } from "@hercule/protocol";
@@ -387,6 +387,25 @@ describe("harness binaries", () => {
   });
 });
 
+/** Returns whether a process with this id exists. */
+const isRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Waits up to two seconds for the process to end. Returns whether it did. */
+const waitUntilGone = async (pid: number): Promise<boolean> => {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (!isRunning(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+};
+
 describe("buildThisMachine", () => {
   it("does not find a binary that is not installed, and probes the machine the test runs on", async () => {
     const thisMachine = buildThisMachine(tmpdir());
@@ -435,6 +454,22 @@ describe("buildThisMachine", () => {
       expect(printed).toBeDefined();
       expect(printed!.length).toBeLessThanOrEqual(4096);
       expect(printed!.length).toBeGreaterThan(0);
+    });
+
+    it("kills a tool that ignores SIGTERM when the caller stops waiting", async () => {
+      const pidFile = join(scratch, "stubborn.pid");
+      // `exec` keeps the shell's process id, and a signal ignored before `exec` stays ignored.
+      const script = writeScript("stubborn", `trap '' TERM\necho $$ > "${pidFile}"\nexec sleep 30`);
+
+      const printed = await Effect.runPromise(
+        Effect.timeoutOption(buildThisMachine(scratch).version(script, []), Duration.seconds(1)),
+      );
+      const pid = Number(readFileSync(pidFile, "utf8"));
+
+      expect(printed._tag, "the tool never prints, so the caller gave up").toBe("None");
+      expect(await waitUntilGone(pid), `process ${pid} is still running`).toBe(true);
+      // Only needed when the assertion above failed: do not leave the sleeper behind.
+      if (isRunning(pid)) process.kill(pid, "SIGKILL");
     });
 
     it("returns nothing when the tool exits with an error", async () => {

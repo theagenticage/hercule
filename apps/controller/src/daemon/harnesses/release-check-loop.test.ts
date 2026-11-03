@@ -107,6 +107,47 @@ describe("runHarnessReleaseCheckLoop", () => {
     expect(counts).toEqual({ atStart: 1, beforeTheHour: 1, afterTheHour: 2 });
   });
 
+  it("reads every harness every hour even when plugin changes come less than an hour apart", async () => {
+    const counts = await run(Duration.zero, ({ refreshes, unreadReads }) =>
+      Effect.gen(function* () {
+        const plugins = yield* Plugins;
+        const loop = yield* Effect.forkChild(runHarnessReleaseCheckLoop);
+        yield* TestClock.adjust(Duration.zero);
+        const reads: Array<{ readonly minute: number; refreshes: number; unreadReads: number }> =
+          [];
+        let minute = 0;
+        let enabled = true;
+        for (const [target, change] of [
+          [50, true],
+          [60, false],
+          [100, true],
+          [120, false],
+          [150, true],
+        ] as const) {
+          yield* TestClock.adjust(Duration.minutes(target - minute));
+          minute = target;
+          if (change) {
+            // Alternate, because disabling a disabled plugin changes nothing and wakes nobody.
+            yield* enabled ? plugins.disable("scoped") : plugins.enable("scoped");
+            enabled = !enabled;
+            yield* TestClock.adjust(Duration.zero);
+          }
+          reads.push({ minute, refreshes: refreshes(), unreadReads: unreadReads() });
+        }
+        yield* Fiber.interrupt(loop);
+        return reads;
+      }),
+    );
+
+    expect(counts).toEqual([
+      { minute: 50, refreshes: 1, unreadReads: 1 },
+      { minute: 60, refreshes: 2, unreadReads: 1 },
+      { minute: 100, refreshes: 2, unreadReads: 2 },
+      { minute: 120, refreshes: 3, unreadReads: 2 },
+      { minute: 150, refreshes: 3, unreadReads: 3 },
+    ]);
+  });
+
   it("reads only the unread harnesses at once when a plugin is disabled or enabled, and the observer that was there before still hears of it", async () => {
     const outcome = await run(Duration.zero, ({ refreshes, unreadReads, previousObserverCalls }) =>
       Effect.gen(function* () {

@@ -8,6 +8,7 @@
  * (`refreshLatestReleases` and `readUnreadReleases`). This module only
  * repeats them.
  */
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -59,10 +60,12 @@ export const WakeHarnessReleaseCheckOnPluginChangeLayer: Layer.Layer<
 );
 
 /**
- * Reads the latest release of every harness at once, then again after each
- * interval. When `HarnessReleaseWake` is asked first, reads only the
- * harnesses that have no stored result. Never returns. A pass that fails is
- * logged, and the next one runs.
+ * Reads the latest release of every harness at once, then again one interval
+ * after the end of each such full read. When `HarnessReleaseWake` is asked
+ * first, reads only the harnesses that have no stored result, and then waits
+ * only for the time left until the full read is due. So requests never push
+ * the full read back, however often they come. Never returns. A pass that
+ * fails is logged, and the next one runs.
  *
  * A request that arrives while a pass runs leads to exactly one more pass
  * after it, however many arrive. A request that arrived before the pass
@@ -85,11 +88,20 @@ export const runHarnessReleaseCheckLoop: Effect.Effect<
   const { queue } = yield* HarnessReleaseWake;
   const promotion = yield* PromotionState;
   let pass = releases.refreshLatestReleases();
+  let isFullRead = true;
+  let nextFullReadAt = 0;
   while (true) {
     yield* promotion.whenServing(Effect.void);
     yield* Queue.clear(queue);
     yield* absorbFailures("Reading the latest releases of the harnesses failed", pass);
-    const wake = yield* Effect.timeoutOption(Queue.take(queue), HARNESS_RELEASE_CHECK_INTERVAL);
-    pass = Option.isSome(wake) ? releases.readUnreadReleases() : releases.refreshLatestReleases();
+    const now = yield* Clock.currentTimeMillis;
+    if (isFullRead) nextFullReadAt = now + Duration.toMillis(HARNESS_RELEASE_CHECK_INTERVAL);
+    // A read of the unread harnesses can run past the due time: then the full read starts at once.
+    const wake =
+      nextFullReadAt > now
+        ? yield* Effect.timeoutOption(Queue.take(queue), Duration.millis(nextFullReadAt - now))
+        : Option.none();
+    isFullRead = Option.isNone(wake);
+    pass = isFullRead ? releases.refreshLatestReleases() : releases.readUnreadReleases();
   }
 });

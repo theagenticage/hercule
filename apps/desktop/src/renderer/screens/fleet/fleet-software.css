@@ -230,12 +230,16 @@
 .fleet-sw-cell.is-not-installed {
   color: var(--faint);
 }
-.fleet-sw-cell.is-unknown-version,
-.fleet-sw-cell.is-not-probed {
+.fleet-sw-cell.is-unknown-version {
   color: var(--muted);
 }
+/* "Unknown": the machine's runner is too old to look for this toolchain. */
+.fleet-sw-cell.is-not-probed {
+  color: var(--faint);
+}
 /* A machine that is away shows the versions it last reported, muted (a check
-   becomes its version). A dash stays faint. */
+   becomes its version). A dash stays faint. This rule has three classes to
+   the two above, so it wins over `is-not-probed` whatever the order. */
 .fleet-sw-cell.is-away:not(.is-not-installed) {
   color: var(--muted);
 }
