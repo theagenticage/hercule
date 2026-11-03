@@ -96,6 +96,7 @@ import {
   type RecentModel,
   type ThreadPicks,
 } from "@hercule/client-core";
+import { computeDayStart } from "@hercule/client-core/list-time";
 import {
   buildMachineFiveMinuteScope,
   FLEET_HOUR_METRICS_SCOPE,
@@ -179,9 +180,10 @@ import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
 import { CleanupProvider } from "../app/cleanup";
 import {
-  cleanupThreadsQuery,
+  decideStorageNow,
   listCleanupCandidateIds,
   negotiatedCapabilitiesQuery,
+  writeIdleWorkspaceThreads,
 } from "../app/machine-storage-queries";
 import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
@@ -832,19 +834,22 @@ const seedQueryCache = (
     }
     // Storage reads what each runner negotiated, and the Threads of the workspaces
     // that are idle at the hour points' read time (see `decideStorageNow`).
-    const storageNow = new Date(fleetHours.readAt);
+    const clock = new Date();
+    const storageNow = decideStorageNow(fleetHours.readAt, computeDayStart(clock, "UTC") ?? clock);
     for (const runner of records.runners) {
       queryClient.setQueryData(
         negotiatedCapabilitiesQuery(client, runner.id).queryKey,
         fleet.negotiatedCapabilities[runner.id] ?? null,
       );
       const idleIds = listCleanupCandidateIds(records.workspaces, runner.id, storageNow);
-      queryClient.setQueryData(cleanupThreadsQuery(client, runner.id, idleIds).queryKey, {
-        workspaceIds: idleIds,
-        threads: fleet.cleanupThreads.filter(
+      writeIdleWorkspaceThreads(
+        queryClient,
+        runner.id,
+        idleIds,
+        fleet.cleanupThreads.filter(
           ({ workspaceId }) => workspaceId !== null && idleIds.includes(workspaceId),
         ),
-      });
+      );
     }
   }
   if (workflows !== undefined) {

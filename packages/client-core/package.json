@@ -27,6 +27,7 @@
     "./skill-folder": "./src/skill-folder.ts",
     "./software": "./src/fleet/software.ts",
     "./timeline-limit": "./src/timeline-limit.ts",
+    "./workspace-threads": "./src/threads/workspace-threads.ts",
     "./workflow-detail-rows": "./src/workflow-detail-rows.ts",
     "./wiki-history": "./src/wiki-history.ts",
     "./workflow-rows": "./src/workflow-rows.ts",

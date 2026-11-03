@@ -3,11 +3,15 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
-import { buildMachineFiveMinuteScope } from "@hercule/client-core/metrics-history";
+import {
+  buildMachineFiveMinuteScope,
+  FLEET_HOUR_METRICS_SCOPE,
+} from "@hercule/client-core/metrics-history";
 import { describeMachinePage } from "@hercule/client-core/machine-page";
 import { listMachineRunIds } from "@hercule/client-core/machine-work";
 import type { Runner } from "@hercule/contract";
 import { throwScreenNotFound } from "../../../../app/last-screen";
+import { loadMachineStorage } from "../../../../app/machine-storage-queries";
 import {
   controllerQuery,
   fleetSessionsQuery,
@@ -42,7 +46,6 @@ import {
 import { MachineSettings } from "./-machine-settings";
 import { MachineSoftware } from "./-machine-software";
 import { MachineStorage } from "./-machine-storage";
-import { loadMachineStorage } from "./-machine-storage-reads";
 import { RunnerNotFound } from "./-runner-not-found";
 import { runnerMetricsQuery, useRunnerMetricsLive } from "./-runner-metrics";
 import { MachineRunningHere } from "./-running-here";
@@ -101,6 +104,7 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
               client,
               runnerId,
               resolveDisplayTimezone(read.user.timezone),
+              queryClient.ensureQueryData(runnerMetricsQuery(client, FLEET_HOUR_METRICS_SCOPE)),
             ),
           ),
         ]);

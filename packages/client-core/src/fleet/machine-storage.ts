@@ -333,9 +333,7 @@ export const describeMachineStorage = ({
     listCleanupCandidates(workspaces, runner.id, now),
     threads,
     now,
-  )
-    .toSorted((a, b) => (b.freesBytes ?? -1) - (a.freesBytes ?? -1))
-    .slice(0, LARGEST_IDLE_COUNT);
+  ).slice(0, LARGEST_IDLE_COUNT);
   return {
     head,
     bar: {
