@@ -100,6 +100,9 @@ import type { Bridge } from "../../ipc/bridge";
 import {
   agentsQuery,
   assistantsQuery,
+  buildMachineFiveMinuteScope,
+  buildMachineHourScope,
+  FLEET_HOUR_METRICS_SCOPE,
   connectionsQuery,
   controllerQuery,
   conversationMessagesQuery,
@@ -123,6 +126,7 @@ import {
   profilesQuery,
   projectsQuery,
   harnessesQuery,
+  runnerMetricsQuery,
   providerAccountsQuery,
   providersQuery,
   queuedInputsQuery,
@@ -789,6 +793,19 @@ const seedQueryCache = (
     queryClient.setQueryData(harnessesQuery(client).queryKey, fleet.harnesses);
     queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
     queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
+    const { fiveMinutesByRunner, hoursByRunner, fleetHours } = fleet.metrics;
+    queryClient.setQueryData(
+      runnerMetricsQuery(client, FLEET_HOUR_METRICS_SCOPE).queryKey,
+      fleetHours,
+    );
+    for (const [runnerId, history] of Object.entries(fiveMinutesByRunner)) {
+      const scope = buildMachineFiveMinuteScope(runnerId);
+      queryClient.setQueryData(runnerMetricsQuery(client, scope).queryKey, history);
+    }
+    for (const [runnerId, history] of Object.entries(hoursByRunner)) {
+      const scope = buildMachineHourScope(runnerId);
+      queryClient.setQueryData(runnerMetricsQuery(client, scope).queryKey, history);
+    }
   }
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
