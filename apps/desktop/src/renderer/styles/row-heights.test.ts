@@ -50,8 +50,8 @@ describe("row-heights.css", () => {
       "--model-browser-height-row": [46, 2],
       "--fleet-activity-height-day": [48, 1],
       "--fleet-activity-height-entry": [35, 1],
-      "--fleet-activity-height-member": [19, 1],
-      "--fleet-activity-height-last-member": [28, 1],
+      "--fleet-activity-height-detail": [19, 1],
+      "--fleet-activity-height-last-detail": [28, 1],
     };
     expect([...initialValues.keys()].sort()).toEqual(Object.keys(rows).sort());
     for (const [name, [height, lines]] of Object.entries(rows)) {

@@ -26,14 +26,14 @@
   column-gap: 8px;
 }
 .machine-activity--recent > .machine-activity-row,
-.machine-activity--recent > .machine-activity-member {
+.machine-activity--recent > .machine-activity-detail {
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
 }
 
 /* ---------- An entry ---------- */
 .machine-activity-row,
-.machine-activity-member {
+.machine-activity-detail {
   position: relative;
   display: grid;
   grid-template-columns: var(--machine-activity-time-width) 18px minmax(0, 1fr);
@@ -78,10 +78,10 @@
 }
 
 /* The thread that joins the dots: from the dot above to this one. A line
-   that unfolds carries it on, down through its members. */
+   that unfolds carries it on, down through its details. */
 .machine-activity-row.joins-above::before,
 .machine-activity-row.is-open::after,
-.machine-activity-member::before {
+.machine-activity-detail::before {
   content: "";
   position: absolute;
   /* Placed in the dot's column, and centred in it. */
@@ -98,7 +98,7 @@
   top: 21px;
   bottom: 0;
 }
-.machine-activity-member::before {
+.machine-activity-detail::before {
   top: 0;
   bottom: 0;
 }
@@ -151,31 +151,31 @@
 }
 
 /* ---------- A line of an unfolded entry ---------- */
-/* The text sits at the top of the line, so the first member is as far below
+/* The text sits at the top of the line, so the first detail is as far below
    its entry as the prototype's list is, and the last has room below it. */
-.machine-activity-member {
+.machine-activity-detail {
   align-items: start;
-  height: var(--fleet-activity-height-member);
+  height: var(--fleet-activity-height-detail);
   color: var(--muted);
   font-size: var(--t-12);
   line-height: var(--line-16);
 }
-.machine-activity-member.is-last {
-  height: var(--fleet-activity-height-last-member);
+.machine-activity-detail.is-last {
+  height: var(--fleet-activity-height-last-detail);
 }
-.machine-activity-member-text {
+.machine-activity-detail-text {
   position: relative;
   grid-column: 3;
   min-width: 0;
   overflow: hidden;
-  /* Puts the first member as far below its entry as the prototype's list does. */
+  /* Puts the first detail as far below its entry as the prototype's list does. */
   margin-top: -1px;
   padding-left: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* The hollow bullet. */
-.machine-activity-member-text::before {
+.machine-activity-detail-text::before {
   content: "";
   position: absolute;
   top: calc((var(--line-16) - 5px) / 2);

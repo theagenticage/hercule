@@ -80,10 +80,10 @@ describe("the Recent section", () => {
     expect(within(recent).getByRole("button", { name: "Hide" }).getAttribute("aria-expanded")).toBe(
       "true",
     );
-    expect(recent.querySelectorAll(".machine-activity-member")).toHaveLength(3);
+    expect(recent.querySelectorAll(".machine-activity-detail")).toHaveLength(3);
 
     await userEvent.click(within(recent).getByRole("button", { name: "Hide" }));
-    expect(recent.querySelectorAll(".machine-activity-member")).toHaveLength(0);
+    expect(recent.querySelectorAll(".machine-activity-detail")).toHaveLength(0);
   });
 
   it("opens the Activity page from All activity", async () => {

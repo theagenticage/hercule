@@ -70,11 +70,11 @@ const openActivity = async (events: readonly EventWithFacts[]) => {
   return opened;
 };
 
-/** Returns the text of each line of the list, in order: day headings, entries and members. */
+/** Returns the text of each line of the list, in order: day headings, entries and details. */
 const readLines = (): readonly string[] =>
   Array.from(
     document.querySelectorAll(
-      ".machine-activity-day, .machine-activity-row, .machine-activity-member",
+      ".machine-activity-day, .machine-activity-row, .machine-activity-detail",
     ),
     (line) => line.textContent,
   );
@@ -149,11 +149,11 @@ describe("the Activity page's entries", () => {
     await openActivity(buildSixEntries());
     await userEvent.click(await screen.findByRole("button", { name: "Show 3" }));
 
-    expect(document.querySelectorAll(".machine-activity-member")).toHaveLength(3);
+    expect(document.querySelectorAll(".machine-activity-detail")).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Hide" }).getAttribute("aria-expanded")).toBe("true");
 
     await userEvent.click(screen.getByRole("button", { name: "Hide" }));
-    expect(document.querySelectorAll(".machine-activity-member")).toHaveLength(0);
+    expect(document.querySelectorAll(".machine-activity-detail")).toHaveLength(0);
   });
 
   it("lists the lines of an unfolded entry right under it, the last with room below, and joins each entry to the one above", async () => {
@@ -162,11 +162,11 @@ describe("the Activity page's entries", () => {
 
     const lines = Array.from(
       document.querySelectorAll<HTMLElement>(
-        ".machine-activity-day, .machine-activity-row, .machine-activity-member",
+        ".machine-activity-day, .machine-activity-row, .machine-activity-detail",
       ),
     );
     expect(
-      lines.map((line) => (line.matches(".machine-activity-member") ? "detail" : line.textContent)),
+      lines.map((line) => (line.matches(".machine-activity-detail") ? "detail" : line.textContent)),
     ).toEqual([
       "Today",
       "13:00Went offlineby Hercule",
@@ -323,7 +323,7 @@ describe("reading older pages", () => {
   });
 
   it("keeps reading while log entries that fold into one entry still match, however many pages that takes", async () => {
-    // 700 log entries make one entry whose members grow with each page, which is a gain.
+    // 700 log entries make one entry whose details grow with each page, which is a gain.
     const { calls } = await openActivity(buildSpawnBurst(700));
     const countCursorReads = () =>
       readEventCalls(calls).filter((call) => call.search.includes("cursor=")).length;

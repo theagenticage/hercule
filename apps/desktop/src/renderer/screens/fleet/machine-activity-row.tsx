@@ -156,8 +156,8 @@ export function MachineActivityDetailRow({
   readonly isLast: boolean;
 }): JSX.Element {
   return (
-    <div className={isLast ? "machine-activity-member is-last" : "machine-activity-member"}>
-      <span className="machine-activity-member-text" title={detail.line}>
+    <div className={isLast ? "machine-activity-detail is-last" : "machine-activity-detail"}>
+      <span className="machine-activity-detail-text" title={detail.line}>
         {detail.line}
         {detail.sessionId === undefined ? null : (
           <>

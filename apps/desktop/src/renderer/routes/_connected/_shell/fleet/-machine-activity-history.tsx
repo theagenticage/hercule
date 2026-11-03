@@ -309,8 +309,8 @@ const flattenIntoItems = (
 const LINE_HEIGHT_PROPERTIES = {
   day: "--fleet-activity-height-day",
   entry: "--fleet-activity-height-entry",
-  detail: "--fleet-activity-height-member",
-  lastDetail: "--fleet-activity-height-last-member",
+  detail: "--fleet-activity-height-detail",
+  lastDetail: "--fleet-activity-height-last-detail",
 } as const;
 
 /** The heights of the list's lines, in CSS pixels. */
