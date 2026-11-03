@@ -5,13 +5,11 @@
  */
 import { useState, type JSX } from "react";
 import {
-  buildArchiveTitle,
   findArchiveBlockReason,
   formatDay,
   resolveBrowserTimezone,
   type GroupRow,
 } from "@hercule/client-core";
-import { useDoneMoves } from "../../app/done-moves";
 import { ArchiveIcon } from "../../icons/archive";
 import { MoreIcon } from "../../icons/more";
 import { ArchiveDialog } from "../archive-dialog";
@@ -26,7 +24,6 @@ import "./thread-header.css";
  * Confirming archives every Thread of the row and shows the shell's toast.
  */
 export function ThreadMorePill({ row }: { readonly row: GroupRow }): JSX.Element {
-  const { archive } = useDoneMoves();
   const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
   const [confirming, setConfirming] = useState(false);
   const blockReason = findArchiveBlockReason(row);
@@ -60,10 +57,7 @@ export function ThreadMorePill({ row }: { readonly row: GroupRow }): JSX.Element
           and the dialog would inherit that. */}
       {confirming && (
         <ArchiveDialog
-          title={buildArchiveTitle([row])}
-          onConfirm={() => {
-            archive({ rows: [row], skippedWorking: 0, leftOver: 0 });
-          }}
+          plan={{ rows: [row], skippedWorking: 0, leftOver: 0 }}
           onClose={() => {
             setConfirming(false);
           }}

@@ -40,8 +40,6 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
-  ARCHIVED_SESSION_FILES_CAPABILITY,
-  MAX_ARCHIVED_SESSIONS,
   supportsWorkspaceLifecycle,
   requiresWorkspaceLifecycle,
   type ArchivedSession,
@@ -89,7 +87,6 @@ import {
 import type { ConnectionTypes } from "../connections";
 import type { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
-import { providerAccountRepository, resolveHarnessHome } from "../provider-accounts";
 import {
   isCheckedOut,
   NOT_CHECKED_OUT,
@@ -146,10 +143,6 @@ const DEFAULT_INSPECTION_TTL_DAYS = 14;
 /** How long an `archived` lease keeps its workspace after its release, in days. */
 const DEFAULT_ARCHIVED_TTL_DAYS = 7;
 
-/** Stored on a workspace removed whole when its runner cannot delete the harness's files. */
-const RUNNER_TOO_OLD_FOR_HARNESS_FILES =
-  "This machine's runner is too old to delete the harness's files. Update it.";
-
 /**
  * Says that the expiry sweep, not a caller, disposes of the workspace, and
  * which lease expired. A sweep removes a finished run's workspace whole.
@@ -157,22 +150,6 @@ const RUNNER_TOO_OLD_FOR_HARNESS_FILES =
 export interface SweepDisposal {
   readonly expired: ExpiredLease;
 }
-
-/** Returns "1 archived session" or "N archived sessions". */
-const countArchivedSessions = (count: number): string =>
-  `${String(count)} archived ${count === 1 ? "session" : "sessions"}`;
-
-/**
- * Returns the warning stored on a workspace removed while the Harness Homes
- * of some archived sessions could not be named, because the provider account
- * they ran under was deleted.
- */
-const describeKeptFilesOfDeletedAccounts = (count: number): string =>
-  `The harness's files of ${countArchivedSessions(count)} were kept: their account was deleted.`;
-
-/** Returns the warning stored on a workspace whose removal could list only some archived sessions. */
-const describeKeptFilesOverLimit = (count: number): string =>
-  `The harness's files of ${countArchivedSessions(count)} were kept: one removal deletes at most ${String(MAX_ARCHIVED_SESSIONS)}.`;
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -313,7 +290,6 @@ const make = Effect.gen(function* () {
   const workspaces = yield* workspaceRepository;
   const resources = yield* resourceRepository;
   const runners = yield* runnerRepository;
-  const providerAccounts = yield* providerAccountRepository;
   const credentials = yield* gitCredentials;
   const accounts = yield* githubAccounts;
   const settings = yield* Settings;
@@ -791,81 +767,24 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Builds what a workspace's removal tells the runner about its archived
-   * sessions: the sessions whose harness files the runner deletes with it, and
-   * the warnings for the files that stay. Returns no sessions and a warning
-   * when the runner cannot delete harness files, and no sessions and no
-   * warning when the workspace has no archived session with a native id.
-   *
-   * The warnings cover a runner too old to delete the files, sessions whose
-   * provider account was deleted (their Harness Home cannot be named), and
-   * sessions past what one removal lists.
-   *
-   * The Harness Home is named by `resolveHarnessHome` from the session's
-   * account and harness, the same way a session's start names it. Those never
-   * change after the session started, so the name is the one the session used.
-   */
-  const buildArchivedSessionsInstruction = (
-    workspace: StoredWorkspace,
-  ): Effect.Effect<
-    {
-      readonly archivedSessions: ReadonlyArray<ArchivedSession>;
-      readonly warnings: ReadonlyArray<string>;
-    },
-    SqlError
-  > =>
-    Effect.gen(function* () {
-      const { sessions: found, total } = yield* workspaces.listArchivedSessions(
-        workspace.id,
-        MAX_ARCHIVED_SESSIONS,
-      );
-      if (found.length === 0) return { archivedSessions: [], warnings: [] };
-      const runner = yield* runners.read(workspace.runnerId);
-      if (
-        Option.isNone(runner) ||
-        !(runner.value.negotiatedCapabilities ?? []).includes(ARCHIVED_SESSION_FILES_CAPABILITY)
-      )
-        return { archivedSessions: [], warnings: [RUNNER_TOO_OLD_FOR_HARNESS_FILES] };
-      const accountsById = new Map(
-        (yield* providerAccounts.list()).map((account) => [account.id, account]),
-      );
-      const archivedSessions: Array<ArchivedSession> = [];
-      let deletedAccounts = 0;
-      for (const session of found) {
-        const account = accountsById.get(session.providerAccountId);
-        if (account === undefined) {
-          deletedAccounts += 1;
-          continue;
-        }
-        archivedSessions.push({
-          harnessId: session.harnessId,
-          harnessHome: resolveHarnessHome(account, session.harnessId),
-          nativeSessionId: session.nativeSessionId,
-        });
-      }
-      return {
-        archivedSessions,
-        warnings: [
-          ...(deletedAccounts === 0 ? [] : [describeKeptFilesOfDeletedAccounts(deletedAccounts)]),
-          ...(total > found.length ? [describeKeptFilesOverLimit(total - found.length)] : []),
-        ],
-      };
-    });
-
-  /**
    * Reserves a removal and returns its frozen instruction.
    *
    * A dispose is sent with `discardChanges: true`, and so removes the workspace
    * whole, when the caller asked for it or when the workspace is:
    *
-   * - archived (at least one Thread, every Thread archived), whoever disposes,
-   *   unless it is a main workspace, which only an explicit request discards;
+   * - archived (see `listArchivedWorkspaces`), whoever disposes;
    * - a run's workspace (a run holds a lease, no Thread works in it), when the
    *   sweep disposes of it.
    *
    * Both are decided here, from the sessions and leases, in the reserving
-   * transaction. For an archived workspace the instruction also lists the
-   * archived sessions whose harness files the runner deletes.
+   * transaction. A main workspace is neither: only an explicit request
+   * discards it, and it keeps the harness files of its archived Threads, so
+   * the `archivedSessions` and `warnings` passed in are ignored for it.
+   *
+   * `archivedSessions` is the list of archived sessions whose harness files the
+   * runner deletes with the workspace. It is built by the caller, frozen into
+   * the instruction, and stored as given. `warnings` are stored on the
+   * workspace once the removal is confirmed.
    */
   const reserveRemoval = (
     workspace: StoredWorkspace,
@@ -874,21 +793,24 @@ const make = Effect.gen(function* () {
     {
       discardChanges = false,
       sweep,
-    }: { readonly discardChanges?: boolean; readonly sweep?: SweepDisposal } = {},
+      archivedSessions = [],
+      warnings = [],
+    }: {
+      readonly discardChanges?: boolean;
+      readonly sweep?: SweepDisposal;
+      readonly archivedSessions?: ReadonlyArray<ArchivedSession>;
+      readonly warnings?: ReadonlyArray<string>;
+    } = {},
   ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
     Effect.gen(function* () {
       const previous = yield* workspaces.readRemoval(workspace.id);
-      // A main workspace is never removed whole on its archived Threads' account: the
-      // sweep never deletes one, and its owner's uncommitted work lives there.
-      const main = workspace.kind === "primary";
+      const removable = tag === "workspaceDispose" && workspace.kind !== "primary";
       const archived =
-        tag === "workspaceDispose" && !main && (yield* workspaces.isArchived(workspace.id));
+        removable && (yield* workspaces.listArchivedWorkspaces([workspace.id])).length > 0;
       const removeWhole =
         discardChanges ||
         archived ||
-        (tag === "workspaceDispose" &&
-          sweep !== undefined &&
-          (yield* workspaces.isRunWorkspace(workspace.id)));
+        (removable && sweep !== undefined && (yield* workspaces.isRunWorkspace(workspace.id)));
       if (workspace.status === "disposing") {
         if (
           Option.isSome(previous) &&
@@ -905,10 +827,6 @@ const make = Effect.gen(function* () {
         );
       }
       const requestId = uuidToString(mintUuid());
-      const files =
-        tag === "workspaceDispose" && !main
-          ? yield* buildArchivedSessionsInstruction(workspace)
-          : { archivedSessions: [], warnings: [] };
       const frame: WorkspaceRemoval =
         tag === "workspaceDetach"
           ? { _tag: "workspaceDetach", workspaceId: workspace.id, requestId }
@@ -917,9 +835,7 @@ const make = Effect.gen(function* () {
               workspaceId: workspace.id,
               requestId,
               ...(removeWhole ? { discardChanges: true } : {}),
-              ...(files.archivedSessions.length === 0
-                ? {}
-                : { archivedSessions: files.archivedSessions }),
+              ...(removable && archivedSessions.length > 0 ? { archivedSessions } : {}),
             };
       yield* workspaces.reserveRemoval(workspace.id, frame, {
         actor,
@@ -929,7 +845,7 @@ const make = Effect.gen(function* () {
               reason: sweep.expired.retention,
               holder: formatHolder(sweep.expired.holder),
             }),
-        ...(files.warnings.length === 0 ? {} : { warnings: files.warnings }),
+        ...(removable && warnings.length > 0 ? { warnings } : {}),
       });
       yield* audit.append({
         kind: "workspace.disposalRequested",
@@ -1395,7 +1311,12 @@ const make = Effect.gen(function* () {
     reserveDisposal: (
       workspace: StoredWorkspace,
       actor: string,
-      options: { readonly sweep?: SweepDisposal; readonly discardChanges?: boolean } = {},
+      options: {
+        readonly sweep?: SweepDisposal;
+        readonly discardChanges?: boolean;
+        readonly archivedSessions?: ReadonlyArray<ArchivedSession>;
+        readonly warnings?: ReadonlyArray<string>;
+      } = {},
     ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
       reserveRemoval(workspace, "workspaceDispose", actor, options),
 
@@ -1406,50 +1327,28 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
       reserveRemoval(workspace, "workspaceDetach", actor),
 
-    /**
-     * Returns the removal instructions owed to a runner, including detachment,
-     * until their matching outcome arrives, ready to be sent again.
-     *
-     * The stored instruction is never changed. A runner that did not
-     * negotiate `archivedSessionFiles` ignores the list of archived sessions,
-     * which happens when an older runner connects after the removal was
-     * reserved. Its instruction is returned without the list, and the pending
-     * removal records the older-runner warning (in its own transaction), which
-     * is stored on the workspace once the removal is confirmed.
-     */
-    downgradeOwedDisposals: (
+    /** Returns persisted removal instructions, including detachment, until their matching outcome arrives. */
+    listOwedDisposals: (
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceRemoval>, SqlError> =>
-      Effect.gen(function* () {
-        const owed = yield* workspaces.listOwedDisposals(runnerId);
-        if (!owed.some((frame) => frame._tag === "workspaceDispose" && frame.archivedSessions)) {
-          return owed;
-        }
-        const runner = yield* runners.read(runnerId);
-        if (
-          Option.isSome(runner) &&
-          (runner.value.negotiatedCapabilities ?? []).includes(ARCHIVED_SESSION_FILES_CAPABILITY)
-        )
-          return owed;
-        const sent: Array<WorkspaceRemoval> = [];
-        for (const frame of owed) {
-          if (frame._tag !== "workspaceDispose" || frame.archivedSessions === undefined) {
-            sent.push(frame);
-            continue;
-          }
-          yield* withTransaction(
-            sql,
-            workspaces.addRemovalWarning(frame.workspaceId, RUNNER_TOO_OLD_FOR_HARNESS_FILES),
-          );
-          sent.push({
-            _tag: "workspaceDispose",
-            workspaceId: frame.workspaceId,
-            ...(frame.requestId === undefined ? {} : { requestId: frame.requestId }),
-            ...(frame.discardChanges === undefined ? {} : { discardChanges: frame.discardChanges }),
-          });
-        }
-        return sent;
-      }),
+      workspaces.listOwedDisposals(runnerId),
+
+    /** Returns the archived workspaces among these ids; see the repository's definition. */
+    listArchivedWorkspaces: workspaces.listArchivedWorkspaces,
+
+    /**
+     * Returns up to `limit` archived sessions of the workspace that have a
+     * native session id, oldest first, and how many such sessions it has in all.
+     */
+    listArchivedSessions: workspaces.listArchivedSessions,
+
+    /**
+     * Adds a warning to the workspace's pending removal, once, in a
+     * transaction of its own. It is stored on the workspace when the runner
+     * confirms the removal.
+     */
+    recordRemovalWarning: (workspaceId: string, warning: string): Effect.Effect<void, SqlError> =>
+      withTransaction(sql, workspaces.addRemovalWarning(workspaceId, warning)),
 
     /** Returns whether this runner can execute the workspace's recorded attachment semantics. */
     supportsPreparationInstruction: (

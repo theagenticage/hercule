@@ -617,7 +617,7 @@ describe("explicit disposal and admission", () => {
       const owed = await Effect.runPromise(
         Effect.gen(function* () {
           const workspaces = yield* WorkspaceService;
-          return yield* workspaces.downgradeOwedDisposals(arranged.runnerId);
+          return yield* workspaces.listOwedDisposals(arranged.runnerId);
         }).pipe(Effect.provide(reopenWorkspaceDomain(database, recoveryHome)), Effect.orDie),
       );
       expect(owed).toContainEqual(instruction);

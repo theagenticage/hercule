@@ -51,8 +51,11 @@ export const runGitOrThrow = (cwd: string, ...args: ReadonlyArray<string>): stri
 const roots: Array<string> = [];
 const workspaceScopes: Array<Scope.Closeable> = [];
 
-type TestWorkspacesOptions = Omit<Parameters<typeof makeWorkspaces>[0], "deleteSessionFiles"> &
-  Partial<Pick<Parameters<typeof makeWorkspaces>[0], "deleteSessionFiles">>;
+type TestWorkspacesOptions = Omit<
+  Parameters<typeof makeWorkspaces>[0],
+  "deleteArchivedSessionFiles"
+> &
+  Partial<Pick<Parameters<typeof makeWorkspaces>[0], "deleteArchivedSessionFiles">>;
 
 /**
  * Constructs a manager whose workers remain alive until the test fixtures are
@@ -63,7 +66,7 @@ export const makeTestWorkspaces = (options: TestWorkspacesOptions): Workspaces =
   const scope = Effect.runSync(Scope.make());
   workspaceScopes.push(scope);
   return Effect.runSync(
-    makeWorkspaces({ deleteSessionFiles: () => Effect.void, ...options }).pipe(
+    makeWorkspaces({ deleteArchivedSessionFiles: () => Effect.succeed([]), ...options }).pipe(
       Scope.provide(scope),
     ),
   );

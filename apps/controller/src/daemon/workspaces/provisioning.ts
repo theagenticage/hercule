@@ -44,8 +44,9 @@ import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR } from "../../ac
 import { withTransaction, mintUuid, uuidToString } from "../../db";
 import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
-import { WorkspaceService } from "../../workspaces";
+import { WorkspaceService, type StoredWorkspace, type SweepDisposal } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
+import { makeArchivedSessionsBuilder, makeRemovalSender } from "./removal";
 
 const decodeDispose = Schema.decodeUnknownEffect(WorkspaceDisposeInput);
 
@@ -69,6 +70,18 @@ const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const connections = yield* RunnerConnections;
   const promotion = yield* PromotionState;
+  const buildArchivedSessions = yield* makeArchivedSessionsBuilder;
+  const tellRemoval = yield* makeRemovalSender;
+
+  /** Reserves the removal of a workspace, freezing the archived sessions whose harness files go with it. */
+  const reserveDisposal = (
+    workspace: StoredWorkspace,
+    actor: string,
+    options: { readonly sweep?: SweepDisposal; readonly discardChanges?: boolean },
+  ) =>
+    Effect.flatMap(buildArchivedSessions(workspace.id), (instruction) =>
+      workspaces.reserveDisposal(workspace, actor, { ...options, ...instruction }),
+    );
 
   /** One pass of the expiry sweep. */
   const sweep = Effect.gen(function* () {
@@ -81,14 +94,14 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const found = yield* workspaces.sweepable(id);
           if (found === undefined) return undefined;
-          const frame = yield* workspaces.reserveDisposal(found.workspace, SYSTEM_ACTOR, {
+          const frame = yield* reserveDisposal(found.workspace, SYSTEM_ACTOR, {
             sweep: { expired: found.expired },
           });
           return { runnerId: found.workspace.runnerId, frame };
         }),
       );
       if (gone === undefined) continue;
-      yield* connections.tell(gone.runnerId, gone.frame);
+      yield* tellRemoval(gone.runnerId, gone.frame);
     }
   });
 
@@ -203,13 +216,13 @@ const make = Effect.gen(function* () {
             const workspace = yield* workspaces.disposable(id);
             return {
               runnerId: workspace.runnerId,
-              frame: yield* workspaces.reserveDisposal(workspace, actor, {
+              frame: yield* reserveDisposal(workspace, actor, {
                 discardChanges: decoded.discardChanges ?? false,
               }),
             };
           }),
         );
-        yield* connections.tell(runnerId, frame);
+        yield* tellRemoval(runnerId, frame);
         return {};
       }),
 
@@ -230,7 +243,7 @@ const make = Effect.gen(function* () {
             };
           }),
         );
-        yield* connections.tell(runnerId, frame);
+        yield* tellRemoval(runnerId, frame);
         return {};
       }),
 

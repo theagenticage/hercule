@@ -450,20 +450,25 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns whether the workspace is archived: it has at least one Thread,
-     * and every Thread in it is archived. Decided from the sessions, never from
-     * a lease's retention. A Thread is a session with no Agent behind it;
-     * `agent_id` is tested rather than `kind` so the query uses the
-     * `sessions_workspace` index instead of scanning every Thread.
+     * Returns the ids, among these workspaces, of the archived ones: those
+     * with at least one Thread, every Thread of which is archived. This is the
+     * only definition of an archived workspace. It reads the sessions, never a
+     * lease's retention, and counts main workspaces too. A Thread is a session
+     * with no Agent behind it; `agent_id` is tested rather than `kind` so the
+     * query uses the `sessions_workspace` index instead of scanning every Thread.
      */
-    isArchived: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly archived: number }>`
-          SELECT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)} AND agent_id IS NULL)
-            AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)}
-                              AND agent_id IS NULL AND archived_at IS NULL) AS archived`,
-        (rows) => rows[0]?.archived === 1,
-      ),
+    listArchivedWorkspaces: (
+      workspaceIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      workspaceIds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly workspace_id: Uint8Array }>`
+              SELECT workspace_id FROM sessions
+              WHERE workspace_id IN ${sql.in(workspaceIds.map(uuidFromString))} AND agent_id IS NULL
+              GROUP BY workspace_id HAVING COUNT(archived_at) = COUNT(*)`,
+            (rows) => rows.map((row) => uuidToString(row.workspace_id)),
+          ),
 
     /** Returns whether a run holds or held a lease on the workspace and no Thread works in it. */
     isRunWorkspace: (workspaceId: string): Effect.Effect<boolean, SqlError> =>

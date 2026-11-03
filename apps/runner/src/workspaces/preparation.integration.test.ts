@@ -151,7 +151,7 @@ describe("durable preparation outcomes", () => {
     });
     const scope = Scope.makeUnsafe();
     const manager = Effect.runSync(
-      makeWorkspaces({ storageDir, deleteSessionFiles: () => Effect.void }).pipe(
+      makeWorkspaces({ storageDir, deleteArchivedSessionFiles: () => Effect.succeed([]) }).pipe(
         Scope.provide(scope),
       ),
     );

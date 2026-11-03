@@ -2026,41 +2026,21 @@ const make = Effect.gen(function* () {
                 firstNamedThreadByWorkspace.set(thread.workspaceId, thread.id);
               }
             }
-            const sessionsByWorkspace = new Map<string | null, StoredSession[]>();
-            for (const session of yield* sessions.listThreadsAndAgentSessionsInWorkspaces([
-              ...firstNamedThreadByWorkspace.keys(),
-            ])) {
-              const group = sessionsByWorkspace.get(session.workspaceId) ?? [];
-              group.push(session);
-              sessionsByWorkspace.set(session.workspaceId, group);
-            }
-            // A workspace ends up archived when each of its Threads is
-            // archived already or is archived by this call.
-            const movingIds = new Set(moving.map((thread) => thread.id));
-            const archivedWorkspaces = [...firstNamedThreadByWorkspace].filter(([workspaceId]) =>
-              (sessionsByWorkspace.get(workspaceId) ?? []).every(
-                (session) =>
-                  session.kind !== "thread" ||
-                  session.archived !== null ||
-                  movingIds.has(session.id),
-              ),
-            );
-            const archiveEntries = [
-              ...moving.map((session) => ({ session, threadId: session.id })),
-              ...archivedWorkspaces.flatMap(([workspaceId, threadId]) =>
-                (sessionsByWorkspace.get(workspaceId) ?? [])
-                  .filter((session) => session.kind === "agent" && session.archived === null)
-                  .map((session) => ({ session, threadId })),
-              ),
-            ];
-            const sessionsToArchive = archiveEntries.map(({ session }) => session);
-            const working = sessionsToArchive.filter((session) =>
-              WORKING_STATUSES.includes(session.status),
-            );
-            if (working.length > 0) {
-              return yield* Effect.fail(createInvalidStateError(describeWorkingRefusal(working)));
-            }
-
+            const archiveSession = (session: StoredSession, threadId: string) =>
+              Effect.gen(function* () {
+                yield* sessions.archive(session.id, actor, at);
+                yield* audit.append({
+                  kind: "session.archived",
+                  actor,
+                  record: {
+                    topic: "session",
+                    id: session.id,
+                    conversationId: session.conversationId,
+                  },
+                  payload: { sessionId: session.id, threadId },
+                  at,
+                });
+              });
             for (const thread of moving) {
               if (yield* sessions.markDone(thread.id, actor, at)) {
                 yield* audit.append({
@@ -2075,20 +2055,35 @@ const make = Effect.gen(function* () {
                   at,
                 });
               }
+              yield* archiveSession(thread, thread.id);
             }
-            for (const { session, threadId } of archiveEntries) {
-              yield* sessions.archive(session.id, actor, at);
-              yield* audit.append({
-                kind: "session.archived",
-                actor,
-                record: {
-                  topic: "session",
-                  id: session.id,
-                  conversationId: session.conversationId,
-                },
-                payload: { sessionId: session.id, threadId },
-                at,
-              });
+
+            // With the Threads marked, the workspaces domain tells which of
+            // their workspaces are now archived. Their Agent sessions follow
+            // the Threads, so a sidebar row is archived whole. A working
+            // session, named Thread or following Agent session, fails the
+            // call once, naming each; the transaction takes the marks back.
+            const archivedWorkspaceIds = yield* workspaces.listArchivedWorkspaces([
+              ...firstNamedThreadByWorkspace.keys(),
+            ]);
+            const following = (yield* sessions.listThreadsAndAgentSessionsInWorkspaces(
+              archivedWorkspaceIds,
+            )).filter((session) => session.kind === "agent" && session.archived === null);
+            const sessionsToArchive = [...moving, ...following];
+            const working = sessionsToArchive.filter((session) =>
+              WORKING_STATUSES.includes(session.status),
+            );
+            if (working.length > 0) {
+              return yield* Effect.fail(createInvalidStateError(describeWorkingRefusal(working)));
+            }
+            for (const session of following) {
+              yield* archiveSession(
+                session,
+                firstNamedThreadByWorkspace.get(session.workspaceId!)!,
+              );
+            }
+
+            for (const session of sessionsToArchive) {
               // The stop that follows withdraws these too, but only when the
               // runner is connected, and a notification nobody can answer
               // must not outlive the archive.
@@ -2107,7 +2102,7 @@ const make = Effect.gen(function* () {
               sessionsToArchive.map((session) => session.id),
               WITHDRAW_REASON_SESSION_ARCHIVED,
             );
-            for (const [workspaceId] of archivedWorkspaces) {
+            for (const workspaceId of archivedWorkspaceIds) {
               yield* workspaces.returnToAutomaticCleanup(workspaceId);
             }
 

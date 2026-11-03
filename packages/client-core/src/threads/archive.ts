@@ -1,13 +1,15 @@
 /**
  * What the desktop decides about archiving rows (spec 17 §Archiving a row):
- * which rows can be archived, which rows "Archive all" takes, and the words
- * of the confirmation and of the toast. Archiving acts on a row, as Done
+ * which rows can be archived, which rows "Archive all" takes, the words of
+ * the confirmation, and the archive itself. Archiving acts on a row, as Done
  * does: every Thread of the row goes in one `session.archive` call.
  */
-import { MAX_PAGE_LIMIT, MAX_SESSION_IDS, type Session } from "@hercule/contract";
+import { MAX_SESSION_IDS, type Session } from "@hercule/contract";
+import type { HerculeClient } from "../client";
+import { readEveryPage } from "../read-every-page";
 import type { GroupRow } from "./group-row";
 
-/** The rows "Archive all" takes from the Done shelf, and what it leaves out. */
+/** The rows an archive takes, and what the user is told about the rows it leaves. */
 export interface ArchivePlan {
   /** The rows to archive, the oldest marked Done first. */
   readonly rows: readonly GroupRow[];
@@ -15,16 +17,6 @@ export interface ArchivePlan {
   readonly skippedWorking: number;
   /** How many rows that could be archived did not fit in the call's limit of Threads, counting the Threads the sidebar holds. */
   readonly leftOver: number;
-}
-
-/** What archiving the rows of an `ArchivePlan` really sends, once each row's Threads are complete. */
-export interface ArchiveCall {
-  /** The rows archived: the plan's rows, oldest first, while their Threads fit in one call. */
-  readonly rows: readonly GroupRow[];
-  /** Every Thread of `rows`, for one `session.archive` call. */
-  readonly sessionIds: readonly string[];
-  /** How many of the plan's rows did not fit in the call's limit of Threads. */
-  readonly droppedRows: number;
 }
 
 /**
@@ -47,7 +39,7 @@ export const findArchiveBlockReason = (row: GroupRow): string | null =>
  *   one call. The first row that does not fit ends the list, so the rows
  *   left over are always the newest. The Threads counted are the ones the
  *   rows hold, which can be fewer than the workspace has (see
- *   `buildArchiveCall`), so the call may still drop rows.
+ *   `archiveRows`), so the archive may still leave rows out.
  */
 export const planArchiveAll = (rows: readonly GroupRow[]): ArchivePlan => {
   const shelf = rows
@@ -82,10 +74,7 @@ export const buildArchiveTitle = (rows: readonly GroupRow[]): string =>
  * for the rows it skipped as working and one for the rows it left over:
  * "Archived 12. 2 working rows skipped. 3 rows left."
  */
-export const buildArchivedToast = (
-  rowCount: number,
-  { skippedWorking, leftOver }: Pick<ArchivePlan, "skippedWorking" | "leftOver">,
-): string => {
+const buildArchivedToast = (rowCount: number, skippedWorking: number, leftOver: number): string => {
   const noun = (count: number): string => (count === 1 ? "row" : "rows");
   const sentences = [rowCount === 1 ? "Archived" : `Archived ${String(rowCount)}`];
   if (skippedWorking > 0)
@@ -95,57 +84,52 @@ export const buildArchivedToast = (
 };
 
 /**
- * Returns the ids of the workspaces of `rows`, in lists of at most one page
- * each, which is the most a read of Threads by workspace takes. A Thread with
- * no workspace has none to read.
- */
-export const listArchiveWorkspaceIds = (
-  rows: readonly GroupRow[],
-): readonly (readonly string[])[] => {
-  const ids = [
-    ...new Set(rows.flatMap((row) => (row.workspaceId === null ? [] : [row.workspaceId]))),
-  ];
-  return Array.from({ length: Math.ceil(ids.length / MAX_PAGE_LIMIT) }, (_, index) =>
-    ids.slice(index * MAX_PAGE_LIMIT, (index + 1) * MAX_PAGE_LIMIT),
-  );
-};
-
-/**
- * Returns the call that archives `rows`, from the Threads the controller
- * holds in the rows' workspaces (`workspaceThreads`, as the read by
- * `listArchiveWorkspaceIds` returns them).
+ * Archives the rows of `plan` and returns the sessions the controller
+ * archived and the toast that tells the user what happened. Fails when a
+ * read or the archive fails, or when the first row alone holds more Threads
+ * than one call takes.
  *
- * The sidebar's read leaves out a Thread marked Done more than 14 days ago,
- * so a row can miss such a sibling. Archiving only the row's known Threads
- * would leave the workspace not fully archived, and it would never be
- * cleaned up. So each row's Threads are the ones it knows plus every
- * unarchived Thread in `workspaceThreads` of its workspace. Rows are then
- * taken whole, in order, while their Threads stay within the limit of one
- * call. The first row that does not fit ends the list.
+ * The sidebar's list leaves out a Thread marked Done more than 14 days ago,
+ * so a row can miss such a sibling, and a workspace with one Thread left
+ * unarchived would never be cleaned up. So the rows' workspaces are read
+ * first, with one query, and each row's Threads are the ones it knows plus
+ * every unarchived Thread of its workspace. Rows are then taken whole, in
+ * order, while their Threads stay within the limit of one call. The first
+ * row that does not fit ends the list, and the toast counts it as left.
  */
-export const buildArchiveCall = (
-  rows: readonly GroupRow[],
-  workspaceThreads: readonly Session[],
-): ArchiveCall => {
+export const archiveRows = async (
+  client: HerculeClient,
+  { rows, skippedWorking, leftOver }: ArchivePlan,
+): Promise<{ readonly sessions: readonly Session[]; readonly notice: string }> => {
+  const workspaceIds = [...new Set(rows.flatMap((row) => row.workspaceId ?? []))];
+  // A Thread with no workspace is a row of its own, so there is nothing to read for it.
+  const workspaceThreads =
+    workspaceIds.length === 0
+      ? []
+      : await readEveryPage((page) =>
+          client.session.query({
+            query: { workspaceId: workspaceIds, kind: "thread", archived: false, ...page },
+          }),
+        );
   const taken: GroupRow[] = [];
   const sessionIds: string[] = [];
   for (const row of rows) {
-    const unseen =
-      row.workspaceId === null
-        ? []
-        : workspaceThreads
-            .filter(
-              (session) =>
-                session.workspaceId === row.workspaceId &&
-                session.kind === "thread" &&
-                session.archived === undefined &&
-                !row.threadIds.includes(session.id),
-            )
-            .map((session) => session.id);
-    const rowIds = [...row.threadIds, ...unseen];
+    const unlisted = workspaceThreads
+      .filter(
+        (thread) => thread.workspaceId === row.workspaceId && !row.threadIds.includes(thread.id),
+      )
+      .map((thread) => thread.id);
+    const rowIds = [...row.threadIds, ...unlisted];
     if (sessionIds.length + rowIds.length > MAX_SESSION_IDS) break;
     taken.push(row);
     sessionIds.push(...rowIds);
   }
-  return { rows: taken, sessionIds, droppedRows: rows.length - taken.length };
+  if (taken.length === 0) {
+    throw new Error("The first row holds more threads than one archive can take.");
+  }
+  const sessions = await client.session.archive({ payload: { sessionIds } });
+  return {
+    sessions,
+    notice: buildArchivedToast(taken.length, skippedWorking, leftOver + rows.length - taken.length),
+  };
 };

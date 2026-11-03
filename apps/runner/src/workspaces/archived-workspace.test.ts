@@ -20,7 +20,7 @@ import { join } from "node:path";
 import type { ArchivedSession } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
 import { afterAll, describe, expect, it } from "vitest";
-import type { DeleteSessionFiles } from "./archived-session-files";
+import type { DeleteArchivedSessionFiles } from "./substrate";
 import {
   buildCheckout,
   buildProvisionFrame,
@@ -42,11 +42,11 @@ afterAll(cleanTemporaries);
  */
 const provisionUsedWorkspace = async (
   count: number,
-  deleteSessionFiles: DeleteSessionFiles = () => Effect.void,
+  deleteArchivedSessionFiles: DeleteArchivedSessionFiles = () => Effect.succeed([]),
 ) => {
   const storageDir = createTemporaryDir("hercule-storage-");
   const workspaceId = createId();
-  const workspaces = makeTestWorkspaces({ storageDir, deleteSessionFiles });
+  const workspaces = makeTestWorkspaces({ storageDir, deleteArchivedSessionFiles });
   const resourceIds = Array.from({ length: count }, () => createId());
   await Effect.runPromise(
     workspaces.provision(
@@ -206,22 +206,25 @@ describe("deleting the harness files of archived sessions", () => {
     { harnessId: "codex", harnessHome: "providers/account-2", nativeSessionId: "native-3" },
   ];
 
-  /** A delete function that records its calls and refuses every Claude Code session. */
+  const WARNING = "Claude Code kept the files of 2 sessions: permission denied";
+
+  /** A delete function that records the sessions of each call and returns one warning. */
   const makeRecordingDelete = () => {
-    const calls: Array<ArchivedSession> = [];
-    const deleteSessionFiles = (session: ArchivedSession) =>
-      Effect.suspend(() => {
-        calls.push(session);
-        return session.harnessId === "claude-code"
-          ? Effect.fail({ harnessName: "Claude Code", reason: "permission denied" })
-          : Effect.void;
+    const calls: Array<ReadonlyArray<ArchivedSession>> = [];
+    const deleteArchivedSessionFiles: DeleteArchivedSessionFiles = (listed) =>
+      Effect.sync(() => {
+        calls.push(listed);
+        return [WARNING];
       });
-    return { calls, deleteSessionFiles };
+    return { calls, deleteArchivedSessionFiles };
   };
 
-  it("deletes each session's files after the workspace, and reports one warning per harness that kept some", async () => {
-    const { calls, deleteSessionFiles } = makeRecordingDelete();
-    const { workspaces, workspaceId, root } = await provisionUsedWorkspace(1, deleteSessionFiles);
+  it("deletes the archived sessions' files after the workspace, and reports the warnings it gets back", async () => {
+    const { calls, deleteArchivedSessionFiles } = makeRecordingDelete();
+    const { workspaces, workspaceId, root } = await provisionUsedWorkspace(
+      1,
+      deleteArchivedSessionFiles,
+    );
 
     const report = await Effect.runPromise(
       workspaces.dispose({
@@ -234,15 +237,38 @@ describe("deleting the harness files of archived sessions", () => {
 
     expect(report.status).toBe("deleted");
     expect(existsSync(root)).toBe(false);
-    expect(calls).toEqual(sessions);
-    expect(report.warnings).toEqual([
-      "Claude Code kept the files of 2 sessions: permission denied",
-    ]);
+    expect(calls).toEqual([sessions]);
+    expect(report.warnings).toEqual([WARNING]);
+  });
+
+  it("lists the harness warnings before the checkout warnings", async () => {
+    const { deleteArchivedSessionFiles } = makeRecordingDelete();
+    const { workspaces, workspaceId, caches } = await provisionUsedWorkspace(
+      1,
+      deleteArchivedSessionFiles,
+    );
+    caches.forEach((cache) => rmSync(cache, { recursive: true }));
+
+    const report = await Effect.runPromise(
+      workspaces.dispose({
+        _tag: "workspaceDispose",
+        workspaceId,
+        discardChanges: true,
+        archivedSessions: sessions,
+      }),
+    );
+
+    expect(report.status).toBe("deleted");
+    expect(report.warnings).toHaveLength(2);
+    expect(report.warnings![0]).toBe(WARNING);
   });
 
   it("deletes no session files when the workspace is not removed", async () => {
-    const { calls, deleteSessionFiles } = makeRecordingDelete();
-    const { workspaces, workspaceId, root } = await provisionUsedWorkspace(1, deleteSessionFiles);
+    const { calls, deleteArchivedSessionFiles } = makeRecordingDelete();
+    const { workspaces, workspaceId, root } = await provisionUsedWorkspace(
+      1,
+      deleteArchivedSessionFiles,
+    );
 
     const report = await Effect.runPromise(
       workspaces.dispose({ _tag: "workspaceDispose", workspaceId, archivedSessions: sessions }),
@@ -254,8 +280,8 @@ describe("deleting the harness files of archived sessions", () => {
   });
 
   it("replays the same report without deleting anything again", async () => {
-    const { calls, deleteSessionFiles } = makeRecordingDelete();
-    const { workspaces, workspaceId } = await provisionUsedWorkspace(1, deleteSessionFiles);
+    const { calls, deleteArchivedSessionFiles } = makeRecordingDelete();
+    const { workspaces, workspaceId } = await provisionUsedWorkspace(1, deleteArchivedSessionFiles);
     const frame = {
       _tag: "workspaceDispose",
       workspaceId,
@@ -269,12 +295,12 @@ describe("deleting the harness files of archived sessions", () => {
 
     expect(replay).toEqual(first);
     expect(replay.warnings).toHaveLength(1);
-    expect(calls).toHaveLength(sessions.length);
+    expect(calls).toHaveLength(1);
   });
 
   it("treats a request id that comes back with the list as the same request", async () => {
-    const { calls, deleteSessionFiles } = makeRecordingDelete();
-    const { workspaces, workspaceId } = await provisionUsedWorkspace(1, deleteSessionFiles);
+    const { calls, deleteArchivedSessionFiles } = makeRecordingDelete();
+    const { workspaces, workspaceId } = await provisionUsedWorkspace(1, deleteArchivedSessionFiles);
     const frame = {
       _tag: "workspaceDispose",
       workspaceId,

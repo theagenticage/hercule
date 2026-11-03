@@ -318,8 +318,36 @@ describe("session.archive", () => {
         `${agentSession.title} is working. Stop it first, or wait for its turn to end.`,
       );
       expect("archived" in (await readSession(arranged, thread.id))).toBe(false);
+      expect(await arranged.harness.audit("session.archived")).toEqual([]);
+      expect(await arranged.harness.audit("session.markedDone")).toEqual([]);
       expect(countStopFrames(arranged)).toBe(0);
       expect(await readPolicy(arranged, thread.workspaceId!)).toBe("manual");
+    });
+  });
+
+  it("names every working session at once: a named Thread first, then the Agent session that would follow", async () => {
+    await withFleet(async (arranged) => {
+      const idle = await startIdleThreadInNewWorkspace(arranged);
+      const busy = await startThread(arranged, {
+        kind: "existing",
+        workspaceId: idle.workspaceId!,
+      });
+      const agentSession = await startAgentSessionIn(arranged, idle.workspaceId!);
+
+      const refused = await archive(arranged, [idle.id, busy.id]);
+
+      expect(refused.status).toBe(409);
+      expect((await readErrorBody(refused)).message).toBe(
+        `${busy.title} and ${agentSession.title} are working. Stop them first, or wait for their turns to end.`,
+      );
+      for (const session of [idle, busy, agentSession]) {
+        const read = await readSession(arranged, session.id);
+        expect("archived" in read || "done" in read).toBe(false);
+      }
+      expect(await arranged.harness.audit("session.archived")).toEqual([]);
+      expect(await arranged.harness.audit("session.markedDone")).toEqual([]);
+      expect(countStopFrames(arranged)).toBe(0);
+      expect(await readPolicy(arranged, idle.workspaceId!)).toBe("manual");
     });
   });
 

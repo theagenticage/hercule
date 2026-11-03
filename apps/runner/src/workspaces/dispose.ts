@@ -10,7 +10,6 @@ import {
   type WorkspaceReport,
 } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
-import { deleteArchivedSessionFiles } from "./archived-session-files";
 import { observeCheckoutsAfterFailedRemoval, planCheckoutRemovals } from "./checkout-removal";
 import { isInsideDirectory, normalizeError, validateManagedPath } from "./managed-paths";
 import type { Removal, RegisteredCheckout, RegisteredWorkspace } from "./registry";
@@ -297,10 +296,7 @@ const removeWorkspace = (
       }
       const fileWarnings =
         instruction._tag === "workspaceDispose" && instruction.archivedSessions !== undefined
-          ? yield* deleteArchivedSessionFiles(
-              substrate.deleteSessionFiles,
-              instruction.archivedSessions,
-            )
+          ? yield* substrate.deleteArchivedSessionFiles(instruction.archivedSessions)
           : [];
       const warnings = [...fileWarnings, ...checkoutWarnings]
         .slice(0, MAX_CHECKOUTS)

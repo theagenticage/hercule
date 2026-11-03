@@ -1,12 +1,12 @@
 /**
- * Finds the Harness Adapter of an archived session and has it delete the
- * session's files, for the workspace removal that lists the session.
+ * Deletes the harness files of archived sessions, for the workspace removal
+ * that lists them: finds each session's Harness Adapter, checks the Harness
+ * Home, and turns the files that stay into warnings.
  */
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { ArchivedSession } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
-import type { SessionFilesKept } from "../workspaces/archived-session-files";
 import { buildHarnessHomePath } from "./account";
 import { findAdapter } from "./index";
 import { describeFileFailure } from "./session-files";
@@ -31,6 +31,12 @@ const locateHome = async (
   }
 };
 
+/** Why a harness kept a session's files, and the name the user knows the harness by. */
+interface SessionFilesKept {
+  readonly harnessName: string;
+  readonly reason: string;
+}
+
 /**
  * Deletes the harness's files of one archived session, in the Harness Home the
  * controller named. Fails with `SessionFilesKept` when this runner has no
@@ -39,7 +45,7 @@ const locateHome = async (
  * the deletion reach outside it), or when the adapter cannot delete the files.
  * Does not create the home: a home that is not there has no files to delete.
  */
-export const deleteHarnessSessionFiles = (
+const deleteSessionFilesOf = (
   storageDir: string,
   session: ArchivedSession,
 ): Effect.Effect<void, SessionFilesKept> => {
@@ -69,3 +75,32 @@ export const deleteHarnessSessionFiles = (
       );
   });
 };
+
+/**
+ * Deletes the harness files of every listed session and returns one warning
+ * per harness that kept some, such as "Claude Code kept the files of 2
+ * sessions: permission denied". Never fails: a session whose files stay does
+ * not stop the others, and does not undo the workspace removal that came
+ * before.
+ */
+export const deleteArchivedSessionFiles = (
+  storageDir: string,
+  sessions: ReadonlyArray<ArchivedSession>,
+): Effect.Effect<ReadonlyArray<string>> =>
+  Effect.gen(function* () {
+    const kept = new Map<string, { count: number; reasons: Set<string> }>();
+    for (const session of sessions) {
+      const failure = yield* deleteSessionFilesOf(storageDir, session).pipe(
+        Effect.match({ onSuccess: () => undefined, onFailure: (error) => error }),
+      );
+      if (failure === undefined) continue;
+      const group = kept.get(failure.harnessName) ?? { count: 0, reasons: new Set<string>() };
+      group.count += 1;
+      group.reasons.add(failure.reason);
+      kept.set(failure.harnessName, group);
+    }
+    return [...kept].map(
+      ([harnessName, { count, reasons }]) =>
+        `${harnessName} kept the files of ${count} ${count === 1 ? "session" : "sessions"}: ${[...reasons].join("; ")}`,
+    );
+  });

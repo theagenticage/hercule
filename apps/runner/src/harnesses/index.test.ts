@@ -70,7 +70,7 @@ describe("the adapters in this runner build", () => {
       workspaces: Effect.runSync(
         makeWorkspaces({
           storageDir: "/var/hercule/runner",
-          deleteSessionFiles: () => Effect.void,
+          deleteArchivedSessionFiles: () => Effect.succeed([]),
         }).pipe(Scope.provide(scope)),
       ),
       socketPath: "/var/hercule/runner/daemon.sock",

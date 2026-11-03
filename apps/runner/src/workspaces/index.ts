@@ -20,7 +20,6 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
-import type { DeleteSessionFiles } from "./archived-session-files";
 import { attachWorkspace, reserveManagedRepositories } from "./attachment";
 import { hasExpectedCheckoutIdentity } from "./identity";
 import { disposeWorkspace, detachWorkspace, hasSameRemovalIntent } from "./dispose";
@@ -31,7 +30,12 @@ import {
   type RegisteredCheckout,
   type RegisteredWorkspace,
 } from "./registry";
-import { SETUP_DEADLINE_MS, buildSubstrateEnv, type Substrate } from "./substrate";
+import {
+  SETUP_DEADLINE_MS,
+  buildSubstrateEnv,
+  type DeleteArchivedSessionFiles,
+  type Substrate,
+} from "./substrate";
 
 export { buildStepResultsDir, buildStepResultsRoot } from "./dispose";
 export { switchBranch, type GitOutcome, type GitEnv } from "./git";
@@ -107,11 +111,11 @@ export const makeWorkspaces = (options: {
   /** How long a setup command may run. Defaults to `SETUP_DEADLINE_MS`; tests set a shorter one. */
   readonly setupDeadlineMs?: number;
   /**
-   * Deletes the harness files of one archived session, for a dispose that
-   * lists archived sessions. The harness adapters live outside this module,
-   * so the runner passes the function in.
+   * Deletes the harness files of the archived sessions a dispose lists, and
+   * returns the warnings for the files that stayed. The harness adapters live
+   * outside this module, so the runner passes the function in.
    */
-  readonly deleteSessionFiles: DeleteSessionFiles;
+  readonly deleteArchivedSessionFiles: DeleteArchivedSessionFiles;
 }): Effect.Effect<Workspaces, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope;
@@ -142,7 +146,7 @@ export const makeWorkspaces = (options: {
       coordinateRepository,
       gitEnv: buildSubstrateEnv(process.env, options.gitEnv),
       setupDeadlineMs: options.setupDeadlineMs ?? SETUP_DEADLINE_MS,
-      deleteSessionFiles: options.deleteSessionFiles,
+      deleteArchivedSessionFiles: options.deleteArchivedSessionFiles,
     };
 
     /**

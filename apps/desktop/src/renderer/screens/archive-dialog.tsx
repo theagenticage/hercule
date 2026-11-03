@@ -1,7 +1,7 @@
 import { useEffect, useRef, type JSX } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { readErrorMessage } from "@hercule/client-core";
+import { buildArchiveTitle, readErrorMessage, type ArchivePlan } from "@hercule/client-core";
 import { useDoneMoves } from "../app/done-moves";
 import { settingsQuery } from "../app/queries";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -13,35 +13,35 @@ import { ConfirmDialog } from "./confirm-dialog";
 const DEFAULT_KEPT_DAYS = 7;
 
 /**
- * Renders the dialog that asks before rows are archived (spec 17 §Archiving a
- * row): `title` names what is archived, and the text says that archiving is
- * final, that transcripts stay readable, and how long Hercule keeps the
- * workspace afterwards. Keep it closes the dialog and has the focus, so a
- * stray Enter does not archive.
+ * Renders the confirmation that asks before the rows of `plan` are archived
+ * (spec 17 §Archiving a row), and archives them on Archive. The header's More
+ * menu opens it for one row, and the Done shelf for a row or for "Archive
+ * all". The caller unmounts it when `onClose` is called, which happens
+ * whenever the dialog closes.
  *
- * The days are the controller's `workspace.archivedTtlDays`, so the dialog
- * reads the controller's settings when it mounts, which is when the user
- * starts the archive, and draws nothing until it has them. The settings are
- * usually cached, so that is no wait. When the read fails, the dialog never
- * shows: the failure shows as an alert toast, like any other failed move,
- * and `onClose` is called.
+ * The title names the rows (`buildArchiveTitle`). The text says that
+ * archiving is final, that transcripts stay readable, and how long Hercule
+ * keeps the workspace afterwards, which is the controller's
+ * `workspace.archivedTtlDays`. So the dialog reads the controller's settings
+ * when it mounts, which is when the user starts the archive, and draws
+ * nothing until it has them. They are usually cached, so that is no wait.
+ * When the read fails, the dialog never shows: the failure shows as an alert
+ * toast, like any other failed move, and `onClose` is called.
  *
- * Archive calls `onConfirm` and closes the dialog. The caller sends the
- * request and shows the controller's answer or refusal as a toast, so the
- * dialog does not wait for it. `onClose` is called whenever the dialog
- * closes, and the caller then unmounts it.
+ * Keep it closes the dialog and has the focus, so a stray Enter does not
+ * archive. Archive sends the archive through the Done moves and closes the
+ * dialog without waiting: the move shows the controller's answer or refusal
+ * as a toast.
  */
 export function ArchiveDialog({
-  title,
-  onConfirm,
+  plan,
   onClose,
 }: {
-  readonly title: string;
-  readonly onConfirm: () => void;
+  readonly plan: ArchivePlan;
   readonly onClose: () => void;
 }): JSX.Element | null {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { toasts } = useDoneMoves();
+  const { archive, toasts } = useDoneMoves();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const { data: settings, error } = useQuery(settingsQuery(client));
   useEffect(() => {
@@ -54,13 +54,13 @@ export function ArchiveDialog({
   return (
     <ConfirmDialog
       dialogRef={dialogRef}
-      title={title}
+      title={buildArchiveTitle(plan.rows)}
       actionLabel="Archive"
       actionClass="danger"
       closeLabel="Keep it"
       initialFocus="close"
       onConfirm={() => {
-        onConfirm();
+        archive(plan);
         dialogRef.current?.close();
       }}
       onClose={onClose}

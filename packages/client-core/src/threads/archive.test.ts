@@ -1,18 +1,21 @@
 /**
  * Tests the decisions behind archiving rows: when a row cannot be archived,
  * which rows "Archive all" takes from the Done shelf and which it leaves,
- * and the words of the confirmation and the toast.
+ * the words of the confirmation, and `archiveRows`, which completes the
+ * rows' Threads, packs whole rows under the limit of one call, archives
+ * them and words the toast, against a stub controller.
  */
 import type { Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildProviderAccount, ANTHROPIC_IDENTITY } from "../providers.testing";
+import { buildErrorBody, createApiStub, type Handler } from "../api-stub";
+import { createClient } from "../client";
 import {
-  buildArchiveCall,
-  buildArchivedToast,
+  archiveRows,
   buildArchiveTitle,
   findArchiveBlockReason,
-  listArchiveWorkspaceIds,
   planArchiveAll,
+  type ArchivePlan,
 } from "./archive";
 import type { GroupRow } from "./group-row";
 import { prepareSessionPresentation } from "./session-presentation";
@@ -168,91 +171,154 @@ describe("buildArchiveTitle", () => {
   });
 });
 
-describe("buildArchivedToast", () => {
-  it("reads only Archived for one row, and counts several", () => {
-    const none = { skippedWorking: 0, leftOver: 0 };
-    expect(buildArchivedToast(1, none)).toBe("Archived");
-    expect(buildArchivedToast(12, none)).toBe("Archived 12");
+describe("archiveRows", () => {
+  /** Returns the canonical id the client accepts for the thing numbered `number`. */
+  const uuid = (number: number): string =>
+    `01a06d02-7400-7000-8000-${String(number).padStart(12, "0")}`;
+  const W1 = uuid(9001);
+  const W2 = uuid(9002);
+
+  /** Returns `session` with the ids the fixture spells loosely made canonical, so the client accepts it from the controller. */
+  const onWire = (session: Session): Session => ({
+    ...session,
+    permissionProfileId: uuid(7001),
+    providerAccountId: uuid(7002),
+    runnerId: uuid(7003),
+    projectId: null,
   });
 
-  it("adds the rows Archive all skipped as working and the rows it left over", () => {
-    expect(buildArchivedToast(12, { skippedWorking: 2, leftOver: 0 })).toBe(
-      "Archived 12. 2 working rows skipped.",
-    );
-    expect(buildArchivedToast(12, { skippedWorking: 0, leftOver: 1 })).toBe(
-      "Archived 12. 1 row left.",
-    );
-    expect(buildArchivedToast(1, { skippedWorking: 1, leftOver: 3 })).toBe(
-      "Archived. 1 working row skipped. 3 rows left.",
-    );
-  });
-});
+  /**
+   * Returns a client on a stub controller that holds `workspaceThreads` for
+   * the read by workspace and archives the Threads it is sent, and the
+   * calls it received. `archive` answers the archive instead when given.
+   */
+  const buildController = (workspaceThreads: readonly Session[] = [], archive?: Handler) => {
+    const api = createApiStub({
+      "GET /api/v1/sessions": { body: { items: workspaceThreads.map(onWire) } },
+      "POST /api/v1/sessions/archive":
+        archive ??
+        ((call) => ({
+          body: (call.body as { sessionIds: string[] }).sessionIds.map((id) =>
+            onWire(buildSession({ id, archived: { at: at(30), by: "user" } })),
+          ),
+        })),
+    });
+    return { api, client: createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch }) };
+  };
 
-describe("listArchiveWorkspaceIds", () => {
-  it("lists each workspace once, and none for Threads with no workspace", () => {
-    const rows = describeRows([
-      doneThread("t-1", 5, { workspaceId: "w-1" }),
-      doneThread("t-2", 6, { workspaceId: "w-1", createdAt: at(1) }),
-      doneThread("t-3", 7, { workspaceId: "w-2" }),
-      doneThread("t-4", 8),
+  /** Returns the plan that archives `rows` alone. */
+  const planOf = (rows: readonly GroupRow[], over: Partial<ArchivePlan> = {}): ArchivePlan => ({
+    rows,
+    skippedWorking: 0,
+    leftOver: 0,
+    ...over,
+  });
+
+  /** Returns the ids each archive call carried. */
+  const readArchived = (api: ReturnType<typeof buildController>["api"]) =>
+    api.calls
+      .filter((call) => call.path === "/api/v1/sessions/archive")
+      .map((call) => (call.body as { sessionIds: string[] }).sessionIds);
+
+  it("archives a Thread with no workspace as it is, reads nothing, and says only Archived", async () => {
+    const { api, client } = buildController();
+
+    const { sessions, notice } = await archiveRows(
+      client,
+      planOf([describeRow([doneThread(uuid(11), 5)])]),
+    );
+
+    expect(readArchived(api)).toEqual([[uuid(11)]]);
+    expect(api.calls.some((call) => call.method === "GET")).toBe(false);
+    expect(sessions.map((session) => session.id)).toEqual([uuid(11)]);
+    expect(notice).toBe("Archived");
+  });
+
+  it("adds the Threads of the row's workspace that the sidebar's read missed, such as one marked Done long ago", async () => {
+    const recent = doneThread(uuid(1), 20, { workspaceId: W1 });
+    const old = doneThread(uuid(2), 1, { workspaceId: W1, createdAt: at(-1) });
+    const { api, client } = buildController([old, recent]);
+
+    await archiveRows(client, planOf([describeRow([recent])]));
+
+    const read = api.calls.find((call) => call.method === "GET")!;
+    expect(new URLSearchParams(read.search).getAll("workspaceId")).toEqual([W1]);
+    expect(new URLSearchParams(read.search).get("archived")).toBe("false");
+    expect(readArchived(api)).toEqual([[uuid(1), uuid(2)]]);
+  });
+
+  it("reads every workspace of the rows in one query, and counts the rows in the toast", async () => {
+    const first = doneThread(uuid(11), 5, { workspaceId: W1 });
+    const second = doneThread(uuid(12), 6, { workspaceId: W2 });
+    const hidden = doneThread(uuid(13), 1, { workspaceId: W2, createdAt: at(-1) });
+    const { api, client } = buildController([first, second, hidden]);
+
+    const { notice } = await archiveRows(client, planOf(describeRows([first, second])));
+
+    const reads = api.calls.filter((call) => call.method === "GET");
+    expect(reads).toHaveLength(1);
+    expect(new URLSearchParams(reads[0]!.search).getAll("workspaceId").toSorted()).toEqual([
+      W1,
+      W2,
     ]);
-    expect(listArchiveWorkspaceIds(rows)).toEqual([["w-1", "w-2"]]);
+    expect(readArchived(api)[0]!.toSorted()).toEqual([uuid(11), uuid(12), uuid(13)]);
+    expect(notice).toBe("Archived 2");
   });
 
-  it("splits the workspaces into reads of at most 500", () => {
-    const rows = describeRows(
-      Array.from({ length: 501 }, (_, index) =>
-        doneThread(`t-${String(index)}`, index, { workspaceId: `w-${String(index)}` }),
-      ),
+  it("says how many working rows the plan skipped and how many it left over", async () => {
+    const { client } = buildController();
+
+    const { notice } = await archiveRows(
+      client,
+      planOf(describeRows([doneThread(uuid(11), 5), doneThread(uuid(12), 6)]), {
+        skippedWorking: 2,
+        leftOver: 1,
+      }),
     );
-    const chunks = listArchiveWorkspaceIds(rows);
-    expect(chunks.map((chunk) => chunk.length)).toEqual([500, 1]);
-  });
-});
 
-describe("buildArchiveCall", () => {
-  it("adds the Threads of the row's workspace that the sidebar's read missed, such as one marked Done long ago", () => {
-    const [row] = describeRows([doneThread("t-new", 20, { workspaceId: "w-1" })]);
-    const old = doneThread("t-old", 1, { workspaceId: "w-1", createdAt: at(-1) });
-
-    const call = buildArchiveCall([row!], [old, doneThread("t-new", 20, { workspaceId: "w-1" })]);
-
-    expect(call.sessionIds).toEqual(["t-new", "t-old"]);
-    expect(call.rows).toEqual([row]);
-    expect(call.droppedRows).toBe(0);
+    expect(notice).toBe("Archived 2. 2 working rows skipped. 1 row left.");
   });
 
-  it("leaves out archived Threads, Agent sessions and Threads of other workspaces", () => {
-    const [row] = describeRows([doneThread("t-1", 5, { workspaceId: "w-1" })]);
-    const others = [
-      doneThread("t-archived", 1, { workspaceId: "w-1", archived: { at: at(2), by: "user" } }),
-      doneThread("a-1", 1, { workspaceId: "w-1", kind: "agent", agentId: "ag-1" }),
-      doneThread("t-elsewhere", 1, { workspaceId: "w-2" }),
-    ];
-    expect(buildArchiveCall([row!], others).sessionIds).toEqual(["t-1"]);
-  });
-
-  it("sends a Thread with no workspace as it is", () => {
-    const [row] = describeRows([doneThread("t-1", 5)]);
-    expect(buildArchiveCall([row!], []).sessionIds).toEqual(["t-1"]);
-  });
-
-  it("takes whole rows only while the complete Threads stay within 500, and counts the rows dropped", () => {
+  it("takes whole rows only while the complete Threads stay within 500, and counts the rows dropped as left", async () => {
     const { rows } = planArchiveAll(
       describeRows([
-        ...Array.from({ length: 499 }, (_, index) => doneThread(`t-${String(index)}`, index)),
-        doneThread("w-lead", 600, { workspaceId: "w-1" }),
+        ...Array.from({ length: 499 }, (_, index) => doneThread(uuid(100 + index), index)),
+        doneThread(uuid(20), 600, { workspaceId: W1 }),
       ]),
     );
     // The sidebar holds one Thread of the last row, so the plan fits: 500. Its workspace holds a
     // second Thread the sidebar did not list, which makes 501.
-    const hidden = doneThread("w-old", 1, { workspaceId: "w-1", createdAt: at(-1) });
+    const hidden = doneThread(uuid(21), 1, { workspaceId: W1, createdAt: at(-1) });
+    const { api, client } = buildController([hidden]);
 
-    const call = buildArchiveCall(rows, [hidden]);
+    const { notice } = await archiveRows(client, planOf(rows));
 
     expect(rows).toHaveLength(500);
-    expect(call.rows).toHaveLength(499);
-    expect(call.sessionIds).toHaveLength(499);
-    expect(call.droppedRows).toBe(1);
+    expect(readArchived(api)[0]).toHaveLength(499);
+    expect(notice).toBe("Archived 499. 1 row left.");
+  });
+
+  it("fails without archiving when the first row alone holds more Threads than one call takes", async () => {
+    const lead = doneThread(uuid(22), 5, { workspaceId: W1 });
+    const hidden = Array.from({ length: 500 }, (_, index) =>
+      doneThread(uuid(1000 + index), 1, { workspaceId: W1 }),
+    );
+    const { api, client } = buildController(hidden);
+
+    await expect(archiveRows(client, planOf([describeRow([lead])]))).rejects.toThrow(
+      "more threads than one archive can take",
+    );
+    expect(readArchived(api)).toEqual([]);
+  });
+
+  it("fails with the controller's refusal", async () => {
+    const { client } = buildController([], {
+      status: 409,
+      body: buildErrorBody("invalid_state", "Thread one is working."),
+    });
+
+    await expect(
+      archiveRows(client, planOf([describeRow([doneThread(uuid(11), 5)])])),
+    ).rejects.toThrow("Thread one is working.");
   });
 });
