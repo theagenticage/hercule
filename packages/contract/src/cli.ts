@@ -69,6 +69,13 @@ export type FieldRow =
       readonly flag: string;
       readonly help: string;
       /**
+       * The text the command line uses when the flag is left out, written as
+       * a person would type it. It makes the flag optional on the command
+       * line even when the operation requires the field, and the help says
+       * what the default is.
+       */
+      readonly default?: string;
+      /**
        * The list operation that resolves an id tail given for this flag, as
        * for a positional. A tail is eight characters or more. The command
        * line accepts a tail, and the request sent to the API carries the
@@ -2355,39 +2362,30 @@ export const CLI = {
 
   "runnerMetrics.query": {
     command: "runner metrics",
-    help: "Lists a machine's Runner Metrics history as points. A point holds free disk, available memory, CPU use, and the sessions running and queued, over five minutes or one hour, never a single minute. `minutes` says how many minutes of a point have a report, so a gap shows as fewer minutes, not as an invented value. The span is at most 24 hours for five-minute points, and for hour points as long as the history is kept, or 14 days if that is longer.",
+    help: "Shows how busy a machine was: free disk, memory, CPU and sessions. The history is the controller's own, in points of five minutes or one hour, never single minutes. `minutes` says how many minutes of a point have a report, so a gap shows as fewer minutes, not as an invented value. Five-minute points cover at most 24 hours; hour points cover the history kept, or 14 days if that is longer.",
     examples: [
-      { args: ["--since", "2026-11-02T08:00:00.000Z", "--resolution", "fiveMinutes"] },
-      {
-        args: [
-          "--runner",
-          "1f3a9c2e",
-          "--since",
-          "2026-10-27T00:00:00.000Z",
-          "--until",
-          "2026-11-03T00:00:00.000Z",
-          "--resolution",
-          "hour",
-        ],
-      },
+      { args: ["7b41d0a5", "--since", "2026-11-01T09:00:00Z", "--resolution", "five-minutes"] },
+      { args: ["--since", "2026-10-27T00:00:00Z", "--until", "2026-11-03T00:00:00Z"] },
     ],
     fields: {
       runnerId: {
-        flag: "runner",
-        help: "Only this machine, by its id or a tail of eight or more characters; leave it off for every machine.",
+        positional: true,
+        placeholder: "runner-id",
+        help: "The machine, by its id or a tail of eight or more characters; leave it off for every machine.",
         resolves: "runner.query",
       },
       since: {
         flag: "since",
-        help: "The start of the span as a UTC instant with milliseconds: 2026-11-02T08:00:00.000Z. It moves back to the start of its point, so every point is whole.",
+        help: "The start of the span as a time with its offset or Z, such as 2026-11-01T09:00:00Z. It moves back to the start of its point, so every point is whole.",
       },
       until: {
         flag: "until",
-        help: "The end of the span, not included, as a UTC instant with milliseconds; leave it off for now.",
+        help: "The end of the span, not included, written like --since; leave it off for now.",
       },
       resolution: {
         flag: "resolution",
-        help: "How long a point is: fiveMinutes, on UTC multiples of five minutes, or hour, on whole UTC hours.",
+        default: "hour",
+        help: "How long a point is: five-minutes, on UTC multiples of five minutes, or hour, on whole UTC hours.",
       },
     },
   },

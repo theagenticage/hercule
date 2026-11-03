@@ -676,3 +676,58 @@ describe("an upload field", () => {
     );
   });
 });
+
+describe("runner metrics", () => {
+  const command = lookUpCommand("runner", "metrics");
+  const SINCE = "2026-11-01T09:00:00Z";
+  const runner = {
+    id: buildId("aaaaaaa1"),
+    name: "iris",
+    connectivity: "online",
+    lifecycle: "active",
+    reserved: false,
+    version: null,
+    labels: [],
+    facts: null,
+    metrics: null,
+    maxConcurrentSessions: 1,
+    diskWatermarkBytes: 10_737_418_240,
+    lastSeenAt: null,
+  };
+
+  it("resolves the optional runner tail and sends it, with the span and the resolution, in the query", async () => {
+    const { fetch, client } = stubClient((request) =>
+      request.path === "/api/v1/runners" ? { items: [runner] } : { items: [] },
+    );
+    const args = await parseArguments(
+      command,
+      ["0aaaaaaa1", "--since", SINCE, "--resolution", "five-minutes"],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls.map((call) => call.path)).toEqual([
+      "/api/v1/runners",
+      "/api/v1/runner-metrics",
+    ]);
+    const query = fetch.calls[1]!.query;
+    expect(Object.fromEntries(query)).toMatchObject({
+      runnerId: runner.id,
+      since: "2026-11-01T09:00:00.000Z",
+      resolution: "fiveMinutes",
+    });
+  });
+
+  it("reads no runner list when the runner is left out, and asks for hour points", async () => {
+    const { fetch, client } = stubClient(() => ({ items: [] }));
+    const args = await parseArguments(command, ["--since", SINCE], refuseStdinRead);
+
+    await execute(client, command, args);
+
+    expect(fetch.calls.map((call) => call.path)).toEqual(["/api/v1/runner-metrics"]);
+    const query = fetch.calls[0]!.query;
+    expect(query.get("runnerId")).toBeNull();
+    expect(query.get("resolution")).toBe("hour");
+  });
+});

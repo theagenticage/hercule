@@ -130,7 +130,12 @@ describe("the spelling of a command", () => {
       // a skill folder, sent as the query field that names each skill.
       const rest = command.positionals.slice(inPath.length);
       expect(
-        rest.every((field) => field.carriedIn === "payload" || field.readsSkillFolder),
+        rest.every(
+          (field) =>
+            field.carriedIn === "payload" ||
+            field.readsSkillFolder ||
+            (field.carriedIn === "query" && field.optional),
+        ),
         `${readSpelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
       ).toBe(true);
     }
@@ -370,6 +375,7 @@ describe("the placeholders a usage line shows", () => {
     "skill read": "<name>",
     "skill delete": "<name>",
     "skill import": "<folder>",
+    "runner metrics": "[<runner-id>]",
     "skill diff": "<name> <revision-hash>",
     "skill apply": "<name> <revision-hash>",
   };

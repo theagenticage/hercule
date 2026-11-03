@@ -405,3 +405,37 @@ describe("a field that takes named values", () => {
     expect(args.payload["credentials"]).toEqual({ pat: "ghp_yyy" });
   });
 });
+
+// `runner metrics` is the one command with an optional positional (a query
+// parameter), a flag with a default, and a closed set typed in kebab case.
+describe("runner metrics", () => {
+  const runnerMetrics = lookUpCommand("runner", "metrics");
+  const SINCE = "2026-11-01T09:00:00Z";
+
+  it("takes the runner as an optional positional, and sends every runner without it", async () => {
+    const with_ = await parseArguments(runnerMetrics, [ID, "--since", SINCE], refuseStdinRead);
+    expect(with_.positionals).toEqual([ID]);
+    const without = await parseArguments(runnerMetrics, ["--since", SINCE], refuseStdinRead);
+    expect(without.positionals).toEqual([]);
+    await expect(
+      parseArguments(runnerMetrics, [ID, "extra", "--since", SINCE], refuseStdinRead),
+    ).rejects.toThrow(/takes 0 to 1 argument\(s\): \[<runner-id>\]/);
+  });
+
+  it("uses hour when --resolution is left out", async () => {
+    const args = await parseArguments(runnerMetrics, ["--since", SINCE], refuseStdinRead);
+    expect(args.query["resolution"]).toBe("hour");
+  });
+
+  it("types fiveMinutes as five-minutes, and refuses the schema's own spelling's near misses", async () => {
+    const args = await parseArguments(
+      runnerMetrics,
+      ["--since", SINCE, "--resolution", "five-minutes"],
+      refuseStdinRead,
+    );
+    expect(args.query["resolution"]).toBe("fiveMinutes");
+    await expect(
+      parseArguments(runnerMetrics, ["--since", SINCE, "--resolution", "minute"], refuseStdinRead),
+    ).rejects.toThrow(/is not one of five-minutes, hour/);
+  });
+});

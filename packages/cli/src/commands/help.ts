@@ -260,6 +260,7 @@ export const buildCommandHelp = (command: Command): ReadonlyArray<string> => {
       const notes = [field.optional ? "optional" : "required"];
       if (field.repeated) notes.push("repeatable");
       if (field.choices !== undefined) notes.push(`one of: ${field.choices.join(", ")}`);
+      if (field.defaultText !== undefined) notes.push(`default: ${field.defaultText}`);
       if (field.nullable) notes.push("`null` clears it");
       return {
         label: `--${field.spelling} ${buildPlaceholder(field)}`,
