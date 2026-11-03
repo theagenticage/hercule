@@ -34,7 +34,6 @@ import type {
   Run,
   Runner,
   RunnerFacts,
-  RunSummary,
   Session,
 } from "@hercule/contract";
 import {
@@ -369,7 +368,7 @@ const buildBusySessions = (runnerId: string, prefix: string, count: number): Ses
       kind,
       // A run's step session is titled "<workflow name> · <step id>".
       kind === "run"
-        ? `${NIGHTLY_RUN.workflowName} · build`
+        ? `${NIGHTLY_WORKFLOW_NAME} · build`
         : `${prefix} session ${String(index + 1)}`,
       10 + index * 7,
     );
@@ -378,18 +377,8 @@ const buildBusySessions = (runnerId: string, prefix: string, count: number): Ses
 /** The id of the one workflow run the fixture's step sessions belong to, which is running. */
 const NIGHTLY_RUN_ID = "01a0f0c0-0000-7000-8000-0000000000a1";
 
-/** The run, as `run.query { status: running }` lists it: the Nightly build, which started 31 minutes ago. */
-const NIGHTLY_RUN: RunSummary = {
-  id: NIGHTLY_RUN_ID,
-  workflowId: "01a0f0c0-0000-7000-8000-0000000000a2",
-  workflowName: "Nightly build",
-  origin: { kind: "manual", actor: "user" },
-  createdAt: minutesAgo(31),
-  status: "running",
-  startedAt: minutesAgo(31),
-  activeStepIds: ["lint", "typecheck"],
-  awaitedSignalIds: [],
-};
+/** The name of the workflow the running run belongs to, which is what a machine's Running here names the run by. */
+const NIGHTLY_WORKFLOW_NAME = "Nightly build";
 
 /** The workspace of the Payout row, which holds the Thread and its two Agent sessions. */
 const PAYOUT_WORKSPACE_ID = "ws-payout";
@@ -659,8 +648,8 @@ export interface FleetRecords {
   readonly harnesses: ReadonlyArray<Harness>;
   /** Every session that has not exited, which the machines' counts are made from. */
   readonly sessions: ReadonlyArray<Session>;
-  /** The running runs, as `run.query { status: running }` lists them. Their workflow names are what a machine's Running here names the runs by. */
-  readonly runningRuns: ReadonlyArray<RunSummary>;
+  /** The name of each run's workflow, by run id, as `run.read` gives it. A machine's Running here names its runs by these. */
+  readonly workflowNames: Readonly<Record<string, string>>;
   readonly controller: ControllerInfo;
   /** The Runner Metrics history the graphs and the forecasts are drawn from. */
   readonly metrics: FleetMetricsRecords;
@@ -673,7 +662,7 @@ export interface FleetRecords {
 export const FLEET_RECORDS: FleetRecords = {
   harnesses: FLEET_HARNESSES,
   sessions: FLEET_SESSIONS,
-  runningRuns: [NIGHTLY_RUN],
+  workflowNames: { [NIGHTLY_RUN_ID]: NIGHTLY_WORKFLOW_NAME },
   controller: FLEET_CONTROLLER,
   metrics: FLEET_METRICS,
   activity: FLEET_ACTIVITY,

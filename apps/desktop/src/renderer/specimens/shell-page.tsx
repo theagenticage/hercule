@@ -798,10 +798,9 @@ const seedQueryCache = (
     // The runners and the accounts are the sidebar's lists, seeded above.
     queryClient.setQueryData(harnessesQuery(client).queryKey, fleet.harnesses);
     queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
-    queryClient.setQueryData(liveRunsQuery(client, "running").queryKey, fleet.runningRuns);
     // Running here names each run by its own read of the workflow's name.
-    for (const run of fleet.runningRuns) {
-      queryClient.setQueryData(runWorkflowNameQuery(client, run.id).queryKey, run.workflowName);
+    for (const [runId, workflowName] of Object.entries(fleet.workflowNames)) {
+      queryClient.setQueryData(runWorkflowNameQuery(client, runId).queryKey, workflowName);
     }
     queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
     const { fiveMinutesByRunner, hoursByRunner, fleetHours } = fleet.metrics;
