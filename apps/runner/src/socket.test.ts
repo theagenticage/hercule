@@ -343,7 +343,10 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         pin,
         facts: FACTS,
         probe: Effect.succeed(FACTS),
-        readMetrics: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
+        readDiskAndMemory: Effect.succeed({
+          diskFreeBytes: 200 * 1024 ** 3,
+          availableMemoryBytes: 1,
+        }),
         storageDir: STORAGE_DIR,
         scratchDir: SCRATCH_DIR,
         attachmentsDir: "/nonexistent/hercule-runner-attachments",

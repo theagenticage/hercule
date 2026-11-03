@@ -87,7 +87,7 @@ import {
   previewRepositorySkills,
   type SessionSkillsFolders,
 } from "./skills";
-import { reportMetrics, type MetricsReading } from "./metrics";
+import { reportMetrics, type DiskAndMemory } from "./metrics";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
 import type { Workspaces } from "./workspaces";
@@ -153,7 +153,7 @@ export interface ConnectOptions {
   readonly pin: ControllerPin;
   readonly facts: RunnerFacts;
   readonly probe: Effect.Effect<RunnerFacts>;
-  readonly readMetrics: Effect.Effect<MetricsReading, Cause.UnknownError>;
+  readonly readDiskAndMemory: Effect.Effect<DiskAndMemory, Cause.UnknownError>;
   /**
    * The runner's storage directory. A Harness Home is a path the controller
    * names, joined to this directory. Each account has its own home, so two
@@ -1089,7 +1089,7 @@ export const connect = (
       yield* Effect.all(
         [
           reportMetrics({
-            read: options.readMetrics,
+            readDiskAndMemory: options.readDiskAndMemory,
             send: (metrics) => write(encodeFrameText({ _tag: "watermarkReport", metrics })),
           }),
           refreshFacts({

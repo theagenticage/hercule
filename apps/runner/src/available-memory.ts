@@ -8,10 +8,10 @@
  *
  * - Linux: `MemAvailable` from `/proc/meminfo`.
  * - macOS: the total memory minus what Activity Monitor calls "Memory Used",
- *   computed from one `vm_stat` reading.
+ *   computed from one run of `vm_stat`.
  * - Other platforms (Windows): `os.freemem()`, which does count cache there.
  *
- * A reading that cannot be made or understood fails. It never falls back to
+ * A read that cannot be made or understood fails. It never falls back to
  * `os.freemem()` on macOS or Linux: that is the wrong number there, and a wrong
  * number that looks right is worse than a skipped report.
  */
@@ -78,11 +78,15 @@ export const parseMemInfoAvailableBytes = (text: string): number => {
   return Number(kilobytes) * 1024;
 };
 
-/** Runs `vm_stat` once and returns what it printed. Kills the process when the caller stops waiting. */
+/**
+ * Runs `vm_stat` once and returns what it printed. Kills the process when the
+ * caller stops waiting, which is when the connection ends or the read times out.
+ * It runs the binary by its full path, so no `PATH` search can find another
+ * program with that name, and it works under a service manager's short `PATH`.
+ */
 const runVmStat = (signal: AbortSignal): Promise<string> => {
-  const child = Bun.spawn(["vm_stat"], { stdout: "pipe", stderr: "ignore" });
-  // Otherwise a `vm_stat` that hangs would be left running, and one more would
-  // pile up every minute.
+  const child = Bun.spawn(["/usr/bin/vm_stat"], { stdout: "pipe", stderr: "ignore" });
+  // Otherwise a `vm_stat` that hangs would keep running after nobody waits for it.
   signal.addEventListener("abort", () => {
     child.kill();
   });

@@ -6,7 +6,7 @@
  *   memory + wired + compressed), with the page size taken from the first
  *   line, which differs between Apple silicon (16384) and Intel (4096);
  * - Linux reads `MemAvailable`;
- * - a malformed reading fails, instead of turning into a number that looks right.
+ * - a malformed read fails, instead of turning into a number that looks right.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";

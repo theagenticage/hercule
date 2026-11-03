@@ -30,7 +30,7 @@ import { reconnect, streamReconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile } from "./runner-file";
 import { acceptControllerMove } from "./repoint";
 import { connect, type RunnerRetired } from "./socket";
-import { readRunnerMetrics } from "./metrics";
+import { readDiskAndMemory } from "./metrics";
 import { makeWorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
 
@@ -179,7 +179,6 @@ export const runDaemon = (
       // The disk the facts and the metrics describe is the one this directory
       // is on, because that is where the sessions' files grow.
       const probe = probeFacts(buildThisMachine(storageDir), identityPort);
-      const readMetrics = readRunnerMetrics(storageDir);
       // The working directories of sessions without a workspace, one per
       // session. They can be deleted at any time.
       const scratchDir = joinPath(storageDir, "scratch");
@@ -275,7 +274,7 @@ export const runDaemon = (
             pin,
             facts,
             probe,
-            readMetrics,
+            readDiskAndMemory: readDiskAndMemory(storageDir),
             storageDir,
             scratchDir,
             attachmentsDir,
