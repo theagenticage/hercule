@@ -16,7 +16,12 @@ export interface FleetHeaderMachine {
 /** Where the user is in Fleet, as the header draws it. */
 export type FleetHeaderPlace =
   | { readonly page: "fleet" }
-  | { readonly page: "machine"; readonly machine: FleetHeaderMachine };
+  | { readonly page: "machine"; readonly machine: FleetHeaderMachine }
+  | {
+      readonly page: "activity";
+      readonly runnerId: string;
+      readonly machine: FleetHeaderMachine;
+    };
 
 /**
  * A jump link to one section of the open page. `count` is the small text
@@ -37,6 +42,8 @@ export interface FleetSection {
  *   of `sections`.
  * - On a machine's page, the title is the crumb "Fleet /", a link back, then
  *   the machine's icon and name, then the jump links.
+ * - On a machine's activity, the title is the crumbs "Fleet / atlas /", each a
+ *   link back to its page, then "Activity". It has no jump links.
  * - "Add a machine" is at the far end on all of them. Pressing it calls
  *   `onAddMachine`.
  *
@@ -95,7 +102,7 @@ export function FleetHeader({
   );
 }
 
-/** Renders the pill's first part: the title on the Fleet page, the crumbs on a machine's page. */
+/** Renders the pill's first part: the title on the Fleet page, the crumbs on the pages of a machine. */
 function FleetHeaderTitle({ place }: { readonly place: FleetHeaderPlace }): JSX.Element {
   switch (place.page) {
     case "fleet":
@@ -107,6 +114,21 @@ function FleetHeaderTitle({ place }: { readonly place: FleetHeaderPlace }): JSX.
           <span className="ptab is-name" aria-current="page">
             <MachineIcon kind={place.machine.kind} size={14} />
             <span className="fleet-header-name">{place.machine.name}</span>
+          </span>
+        </>
+      );
+    case "activity":
+      return (
+        <>
+          <FleetCrumb />
+          <span className="pill-crumb">
+            <Link to="/fleet/$runnerId" params={{ runnerId: place.runnerId }}>
+              <MachineIcon kind={place.machine.kind} size={14} />
+              <span className="fleet-header-name">{place.machine.name}</span>
+            </Link>
+          </span>
+          <span className="ptab is-name" aria-current="page">
+            Activity
           </span>
         </>
       );

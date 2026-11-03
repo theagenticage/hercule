@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { withTransaction } from "../db/client";
+import { uuidFromString } from "../db";
 import { AuditLog, AuditLogLayer, SECURITY_KINDS } from "./audit-log";
 import { readEventsOfKind } from "./testing";
 
@@ -137,6 +138,72 @@ describe("AuditLog", () => {
       }),
     );
     expect(entries).toHaveLength(1);
+  });
+});
+
+describe("AuditLog runner column", () => {
+  const RUNNER_ID = "0199e0e7-0000-7000-8000-0000000000a1";
+
+  const readRunnerColumns = Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) =>
+      sql<{ readonly kind: string; readonly runner_id: Uint8Array | null }>`
+      SELECT kind, runner_id FROM events ORDER BY id`,
+  );
+
+  it("stores the runner an entry of a runner-activity kind is about", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const audit = yield* AuditLog;
+        yield* inTransaction(
+          audit.append({
+            kind: "session.stopped",
+            actor: "user",
+            payload: { sessionId: "0199e0e7-0000-7000-8000-0000000000b1", runnerId: RUNNER_ID },
+          }),
+        );
+        return yield* readRunnerColumns;
+      }),
+    );
+    expect(rows.map((row) => row.kind)).toEqual(["session.stopped"]);
+    expect(rows[0]?.runner_id).toEqual(uuidFromString(RUNNER_ID));
+  });
+
+  it("stores no runner for an entry of another kind, even when its payload names one", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const audit = yield* AuditLog;
+        yield* inTransaction(
+          audit.append({
+            kind: "workspace.observed",
+            actor: "user",
+            payload: { workspaceId: "0199e0e7-0000-7000-8000-0000000000c1", runnerId: RUNNER_ID },
+          }),
+        );
+        yield* inTransaction(
+          audit.append({ kind: "auth.login.failed", actor: "user", payload: { attempt: 1 } }),
+        );
+        return yield* readRunnerColumns;
+      }),
+    );
+    expect(rows.map((row) => row.runner_id)).toEqual([null, null]);
+  });
+
+  it("stores no runner for an entry about a runner whose id is not known yet", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const audit = yield* AuditLog;
+        yield* inTransaction(
+          audit.append({
+            kind: "runner.crashLooping",
+            actor: "user",
+            payload: { runnerId: undefined, count: 3 },
+          }),
+        );
+        return yield* readRunnerColumns;
+      }),
+    );
+    expect(rows.map((row) => row.runner_id)).toEqual([null]);
   });
 });
 

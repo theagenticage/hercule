@@ -441,7 +441,7 @@ describe("the first boot of an empty home", () => {
   it("does not replace a child it was asked to stop", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+    const child = buildStubChild(home, JSON.stringify({ runnerId: Bun.randomUUIDv7() }), [
       "--exit",
       "3",
     ]);
@@ -530,7 +530,7 @@ describe("supervising the child", () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
     // It announces its runner id and then exits, over and over.
-    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+    const child = buildStubChild(home, JSON.stringify({ runnerId: Bun.randomUUIDv7() }), [
       "--exit",
       "3",
     ]);
@@ -561,7 +561,7 @@ describe("supervising the child", () => {
   it("records a crash loop once per window, and calls the alert listener", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    const runnerId = crypto.randomUUID();
+    const runnerId = Bun.randomUUIDv7();
     const child = buildStubChild(home, JSON.stringify({ runnerId }), ["--exit", "3"]);
     const alerted: Array<{ runnerId: string | undefined; count: number }> = [];
 
@@ -613,7 +613,7 @@ describe("stopping", () => {
   it("asks the child to stop, and does not start another in its place", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }));
+    const child = buildStubChild(home, JSON.stringify({ runnerId: Bun.randomUUIDv7() }));
 
     await bootAndHold(home, port, { ...FAST, command: child.command }, () =>
       Effect.promise(() =>
@@ -634,7 +634,7 @@ describe("stopping", () => {
   it("kills a child that is still running when the drain's deadline passes", async () => {
     const home = createTemporaryHome();
     const port = await findFreePort();
-    const child = buildStubChild(home, JSON.stringify({ runnerId: crypto.randomUUID() }), [
+    const child = buildStubChild(home, JSON.stringify({ runnerId: Bun.randomUUIDv7() }), [
       "--deaf",
       "1",
     ]);

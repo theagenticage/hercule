@@ -237,6 +237,12 @@ export const event = HttpApiGroup.make("event")
          */
         workflowId: Schema.optionalKey(Id),
         triggerId: Schema.optionalKey(Schema.String),
+        /**
+         * Only the audit entries about this runner, a workspace on it, or a
+         * session on it, of the kinds that show a machine's activity (spec 04
+         * "Events by runner").
+         */
+        runnerId: Schema.optionalKey(Id),
         ...pageParams(EVENT_SORT_FIELDS).fields,
       }),
       success: page(EventWithFacts),

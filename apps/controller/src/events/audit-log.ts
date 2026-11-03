@@ -140,6 +140,48 @@ export const AUDIT_KINDS = [
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
 /**
+ * The audit kinds a machine's activity shows: the changes to a runner, to a
+ * workspace on it and to a session on it. An entry of one of these kinds names
+ * its runner in `payload.runnerId`, and the writer copies that id into the
+ * event's `runner_id` column, so `event.query` can read one runner's activity
+ * as a single index range.
+ *
+ * Two families are left out on purpose:
+ *
+ * - `workspace.observed` is written on most observations of a workspace, and
+ *   would bury the rest of the activity.
+ * - `runner.joinToken.*` concerns a token, not a runner: no runner has joined
+ *   yet when a token is minted.
+ *
+ * Every other audit kind, and every other event, is stored with no runner.
+ */
+export const RUNNER_ACTIVITY_KINDS = [
+  "runner.joined",
+  "runner.stateChanged",
+  "runner.updated",
+  "runner.drained",
+  "runner.undrained",
+  "runner.placementsChanged",
+  "runner.crashLooping",
+  "runner.retired",
+  "workspace.created",
+  "workspace.disposalRequested",
+  "workspace.disposalRefused",
+  "workspace.deleted",
+  "workspace.detached",
+  "workspace.attachmentRetried",
+  "session.spawned",
+  "session.stopped",
+  "session.reconciled",
+  "session.archived",
+  "providerAccount.signedIn",
+] as const satisfies ReadonlyArray<AuditKind>;
+
+type RunnerActivityKind = (typeof RUNNER_ACTIVITY_KINDS)[number];
+
+const RUNNER_ACTIVITY_KIND_SET: ReadonlySet<string> = new Set(RUNNER_ACTIVITY_KINDS);
+
+/**
  * The kind prefixes whose entries are about a credential, a secret or the
  * user's own account. The shipped agent profiles withhold these families, so a
  * profile that may read the log still cannot read these entries: only the
@@ -265,12 +307,6 @@ interface AuditFields {
    */
   readonly actor: Actor | null;
   /**
-   * References only - an id, a name, an owner, a reason. Never a secret value,
-   * a token, a password or a password hash: the event log is read by the
-   * Intake views and kept for at least 90 days.
-   */
-  readonly payload: Readonly<Record<string, unknown>>;
-  /**
    * When the recorded change happened: the timestamp the change wrote on its
    * own rows. An operation that stamps rows passes it, so the entry is never
    * dated before the row it describes. Without it there would be two clock
@@ -282,13 +318,53 @@ interface AuditFields {
   readonly at?: string;
 }
 
-/** One audit entry: what happened, who caused it, and what it was about. */
-export type AuditEntry =
-  | (AuditFields & { readonly kind: RecordAuditKind; readonly record: AuditRecord })
-  | (AuditFields & {
-      readonly kind: Exclude<AuditKind, RecordAuditKind>;
-      readonly record?: undefined;
-    });
+/**
+ * References only - an id, a name, an owner, a reason. Never a secret value,
+ * a token, a password or a password hash: the event log is read by the
+ * Intake views and kept for at least 90 days.
+ */
+type AuditPayload = Readonly<Record<string, unknown>>;
+
+/**
+ * The payload of a runner-activity entry. `runnerId` is the runner the entry is
+ * about, which is the runner of the session or workspace it records, and not
+ * the runner of the actor that caused it.
+ *
+ * The key is required, so a call site cannot forget it. It is `undefined` only
+ * when the entry is about a runner whose id is not known yet: the local
+ * runner's crash loop can be reported before the runner has announced its id.
+ * Such an entry is stored with no runner.
+ */
+type RunnerAuditPayload = AuditPayload & { readonly runnerId: string | undefined };
+
+/**
+ * One audit entry: what happened, who caused it, and what it was about. The
+ * type splits on two questions about the kind:
+ *
+ * - Does the entry name a Live Topic record (`record`)? Only the kinds in
+ *   `RECORD_KINDS` do, and they must.
+ * - Does the entry name a runner (`payload.runnerId`)? Only the kinds in
+ *   `RUNNER_ACTIVITY_KINDS` do, and they must.
+ *
+ * A call site that leaves either out does not compile.
+ */
+export type AuditEntry = AuditFields & RecordPart & RunnerPart;
+
+/** The first question: a record-kind entry must name its record, any other must not. */
+type RecordPart =
+  | { readonly kind: RecordAuditKind; readonly record: AuditRecord }
+  | { readonly kind: Exclude<AuditKind, RecordAuditKind>; readonly record?: undefined };
+
+/** The second question: a runner-activity entry must name its runner, any other has any payload. */
+type RunnerPart =
+  | { readonly kind: RunnerActivityKind; readonly payload: RunnerAuditPayload }
+  | { readonly kind: Exclude<AuditKind, RunnerActivityKind>; readonly payload: AuditPayload };
+
+/** Returns true if the entry is of a runner-activity kind, so its payload names its runner. */
+const hasRunnerPayload = (
+  entry: AuditEntry,
+): entry is Extract<AuditEntry, { readonly payload: RunnerAuditPayload }> =>
+  RUNNER_ACTIVITY_KIND_SET.has(entry.kind);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -306,6 +382,9 @@ const make = Effect.gen(function* () {
           actor: entry.actor,
           payload: entry.payload,
           at: entry.at ?? (yield* nowIso),
+          ...(hasRunnerPayload(entry) && entry.payload.runnerId !== undefined
+            ? { runnerId: entry.payload.runnerId }
+            : {}),
         });
         // A row about records is also announced as a change to each of them.
         if (entry.record === undefined) return;

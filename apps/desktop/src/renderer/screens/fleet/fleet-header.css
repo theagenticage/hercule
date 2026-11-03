@@ -41,6 +41,14 @@
 .fleet-header-pill .pill-crumb > a:hover {
   color: var(--ink);
 }
+/* The machine's name as a crumb on its activity: cut at the same 260px as the
+   name on its own page, with the icon kept whole. */
+.fleet-header-pill .pill-crumb > a .ic {
+  flex: none;
+}
+.fleet-header-pill .pill-crumb > a:has(.fleet-header-name) {
+  max-width: 260px;
+}
 /* Separates the machine's name from the jump links that follow it. */
 .fleet-header-rule {
   flex: none;

@@ -55,6 +55,9 @@ export type {
   SessionCountsByRunner,
 } from "./machine";
 
+// The activity page's header draws a machine's icon without the rest of the machine's page.
+export { decideMachineKind } from "./machine";
+
 const holdsSlot = new Set<string>(RUNNING_STATUSES);
 
 /**

@@ -42,6 +42,11 @@ export interface VirtualLines<Item> {
  * `focusedKey`, the one that holds the focus: a focused element that is
  * removed drops the focus to the page's body. The caller scrolls the selected
  * item into view with `scrollToSelected`, when it decides to.
+ *
+ * `scrollMargin` is how far below the top of the scrolled content the first
+ * line starts, in pixels, for a list that has something else above it in the
+ * same scroll, such as a heading. Without it, the list takes its first line to
+ * be at the top.
  */
 export const useVirtualLines = <Item extends { readonly key: string }>(
   items: ReadonlyArray<Item>,
@@ -49,6 +54,7 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
   estimateSize: (item: Item) => number,
   selectedKey: string | null,
   focusedKey: string | null = null,
+  scrollMargin = 0,
 ): VirtualLines<Item> => {
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedKey),
@@ -86,6 +92,7 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
     getItemKey,
     rangeExtractor,
     overscan: VIRTUAL_OVERSCAN,
+    scrollMargin,
     // Before the scroll element is measured, the list is taken to be as tall as the window. The
     // first render then draws the rows, which the motion that opens Tracking's sheet needs to find.
     initialRect: { width: 0, height: window.innerHeight },
@@ -100,7 +107,7 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
 
   const lines: VirtualLine<Item>[] = [];
   const visible = virtualizer.range;
-  let end = 0;
+  let end = scrollMargin;
   let lastDrawnIndex: number | undefined;
   for (const { index, key, start, size } of virtualizer.getVirtualItems()) {
     if (start > end) lines.push({ kind: "gap", key: `gap:${key}`, height: start - end });

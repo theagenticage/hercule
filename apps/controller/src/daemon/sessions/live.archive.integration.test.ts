@@ -170,7 +170,7 @@ describe("session.archive", () => {
       expect(archived!.done).toEqual(archived!.archived);
       const entries = await arranged.harness.audit("session.archived");
       expect(entries.map((one) => [one.actor, one.payload])).toEqual([
-        ["user", { sessionId: thread.id, threadId: thread.id }],
+        ["user", { sessionId: thread.id, runnerId: thread.runnerId, threadId: thread.id }],
       ]);
       expect(
         (await arranged.harness.audit("session.markedDone")).map((one) => one.payload),
@@ -223,6 +223,7 @@ describe("session.archive", () => {
       expect(entries).toHaveLength(3);
       expect(entries.find((one) => one.payload["sessionId"] === agentSession.id)?.payload).toEqual({
         sessionId: agentSession.id,
+        runnerId: agentSession.runnerId,
         threadId: second.id,
       });
       expect([...(await waitForStops(arranged, 3))].sort()).toEqual(

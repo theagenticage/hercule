@@ -123,6 +123,27 @@
   initial-value: 46px;
 }
 
+/* ---------- A machine's activity ---------- */
+
+/* A day's heading, with the space above it. */
+@property --fleet-activity-height-day {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 36px;
+}
+/* An entry: one line of text between 8px above and below. */
+@property --fleet-activity-height-entry {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 34px;
+}
+/* A line of an unfolded entry: one small line between 3px above and below. */
+@property --fleet-activity-height-member {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 22px;
+}
+
 :root {
   --side-height-header: calc(24px + var(--text-size-step));
   --side-height-waiting-row: calc(38px + 2 * var(--text-size-step));
@@ -142,4 +163,8 @@
   --tracking-height-row: calc(46px + 2 * var(--text-size-step));
 
   --model-browser-height-row: calc(46px + 2 * var(--text-size-step));
+
+  --fleet-activity-height-day: calc(var(--line-16) + 20px);
+  --fleet-activity-height-entry: calc(var(--line-18) + 16px);
+  --fleet-activity-height-member: calc(var(--line-16) + 6px);
 }

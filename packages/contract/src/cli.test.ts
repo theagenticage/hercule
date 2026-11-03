@@ -387,6 +387,8 @@ const RESOLVES: Record<string, string> = {
   "workflow.update id": "workflow.query",
   "workflow.delete id": "workflow.query",
 
+  "event.query runnerId": "runner.query",
+
   "event.query workflowId": "workflow.query",
 
   "trigger.pause workflowId": "workflow.query",

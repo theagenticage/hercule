@@ -7,11 +7,11 @@ export interface ViewChoice<View extends string> {
 }
 
 /**
- * Renders a `.seg` switch between two views, such as the Runs tab's List and
+ * Renders a `.seg` switch between views, such as the Runs tab's List and
  * Timeline, as a group named `label`. The button of `view` is pressed, and
- * pressing the other calls `onPick` with its view. ← and → pick the first
- * or the second view and move focus to its button, as a segmented control on
- * the Mac does.
+ * pressing another calls `onPick` with its view. ← and → pick the view before
+ * or after the pressed one and move focus to its button, as a segmented
+ * control on the Mac does. At either end, the arrow keeps the view.
  */
 export function ViewSwitch<View extends string>({
   label,
@@ -20,14 +20,17 @@ export function ViewSwitch<View extends string>({
   onPick,
 }: {
   readonly label: string;
-  readonly choices: readonly [ViewChoice<View>, ViewChoice<View>];
+  readonly choices: ReadonlyArray<ViewChoice<View>>;
   readonly view: View;
   readonly onPick: (view: View) => void;
 }): JSX.Element {
   const pickWithArrow = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    const next = event.key === "ArrowLeft" ? choices[0] : choices[1];
+    const step = event.key === "ArrowLeft" ? -1 : 1;
+    const current = choices.findIndex((each) => each.view === view);
+    const next = choices[Math.min(Math.max(current + step, 0), choices.length - 1)];
+    if (next === undefined) return;
     if (next.view !== view) onPick(next.view);
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-view="${next.view}"]`)?.focus();
   };
