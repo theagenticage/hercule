@@ -30,7 +30,7 @@ import { reconnect, streamReconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile } from "./runner-file";
 import { acceptControllerMove } from "./repoint";
 import { connect, type RunnerRetired } from "./socket";
-import { readMachineHeadroom } from "./watermark";
+import { readRunnerMetrics } from "./metrics";
 import { makeWorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
 
@@ -170,7 +170,7 @@ export const runDaemon = (
         port: IDENTITY_PORT,
       });
       const probe = probeFacts(thisMachine, identityPort);
-      const headroom = readMachineHeadroom(home);
+      const readMetrics = readRunnerMetrics(home);
       // Everything this machine stores for its controller lives in this
       // directory. So when the machine joins again, every harness login,
       // workspace and cache stays behind with the old runner identity.
@@ -273,7 +273,7 @@ export const runDaemon = (
             pin,
             facts,
             probe,
-            headroom,
+            readMetrics,
             storageDir,
             scratchDir,
             attachmentsDir,

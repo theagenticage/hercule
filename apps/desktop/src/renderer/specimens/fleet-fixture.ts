@@ -97,7 +97,7 @@ const buildMachine = (
   reserved: false,
   version: CONTROLLER_VERSION,
   labels: [],
-  watermark: { diskFreeBytes, availableMemoryBytes },
+  metrics: { diskFreeBytes, availableMemoryBytes },
   diskWatermarkBytes: DEFAULT_DISK_LIMIT_BYTES,
   lastSeenAt: minutesAgo(0.5),
   ...over,

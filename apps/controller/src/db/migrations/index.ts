@@ -110,6 +110,7 @@ import sessionProcessStart from "./0099-session-process-start";
 import modelCatalogsAndProfiles from "./0100-model-catalogs-and-profiles";
 import projectModelProfile from "./0101-project-model-profile";
 import catalogFirstRead from "./0102-catalog-first-read";
+import runnerMetrics from "./0103-runner-metrics";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -214,6 +215,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [100, "model-catalogs-and-profiles", Effect.succeed(modelCatalogsAndProfiles)],
   [101, "project-model-profile", Effect.succeed(projectModelProfile)],
   [102, "catalog-first-read", Effect.succeed(catalogFirstRead)],
+  [103, "runner-metrics", Effect.succeed(runnerMetrics)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

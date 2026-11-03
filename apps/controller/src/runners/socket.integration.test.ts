@@ -51,7 +51,6 @@ import {
   type ProbeResult,
   type RunnerFacts,
   type RunnerHello,
-  type RunnerToController as RunnerMessage,
 } from "@hercule/protocol";
 import type { RunnerDetail } from "@hercule/contract";
 import { nowIso, uuidFromString, withTransaction } from "../db";
@@ -75,6 +74,7 @@ import {
   dialRunnerSocket,
   RUNNER_SOCKET_PATH,
   type RunnerSocket,
+  type RunnerWireFrame,
 } from "./testing";
 
 /**
@@ -517,7 +517,7 @@ describe("the hello exchange", () => {
         _tag: "runnerHello",
         protocolVersion: PROTOCOL_VERSION + 1,
         somethingLater: true,
-      } as unknown as RunnerMessage);
+      } as unknown as RunnerWireFrame);
 
       const ending = await wire.closed();
       expect(ending.reason).toContain(String(PROTOCOL_VERSION));
@@ -546,7 +546,7 @@ describe("what a connection leaves behind", () => {
 
         // A frame this build cannot read, like a newer runner sending a frame
         // type this protocol version does not have.
-        wire.send({ _tag: "nonsense" } as unknown as RunnerMessage);
+        wire.send({ _tag: "nonsense" } as unknown as RunnerWireFrame);
         const ending = await wire.closed();
         expect(ending.code, "the frame was rejected, not the runner retired").toBe(PROTOCOL_ERROR);
         expect(ending.reason).not.toBe("");
@@ -583,7 +583,7 @@ describe("what a connection leaves behind", () => {
         // it ignores, padded one byte past the limit.
         const pong = JSON.stringify({ _tag: "pong", padding: "" });
         const padding = "x".repeat(MAX_FRAME_BYTES - Buffer.byteLength(pong) + 1);
-        wire.send({ _tag: "pong", padding } as unknown as RunnerMessage);
+        wire.send({ _tag: "pong", padding } as unknown as RunnerWireFrame);
 
         const ending = await wire.closed();
         expect(ending.code, "the transport rejected the frame").toBe(MESSAGE_TOO_BIG);
@@ -860,13 +860,13 @@ describe("the liveness check", () => {
 });
 
 describe("what a runner reports about its machine", () => {
-  /** Builds a watermark report, with the free disk the test wants. */
+  /** Builds a report of the Runner Metrics, with the free disk the test wants. */
   const buildResourceReport = (diskFreeBytes: number) => ({
     diskFreeBytes,
     availableMemoryBytes: 16 * 1024 * 1024 * 1024,
   });
 
-  it("stores the watermark a runner reports and returns it on the runner", async () => {
+  it("stores the metrics a runner reports and returns it on the runner", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetupWithNoProviderAccount(harness);
@@ -881,7 +881,7 @@ describe("what a runner reports about its machine", () => {
         );
         // A runner that has only just sent its hello has not reported its
         // disk space yet.
-        expect(online.watermark).toBeNull();
+        expect(online.metrics).toBeNull();
 
         // Above the default ten-gibibyte watermark, so the runner is still
         // accepting work.
@@ -890,9 +890,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark !== null,
+          (one) => one.metrics !== null,
         );
-        expect(stored.watermark).toEqual(buildResourceReport(200 * GIB));
+        expect(stored.metrics).toEqual(buildResourceReport(200 * GIB));
 
         const before = await harness.audit("runner.placementsChanged");
         // A runner with no earlier report counts as accepting work, so a
@@ -908,9 +908,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark?.diskFreeBytes === 150 * GIB,
+          (one) => one.metrics?.diskFreeBytes === 150 * GIB,
         );
-        expect(again.watermark).toEqual(buildResourceReport(150 * GIB));
+        expect(again.metrics).toEqual(buildResourceReport(150 * GIB));
         expect(
           await harness.audit("runner.placementsChanged"),
           "nothing about placement changed",
@@ -923,9 +923,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark?.diskFreeBytes === 4 * GIB,
+          (one) => one.metrics?.diskFreeBytes === 4 * GIB,
         );
-        expect(short.watermark).toEqual(buildResourceReport(4 * GIB));
+        expect(short.metrics).toEqual(buildResourceReport(4 * GIB));
 
         const after = await harness.audit("runner.placementsChanged");
         expect(after).toHaveLength(before.length + 1);
@@ -974,7 +974,7 @@ describe("what a runner reports about its machine", () => {
         // but a runner that cannot take work is a change worth recording
         // either way.
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
-        await waitForRunner(harness.base, token, joined.runnerId, (one) => one.watermark !== null);
+        await waitForRunner(harness.base, token, joined.runnerId, (one) => one.metrics !== null);
 
         const entries = await harness.audit("runner.placementsChanged");
         expect(entries).toHaveLength(1);
@@ -1080,7 +1080,7 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
-  it("keeps the runner readable when its stored watermark cannot be decoded", async () => {
+  it("keeps the runner readable when its stored metrics cannot be decoded", async () => {
     await withServer(
       async (harness) => {
         const token = await completeSetupWithNoProviderAccount(harness);
@@ -1100,7 +1100,7 @@ describe("what a runner reports about its machine", () => {
           Effect.orDie(
             withTransaction(
               harness.sql,
-              harness.sql`UPDATE runners SET watermark = 'not json at all'
+              harness.sql`UPDATE runners SET metrics = 'not json at all'
                         WHERE id = ${uuidFromString(joined.runnerId)}`,
             ),
           ),
@@ -1111,9 +1111,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark !== null,
+          (one) => one.metrics !== null,
         );
-        expect(stored.watermark).toEqual(buildResourceReport(200 * GIB));
+        expect(stored.metrics).toEqual(buildResourceReport(200 * GIB));
         expect(stored.connectivity).toBe("online");
 
         wire.close();
@@ -1142,7 +1142,7 @@ describe("what a runner reports about its machine", () => {
 
         const row = await readRunner(harness.base, token, joined.runnerId);
         expect(row.connectivity).toBe("offline");
-        expect(row.watermark).toBeNull();
+        expect(row.metrics).toBeNull();
         expect(row.facts).toBeNull();
       },
       { pings: FAST },
@@ -1202,9 +1202,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark !== null && one.facts?.docker === true,
+          (one) => one.metrics !== null && one.facts?.docker === true,
         );
-        expect(reported.watermark, "the report never landed").not.toBeNull();
+        expect(reported.metrics, "the report never landed").not.toBeNull();
         expect(reported.facts?.docker, "the report never landed").toBe(true);
         // Only the ping and pong decide liveness. A runner could send reports
         // while unable to answer a ping, and the row must treat that as

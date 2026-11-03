@@ -57,7 +57,7 @@ const buildRunner = (id: string, name: string, over: Partial<Runner> = {}): Runn
   version: "0.9.3",
   labels: [],
   facts: FACTS,
-  watermark: { diskFreeBytes: 200 * GIB, availableMemoryBytes: 24 * GIB },
+  metrics: { diskFreeBytes: 200 * GIB, availableMemoryBytes: 24 * GIB },
   maxConcurrentSessions: 16,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-11-02T13:59:00.000Z",
@@ -66,7 +66,7 @@ const buildRunner = (id: string, name: string, over: Partial<Runner> = {}): Runn
 
 const ATLAS = buildRunner("01a06d02-a000-7000-8000-000000000001", "atlas");
 const FORGE = buildRunner("01a06d02-a000-7000-8000-000000000002", "forge", {
-  watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 24 * GIB },
+  metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 24 * GIB },
 });
 const NOMAD = buildRunner("01a06d02-a000-7000-8000-000000000003", "nomad", {
   connectivity: "offline",

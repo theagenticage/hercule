@@ -22,7 +22,7 @@ export const buildRunner = (overrides: Partial<Runner>): Runner => ({
   version: "0.9.3",
   labels: [],
   facts: null,
-  watermark: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 8 * GIB },
+  metrics: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 8 * GIB },
   maxConcurrentSessions: 16,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-11-02T09:12:00.000Z",
@@ -34,7 +34,7 @@ const RUNNERS: readonly Runner[] = [
   buildRunner({
     id: "runner-full",
     name: "forge",
-    watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
+    metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
   }),
   buildRunner({ id: "runner-off", name: "nomad", connectivity: "offline" }),
   buildRunner({ id: "runner-drain", name: "dock", lifecycle: "draining" }),

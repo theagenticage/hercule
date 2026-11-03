@@ -228,10 +228,10 @@ const MEMORY_FAIL_FROM = 0.92;
 const measureMemory = (
   runner: Runner,
 ): { readonly share: number; readonly level: GaugeLevel } | null => {
-  if (runner.facts === null || runner.watermark === null) return null;
+  if (runner.facts === null || runner.metrics === null) return null;
   const total = runner.facts.totalMemoryBytes;
   if (total <= 0) return null;
-  const share = Math.min(1, Math.max(0, (total - runner.watermark.availableMemoryBytes) / total));
+  const share = Math.min(1, Math.max(0, (total - runner.metrics.availableMemoryBytes) / total));
   const level = share >= MEMORY_FAIL_FROM ? "fail" : share >= MEMORY_YOU_FROM ? "you" : "normal";
   return { share, level };
 };
@@ -301,10 +301,10 @@ const summarizeMachine = (
     roomText: describeRoom(machine)?.short ?? null,
     need: needs[0],
     disk:
-      runner.watermark === null
+      runner.metrics === null
         ? null
         : {
-            ...splitDiskSize(runner.watermark.diskFreeBytes),
+            ...splitDiskSize(runner.metrics.diskFreeBytes),
             level: isDiskBelowLimit(runner) ? "fail" : "normal",
             share: null,
           },

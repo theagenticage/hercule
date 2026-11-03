@@ -1,5 +1,5 @@
 /**
- * Tests the headroom a runner reports. The report loop:
+ * Tests the Runner Metrics a runner reports. The report loop:
  *
  * - sends a reading at once, so a runner that has just connected does not go
  *   a minute without reporting its disk;
@@ -17,13 +17,13 @@ import { describe, expect, it } from "vitest";
 import { Cause, Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { freemem, tmpdir, totalmem } from "node:os";
-import type { RunnerWatermark } from "@hercule/protocol";
-import { reportWatermark, readMachineHeadroom, WATERMARK_INTERVAL } from "./watermark";
+import type { RunnerMetrics } from "@hercule/protocol";
+import { reportMetrics, readRunnerMetrics, METRICS_INTERVAL } from "./metrics";
 
 const GIB = 1024 * 1024 * 1024;
 
 /** A machine with plenty of room. Tests lower its free disk from here. */
-const ROOMY: RunnerWatermark = { diskFreeBytes: 200 * GIB, availableMemoryBytes: 16 * GIB };
+const ROOMY: RunnerMetrics = { diskFreeBytes: 200 * GIB, availableMemoryBytes: 16 * GIB };
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestClock.layer()));
@@ -31,38 +31,38 @@ const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
 /** Lets a forked loop run without moving time. */
 const settle = TestClock.adjust(Duration.zero);
 
-describe("readMachineHeadroom on the real machine", () => {
+describe("readRunnerMetrics on the real machine", () => {
   it("returns the free bytes of the filesystem that holds a path", async () => {
-    const headroom = await Effect.runPromise(readMachineHeadroom(tmpdir()));
+    const metrics = await Effect.runPromise(readRunnerMetrics(tmpdir()));
 
-    expect(Number.isInteger(headroom.diskFreeBytes)).toBe(true);
-    expect(headroom.diskFreeBytes).toBeGreaterThan(0);
-    expect(Number.isInteger(headroom.availableMemoryBytes)).toBe(true);
-    expect(headroom.availableMemoryBytes).toBeGreaterThan(0);
+    expect(Number.isInteger(metrics.diskFreeBytes)).toBe(true);
+    expect(metrics.diskFreeBytes).toBeGreaterThan(0);
+    expect(Number.isInteger(metrics.availableMemoryBytes)).toBe(true);
+    expect(metrics.availableMemoryBytes).toBeGreaterThan(0);
     // Available memory can never exceed total memory, and both are in bytes,
     // the unit the runner's facts use for the total.
-    expect(headroom.availableMemoryBytes).toBeLessThanOrEqual(totalmem());
+    expect(metrics.availableMemoryBytes).toBeLessThanOrEqual(totalmem());
     expect(freemem()).toBeGreaterThan(0);
   });
 
   it("fails instead of guessing when the path does not exist", async () => {
     const outcome = await Effect.runPromise(
-      Effect.result(readMachineHeadroom("/no/such/directory/on/this/machine")),
+      Effect.result(readRunnerMetrics("/no/such/directory/on/this/machine")),
     );
     expect(outcome._tag).toBe("Failure");
   });
 });
 
-describe("reportWatermark", () => {
+describe("reportMetrics", () => {
   it("reports at once and then on the interval", async () => {
     await run(
       Effect.gen(function* () {
-        const sent: Array<RunnerWatermark> = [];
+        const sent: Array<RunnerMetrics> = [];
 
         const loop = yield* Effect.forkChild(
-          reportWatermark({
+          reportMetrics({
             read: Effect.succeed(ROOMY),
-            send: (watermark) => Effect.sync(() => void sent.push(watermark)),
+            send: (metrics) => Effect.sync(() => void sent.push(metrics)),
           }),
         );
 
@@ -79,7 +79,7 @@ describe("reportWatermark", () => {
         yield* TestClock.adjust(Duration.millis(1));
         expect(sent, "on the minute").toHaveLength(2);
 
-        for (let minute = 0; minute < 5; minute++) yield* TestClock.adjust(WATERMARK_INTERVAL);
+        for (let minute = 0; minute < 5; minute++) yield* TestClock.adjust(METRICS_INTERVAL);
         expect(sent).toHaveLength(7);
 
         yield* Fiber.interrupt(loop);
@@ -90,24 +90,24 @@ describe("reportWatermark", () => {
   it("reports every minute, not only when the reading changed", async () => {
     await run(
       Effect.gen(function* () {
-        const sent: Array<RunnerWatermark> = [];
+        const sent: Array<RunnerMetrics> = [];
         let disk = 200 * GIB;
 
         const loop = yield* Effect.forkChild(
-          reportWatermark({
+          reportMetrics({
             read: Effect.suspend(() =>
-              Effect.succeed({ ...ROOMY, diskFreeBytes: disk } satisfies RunnerWatermark),
+              Effect.succeed({ ...ROOMY, diskFreeBytes: disk } satisfies RunnerMetrics),
             ),
-            send: (watermark) => Effect.sync(() => void sent.push(watermark)),
+            send: (metrics) => Effect.sync(() => void sent.push(metrics)),
           }),
         );
 
         yield* settle;
         // The disk fills up and then frees up while the loop runs.
         disk = 4 * GIB;
-        yield* TestClock.adjust(WATERMARK_INTERVAL);
+        yield* TestClock.adjust(METRICS_INTERVAL);
         disk = 40 * GIB;
-        yield* TestClock.adjust(WATERMARK_INTERVAL);
+        yield* TestClock.adjust(METRICS_INTERVAL);
 
         expect(sent.map((one) => one.diskFreeBytes)).toEqual([200 * GIB, 4 * GIB, 40 * GIB]);
 
@@ -119,17 +119,17 @@ describe("reportWatermark", () => {
   it("skips a reading that fails and keeps checking", async () => {
     await run(
       Effect.gen(function* () {
-        const sent: Array<RunnerWatermark> = [];
+        const sent: Array<RunnerMetrics> = [];
         let readable = false;
 
         const loop = yield* Effect.forkChild(
-          reportWatermark({
+          reportMetrics({
             read: Effect.suspend(() =>
               readable
                 ? Effect.succeed(ROOMY)
                 : Effect.fail(new Cause.UnknownError(new Error("the filesystem did not answer"))),
             ),
-            send: (watermark) => Effect.sync(() => void sent.push(watermark)),
+            send: (metrics) => Effect.sync(() => void sent.push(metrics)),
           }),
         );
 
@@ -137,11 +137,11 @@ describe("reportWatermark", () => {
         // A failed reading does not mean the machine has no disk left.
         expect(sent).toEqual([]);
 
-        yield* TestClock.adjust(WATERMARK_INTERVAL);
+        yield* TestClock.adjust(METRICS_INTERVAL);
         expect(sent).toEqual([]);
 
         readable = true;
-        yield* TestClock.adjust(WATERMARK_INTERVAL);
+        yield* TestClock.adjust(METRICS_INTERVAL);
         expect(sent).toHaveLength(1);
         expect(sent[0]?.diskFreeBytes).toBe(ROOMY.diskFreeBytes);
 
@@ -153,12 +153,12 @@ describe("reportWatermark", () => {
   it("stops as soon as it is interrupted, and queues nothing for later", async () => {
     await run(
       Effect.gen(function* () {
-        const sent: Array<RunnerWatermark> = [];
+        const sent: Array<RunnerMetrics> = [];
 
         const loop = yield* Effect.forkChild(
-          reportWatermark({
+          reportMetrics({
             read: Effect.succeed(ROOMY),
-            send: (watermark) => Effect.sync(() => void sent.push(watermark)),
+            send: (metrics) => Effect.sync(() => void sent.push(metrics)),
           }),
         );
 
@@ -169,7 +169,7 @@ describe("reportWatermark", () => {
         // because a reading taken now is out of date by the time the runner
         // reconnects.
         yield* Fiber.interrupt(loop);
-        for (let minute = 0; minute < 10; minute++) yield* TestClock.adjust(WATERMARK_INTERVAL);
+        for (let minute = 0; minute < 10; minute++) yield* TestClock.adjust(METRICS_INTERVAL);
         expect(sent).toHaveLength(1);
       }),
     );

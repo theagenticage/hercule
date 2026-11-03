@@ -20,7 +20,7 @@ import type {
   RunnerConnectivity,
   RunnerFacts,
   RunnerLifecycle,
-  RunnerWatermark,
+  RunnerMetrics,
 } from "@hercule/contract";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
@@ -221,7 +221,7 @@ const FACTS: RunnerFacts = {
   identityPort: 4939,
 };
 
-const WATERMARK: RunnerWatermark = {
+const METRICS: RunnerMetrics = {
   diskFreeBytes: 200 * 1024 * 1024 * 1024,
   availableMemoryBytes: 1,
 };
@@ -535,7 +535,7 @@ describe("a report from a connection the runner has replaced", () => {
 
         // A frame the older connection had already sent, arriving late.
         yield* connections.reportedFacts(runner!.id, older, { ...FACTS, docker: false });
-        yield* connections.reportedWatermark(runner!.id, older, WATERMARK);
+        yield* connections.reportedMetrics(runner!.id, older, METRICS);
 
         return yield* runners.read(runner!.id);
       }).pipe(Effect.provide(layer)),
@@ -544,7 +544,7 @@ describe("a report from a connection the runner has replaced", () => {
     expect(Option.isSome(row)).toBe(true);
     const one = Option.getOrThrow(row);
     expect(one.facts?.docker, "the newer connection's hello still stands").toBe(true);
-    expect(one.watermark, "a stale watermark is not a reading of this machine").toBeNull();
+    expect(one.metrics, "stale metrics are not a reading of this machine").toBeNull();
   });
 });
 

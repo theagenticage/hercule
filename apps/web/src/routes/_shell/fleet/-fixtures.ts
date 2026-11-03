@@ -29,7 +29,7 @@ export interface Fixture {
     readonly adapters: readonly string[];
     readonly identityPort: number;
   } | null;
-  readonly watermark: {
+  readonly metrics: {
     readonly diskFreeBytes: number;
     readonly availableMemoryBytes: number;
   } | null;
@@ -61,7 +61,7 @@ export const MOSS: Fixture = {
     adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
-  watermark: {
+  metrics: {
     diskFreeBytes: 128 * GIB,
     availableMemoryBytes: 32 * GIB,
   },

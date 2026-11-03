@@ -24,7 +24,7 @@ const buildRunner = (overrides: Partial<Runner> = {}): Runner => ({
   version: "0.9.3",
   labels: [],
   facts: null,
-  watermark: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 8 * GIB },
+  metrics: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 8 * GIB },
   maxConcurrentSessions: 16,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: SEEN_TODAY,
@@ -284,7 +284,7 @@ describe("findMachineNeeds", () => {
 
   it("reports a disk below its limit", () => {
     const machine = buildMachine({
-      watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
+      metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
     expect(findNeeds(machine)).toEqual([
@@ -366,7 +366,7 @@ describe("findMachineNeeds", () => {
     ["offline", { connectivity: "offline" as const }],
     ["unreachable", { connectivity: "unreachable" as const }],
     ["draining", { lifecycle: "draining" as const }],
-    ["short of disk", { watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB } }],
+    ["short of disk", { metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB } }],
   ])("does not report waiting sessions while the machine is %s", (_name, overrides) => {
     // Raising the cap would start none of them, so Allow would do nothing.
     const kinds = findNeeds(buildFullMachine(3, overrides)).map((need) => need.kind);
@@ -376,7 +376,7 @@ describe("findMachineNeeds", () => {
 
   it("reports waiting sessions when the free disk equals the limit", () => {
     const machine = buildFullMachine(3, {
-      watermark: { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB },
+      metrics: { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
     expect(findNeeds(machine)[0]?.kind).toBe("waiting");
@@ -393,7 +393,7 @@ describe("findMachineNeeds", () => {
     const machine = buildMachine(
       {
         connectivity: "unreachable",
-        watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
+        metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
       },
       { running: 12, waiting: 3 },
     );
@@ -548,23 +548,23 @@ describe("MachineSummary roomText", () => {
   it("is not reduced by a reserved runner, labels, a runner that has not reported its disk or memory", () => {
     const texts = [
       summarize({ reserved: true, labels: ["gpu"] }),
-      summarize({ watermark: null }),
-      summarize({ watermark: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 0 } }),
+      summarize({ metrics: null }),
+      summarize({ metrics: { diskFreeBytes: 20 * GIB, availableMemoryBytes: 0 } }),
     ].map((machine) => machine.roomText);
 
     expect(texts).toEqual(["Room for 16", "Room for 16", "Room for 16"]);
   });
 
   it("counts a free disk equal to the limit as enough", () => {
-    const watermark = { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB };
+    const metrics = { diskFreeBytes: 10 * GIB, availableMemoryBytes: 8 * GIB };
 
-    expect(summarize({ watermark }).roomText).toBe("Room for 16");
+    expect(summarize({ metrics }).roomText).toBe("Room for 16");
   });
 
   it("is null for a disk below its limit, because the need line says so", () => {
-    const watermark = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
 
-    expect(summarize({ watermark }).roomText).toBeNull();
+    expect(summarize({ metrics }).roomText).toBeNull();
   });
 
   it("is null for a machine told to take no new work, because its status says so", () => {
@@ -646,7 +646,7 @@ describe("MachineSummary kind", () => {
 describe("MachineSummary disk", () => {
   // The disk limit is 10 GiB; levels are checked apart, so only the size is read here.
   const readDisk = (diskFreeBytes: number) =>
-    summarize({ watermark: { diskFreeBytes, availableMemoryBytes: 8 * GIB } }).disk;
+    summarize({ metrics: { diskFreeBytes, availableMemoryBytes: 8 * GIB } }).disk;
 
   it.each([
     [10 * GIB, "10.7", "GB"],
@@ -677,7 +677,7 @@ describe("MachineSummary disk", () => {
   });
 
   it("is null until the runner reports its disk", () => {
-    expect(summarize({ watermark: null }).disk).toBeNull();
+    expect(summarize({ metrics: null }).disk).toBeNull();
   });
 });
 
@@ -685,7 +685,7 @@ describe("MachineSummary memory", () => {
   const readMemory = (totalGib: number, availableGib: number) =>
     summarize({
       facts: buildFacts({ totalMemoryBytes: totalGib * GIB }),
-      watermark: { diskFreeBytes: 20 * GIB, availableMemoryBytes: availableGib * GIB },
+      metrics: { diskFreeBytes: 20 * GIB, availableMemoryBytes: availableGib * GIB },
     }).memory;
 
   it.each([
@@ -711,7 +711,7 @@ describe("MachineSummary memory", () => {
   });
 
   it("is null until the runner reports its available memory", () => {
-    expect(summarize({ facts: buildFacts(), watermark: null }).memory).toBeNull();
+    expect(summarize({ facts: buildFacts(), metrics: null }).memory).toBeNull();
   });
 });
 
@@ -753,7 +753,7 @@ describe("MachineSummary", () => {
     const machine = summarize(
       {
         facts: buildFacts({ totalMemoryBytes: 16 * GIB }),
-        watermark: { diskFreeBytes: 42.14e9, availableMemoryBytes: 4 * GIB },
+        metrics: { diskFreeBytes: 42.14e9, availableMemoryBytes: 4 * GIB },
       },
       { running: 12 },
     );
@@ -770,7 +770,7 @@ describe("MachineSummary", () => {
 
   it("takes the first need, with a disk below its limit failing", () => {
     const machine = summarize({
-      watermark: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
+      metrics: { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB },
     });
 
     expect(machine.disk?.level).toBe("fail");
@@ -778,7 +778,7 @@ describe("MachineSummary", () => {
   });
 
   it("has no disk, memory or room for an offline machine that never reported", () => {
-    expect(summarize({ connectivity: "offline", watermark: null })).toMatchObject({
+    expect(summarize({ connectivity: "offline", metrics: null })).toMatchObject({
       isAway: true,
       roomText: null,
       disk: null,

@@ -170,9 +170,9 @@ describe("describeMachinePage top", () => {
   });
 
   it("names the disk for a disk below its limit", () => {
-    const watermark = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
 
-    expect(readText(line({ watermark }))).toBe(
+    expect(readText(line({ metrics }))).toBe(
       "No room: its disk is below its limit, so it takes no new sessions",
     );
   });
@@ -182,9 +182,9 @@ describe("describeMachinePage top", () => {
   });
 
   it("still names the disk when the machine is also told to take no new work", () => {
-    const watermark = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
+    const metrics = { diskFreeBytes: 5 * GIB, availableMemoryBytes: 8 * GIB };
 
-    expect(readText(line({ lifecycle: "draining", watermark }))).toBe(
+    expect(readText(line({ lifecycle: "draining", metrics }))).toBe(
       "No room: its disk is below its limit, so it takes no new sessions",
     );
   });

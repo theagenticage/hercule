@@ -35,7 +35,7 @@ const CARRIED = {
   protocol_version: 1,
   negotiated_capabilities: '["sessions"]',
   facts: '{"os":"darwin"}',
-  watermark: '{"diskFreeBytes":42}',
+  metrics: '{"diskFreeBytes":42}',
   last_seen_at: "2026-09-05T09:14:00.000Z",
   credential_hash: "hash-0",
   created_at: "2026-09-01T00:00:00.000Z",
@@ -94,7 +94,7 @@ const migrated = Effect.gen(function* () {
            ${index === 0 ? CARRIED.protocol_version : null},
            ${index === 0 ? CARRIED.negotiated_capabilities : null},
            ${index === 0 ? CARRIED.facts : null},
-           ${index === 0 ? CARRIED.watermark : null},
+           ${index === 0 ? CARRIED.metrics : null},
            ${index === 0 ? CARRIED.last_seen_at : null},
            ${`2026-09-0${String(index + 1)}T00:00:00.000Z`},
            ${CARRIED.updated_at})`,
@@ -104,9 +104,11 @@ const migrated = Effect.gen(function* () {
     SELECT name, connectivity, lifecycle, reserved, max_concurrent_sessions
     FROM runners ORDER BY created_at
   `;
+  // The `runner-metrics` migration renames the `watermark` column that was
+  // inserted above, and `runMigrations()` has applied it by now.
   const carried = yield* sql<typeof CARRIED>`
     SELECT labels, binary_version, protocol_version, negotiated_capabilities, facts,
-           watermark, last_seen_at, credential_hash, created_at, updated_at
+           metrics, last_seen_at, credential_hash, created_at, updated_at
     FROM runners WHERE name = 'online-one'
   `;
   const indexes = yield* sql<{ readonly name: string }>`

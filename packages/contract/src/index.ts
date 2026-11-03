@@ -490,11 +490,11 @@ export {
   RunnerFacts,
   RunnerFilter,
   RunnerLifecycle,
+  RunnerMetrics,
   HarnessBinary,
   RunnerRetireInput,
   RunnerToolchain,
   RunnerUpdateInput,
-  RunnerWatermark,
 } from "./groups/runner";
 export {
   HandoffLeg,

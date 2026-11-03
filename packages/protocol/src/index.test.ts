@@ -48,7 +48,11 @@ const listTags = (union: typeof RunnerToController | typeof ControllerToRunner):
       ? (member.members as ReadonlyArray<{ fields: { _tag: { literal: string } } }>).map(
           (nested) => nested.fields._tag.literal,
         )
-      : [member.fields._tag.literal],
+      : // A frame with a key renamed on the wire is a transformation, and its
+        // struct is the decoded side.
+        "fields" in member
+        ? [member.fields._tag.literal]
+        : [member.to.fields._tag.literal],
   );
 
 const facts = {
@@ -68,7 +72,7 @@ const facts = {
   identityPort: 4939,
 } as const;
 
-const watermark = {
+const metrics = {
   diskFreeBytes: 42949672960,
   availableMemoryBytes: 8589934592,
 } as const;
@@ -182,7 +186,7 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   runnerHello,
   { _tag: "pong" },
   { _tag: "factsReport", facts },
-  { _tag: "watermarkReport", watermark },
+  { _tag: "watermarkReport", metrics },
   {
     _tag: "probeReport",
     requestId: REQUEST_ID,
@@ -805,10 +809,10 @@ describe("the runner hello", () => {
   });
 });
 
-describe("the watermark a runner reports", () => {
+describe("the Runner Metrics a runner reports", () => {
   it.each(["diskFreeBytes", "availableMemoryBytes"])("rejects a report without %s", (key) => {
     expect(
-      decodeFromRunner({ _tag: "watermarkReport", watermark: omitKey(watermark, key) })._tag,
+      decodeFromRunner({ _tag: "watermarkReport", watermark: omitKey(metrics, key) })._tag,
     ).toBe("Failure");
   });
 
@@ -816,12 +820,36 @@ describe("the watermark a runner reports", () => {
     const decoded = Effect.runSync(
       Schema.decodeUnknownEffect(RunnerToController)({
         _tag: "watermarkReport",
-        watermark: { ...watermark, acceptingPlacements: false },
+        watermark: { ...metrics, acceptingPlacements: false },
       }),
-    ) as { readonly watermark: Record<string, unknown> };
+    ) as { readonly metrics: Record<string, unknown> };
 
-    expect(decoded.watermark).not.toHaveProperty("acceptingPlacements");
-    expect(decoded.watermark).toEqual(watermark);
+    expect(decoded.metrics).not.toHaveProperty("acceptingPlacements");
+    expect(decoded.metrics).toEqual(metrics);
+  });
+
+  // Runners and controllers of the age before the rename must still read each
+  // other, so the frame keeps its old tag and key on the wire.
+  it("encodes under the old tag and the old key", () => {
+    expect(Schema.encodeSync(RunnerToController)({ _tag: "watermarkReport", metrics })).toEqual({
+      _tag: "watermarkReport",
+      watermark: metrics,
+    });
+  });
+
+  it("decodes a report in the old wire shape to `metrics`", () => {
+    expect(
+      Effect.runSync(
+        Schema.decodeUnknownEffect(RunnerToController)({
+          _tag: "watermarkReport",
+          watermark: metrics,
+        }),
+      ),
+    ).toEqual({ _tag: "watermarkReport", metrics });
+  });
+
+  it("rejects a report under the new key, which no runner sends yet", () => {
+    expect(decodeFromRunner({ _tag: "watermarkReport", metrics })._tag).toBe("Failure");
   });
 });
 

@@ -59,7 +59,7 @@ const ATLAS: Runner = {
     adapters: ["claude-code/claude-code", "codex/codex"],
     identityPort: 4939,
   },
-  watermark: { diskFreeBytes: 100_000_000_000, availableMemoryBytes: 8 * GIB },
+  metrics: { diskFreeBytes: 100_000_000_000, availableMemoryBytes: 8 * GIB },
   maxConcurrentSessions: 8,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-11-02T09:12:00.000Z",

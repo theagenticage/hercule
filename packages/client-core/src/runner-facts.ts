@@ -22,7 +22,7 @@ export interface RunnerFactsReading {
 }
 
 export const describeRunnerFacts = (runner: Runner): RunnerFactsReading => {
-  const { facts, watermark } = runner;
+  const { facts, metrics } = runner;
   // A runner that reported no installed harness is different from one that
   // has not reported yet, so the two must be shown differently.
   const installed = facts?.harnesses.filter((harness) => harness.present) ?? [];
@@ -30,7 +30,7 @@ export const describeRunnerFacts = (runner: Runner): RunnerFactsReading => {
   return {
     machine: facts === null ? null : `${facts.os} · ${facts.arch}`,
     memory: facts === null ? null : formatBytes(facts.totalMemoryBytes),
-    diskFree: watermark === null ? null : formatBytes(watermark.diskFreeBytes),
+    diskFree: metrics === null ? null : formatBytes(metrics.diskFreeBytes),
     toolchains:
       facts === null || facts.toolchains.length === 0
         ? null

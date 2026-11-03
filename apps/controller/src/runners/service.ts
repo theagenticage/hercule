@@ -327,13 +327,13 @@ const make = Effect.gen(function* () {
               payload: { runnerId: id, changes },
               at,
             });
-            // The new override may move the watermark past the free disk this
-            // runner already reported. That is the same change a
-            // `watermarkReport` would detect, and it is recorded the same way.
+            // The new override may move the disk watermark past the free disk
+            // this runner already reported. That is the same change a report of
+            // the Runner Metrics would detect, and it is recorded the same way.
             let becameAccepting = false;
-            if (before.watermark !== null && edit.diskWatermarkBytes !== undefined) {
-              const wasAccepting = before.watermark.diskFreeBytes >= before.diskWatermarkBytes;
-              const accepting = before.watermark.diskFreeBytes >= edit.diskWatermarkBytes;
+            if (before.metrics !== null && edit.diskWatermarkBytes !== undefined) {
+              const wasAccepting = before.metrics.diskFreeBytes >= before.diskWatermarkBytes;
+              const accepting = before.metrics.diskFreeBytes >= edit.diskWatermarkBytes;
               becameAccepting = !wasAccepting && accepting;
               if (wasAccepting !== accepting) {
                 yield* audit.append({

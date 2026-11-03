@@ -85,7 +85,7 @@ export const formatLastSeen = (runner: Runner, timezone: string, today: Date): s
  * when the runner has not reported its disk yet.
  */
 export const isDiskBelowLimit = (runner: Runner): boolean =>
-  runner.watermark !== null && runner.watermark.diskFreeBytes < runner.diskWatermarkBytes;
+  runner.metrics !== null && runner.metrics.diskFreeBytes < runner.diskWatermarkBytes;
 
 /**
  * Checks whether the controller places new sessions on the machine: it is

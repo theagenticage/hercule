@@ -20,7 +20,7 @@ const RUNNER: Runner = {
   version: "0.4.2",
   labels: ["gpu", "primary"],
   facts: null,
-  watermark: null,
+  metrics: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: null,

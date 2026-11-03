@@ -9,7 +9,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { RunnerCapabilities, RunnerFacts, RunnerWatermark } from "@hercule/contract";
+import { RunnerCapabilities, RunnerFacts, RunnerMetrics } from "@hercule/contract";
 import type {
   Runner,
   RunnerConnectivity,
@@ -90,14 +90,14 @@ interface RunnerRow {
   readonly protocol_version: number | null;
   readonly negotiated_capabilities: string | null;
   readonly facts: string | null;
-  readonly watermark: string | null;
+  readonly metrics: string | null;
   readonly last_seen_at: string | null;
 }
 
 const COLUMNS =
   "id, name, connectivity, lifecycle, reserved, labels, max_concurrent_sessions, " +
   "disk_watermark_bytes, binary_version, protocol_version, negotiated_capabilities, " +
-  "facts, watermark, last_seen_at";
+  "facts, metrics, last_seen_at";
 
 /**
  * The memory one session is assumed to need. A runner's default session cap
@@ -156,7 +156,7 @@ const buildDocumentDecoder = <S extends Schema.ConstraintDecoder<unknown>>(
 };
 
 const decodeFacts = buildDocumentDecoder(RunnerFacts, "facts");
-const decodeWatermark = buildDocumentDecoder(RunnerWatermark, "watermark");
+const decodeMetrics = buildDocumentDecoder(RunnerMetrics, "metrics");
 const decodeCapabilities = buildDocumentDecoder(RunnerCapabilities, "negotiated capabilities");
 
 const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
@@ -172,7 +172,7 @@ const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
       version: row.binary_version,
       labels: JSON.parse(row.labels) as ReadonlyArray<string>,
       facts,
-      watermark: yield* decodeWatermark(id, row.watermark),
+      metrics: yield* decodeMetrics(id, row.metrics),
       maxConcurrentSessions: computeEffectiveCap(row.max_concurrent_sessions, facts),
       diskWatermarkBytes: computeEffectiveWatermark(row.disk_watermark_bytes),
       lastSeenAt: row.last_seen_at,
@@ -462,31 +462,31 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Stores the runner's latest watermark report. Returns whether the runner
-     * now accepts work (enough free disk for the effective watermark), and
+     * Stores the runner's latest Runner Metrics. Returns whether the runner
+     * now accepts work (enough free disk for the effective disk watermark), and
      * whether that changed since the last report; only a change is acted on.
      * The old report is decoded the same tolerant way as for the API, so an
      * unreadable column does not break the connection. A runner with no
      * earlier report counts as accepting work.
      */
-    recordWatermark: (
+    recordMetrics: (
       id: string,
-      watermark: RunnerWatermark,
+      metrics: RunnerMetrics,
       at: string,
     ): Effect.Effect<{ readonly crossed: boolean; readonly accepting: boolean }, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
         const rows = yield* sql<{
-          readonly watermark: string | null;
+          readonly metrics: string | null;
           readonly disk_watermark_bytes: number | null;
-        }>`SELECT watermark, disk_watermark_bytes FROM runners WHERE id = ${key}`;
-        const was = yield* decodeWatermark(id, rows[0]?.watermark ?? null);
+        }>`SELECT metrics, disk_watermark_bytes FROM runners WHERE id = ${key}`;
+        const was = yield* decodeMetrics(id, rows[0]?.metrics ?? null);
         const effective = computeEffectiveWatermark(rows[0]?.disk_watermark_bytes ?? null);
         yield* sql`UPDATE runners
-                   SET watermark = ${JSON.stringify(watermark)}, updated_at = ${at}
+                   SET metrics = ${JSON.stringify(metrics)}, updated_at = ${at}
                    WHERE id = ${key}`;
         const wasAccepting = was === null ? true : was.diskFreeBytes >= effective;
-        const accepting = watermark.diskFreeBytes >= effective;
+        const accepting = metrics.diskFreeBytes >= effective;
         return { crossed: wasAccepting !== accepting, accepting };
       }),
 

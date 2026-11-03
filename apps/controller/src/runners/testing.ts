@@ -15,7 +15,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { ControllerToRunner, type RunnerToController } from "@hercule/protocol";
+import { ControllerToRunner, RunnerToController } from "@hercule/protocol";
 
 /**
  * The path a runner connects to, on the same host and port as the API. It is
@@ -43,11 +43,18 @@ export interface SocketEnding {
   readonly reason: string;
 }
 
+/**
+ * A frame a runner sends, in the shape it has on the wire. A frame whose wire
+ * keys differ from its decoded keys, such as the metrics report, must reach
+ * the controller the way a runner sends it, so a test writes it in this shape.
+ */
+export type RunnerWireFrame = (typeof RunnerToController)["Encoded"];
+
 /** A test's end of a runner socket, which plays the runner. */
 export interface RunnerSocket {
   /** Every frame the controller has sent so far, in order, including those `next` has returned. */
   readonly frames: ReadonlyArray<ControllerToRunner>;
-  readonly send: (message: RunnerToController) => void;
+  readonly send: (message: RunnerWireFrame) => void;
   /**
    * Returns the first frame that `next` has not returned yet, waiting for it
    * if it has not arrived. Fails when the controller closes the connection

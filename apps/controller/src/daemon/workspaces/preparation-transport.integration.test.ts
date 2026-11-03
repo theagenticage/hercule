@@ -163,7 +163,7 @@ describe("preparation after a real runner process dies", () => {
         const workspaces = yield* makeWorkspaces({ storageDir, gitEnv });
         yield* connect({
           pin, facts, probe: Effect.succeed(facts),
-          headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1024 ** 3 }),
+          readMetrics: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1024 ** 3 }),
           storageDir, scratchDir: storageDir + "/scratch",
           workspaces, workspaceSteps: makeWorkspaceSteps({ storageDir, workspaces, socketPath, baseEnv: process.env }),
           socketPath, credentials: makeCredentialRelay(), harnessLogins, sessions,

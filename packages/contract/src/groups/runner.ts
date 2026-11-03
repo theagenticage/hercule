@@ -10,7 +10,7 @@
  * shape whichever runner it is looking at.
  */
 import { Schema } from "effect";
-import { Capabilities, Fact, RunnerFacts, RunnerWatermark } from "@hercule/protocol";
+import { Capabilities, Fact, RunnerFacts, RunnerMetrics } from "@hercule/protocol";
 import { CapabilitySnapshot } from "./provider-account";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -39,7 +39,7 @@ export {
   Capabilities as RunnerCapabilities,
   HarnessBinary,
   RunnerFacts,
-  RunnerWatermark,
+  RunnerMetrics,
   Toolchain as RunnerToolchain,
 } from "@hercule/protocol";
 
@@ -93,7 +93,7 @@ export const Runner = Schema.Struct({
   version: Schema.NullOr(Fact),
   labels: atMost(RunnerLabel, MAX_RUNNER_LABELS),
   facts: Schema.NullOr(RunnerFacts),
-  watermark: Schema.NullOr(RunnerWatermark),
+  metrics: Schema.NullOr(RunnerMetrics),
   /** The effective cap: the owner's override, or the one derived from the facts. */
   maxConcurrentSessions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   /** The effective watermark: the owner's override, or the shipped ten gibibytes. */
