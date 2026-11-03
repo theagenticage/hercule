@@ -5,7 +5,9 @@
  * The rule that decides what to measure is a per-workspace counter:
  *
  * - `generation` goes up, and is saved, each time a session starts or exits in
- *   the workspace. A start is recorded before the session can write a file.
+ *   the workspace, and each time its removal begins (a removal that fails can
+ *   leave the workspace half emptied). A start is recorded before the session
+ *   can write a file.
  * - `measuredGeneration` is the generation the last walk began at, whether it
  *   succeeded or failed.
  * - A workspace is dirty when `generation > measuredGeneration`. It is measured
@@ -24,9 +26,11 @@
  * Two kinds of change are saved differently, because the file holds every
  * workspace and rewriting it is costly:
  *
- * - A counter change (a session starts or exits, a workspace appears or is
- *   removed) is saved at once. A start must be on disk before the session can
- *   write a file, or a crash would leave the new files unmeasured.
+ * - A counter change (a session starts or exits, a removal begins, a workspace
+ *   appears or is removed) is saved at once, before the session can write or
+ *   the removal can delete. The write is atomic but not synced to the disk, so
+ *   the save survives a crash of this process, not a power loss. A lost save
+ *   only means one more walk.
  * - A measurement result is saved at most once every `REPORT_INTERVAL`, and
  *   once more when the daemon's scope closes at a clean stop. A crash can lose
  *   a result that was not saved yet. That costs one more walk of the
@@ -50,9 +54,11 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import {
+  DiskUsageError,
   MAX_DISK_USAGE_ERROR_LENGTH,
   MAX_MEASURED_WORKSPACES,
   RunnerDiskUsage,
+  StorageId,
   WorkspaceDiskUsage,
   type DiskUsageReport,
   type RunnerDiskUsageReport,
@@ -67,17 +73,26 @@ export const SHARED_MEASUREMENT_INTERVAL: Duration.Duration = Duration.minutes(1
 export const REPORT_INTERVAL: Duration.Duration = Duration.seconds(10);
 
 /**
- * Returns an error text the protocol accepts in a workspace's entry: control
- * characters, such as the newlines of a child's stderr, become spaces, and the
- * text is cut at `MAX_DISK_USAGE_ERROR_LENGTH`.
+ * Characters `DiskUsageError` refuses: control characters (C0, DEL and C1),
+ * bidirectional controls, and lone surrogates. With the `u` flag, `\p{Surrogate}`
+ * matches only a surrogate that is not half of a pair.
  */
-const shortenError = (message: string): string =>
-  Array.from(message, (character) => {
-    const code = character.charCodeAt(0);
-    return code < 0x20 || code === 0x7f ? " " : character;
-  })
-    .join("")
-    .slice(0, MAX_DISK_USAGE_ERROR_LENGTH);
+const REFUSED_ERROR_CHARACTERS = /[\p{Cc}\u202a-\u202e\u2066-\u2069\p{Surrogate}]/gu;
+
+/**
+ * Returns an error text the protocol accepts in a workspace's entry: each
+ * refused character, such as the newline of a child's stderr, becomes a space,
+ * and the text is cut to `MAX_DISK_USAGE_ERROR_LENGTH` UTF-16 units. The cut
+ * is made between characters, so it never splits a surrogate pair.
+ */
+const shortenError = (message: string): string => {
+  let kept = "";
+  for (const character of message.replace(REFUSED_ERROR_CHARACTERS, " ")) {
+    if (kept.length + character.length > MAX_DISK_USAGE_ERROR_LENGTH) break;
+    kept += character;
+  }
+  return kept;
+};
 
 const StoredWorkspace = Schema.Struct({
   generation: Schema.Int,
@@ -85,14 +100,14 @@ const StoredWorkspace = Schema.Struct({
   /** Epoch milliseconds of the newest session start or exit seen here, or of the first sighting. */
   lastUsedAt: Schema.Number,
   diskUsage: Schema.NullOr(WorkspaceDiskUsage),
-  error: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(DiskUsageError),
 });
 
 type StoredWorkspace = Schema.Schema.Type<typeof StoredWorkspace>;
 
 const StoredState = Schema.Struct({
   version: Schema.Literal(1),
-  workspaces: Schema.Record(Schema.String, StoredWorkspace),
+  workspaces: Schema.Record(StorageId, StoredWorkspace),
   runner: Schema.NullOr(RunnerDiskUsage),
 });
 
@@ -118,6 +133,19 @@ export interface WorkspaceSessionObserver {
 export interface WorkspaceLifecycleObserver {
   /** Records that the workspace is ready, so it is measured. Never fails. */
   readonly workspaceReady: (workspaceId: string) => Effect.Effect<void>;
+  /**
+   * Records that the workspace's removal is about to begin, and saves it. The
+   * workspace counts as changed from here on, because a removal that fails can
+   * leave it half emptied, and a walk that ends meanwhile cannot save its
+   * numbers. Call it before the removal deletes anything. Never fails.
+   */
+  readonly workspaceRemovalStarted: (workspaceId: string) => Effect.Effect<void>;
+  /**
+   * Records that the removal ended and the workspace remains, wholly or in
+   * part. The workspace is measured again once no session works in it. Never
+   * fails.
+   */
+  readonly workspaceRemovalFailed: (workspaceId: string) => Effect.Effect<void>;
   /**
    * Forgets the workspace, so a walk that is still running cannot save its
    * numbers afterwards. Never fails.
@@ -177,7 +205,7 @@ const guessLastUsedAt = (root: string): number => {
   }
 };
 
-const startingRecord = (root: string): WorkspaceRecord => ({
+const buildStartingRecord = (root: string): WorkspaceRecord => ({
   generation: 1,
   measuredGeneration: 0,
   lastUsedAt: guessLastUsedAt(root),
@@ -236,8 +264,9 @@ const writeSavedState = (storageDir: string, state: SavedState): void => {
 /**
  * Creates the disk measurements of this runner and starts their worker, which
  * lives as long as `Scope`. The worker measures every dirty workspace once the
- * registry has been read, then waits for the next session, ready workspace, or
- * removal. It runs one walk at a time.
+ * registry has been read, then waits until a session exits, a workspace becomes
+ * ready, or a removal fails and leaves its workspace. A completed removal does
+ * not wake it: that workspace is gone. It runs one walk at a time.
  */
 export const makeDiskMeasurements = (
   options: DiskMeasurementsOptions,
@@ -253,6 +282,9 @@ export const makeDiskMeasurements = (
     // Sessions working in each workspace now. A crash loses it on purpose:
     // no session survives the process.
     const working = new Map<string, number>();
+    // Workspaces whose removal has begun and not ended. A walk of one of them
+    // must not save its numbers: its files are being deleted.
+    const removing = new Set<string>();
     const wake = yield* Queue.sliding<void>(1);
     // Where a report change is signalled, while a connection is reporting.
     let reportChanged: Queue.Queue<void> | undefined;
@@ -330,7 +362,7 @@ export const makeDiskMeasurements = (
         const entry = yield* readRegistered(workspaceId);
         if (entry === undefined || !isManaged(entry)) return undefined;
         // Another fiber may have created it while the registry was read.
-        const created = records.get(workspaceId) ?? startingRecord(entry.root);
+        const created = records.get(workspaceId) ?? buildStartingRecord(entry.root);
         records.set(workspaceId, created);
         return created;
       });
@@ -344,6 +376,22 @@ export const makeDiskMeasurements = (
         working.set(workspaceId, Math.max(0, (working.get(workspaceId) ?? 0) + change));
         yield* persist;
         if (change === -1) Queue.offerUnsafe(wake, undefined);
+      });
+
+    const noteRemovalStarted = (workspaceId: string): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const record = yield* ensureRecord(workspaceId);
+        if (record === undefined) return;
+        removing.add(workspaceId);
+        record.generation += 1;
+        yield* persist;
+      });
+
+    const noteRemovalFailed = (workspaceId: string): Effect.Effect<void> =>
+      Effect.sync(() => {
+        removing.delete(workspaceId);
+        // The generation went up when the removal began, so the workspace is dirty.
+        Queue.offerUnsafe(wake, undefined);
       });
 
     /**
@@ -360,11 +408,12 @@ export const makeDiskMeasurements = (
         if (managed.has(id)) continue;
         records.delete(id);
         working.delete(id);
+        removing.delete(id);
         changed = true;
       }
       for (const [id, entry] of managed) {
         if (records.has(id) || !isMeasurable(entry)) continue;
-        records.set(id, startingRecord(entry.root));
+        records.set(id, buildStartingRecord(entry.root));
         changed = true;
       }
       if (changed) yield* persist;
@@ -375,18 +424,18 @@ export const makeDiskMeasurements = (
       if (reportChanged !== undefined) Queue.offerUnsafe(reportChanged, undefined);
     });
 
-    /** Walks one workspace and saves the outcome, unless the workspace was removed meanwhile. */
+    /** Walks one workspace and saves the outcome, unless its removal began or finished meanwhile. */
     const measureWorkspace = (entry: RegisteredWorkspace): Effect.Effect<void> =>
       Effect.gen(function* () {
         const walkedGeneration = records.get(entry.workspaceId)?.generation;
         if (walkedGeneration === undefined) return;
         const outcome = yield* Effect.result(measureFolder(entry.root));
         const measuredAt = new Date().toISOString();
-        // A removal that started during the walk makes `held` answer
-        // undefined. A removal that finished already dropped the record.
+        // A finished removal dropped the record. A removal that began during
+        // the walk is in `removing`, and a failed one made the workspace dirty
+        // again, so the walk's generation never covers what it deleted.
         const record = records.get(entry.workspaceId);
-        if (record === undefined || (yield* readRegistered(entry.workspaceId)) === undefined)
-          return;
+        if (record === undefined || removing.has(entry.workspaceId)) return;
         record.measuredGeneration = walkedGeneration;
         if (Result.isSuccess(outcome)) {
           record.diskUsage = { ...outcome.success, measuredAt };
@@ -402,14 +451,14 @@ export const makeDiskMeasurements = (
     const measureShared: Effect.Effect<void> = Effect.gen(function* () {
       sharedMeasuredAt = Date.now();
       // A folder that does not exist yet holds nothing.
-      const freesBytesOf = (folder: string) =>
+      const measureFreesBytes = (folder: string) =>
         existsSync(folder)
           ? Effect.map(measureFolder(folder), (usage) => usage.freesBytes)
           : Effect.succeed(0);
       const outcome = yield* Effect.result(
         Effect.all([
-          freesBytesOf(joinPath(storageDir, "cache")),
-          freesBytesOf(joinPath(storageDir, "providers")),
+          measureFreesBytes(joinPath(storageDir, "cache")),
+          measureFreesBytes(joinPath(storageDir, "providers")),
         ]),
       );
       if (Result.isFailure(outcome)) {
@@ -449,6 +498,7 @@ export const makeDiskMeasurements = (
         if (
           record === undefined ||
           (working.get(entry.workspaceId) ?? 0) > 0 ||
+          removing.has(entry.workspaceId) ||
           record.generation <= record.measuredGeneration
         )
           continue;
@@ -492,9 +542,12 @@ export const makeDiskMeasurements = (
           yield* ensureRecord(workspaceId);
           Queue.offerUnsafe(wake, undefined);
         }),
+      workspaceRemovalStarted: noteRemovalStarted,
+      workspaceRemovalFailed: noteRemovalFailed,
       workspaceRemoved: (workspaceId) =>
         Effect.gen(function* () {
           working.delete(workspaceId);
+          removing.delete(workspaceId);
           if (records.delete(workspaceId)) yield* persist;
         }),
       buildReport,
@@ -512,13 +565,14 @@ export const makeDiskMeasurements = (
               );
               yield* Effect.sleep(REPORT_INTERVAL);
             }),
+          ).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                // A newer connection may have replaced the slot already.
+                if (reportChanged === changed) reportChanged = undefined;
+              }),
+            ),
           );
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              reportChanged = undefined;
-            }),
-          ),
-        ),
+        }),
     };
   });

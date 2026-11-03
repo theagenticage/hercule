@@ -118,7 +118,8 @@ export const makeWorkspaces = (options: {
    */
   readonly deleteArchivedSessionFiles: DeleteArchivedSessionFiles;
   /**
-   * Told when a workspace becomes ready and when its removal is complete.
+   * Told when a workspace becomes ready, when its removal begins, and when the
+   * removal ends, completed or not.
    * Tests that do not measure disk usage leave it out.
    */
   readonly observer?: WorkspaceLifecycleObserver;
@@ -321,15 +322,22 @@ export const makeWorkspaces = (options: {
           removalsInFlight.set(instruction.workspaceId, { instruction, result });
           const work = Effect.gen(function* () {
             if (preparation !== undefined) yield* Deferred.await(preparation.result);
-            const report = yield* instruction._tag === "workspaceDispose"
+            // A removal that fails can leave the workspace half emptied, so
+            // the observer hears of it before anything is deleted.
+            yield* (
+              options.observer?.workspaceRemovalStarted(instruction.workspaceId) ?? Effect.void
+            );
+            return yield* instruction._tag === "workspaceDispose"
               ? disposeWorkspace(substrate, instruction)
               : detachWorkspace(substrate, instruction);
-            if (report.status === "deleted")
-              yield* options.observer?.workspaceRemoved(report.workspaceId) ?? Effect.void;
-            return report;
           }).pipe(
             Effect.catch((error) =>
               Effect.succeed(failureReport(instruction.workspaceId, error, instruction.requestId)),
+            ),
+            Effect.tap((report) =>
+              report.status === "deleted"
+                ? (options.observer?.workspaceRemoved(report.workspaceId) ?? Effect.void)
+                : (options.observer?.workspaceRemovalFailed(report.workspaceId) ?? Effect.void),
             ),
           );
           yield* startWorkspaceOperation(result, restore(work), () =>

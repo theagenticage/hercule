@@ -64,4 +64,16 @@ describe("makeFolderMeasurer", () => {
     // `kill -0` fails once the process is gone and reaped.
     expect(() => process.kill(pid, 0)).toThrow();
   });
+
+  it("stops a walker that prints far more than a disk usage, and reports why", async () => {
+    const measure = makeFolderMeasurer({
+      buildCommand: () => ["sh", "-c", "yes"],
+    });
+
+    const failure = await Effect.runPromise(Effect.flip(measure(makeScratch())));
+
+    expect(failure.message).toBe(
+      "The walker printed far more than a disk usage, so it was stopped",
+    );
+  });
 });

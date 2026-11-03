@@ -14,7 +14,11 @@ import type { FolderUsage } from "./walker";
 /** How long one walk may run before it is killed. */
 export const MEASURE_DEADLINE: Duration.Duration = Duration.minutes(10);
 
-/** What a walk that passed its deadline reports. It names the default deadline, which is the only one a user can meet. */
+/**
+ * What a walk that passed its deadline reports. The text names the default
+ * deadline of ten minutes, because a runner never sets another one outside the
+ * tests.
+ */
 export const DEADLINE_MESSAGE = "Measuring took longer than 10 minutes";
 
 /** The most the child may print on stdout. Its answer is one short line. */
@@ -22,6 +26,9 @@ const MAX_STDOUT_BYTES = 4096;
 
 /** The most of the child's stderr that is kept for the error text. */
 const MAX_STDERR_BYTES = 2048;
+
+/** What a walk reports when it printed more than `MAX_STDOUT_BYTES` and was killed for it. */
+const OUTPUT_TOO_LONG_MESSAGE = "The walker printed far more than a disk usage, so it was stopped";
 
 /** A walk failed: the child reported an error, could not start, or passed its deadline. */
 export class MeasuringFailed extends Schema.TaggedError<MeasuringFailed>()("MeasuringFailed", {
@@ -110,6 +117,7 @@ const runWalker = (
   (async () => {
     const child = Bun.spawn([...command], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     let timedOut = false;
+    let floodedOutput = false;
     const kill = (): void => {
       child.kill("SIGKILL");
     };
@@ -122,13 +130,17 @@ const runWalker = (
       const [stdout, stderr] = await Promise.all([
         readAtMost(child.stdout, MAX_STDOUT_BYTES).then((read) => {
           // A walker that floods its output is not printing a number.
-          if (read.truncated) kill();
+          if (read.truncated) {
+            floodedOutput = true;
+            kill();
+          }
           return read;
         }),
         readAtMost(child.stderr, MAX_STDERR_BYTES),
       ]);
       await child.exited;
       if (timedOut) throw new Error(DEADLINE_MESSAGE);
+      if (floodedOutput) throw new Error(OUTPUT_TOO_LONG_MESSAGE);
       if (child.exitCode !== 0)
         throw new Error(
           stderr.text.trim() || `The walker exited with code ${String(child.exitCode)}`,

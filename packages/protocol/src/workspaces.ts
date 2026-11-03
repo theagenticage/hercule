@@ -459,24 +459,38 @@ export const WorkspaceDiskUsage = Schema.Struct({
 export type WorkspaceDiskUsage = Schema.Schema.Type<typeof WorkspaceDiskUsage>;
 
 /**
- * The longest reason a runner gives for a failed measurement. With three-byte
- * characters, 2,000 entries of 250 stay near 1.9 MB; 300 would pass 2 MiB.
+ * The longest reason a runner gives for a failed measurement, in UTF-16 code
+ * units. With three-byte characters (the widest that JSON writes as they are),
+ * 2,000 entries of 250 stay near 1.5 MB; 300 would pass 2 MiB.
  */
 export const MAX_DISK_USAGE_ERROR_LENGTH = 250;
 
 /**
+ * Matches a lone surrogate. With the `u` flag a surrogate pair is one
+ * character, so only an unpaired half matches. (`String.isWellFormed` does the
+ * same, but the project's TypeScript library setting does not include it.)
+ */
+const LONE_SURROGATE = /\p{Surrogate}/u;
+
+/** Control characters (`Cc`: C0, DEL and C1) and bidirectional controls: the embedding, override and isolate controls. */
+const DISK_USAGE_ERROR_REFUSED_CHARACTERS = /[\p{Cc}\u202a-\u202e\u2066-\u2069]/u;
+
+/**
  * Why measuring a workspace failed, such as "Measuring took longer than 10
- * minutes". It is short and holds no control characters, so a report of
+ * minutes". It is short and well-formed Unicode with no control characters:
+ * no C0, DEL or C1 control, no bidirectional control, and no lone surrogate
+ * (JSON writes each lone surrogate as six bytes). So a report of
  * `MAX_MEASURED_WORKSPACES` entries, each with the longest reason, still fits
  * in one frame (`MAX_FRAME_BYTES`). A runner shortens a longer reason before it
  * sends it.
  */
 export const DiskUsageError = Schema.String.check(
   Schema.isMaxLength(MAX_DISK_USAGE_ERROR_LENGTH),
-  // eslint-disable-next-line no-control-regex
-  Schema.isPattern(/^[^\u0000-\u001f\u007f]*$/, {
-    title: "disk usage error",
-    description: "text without control characters",
+  Schema.makeFilter<string>((text) => {
+    if (LONE_SURROGATE.test(text)) return "must be well-formed Unicode, with no lone surrogate";
+    if (DISK_USAGE_ERROR_REFUSED_CHARACTERS.test(text))
+      return "must hold no control or bidirectional control characters";
+    return undefined;
   }),
 );
 
