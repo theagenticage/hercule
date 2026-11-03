@@ -42,6 +42,7 @@ import {
   readWordNumbers,
   recordFrames,
   recordLastAgentText,
+  WINDOW_VISIBILITY_TIMEOUT_MS,
   type AgentTextSnapshot,
   type TapSubscriptions,
 } from "./harness";
@@ -255,10 +256,12 @@ describe("the Conversation", () => {
     await expect.poll(async () => (await readLastSnapshot())?.openParagraph ?? "").not.toBe("");
 
     await callWindowMethod("hide");
-    await expect.poll(readVisibility).toBe("hidden");
+    await expect.poll(readVisibility, { timeout: WINDOW_VISIBILITY_TIMEOUT_MS }).toBe("hidden");
     // Every tap subscription the page made is ended, and none is made while
     // the window stays hidden.
-    await expect.poll(async () => (await readTaps()).ended).toBeGreaterThan(0);
+    await expect
+      .poll(async () => (await readTaps()).ended, { timeout: WINDOW_VISIBILITY_TIMEOUT_MS })
+      .toBeGreaterThan(0);
     const tapsWhenHidden = await readTaps();
     expect(tapsWhenHidden.made).toBe(tapsWhenHidden.ended);
     const shownWhenHidden = joinShownText((await readLastSnapshot())!);
@@ -277,8 +280,8 @@ describe("the Conversation", () => {
     expect(await readTaps()).toEqual(tapsWhenHidden);
 
     await callWindowMethod("show");
-    await expect.poll(readVisibility).toBe("visible");
-    await expect.poll(readTaps).toEqual({
+    await expect.poll(readVisibility, { timeout: WINDOW_VISIBILITY_TIMEOUT_MS }).toBe("visible");
+    await expect.poll(readTaps, { timeout: WINDOW_VISIBILITY_TIMEOUT_MS }).toEqual({
       made: tapsWhenHidden.made + 1,
       ended: tapsWhenHidden.ended,
     });

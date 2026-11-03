@@ -22,6 +22,7 @@ import { openFileClock } from "./edit-marks";
 import { serveIdentity } from "./identity";
 import { buildThisMachine, probeFacts } from "./probe";
 import { harnessLogins, removeStaleSetupTokenFolders } from "./harnesses";
+import { deleteArchivedSessionFiles } from "./harnesses/archived-session-files";
 import { sessions } from "./sessions";
 import { makeSessionSkillsFolders } from "./skills";
 import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
@@ -197,6 +198,7 @@ export const runDaemon = (
       const workspaces = yield* makeWorkspaces({
         storageDir,
         gitEnv: buildGitCredentialEnv({ socketPath }),
+        deleteArchivedSessionFiles: (sessions) => deleteArchivedSessionFiles(storageDir, sessions),
       });
       const workspaceSteps = makeWorkspaceSteps({
         storageDir,

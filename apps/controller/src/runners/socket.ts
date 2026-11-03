@@ -30,6 +30,7 @@ import * as Socket from "effect/socket/Socket";
 import { createInternalError, createUnauthenticatedError } from "@hercule/contract";
 import {
   AGENT_STEPS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   FILES_EDITED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
@@ -120,6 +121,10 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   says why.
  * - `REPOSITORY_SKILLS_CAPABILITY`: this controller asks a runner to list the
  *   skills in a workspace's checkouts, and only a runner that negotiated it.
+ * - `ARCHIVED_SESSION_FILES_CAPABILITY`: this controller lists the archived
+ *   sessions of a workspace it asks a runner to remove, so the runner deletes
+ *   their harness files too. A runner that did not negotiate it gets the
+ *   removal without the list, and the workspace gets a warning saying so.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -132,6 +137,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   GITHUB_TOKEN_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";

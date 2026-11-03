@@ -18,7 +18,7 @@ import {
   providerAccountRepository,
 } from "../../provider-accounts";
 import { DRAINING, RETIRED, runnerRepository } from "../../runners";
-import { ACCOUNT_DELETED, type StoredSession } from "../../sessions";
+import { ACCOUNT_DELETED, refuseArchived, type StoredSession } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 
 const STILL_LIVE = "that session is still live; stop it first";
@@ -50,6 +50,7 @@ const describeWorkspaceGone = (status: string): string =>
  * the session's harness-native session id. It fails with an invalid state
  * error, whose message states the reason, when:
  *
+ * - the session is archived;
  * - the session is still live;
  * - the session answered an assistant's conversation that was deleted;
  * - the session left no transcript;
@@ -74,6 +75,7 @@ export const resumable: Effect.Effect<
 
   return (session: StoredSession) =>
     Effect.gen(function* () {
+      yield* refuseArchived(session);
       if (session.status !== "exited")
         return yield* Effect.fail(createInvalidStateError(STILL_LIVE));
       if (session.conversationDeleted)

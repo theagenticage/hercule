@@ -19,6 +19,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import {
   type AdapterError,
   AGENT_STEPS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   buildWorkspaceActionCapability,
@@ -76,7 +77,8 @@ import { buildRunnerSocketUrl, type RunnerWireFrame } from "../runners/testing";
 /**
  * The capabilities a runner of this build lists at hello: every workspace
  * action the controller's catalog knows, agent steps, the workspace lifecycle,
- * images in inputs, text generation, library skills, and repository skills.
+ * images in inputs, text generation, library skills, repository skills, and
+ * deleting the harness files of archived sessions.
  */
 export const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -86,6 +88,7 @@ export const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   TEXT_GENERATION_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
 ];
 
 /**

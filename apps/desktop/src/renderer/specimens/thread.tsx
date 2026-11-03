@@ -33,14 +33,18 @@
  * bottom. With `?state=question`, the thread waits on a Request of two
  * questions, so the composer answers instead of sending a message: the page
  * answers the first question and steps to the second, and types a short answer
- * in the composer's field, as a user would.
+ * in the composer's field, as a user would. With `?state=archived`, the thread
+ * is archived: it has no row in the sidebar, and a line with a New thread
+ * button takes the composer's place. This state is for a check by eye.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
 import "./fixed-clock";
 import {
+  ARCHIVED_PAGE_RECORDS,
   buildFixThreadWithPermissionRequests,
   FIX_THREAD,
+  FIX_THREAD_ARCHIVED,
   FIX_THREAD_ASKING_QUESTIONS,
   FIX_THREAD_COMPACTING,
   FIX_THREAD_WITH_RUNTIME_NOTICES,
@@ -160,6 +164,8 @@ if (state === "senders") {
 } else if (state === "question") {
   await mountWithSidebarSession(FIX_THREAD_ASKING_QUESTIONS);
   await answerFirstQuestionAndTypeSecond("Cards only, but open an issue for Apple Pay");
+} else if (state === "archived") {
+  await mountThreadSpecimen(ARCHIVED_PAGE_RECORDS, FIX_THREAD_ARCHIVED);
 } else if (state === "syncing") {
   await mountThreadSpecimen(THREAD_PAGE_RECORDS, { ...FIX_THREAD, syncing: true });
 } else {

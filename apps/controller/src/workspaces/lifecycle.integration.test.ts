@@ -308,7 +308,7 @@ describe("human and automatic workspace retention", () => {
   });
 
   it.each(["clean", "tracked", "untracked", "ignored", "multi-root"] as const)(
-    "records the actual automatic %s removal outcome without forcing files",
+    "removes a finished run's %s workspace whole, with no look at its files",
     async (kind) => {
       await withFleet(
         async (arranged) => {
@@ -333,25 +333,16 @@ describe("human and automatic workspace retention", () => {
           }
           if (kind === "multi-root")
             writeFileSync(join(resolved.root, "human-notes.txt"), "unfinished root notes\n");
-          const before = hashContents(resolved.root);
           await done.complete();
           const cleanup = await waitDisposal(arranged.wire, automatic.workspaceId);
-          expect(cleanup.discardChanges ?? false).toBe(false);
+          expect(cleanup.discardChanges).toBe(true);
           expect((await readWorkspace(arranged, automatic.workspaceId)).status).toBe("disposing");
           const outcome = await Effect.runPromise(world.manager.dispose(cleanup));
           arranged.wire.send(outcome);
-          if (kind === "clean") {
-            expect(outcome.status, outcome.message).toBe("deleted");
-            await waitStatus(arranged, automatic.workspaceId, "deleted");
-            expect(existsSync(resolved.root)).toBe(false);
-            expect(runGitOrThrow(common, "rev-parse", `refs/heads/${done.branch}`)).toBe(done.sha);
-          } else {
-            expect(outcome.status).toBe("failed");
-            const retained = await waitStatus(arranged, automatic.workspaceId, "ready");
-            expect(retained.message).toMatch(/files|changes|ignored|root|preserve|discard/i);
-            expect(hashContents(resolved.root)).toBe(before);
-            expect(Effect.runSync(world.manager.resolve(automatic.workspaceId))).toBeDefined();
-          }
+          expect(outcome.status, outcome.message).toBe("deleted");
+          await waitStatus(arranged, automatic.workspaceId, "deleted");
+          expect(existsSync(resolved.root)).toBe(false);
+          expect(runGitOrThrow(common, "rev-parse", `refs/heads/${done.branch}`)).toBe(done.sha);
         },
         { workspaceSweepInterval: SWEEP },
       );

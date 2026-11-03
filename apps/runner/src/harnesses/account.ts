@@ -10,14 +10,21 @@ import { join } from "node:path";
 import type { HarnessAccount, HarnessHome } from "@hercule/protocol";
 
 /**
+ * Returns the absolute folder of a Harness Home without creating it. The home
+ * is the folder the controller named, joined to the runner's storage
+ * directory; the runner never works one out from an account id. The protocol
+ * accepts only homes that stay under the storage directory, so the join cannot
+ * leave it.
+ */
+export const buildHarnessHomePath = (storageDir: string, harnessHome: HarnessHome): string =>
+  join(storageDir, harnessHome);
+
+/**
  * Returns the absolute folder of a Harness Home, which it creates with mode
- * 0700 when it is missing. The home is the folder the controller named,
- * joined to the runner's storage directory; the runner never works one out
- * from an account id. The protocol accepts only homes that stay under the
- * storage directory, so the join cannot leave it.
+ * 0700 when it is missing.
  */
 export const createHarnessHome = (storageDir: string, harnessHome: HarnessHome): string => {
-  const home = join(storageDir, harnessHome);
+  const home = buildHarnessHomePath(storageDir, harnessHome);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   return home;
 };

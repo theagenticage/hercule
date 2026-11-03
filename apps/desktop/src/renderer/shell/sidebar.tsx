@@ -1,6 +1,6 @@
 import { memo, Suspense, useCallback, useEffect, useId, useMemo, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { DONE_SHELF_LIMIT, DONE_SHELF_STEP } from "@hercule/client-core";
+import { DONE_SHELF_LIMIT, DONE_SHELF_STEP, planArchiveAll } from "@hercule/client-core";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
 import { useDoneMoves } from "../app/done-moves";
@@ -14,6 +14,7 @@ import { ComposeIcon } from "../icons/compose";
 import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
 import { SidebarIcon } from "../icons/sidebar";
+import { ArchiveDialog } from "../screens/archive-dialog";
 import { AssistantsSection } from "./assistants-section";
 import { DoneToastHost } from "./done-toast";
 import { FaceSwitch } from "./face-switch";
@@ -48,7 +49,9 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *     group's Threads Done: the group leaves its project at once, and the
  *     toast over the list's bottom edge says "Marked done" with Undo. Then
  *     the Done shelf, closed until its heading is pressed, whose rows of
- *     several sessions unfold into their lines too. Then the Assistants
+ *     several sessions unfold into their lines too. A shelf row has Reopen
+ *     and Archive, and the open shelf's heading has "Archive all"; both ask
+ *     for confirmation first (`ArchiveDialog`). Then the Assistants
  *     section, pinned under the list, while there is an assistant.
  *   - On the Hercule face, the System section;
  * - the foot: how many sessions are working, waiting and idle, the
@@ -190,6 +193,34 @@ export const Sidebar = memo(function Sidebar({
     setProjectMenu({ projectId, x, y });
   }, []);
 
+  // What the user asked to archive from the Done shelf, while the confirmation is open: a row's
+  // group key, or every row of the shelf.
+  const [archiving, setArchiving] = useState<{ readonly groupKey: string | null } | null>(null);
+  const archiveRow = useCallback((groupKey: string) => {
+    setArchiving({ groupKey });
+  }, []);
+  const archiveAll = useCallback(() => {
+    setArchiving({ groupKey: null });
+  }, []);
+  const closeArchiveConfirmation = useCallback(() => {
+    setArchiving(null);
+  }, []);
+
+  // The rows the confirmation asks about are read from the sidebar's rows as they are now, so a
+  // row that changes while the dialog is open changes the dialog. It closes once none are left,
+  // for instance when every row began to work.
+  const archivePlan =
+    archiving === null
+      ? null
+      : archiving.groupKey === null
+        ? planArchiveAll(presentation.groupRows)
+        : {
+            rows: presentation.groupRows.filter((row) => row.key === archiving.groupKey),
+            skippedWorking: 0,
+            leftOver: 0,
+          };
+  if (archivePlan !== null && archivePlan.rows.length === 0) setArchiving(null);
+
   // The toast reads its store on its own, so showing, fading or dismissing a
   // toast does not draw the sidebar again.
   const { markDone, reopen } = useDoneMoves();
@@ -199,6 +230,8 @@ export const Sidebar = memo(function Sidebar({
       onCollapse: collapseSection,
       onMarkDone: markDone,
       onReopen: reopen,
+      onArchive: archiveRow,
+      onArchiveAll: archiveAll,
       onToggleDoneShelf: toggleDoneShelf,
       onToggleGroup: toggleGroup,
       onShowQuiet: showQuiet,
@@ -209,6 +242,8 @@ export const Sidebar = memo(function Sidebar({
       collapseSection,
       markDone,
       reopen,
+      archiveRow,
+      archiveAll,
       toggleDoneShelf,
       toggleGroup,
       showQuiet,
@@ -309,6 +344,9 @@ export const Sidebar = memo(function Sidebar({
             }}
           />
         </Suspense>
+      )}
+      {archivePlan !== null && archivePlan.rows.length > 0 && (
+        <ArchiveDialog plan={archivePlan} onClose={closeArchiveConfirmation} />
       )}
       <DoneToastHost place="sidebar" />
       {face === "threads" && <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />}

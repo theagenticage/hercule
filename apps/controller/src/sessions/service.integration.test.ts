@@ -1381,6 +1381,76 @@ describe("SessionService.resume", () => {
   });
 });
 
+describe("an archived session", () => {
+  /** Arranges an idle session on a runner, marks it archived, and returns its id. */
+  const arrangeArchivedIdleSession = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sessionRepository;
+    const providerAccountId = mintId();
+    return yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const runnerId = mintId();
+        yield* sql`
+          INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                               credential_hash, created_at, updated_at)
+          VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                  'a hash', ${at}, ${at})
+        `;
+        const sessionId = yield* insertQueuedSession(runnerId, {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+          withoutInput: true,
+        });
+        yield* rows.bind(sessionId, runnerId, providerAccountId, "native-1");
+        yield* rows.moved(sessionId, "idle", at);
+        yield* sql`UPDATE sessions SET archived_at = ${at}, archived_by = 'user'
+                   WHERE id = ${uuidFromString(sessionId)}`;
+        return sessionId;
+      }),
+    );
+  });
+
+  /** Counts the inputs stored for the session. */
+  const countInputs = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const [counted] = yield* sql<{ readonly total: number }>`
+        SELECT count(*) AS total FROM session_inputs WHERE session_id = ${uuidFromString(sessionId)}
+      `;
+      return counted!.total;
+    });
+
+  it("takes no input from any path, and stores nothing", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const sessionId = yield* arrangeArchivedIdleSession;
+        const taken = yield* withTransaction(
+          sql,
+          sessions.takeInput({
+            sessionId,
+            modelSelection: { model: "clever", options: {} },
+            buildResumeSpec: undefined,
+            text: "more",
+            attachments: [],
+            at,
+            claimWhenIdle: true,
+          }),
+        ).pipe(Effect.exit);
+        const discussed = yield* sessions.storeClaimedDiscussionInput(sessionId, "news", "idle");
+        return { taken, discussed, inputs: yield* countInputs(sessionId) };
+      }),
+    );
+
+    expect(Exit.isFailure(result.taken)).toBe(true);
+    expect(JSON.stringify(result.taken)).toContain("This thread is archived");
+    expect(Option.isNone(result.discussed)).toBe(true);
+    expect(result.inputs).toBe(0);
+  });
+});
+
 describe("SessionService.claimInput", () => {
   it("claims a waiting input in a transaction of its own, and refuses a second claim", async () => {
     const result = await run(

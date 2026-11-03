@@ -12,7 +12,7 @@
  */
 import { Schema } from "effect";
 
-import { Fact, Message, StorageId, Subdirectory, Timestamp } from "./primitives";
+import { Fact, HarnessHome, Message, StorageId, Subdirectory, Timestamp } from "./primitives";
 import { MAX_REPOSITORY_SKILLS, MAX_SKIPPED_REASON_LENGTH, RepositorySkill } from "./skills";
 
 /** The most checkouts one workspace holds; a multi-repo workspace is a handful. */
@@ -27,6 +27,19 @@ export const WORKSPACE_LIFECYCLE_CAPABILITY = "workspaceLifecycle";
 /** Checks whether the negotiated capabilities support the selected-repository workspace lifecycle. */
 export const supportsWorkspaceLifecycle = (capabilities: ReadonlyArray<string>): boolean =>
   capabilities.includes(WORKSPACE_LIFECYCLE_CAPABILITY);
+
+/**
+ * Means the runner honours `archivedSessions` on a workspace dispose and deletes
+ * those sessions' harness files. The controller sends the field only to a runner
+ * that lists it.
+ */
+export const ARCHIVED_SESSION_FILES_CAPABILITY = "archivedSessionFiles";
+
+/**
+ * The most archived sessions one dispose lists. Each entry is at most about 1.4 KB,
+ * so 1000 of them stay inside `MAX_FRAME_BYTES` (2 MiB).
+ */
+export const MAX_ARCHIVED_SESSIONS = 1000;
 
 /** An explicitly supplied absolute path on one supported runner. */
 export const WorkspacePath = Schema.String.check(
@@ -124,11 +137,25 @@ export const requiresWorkspaceLifecycle = (frame: WorkspaceProvision): boolean =
       checkout.baseBranch !== null,
   );
 
+/** An archived session whose harness files are deleted together with its workspace. */
+export const ArchivedSession = Schema.Struct({
+  harnessId: Fact,
+  /** The session's Harness Home as the controller names it in a session start. */
+  harnessHome: HarnessHome,
+  nativeSessionId: Fact,
+});
+
+export type ArchivedSession = Schema.Schema.Type<typeof ArchivedSession>;
+
 export const WorkspaceDispose = Schema.Struct({
   _tag: Schema.Literal("workspaceDispose"),
   workspaceId: StorageId,
   requestId: Schema.optionalKey(Fact),
   discardChanges: Schema.optionalKey(Schema.Boolean),
+  /** The sessions whose harness files the runner deletes once the workspace is removed. */
+  archivedSessions: Schema.optionalKey(
+    Schema.Array(ArchivedSession).check(Schema.isMaxLength(MAX_ARCHIVED_SESSIONS)),
+  ),
 });
 
 export type WorkspaceDispose = Schema.Schema.Type<typeof WorkspaceDispose>;

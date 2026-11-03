@@ -74,6 +74,13 @@ import {
   buildSessionNotRunning,
   describeStartFailure,
 } from "../adapter-error-builders";
+import {
+  isRealFolder,
+  readChildFolders,
+  readFolderNames,
+  removeSessionFiles,
+  UUID_PATTERN,
+} from "../session-files";
 import { truncateMessage } from "../text";
 import { captureIgnoredMessageReporter, captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
@@ -697,6 +704,17 @@ const buildUserInput = (
 
 /** Matches the code the device login prints for the user to type: four characters, a dash, five. */
 const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
+
+/**
+ * Returns the day folders (`YYYY/MM/DD`) of a Codex sessions folder, reading
+ * folder names only, three levels deep. Returns none when there is no sessions
+ * folder.
+ */
+const listRolloutDayFolders = async (sessionsFolder: string): Promise<ReadonlyArray<string>> => {
+  const years = await readChildFolders(sessionsFolder);
+  const months = (await Promise.all(years.map(readChildFolders))).flat();
+  return (await Promise.all(months.map(readChildFolders))).flat();
+};
 
 /**
  * Removes the generated image from a notification frame, in place, before
@@ -1828,6 +1846,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
 
   return {
     harnessId: CODEX,
+    harnessName: CODEX_NAME,
     binaryName: CODEX_BINARY,
 
     events: Stream.fromPubSub(published),
@@ -2060,6 +2079,32 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
+
+    // Codex files a rollout under `sessions/YYYY/MM/DD`, in the date it was
+    // started, and ends its name with the thread id and `.jsonl` (`.jsonl.zst`
+    // once Codex has compressed it). Codex's shared files (its
+    // thread database, `session_index.jsonl`, `history.jsonl`) are left alone:
+    // they hold the threads of every session of the account, and rewriting
+    // them is not safe while another session may be using them.
+    deleteSessionFiles: (home, nativeSessionId) =>
+      removeSessionFiles(nativeSessionId, UUID_PATTERN, async () => {
+        if (!(await isRealFolder(join(home, "codex")))) return [];
+        const sessionsFolder = join(home, "codex", "sessions");
+        const days = await listRolloutDayFolders(sessionsFolder);
+        const rollouts = await Promise.all(
+          days.map(async (day) =>
+            (await readFolderNames(day))
+              .filter(
+                (name) =>
+                  name.startsWith("rollout-") &&
+                  (name.endsWith(`-${nativeSessionId}.jsonl`) ||
+                    name.endsWith(`-${nativeSessionId}.jsonl.zst`)),
+              )
+              .map((name) => join(day, name)),
+          ),
+        );
+        return rollouts.flat();
+      }),
     generateText: generateText,
 
     /**

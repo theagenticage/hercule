@@ -279,7 +279,7 @@ const withLegacyController = async (
       //   `session.started`, so the count is 0;
       // - whether a generated title needs refinement: no title was generated
       //   for these sessions, so it stays null;
-      // - whether the user marked a Thread Done, and when it last reopened:
+      // - whether the user marked a Thread Done or archived it, and when it last reopened:
       //   no old session was either, so these stay null;
       // - which library skills it was given at its last claimed start: no old
       //   session had its start claimed under skill tracking, so the column
@@ -305,6 +305,8 @@ const withLegacyController = async (
             needs_refinement: null,
             done_at: null,
             done_by: null,
+            archived_at: null,
+            archived_by: null,
             reopened_at: null,
             process_started_at: null,
             library_skills: null,

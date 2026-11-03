@@ -47,6 +47,7 @@ import {
   signalsDoneQuery,
   storeNewestMessages,
   storeSentMessage,
+  liveAgentSessionsQuery,
   threadAndAgentSessionsQuery,
   threadsQuery,
   transcriptQuery,
@@ -283,7 +284,7 @@ describe("threadAndAgentSessionsQuery", () => {
     vi.useRealTimers();
   });
 
-  it("asks for the Threads and Agent sessions, minus the Threads marked Done more than 14 days ago", async () => {
+  it("asks for the Threads and Agent sessions, minus the Threads marked Done more than 14 days ago and the archived ones", async () => {
     vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
     const { fetch, calls } = createApiStub({ "GET /api/v1/sessions": { body: { items: [] } } });
     const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
@@ -293,6 +294,7 @@ describe("threadAndAgentSessionsQuery", () => {
     const search = new URLSearchParams(calls[0]!.search);
     expect(search.getAll("kind")).toEqual(["thread", "agent"]);
     expect(search.get("doneSince")).toBe(new Date(NOW.getTime() - 14 * DAY_MS).toISOString());
+    expect(search.get("archived")).toBe("false");
   });
 
   it("keeps its key while the app runs, so a render days later reads nothing new", () => {
@@ -333,6 +335,19 @@ describe("threadAndAgentSessionsQuery", () => {
       thread,
       partner,
     ]);
+  });
+});
+
+describe("liveAgentSessionsQuery", () => {
+  it("asks for the live sessions an Agent spawned and leaves out the archived ones, which the Office must not seat", async () => {
+    const { fetch, calls } = createApiStub({ "GET /api/v1/sessions": { body: { items: [] } } });
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+
+    await new QueryClient().fetchQuery(liveAgentSessionsQuery(client));
+
+    const search = new URLSearchParams(calls[0]!.search);
+    expect(search.getAll("kind")).toEqual(["agent", "run", "assistant"]);
+    expect(search.get("archived")).toBe("false");
   });
 });
 

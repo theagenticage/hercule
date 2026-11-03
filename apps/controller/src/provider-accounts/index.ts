@@ -18,6 +18,7 @@ export {
   type UsageRead,
 } from "./account-runners";
 export { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
+export { resolveHarnessHome } from "./harness-home";
 export { resolveProviderAccountHarness } from "./harness-choice";
 export {
   ProviderKeyRequests,

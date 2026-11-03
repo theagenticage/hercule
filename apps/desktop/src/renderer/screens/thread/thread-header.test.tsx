@@ -394,15 +394,11 @@ describe("the thread header", () => {
     expect(within(readTabStrip()).getByText("No project")).toBeTruthy();
   });
 
-  it("draws More as a disabled button that does nothing, and no Open in editor", async () => {
-    const user = userEvent.setup();
-    const { calls } = await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
-    const sent = calls.length;
+  it("draws More as a button that opens a menu, and no Open in editor", async () => {
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
 
     const more = screen.getByRole("button", { name: "More" });
-    expect(more.getAttribute("aria-disabled")).toBe("true");
-    await user.click(more);
-    expect(calls).toHaveLength(sent);
+    expect(more.getAttribute("aria-haspopup")).toBe("menu");
     expect(screen.queryByRole("button", { name: "Open in editor" })).toBeNull();
     expect(readLinkNames()).toEqual(["Bump the Bun pin, idle", "New thread in this workspace"]);
   });
@@ -867,5 +863,121 @@ describe("the side pane's toggle", () => {
   it("is drawn on a subagent's page too", async () => {
     await openApp(`/threads/${FIXTURE_THREAD_IDS.flaky}/subagents/${FIXTURE_SUBAGENT.id}`);
     expect(await screen.findByRole("button", { name: "Side pane" })).toBeTruthy();
+  });
+});
+
+describe("Archiving from the thread header", () => {
+  const ARCHIVE_PATH = "/api/v1/sessions/archive";
+  const ARCHIVED_AT = "2026-11-02T12:00:00.000Z";
+
+  /** Returns the bodies of the archive requests the app sent. */
+  const readArchiveRequests = (calls: readonly Call[]): readonly unknown[] =>
+    calls.filter((call) => call.path === ARCHIVE_PATH).map((call) => call.body);
+
+  /** Opens More and returns its "Archive…" entry. */
+  const findArchiveEntry = async (): Promise<HTMLElement> => {
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
+    return screen.getByRole("menuitem", { name: "Archive…", hidden: true });
+  };
+
+  it("asks first, with Keep it focused, and sends nothing when the user keeps the thread", async () => {
+    const { calls } = await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
+
+    await userEvent.click(await findArchiveEntry());
+
+    const dialog = await screen.findByRole("dialog", { name: "Archive Bump the Bun pin?" });
+    expect(within(dialog).getByText(/^Its threads leave the sidebar for good/).textContent).toBe(
+      "Its threads leave the sidebar for good and can never be resumed. Their transcripts stay readable. Hercule removes the workspace and everything in it once nobody has used it for 7 days, files you never committed included.",
+    );
+    const keep = within(dialog).getByRole("button", { name: "Keep it" });
+    expect(document.activeElement).toBe(keep);
+    expect(within(dialog).getByRole("button", { name: "Archive" }).className).toContain(
+      "btn--danger",
+    );
+
+    await userEvent.click(keep);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(readArchiveRequests(calls)).toEqual([]);
+  });
+
+  it("archives every Thread of the row in one request once the user confirms", async () => {
+    const { flaky, runbook } = FIXTURE_THREAD_IDS;
+    const { calls } = await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: {
+        ...buildWorktreeHandlers((session) => ({ ...session, status: "idle" })),
+        [`POST ${ARCHIVE_PATH}`]: { body: [] },
+      },
+    });
+
+    await userEvent.click(await findArchiveEntry());
+    await userEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Archive" }),
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(readArchiveRequests(calls)).toEqual([{ sessionIds: [flaky, runbook] }]);
+  });
+
+  it("disables the entry while a session of the row works, with the reason as its tooltip", async () => {
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.waiting });
+
+    const entry = await findArchiveEntry();
+    expect(entry.getAttribute("aria-disabled")).toBe("true");
+    expect(entry.title).toBe("Fix flaky webhook tests is working. Stop it first.");
+
+    await userEvent.click(entry);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  describe("on an archived thread opened from a link", () => {
+    /** The finished thread, archived, which the controller no longer lists. */
+    const renderArchivedHeader = () => {
+      const finished = THREAD_FIXTURES.finished;
+      const archived: Session = {
+        ...finished.session,
+        done: DONE_AT,
+        archived: { at: ARCHIVED_AT, by: "user" },
+      };
+      return renderThreadPart(HeaderOfThread, {
+        thread: { ...finished, session: archived },
+        handlers: {
+          ...buildSidebarHandlers({
+            ...SIDEBAR_FIXTURE,
+            threads: SIDEBAR_FIXTURE.threads.filter((each) => each.id !== archived.id),
+          }),
+        },
+      });
+    };
+
+    it("shows the day it was archived in place of Done and More, and keeps the side pane toggle", async () => {
+      await renderArchivedHeader();
+
+      expect(await screen.findByText("Archived 2 Nov")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Mark done" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+      expect(
+        within(screen.getByRole("banner"))
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("aria-label")),
+      ).toEqual(["Side pane"]);
+      expect(readLinkNames()).toEqual(["Bump the Bun pin, done", "New thread in this project"]);
+    });
+
+    it("starts a new thread in the project alone, without the archived thread's workspace", async () => {
+      await renderArchivedHeader();
+
+      const plus = await within(readTabStrip()).findByRole("link", {
+        name: "New thread in this project",
+      });
+
+      const href = plus.getAttribute("href")!;
+      const search = new URL(href, "http://hercule.test").searchParams;
+      expect(search.get("project")).toBe(THREAD_FIXTURES.finished.session.projectId);
+      expect(search.has("workspace")).toBe(false);
+    });
   });
 });

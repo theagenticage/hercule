@@ -192,7 +192,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
-        const ended = yield* promotion.whenServing(
+        const toStop = yield* promotion.whenServing(
           sessions.bound(traffic.runnerId, traffic.frame.sessions),
         );
         // Mark the runner only after the write is committed. The mark lives in
@@ -202,7 +202,9 @@ const make = Effect.gen(function* () {
         // A process for a session the controller has already ended keeps
         // running without a token, and it blocks a resume of that session on
         // the runner. Nothing else would stop it, so the runner is told to.
-        for (const id of ended) {
+        // An archived session still running is stopped here too: the stop sent
+        // when it was archived may have been lost.
+        for (const id of toStop) {
           yield* connections.tell(traffic.runnerId, sessions.stopping(id));
         }
         yield* forkAndAbsorbFailures(

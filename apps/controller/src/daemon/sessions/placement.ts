@@ -1538,7 +1538,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Opens a new session that continues from the harness-native session an
-     * exited parent left behind. Returns the new session. It runs on the same
+     * exited parent left behind. Returns the new session. Fails with
+     * `InvalidState` when the parent is archived. It runs on the same
      * runner, account and harness as the parent, because that is where the native
      * state is (spec 06 section 4.1). Resuming the parent itself is done by
      * `session.input`.

@@ -744,7 +744,8 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
         withApiErrors(placement.continueSession({ id: params.id, ...payload })),
       )
       .handle("markDone", ({ payload }) => withApiErrors(sessions.markDone(payload)))
-      .handle("reopen", ({ payload }) => withApiErrors(sessions.reopen(payload)));
+      .handle("reopen", ({ payload }) => withApiErrors(sessions.reopen(payload)))
+      .handle("archive", ({ payload }) => withApiErrors(live.archive(payload)));
   }),
 );
 

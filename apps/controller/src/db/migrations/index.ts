@@ -111,6 +111,7 @@ import modelCatalogsAndProfiles from "./0100-model-catalogs-and-profiles";
 import projectModelProfile from "./0101-project-model-profile";
 import catalogFirstRead from "./0102-catalog-first-read";
 import runnerMetrics from "./0103-runner-metrics";
+import archivedSessions from "./0104-archived-sessions";
 import runnerMetricsHistory from "./0104-runner-metrics-history";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
@@ -217,7 +218,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [101, "project-model-profile", Effect.succeed(projectModelProfile)],
   [102, "catalog-first-read", Effect.succeed(catalogFirstRead)],
   [103, "runner-metrics", Effect.succeed(runnerMetrics)],
-  [104, "runner-metrics-history", Effect.succeed(runnerMetricsHistory)],
+  [104, "archived-sessions", Effect.succeed(archivedSessions)],
+  [105, "runner-metrics-history", Effect.succeed(runnerMetricsHistory)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

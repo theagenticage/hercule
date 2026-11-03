@@ -23,6 +23,7 @@ import { CheckIcon } from "../../icons/check";
 import { SidebarIcon } from "../../icons/sidebar";
 import { UndoIcon } from "../../icons/undo";
 import { useHasSidePane, useSidePaneLayout } from "../subagents/use-side-pane";
+import { ArchivedPill, ThreadMorePill } from "./archive-pills";
 import { MorePill, ProjectCrumb, ThreadTabsPill } from "./header-pills";
 import { TranscriptSyncMarker } from "./transcript-sync-marker";
 import "../session/floating-header.css";
@@ -60,8 +61,13 @@ const RunSessionCrumbs = lazy(() =>
  * - The free space after the pill holds "Syncing…" while the thread, opened
  *   from its saved copy, is brought up to date (`TranscriptSyncMarker`).
  * - The buttons on the right are the side pane's toggle, on the thread's
- *   screen only, Done (or Reopen), and More, which is drawn but does nothing
- *   yet and carries `aria-disabled` to say so.
+ *   screen only, Done (or Reopen), and More, whose menu has "Archive…"
+ *   (`ThreadMorePill`). A session with no row, such as a step session, has
+ *   a More that is drawn but does nothing and carries `aria-disabled` to say so.
+ * - An archived thread shows "Archived 2 Nov" in place of Done and More, and
+ *   its `+` starts a thread in the project without the workspace. It has no
+ *   row in the sidebar's list, which no longer holds archived threads, so the
+ *   session itself says it is archived.
  *
  * Done marks every Thread of the row that is not done yet, as the sidebar
  * row's Done does. Once every Thread of the row is done, the button is
@@ -106,7 +112,16 @@ export const ThreadHeader = memo(function ThreadHeader({
   // open session's own project must not stand in for it, or a partner in another project would
   // move the work under that project.
   const projectId = row === undefined ? session.projectId : row.projectId;
+  const archived = session.archived;
   const canStartThread = !isStepSession && workspace !== undefined && isJoinable(workspace);
+  // Archiving was the final act on the workspace, and a new thread joining it would make it
+  // manual again, so an archived thread's "+" starts a thread in the project alone.
+  const newThread =
+    archived !== undefined
+      ? { projectId, workspaceId: null }
+      : canStartThread
+        ? { projectId, workspaceId: workspace.id }
+        : null;
 
   return (
     <header className="top">
@@ -127,12 +142,18 @@ export const ThreadHeader = memo(function ThreadHeader({
         workName={isStepSession ? null : (row?.title ?? session.title)}
         tabs={tabs}
         open={{ kind: "session", sessionId: session.id }}
-        newThread={canStartThread ? { projectId, workspaceId: workspace.id } : null}
+        newThread={newThread}
         freeSpace={<TranscriptSyncMarker sessionId={session.id} />}
       />
       <SidePaneToggle sessionId={session.id} />
-      {row === undefined ? null : <DonePill row={row} />}
-      <MorePill />
+      {archived === undefined ? (
+        <>
+          {row === undefined ? null : <DonePill row={row} />}
+          {row === undefined ? <MorePill /> : <ThreadMorePill row={row} />}
+        </>
+      ) : (
+        <ArchivedPill archivedAt={archived.at} />
+      )}
     </header>
   );
 });

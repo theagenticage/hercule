@@ -26,6 +26,7 @@ import {
   type NotFound,
   type Passage,
   type PermissionRequest,
+  type SessionArchived,
   type SessionKind,
   type SessionRequest,
   type SessionStatus,
@@ -64,6 +65,7 @@ const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
  *
  * - the session has exited
  * - its harness-native transcript is known
+ * - it is not archived
  * - its runner is not retired
  * - its workspace is ready (see `buildReadyClause`)
  * - it answers no assistant's conversation, or that conversation still
@@ -72,6 +74,7 @@ const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
  */
 const buildResumableClause = (alias: string): string =>
   `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
+  `AND ${alias}.archived_at IS NULL ` +
   `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
   `AND runners.lifecycle <> 'retired') ` +
   `AND ${buildReadyClause(alias)} ` +
@@ -162,6 +165,8 @@ export interface StoredSession {
   readonly crashGuardArmed: boolean;
   /** When the Thread was marked Done and by whom; `null` while it is not Done. */
   readonly done: ThreadDone | null;
+  /** When the Thread was archived and by whom; `null` while it is not archived. */
+  readonly archived: SessionArchived | null;
   /** The last time the Thread was reopened; `null` until it first is. */
   readonly reopenedAt: string | null;
   /** Whether an input still waits on the session, sent to the runner or not. Computed on read. */
@@ -244,8 +249,12 @@ export interface SessionPageRequest {
   readonly runId: string | ReadonlyArray<string> | undefined;
   /** Only the sessions of these kinds. */
   readonly kind: SessionKind | ReadonlyArray<SessionKind> | undefined;
+  /** Only the sessions placed in this workspace, or in one of these workspaces. */
+  readonly workspaceId: string | ReadonlyArray<string> | undefined;
   /** `true` lists only the Threads marked Done; `false` lists every session that is not. */
   readonly done: boolean | undefined;
+  /** `true` lists only the archived sessions; `false` lists every session that is not. */
+  readonly archived: boolean | undefined;
   /** Only the sessions that are not exited, or that exited at or after this instant. */
   readonly activeSince: string | undefined;
   /** Only the sessions not marked Done, and those marked Done at or after this instant. */
@@ -298,6 +307,8 @@ interface SessionRow {
   readonly crash_guard_armed: number;
   readonly done_at: string | null;
   readonly done_by: string | null;
+  readonly archived_at: string | null;
+  readonly archived_by: string | null;
   readonly reopened_at: string | null;
   readonly input_waiting: number;
   readonly conversation_deleted: number;
@@ -318,7 +329,7 @@ const buildColumnList = (): string =>
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
   "open_requests, usage, usage_process, tool_calls, created_at, started_at, process_started_at, exited_at, exit_reason, " +
-  "last_activity_at, crash_guard_armed, done_at, done_by, reopened_at, " +
+  "last_activity_at, crash_guard_armed, done_at, done_by, archived_at, archived_by, reopened_at, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
   "(conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversations " +
@@ -384,6 +395,9 @@ const toSession = (row: SessionRow): StoredSession => ({
   crashGuardArmed: row.crash_guard_armed === 1,
   // The migration's check stores `done_by` exactly when `done_at` is set.
   done: row.done_at === null ? null : { at: row.done_at, by: row.done_by as string },
+  // The migration's check stores `archived_by` exactly when `archived_at` is set.
+  archived:
+    row.archived_at === null ? null : { at: row.archived_at, by: row.archived_by as string },
   reopenedAt: row.reopened_at,
   inputWaiting: row.input_waiting === 1,
   conversationDeleted: row.conversation_deleted === 1,
@@ -683,15 +697,19 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Returns the ids of the exited sessions of one conversation that have a workspace. */
-    listExitedWithWorkspaceInConversation: (
+    /**
+     * Returns the ids of the exited sessions of one conversation that have a
+     * workspace and are not archived. An archived session's lease is released
+     * as `archived`, and a caller that releases these again must not change it.
+     */
+    listExitedUnarchivedWithWorkspaceInConversation: (
       conversationId: string,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM sessions
           WHERE conversation_id = ${uuidFromString(conversationId)} AND status = 'exited'
-            AND workspace_id IS NOT NULL
+            AND workspace_id IS NOT NULL AND archived_at IS NULL
         `,
         (rows) => rows.map((row) => uuidToString(row.id)),
       ),
@@ -714,8 +732,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the ids among `ids` of sessions that have ended for good: the
-     * process has exited and the session cannot be resumed. Uses one query for
+     * Returns the ids among `ids` of sessions that have ended for good: they
+     * are archived, or the process has exited and the session cannot be
+     * resumed. Uses one query for
      * the whole list, because the caller asks about many sessions at once and
      * a query per id would grow with the list.
      */
@@ -728,7 +747,8 @@ const make = Effect.gen(function* () {
             sql<{ readonly id: Uint8Array }>`
               SELECT id FROM sessions
               WHERE id IN ${sql.in(ids.map(uuidFromString))}
-                AND status = 'exited' AND NOT (${sql.literal(buildResumableClause("sessions"))})
+                AND (archived_at IS NOT NULL
+                  OR (status = 'exited' AND NOT (${sql.literal(buildResumableClause("sessions"))})))
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),
           ),
@@ -776,8 +796,18 @@ const make = Effect.gen(function* () {
               : sql`kind IN ${sql.in(request.kind)}`,
           );
         }
+        if (request.workspaceId !== undefined) {
+          clauses.push(
+            typeof request.workspaceId === "string"
+              ? sql`workspace_id = ${uuidFromString(request.workspaceId)}`
+              : sql`workspace_id IN ${sql.in(request.workspaceId.map(uuidFromString))}`,
+          );
+        }
         if (request.done !== undefined) {
           clauses.push(request.done ? sql`done_at IS NOT NULL` : sql`done_at IS NULL`);
+        }
+        if (request.archived !== undefined) {
+          clauses.push(request.archived ? sql`archived_at IS NOT NULL` : sql`archived_at IS NULL`);
         }
         if (request.doneSince !== undefined) {
           clauses.push(sql`(done_at IS NULL OR done_at >= ${request.doneSince})`);
@@ -1269,6 +1299,43 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Marks the session archived, at `at`, by `actor`. Returns whether it
+     * changed the row: `false` when the session was already archived, or does
+     * not exist. It checks nothing else; the service decides which sessions
+     * may be archived.
+     */
+    archive: (sessionId: string, actor: string, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE sessions SET archived_at = ${at}, archived_by = ${actor}
+          WHERE id = ${uuidFromString(sessionId)} AND archived_at IS NULL
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Returns every session of kind `thread` or `agent` in these workspaces,
+     * archived or not: the sessions a desktop sidebar row holds. One query
+     * serves all the workspaces, because a caller archiving many Threads asks
+     * about every one of their workspaces at once.
+     */
+    listThreadsAndAgentSessionsInWorkspaces: (
+      workspaceIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      workspaceIds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<SessionRow>`
+              SELECT ${sql.literal(COLUMNS)} FROM sessions
+              WHERE workspace_id IN ${sql.in(workspaceIds.map(uuidFromString))}
+                AND kind IN ('thread', 'agent')
+              ORDER BY created_at, id
+            `,
+            (rows) => rows.map(toSession),
+          ),
+
+    /**
      * Takes the Done mark off the session and stores `at` as the time it was
      * reopened. Returns whether it changed the row: `false` when the session
      * was not Done, or does not exist. A session that was not Done keeps its
@@ -1522,7 +1589,7 @@ const make = Effect.gen(function* () {
      * reach, and its token must keep working. One exception: a runner whose
      * machine was suspended does not count the suspended time, so its process
      * can outlive the bound. That runner lists the process in its report when
-     * it returns, and the controller then stops it (`listExitedAmong`).
+     * it returns, and the controller then stops it (`listToStopAmong`).
      *
      * A spec stored before the timeouts were on it has no absolute timeout, so
      * the default the runner applied to it at that time is the bound.
@@ -1540,11 +1607,14 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the sessions in `held` (the runner's report) that the controller
-     * has already marked `exited`. The caller tells the runner to stop each
-     * one.
+     * Returns the sessions in `held` (the runner's report) that must not be
+     * running: the controller has already marked them `exited`, or they are
+     * archived. An archived session is stopped when it is archived, and the
+     * frame can be lost before the runner gets it. The caller tells the runner
+     * to stop each one. Neither the status nor the lease of a session changes
+     * here.
      */
-    listExitedAmong: (
+    listToStopAmong: (
       runnerId: string,
       held: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
@@ -1553,7 +1623,7 @@ const make = Effect.gen(function* () {
         : Effect.map(
             sql<{ readonly id: Uint8Array }>`
               SELECT id FROM sessions
-              WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'exited'
+              WHERE runner_id = ${uuidFromString(runnerId)} AND (status = 'exited' OR archived_at IS NOT NULL)
                 AND id IN ${sql.in(held.map(uuidFromString))}
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),

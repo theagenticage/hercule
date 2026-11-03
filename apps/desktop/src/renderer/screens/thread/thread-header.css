@@ -197,3 +197,29 @@
   display: inline-flex;
   transform: scaleX(-1);
 }
+
+/* Not in the book, which draws no archive. More opens a menu 6px under its
+   button, its right edge on the button's, as Intake's pane menu does. */
+.more-menu {
+  min-width: 180px;
+  margin-top: 6px;
+  position-area: block-end span-inline-start;
+}
+.more-menu [role="menuitem"] .ic {
+  color: var(--muted);
+}
+.more-menu [role="menuitem"][aria-disabled="true"] .ic {
+  color: var(--faint);
+}
+/* Not in the book. What an archived thread's header says in place of Done
+   and More: sized and spaced as the Done button, but a note, not a button,
+   so it is muted and takes no hover. */
+.pill-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}

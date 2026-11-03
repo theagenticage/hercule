@@ -683,6 +683,7 @@ export {
   chooseStamps,
   computeNextMidnight,
   formatClock,
+  formatDay,
   formatDayStamp,
   formatPreciseStamp,
   formatRelativeMoment,
@@ -961,6 +962,13 @@ export {
 export { locateShownRequest } from "./threads/shown-request";
 export { createTypingGuard, type TypingGuard } from "./threads/typing-guard";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
+export {
+  archiveRows,
+  buildArchiveTitle,
+  findArchiveBlockReason,
+  planArchiveAll,
+  type ArchivePlan,
+} from "./threads/archive";
 export { isMarkedDone } from "./threads/status";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
 export { describeAgent } from "./threads/model-name";

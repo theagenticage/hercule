@@ -68,7 +68,10 @@ describe("the adapters in this runner build", () => {
       baseEnv: { PATH: "/usr/bin" },
       findBinary: () => undefined,
       workspaces: Effect.runSync(
-        makeWorkspaces({ storageDir: "/var/hercule/runner" }).pipe(Scope.provide(scope)),
+        makeWorkspaces({
+          storageDir: "/var/hercule/runner",
+          deleteArchivedSessionFiles: () => Effect.succeed([]),
+        }).pipe(Scope.provide(scope)),
       ),
       socketPath: "/var/hercule/runner/daemon.sock",
     };

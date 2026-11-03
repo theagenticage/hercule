@@ -171,6 +171,11 @@ export const SETTING_VALUES = {
      */
     "workspace.inspectionTtlDays": PositiveDays,
     /**
+     * How long an archived workspace is kept after its last session exits, in
+     * days. Applies to workspaces that become archived after a change.
+     */
+    "workspace.archivedTtlDays": PositiveDays,
+    /**
      * How deep runs may nest. A run started by hand or by a program is 1
      * deep, and a run that a step of another run starts is one deeper than
      * that run. A workflow that starts itself, directly or through another

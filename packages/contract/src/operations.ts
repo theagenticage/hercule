@@ -778,6 +778,15 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/sessions/reopen",
   },
+  // Archiving puts Threads away for good. The grant is the one the user
+  // holds, but the operation is also refused to every session token, whatever
+  // its profile holds, because an agent that archived a Thread could make the
+  // user's work unresumable without the user seeing it.
+  "session.archive": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/archive",
+  },
 
   // Owned sub-resources of a session: the id in the path is the session's, and
   // the grant is the session's, because an input is what that session was told.
