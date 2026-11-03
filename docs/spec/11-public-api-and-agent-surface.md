@@ -987,11 +987,12 @@ Disposal reserves `disposing` before runner I/O ~~and returns deletion success o
   - `refused`: one of the checks `workspace.dispose` makes refused it before anything was reserved (an unknown id, an active holder, a workspace that is not managed), with that check's message. A main workspace is refused too: "A main workspace is removed on its own, with workspace.dispose." So is a workspace used since `expectedLastUsedAt`.
 
   It is not all or nothing: each workspace is reserved in its own transaction, and one refusal does not stop the others.
+  - *(Amended 2026-11-03, [#987](https://github.com/theagenticage/hercule/issues/987).)* Each item is an ordinary disposal. A workspace listed twice is checked twice, and one already reserved answers `requested` again with the same removal. A database failure fails the whole call: the items already reserved stay reserved, and their runners are told when they connect.
   - It archives nothing. The cleanup dialog's "Archive and remove" calls `session.archive` for the workspaces' Threads first, then this.
   - An archived workspace, one with at least one Thread and every Thread archived, is removed whole, with its archived sessions' harness files ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.9). Any other workspace is removed as `workspace.dispose` without `discardChanges` removes it, so it takes no `discardChanges` of its own.
   - The user only: a session is refused `forbidden` whatever its profile holds, as for `session.archive`. Grant `workspace.write`. Route `POST /workspaces/dispose`.
   - Audit: the entries `workspace.dispose` writes, one set per workspace.
-  - The CLI row: `hercule workspace dispose-many <workspace-id>...`, which sends no `expectedLastUsedAt`. Purpose: "Asks for several workspaces to be removed at once, and reports for each whether the removal was requested or refused."
+  - The CLI row: `hercule workspace dispose-many <workspace-id>...`, which sends no `expectedLastUsedAt`. Purpose: ~~"Asks for several workspaces to be removed at once, and reports for each whether the removal was requested or refused."~~ *(Amended 2026-11-03, [#987](https://github.com/theagenticage/hercule/issues/987).)* "Asks for several workspaces to be removed at once. Reports for each whether the removal was requested or refused." The purpose is two sentences because a purpose must start with a sentence of at most 100 characters.
 
 Workspaces otherwise appear as side effects of session and run placement; `lost` is set by runner retirement, never by an operation.
 
