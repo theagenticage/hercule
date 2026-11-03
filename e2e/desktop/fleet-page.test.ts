@@ -15,6 +15,8 @@
  * - a machine's activity lists the session the user spawned and the workspace
  *   the user removed, in Recent on its page and on the Activity page, and the
  *   crumb of the Activity page leads back to the machine.
+ * - a thread started on a machine shows on that machine's card as a group at
+ *   work, and in the Running here section of its page, which opens the thread.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -336,5 +338,34 @@ describe("the Fleet page", () => {
       .click();
     await page.getByRole("region", { name: "Recent" }).waitFor();
     await page.getByRole("heading", { level: 2, name: "Activity" }).waitFor({ state: "detached" });
+  });
+
+  it("lists a thread started on a machine in that machine's Running here, and the row opens the thread", async () => {
+    const { url, fleet, waitForStatus } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    const [thread] = await fleet.spawnThreads(1, { runner });
+    await waitForStatus(thread!.id, "busy");
+    const { page } = await openSignedIn(url);
+    await openFleet(page);
+
+    // The card counts the thread as one group at work.
+    const card = locateCard(page, "studio");
+    await card.getByRole("img", { name: "1 group at work here" }).waitFor();
+
+    // The machine's page lists it under the title the sidebar gives the thread.
+    await card.getByRole("button", { name: "studio", exact: true }).click();
+    const runningHere = page.getByRole("region", { name: "Running here" });
+    await runningHere.getByRole("link", { name: /Thread 1/ }).click();
+
+    await page.locator('section[aria-label="Transcript"]').waitFor();
+    await expect.poll(() => readSidebarList(page)).toBe("Threads");
+    await expect
+      .poll(() =>
+        page
+          .getByRole("navigation", { name: "Threads", exact: true })
+          .getByRole("link", { name: /Thread 1/ })
+          .getAttribute("aria-current"),
+      )
+      .toBe("page");
   });
 });
