@@ -1,10 +1,11 @@
 /**
- * Tests `findResumeBlockedReason(session)`, which returns why a thread cannot
- * take input, or `null` when it can.
+ * Tests `findResumeBlockedReason(session, workspace)`, which returns why a
+ * thread cannot take input, or `null` when it can.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
 import { findResumeBlockedReason } from "@hercule/client-core";
+import { buildWorkspace } from "@hercule/client-core/threads/testing";
 
 const BASE: Session = {
   id: "s0",
@@ -41,24 +42,54 @@ const BASE: Session = {
 
 const buildSession = (overrides: Partial<Session>): Session => ({ ...BASE, ...overrides });
 
+const READY = buildWorkspace({ id: "w0", status: "ready" });
+
 describe("findResumeBlockedReason", () => {
   it("returns null for a session that has not exited", () => {
-    expect(findResumeBlockedReason(buildSession({ status: "idle" }))).toBeNull();
-    expect(findResumeBlockedReason(buildSession({ status: "busy" }))).toBeNull();
+    expect(findResumeBlockedReason(buildSession({ status: "idle" }), READY)).toBeNull();
+    expect(findResumeBlockedReason(buildSession({ status: "busy" }), READY)).toBeNull();
   });
 
   it("returns null for an exited session that can be resumed", () => {
     const exited = buildSession({ status: "exited", resumable: true, nativeSessionId: "n" });
-    expect(findResumeBlockedReason(exited)).toBeNull();
+    expect(findResumeBlockedReason(exited, READY)).toBeNull();
   });
 
   it("says the transcript is gone when a session that cannot be resumed has no native session id", () => {
     const exited = buildSession({ status: "exited", resumable: false, nativeSessionId: null });
-    expect(findResumeBlockedReason(exited)).toBe("its transcript is gone");
+    expect(findResumeBlockedReason(exited, READY)).toBe("its transcript is gone");
   });
 
   it("says the runner was retired when a session that cannot be resumed still has its native session id", () => {
     const exited = buildSession({ status: "exited", resumable: false, nativeSessionId: "n" });
-    expect(findResumeBlockedReason(exited)).toBe("its runner was retired");
+    expect(findResumeBlockedReason(exited, READY)).toBe("its runner was retired");
+    expect(findResumeBlockedReason(exited, undefined)).toBe("its runner was retired");
+  });
+
+  it.each(["deleted", "lost"] as const)(
+    "says the workspace was removed when it is %s, before the other reasons",
+    (status) => {
+      const exited = buildSession({ status: "exited", resumable: false, nativeSessionId: null });
+      expect(findResumeBlockedReason(exited, buildWorkspace({ id: "w0", status }))).toBe(
+        "its workspace was removed",
+      );
+    },
+  );
+
+  it("does not report a removed workspace for a session that can be resumed", () => {
+    const exited = buildSession({ status: "exited", resumable: true, nativeSessionId: "n" });
+    expect(
+      findResumeBlockedReason(exited, buildWorkspace({ id: "w0", status: "deleted" })),
+    ).toBeNull();
+  });
+
+  it("says the thread is archived before every other reason, even while the session is idle", () => {
+    const archived = { at: "2026-11-02T09:00:00.000Z", by: "user" } as const;
+    const idle = buildSession({ status: "idle", archived });
+    expect(findResumeBlockedReason(idle, READY)).toBe("it is archived");
+    const exited = buildSession({ status: "exited", nativeSessionId: null, archived });
+    expect(findResumeBlockedReason(exited, buildWorkspace({ id: "w0", status: "deleted" }))).toBe(
+      "it is archived",
+    );
   });
 });

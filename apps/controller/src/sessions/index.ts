@@ -9,6 +9,7 @@
  * that a request calls directly. It also builds the frames and makes the
  * status changes that the controller daemon calls while it talks to a runner.
  */
+export { ARCHIVED_REFUSAL, refuseArchived } from "./archived";
 export type { WaitEndedBy } from "./approval-notification";
 export {
   combineSessionObservers,

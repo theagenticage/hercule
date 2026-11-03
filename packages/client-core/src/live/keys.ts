@@ -136,9 +136,9 @@ export const queryKeys = {
    * - one run's sessions, the ones its agent steps started, for the run's page;
    * - `{ kind: "thread" }`, every Thread and no Agent's session, for the
    *   desktop app's sidebar;
-   * - `{ kind: ["agent", "run", "assistant"], status: LIVE_SESSION_STATUSES }`,
-   *   the live sessions an Agent spawned, which the desktop app's "From runs"
-   *   reads.
+   * - `{ kind: ["agent", "run", "assistant"], status: LIVE_SESSION_STATUSES,
+   *   archived: false }`, the live sessions an Agent spawned that are not
+   *   archived, which the desktop app's "From runs" and the Office read.
    *
    * Every variant keeps the `sessions` prefix, so a `session` push
    * invalidates them all.

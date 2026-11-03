@@ -56,6 +56,10 @@ const MAX_LISTED_PATHS = 20;
 /** Why a notification is withdrawn when its session ends while the request waits. */
 export const WITHDRAW_REASON_SESSION_ENDED = "The session ended before the request was answered.";
 
+/** Why a notification is withdrawn when its session is archived while the request waits. */
+export const WITHDRAW_REASON_SESSION_ARCHIVED =
+  "The session was archived before the request was answered.";
+
 /** Why a notification is withdrawn when the user interrupts the turn that asked. */
 const WITHDRAW_REASON_TURN_INTERRUPTED =
   "The turn was interrupted before the request was answered.";

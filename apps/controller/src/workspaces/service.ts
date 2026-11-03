@@ -42,6 +42,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   supportsWorkspaceLifecycle,
   requiresWorkspaceLifecycle,
+  type ArchivedSession,
   type CredentialAnswer,
   type CredentialRequest,
   type GitIdentity,
@@ -139,6 +140,17 @@ const DEFAULT_IDLE_TTL_DAYS = 30;
 /** How long an `inspection` lease keeps its workspace after its release, in days. */
 const DEFAULT_INSPECTION_TTL_DAYS = 14;
 
+/** How long an `archived` lease keeps its workspace after its release, in days. */
+const DEFAULT_ARCHIVED_TTL_DAYS = 7;
+
+/**
+ * Says that the expiry sweep, not a caller, disposes of the workspace, and
+ * which lease expired. A sweep removes a finished run's workspace whole.
+ */
+export interface SweepDisposal {
+  readonly expired: ExpiredLease;
+}
+
 const HOUR_MS = 60 * 60 * 1000;
 
 const DAY_MS = 24 * HOUR_MS;
@@ -221,6 +233,8 @@ const computeRetentionWindow = (
       return (controller["workspace.idleTtlDays"] ?? DEFAULT_IDLE_TTL_DAYS) * DAY_MS;
     case "inspection":
       return (controller["workspace.inspectionTtlDays"] ?? DEFAULT_INSPECTION_TTL_DAYS) * DAY_MS;
+    case "archived":
+      return (controller["workspace.archivedTtlDays"] ?? DEFAULT_ARCHIVED_TTL_DAYS) * DAY_MS;
   }
 };
 
@@ -752,24 +766,58 @@ const make = Effect.gen(function* () {
       return opened;
     });
 
+  /**
+   * Reserves a removal and returns its frozen instruction.
+   *
+   * A dispose is sent with `discardChanges: true`, and so removes the workspace
+   * whole, when the caller asked for it or when the workspace is:
+   *
+   * - archived (see `listArchivedWorkspaces`), whoever disposes;
+   * - a run's workspace (a run holds a lease, no Thread works in it), when the
+   *   sweep disposes of it.
+   *
+   * Both are decided here, from the sessions and leases, in the reserving
+   * transaction. A main workspace is neither: only an explicit request
+   * discards it, and it keeps the harness files of its archived Threads, so
+   * the `archivedSessions` and `warnings` passed in are ignored for it.
+   *
+   * `archivedSessions` is the list of archived sessions whose harness files the
+   * runner deletes with the workspace. It is built by the caller, frozen into
+   * the instruction, and stored as given. `warnings` are stored on the
+   * workspace once the removal is confirmed.
+   */
   const reserveRemoval = (
     workspace: StoredWorkspace,
     tag: "workspaceDispose" | "workspaceDetach",
     actor: string,
     {
       discardChanges = false,
-      expired,
-    }: { readonly discardChanges?: boolean; readonly expired?: ExpiredLease } = {},
+      sweep,
+      archivedSessions = [],
+      warnings = [],
+    }: {
+      readonly discardChanges?: boolean;
+      readonly sweep?: SweepDisposal;
+      readonly archivedSessions?: ReadonlyArray<ArchivedSession>;
+      readonly warnings?: ReadonlyArray<string>;
+    } = {},
   ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
     Effect.gen(function* () {
       const previous = yield* workspaces.readRemoval(workspace.id);
+      const removable = tag === "workspaceDispose" && workspace.kind !== "primary";
+      const archived =
+        removable && (yield* workspaces.listArchivedWorkspaces([workspace.id])).length > 0;
+      const removeWhole =
+        discardChanges ||
+        archived ||
+        (removable && sweep !== undefined && (yield* workspaces.isRunWorkspace(workspace.id)));
       if (workspace.status === "disposing") {
         if (
           Option.isSome(previous) &&
           previous.value.frame._tag === tag &&
           (tag === "workspaceDetach" ||
             (previous.value.frame._tag === "workspaceDispose" &&
-              (previous.value.frame.discardChanges ?? false) === discardChanges))
+              (previous.value.frame.discardChanges ?? false) === removeWhole))
         )
           return previous.value.frame;
         return yield* Effect.fail(
@@ -786,13 +834,18 @@ const make = Effect.gen(function* () {
               _tag: "workspaceDispose",
               workspaceId: workspace.id,
               requestId,
-              ...(discardChanges ? { discardChanges: true } : {}),
+              ...(removeWhole ? { discardChanges: true } : {}),
+              ...(removable && archivedSessions.length > 0 ? { archivedSessions } : {}),
             };
       yield* workspaces.reserveRemoval(workspace.id, frame, {
         actor,
-        ...(expired === undefined
+        ...(sweep === undefined
           ? {}
-          : { reason: expired.retention, holder: formatHolder(expired.holder) }),
+          : {
+              reason: sweep.expired.retention,
+              holder: formatHolder(sweep.expired.holder),
+            }),
+        ...(removable && warnings.length > 0 ? { warnings } : {}),
       });
       yield* audit.append({
         kind: "workspace.disposalRequested",
@@ -802,7 +855,7 @@ const make = Effect.gen(function* () {
           runnerId: workspace.runnerId,
           requestId,
           operation: tag,
-          discardChanges,
+          discardChanges: removeWhole,
         },
         at: yield* nowIso,
       });
@@ -845,6 +898,14 @@ const make = Effect.gen(function* () {
       }
       if (report.status === "deleted") {
         yield* workspaces.markDisposed(report.workspaceId, at);
+        const warnings = [...(report.warnings ?? []), ...(removal.value.audit.warnings ?? [])];
+        if (warnings.length > 0) {
+          const kept = yield* workspaces.one(report.workspaceId);
+          yield* workspaces.recordWarnings(report.workspaceId, [
+            ...(Option.isSome(kept) ? kept.value.warnings : []),
+            ...warnings,
+          ]);
+        }
         yield* audit.append({
           kind:
             removal.value.frame._tag === "workspaceDetach"
@@ -1196,6 +1257,25 @@ const make = Effect.gen(function* () {
         }),
       ),
 
+    /**
+     * Gives an archived workspace back to automatic cleanup, in the caller's
+     * transaction. The sessions code calls it when a workspace has become
+     * archived.
+     *
+     * - A primary keeps its policy, because the sweep never deletes one.
+     * - Every released lease of an archived session is released again with the
+     *   retention `archived`. It keeps its own release time, so it is kept for
+     *   the archived window counted from the session's exit, with the window
+     *   read from the settings now.
+     * - An active lease is never touched: a session that is still running
+     *   keeps its workspace until it exits.
+     */
+    returnToAutomaticCleanup: (workspaceId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const window = computeRetentionWindow("archived", yield* settings.all());
+        yield* workspaces.returnToAutomaticCleanup(workspaceId, window);
+      }),
+
     /** Applies manual retention using the actual stored session's Thread classification. */
     retainForThread: workspaces.retainForThread,
 
@@ -1225,12 +1305,18 @@ const make = Effect.gen(function* () {
      * Reserves a durable removal and returns its frozen runner instruction.
      * Keeps the workspace disposing until that request's outcome arrives.
      * Refuses a different policy while removal is pending. A sweep records
-     * the expired lease's rule and holder as the reason for requesting removal.
+     * the expired lease's rule and holder as the reason for requesting removal,
+     * and removes a finished run's workspace whole.
      */
     reserveDisposal: (
       workspace: StoredWorkspace,
       actor: string,
-      options: { readonly expired?: ExpiredLease; readonly discardChanges?: boolean } = {},
+      options: {
+        readonly sweep?: SweepDisposal;
+        readonly discardChanges?: boolean;
+        readonly archivedSessions?: ReadonlyArray<ArchivedSession>;
+        readonly warnings?: ReadonlyArray<string>;
+      } = {},
     ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
       reserveRemoval(workspace, "workspaceDispose", actor, options),
 
@@ -1246,6 +1332,23 @@ const make = Effect.gen(function* () {
       runnerId: string,
     ): Effect.Effect<ReadonlyArray<WorkspaceRemoval>, SqlError> =>
       workspaces.listOwedDisposals(runnerId),
+
+    /** Returns the archived workspaces among these ids; see the repository's definition. */
+    listArchivedWorkspaces: workspaces.listArchivedWorkspaces,
+
+    /**
+     * Returns up to `limit` archived sessions of the workspace that have a
+     * native session id, oldest first, and how many such sessions it has in all.
+     */
+    listArchivedSessions: workspaces.listArchivedSessions,
+
+    /**
+     * Adds a warning to the workspace's pending removal, once, in a
+     * transaction of its own. It is stored on the workspace when the runner
+     * confirms the removal.
+     */
+    recordRemovalWarning: (workspaceId: string, warning: string): Effect.Effect<void, SqlError> =>
+      withTransaction(sql, workspaces.addRemovalWarning(workspaceId, warning)),
 
     /** Returns whether this runner can execute the workspace's recorded attachment semantics. */
     supportsPreparationInstruction: (

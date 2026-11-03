@@ -223,9 +223,10 @@
 .side-line .side-end {
   min-width: 48px;
 }
-/* A done row's slot is empty, and wide enough for Reopen, the wider word. */
+/* A done row's slot is empty, and wide enough for Reopen, the wider word,
+   and Archive beside it. */
 .side-thread.is-done .side-line .side-end {
-  min-width: 58px;
+  min-width: 82px;
 }
 /* A working thread steps back so the threads that need the user stand out,
    unless it is the open thread (`receded` in sidebar-items.ts), and so does
@@ -315,9 +316,32 @@
     opacity var(--dur-1),
     background var(--dur-1);
 }
-.side-act:hover {
+.side-act:hover:not([aria-disabled="true"]) {
   background: var(--hover);
   color: var(--ink);
+}
+/* Not in the book. Archive on the Done shelf, beside Reopen: an icon alone,
+   so the pair fits where Reopen sat. While the row works it is disabled,
+   faint, and its tooltip says why. */
+.side-act--icon {
+  min-width: 0;
+}
+.side-act[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
+/* The pair of buttons on a Done shelf row sits where one button does, with
+   the same top and right edge. Each button is placed by the pair, so it
+   keeps its own fade (`.side-act`'s opacity and the rules below). */
+.side-acts {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  display: inline-flex;
+  gap: 2px;
+}
+.side-acts > .side-act {
+  position: static;
 }
 .side-thread .side-end {
   transition: opacity var(--dur-1);
@@ -329,8 +353,8 @@
 /* The status fades only where a button takes its place. The draft's row, and
    a group with no Thread left to mark Done, have none and keep their status
    in view. */
-.side-thread:has(> .side-act):hover .side-end,
-.side-thread:has(> .side-act):has(:focus-visible) .side-end {
+.side-thread:has(> :is(.side-act, .side-acts)):hover .side-end,
+.side-thread:has(> :is(.side-act, .side-acts)):has(:focus-visible) .side-end {
   opacity: 0;
 }
 
@@ -562,6 +586,32 @@
 .side-h--done .count {
   font-weight: var(--w-bold);
   font-variant-numeric: tabular-nums;
+}
+/* Not in the book. "Archive all", at the end of the open shelf's heading:
+   quiet text that takes the heading's size and turns to the ink under the
+   pointer. The heading's capitals and tracking are for labels, not buttons. */
+.side-h--done > .side-h-act {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  text-transform: none;
+  transition: background var(--dur-1);
+}
+.side-h--done > .side-h-act:hover:not([aria-disabled="true"]) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.side-h--done > .side-h-act[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
 }
 
 /* "Marked done" with Undo, after a thread is marked done: Intake's toast,

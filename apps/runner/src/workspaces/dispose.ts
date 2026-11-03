@@ -1,15 +1,8 @@
 /** Removes only recorded managed working files and preserves their source Git repositories. */
+import { existsSync, lstatSync, readdirSync, realpathSync, rmdirSync, rmSync } from "node:fs";
+import { dirname, join as joinPath, relative, resolve } from "node:path";
 import {
-  existsSync,
-  lstatSync,
-  readdirSync,
-  realpathSync,
-  rmdirSync,
-  rmSync,
-  statSync,
-} from "node:fs";
-import { dirname, isAbsolute, join as joinPath, relative, resolve, sep } from "node:path";
-import {
+  MAX_CHECKOUTS,
   MAX_MESSAGE_LENGTH,
   type WorkspaceDetach,
   type WorkspaceDispose,
@@ -17,19 +10,18 @@ import {
   type WorkspaceReport,
 } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
-import { buildCacheDir, removeWorktree, runGit } from "./git";
-import { hasExpectedCheckoutIdentity } from "./identity";
-import { observeWorkspace } from "./inspection";
-import {
-  isStillOnDisk,
-  type RegisteredCheckout,
-  type RegisteredWorkspace,
-  type Removal,
-} from "./registry";
+import { observeCheckoutsAfterFailedRemoval, planCheckoutRemovals } from "./checkout-removal";
+import { isInsideDirectory, normalizeError, validateManagedPath } from "./managed-paths";
+import type { Removal, RegisteredCheckout, RegisteredWorkspace } from "./registry";
 import { isRootBoundary, removeRootBoundary } from "./root-boundary";
 import type { Substrate } from "./substrate";
 
-/** Checks whether two requests carry the same removal intent and correlation identifier. */
+/**
+ * Checks whether two requests carry the same removal intent and correlation
+ * identifier. The `archivedSessions` list is not part of the intent: it only
+ * adds cleanup of harness files, so a request resent with the list, after an
+ * older runner removed the workspace without it, is still the same request.
+ */
 export const hasSameRemovalIntent = (first: WorkspaceRemoval, second: WorkspaceRemoval): boolean =>
   first._tag === second._tag &&
   first.workspaceId === second.workspaceId &&
@@ -45,46 +37,6 @@ export const buildStepResultsRoot = (storageDir: string): string =>
 /** Returns the runner-owned result directory outside a workspace's working files. */
 export const buildStepResultsDir = (storageDir: string, workspaceId: string): string =>
   joinPath(buildStepResultsRoot(storageDir), workspaceId);
-
-const normalizeError = (error: unknown): Error =>
-  error instanceof Error ? error : new Error(String(error));
-
-const isInsideDirectory = (parent: string, child: string): boolean => {
-  const path = relative(parent, child);
-  return path.length > 0 && !path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path);
-};
-
-/** Checks that a recorded managed path still names the runner's original storage location. */
-const validateManagedPath = (substrate: Substrate, path: string): Effect.Effect<void, Error> =>
-  Effect.try({
-    try: () => {
-      const storage = realpathSync(substrate.storageDir);
-      const expected = resolve(storage, relative(resolve(substrate.storageDir), resolve(path)));
-      if (!isInsideDirectory(storage, expected))
-        throw new Error(
-          "The recorded workspace path is outside managed storage. Preserve its files and restore its registry.",
-        );
-      let ancestor = resolve(path);
-      while (ancestor !== resolve(substrate.storageDir)) {
-        try {
-          const physical = lstatSync(ancestor);
-          const expectedAncestor = resolve(
-            storage,
-            relative(resolve(substrate.storageDir), ancestor),
-          );
-          if (physical.isSymbolicLink() || realpathSync(ancestor) !== expectedAncestor)
-            throw new Error(
-              "The recorded managed directory or one of its parent directories was replaced or redirected. Preserve its files and restore the original workspace.",
-            );
-          break;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          ancestor = dirname(ancestor);
-        }
-      }
-    },
-    catch: normalizeError,
-  });
 
 /** Finds files outside recorded checkout boundaries, including nested paths and ignored root files. */
 const findRemainingRootFiles = (
@@ -120,38 +72,6 @@ const findRemainingRootFiles = (
     catch: normalizeError,
   });
 
-const checkWorkingFiles = (
-  substrate: Substrate,
-  checkout: RegisteredCheckout,
-): Effect.Effect<void, Error> =>
-  Effect.gen(function* () {
-    if (!existsSync(checkout.path)) return;
-    const status = yield* runGit(
-      [
-        "-C",
-        checkout.path,
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-        "--ignored=matching",
-      ],
-      { env: { ...substrate.gitEnv, GIT_OPTIONAL_LOCKS: "0" } },
-    );
-    if (!status.ok)
-      return yield* Effect.fail(
-        new Error(
-          `Cannot inspect remaining checkout files. Restore its Git repository before disposal: ${status.stderr}`,
-        ),
-      );
-    if (status.stdout.length > 0)
-      return yield* Effect.fail(
-        new Error(
-          "Tracked changes, untracked files or ignored files remain. Preserve those files or explicitly choose discard changes.",
-        ),
-      );
-  });
-
 const removeEmptyDirectories = (root: string): void => {
   if (!existsSync(root)) return;
   for (const name of readdirSync(root)) {
@@ -161,12 +81,18 @@ const removeEmptyDirectories = (root: string): void => {
   rmdirSync(root);
 };
 
-/** Removes clean worktrees only after every checkout and root file passes preflight. */
+/**
+ * Removes a managed workspace: first each of its checkouts, then the folder
+ * with whatever is still in it. Unless changes are discarded, nothing is
+ * removed before every checkout and every root file passes preflight.
+ * Returns a warning for each checkout whose Git repository cannot be found,
+ * which only happens when changes are discarded.
+ */
 const removeManagedWorkspace = (
   substrate: Substrate,
   entry: RegisteredWorkspace,
   discardChanges: boolean,
-): Effect.Effect<void, Error> =>
+): Effect.Effect<ReadonlyArray<string>, Error> =>
   Effect.gen(function* () {
     const parent = resolve(
       substrate.storageDir,
@@ -184,7 +110,6 @@ const removeManagedWorkspace = (
       yield* Effect.try({ try: () => realpathSync(substrate.storageDir), catch: normalizeError }),
       relative(resolve(substrate.storageDir), resolve(entry.root)),
     );
-    const sources = new Map<string, string>();
     for (const checkout of entry.checkouts) {
       yield* validateManagedPath(substrate, checkout.path);
       if (
@@ -196,162 +121,49 @@ const removeManagedWorkspace = (
             "A recorded checkout lies outside its managed workspace root. Restore the registry before disposal.",
           ),
         );
-      let common = checkout.commonDirectory;
-      if (common === undefined && existsSync(checkout.path)) {
-        const found = yield* runGit(
-          ["-C", checkout.path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-          { env: substrate.gitEnv },
-        );
-        if (!found.ok)
-          return yield* Effect.fail(
-            new Error(
-              "The recorded checkout Git repository is unavailable. Restore it before disposal.",
-            ),
-          );
-        common = found.stdout;
-      }
-      common ??= buildCacheDir(substrate.storageDir, checkout.resourceId);
-      const source = common;
-      const canonical = yield* Effect.try({
-        try: () => realpathSync(source),
-        catch: normalizeError,
-      });
-      if (
-        canonical ===
-          (yield* Effect.try({
-            try: () => realpathSync(substrate.storageDir),
-            catch: normalizeError,
-          })) ||
-        canonical === canonicalRoot ||
-        isInsideDirectory(canonicalRoot, canonical)
-      )
-        return yield* Effect.fail(
-          new Error(
-            "This workspace contains its source Git repository. Preserve the standalone main repository; it cannot be discarded.",
-          ),
-        );
-      sources.set(checkout.checkoutId, canonical);
     }
-    const keys = [...new Set(sources.values())].sort();
+    const checkouts = yield* planCheckoutRemovals(substrate, entry, canonicalRoot, discardChanges);
     const removed: Array<string> = [];
-    const remove = Effect.gen(function* () {
-      for (const checkout of entry.checkouts) {
-        const common = sources.get(checkout.checkoutId)!;
-        const physical = yield* Effect.try({ try: () => statSync(common), catch: normalizeError });
-        if (
-          checkout.commonDirectoryIdentity !== undefined &&
-          checkout.commonDirectoryIdentity !== `${String(physical.dev)}:${String(physical.ino)}`
-        )
+    yield* checkouts.coordinate(
+      Effect.gen(function* () {
+        yield* checkouts.preflight;
+        const remaining = yield* findRemainingRootFiles(entry.root, entry.checkouts);
+        if (!discardChanges && remaining.length > 0)
           return yield* Effect.fail(
             new Error(
-              "The recorded source Git repository was replaced. Restore the original repository before disposal.",
+              `Workspace root files remain outside its checkouts: ${remaining.join(", ")}. Preserve those files or explicitly choose discard changes.`,
             ),
           );
-        if (
-          existsSync(checkout.path) &&
-          !(yield* hasExpectedCheckoutIdentity(
-            { ...entry, root: checkout.path, checkouts: [checkout] },
-            substrate.gitEnv,
-          ))
-        )
-          return yield* Effect.fail(
-            new Error(
-              "The recorded checkout Git binding changed. Preserve its files and restore the original repository before disposal.",
-            ),
-          );
-        if (!discardChanges) yield* checkWorkingFiles(substrate, checkout);
-      }
-      const remaining = yield* findRemainingRootFiles(entry.root, entry.checkouts);
-      if (!discardChanges && remaining.length > 0)
-        return yield* Effect.fail(
-          new Error(
-            `Workspace root files remain outside its checkouts: ${remaining.join(", ")}. Preserve those files or explicitly choose discard changes.`,
+        yield* Effect.gen(function* () {
+          yield* checkouts.removeAll((path) => removed.push(path));
+          yield* validateManagedPath(substrate, entry.root);
+          yield* Effect.try({
+            try: () => {
+              if (discardChanges) rmSync(entry.root, { recursive: true, force: true });
+              else {
+                removeRootBoundary(entry.root);
+                removeEmptyDirectories(entry.root);
+              }
+            },
+            catch: normalizeError,
+          });
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              if (removed.length > 0)
+                return yield* Effect.fail(
+                  new Error(
+                    `Removal was partial; these checkouts were removed: ${removed.join(", ")}. Remaining files were preserved. ${error.message}`,
+                    { cause: error },
+                  ),
+                );
+              return yield* Effect.fail(error);
+            }),
           ),
         );
-      yield* Effect.gen(function* () {
-        for (const checkout of entry.checkouts) {
-          const common = sources.get(checkout.checkoutId)!;
-          const listed = yield* runGit(["-C", common, "worktree", "list", "--porcelain", "-z"], {
-            env: substrate.gitEnv,
-          });
-          if (!listed.ok)
-            return yield* Effect.fail(
-              new Error(`Cannot inspect the recorded worktree registration: ${listed.stderr}`),
-            );
-          const canonicalCheckoutRoot =
-            checkout.canonicalRoot ??
-            (yield* Effect.try({
-              try: () =>
-                resolve(
-                  realpathSync(substrate.storageDir),
-                  relative(resolve(substrate.storageDir), resolve(checkout.path)),
-                ),
-              catch: normalizeError,
-            }));
-          const registered = listed.stdout
-            .split("\0")
-            .includes(`worktree ${canonicalCheckoutRoot}`);
-          if (existsSync(checkout.path) || registered) {
-            yield* validateManagedPath(substrate, checkout.path);
-            if (
-              existsSync(checkout.path) &&
-              !(yield* hasExpectedCheckoutIdentity(
-                { ...entry, root: checkout.path, checkouts: [checkout] },
-                substrate.gitEnv,
-              ))
-            )
-              return yield* Effect.fail(
-                new Error(
-                  "The checkout changed after preflight. Preserve the remaining files and restore its original Git binding.",
-                ),
-              );
-            if (!discardChanges) yield* checkWorkingFiles(substrate, checkout);
-            const result = yield* removeWorktree(
-              sources.get(checkout.checkoutId)!,
-              checkout.path,
-              substrate.gitEnv,
-              discardChanges,
-            );
-            if (!result.ok)
-              return yield* Effect.fail(
-                new Error(
-                  `Git refused to remove the checkout: ${result.stderr}. Preserve its files before retrying disposal.`,
-                ),
-              );
-            removed.push(checkout.path);
-          }
-        }
-        yield* validateManagedPath(substrate, entry.root);
-        yield* Effect.try({
-          try: () => {
-            if (discardChanges) rmSync(entry.root, { recursive: true, force: true });
-            else {
-              removeRootBoundary(entry.root);
-              removeEmptyDirectories(entry.root);
-            }
-          },
-          catch: normalizeError,
-        });
-      }).pipe(
-        Effect.catch((error) =>
-          Effect.gen(function* () {
-            if (removed.length > 0)
-              return yield* Effect.fail(
-                new Error(
-                  `Removal was partial; these checkouts were removed: ${removed.join(", ")}. Remaining files were preserved. ${error.message}`,
-                  { cause: error },
-                ),
-              );
-            return yield* Effect.fail(error);
-          }),
-        ),
-      );
-    });
-    const lock = (at: number): Effect.Effect<void, Error> =>
-      at === keys.length
-        ? remove
-        : substrate.coordinateRepository(`git:${keys[at]!}`, lock(at + 1));
-    yield* lock(0);
+      }),
+    );
+    return checkouts.warnings;
   });
 
 /** Records and executes disposal or detachment, replaying completed receipts without deleting new files. */
@@ -422,6 +234,7 @@ const removeWorkspace = (
       ...(entry === undefined ? {} : { workspace: entry }),
     };
     yield* substrate.registry.recordRemoval(pending);
+    let checkoutWarnings: ReadonlyArray<string> = [];
     const report = yield* Effect.gen(function* () {
       if (instruction._tag === "workspaceDetach") {
         if (entry !== undefined && (entry.ownership !== "adopted" || entry.kind !== "primary"))
@@ -458,7 +271,11 @@ const removeWorkspace = (
         const resultsDirectory = buildStepResultsDir(substrate.storageDir, workspaceId);
         yield* validateManagedPath(substrate, resultsRoot);
         yield* validateManagedPath(substrate, resultsDirectory);
-        yield* removeManagedWorkspace(substrate, entry, instruction.discardChanges === true);
+        checkoutWarnings = yield* removeManagedWorkspace(
+          substrate,
+          entry,
+          instruction.discardChanges === true,
+        );
         yield* Effect.gen(function* () {
           yield* validateManagedPath(substrate, resultsRoot);
           yield* validateManagedPath(substrate, resultsDirectory);
@@ -477,26 +294,28 @@ const removeWorkspace = (
           ),
         );
       }
+      const fileWarnings =
+        instruction._tag === "workspaceDispose" && instruction.archivedSessions !== undefined
+          ? yield* substrate.deleteArchivedSessionFiles(instruction.archivedSessions)
+          : [];
+      const warnings = [...fileWarnings, ...checkoutWarnings]
+        .slice(0, MAX_CHECKOUTS)
+        .map((warning) => warning.slice(0, MAX_MESSAGE_LENGTH));
       return {
         _tag: "workspaceReport",
         workspaceId,
         status: "deleted",
         ...(requestId === undefined ? {} : { requestId }),
+        ...(warnings.length === 0 ? {} : { warnings }),
       } satisfies WorkspaceReport;
     }).pipe(
       Effect.catch((error) =>
         Effect.gen(function* () {
-          const observation =
-            entry === undefined ? {} : yield* observeWorkspace(entry, substrate.gitEnv);
           return {
-            ...observation,
+            ...(yield* observeCheckoutsAfterFailedRemoval(substrate, entry)),
             _tag: "workspaceReport",
             workspaceId,
             status: "failed",
-            available:
-              entry !== undefined &&
-              isStillOnDisk(entry) &&
-              (yield* hasExpectedCheckoutIdentity(entry, substrate.gitEnv)),
             ...(requestId === undefined ? {} : { requestId }),
             message: error.message.slice(0, MAX_MESSAGE_LENGTH),
           } satisfies WorkspaceReport;

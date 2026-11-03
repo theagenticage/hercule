@@ -119,8 +119,10 @@ export interface WorkspaceHolder {
  *   worktree, because the worktree holds its work.
  * - `inspection`: the inspection window. A failed run, or a run cancelled
  *   with its workspace kept, leaves its workspace for the user to look at.
+ * - `archived`: the archived window. A Thread the user archived keeps its
+ *   workspace only for a short while, because nothing can resume it.
  */
-const Retention = Schema.Literals(["none", "orphan", "idle", "inspection"]);
+const Retention = Schema.Literals(["none", "orphan", "idle", "inspection", "archived"]);
 export type Retention = Schema.Schema.Type<typeof Retention>;
 
 /**
@@ -149,6 +151,13 @@ export const buildReadyClause = (alias: string): string =>
 
 /** The statuses a workspace can still leave. Every other status is final. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed', 'disposing')";
+
+/** An archived session with a native session id, as its workspace's removal needs it. */
+export interface StoredArchivedSession {
+  readonly harnessId: string;
+  readonly nativeSessionId: string;
+  readonly providerAccountId: string;
+}
 
 /**
  * A condition on a lease's `workspace_id`, true when a released lease on that
@@ -278,6 +287,8 @@ const RemovalAudit = Schema.Struct({
   reason: Schema.optionalKey(Retention),
   holder: Schema.optionalKey(Schema.String),
   refusalMessage: Schema.optionalKey(Schema.String),
+  /** Warnings known when the removal was reserved, stored on the workspace once it is deleted. */
+  warnings: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type RemovalAudit = Schema.Schema.Type<typeof RemovalAudit>;
 const decodeRemovalAudit = Schema.decodeUnknownEffect(Schema.fromJsonString(RemovalAudit));
@@ -411,6 +422,20 @@ const make = Effect.gen(function* () {
         );
       }),
 
+    /**
+     * Adds a warning to the pending removal of a workspace, once, so it is
+     * stored on the workspace when the removal is confirmed. Does nothing when
+     * the workspace is not being removed.
+     */
+    addRemovalWarning: (id: string, warning: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE workspaces SET disposal_audit = json_set(disposal_audit, '$.warnings',
+              json(json_insert(COALESCE(json_extract(disposal_audit, '$.warnings'), '[]'), '$[#]', ${warning})))
+            WHERE id = ${uuidFromString(id)} AND status = 'disposing'
+              AND NOT EXISTS (SELECT 1 FROM json_each(COALESCE(json_extract(disposal_audit, '$.warnings'), '[]'))
+                              WHERE value = ${warning})`,
+      ),
+
     /** Restores the recorded status after refusal while keeping the intent as a retained cleanup reason. */
     refuseRemoval: (
       id: string,
@@ -422,6 +447,101 @@ const make = Effect.gen(function* () {
           disposal_audit = json_set(disposal_audit, '$.refusalMessage', ${message})
           WHERE id = ${uuidFromString(id)} AND status = 'disposing'`;
         yield* announceChange(id);
+      }),
+
+    /**
+     * Returns the ids, among these workspaces, of the archived ones: those
+     * with at least one Thread, every Thread of which is archived. This is the
+     * only definition of an archived workspace. It reads the sessions, never a
+     * lease's retention, and counts main workspaces too. A Thread is a session
+     * with no Agent behind it; `agent_id` is tested rather than `kind` so the
+     * query uses the `sessions_workspace` index instead of scanning every Thread.
+     */
+    listArchivedWorkspaces: (
+      workspaceIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      workspaceIds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly workspace_id: Uint8Array }>`
+              SELECT workspace_id FROM sessions
+              WHERE workspace_id IN ${sql.in(workspaceIds.map(uuidFromString))} AND agent_id IS NULL
+              GROUP BY workspace_id HAVING COUNT(archived_at) = COUNT(*)`,
+            (rows) => rows.map((row) => uuidToString(row.workspace_id)),
+          ),
+
+    /** Returns whether a run holds or held a lease on the workspace and no Thread works in it. */
+    isRunWorkspace: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly run: number }>`
+          SELECT EXISTS (SELECT 1 FROM workspace_leases WHERE workspace_id = ${uuidFromString(workspaceId)} AND holder_kind = 'run')
+            AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)} AND agent_id IS NULL) AS run`,
+        (rows) => rows[0]?.run === 1,
+      ),
+
+    /**
+     * Returns up to `limit` archived sessions of the workspace that have a
+     * native session id, oldest first, and how many such sessions the
+     * workspace has in all.
+     */
+    listArchivedSessions: (
+      workspaceId: string,
+      limit: number,
+    ): Effect.Effect<
+      { readonly sessions: ReadonlyArray<StoredArchivedSession>; readonly total: number },
+      SqlError
+    > =>
+      Effect.map(
+        sql<{
+          readonly harness_id: string;
+          readonly native_session_id: string;
+          readonly provider_account_id: Uint8Array;
+          readonly total: number;
+        }>`
+          SELECT harness_id, native_session_id, provider_account_id, COUNT(*) OVER () AS total
+          FROM sessions
+          WHERE workspace_id = ${uuidFromString(workspaceId)} AND archived_at IS NOT NULL
+            AND native_session_id IS NOT NULL
+          ORDER BY created_at, id LIMIT ${limit}`,
+        (rows) => ({
+          total: rows[0]?.total ?? 0,
+          sessions: rows.map((row) => ({
+            harnessId: row.harness_id,
+            nativeSessionId: row.native_session_id,
+            providerAccountId: uuidToString(row.provider_account_id),
+          })),
+        }),
+      ),
+
+    /**
+     * Gives an archived workspace back to automatic cleanup. Does nothing to a
+     * primary, which the sweep never deletes.
+     *
+     * - Sets the retention policy to `automatic`.
+     * - Releases again, with `archived`, every released lease whose holder is
+     *   an archived session. Each lease keeps its own release time, and its
+     *   kept-until time is that time plus `windowMs`. An active lease is never
+     *   touched.
+     */
+    returnToAutomaticCleanup: (
+      workspaceId: string,
+      windowMs: number,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const policy = yield* sql`
+          UPDATE workspaces SET retention_policy = 'automatic'
+          WHERE id = ${uuidFromString(workspaceId)} AND kind <> 'primary' AND retention_policy <> 'automatic'
+          RETURNING id`;
+        const leases = yield* sql`
+          UPDATE workspace_leases
+          SET retention = 'archived',
+              kept_until = strftime('%Y-%m-%dT%H:%M:%fZ', released_at, ${`+${String(windowMs / 1000)} seconds`})
+          WHERE workspace_id = ${uuidFromString(workspaceId)} AND released_at IS NOT NULL
+            AND NOT (${sql.literal(NO_RETENTION_CLAUSE)})
+            AND holder_kind = 'session'
+            AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = workspace_leases.holder_id AND s.archived_at IS NOT NULL)
+          RETURNING workspace_id`;
+        if (policy.length > 0 || leases.length > 0) yield* announceChange(workspaceId);
       }),
 
     /** Makes a workspace manual only when the actual stored session is a Thread. */

@@ -284,6 +284,8 @@ export interface InstallOutcome {
 
 export interface HarnessAdapter {
   readonly harnessId: string;
+  /** The name the user knows the harness by: "Claude Code", "Codex" or "pi". */
+  readonly harnessName: string;
   /** The harness binary's name on `PATH`, used to resolve `binary`. */
   readonly binaryName: string;
   /**
@@ -457,6 +459,23 @@ export interface HarnessAdapter {
 
   /** The bindings of the sessions this adapter is hosting right now. */
   readonly listSessions: Effect.Effect<ReadonlyArray<SessionBinding>>;
+
+  /**
+   * Deletes what the harness keeps about one session in the Harness Home
+   * `home`: its transcript and the files that belong to that session alone.
+   * Files the harness shares between sessions are left alone. The adapter is
+   * not given the session's working directory, so it finds the files by
+   * `nativeSessionId`.
+   *
+   * Succeeds when the session has no files left. Fails with an `AdapterError`
+   * whose message is the reason a file could not be deleted, such as
+   * "permission denied". The runner calls it only for an archived session,
+   * after it removed that session's workspace (spec 06 section 4).
+   */
+  readonly deleteSessionFiles: (
+    home: string,
+    nativeSessionId: string,
+  ) => Effect.Effect<void, AdapterError>;
 }
 
 const ADAPTERS: ReadonlyMap<string, HarnessAdapter> = new Map([

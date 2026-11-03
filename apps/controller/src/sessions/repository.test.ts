@@ -556,9 +556,11 @@ describe("the kind of a session", () => {
         permissionProfileId: undefined,
         kind,
         done: undefined,
+        archived: undefined,
         runId: undefined,
         conversationId: undefined,
         activeSince: undefined,
+        workspaceId: undefined,
         doneSince: undefined,
       });
       return page.items.map((one) => one.id);
@@ -665,9 +667,11 @@ describe("listing the sessions on one profile", () => {
           permissionProfileId: profileId,
           kind: undefined,
           done: undefined,
+          archived: undefined,
           runId: undefined,
           conversationId: undefined,
           activeSince: undefined,
+          workspaceId: undefined,
           doneSince: undefined,
         });
         return { listed: page.items, profileId, live };
@@ -694,9 +698,11 @@ describe("listing the sessions of runs", () => {
         permissionProfileId: undefined,
         kind: undefined,
         done: undefined,
+        archived: undefined,
         runId,
         conversationId: undefined,
         activeSince: undefined,
+        workspaceId: undefined,
         doneSince: undefined,
       });
       return page.items.map((one) => one.id);
@@ -716,6 +722,65 @@ describe("listing the sessions of runs", () => {
           second,
           one: yield* listByRun(runA),
           several: yield* listByRun([runA, runB]),
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(one).toEqual([first]);
+    expect(several).toEqual([first, second]);
+  });
+});
+
+describe("listing the sessions of workspaces", () => {
+  /** Lists every session placed in `workspaceId`, or in one of them, oldest first. */
+  const listByWorkspaces = (workspaceId: string | ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        kind: undefined,
+        workspaceId,
+        done: undefined,
+        archived: undefined,
+        runId: undefined,
+        conversationId: undefined,
+        activeSince: undefined,
+        doneSince: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  it("returns the sessions placed in one of the workspaces, and no other rows", async () => {
+    const { first, second, one, several } = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const [workspaceA, workspaceB, workspaceC] = [mintId(), mintId(), mintId()];
+        const first = yield* insertSession(mintId());
+        const second = yield* insertSession(mintId());
+        const third = yield* insertSession(mintId());
+        // A session in no workspace, which no list holds.
+        yield* insertSession(mintId());
+        for (const [sessionId, workspaceId] of [
+          [first, workspaceA],
+          [second, workspaceB],
+          [third, workspaceC],
+        ] as const) {
+          yield* sql`
+            UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
+            WHERE id = ${uuidFromString(sessionId)}
+          `;
+        }
+        return {
+          first,
+          second,
+          one: yield* listByWorkspaces(workspaceA),
+          several: yield* listByWorkspaces([workspaceA, workspaceB]),
         };
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
@@ -764,9 +829,11 @@ describe("listing the sessions active since an instant", () => {
           permissionProfileId: undefined,
           kind,
           done: undefined,
+          archived: undefined,
           runId: undefined,
           conversationId: undefined,
           activeSince: instant,
+          workspaceId: undefined,
           doneSince: undefined,
         });
         ids.push(...page.items.map((one) => one.id));
@@ -818,9 +885,11 @@ describe("listing the sessions active since an instant", () => {
             permissionProfileId: undefined,
             kind: ["agent", "run", "assistant"],
             done: undefined,
+            archived: undefined,
             runId: undefined,
             conversationId: undefined,
             activeSince: instant,
+            workspaceId: undefined,
             doneSince: undefined,
           })
           .pipe(
@@ -1104,5 +1173,59 @@ describe("an event the controller writes itself", () => {
       { runner_seq: 4, tag: "runtime.warning" },
       { runner_seq: 5, tag: "session.started" },
     ]);
+  });
+});
+
+describe("the archived mark of a session", () => {
+  /** Lists the ids of the sessions that match `archived`, oldest first; `undefined` lists every session. */
+  const listArchived = (archived: boolean | undefined) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        kind: undefined,
+        done: undefined,
+        archived,
+        runId: undefined,
+        conversationId: undefined,
+        activeSince: undefined,
+        workspaceId: undefined,
+        doneSince: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  it("reads back as who archived the session and when, and filters the list", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const open = yield* aSession;
+        const archived = yield* aSession;
+        yield* sql`UPDATE sessions SET archived_at = ${at}, archived_by = 'user'
+                   WHERE id = ${uuidFromString(archived)}`;
+        return {
+          open,
+          archived,
+          openMark: Option.getOrThrow(yield* sessions.one(open)).archived,
+          archivedMark: Option.getOrThrow(yield* sessions.one(archived)).archived,
+          onlyArchived: yield* listArchived(true),
+          notArchived: yield* listArchived(false),
+          every: yield* listArchived(undefined),
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(result.openMark).toBeNull();
+    expect(result.archivedMark).toEqual({ at, by: "user" });
+    expect(result.onlyArchived).toEqual([result.archived]);
+    expect(result.notArchived).toEqual([result.open]);
+    expect(result.every).toEqual([result.open, result.archived]);
   });
 });

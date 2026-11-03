@@ -2,7 +2,8 @@
  * One agent's page on the thread, as the Bureau book's session page draws
  * it: the header floating over the transcript, and the composer floating
  * over its bottom. The agent is the session's own agent, or one of its
- * subagents. A subagent takes no messages, so its page has no composer.
+ * subagents. A subagent takes no messages, so its page has no composer, and
+ * neither has an archived Thread's page.
  */
 import { useRef, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -34,6 +35,7 @@ import {
   subagentsQuery,
   transcriptQuery,
 } from "../../app/queries";
+import { ArchivedNotice } from "./archived-notice";
 import { ThreadComposer } from "./composer";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
@@ -85,7 +87,8 @@ export type DrawSubagentParts = (records: {
  * agent when `subagentId` is undefined, else that subagent.
  *
  * - The session's own agent's page has the header, the transcript and the
- *   composer.
+ *   composer. When the Thread is archived, a line with a New thread button
+ *   takes the composer's place (`ArchivedNotice`).
  * - A subagent's page has its transcript, with faces seeded
  *   `<sessionId>:<subagentId>`, and the parts `drawSubagentParts` returns:
  *   its own header, the brief above the transcript and the status card in
@@ -213,10 +216,12 @@ export function AgentPage({
   const transcriptRef = useRef<TranscriptHandle>(null);
   // The composer shrinks while the reader is away from the bottom of the
   // transcript, unless the focus is in the composer. A subagent's status
-  // card never shrinks, so the transcript always clears it.
+  // card and an archived Thread's line never shrink, so the transcript always
+  // clears them.
   const [atBottom, setAtBottom] = useState(true);
   const [composerFocused, setComposerFocused] = useState(false);
-  const shrunk = subagent === undefined && !atBottom && !composerFocused;
+  const shrunk =
+    subagent === undefined && session.archived === undefined && !atBottom && !composerFocused;
 
   // On a subagent's page, the user message that opens the transcript is the
   // brief its parent gave it, drawn as the brief card rather than as a
@@ -282,7 +287,18 @@ export function AgentPage({
         )}
         ref={transcriptRef}
       />
-      {subagentParts === undefined ? (
+      {subagentParts !== undefined ? (
+        // A subagent takes no messages, so its status card takes the
+        // composer's place. The stack is passed to `setComposerStack`, so the
+        // transcript's last line clears the card and what sits on it.
+        <div className="composer-wrap">
+          <div className="composer" ref={setComposerStack}>
+            {subagentParts.bottom}
+          </div>
+        </div>
+      ) : session.archived !== undefined ? (
+        <ArchivedNotice session={session} ref={setComposerStack} />
+      ) : (
         <ThreadComposer
           sessionId={sessionId}
           shrunk={shrunk}
@@ -292,15 +308,6 @@ export function AgentPage({
           }}
           ref={setComposerStack}
         />
-      ) : (
-        // A subagent takes no messages, so its status card takes the
-        // composer's place. The stack is passed to `setComposerStack`, so the
-        // transcript's last line clears the card and what sits on it.
-        <div className="composer-wrap">
-          <div className="composer" ref={setComposerStack}>
-            {subagentParts.bottom}
-          </div>
-        </div>
       )}
     </>
   );

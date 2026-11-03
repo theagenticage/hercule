@@ -28,6 +28,7 @@ import {
   labelWorkspaceSessions,
   type SessionTab,
 } from "./siblings";
+import { WORKING_STATUSES } from "./status";
 import { describeThreadPlace } from "./thread-place";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
 
@@ -60,6 +61,12 @@ export interface GroupMember extends SessionTab {
   readonly counted: boolean;
   /** Whether the Office seats the session at work, as `isSessionSeated` decides it. */
   readonly seated: boolean;
+  /**
+   * Whether the session is queued, starting or busy, which is what stops the
+   * controller archiving it. Unlike `dot`, it holds for a Done Thread and for
+   * a session that waits on the user too.
+   */
+  readonly working: boolean;
   readonly dot: SessionDot;
   /** The oldest open Request's question, or `null` when nothing waits in this session. */
   readonly question: string | null;
@@ -112,6 +119,8 @@ export interface GroupRow {
   readonly key: string;
   /** The project the row sits under: the lead's, or `null` when the lead has none or its project no longer exists. */
   readonly projectId: string | null;
+  /** The workspace the row's sessions work in, or `null` for a Thread with no workspace, which is a row of its own. */
+  readonly workspaceId: string | null;
   /** The session the row opens: the lead. */
   readonly leadId: string;
   /** The row's name: the lead's title. */
@@ -285,6 +294,7 @@ export const describeGroupRows = ({
         askerLabel: session.id === group.lead.id ? null : tab.label,
         counted,
         seated: seatedIds.has(session.id),
+        working: WORKING_STATUSES.has(session.status),
         dot: decideDot(counted, pose),
         question: oldest === null ? null : formatRequestQuestion(oldest),
       };
@@ -323,6 +333,7 @@ export const describeGroupRows = ({
     return {
       key: group.key,
       projectId,
+      workspaceId: group.lead.workspaceId,
       leadId: group.lead.id,
       title: group.lead.title,
       pose: statusMember.pose,

@@ -402,6 +402,13 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     workspaceId: WORKSPACE_ID,
     requestId: REQUEST_ID,
     discardChanges: true,
+    archivedSessions: [
+      {
+        harnessId: "claude-code",
+        harnessHome: "providers/homes/0199e0e7/anthropic/claude",
+        nativeSessionId: "0199e0e7-1111-7222-8333-944455556666",
+      },
+    ],
   },
   { _tag: "workspaceDetach", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
   { _tag: "workspaceInspect", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
@@ -1025,6 +1032,17 @@ describe("the ids a machine uses as directory names", () => {
     expect(
       decodeFromController({ _tag: "workspaceDispose", workspaceId: "../elsewhere" })._tag,
     ).toBe("Failure");
+  });
+
+  it("rejects an archived session whose harness home could leave the storage directory", () => {
+    const dispose = (harnessHome: string) =>
+      decodeFromController({
+        _tag: "workspaceDispose",
+        workspaceId: WORKSPACE_ID,
+        archivedSessions: [{ harnessId: "claude-code", harnessHome, nativeSessionId: "native-1" }],
+      })._tag;
+    expect(dispose("providers/0199e0e7")).toBe("Success");
+    expect(dispose("providers/../../etc")).toBe("Failure");
   });
 
   it("rejects a checkout whose resource or subdirectory could escape the workspace", () => {

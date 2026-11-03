@@ -29,6 +29,7 @@ import type {
   OpenRequest,
   PermissionRequest,
   Profile,
+  Session,
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
@@ -685,6 +686,33 @@ export const THREAD_PAGE_RECORDS: SidebarRecords = {
         : thread,
   ),
   workspaces: [FIX_WORKSPACE],
+};
+
+/** The Fix thread after the user archived it: finished, marked Done, and put away for good. */
+const ARCHIVED_FIX_SESSION: Session = {
+  ...FIX_SESSION,
+  status: "exited",
+  resumable: false,
+  openRequests: [],
+  exitedAt: new Date(SPECIMEN_NOW - 5 * 60_000).toISOString(),
+  done: { at: new Date(SPECIMEN_NOW - 4 * 60_000).toISOString(), by: "user" },
+  archived: { at: new Date(SPECIMEN_NOW - 60_000).toISOString(), by: "user" },
+};
+
+/** The archived Fix thread, for the thread specimen's `?state=archived`. */
+export const FIX_THREAD_ARCHIVED: ThreadScreenRecords = {
+  ...FIX_THREAD,
+  session: ARCHIVED_FIX_SESSION,
+  queuedInputs: [],
+};
+
+/**
+ * The shell's lists for `FIX_THREAD_ARCHIVED`: the thread page's, without the
+ * archived row, because the sidebar's read leaves archived threads out.
+ */
+export const ARCHIVED_PAGE_RECORDS: SidebarRecords = {
+  ...THREAD_PAGE_RECORDS,
+  threads: THREAD_PAGE_RECORDS.threads.filter((thread) => thread.workspaceId !== FIX_WORKSPACE.id),
 };
 
 /** The thread whose agent sends the Fix thread a message: its face is lime, a loud hue. */

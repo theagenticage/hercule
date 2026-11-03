@@ -51,11 +51,25 @@ export const runGitOrThrow = (cwd: string, ...args: ReadonlyArray<string>): stri
 const roots: Array<string> = [];
 const workspaceScopes: Array<Scope.Closeable> = [];
 
-/** Constructs a manager whose workers remain alive until the test fixtures are cleaned up. */
-export const makeTestWorkspaces = (options: Parameters<typeof makeWorkspaces>[0]): Workspaces => {
+type TestWorkspacesOptions = Omit<
+  Parameters<typeof makeWorkspaces>[0],
+  "deleteArchivedSessionFiles"
+> &
+  Partial<Pick<Parameters<typeof makeWorkspaces>[0], "deleteArchivedSessionFiles">>;
+
+/**
+ * Constructs a manager whose workers remain alive until the test fixtures are
+ * cleaned up. A test that does not look at archived sessions' files gets a
+ * delete function that deletes nothing.
+ */
+export const makeTestWorkspaces = (options: TestWorkspacesOptions): Workspaces => {
   const scope = Effect.runSync(Scope.make());
   workspaceScopes.push(scope);
-  return Effect.runSync(makeWorkspaces(options).pipe(Scope.provide(scope)));
+  return Effect.runSync(
+    makeWorkspaces({ deleteArchivedSessionFiles: () => Effect.succeed([]), ...options }).pipe(
+      Scope.provide(scope),
+    ),
+  );
 };
 
 /** Stops test-owned workspace workers before their directories are removed. */

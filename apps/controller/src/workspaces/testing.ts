@@ -62,6 +62,8 @@ export interface WorkspaceFleetOptions {
    * watches the sweep can wait.
    */
   readonly workspaceSweepInterval?: Duration.Duration;
+  /** The capabilities the fleet's runner lists at hello, instead of those of a runner of this build. */
+  readonly capabilities?: ReadonlyArray<string>;
 }
 
 /**
@@ -79,6 +81,7 @@ export const withFleet = (
     ],
     facts: FACTS,
     models: MODELS,
+    ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
     ...(options.workspaceSweepInterval === undefined
       ? {}
       : { workspaceSweepInterval: options.workspaceSweepInterval }),

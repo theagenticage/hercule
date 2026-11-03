@@ -84,6 +84,13 @@
  * the upgrade the first reads are the earliest ledger time and the last read,
  * and the catalog still reads.
  *
+ * Migration 104 rebuilds `workspace_leases` so a lease can be released with the
+ * `archived` retention. When the edge database has not run it yet, the fixture
+ * writes two workspaces on the seeded runner: one whose only lease was released
+ * with the `idle` retention and a kept-until time far in the future, and one
+ * whose session lease is still active. After the upgrade both workspaces read
+ * with the same holders and kept-until time, so the rebuild lost no lease.
+ *
  * It is not a matrix of session states or harness behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -247,6 +254,22 @@ const CATALOG_FIRST_READ_MIGRATION = 102;
 const SEEDED_CATALOG_FIRST_READ = "2026-10-01T08:00:00.000Z";
 const SEEDED_CATALOG_SECOND_READ = "2026-10-01T12:00:00.000Z";
 const SEEDED_CATALOG_LAST_READ = "2026-10-02T12:00:00.000Z";
+
+/** The migration that rebuilds `workspace_leases` so a lease can be released with the `archived` retention. */
+const ARCHIVED_SESSIONS_MIGRATION = 104;
+
+/**
+ * The workspaces the fixture writes on the seeded runner, and the sessions that
+ * hold them. No session row exists for either holder, so no session exit or
+ * conversation delete in the upgraded controller can release the active lease.
+ */
+const SEEDED_RELEASED_WORKSPACE_ID = "0199e0e7-0000-7000-8000-0000000009b1";
+const SEEDED_ACTIVE_WORKSPACE_ID = "0199e0e7-0000-7000-8000-0000000009b2";
+const SEEDED_RELEASED_LEASE_HOLDER_ID = "0199e0e7-0000-7000-8000-0000000009c1";
+const SEEDED_ACTIVE_LEASE_HOLDER_ID = "0199e0e7-0000-7000-8000-0000000009c2";
+
+/** When the seeded released lease keeps its workspace until: far enough that the sweep never collects it. */
+const SEEDED_LEASE_KEPT_UNTIL = "2099-01-01T00:00:00.000Z";
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -1116,6 +1139,58 @@ function persistRunnerWithEdgeFacts(home: string, facts: typeof SEEDED_RUNNER_FA
 }
 
 /**
+ * Writes two ephemeral workspaces on the seeded runner into the database the
+ * edge binary created, when that database has not run the migration that
+ * rebuilds `workspace_leases`. Returns whether it wrote.
+ *
+ * - `SEEDED_RELEASED_WORKSPACE_ID` has one lease, released with the `idle`
+ *   retention and kept until `SEEDED_LEASE_KEPT_UNTIL`.
+ * - `SEEDED_ACTIVE_WORKSPACE_ID` has one lease that is still active.
+ *
+ * The rows go straight into the database because a lease is only made by a
+ * session start, which needs a signed-in harness. A database that already ran
+ * the migration is skipped because its table would not be in the old shape.
+ */
+function persistWorkspaceLeases(home: string): boolean {
+  if (readMigrationVersion(home) >= ARCHIVED_SESSIONS_MIGRATION) return false;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const at = new Date().toISOString();
+    const insertWorkspace = database.query(
+      `INSERT INTO workspaces (id, runner_id, kind, status, created_at, provisioned_at, last_used_at)
+       VALUES (?, ?, 'ephemeral', 'ready', ?, ?, ?)`,
+    );
+    for (const workspaceId of [SEEDED_RELEASED_WORKSPACE_ID, SEEDED_ACTIVE_WORKSPACE_ID]) {
+      insertWorkspace.run(uuidBlob(workspaceId), uuidBlob(SEEDED_RUNNER_ID), at, at, at);
+    }
+    const insertLease = database.query(
+      `INSERT INTO workspace_leases
+         (workspace_id, holder_kind, holder_id, acquired_at, released_at, retention, kept_until)
+       VALUES (?, 'session', ?, ?, ?, ?, ?)`,
+    );
+    insertLease.run(
+      uuidBlob(SEEDED_RELEASED_WORKSPACE_ID),
+      uuidBlob(SEEDED_RELEASED_LEASE_HOLDER_ID),
+      at,
+      at,
+      "idle",
+      SEEDED_LEASE_KEPT_UNTIL,
+    );
+    insertLease.run(
+      uuidBlob(SEEDED_ACTIVE_WORKSPACE_ID),
+      uuidBlob(SEEDED_ACTIVE_LEASE_HOLDER_ID),
+      at,
+      null,
+      null,
+      null,
+    );
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
+/**
  * Stores `RETIRED_SETTINGS` for the one user in the database the edge binary
  * created, when that database predates the migration that deletes them.
  * Returns whether it stored them.
@@ -1772,6 +1847,7 @@ describe("upgrading from the previous edge release", () => {
         withLedger: codexAccount.id,
         withoutLedger: piAccount.id,
       });
+      const workspaceLeasesSeeded = persistWorkspaceLeases(home);
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -2030,6 +2106,28 @@ describe("upgrading from the previous edge release", () => {
       const { adapters: expectedAdapters, ...expectedFacts } = SEEDED_RUNNER_FACTS;
       expect(upgradedFacts).toEqual(expectedFacts);
       expect(new Set(upgradedAdapters)).toEqual(new Set(expectedAdapters));
+
+      // The rebuilt `workspace_leases` kept both leases: the released one
+      // still keeps its workspace until the same time, and the active one
+      // still shows its session working in its workspace.
+      if (workspaceLeasesSeeded) {
+        const readWorkspace = async (workspaceId: string) =>
+          expectJson<{ sessionIds: ReadonlyArray<string>; keptUntil: string | null }>(
+            await runCli(["workspace", "read", workspaceId, "--json"], upgraded),
+          );
+        expect(await readWorkspace(SEEDED_RELEASED_WORKSPACE_ID)).toMatchObject({
+          sessionIds: [],
+          keptUntil: SEEDED_LEASE_KEPT_UNTIL,
+        });
+        expect(await readWorkspace(SEEDED_ACTIVE_WORKSPACE_ID)).toMatchObject({
+          sessionIds: [SEEDED_ACTIVE_LEASE_HOLDER_ID],
+          keptUntil: null,
+        });
+      } else {
+        console.log(
+          `Skipping the workspace leases fixture: the edge database already ran migration ${String(ARCHIVED_SESSIONS_MIGRATION)}.`,
+        );
+      }
 
       // An Agent and an assistant keep their account and the harness choice
       // they had: none, which is the account's default.

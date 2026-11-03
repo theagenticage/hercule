@@ -193,7 +193,9 @@ describe.skipIf(binary === undefined)("a real pi on OpenRouter models it does no
       expect(readFileSync(join(folders[0]!, MODELS_FILE), "utf8")).toContain(FIRST_ID);
       await Effect.runPromise(pi.stopSession(first, "stopped"));
       // The session's private folder goes with its pi.
-      await waitUntil("removed the first folder", () => !existsSync(folders[0]!));
+      // A real pi process has to exit first, which takes longer than the default
+      // wait when the whole suite runs at once.
+      await waitUntil("removed the first folder", () => !existsSync(folders[0]!), BUDGET_MS / 2);
 
       const second = crypto.randomUUID();
       await Effect.runPromise(

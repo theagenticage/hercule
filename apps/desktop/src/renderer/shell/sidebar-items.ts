@@ -11,6 +11,7 @@
  */
 import {
   DONE_SHELF_STEP,
+  planArchiveAll,
   selectSidebar,
   type DoneShelf,
   type DoneShelfRow,
@@ -156,6 +157,12 @@ export type SidebarItemContent =
       /** How many groups the shelf holds, shown or hidden. */
       readonly count: number;
       readonly open: boolean;
+      /**
+       * Whether "Archive all" has a row to archive: false when every row on
+       * the shelf works. Always false while the shelf is closed, which draws
+       * no such button.
+       */
+      readonly canArchiveAll: boolean;
     }
   /**
    * A group on the Done shelf: every Thread of it is marked Done and every
@@ -650,6 +657,9 @@ const buildDoneContents = (doneShelf: DoneShelf, sources: SidebarSources): Sideb
       key: buildHeaderKey("done"),
       count: doneShelf.count,
       open: sources.doneShelfLimit !== null,
+      canArchiveAll:
+        sources.doneShelfLimit !== null &&
+        planArchiveAll(sources.presentation.groupRows).rows.length > 0,
     },
     ...doneShelf.rows.flatMap((shown) => buildDoneGroupContents(shown, sources)),
   ];

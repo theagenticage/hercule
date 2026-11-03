@@ -82,6 +82,12 @@ import {
   stopChild,
   type Run,
 } from "../process";
+import {
+  isRealFolder,
+  PLAIN_ID_PATTERN,
+  readFolderNames,
+  removeSessionFiles,
+} from "../session-files";
 import { truncateFact, truncateMessage } from "../text";
 import { captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
@@ -1890,6 +1896,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
 
   return {
     harnessId: PI,
+    harnessName: PI_NAME,
     binaryName: PI_BINARY,
 
     events: Stream.fromPubSub(published),
@@ -2272,6 +2279,20 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
+
+    // pi keeps one file per session, its transcript.
+    deleteSessionFiles: (home, nativeSessionId) =>
+      removeSessionFiles(nativeSessionId, PLAIN_ID_PATTERN, async () => {
+        // Unlike `findTranscript`, a folder that cannot be read fails the
+        // deletion instead of reading as "no transcript", so files left behind
+        // are reported.
+        const folder = buildSessionsDir(home);
+        if (!(await isRealFolder(folder))) return [];
+        const name = (await readFolderNames(folder)).find((one) =>
+          one.endsWith(`_${nativeSessionId}.jsonl`),
+        );
+        return name === undefined ? [] : [join(folder, name)];
+      }),
     generateText: generateText,
 
     install: makePiInstall(seam.run),

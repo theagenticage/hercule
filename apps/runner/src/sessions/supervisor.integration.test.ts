@@ -231,6 +231,7 @@ const createFake = (): Fake => {
     usageReportsRead: () => usageReportsRead,
     adapter: {
       harnessId: "fake",
+      harnessName: "Fake Harness",
       binaryName: "fake-harness",
       /**
        * A PubSub drops events that no subscriber receives, so an event
@@ -247,6 +248,7 @@ const createFake = (): Fake => {
       usageReports: Stream.tap(Stream.fromQueue(usageReports), () =>
         Effect.sync(() => void (usageReportsRead += 1)),
       ),
+      deleteSessionFiles: () => Effect.die("no session files here"),
       probe: () => Effect.die("not probed here"),
       listSessions: Effect.sync(() => [...held.values()]),
       generateText: () => Effect.die("no text generation here"),

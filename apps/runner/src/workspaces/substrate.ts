@@ -9,12 +9,21 @@
  * agent. The runner's own `HERCULE_*` variables are dropped too, so a session
  * or a setup command never gets the runner's Home or settings.
  */
+import type { ArchivedSession } from "@hercule/protocol";
 import type * as Effect from "effect/Effect";
 import type { Registry } from "./registry";
 import type { GitEnv } from "./git";
 
 /** How long a repository's setup command may run before the runner stops it. */
 export const SETUP_DEADLINE_MS = 10 * 60 * 1000;
+
+/**
+ * Deletes the harness files of archived sessions whose workspace was removed,
+ * and returns one warning for each harness that kept some. Never fails.
+ */
+export type DeleteArchivedSessionFiles = (
+  sessions: ReadonlyArray<ArchivedSession>,
+) => Effect.Effect<ReadonlyArray<string>>;
 
 export interface Substrate {
   readonly storageDir: string;
@@ -33,6 +42,7 @@ export interface Substrate {
    */
   readonly gitEnv: GitEnv;
   readonly setupDeadlineMs: number;
+  readonly deleteArchivedSessionFiles: DeleteArchivedSessionFiles;
 }
 
 /**

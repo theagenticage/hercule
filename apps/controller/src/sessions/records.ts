@@ -2,7 +2,7 @@
  * Converts a stored session into the `Session` record the API returns.
  *
  * Every field on the record comes from the row, except `unenforced` and
- * `resumeHeld`. `done` and `reopenedAt` are left off the record while the row
+ * `resumeHeld`. `done`, `archived` and `reopenedAt` are left off the record while the row
  * holds `NULL` for them. Each open Request a subagent asked also gets that
  * subagent's name, from the names the row was read with. `resumeHeld` is the crash-loop guard's rule applied to the
  * row, so every reader of the record agrees with the controller about it. The list
@@ -62,10 +62,12 @@ export const sessionRecordComposer: Effect.Effect<
       "openRequests",
       "subagentNames",
       "done",
+      "archived",
       "reopenedAt",
     ]),
-    // Both keys are left out, not set to `undefined`, while they hold nothing.
+    // Each key is left out, not set to `undefined`, while it holds nothing.
     ...(stored.done === null ? {} : { done: stored.done }),
+    ...(stored.archived === null ? {} : { archived: stored.archived }),
     ...(stored.reopenedAt === null ? {} : { reopenedAt: stored.reopenedAt }),
     openRequests: stored.openRequests.map((request) =>
       addSubagentName(request, stored.subagentNames),
