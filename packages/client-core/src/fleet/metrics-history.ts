@@ -6,7 +6,11 @@
  * always UTC with milliseconds (`2026-11-03T09:05:00.000Z`), so the strings
  * sort in time order and nothing needs parsing.
  */
-import type { RunnerMetricsPoint, RunnerMetricsResolution } from "@hercule/contract";
+import {
+  RUNNER_METRICS_POINT_MS,
+  type RunnerMetricsPoint,
+  type RunnerMetricsResolution,
+} from "@hercule/contract";
 
 /**
  * The points of one resolution (five minutes or one hour) that a screen holds
@@ -22,46 +26,38 @@ export interface RunnerMetricsHistory {
 /** The history of a screen that has read nothing yet. */
 export const EMPTY_RUNNER_METRICS_HISTORY: RunnerMetricsHistory = { points: [], readAt: 0 };
 
-/**
- * Returns the `since` for the next re-read: the start of the newest point
- * across all runners, or `undefined` when the history holds no point (the next
- * read then covers the whole range).
- *
- * One runner's newest point can be older than another's. That is fine,
- * because every read covers every runner up to the time of the read, so a
- * runner with no point after this time has none to read.
- */
-export const findNewestPointStart = (history: RunnerMetricsHistory): string | undefined => {
-  let newest: string | undefined;
-  for (const { at } of history.points) {
-    if (newest === undefined || at > newest) newest = at;
-  }
-  return newest;
-};
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** How long one point of each resolution is, in ms. */
-export const POINT_MS: Readonly<Record<RunnerMetricsResolution, number>> = {
-  fiveMinutes: 5 * 60 * 1000,
-  hour: 60 * 60 * 1000,
-};
+/** The time the Sessions, CPU and Memory graphs of a machine's page cover: their history holds five-minute points. */
+export const FIVE_MINUTE_HISTORY_MS = DAY_MS;
+
+/** The time the Disk graph of a machine's page covers: its history holds hour points. */
+export const HOUR_HISTORY_MS = 14 * DAY_MS;
+
+/** How far back the disk forecast reads hour points: the Fleet page reads this much history. */
+export const FORECAST_HISTORY_MS = 7 * DAY_MS;
 
 /**
  * Returns the `since` of the next read of `resolution` points over `rangeMs`,
  * at `now` (Unix ms).
  *
  * - When the history holds a point inside the range, it is the start of the
- *   newest one (`findNewestPointStart`): the read replaces that point, which
- *   was still filling, and appends the rest.
+ *   newest point across all runners: the read replaces that point, which was
+ *   still filling, and appends the rest. One runner's newest point can be
+ *   older than another's. That is fine, because every read covers every runner
+ *   up to the time of the read, so a runner with no newer point has none to
+ *   read.
  * - Otherwise it is the start of the range, so the read covers all of it. This
  *   also happens after a long sleep, when the newest point is older than the
  *   range.
  *
- * The start of the range is a point boundary two points after `now - rangeMs`.
- * The controller refuses a span wider than the range, measuring it from the
- * `since` the client sent to the time it answers. The margin keeps a little
- * clock difference and the request's own time from tipping a first read over
- * that limit. The one or two far-left points it skips are outside what a graph
- * draws. Being on a boundary also means a held point never overlaps a read.
+ * The start of the range is `now - rangeMs` rounded down to a point boundary,
+ * plus two points. The controller refuses a span wider than the range,
+ * measuring it from the `since` the client sent to the time it answers. The
+ * two extra points keep a little clock difference and the request's own time
+ * from tipping a first read over that limit. The one or two far-left points it
+ * skips are outside what a graph draws. Being on a boundary also means a held
+ * point never overlaps a read.
  */
 export const findMetricsReadStart = (
   held: RunnerMetricsHistory,
@@ -69,12 +65,15 @@ export const findMetricsReadStart = (
   rangeMs: number,
   now: number,
 ): string => {
-  const pointMs = POINT_MS[resolution];
-  const rangeStart = new Date(Math.floor((now - rangeMs) / pointMs) * pointMs + 2 * pointMs);
-  const newest = findNewestPointStart(held);
-  return newest !== undefined && newest >= rangeStart.toISOString()
-    ? newest
-    : rangeStart.toISOString();
+  const pointMs = RUNNER_METRICS_POINT_MS[resolution];
+  const rangeStart = new Date(
+    Math.floor((now - rangeMs) / pointMs) * pointMs + 2 * pointMs,
+  ).toISOString();
+  let newest = rangeStart;
+  for (const { at } of held.points) {
+    if (at > newest) newest = at;
+  }
+  return newest;
 };
 
 /**
@@ -82,7 +81,7 @@ export const findMetricsReadStart = (
  *
  * - `read` is what `runnerMetrics.query` returned for `since`, sorted by runner
  *   id, then oldest first, like the held points.
- * - `since` is the value `findNewestPointStart` gave. The held points that
+ * - `since` is the value `findMetricsReadStart` gave. The held points that
  *   start at or after it were still filling, so the read replaces them.
  * - Points older than `readAt - rangeMs` are dropped, so the history never
  *   grows past the range its graph draws.

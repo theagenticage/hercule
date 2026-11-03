@@ -12,7 +12,7 @@
  * This module is its own subpath (`@hercule/client-core/fleet`) and is not
  * re-exported from the package index, so the first screen does not carry it.
  */
-import type { Runner, Session } from "@hercule/contract";
+import type { Runner, RunnerMetricsPoint, Session } from "@hercule/contract";
 import { RUNNING_STATUSES } from "../runner-capacity";
 import { forecastDiskLimit, type DiskForecast } from "./disk-forecast";
 import {
@@ -43,7 +43,7 @@ import {
 } from "./machine";
 import type { RunnerMetricsHistory } from "./metrics-history";
 
-export { FORECAST_HISTORY_MS, forecastDiskLimit, type DiskForecast } from "./disk-forecast";
+export { forecastDiskLimit, type DiskForecast } from "./disk-forecast";
 export type {
   FleetTextPart,
   GaugeLevel,
@@ -80,34 +80,6 @@ export const countRunnerSessions = (sessions: readonly Session[]): SessionCounts
   }
   return counts;
 };
-
-/**
- * Returns every need that applies to the machine of `runner`, the most serious
- * first: it is offline, it is unreachable, its disk is below its limit,
- * sessions wait for a slot, its disk is 85% full or more, its disk is
- * forecast to reach its limit within 21 days. The list is empty when the
- * machine needs nothing. `counts` holds the session counts of the runners (the
- * runner's own entry is used; none means no sessions). `metricsHistory` holds
- * the hour points of the runners, from which the forecast is made. A time is
- * worded relative to `today` in `timezone`, and left out when the runner was
- * never seen.
- *
- * Takes the runner and the counts rather than a machine type, so that type
- * stays private to the Fleet modules.
- */
-export const findMachineNeeds = (
-  runner: Runner,
-  counts: SessionCountsByRunner,
-  metricsHistory: RunnerMetricsHistory,
-  timezone: string,
-  today: Date,
-): readonly MachineNeed[] =>
-  listMachineNeeds(
-    buildFleetMachine(runner, counts),
-    forecastDiskLimit(metricsHistory.points, runner, metricsHistory.readAt),
-    timezone,
-    today,
-  );
 
 /** The Fleet page's lead: a headline, and under it one line of totals. */
 export interface FleetLead {
@@ -251,6 +223,19 @@ export interface FleetPage {
   readonly machines: readonly MachineSummary[];
 }
 
+/** Groups points by their runner in one pass, each group keeping the order of the points. */
+const groupPointsByRunner = (
+  points: readonly RunnerMetricsPoint[],
+): ReadonlyMap<string, readonly RunnerMetricsPoint[]> => {
+  const groups = new Map<string, RunnerMetricsPoint[]>();
+  for (const point of points) {
+    const group = groups.get(point.runnerId);
+    if (group === undefined) groups.set(point.runnerId, [point]);
+    else group.push(point);
+  }
+  return groups;
+};
+
 /**
  * Builds the Fleet page from the runners and the counts of their sessions.
  * `metricsHistory` holds the hour points of every runner, for the disk
@@ -274,12 +259,17 @@ export const describeFleetPage = (
   timezone: string,
   today: Date,
 ): FleetPage => {
+  const pointsByRunner = groupPointsByRunner(metricsHistory.points);
   const entries = runners
     .filter((runner) => runner.lifecycle !== "retired")
     .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((runner) => {
       const machine = buildFleetMachine(runner, counts);
-      const forecast = forecastDiskLimit(metricsHistory.points, runner, metricsHistory.readAt);
+      const forecast = forecastDiskLimit(
+        pointsByRunner.get(runner.id) ?? [],
+        runner,
+        metricsHistory.readAt,
+      );
       return { machine, forecast, needs: listMachineNeeds(machine, forecast, timezone, today) };
     });
   const machines = entries.map((entry) => entry.machine);

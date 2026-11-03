@@ -4,12 +4,9 @@
  * §Graphs and the forecast).
  */
 import type { Runner, RunnerMetricsPoint } from "@hercule/contract";
+import { FORECAST_HISTORY_MS } from "./metrics-history";
 
-const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
-
-/** How far back the forecast reads hour points: the Fleet page reads this much history. */
-export const FORECAST_HISTORY_MS = 7 * DAY_MS;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The history the forecast needs, from its oldest point to its newest. */
 const MIN_HISTORY_MS = 2 * DAY_MS;
@@ -60,9 +57,10 @@ const dropSamplesBeforeLastJump = (
  * (`diskWatermarkBytes`), by a least-squares straight line through the free
  * space of its hour points. Returns `null` when there is no forecast to show.
  *
- * `points` are hour points, oldest first within a runner. They may hold other
- * runners' points too: only those of `runner` are read. `now` is a Unix time
- * in ms, passed in so the function reads no clock.
+ * `points` are the hour points of `runner` alone, oldest first. The function
+ * does not check whose they are, so a caller with several runners' points
+ * passes each runner its own. `now` is a Unix time in ms, passed in so the
+ * function reads no clock.
  *
  * - Only points that start within the 7 days before `now` are used.
  * - The line starts again after a jump: free space growing by more than 10% of
@@ -76,6 +74,9 @@ const dropSamplesBeforeLastJump = (
  *   no forecast.
  * - There is no forecast when the newest point's free space is already below
  *   the limit, because the machine then needs the user for that reason.
+ * - There is no forecast when the fitted line is already at or below the limit
+ *   at the newest point, even though that point is above it. Noisy data does
+ *   this: the dashed line would run backwards or have no length.
  * - `days` is the time from `now` until the line reaches the limit, rounded to
  *   the nearest whole day and at least 1 (a line that has already crossed the
  *   limit between two reads still says 1). A forecast of more than 60 days
@@ -91,7 +92,6 @@ export const forecastDiskLimit = (
 
   const oldestAllowed = now - FORECAST_HISTORY_MS;
   const samples = points
-    .filter((point) => point.runnerId === runner.id)
     .map((point): FreeSpaceSample => ({ at: Date.parse(point.at), freeBytes: point.diskFreeBytes }))
     .filter(({ at }) => at >= oldestAllowed && at <= now);
   const counted = dropSamplesBeforeLastJump(samples, diskTotalBytes);
@@ -118,6 +118,7 @@ export const forecastDiskLimit = (
 
   const freeAt = (at: number): number => meanFree + slopePerMs * (at - oldest.at - meanTime);
   const reachesAt = newest.at + (runner.diskWatermarkBytes - freeAt(newest.at)) / slopePerMs;
+  if (reachesAt <= newest.at) return null;
   const days = Math.max(1, Math.round((reachesAt - now) / DAY_MS));
   if (days > MAX_FORECAST_DAYS) return null;
   return { days, from: { at: newest.at, freeBytes: freeAt(newest.at) }, reachesAt };

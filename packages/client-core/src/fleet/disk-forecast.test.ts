@@ -38,13 +38,9 @@ const buildRunner = (overrides: Partial<Runner> = {}): Runner => ({
 
 const RUNNER = buildRunner();
 
-/** Returns the hour point of `runnerId` that starts at `at` (Unix ms) with `diskFreeBytes` free. */
-const buildPoint = (
-  at: number,
-  diskFreeBytes: number,
-  runnerId = RUNNER.id,
-): RunnerMetricsPoint => ({
-  runnerId,
+/** Returns the hour point of the runner that starts at `at` (Unix ms) with `diskFreeBytes` free. */
+const buildPoint = (at: number, diskFreeBytes: number): RunnerMetricsPoint => ({
+  runnerId: RUNNER.id,
   at: new Date(at).toISOString(),
   minutes: 60,
   diskFreeBytes,
@@ -65,14 +61,9 @@ const buildFallingPoints = (
   hoursAgo: number,
   startFreeBytes: number,
   fallPerDayBytes: number,
-  runnerId = RUNNER.id,
 ): RunnerMetricsPoint[] =>
   Array.from({ length: hoursAgo + 1 }, (_, hour) =>
-    buildPoint(
-      NOW - (hoursAgo - hour) * HOUR_MS,
-      startFreeBytes - (hour / 24) * fallPerDayBytes,
-      runnerId,
-    ),
+    buildPoint(NOW - (hoursAgo - hour) * HOUR_MS, startFreeBytes - (hour / 24) * fallPerDayBytes),
   );
 
 describe("forecastDiskLimit", () => {
@@ -101,13 +92,6 @@ describe("forecastDiskLimit", () => {
     const points = buildFallingPoints(72, 131 * GB, 10 * GB);
 
     expect(forecastDiskLimit(points, RUNNER, NOW)?.days).toBe(1);
-  });
-
-  it("reads only the points of the runner, from a list that holds other runners' points", () => {
-    const other = buildFallingPoints(72, 150 * GB, 40 * GB, "01a06d02-0002-7000-8000-000000000001");
-    const points = [...other, ...buildFallingPoints(72, 400 * GB, 10 * GB)];
-
-    expect(forecastDiskLimit(points, RUNNER, NOW)?.days).toBe(27);
   });
 
   it("reads only the 7 days before now", () => {
@@ -200,5 +184,33 @@ describe("forecastDiskLimit", () => {
     const runner = buildRunner({ facts: FACTS_WITHOUT_DISK_TOTAL });
 
     expect(forecastDiskLimit(buildFallingPoints(72, 400 * GB, 10 * GB), runner, NOW)).toBeNull();
+  });
+
+  describe("when noisy data puts the fitted line at or below the limit at the newest point", () => {
+    /** Free space 24 hours apart on a disk of 10,000 bytes. The newest point is above a limit of 350 or 400. */
+    const noisy = [1500, 300, 600].map((freeBytes, day) =>
+      buildPoint(NOW - (2 - day) * DAY_MS, freeBytes),
+    );
+    const buildSmallDiskRunner = (diskWatermarkBytes: number): Runner =>
+      buildRunner({
+        facts: { ...FACTS_WITHOUT_DISK_TOTAL, diskTotalBytes: 10_000 },
+        diskWatermarkBytes,
+      });
+
+    it("gives nothing when the line is exactly at the limit, which would have no length", () => {
+      // The fitted line falls 450 a day and is at 350 on the newest day.
+      expect(forecastDiskLimit(noisy, buildSmallDiskRunner(350), NOW)).toBeNull();
+    });
+
+    it("gives nothing when the line is under the limit, which would run backwards", () => {
+      expect(forecastDiskLimit(noisy, buildSmallDiskRunner(400), NOW)).toBeNull();
+    });
+
+    it("still gives a forecast when the line is just above the limit", () => {
+      const forecast = forecastDiskLimit(noisy, buildSmallDiskRunner(300), NOW);
+
+      expect(forecast?.reachesAt).toBeCloseTo(NOW + DAY_MS * (50 / 450), -3);
+      expect(forecast?.days).toBe(1);
+    });
   });
 });

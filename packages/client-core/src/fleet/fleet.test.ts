@@ -10,11 +10,12 @@ import type {
 import {
   countRunnerSessions,
   describeFleetPage,
-  findMachineNeeds,
   type FleetLead,
   type MachineSummary,
   type SessionCountsByRunner,
 } from "./fleet";
+import { forecastDiskLimit } from "./disk-forecast";
+import { buildFleetMachine, listMachineNeeds } from "./machine";
 import { EMPTY_RUNNER_METRICS_HISTORY, type RunnerMetricsHistory } from "./metrics-history";
 
 const GIB = 1024 ** 3;
@@ -188,7 +189,13 @@ const findNeeds = (
   { runner, counts }: TestMachine,
   timezone = TIMEZONE,
   metricsHistory: RunnerMetricsHistory = EMPTY_RUNNER_METRICS_HISTORY,
-) => findMachineNeeds(runner, { [runner.id]: counts }, metricsHistory, timezone, TODAY);
+) =>
+  listMachineNeeds(
+    buildFleetMachine(runner, { [runner.id]: counts }),
+    forecastDiskLimit(metricsHistory.points, runner, metricsHistory.readAt),
+    timezone,
+    TODAY,
+  );
 
 const readText = (parts: FleetLead["headline"]): string => parts.map((part) => part.text).join("");
 
@@ -295,6 +302,22 @@ describe("describeFleetPage machines", () => {
     );
   });
 
+  it("forecasts each machine from the points of its own runner", () => {
+    const soon = buildMachine({ ...withDisk(250e9), id: "01a06d02-0001-7000-8000-000000000001" });
+    const later = buildMachine({ ...withDisk(250e9), id: "01a06d02-0002-7000-8000-000000000001" });
+    const history: RunnerMetricsHistory = {
+      points: [...buildHistory(soon, 12).points, ...buildHistory(later, 40).points],
+      readAt: READ_AT,
+    };
+
+    const { machines } = describePage([later, soon], null, TIMEZONE, history);
+
+    expect(machines.map((machine) => machine.need?.line)).toEqual([
+      "Disk reaches its limit in about 12 days",
+      undefined,
+    ]);
+  });
+
   it("names the machine, the runner it is and the icon it gets", () => {
     const machine = buildMachine({ name: "atlas", facts: buildFacts({ os: "linux" }) });
 
@@ -306,7 +329,7 @@ describe("describeFleetPage machines", () => {
   });
 });
 
-describe("findMachineNeeds", () => {
+describe("listMachineNeeds", () => {
   it("is empty for a healthy machine", () => {
     expect(findNeeds(buildMachine())).toEqual([]);
   });
@@ -337,7 +360,7 @@ describe("findMachineNeeds", () => {
     const startOfDay = new Date("2026-11-02T00:00:00.000Z");
 
     expect(
-      findMachineNeeds(runner, {}, EMPTY_RUNNER_METRICS_HISTORY, TIMEZONE, startOfDay)[0]?.line,
+      listMachineNeeds(buildFleetMachine(runner, {}), null, TIMEZONE, startOfDay)[0]?.line,
     ).toBe("Offline since 09:12");
   });
 

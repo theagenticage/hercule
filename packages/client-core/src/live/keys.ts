@@ -137,10 +137,10 @@ export const queryKeys = {
    * history of that resolution, or of that resolution and runner.
    *
    * The `runnerMetrics` topic maps to no key here, on purpose. A push says a
-   * row was written, and each history is read again from the start of its
-   * newest point, or at most once an hour, as `invalidateForRunnerMetricsPush`
-   * decides. Its key is also outside the `runner` prefix: a push on `runner`
-   * must not read any history.
+   * row was written, and the screens that draw metrics decide what to read on
+   * it: each history is read again from the start of its newest point, or at
+   * most once an hour. Its key is also outside the `runner` prefix: a push on
+   * `runner` must not read any history.
    */
   runnerMetrics: (
     ...scope:

@@ -3,7 +3,6 @@ import type { RunnerMetricsPoint } from "@hercule/contract";
 import {
   EMPTY_RUNNER_METRICS_HISTORY,
   findMetricsReadStart,
-  findNewestPointStart,
   mergeRunnerMetricsHistory,
   type RunnerMetricsHistory,
 } from "./metrics-history";
@@ -47,23 +46,6 @@ const describePoints = (history: RunnerMetricsHistory): string[] =>
     (point) =>
       `${point.runnerId.slice(-1)}@${(Date.parse(point.at) - T0) / MINUTE_MS}:${point.diskFreeBytes}`,
   );
-
-describe("findNewestPointStart", () => {
-  it("returns undefined for a history with no point", () => {
-    expect(findNewestPointStart(EMPTY_RUNNER_METRICS_HISTORY)).toBeUndefined();
-  });
-
-  it("returns the newest start across all runners", () => {
-    const history = buildHistory([
-      buildPoint(ATLAS, 0),
-      buildPoint(ATLAS, 10),
-      buildPoint(BOREAS, 0),
-      buildPoint(BOREAS, 5),
-    ]);
-
-    expect(findNewestPointStart(history)).toBe(new Date(T0 + 10 * MINUTE_MS).toISOString());
-  });
-});
 
 describe("mergeRunnerMetricsHistory", () => {
   const since = new Date(T0 + 5 * MINUTE_MS).toISOString();
@@ -187,6 +169,18 @@ describe("findMetricsReadStart", () => {
     const history = buildHistory([buildPoint(ATLAS, 0), buildPoint(ATLAS, 5)]);
     expect(findMetricsReadStart(history, "fiveMinutes", DAY_MS, T0 + 7 * MINUTE_MS)).toBe(
       new Date(T0 + 5 * MINUTE_MS).toISOString(),
+    );
+  });
+
+  it("starts at the newest start across all runners", () => {
+    const history = buildHistory([
+      buildPoint(ATLAS, 0),
+      buildPoint(ATLAS, 10),
+      buildPoint(BOREAS, 0),
+      buildPoint(BOREAS, 5),
+    ]);
+    expect(findMetricsReadStart(history, "fiveMinutes", DAY_MS, T0 + 12 * MINUTE_MS)).toBe(
+      new Date(T0 + 10 * MINUTE_MS).toISOString(),
     );
   });
 
