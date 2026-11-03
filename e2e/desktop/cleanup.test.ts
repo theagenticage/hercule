@@ -39,7 +39,10 @@ const BULK_BYTES = 1024 * 1024 * 1024;
  * home shares its disk with the rest of the machine, and other processes write
  * to it during the wait for the reports (up to a few minutes). The file is
  * 1 GiB and the test requires half of it, so ordinary writes by others
- * (a build, a log, a download) cannot hide the removal.
+ * (a build, a log, a download) are unlikely to hide the removal. A process
+ * that writes more than 512 MiB during the wait can still fail a correct
+ * cleanup. That risk is accepted, because the runner's storage cannot
+ * portably sit on its own volume.
  */
 const REQUIRED_GROWTH_BYTES = BULK_BYTES / 2;
 

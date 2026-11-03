@@ -5,7 +5,7 @@
  * rows' Threads, packs whole rows under the limit of one call, archives
  * them and words the toast, against a stub controller.
  */
-import type { Session } from "@hercule/contract";
+import { MAX_SESSION_WORKSPACE_IDS, type Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildProviderAccount, ANTHROPIC_IDENTITY } from "../providers.testing";
 import { buildErrorBody, createApiStub, type Handler } from "../api-stub";
@@ -194,7 +194,17 @@ describe("archiveRows", () => {
    */
   const buildController = (workspaceThreads: readonly Session[] = [], archive?: Handler) => {
     const api = createApiStub({
-      "GET /api/v1/sessions": { body: { items: workspaceThreads.map(onWire) } },
+      // Like the controller, answer only with the Threads of the workspaces the query names.
+      "GET /api/v1/sessions": (call) => {
+        const named = new URLSearchParams(call.search).getAll("workspaceId");
+        return {
+          body: {
+            items: workspaceThreads
+              .filter((thread) => named.includes(thread.workspaceId ?? ""))
+              .map(onWire),
+          },
+        };
+      },
       "POST /api/v1/sessions/archive":
         archive ??
         ((call) => ({
@@ -266,6 +276,29 @@ describe("archiveRows", () => {
     ]);
     expect(readArchived(api)[0]!.toSorted()).toEqual([uuid(11), uuid(12), uuid(13)]);
     expect(notice).toBe("Archived 2");
+  });
+
+  it("reads the workspaces in chunks of the controller's limit, and archives the Threads of every chunk", async () => {
+    const rows = describeRows(
+      Array.from({ length: MAX_SESSION_WORKSPACE_IDS + 1 }, (_, index) =>
+        doneThread(uuid(100 + index), index, { workspaceId: uuid(5000 + index) }),
+      ),
+    );
+    const hidden = doneThread(uuid(9), 1, { workspaceId: uuid(5000 + MAX_SESSION_WORKSPACE_IDS) });
+    const { api, client } = buildController([hidden]);
+
+    const { notice } = await archiveRows(client, buildArchivePlan(rows));
+
+    const reads = api.calls
+      .filter((call) => call.method === "GET")
+      .map((call) => new URLSearchParams(call.search));
+    expect(reads.map((read) => read.getAll("workspaceId").length)).toEqual([
+      MAX_SESSION_WORKSPACE_IDS,
+      1,
+    ]);
+    expect(readArchived(api)).toHaveLength(1);
+    expect(readArchived(api)[0]).toHaveLength(MAX_SESSION_WORKSPACE_IDS + 2);
+    expect(notice).toBe(`Archived ${String(MAX_SESSION_WORKSPACE_IDS + 1)}`);
   });
 
   it("says how many working rows the plan skipped and how many it left over", async () => {

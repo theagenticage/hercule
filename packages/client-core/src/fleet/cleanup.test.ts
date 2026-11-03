@@ -473,6 +473,29 @@ describe("archiveAndRemoveWorkspaces", () => {
     });
   });
 
+  it("does not claim the archive was refused when the controller answers with a body the client cannot read", async () => {
+    const { api, client } = buildController(
+      { body: { archived: "yes" } },
+      { body: { results: [] } },
+    );
+
+    const start = await archiveAndRemoveWorkspaces(client, plan);
+
+    expect(start.status).toBe("archiveUnconfirmed");
+    expect(api.calls.map((call) => call.path)).toEqual(["/api/v1/sessions/archive"]);
+  });
+
+  it("treats an internal error from the controller as unconfirmed, not refused", async () => {
+    const { client } = buildController(
+      { status: 500, body: buildErrorBody("internal", "The controller failed.") },
+      { body: { results: [] } },
+    );
+
+    const start = await archiveAndRemoveWorkspaces(client, plan);
+
+    expect(start.status).toBe("archiveUnconfirmed");
+  });
+
   it("does not claim the archive failed when the call gets no answer", async () => {
     const { client } = buildController(
       () => {

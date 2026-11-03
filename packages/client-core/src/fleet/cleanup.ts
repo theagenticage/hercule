@@ -23,16 +23,15 @@
 import {
   MAX_DISPOSE_MANY_ITEMS,
   MAX_SESSION_IDS,
-  MAX_SESSION_WORKSPACE_IDS,
   USED_SINCE_LOOKED_REFUSAL,
   type Session,
   type Workspace,
 } from "@hercule/contract";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
-import { readEveryPage } from "../read-every-page";
 import { buildSessionGroups } from "../threads/session-groups";
 import { describeAge } from "../threads/age";
+import { readWorkspaceThreads } from "../threads/workspace-threads";
 import { formatDiskSize, plural } from "./machine";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -92,24 +91,12 @@ export const describeCleanUpDisabledHint = (
 
 /**
  * Reads every Thread, archived ones included, that was placed in one of
- * `workspaceIds`, in as many reads as `MAX_SESSION_WORKSPACE_IDS` ids per read needs. Fails
- * when a read fails.
+ * `workspaceIds`. Fails when a read fails. See `readWorkspaceThreads`.
  */
-export const readCleanupThreads = async (
+export const readCleanupThreads = (
   client: HerculeClient,
   workspaceIds: readonly string[],
-): Promise<readonly Session[]> => {
-  const threads: Session[] = [];
-  for (let start = 0; start < workspaceIds.length; start += MAX_SESSION_WORKSPACE_IDS) {
-    const chunk = workspaceIds.slice(start, start + MAX_SESSION_WORKSPACE_IDS);
-    threads.push(
-      ...(await readEveryPage((page) =>
-        client.session.query({ query: { workspaceId: chunk, kind: "thread", ...page } }),
-      )),
-    );
-  }
-  return threads;
-};
+): Promise<readonly Session[]> => readWorkspaceThreads(client, workspaceIds);
 
 /** An idle workspace as the machine page and the cleanup dialog draw it. */
 export interface IdleWorkspaceRow {
@@ -449,8 +436,9 @@ export type CleanupStart =
   /** The archive was refused, so nothing was removed. `message` is the controller's. */
   | { readonly status: "archiveRefused"; readonly message: string }
   /**
-   * The archive call failed without an answer (the connection dropped), so
-   * the archive may or may not have happened. Nothing was removed. `message`
+   * The archive call failed without a usable answer (the connection dropped,
+   * or the controller answered `internal`), so the archive may or may not
+   * have happened. Nothing was removed. `message`
    * is worded for the user and says to check the threads.
    */
   | { readonly status: "archiveUnconfirmed"; readonly message: string }
@@ -484,11 +472,12 @@ export type CleanupStart =
  *
  * A refused archive, such as a Thread that started working again, removes
  * nothing and returns the controller's message. An archive call that fails
- * with no answer from the controller returns `archiveUnconfirmed`, because
- * the archive may have been committed. A removal the controller accepts
- * answers `removing`: its outcome arrives later, and `decideRemovalOutcome`
- * reads it. Once the archive
- * is done this never fails, because the archive cannot be undone and its count
+ * with no answer from the controller, or with an `internal` error (which
+ * includes a success the client could not decode), returns
+ * `archiveUnconfirmed`, because the archive may have been committed. A
+ * removal the controller accepts answers `removing`: its outcome arrives
+ * later, and `decideRemovalOutcome` reads it. Once the archive is done this
+ * never fails, because the archive cannot be undone and its count
  * must reach the user: when the removal call fails it returns `removalUnknown`.
  *
  * A "Try again" asks for one removal alone: pass `{ threadIds: [], items: [item] }`
@@ -505,7 +494,11 @@ export const archiveAndRemoveWorkspaces = async (
       // The controller archives a workspace's Agent sessions with its last Thread, and those are not counted.
       archivedCount = archived.filter((session) => session.kind === "thread").length;
     } catch (error) {
-      if (error instanceof ApiError) return { status: "archiveRefused", message: error.message };
+      // The client also turns a success body it cannot decode into an `internal` ApiError, and
+      // then the archive may have been committed. Every other code is the controller's refusal.
+      if (error instanceof ApiError && error.code !== "internal") {
+        return { status: "archiveRefused", message: error.message };
+      }
       const reason = (error instanceof Error ? error.message : String(error)).replace(/\.+$/, "");
       return {
         status: "archiveUnconfirmed",
@@ -567,7 +560,10 @@ export const decideRemovalOutcome = (
 
 /** The words that tell the user how a cleanup ended. See `describeCleanupOutcome`. */
 export interface CleanupOutcomeWords {
-  /** Whether every workspace was removed: the words are then the page's toast, else the dialog's head. */
+  /**
+   * Whether every workspace was removed: the words are then the page's toast,
+   * else the first line under the dialog's title.
+   */
   readonly allRemoved: boolean;
   readonly text: string;
 }
@@ -579,9 +575,9 @@ export interface CleanupOutcomeWords {
  *
  * - All removed, the page's toast: "Archived 9 threads and removed 6
  *   workspaces. 41 GB freed."
- * - Some or all refused, the dialog's head: "Archived 9 threads. Removed 4 of
- *   6 workspaces." The archive is always said when it archived something,
- *   because it is never undone.
+ * - Some or all refused, the first line under the dialog's title: "Archived 9
+ *   threads. Removed 4 of 6 workspaces." The archive is always said when it
+ *   archived something, because it is never undone.
  *
  * With nothing archived, the archive is left out of the words, and a freed
  * size of 0 is too.
