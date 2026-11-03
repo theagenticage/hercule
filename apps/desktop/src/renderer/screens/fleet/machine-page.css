@@ -1,6 +1,6 @@
-/* A machine's page: its head, room line, offline banner, and the Software and
-   Settings sections. The measurements are the fleet prototype's (`fx-hero`,
-   `fx-banner`, `fx-room-line`, `fx-psec`, `fx-sw`). Every class starts with
+/* A machine's page: its head, room line, offline banner, the instruments, and
+   the Software and Settings sections. The measurements are the fleet prototype's (`fx-hero`,
+   `fx-banner`, `fx-room-line`, `fx-instruments`, `fx-psec`, `fx-sw`). Every class starts with
    `machine-page-`. Each departure from the prototype is explained in a
    comment. */
 
@@ -97,6 +97,104 @@
 .machine-page-banner code {
   color: var(--ink);
   font-size: var(--t-11);
+}
+
+/* ---------- Capacity: the room line and the four instruments ---------- */
+/* The section starts right under the head, unlike the sections below it: the
+   room line's own margin is the gap, and an away machine's banner has its own. */
+.machine-page-capacity {
+  scroll-margin-top: var(--fleet-header-clearance);
+}
+/* The row is the container the columns answer to, so they follow the width of
+   the page and not of the window. */
+.machine-page-instruments-box {
+  container: machine-page-instruments / inline-size;
+  margin-top: 18px;
+}
+.machine-page-instruments {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px 36px;
+}
+/* Four 16-block drawings (9px a block) need 144px a column; under this width
+   they would be cut off. */
+@container machine-page-instruments (width < 720px) {
+  .machine-page-instruments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.machine-page-instrument {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.machine-page-instrument-label {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.machine-page-instrument > b {
+  font-size: var(--t-num);
+  font-weight: var(--w-medium);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.machine-page-instrument > b small {
+  color: var(--faint);
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+}
+.machine-page-instrument--you > b {
+  color: var(--you-ink);
+}
+.machine-page-instrument--fail > b {
+  color: var(--fail-ink);
+}
+/* The drawings are the cards', made as big as the prototype's instruments:
+   a 6px meter and 7 by 14px blocks. Both take 22px with their margins and
+   centre on the same line, so the notes under the four tiles line up (the
+   prototype's meter takes 16px and its ladder 22px). */
+.machine-page-instrument .fleet-meter {
+  height: 6px;
+  margin: 8px 0;
+}
+.machine-page-instrument .fleet-sessions {
+  margin: 4px 0;
+}
+.machine-page-instrument .fleet-sessions--blocks i {
+  width: 7px;
+  height: 14px;
+}
+.machine-page-instrument .fleet-sessions--bar {
+  flex: none;
+  width: 100%;
+  height: 14px;
+}
+.machine-page-instrument .fleet-sessions-mark {
+  height: 20px;
+}
+.machine-page-instrument-note {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* A machine that is away: what it last reported in quieter inks, as on its
+   card, never at reduced opacity. */
+.machine-page-instruments-box.is-away .machine-page-instrument > b {
+  color: var(--muted);
+}
+.machine-page-instruments-box.is-away .machine-page-instrument-label {
+  color: var(--faint);
+}
+.machine-page-instruments-box.is-away .fleet-meter {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+}
+.machine-page-instruments-box.is-away .fleet-meter i {
+  background: var(--faint);
 }
 
 /* ---------- A section ---------- */

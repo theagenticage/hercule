@@ -17,7 +17,8 @@
  * - bosgame: a Linux server, online, whose free disk is below its limit.
  * - mini: a Mac laptop with 16 GB, offline since 09:12 today. Two of its
  *   Threads are open.
- * - studio: a Mac with 96 GB, online and set to take no new work.
+ * - studio: a Mac with 96 GB, online and set to take no new work. Its
+ *   disk is 87 % full, which is the one need its card shows.
  *
  * The sidebar's seven threads run on atlas, and are 7 of its 12 running
  * sessions, so the sidebar and the Fleet page agree.
@@ -61,16 +62,18 @@ type HarnessVersions = Readonly<Record<string, string | null>>;
 /** The one Codex version of the fixture that is below the oldest this Hercule works with. */
 const BELOW_FLOOR_VERSION = "0.9.0";
 
-/** Returns the facts of a machine with the harnesses of `versions` installed. */
+/** Returns the facts of a machine with a disk of `diskTotalBytes` and the harnesses of `versions` installed. */
 const buildFacts = (
   os: string,
   arch: string,
   totalMemoryBytes: number,
+  diskTotalBytes: number,
   versions: HarnessVersions,
 ): RunnerFacts => ({
   os,
   arch,
   totalMemoryBytes,
+  diskTotalBytes,
   docker: os === "linux",
   toolchains: [{ name: "node", version: "v24.8.0", path: "/usr/local/bin/node" }],
   harnesses: HARNESSES.map((harness) => ({
@@ -82,13 +85,14 @@ const buildFacts = (
   identityPort: 4939,
 });
 
-/** Returns an online, active machine with the facts and the readings given. */
+/** Returns an online, active machine with the facts and the readings given, `cpu` being the last minute's mean and peak. */
 const buildMachine = (
   id: string,
   name: string,
   over: Partial<Runner> & Pick<Runner, "facts" | "maxConcurrentSessions">,
   diskFreeBytes: number,
   availableMemoryBytes: number,
+  cpu: { readonly averagePercent: number; readonly peakPercent: number },
 ): Runner => ({
   id,
   name,
@@ -97,7 +101,7 @@ const buildMachine = (
   reserved: false,
   version: CONTROLLER_VERSION,
   labels: [],
-  metrics: { diskFreeBytes, availableMemoryBytes },
+  metrics: { diskFreeBytes, availableMemoryBytes, cpu },
   diskWatermarkBytes: DEFAULT_DISK_LIMIT_BYTES,
   lastSeenAt: minutesAgo(0.5),
   ...over,
@@ -130,18 +134,19 @@ const STUDIO_VERSIONS: HarnessVersions = {
   "pi/pi": "0.9.2",
 };
 
-/** Atlas: a Mac with 64 GB, one release behind, with 12 sessions running of a cap of 16. */
+/** Atlas: a Mac with 64 GB and a 1,000 GB disk, one release behind, with 12 sessions running of a cap of 16. */
 export const ATLAS: Runner = buildMachine(
   ATLAS_ID,
   "atlas",
   {
-    facts: buildFacts("darwin", "arm64", 64 * GIB, ATLAS_VERSIONS),
+    facts: buildFacts("darwin", "arm64", 64 * GIB, 1000 * GB, ATLAS_VERSIONS),
     maxConcurrentSessions: 16,
     version: "0.4.1",
     labels: ["macos", "xcode"],
   },
   412 * GB,
   29 * GIB,
+  { averagePercent: 34, peakPercent: 71 },
 );
 
 /** Beelink: a Linux server with 128 GB, 85 % of it in use, with a cap of 24. */
@@ -149,12 +154,13 @@ export const BEELINK: Runner = buildMachine(
   BEELINK_ID,
   "beelink",
   {
-    facts: buildFacts("linux", "x64", 128 * GIB, BEELINK_VERSIONS),
+    facts: buildFacts("linux", "x64", 128 * GIB, 4000 * GB, BEELINK_VERSIONS),
     maxConcurrentSessions: 24,
     labels: ["linux", "docker"],
   },
   1900 * GB,
   19 * GIB,
+  { averagePercent: 18, peakPercent: 52 },
 );
 
 /** Bosgame: a Linux server whose free disk, 6.2 GB, is below its limit of 10.7 GB. */
@@ -162,12 +168,13 @@ export const BOSGAME: Runner = buildMachine(
   BOSGAME_ID,
   "bosgame",
   {
-    facts: buildFacts("linux", "x64", 32 * GIB, BOSGAME_VERSIONS),
+    facts: buildFacts("linux", "x64", 32 * GIB, 500 * GB, BOSGAME_VERSIONS),
     maxConcurrentSessions: 8,
     labels: ["linux"],
   },
   6.2 * GB,
   21 * GIB,
+  { averagePercent: 7, peakPercent: 22 },
 );
 
 /** Mini: a Mac laptop with 16 GB, offline since 09:12 today. Its readings are the last it sent. */
@@ -175,26 +182,28 @@ export const MINI: Runner = buildMachine(
   MINI_ID,
   "mini",
   {
-    facts: buildFacts("darwin", "arm64", 16 * GIB, MINI_VERSIONS),
+    facts: buildFacts("darwin", "arm64", 16 * GIB, 500 * GB, MINI_VERSIONS),
     maxConcurrentSessions: 4,
     connectivity: "offline",
     lastSeenAt: "2026-09-29T09:12:00.000Z",
   },
   98 * GB,
   5.1 * GIB,
+  { averagePercent: 12, peakPercent: 30 },
 );
 
-/** Studio: a Mac with 96 GB, online and told to take no new work. */
+/** Studio: a Mac with 96 GB and a 4,000 GB disk that is 87 % full, online and told to take no new work. */
 export const STUDIO: Runner = buildMachine(
   STUDIO_ID,
   "studio",
   {
-    facts: buildFacts("darwin", "arm64", 96 * GIB, STUDIO_VERSIONS),
+    facts: buildFacts("darwin", "arm64", 96 * GIB, 4000 * GB, STUDIO_VERSIONS),
     maxConcurrentSessions: 8,
     lifecycle: "draining",
   },
-  640 * GB,
+  500 * GB,
   70 * GIB,
+  { averagePercent: 4, peakPercent: 15 },
 );
 
 /**

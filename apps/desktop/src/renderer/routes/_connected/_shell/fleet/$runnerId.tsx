@@ -20,6 +20,7 @@ import { FleetHeader } from "../../../../screens/fleet/fleet-header";
 import { FleetScroll } from "../../../../screens/fleet/fleet-scroll";
 import { MachinePageBanner } from "../../../../screens/fleet/machine-page-banner";
 import { MachinePageHead, MachinePageRoomLine } from "../../../../screens/fleet/machine-page-head";
+import { MachinePageInstruments } from "../../../../screens/fleet/machine-page-instruments";
 import { useFleetToday } from "../../../../screens/fleet/use-fleet-today";
 import { useSectionInView } from "../../../../screens/fleet/use-section-in-view";
 import { NotFound } from "../../../../screens/not-found";
@@ -29,18 +30,20 @@ import { MachineSoftware } from "./-machine-software";
 import { useRunnerSessionCounts } from "./-session-counts";
 
 /** The ids of the page's sections, which the header's jump links scroll to. */
+const CAPACITY_ID = "machine-capacity";
 const SOFTWARE_ID = "machine-software";
 const SETTINGS_ID = "machine-settings";
-const SECTION_IDS = [SOFTWARE_ID, SETTINGS_ID];
+const SECTION_IDS = [CAPACITY_ID, SOFTWARE_ID, SETTINGS_ID];
 const SECTIONS = [
+  { id: CAPACITY_ID, label: "Capacity" },
   { id: SOFTWARE_ID, label: "Software" },
   { id: SETTINGS_ID, label: "Settings" },
 ];
 
 /**
  * One machine's page (spec 17 §Fleet, A machine's page): its head and room
- * line, or the banner of a machine that is away, then its Software and
- * Settings. Its loader reads everything the page draws before it renders, as
+ * line, or the banner of a machine that is away, then its instruments, its
+ * Software and its Settings. Its loader reads everything the page draws before it renders, as
  * the Fleet page's does (`fleet/index.tsx`). When no runner has the id, or the
  * runner is retired, the route shows `RunnerNotFound`: retired machines are
  * not shown anywhere on Fleet.
@@ -88,8 +91,9 @@ function MachinePage(): JSX.Element {
 
 /**
  * Draws the Fleet header over the page of the machine `runner`, and the page
- * in the Fleet scroll area. The head and its line are drawn here; the Software
- * and Settings sections read what they draw themselves.
+ * in the Fleet scroll area. The head, its line and the instruments are drawn
+ * here from what the page already holds; the Software and Settings sections
+ * read what they draw themselves.
  *
  * Retire… on the banner and in Settings ask the same question, so the dialog
  * is held here. So is Add a machine, which the header offers on every Fleet
@@ -128,11 +132,18 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
       <FleetScroll scrollRef={scrollRef}>
         <div className="machine-page">
           <MachinePageHead runnerId={runner.id} head={page.head} />
-          {page.top.kind === "room" ? (
-            <MachinePageRoomLine line={page.top.line} />
-          ) : (
+          {page.top.kind === "away" && (
             <MachinePageBanner banner={page.top.banner} onRetire={() => setRetiring(true)} />
           )}
+          {/* The section has no visible heading: the room line and the numbers
+              need none. Its label names it for the jump link and for screen readers. */}
+          <section id={CAPACITY_ID} className="machine-page-capacity" aria-label="Capacity">
+            {page.top.kind === "room" && <MachinePageRoomLine line={page.top.line} />}
+            <MachinePageInstruments
+              instruments={page.instruments}
+              isAway={page.top.kind === "away"}
+            />
+          </section>
           <MachineSoftware id={SOFTWARE_ID} runner={runner} />
           <MachineSettings id={SETTINGS_ID} runner={runner} onRetire={() => setRetiring(true)} />
         </div>

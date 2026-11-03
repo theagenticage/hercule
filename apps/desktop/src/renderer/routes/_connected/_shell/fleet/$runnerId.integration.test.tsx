@@ -1,7 +1,8 @@
 /**
  * Tests a machine's page (spec 17 §Fleet, A machine's page): its head and
- * room line, the banner of a machine that is away, the Software section, and
- * the Settings rows with their saves, refusals and Retire.
+ * room line, the banner of a machine that is away, the Capacity section with
+ * its instruments, the Software section, and the Settings rows with their
+ * saves, refusals and Retire.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -37,7 +38,10 @@ afterEach(() => {
 const GIB = 1024 ** 3;
 const [MOSS_RECORD] = SIDEBAR_FIXTURE.runners;
 
-/** atlas: online, 16 GiB, a cap of 8, a 10 GiB disk limit with 100 GB free, and the label gpu. */
+/**
+ * atlas: online, 16 GiB, a 500 GB disk with 100 GB free, a CPU at 23% (peak
+ * 61%), a cap of 8, a 10 GiB disk limit, and the label gpu.
+ */
 const ATLAS: Runner = {
   ...MOSS_RECORD!,
   name: "atlas",
@@ -50,6 +54,7 @@ const ATLAS: Runner = {
     os: "darwin",
     arch: "arm64",
     totalMemoryBytes: 16 * GIB,
+    diskTotalBytes: 500_000_000_000,
     docker: false,
     toolchains: [],
     harnesses: [
@@ -59,7 +64,11 @@ const ATLAS: Runner = {
     adapters: ["claude-code/claude-code", "codex/codex"],
     identityPort: 4939,
   },
-  metrics: { diskFreeBytes: 100_000_000_000, availableMemoryBytes: 8 * GIB },
+  metrics: {
+    diskFreeBytes: 100_000_000_000,
+    availableMemoryBytes: 8 * GIB,
+    cpu: { averagePercent: 23, peakPercent: 61 },
+  },
   maxConcurrentSessions: 8,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-11-02T09:12:00.000Z",
@@ -179,6 +188,13 @@ const openMachine = async ({
 const readCalls = (calls: readonly Call[], method: string, path: string): readonly Call[] =>
   calls.filter((call) => call.method === method && call.path === path);
 
+const getCapacity = () => screen.getByRole("region", { name: "Capacity" });
+/** Returns the text of each instrument of the Capacity section, in the order drawn. */
+const readInstruments = (): readonly string[] =>
+  Array.from(
+    getCapacity().querySelectorAll(".machine-page-instrument"),
+    (tile) => tile.textContent,
+  );
 const getSettings = () => screen.getByRole("region", { name: "Settings" });
 const getSoftware = () => screen.getByRole("region", { name: "Software" });
 
@@ -188,10 +204,11 @@ describe("a machine's head", () => {
 
     const head = screen.getByRole("heading", { level: 2, name: "atlas" }).closest("header")!;
     expect(head.textContent).toBe(
-      "atlasOnline·macOS·arm64·16 GB memory·Runner 0.9.3·update available",
+      "atlasOnline·macOS·arm64·16 GB memory·500 GB disk·Runner 0.9.3·update available",
     );
-    expect(screen.getByText(/^Room for/).textContent).toBe("Room for 4 more, under its cap of 8");
-    expect(screen.getByText("4").tagName).toBe("B");
+    const roomLine = screen.getByText(/^Room for/);
+    expect(roomLine.textContent).toBe("Room for 4 more, under its cap of 8");
+    expect(within(roomLine).getByText("4").tagName).toBe("B");
   });
 
   it("names the state of a machine that takes no new work, in the head and in the room line", async () => {
@@ -206,6 +223,63 @@ describe("a machine's head", () => {
     await openMachine({ controllerVersion: "0.9.3" });
 
     expect(screen.queryByText("update available")).toBeNull();
+  });
+});
+
+describe("the Capacity section", () => {
+  it("holds the room line and the four instruments of the machine, with their latest values", async () => {
+    await openMachine();
+
+    expect(within(getCapacity()).getByText(/^Room for/).textContent).toBe(
+      "Room for 4 more, under its cap of 8",
+    );
+    expect(readInstruments()).toEqual([
+      "Sessions4 of 8None waiting",
+      "CPU23%Peak 61% in the last minute",
+      "Memory50%8.0 GB free of 16 GB",
+      "Disk80%100 GB free of 500 GB",
+    ]);
+  });
+
+  it("is the first jump link of the header, scrolls to the section and lights while it is in view", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    await openMachine();
+
+    const links = within(screen.getByRole("navigation", { name: "Fleet" })).getAllByRole("button");
+    expect(links.map((link) => link.textContent)).toEqual(["Capacity", "Software", "Settings"]);
+    expect(links[0]!.getAttribute("aria-current")).toBe("location");
+
+    await userEvent.click(links[0]!);
+
+    expect(scrollIntoView.mock.contexts).toEqual([getCapacity()]);
+  });
+
+  it("tells the instrument a runner cannot report, instead of leaving it blank", async () => {
+    // An older runner leaves out the disk's size and the CPU altogether.
+    await openMachine({
+      runner: {
+        ...ATLAS,
+        facts: {
+          os: "darwin",
+          arch: "arm64",
+          totalMemoryBytes: 16 * GIB,
+          docker: false,
+          toolchains: [],
+          harnesses: [],
+          adapters: [],
+          identityPort: 4939,
+        },
+        metrics: { diskFreeBytes: 100_000_000_000, availableMemoryBytes: 8 * GIB },
+      },
+    });
+
+    expect(readInstruments()).toEqual([
+      "Sessions4 of 8None waiting",
+      "CPU–This machine's runner is too old to report CPU. Update it.",
+      "Memory50%8.0 GB free of 16 GB",
+      "Disk100 GB freeThis machine's runner is too old to report its disk size. Update it.",
+    ]);
   });
 });
 
@@ -225,6 +299,18 @@ describe("a machine that is away", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: "atlas" }).closest("header")!.textContent,
     ).toContain("Offline");
+  });
+
+  it("keeps the instruments below the banner, with the values it last reported", async () => {
+    await openMachine({ runner: OFFLINE });
+
+    expect(within(getCapacity()).queryByText(/has not been heard from/)).toBeNull();
+    expect(readInstruments()).toEqual([
+      "Sessions– of 8None waiting",
+      "CPU23%Peak 61% in the last minute",
+      "Memory50%8.0 GB free of 16 GB",
+      "Disk80%100 GB free of 500 GB",
+    ]);
   });
 
   it("shows the time in the user's time zone from the settings, as the Fleet page does", async () => {
