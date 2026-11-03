@@ -27,6 +27,12 @@ import type {
   TextRole,
   ThemeTokens,
 } from "./ui-probe-types";
+import {
+  computeArea,
+  computeLostShare,
+  intersectRects,
+  type ClippingAncestor,
+} from "./ui-probe-clipping";
 
 // ---------- Constants ----------
 
@@ -174,20 +180,6 @@ const SPACING_PROPERTIES = [
 /** Returns the rectangle in the shape the probe's results use. */
 function toProbeRect(rect: DOMRectReadOnly): ProbeRect {
   return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-}
-
-/** Returns the area of a rectangle in square pixels. */
-function computeArea(rect: ProbeRect): number {
-  return Math.max(0, rect.right - rect.left) * Math.max(0, rect.bottom - rect.top);
-}
-
-/** Returns the part both rectangles cover, or null when they share no area. */
-function intersectRects(first: ProbeRect, second: ProbeRect): ProbeRect | null {
-  const left = Math.max(first.left, second.left);
-  const top = Math.max(first.top, second.top);
-  const right = Math.min(first.right, second.right);
-  const bottom = Math.min(first.bottom, second.bottom);
-  return right > left && bottom > top ? { left, top, right, bottom } : null;
 }
 
 /** Returns whether two rectangles are the same, ignoring sub-pixel noise below 0.01 px. */
@@ -478,46 +470,6 @@ function clipToAncestors(
 }
 
 /**
- * Returns how far to move the span [low, high] so that it lies inside
- * [clipLow, clipHigh], the way scrolling moves content into view. A span
- * longer than the clip starts at its start.
- */
-function computeShiftIntoView(
-  low: number,
-  high: number,
-  clipLow: number,
-  clipHigh: number,
-): number {
-  if (high - low >= clipHigh - clipLow || low < clipLow) return clipLow - low;
-  return high > clipHigh ? clipHigh - high : 0;
-}
-
-/** Moves a rectangle by `delta` along one axis and cuts it to the span of `clip` along that axis. Returns null when nothing is left. */
-function moveAndCutAlongAxis(
-  rect: ProbeRect | null,
-  axis: "x" | "y",
-  delta: number,
-  clip: ProbeRect,
-): ProbeRect | null {
-  if (rect === null) return null;
-  return axis === "x"
-    ? intersectRects(
-        { ...rect, left: rect.left + delta, right: rect.right + delta },
-        { left: clip.left, right: clip.right, top: -Infinity, bottom: Infinity },
-      )
-    : intersectRects(
-        { ...rect, top: rect.top + delta, bottom: rect.bottom + delta },
-        { left: -Infinity, right: Infinity, top: clip.top, bottom: clip.bottom },
-      );
-}
-
-/** An ancestor that cuts or scrolls its content, with the area it clips the content to. */
-interface ClippingAncestor {
-  readonly facts: ElementFacts;
-  readonly clip: ProbeRect;
-}
-
-/**
  * Returns the ancestors, from `from` outward, that clip the content of a box
  * and apply to it: the ones that cut or scroll along some axis, innermost
  * first. `from` and `escape` work as in `clipToAncestors`.
@@ -550,80 +502,18 @@ function listClippingAncestors(
 }
 
 /**
- * Returns the part of a scroller's area that the user can see, or null when
- * none is left. It is the scroller's `clip`, cut by every outer ancestor that
- * cuts along an axis, and by the window unless an outer ancestor scrolls (the
- * user then scrolls the scroller itself into view, and that ancestor gets its
- * own turn in `computeLostShare`). `outer` holds the ancestors around the
- * scroller, innermost first.
- */
-function computeVisibleScrollerArea(
-  clip: ProbeRect,
-  outer: ReadonlyArray<ClippingAncestor>,
-): ProbeRect | null {
-  let visible: ProbeRect | null = clip;
-  let hasOuterScroller = false;
-  for (const { facts, clip: outerClip } of outer) {
-    if (facts.cutsX) visible = moveAndCutAlongAxis(visible, "x", 0, outerClip);
-    if (facts.cutsY) visible = moveAndCutAlongAxis(visible, "y", 0, outerClip);
-    if (facts.scrollsX || facts.scrollsY) hasOuterScroller = true;
-  }
-  return hasOuterScroller || visible === null ? visible : intersectRects(visible, readWindowRect());
-}
-
-/**
  * Returns the share of `box`, from 0 to 1, that is lost: cut off for good,
- * with no scrolling that reaches it. The rules, from the box outward:
- *
- * - An ancestor with overflow `hidden` or `clip` cuts the box along that axis.
- * - An ancestor that scrolls along an axis (overflow `auto` or `scroll`) lets
- *   the user scroll the box into view along that axis, but only into the
- *   part of the scroller the user can see: its area cut by the outer
- *   ancestors that cut and by the window. The walk moves the box into that
- *   part and goes on from there, so the ancestors around the scroller judge
- *   the box where scrolling puts it, not where it lies now. Along an axis
- *   that does not scroll, the scroller cuts like overflow `hidden`.
- * - A scroller whose visible part is empty (a panel placed outside the
- *   window) loses everything inside it, because no scrolling brings the
- *   content into view.
- * - The window cuts the box only when no ancestor scrolls.
- *
- * `from` and `escape` work as in `clipToAncestors`.
+ * with no scrolling that reaches it. It reads the ancestors from `from`
+ * outward that cut or scroll, and the window, and leaves the geometry to
+ * `computeLostShare`. `from` and `escape` work as in `clipToAncestors`.
  */
-function computeLostShare(
+function readLostShare(
   box: ProbeRect,
   from: Element | null,
   escape: Escape,
   readFacts: ReadFacts,
 ): number {
-  const ancestors = listClippingAncestors(from, escape, readFacts);
-  // `reference` is the box as scrolling would put it. The lost share is
-  // what `kept` lacks of it, so moving a box into view loses nothing.
-  let reference: ProbeRect | null = box;
-  let kept: ProbeRect | null = box;
-  let hasScroller = false;
-  for (let index = 0; index < ancestors.length && kept !== null; index++) {
-    const { facts, clip } = ancestors[index]!;
-    if (facts.cutsX) kept = moveAndCutAlongAxis(kept, "x", 0, clip);
-    if (facts.cutsY) kept = moveAndCutAlongAxis(kept, "y", 0, clip);
-    if (!facts.scrollsX && !facts.scrollsY) continue;
-    hasScroller = true;
-    const view = computeVisibleScrollerArea(clip, ancestors.slice(index + 1));
-    if (view === null) return 1;
-    if (facts.scrollsX && reference !== null) {
-      const delta = computeShiftIntoView(reference.left, reference.right, view.left, view.right);
-      reference = moveAndCutAlongAxis(reference, "x", delta, view);
-      kept = moveAndCutAlongAxis(kept, "x", delta, view);
-    }
-    if (facts.scrollsY && reference !== null) {
-      const delta = computeShiftIntoView(reference.top, reference.bottom, view.top, view.bottom);
-      reference = moveAndCutAlongAxis(reference, "y", delta, view);
-      kept = moveAndCutAlongAxis(kept, "y", delta, view);
-    }
-  }
-  if (kept !== null && !hasScroller) kept = intersectRects(kept, readWindowRect());
-  if (kept === null || reference === null) return 1;
-  return Math.max(0, 1 - computeArea(kept) / computeArea(reference));
+  return computeLostShare(box, listClippingAncestors(from, escape, readFacts), readWindowRect());
 }
 
 /** Returns what an element's own position makes it escape, for the clipping of its box. */
@@ -653,7 +543,7 @@ interface CollectedFragment {
   readonly hasStandInBox: boolean;
   /** The element that draws the text: a text node's parent, the input of a field, or the host of a pseudo-element. */
   readonly owner: Element;
-  /** The share of `fragment.box` that is lost, from 0 to 1: see `computeLostShare`. */
+  /** The share of `fragment.box` that is lost, from 0 to 1: see `computeLostShare` in ui-probe-clipping.ts. */
   readonly lostShare: number;
 }
 
@@ -949,7 +839,7 @@ function readTextNode(pass: TextPass, node: Text, parent: Element): void {
       paragraph,
       hasStandInBox: false,
       owner: parent,
-      lostShare: computeLostShare(box, parent, "none", pass.readFacts),
+      lostShare: readLostShare(box, parent, "none", pass.readFacts),
       fragment: {
         sourceId,
         length,
@@ -1010,7 +900,7 @@ function readField(
     paragraph: null,
     hasStandInBox: false,
     owner: field,
-    lostShare: computeLostShare(box, field.parentElement, escape, pass.readFacts),
+    lostShare: readLostShare(box, field.parentElement, escape, pass.readFacts),
     fragment: {
       sourceId: takeSourceId(pass),
       length: text.length,
@@ -1068,7 +958,7 @@ function readPseudoElement(pass: TextPass, host: Element, pseudo: "::before" | "
     paragraph: null,
     hasStandInBox: true,
     owner: host,
-    lostShare: computeLostShare(box, host, "none", pass.readFacts),
+    lostShare: readLostShare(box, host, "none", pass.readFacts),
     fragment: {
       sourceId: takeSourceId(pass),
       length: text.length,
