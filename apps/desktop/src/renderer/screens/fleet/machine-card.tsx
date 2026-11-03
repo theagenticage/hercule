@@ -1,9 +1,11 @@
 import type { JSX, ReactNode } from "react";
 import type { GaugeLevel, MachineSummary } from "@hercule/client-core/fleet";
+import type { MachineFaces } from "@hercule/client-core/machine-work";
 import { MachineIcon } from "./machine-icon";
 import { GaugeValue, Meter, NeedLine, OpenMachine, StatusDot } from "./machine-parts";
 import { buildMachineTransitionName } from "./machine-transition";
 import { SessionsFigure } from "./sessions-drawing";
+import { MachineFacesStack } from "./work-faces";
 import "./fleet-page.css";
 
 /**
@@ -52,7 +54,9 @@ function Gauge({
  *
  * The machine's name is the card's one way to open the machine: its button
  * covers the whole card and calls `onOpen` with the runner id. `allow` is the
- * Allow button, drawn beside a need of waiting sessions.
+ * Allow button, drawn beside a need of waiting sessions. `faces` are the faces
+ * of the work on the machine, drawn left of its room; `undefined` when the
+ * machine has no work.
  *
  * Every card carries the view transition name of its machine, so the browser
  * can grow the card into the head of the machine's page, and back. Runner ids
@@ -60,10 +64,12 @@ function Gauge({
  */
 export function MachineCard({
   machine,
+  faces,
   allow,
   onOpen,
 }: {
   readonly machine: MachineSummary;
+  readonly faces: MachineFaces | undefined;
   readonly allow: ReactNode;
   readonly onOpen: (runnerId: string) => void;
 }): JSX.Element {
@@ -102,6 +108,7 @@ export function MachineCard({
         </Gauge>
       </div>
       <div className="fleet-card-crew">
+        {faces !== undefined && <MachineFacesStack faces={faces} size={20} />}
         {machine.roomText !== null && <span className="fleet-room">{machine.roomText}</span>}
       </div>
       <div className="fleet-card-foot">

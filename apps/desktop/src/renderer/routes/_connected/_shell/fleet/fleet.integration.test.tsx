@@ -313,6 +313,47 @@ describe("the Fleet page", () => {
     expect(screen.queryByRole("button", { name: /Add a machine\./ })).toBeNull();
   });
 
+  describe("the faces of the work on a card", () => {
+    /** Returns `session` as open on forge, busy. */
+    const onForge = (session: Session, over: Partial<Session> = {}): Session => ({
+      ...session,
+      runnerId: FORGE.id,
+      status: "busy",
+      openRequests: [],
+      ...over,
+    });
+
+    it("shows one face per group of the machine's sessions: a run's steps are one face, a row of Threads is one", async () => {
+      // The first two fixture Threads share a workspace, so the sidebar lists them in one row.
+      const [runbook, flaky] = SIDEBAR_FIXTURE.threads as [Session, Session];
+      const runId = "01a06d02-d000-7000-8000-000000000001";
+      const sessions = [
+        onForge(runbook),
+        onForge(flaky),
+        onForge(runbook, {
+          id: "01a06d02-b100-7000-8000-000000000001",
+          kind: "run",
+          runId,
+          stepId: "plan",
+        }),
+        onForge(runbook, {
+          id: "01a06d02-b100-7000-8000-000000000002",
+          kind: "run",
+          runId,
+          stepId: "code",
+        }),
+      ];
+      await openFleet({
+        handlers: { "GET /api/v1/sessions": () => ({ body: { items: sessions } }) },
+      });
+
+      expect(
+        within(getCard("forge")).getByRole("img", { name: "2 groups at work here" }),
+      ).toBeTruthy();
+      expect(within(getCard("atlas")).queryByRole("img", { name: /at work here/ })).toBeNull();
+    });
+  });
+
   describe("keeping the sessions current", () => {
     /** Counts the reads of the Fleet's session list in `calls` from `from` on: every status but exited, of every kind. */
     const countFleetReads = (calls: readonly Call[], from: number): number =>

@@ -1,4 +1,5 @@
 import { useState, type JSX, type ReactNode } from "react";
+import { useRouteContext } from "@tanstack/react-router";
 import type { MachineSummary } from "@hercule/client-core/fleet";
 import { EmptyFleetCard } from "../../../../screens/fleet/empty-fleet-card";
 import { MachineCard, MachineGrid } from "../../../../screens/fleet/machine-card";
@@ -10,6 +11,7 @@ import {
 } from "../../../../screens/fleet/machine-view";
 import { ViewSwitch } from "../../../../screens/workflows/view-switch";
 import { AllowSessionsButton } from "./-allow-sessions-button";
+import { useMachineFaces } from "./-machine-faces";
 
 /** The two ways to show the machines, in the order the switch lists them. */
 const VIEW_CHOICES = [
@@ -20,6 +22,35 @@ const VIEW_CHOICES = [
 /** Returns the Allow button of `machine`, or `null` when no session of it waits for a slot. */
 const buildAllowButton = ({ runnerId, need }: MachineSummary): ReactNode =>
   need?.kind === "waiting" ? <AllowSessionsButton runnerId={runnerId} need={need} /> : null;
+
+/**
+ * Renders the machines as cards, each with the faces of the work on its
+ * machine. It reads the faces here, and not in the section, so the list view
+ * reads no sessions.
+ */
+function MachineCards({
+  machines,
+  onOpen,
+}: {
+  readonly machines: readonly MachineSummary[];
+  readonly onOpen: (runnerId: string) => void;
+}): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const faces = useMachineFaces(client);
+  return (
+    <>
+      {machines.map((machine) => (
+        <MachineCard
+          key={machine.runnerId}
+          machine={machine}
+          faces={faces[machine.runnerId]}
+          allow={buildAllowButton(machine)}
+          onOpen={onOpen}
+        />
+      ))}
+    </>
+  );
+}
 
 /**
  * Renders the Machines section of the Fleet page: its heading with the count
@@ -61,14 +92,7 @@ export function MachinesSection({
       </div>
       {view === "grid" ? (
         <MachineGrid>
-          {machines.map((machine) => (
-            <MachineCard
-              key={machine.runnerId}
-              machine={machine}
-              allow={buildAllowButton(machine)}
-              onOpen={onOpen}
-            />
-          ))}
+          <MachineCards machines={machines} onOpen={onOpen} />
           {emptyCard}
         </MachineGrid>
       ) : (
