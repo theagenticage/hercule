@@ -1,5 +1,5 @@
 /**
- * Tests the four instruments of a machine's page: what each tile shows of the
+ * Tests the three instruments of a machine's page: what each tile shows of the
  * `MachineInstruments` it is given. What the values and notes say is decided by
  * `describeMachinePage` in `@hercule/client-core/machine-page`.
  */
@@ -45,14 +45,6 @@ const INSTRUMENTS: MachineInstruments = {
     level: "normal",
     share: 0.55,
     note: "29.0 GB free of 64 GB",
-  },
-  disk: {
-    ...GAUGE,
-    value: "87",
-    unit: "%",
-    level: "you",
-    share: 0.87,
-    note: "500 GB free of 4,000 GB",
   },
 };
 
@@ -109,21 +101,6 @@ const GRAPHS: MachineGraphs = {
     youY: 0.8,
     failY: 0.92,
   },
-  disk: {
-    kind: "drawn",
-    inUse: [
-      [
-        { x: 0, y: 0.2 },
-        { x: 0.5, y: 0.6 },
-      ],
-    ],
-    limitY: 0.9,
-    forecast: [
-      { x: 0.5, y: 0.6 },
-      { x: 1, y: 0.9 },
-    ],
-    forecastText: "Reaches its limit in about 12 days",
-  },
 };
 
 /** Renders the instruments and returns each tile as its text, in the order drawn. */
@@ -131,7 +108,7 @@ const readTiles = (container: HTMLElement): readonly string[] =>
   Array.from(container.querySelectorAll(".machine-page-instrument"), (tile) => tile.textContent);
 
 describe("MachinePageInstruments", () => {
-  it("draws Sessions, CPU, Memory and Disk, each with its label, value, unit and note", () => {
+  it("draws Sessions, CPU and Memory, in that order, each with its label, value, unit and note", () => {
     const { container } = render(
       <MachinePageInstruments instruments={INSTRUMENTS} graphs={GRAPHS} />,
     );
@@ -140,52 +117,25 @@ describe("MachinePageInstruments", () => {
       "Sessions12 of 165 waiting",
       "CPU34%Peak 71% in the last minute",
       "Memory55%29.0 GB free of 64 GB",
-      "Disk87%500 GB free of 4,000 GB" + "Reaches its limit in about 12 days",
     ]);
   });
 
   it("gives each meter its instrument's share and level, and the sessions a drawing instead of a meter", () => {
     const { container } = render(
-      <MachinePageInstruments instruments={INSTRUMENTS} graphs={GRAPHS} />,
+      <MachinePageInstruments
+        graphs={GRAPHS}
+        instruments={{ ...INSTRUMENTS, memory: { ...INSTRUMENTS.memory, level: "you" } }}
+      />,
     );
 
-    const [sessions, cpu, , disk] = Array.from(
+    const [sessions, cpu, memory] = Array.from(
       container.querySelectorAll<HTMLElement>(".machine-page-instrument"),
     );
     expect(sessions!.querySelector(".fleet-meter")).toBeNull();
     expect(sessions!.querySelector(".fleet-sessions")).not.toBeNull();
     expect(sessions!.classList.contains("machine-page-instrument--you")).toBe(true);
     expect(cpu!.querySelector<HTMLElement>(".fleet-meter i")!.style.width).toBe("34%");
-    expect(disk!.querySelector(".fleet-meter--you")).not.toBeNull();
-  });
-
-  it("draws an empty meter and a free-space value for a disk whose size is not known", () => {
-    const { container } = render(
-      <MachinePageInstruments
-        graphs={{
-          ...GRAPHS,
-          disk: { kind: "unavailable" },
-        }}
-        instruments={{
-          ...INSTRUMENTS,
-          disk: {
-            ...GAUGE,
-            value: "412",
-            unit: " GB free",
-            level: "normal",
-            share: null,
-            note: "This machine's runner does not report its disk size. Update it to see how full the disk is.",
-          },
-        }}
-      />,
-    );
-
-    const disk = readTiles(container)[3];
-    expect(disk).toBe(
-      "Disk412 GB freeThis machine's runner does not report its disk size. Update it to see how full the disk is.",
-    );
-    const meters = container.querySelectorAll<HTMLElement>(".fleet-meter i");
-    expect(meters[2]!.style.width).toBe("0%");
+    expect(memory!.querySelector(".fleet-meter--you")).not.toBeNull();
   });
 
   it("draws a dash and no unit for an instrument the machine has not reported", () => {
@@ -207,6 +157,7 @@ describe("MachinePageInstruments", () => {
     );
 
     expect(readTiles(container)[1]).toBe("CPU–First reading within a minute");
+    expect(container.querySelector<HTMLElement>(".fleet-meter i")!.style.width).toBe("0%");
   });
 
   it("draws a machine that is away in quieter inks, with its instruments as given", () => {
@@ -228,7 +179,6 @@ describe("MachinePageInstruments", () => {
       "Sessions– of 165 waiting",
       "CPU34%Peak 71% in the last minute",
       "Memory55%29.0 GB free of 64 GB",
-      "Disk87%500 GB free of 4,000 GBReaches its limit in about 12 days",
     ]);
     expect(container.querySelector(".machine-page-instruments-box.is-away")).not.toBeNull();
     expect(container.querySelector(".fleet-sessions.is-away")).not.toBeNull();
@@ -285,32 +235,6 @@ describe("MachinePageInstruments", () => {
 
     expect(container.querySelector(".machine-graph-band-single")).toBeNull();
     expect(container.querySelector(".machine-graph-waiting-single")).toBeNull();
-  });
-
-  it("draws the disk graph in marigold only while the disk gauge is marigold or red, with its forecast dashed", () => {
-    const { container, rerender } = render(
-      <MachinePageInstruments instruments={INSTRUMENTS} graphs={GRAPHS} />,
-    );
-
-    const disk = (): Element => container.querySelectorAll(".machine-page-instrument")[3]!;
-    expect(disk().querySelector(".machine-graph--you")).not.toBeNull();
-    expect(disk().querySelector(".machine-graph-forecast")!.getAttribute("d")).toBe(
-      "M50,16.2 L100,4.8",
-    );
-    expect(container.querySelectorAll(".machine-graph--you")).toHaveLength(1);
-
-    rerender(
-      <MachinePageInstruments
-        instruments={{ ...INSTRUMENTS, disk: { ...INSTRUMENTS.disk, level: "normal" } }}
-        graphs={{
-          ...GRAPHS,
-          disk: { ...GRAPHS.disk, forecast: null, forecastText: null } as MachineGraphs["disk"],
-        }}
-      />,
-    );
-    expect(container.querySelector(".machine-graph--you")).toBeNull();
-    expect(disk().querySelector(".machine-graph-forecast")).toBeNull();
-    expect(readTiles(container)[3]).toBe("Disk87%500 GB free of 4,000 GB");
   });
 
   it("shows the instrument's note once, in the frame of a graph with nothing to draw", () => {

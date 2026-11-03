@@ -99,7 +99,7 @@
   font-size: var(--t-11);
 }
 
-/* ---------- Capacity: the room line and the four instruments ---------- */
+/* ---------- Capacity: the room line and the three instruments ---------- */
 /* The section starts right under the head, unlike the sections below it: the
    room line's own margin is the gap, and an away machine's banner has its own. */
 .machine-page-capacity {
@@ -113,14 +113,20 @@
 }
 .machine-page-instruments {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px 36px;
 }
-/* Four 16-block drawings (9px a block) need 144px a column; under this width
-   they would be cut off. */
-@container machine-page-instruments (width < 720px) {
+/* A 16-block Sessions drawing is 142px wide (7px blocks, 2px apart), so three
+   columns need 3 * 142 + 2 * 36 = 498px, rounded up to 500px. Under that the
+   drawing would be cut off. The narrowest window (800px) leaves the row about
+   445px, a column of 124px. Sessions then takes a row of its own and CPU and
+   Memory share the next, two columns of about 204px. */
+@container machine-page-instruments (width < 500px) {
   .machine-page-instruments {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .machine-page-instruments > :first-child {
+    grid-column: 1 / -1;
   }
 }
 .machine-page-instrument {
@@ -155,7 +161,7 @@
 }
 /* The drawings are the cards', made as big as the prototype's instruments:
    a 6px meter and 7 by 14px blocks. Both take 22px with their margins and
-   centre on the same line, so the notes under the four tiles line up (the
+   centre on the same line, so the notes under the three tiles line up (the
    prototype's meter takes 16px and its ladder 22px). */
 .machine-page-instrument .fleet-meter {
   height: 6px;
@@ -182,14 +188,6 @@
   color: var(--faint);
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
-}
-/* When the disk reaches its limit, as a line of its own under the note, in the
-   ink of a need that is not urgent yet. */
-.machine-page-instrument-forecast {
-  margin-top: -4px;
-  color: var(--you-ink);
-  font-size: var(--t-12);
-  font-weight: var(--w-medium);
 }
 /* A machine that is away: what it last reported in quieter inks, as on its
    card, never at reduced opacity. */

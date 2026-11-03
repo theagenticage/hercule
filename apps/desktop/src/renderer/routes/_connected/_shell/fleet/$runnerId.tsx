@@ -3,10 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
 import { describeMachineGraphs } from "@hercule/client-core/machine-graphs";
-import {
-  buildMachineFiveMinuteScope,
-  buildMachineHourScope,
-} from "@hercule/client-core/metrics-history";
+import { buildMachineFiveMinuteScope } from "@hercule/client-core/metrics-history";
 import { describeMachinePage } from "@hercule/client-core/machine-page";
 import { listMachineRunIds } from "@hercule/client-core/machine-work";
 import type { Runner } from "@hercule/contract";
@@ -69,10 +66,9 @@ const SECTIONS = [
  * work running on it, its Software, its Recent activity and its Settings. Its
  * loader reads everything the page draws before it renders, as the Fleet
  * page's does (`fleet/index.tsx`), including the machine's five-minute points
- * of the last 24 hours and hour points of the last 14 days, for its graphs.
- * They are read only for a machine that exists, and a cached read is used as
- * it is: a `runnerMetrics` push brings them up to date (see
- * `useRunnerMetricsLive`). The workflow name of each run that has a session
+ * of the last 24 hours, for its graphs. They are read only for a machine that
+ * exists, and a cached read is used as it is: a `runnerMetrics` push brings
+ * them up to date (see `useRunnerMetricsLive`). The workflow name of each run that has a session
  * on the machine is read once (`runWorkflowNameQuery`). When no runner has
  * the id, or the runner is retired, the route shows `RunnerNotFound`: retired
  * machines are not shown anywhere on Fleet.
@@ -86,12 +82,9 @@ export const Route = createFileRoute("/_connected/_shell/fleet/$runnerId")({
         if (!runners.some((runner) => runner.id === runnerId && runner.lifecycle !== "retired")) {
           throwScreenNotFound(location);
         }
-        return Promise.all([
-          queryClient.ensureQueryData(
-            runnerMetricsQuery(client, buildMachineFiveMinuteScope(runnerId)),
-          ),
-          queryClient.ensureQueryData(runnerMetricsQuery(client, buildMachineHourScope(runnerId))),
-        ]);
+        return queryClient.ensureQueryData(
+          runnerMetricsQuery(client, buildMachineFiveMinuteScope(runnerId)),
+        );
       }),
       queryClient.ensureQueryData(harnessesQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
@@ -145,9 +138,6 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
   const { data: fiveMinutes } = useSuspenseQuery(
     runnerMetricsQuery(client, buildMachineFiveMinuteScope(runner.id)),
   );
-  const { data: hours } = useSuspenseQuery(
-    runnerMetricsQuery(client, buildMachineHourScope(runner.id)),
-  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const { activeSectionId, scrollToSection } = useSectionInView(scrollRef, SECTION_IDS);
   // A link from another page opens this one at a section by putting the
@@ -172,7 +162,7 @@ function MachineFrame({ runner }: { readonly runner: Runner }): JSX.Element {
     timezone,
     today,
   );
-  const graphs = describeMachineGraphs(runner, fiveMinutes, hours);
+  const graphs = describeMachineGraphs(runner, fiveMinutes);
 
   return (
     <>
