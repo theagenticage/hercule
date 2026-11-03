@@ -2364,8 +2364,18 @@ export const CLI = {
     command: "runner metrics",
     help: "Shows how busy a machine was: free disk, memory, CPU and sessions. The history is the controller's own, in points of five minutes or one hour, never single minutes. `minutes` says how many minutes of a point have a report, so a gap shows as fewer minutes, not as an invented value. Five-minute points cover at most 24 hours; hour points cover the history kept, or 14 days if that is longer.",
     examples: [
-      { args: ["7b41d0a5", "--since", "2026-11-01T09:00:00Z", "--resolution", "five-minutes"] },
-      { args: ["--since", "2026-10-27T00:00:00Z", "--until", "2026-11-03T00:00:00Z"] },
+      {
+        args: [
+          "7b41d0a5",
+          "--since",
+          "2026-11-01T09:00:00Z",
+          "--until",
+          "2026-11-01T21:00:00Z",
+          "--resolution",
+          "five-minutes",
+        ],
+      },
+      { args: ["7b41d0a5", "--since", "2026-10-27T00:00:00Z"] },
     ],
     fields: {
       runnerId: {
