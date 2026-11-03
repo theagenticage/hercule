@@ -7392,6 +7392,28 @@ describe("an archived session", () => {
     });
   });
 
+  it("closes an async question it held when it was archived once it exits", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged, true);
+      reportEvent(arranged.wire, 4, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "completed",
+      });
+      const idle = await waitForSession(arranged, session.id, (one) => one.status === "idle");
+      expect(idle.openRequests).toMatchObject([{ requestId: REQUEST_ID, async: true }]);
+      await archive(arranged, session.id);
+
+      reportExited(arranged.wire, session.id, 5);
+
+      const exited = await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      expect(exited.openRequests).toEqual([]);
+    });
+  });
+
   it("releases its workspace lease as archived when it exits, for the archived window", async () => {
     await withFleet(async (arranged) => {
       const session = await startIdleSession(arranged, "hello");

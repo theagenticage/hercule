@@ -3638,8 +3638,9 @@ const make = Effect.gen(function* () {
         const sessionAcceptsChanges = before !== "exited";
         // An archived session may still run until its stop arrives. A Request
         // it opens in that time would wait for an answer that is refused, so
-        // it is recorded in the stream and opens nothing.
-        const requestsAccepted = sessionAcceptsChanges && session.archived === null;
+        // it is recorded in the stream and opens nothing. Events that close
+        // Requests (resolved, turn end, exit) apply as for any session.
+        const opensNothing = event._tag === "request.opened" && session.archived !== null;
         const at = yield* nowIso;
         let toolCallsChanged = false;
         for (const row of folded.rows) {
@@ -3677,7 +3678,7 @@ const make = Effect.gen(function* () {
           ? yield* applySubagentEvent(session, event)
           : new Map<SubagentId, StoredSubagent>();
         let requestsChanged = false;
-        if (requestsAccepted && isRequestEvent(event)) {
+        if (sessionAcceptsChanges && !opensNothing && isRequestEvent(event)) {
           const openRequests = computeOpenRequestsAfter(event, session.openRequests);
           requestsChanged = openRequests !== session.openRequests;
           if (requestsChanged) yield* replaceOpenRequests(session, openRequests, event, askers);

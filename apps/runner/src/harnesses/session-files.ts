@@ -57,7 +57,7 @@ export const readChildFolders = async (folder: string): Promise<ReadonlyArray<st
  * ("EACCES: permission denied, unlink '/home/...'"), which the user does not
  * need.
  */
-const describeFileFailure = (error: unknown): string => {
+export const describeFileFailure = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
   return /^[A-Z0-9]+: ([^,]+),/.exec(message)?.[1] ?? message;
 };
