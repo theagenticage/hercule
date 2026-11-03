@@ -1198,15 +1198,18 @@ export const runQuery = (client: HerculeClient, runId: string) =>
  * Reads the name of the workflow run `runId` was started from, and keeps
  * only that string, for a machine's Running here.
  *
- * A run's plan is frozen when the run starts, so the name never changes and
- * is read once per run for the life of the window (`staleTime` and `gcTime`
- * are `Infinity`). The key is outside the `run` and `runs` prefixes on
- * purpose: a `run` push, which comes with every step, would otherwise read
- * the whole run again just to find the same name. The cache holds the name
- * only, not the run, whose step records change.
+ * A run's plan is frozen when the run starts, so the name never changes. A
+ * name that was read successfully is kept for the life of the window and is
+ * never read again (`staleTime` and `gcTime` are `Infinity`). The key is
+ * outside the `run` and `runs` prefixes on purpose: a `run` push, which
+ * comes with every step, would otherwise read the whole run again just to
+ * find the same name. The cache holds the name only, not the run, whose step
+ * records change.
  *
- * Fails like `runQuery` when no run has the id. It is not tried again: the
- * caller draws the session's own title instead.
+ * Fails like `runQuery` when no run has the id. A failed read is not retried
+ * (`retry: false`) and leaves no data, so the caller draws the session's own
+ * title instead. The read is tried again the next time the section mounts or
+ * the page opens.
  */
 export const runWorkflowNameQuery = (client: HerculeClient, runId: string) =>
   queryOptions({

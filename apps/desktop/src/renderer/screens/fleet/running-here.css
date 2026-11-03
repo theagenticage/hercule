@@ -162,6 +162,11 @@
   overflow: hidden;
   font-size: var(--t-12);
 }
+/* The stack keeps its full width, so a narrow row cuts the leftmost faces
+   (the container is right-aligned) and never the "+n". */
+.running-here-faces > .work-faces {
+  flex: none;
+}
 .running-here-since {
   color: var(--faint);
   font-size: var(--t-12);
