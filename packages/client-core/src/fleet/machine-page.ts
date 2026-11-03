@@ -29,10 +29,8 @@ import {
   describeMachineStatus,
   describeRoom,
   formatLastSeen,
-  describeDiskGauge,
   describeMemoryGauge,
   formatWholeMemory,
-  measureDisk,
   measureMemory,
   NOT_REPORTED_GAUGE,
   splitDiskSize,
@@ -191,12 +189,11 @@ export interface SessionsInstrument {
   readonly drawing: SessionsDrawing;
 }
 
-/** The four instruments of a machine's page, with the latest values. */
+/** The three instruments of a machine's page, with the latest values. */
 export interface MachineInstruments {
   readonly sessions: SessionsInstrument;
   readonly cpu: MeterInstrument;
   readonly memory: MeterInstrument;
-  readonly disk: MeterInstrument;
 }
 
 /** The line under an instrument that has no report to show yet. */
@@ -204,10 +201,6 @@ const NOT_REPORTED_NOTE = "Not reported yet";
 
 /** The line under the CPU of a runner whose reports carry none. */
 const CPU_TOO_OLD_NOTE = "This machine's runner is too old to report CPU. Update it.";
-
-/** The line under the disk of a runner that does not report the disk's total size. */
-const DISK_TOTAL_MISSING_NOTE =
-  "This machine's runner does not report its disk size. Update it to see how full the disk is.";
 
 const NOT_REPORTED: MeterInstrument = { ...NOT_REPORTED_GAUGE, note: NOT_REPORTED_NOTE };
 
@@ -243,25 +236,10 @@ const describeMemoryInstrument = (runner: Runner): MeterInstrument => {
   };
 };
 
-/** Describes the instrument of the disk: the share in use and the space free. See `describeMachineInstruments`. */
-const describeDiskInstrument = (runner: Runner): MeterInstrument => {
-  const disk = measureDisk(runner);
-  if (disk === null) return NOT_REPORTED;
-  const gauge = describeDiskGauge(disk);
-  if (disk.use === null) {
-    return {
-      ...gauge,
-      note: DISK_TOTAL_MISSING_NOTE,
-    };
-  }
-  const size = splitDiskSize(disk.use.totalBytes);
-  return { ...gauge, note: `${gauge.freeAmount} free of ${size.amount} ${size.unit}` };
-};
-
 /**
- * Describes the four instruments of a machine from the runner's latest report.
- * An away machine keeps the values it last reported. Before any report, CPU,
- * memory and disk show "–" and "Not reported yet".
+ * Describes the three instruments of a machine from the runner's latest report.
+ * An away machine keeps the values it last reported. Before any report, CPU
+ * and memory show "–" and "Not reported yet".
  *
  * - Sessions: how many run, against the cap, and how many wait. It is `you`
  *   while sessions wait. A machine that is offline or unreachable runs
@@ -272,9 +250,6 @@ const describeDiskInstrument = (runner: Runner): MeterInstrument => {
  *   levels. A runner that reports no CPU, or none yet, says so in the note.
  * - Memory: the share in use, floored, and the memory free of the total, in
  *   binary gigabytes.
- * - Disk: the share in use, floored, and the free space of the total, in
- *   gigabytes of 10^9 bytes. Without the disk's total size it shows the free
- *   space with an empty meter and says to update the runner.
  */
 const describeMachineInstruments = (machine: FleetMachine): MachineInstruments => {
   const { runner } = machine;
@@ -289,7 +264,6 @@ const describeMachineInstruments = (machine: FleetMachine): MachineInstruments =
     },
     cpu: describeCpuInstrument(runner),
     memory: describeMemoryInstrument(runner),
-    disk: describeDiskInstrument(runner),
   };
 };
 

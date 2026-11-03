@@ -37,9 +37,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** The time the Sessions, CPU and Memory graphs of a machine's page cover: their history holds five-minute points. */
 export const FIVE_MINUTE_HISTORY_MS = DAY_MS;
 
-/** The time the Disk graph of a machine's page covers: its history holds hour points. */
-export const HOUR_HISTORY_MS = 14 * DAY_MS;
-
 /** How far back the disk forecast reads hour points: the Fleet page reads this much history. */
 export const FORECAST_HISTORY_MS = 7 * DAY_MS;
 
@@ -66,13 +63,6 @@ export const buildMachineFiveMinuteScope = (runnerId: string): RunnerMetricsScop
   resolution: "fiveMinutes",
   runnerId,
   rangeMs: FIVE_MINUTE_HISTORY_MS,
-});
-
-/** Returns the hour points of the last 14 days of the runner `runnerId`: a machine's Disk graph and forecast. */
-export const buildMachineHourScope = (runnerId: string): RunnerMetricsScope => ({
-  resolution: "hour",
-  runnerId,
-  rangeMs: HOUR_HISTORY_MS,
 });
 
 /**
