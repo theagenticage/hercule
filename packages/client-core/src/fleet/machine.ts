@@ -537,12 +537,13 @@ const describeAllowHint = ({ running, waiting }: FleetMachine): string => {
 };
 
 /**
- * Returns every need that applies to a machine, the most serious first: it is
- * offline, it is unreachable, its disk is below its limit, sessions wait for a
- * slot, its disk is 85% full or more, its disk is forecast to reach its limit
- * within 21 days (`forecast`, `null` when there is none). The list is empty
- * when the machine needs nothing. A time is worded relative to `today` in
- * `timezone`, and left out when the runner was never seen.
+ * Decides the one need a machine shows, which is the first of these that
+ * applies, in this order: it is offline, it is unreachable, its disk is below
+ * its limit, sessions wait for a slot, its disk is 85% full or more, its disk
+ * is forecast to reach its limit within 21 days (`forecast`, `null` when there
+ * is none). Returns `undefined` when the machine needs nothing. A time is
+ * worded relative to `today` in `timezone`, and left out when the runner was
+ * never seen.
  *
  * Sessions wait for a slot only when the cap is what holds them back. That is
  * when the machine takes new sessions (online, not draining, disk not below its
@@ -553,59 +554,56 @@ const describeAllowHint = ({ running, waiting }: FleetMachine): string => {
  * first two needs already name the machine's state. The rule also keeps the
  * Allow button from ever lowering the cap: its value, running plus waiting, is
  * above the cap by construction.
- *
- * The needs are independent of each other: a machine can have several.
  */
-export const listMachineNeeds = (
+export const decideMachineNeed = (
   machine: FleetMachine,
   forecast: DiskForecast | null,
   timezone: string,
   today: Date,
-): readonly MachineNeed[] => {
+): MachineNeed | undefined => {
   const { runner } = machine;
-  const needs: MachineNeed[] = [];
   const seen = formatLastSeen(runner, timezone, today);
   if (runner.connectivity === "offline") {
-    needs.push({
+    return {
       kind: "offline",
       hue: "fail",
       line: seen === null ? "Offline" : `Offline since ${seen}`,
-    });
+    };
   }
   if (runner.connectivity === "unreachable") {
-    needs.push({ kind: "unreachable", hue: "fail", line: describeUnreachable(seen) });
+    return { kind: "unreachable", hue: "fail", line: describeUnreachable(seen) };
   }
   if (isDiskBelowLimit(runner)) {
-    needs.push({
+    return {
       kind: "disk-below-limit",
       hue: "fail",
       line: "Disk below its limit. It takes no new sessions.",
-    });
+    };
   }
   const isCapHoldingSessionsBack =
     canTakeNewSessions(runner) &&
     machine.waiting > 0 &&
     machine.running + machine.waiting > runner.maxConcurrentSessions;
   if (isCapHoldingSessionsBack) {
-    needs.push({
+    return {
       kind: "waiting",
       hue: "you",
       line: describeWaiting(machine),
       allow: machine.running + machine.waiting,
       allowHint: describeAllowHint(machine),
-    });
+    };
   }
   // A disk without a reported total size has no percentage, so it is never "nearly full".
   const diskPercent = measureDisk(runner)?.use?.percent;
   if (diskPercent !== undefined && diskPercent >= DISK_YOU_FROM_PERCENT) {
-    needs.push({ kind: "disk-nearly-full", hue: "you", line: `Disk ${String(diskPercent)}% full` });
+    return { kind: "disk-nearly-full", hue: "you", line: `Disk ${String(diskPercent)}% full` };
   }
   if (forecast !== null && forecast.days <= FORECAST_NEEDS_USER_WITHIN_DAYS) {
-    needs.push({
+    return {
       kind: "disk-reaches-limit",
       hue: "you",
       line: `Disk reaches its limit in about ${describeForecastDays(forecast)}`,
-    });
+    };
   }
-  return needs;
+  return undefined;
 };

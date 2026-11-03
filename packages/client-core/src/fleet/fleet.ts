@@ -23,12 +23,12 @@ import {
   countRoom,
   buildSessionsDrawing,
   decideMachineKind,
+  decideMachineNeed,
   describeDiskGauge,
   describeForecastDays,
   describeMachineStatus,
   describeMemoryGauge,
   describeRoom,
-  listMachineNeeds,
   measureDisk,
   measureMemory,
   plural,
@@ -182,7 +182,7 @@ export interface MachineSummary {
 /** Builds everything a card and a list row draw for `machine`, so the two cannot disagree. */
 const summarizeMachine = (
   machine: FleetMachine,
-  needs: readonly MachineNeed[],
+  need: MachineNeed | undefined,
   forecast: DiskForecast | null,
   timezone: string,
   today: Date,
@@ -197,7 +197,7 @@ const summarizeMachine = (
     isAway: runner.connectivity !== "online",
     drawing: buildSessionsDrawing(machine),
     roomText: describeRoom(machine)?.short ?? null,
-    need: needs[0],
+    need,
     disk,
     diskCaption:
       forecast === null
@@ -239,8 +239,8 @@ const groupPointsByRunner = (
 /**
  * Builds the Fleet page from the runners and the counts of their sessions.
  * `metricsHistory` holds the hour points of every runner, for the disk
- * forecasts. `localRunnerId` is the controller's own runner, or `null` when it has none.
- * Times are worded in `timezone`, relative to `today`.
+ * forecasts. `localRunnerId` is the controller's own runner, or `null` when it
+ * has none. Times are worded in `timezone`, relative to `today`.
  *
  * The page shows one machine per runner that is not retired. Counts of a
  * runner that is not in `runners` are ignored. The machines are sorted by
@@ -248,7 +248,7 @@ const groupPointsByRunner = (
  * this is the order the machines joined. That order never changes while the
  * page is open, so no card jumps when a state changes.
  *
- * Each machine's disk forecast and needs are computed once, and the lead, the
+ * Each machine's disk forecast and need are computed once, and the lead, the
  * section count and the machines all read the same ones.
  */
 export const describeFleetPage = (
@@ -270,10 +270,10 @@ export const describeFleetPage = (
         runner,
         metricsHistory.readAt,
       );
-      return { machine, forecast, needs: listMachineNeeds(machine, forecast, timezone, today) };
+      return { machine, forecast, need: decideMachineNeed(machine, forecast, timezone, today) };
     });
   const machines = entries.map((entry) => entry.machine);
-  const needing = entries.filter((entry) => entry.needs.length > 0).length;
+  const needing = entries.filter((entry) => entry.need !== undefined).length;
   return {
     lead: describeLead(machines, needing),
     machinesSection:
@@ -283,8 +283,8 @@ export const describeFleetPage = (
     isEmpty: !machines.some(
       ({ runner }) => runner.id !== localRunnerId && runner.connectivity === "online",
     ),
-    machines: entries.map(({ machine, needs, forecast }) =>
-      summarizeMachine(machine, needs, forecast, timezone, today),
+    machines: entries.map(({ machine, need, forecast }) =>
+      summarizeMachine(machine, need, forecast, timezone, today),
     ),
   };
 };
