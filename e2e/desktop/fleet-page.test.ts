@@ -194,7 +194,9 @@ describe("the Fleet page", () => {
     const first = await readGraphLines(page);
 
     // A second report in the same minute replaces the first one's point. The
-    // page is not navigated or reloaded: the report reaches it as a push.
+    // page is not navigated or reloaded: the report reaches it as a push. Only
+    // CPU and Memory are checked for a change: they draw five-minute points,
+    // and the page re-reads the hour points of Disk at most once an hour.
     runner.reportMetrics({
       diskFreeBytes: 200 * GIB,
       availableMemoryBytes: 16 * GIB,
@@ -203,8 +205,8 @@ describe("the Fleet page", () => {
     await expect
       .poll(async () => {
         const next = await readGraphLines(page);
-        return Object.keys(first).filter((label) => next[label] !== first[label]);
+        return ["CPU", "Memory"].filter((label) => next[label] !== first[label]);
       })
-      .toEqual(["CPU", "Memory", "Disk"]);
+      .toEqual(["CPU", "Memory"]);
   });
 });
