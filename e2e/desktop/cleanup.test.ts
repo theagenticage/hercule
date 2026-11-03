@@ -14,20 +14,13 @@
  * the test moves that time back 8 days while the controller is stopped,
  * which is the only moment the database is not locked.
  *
- * The runner reports its free space once a minute, so the last step of the
- * test waits for up to two reports. It checks a function, not a speed.
+ * The runner reports its free space once a minute, so the test waits for a
+ * report before the removal and one after it. It checks a function, not a
+ * speed.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  rmSync,
-  statfsSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -35,16 +28,28 @@ import { expect, it, onTestFinished } from "vitest";
 import type { Session } from "../../packages/contract/src/index";
 import { pollUntil } from "../../apps/desktop/scripts/poll";
 import { readRunnerStorageDir } from "../harness";
+import type { HerculeClient } from "../../packages/client-core/src/index";
 import { arrangeFleet, locateCard, openFleet, openSignedIn } from "./harness";
 
 /** What the stand-in agent writes into its workspace. */
-const BULK_BYTES = 256 * 1024 * 1024;
+const BULK_BYTES = 1024 * 1024 * 1024;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+/**
+ * How much more free space the test requires after the removal. The scratch
+ * home shares its disk with the rest of the machine, and other processes write
+ * to it during the wait for the reports (up to a few minutes). The file is
+ * 1 GiB and the test requires half of it, so ordinary writes by others
+ * (a build, a log, a download) cannot hide the removal.
+ */
+const REQUIRED_GROWTH_BYTES = BULK_BYTES / 2;
+
+const HOUR_MS = 60 * 60 * 1000;
+
+const DAY_MS = 24 * HOUR_MS;
 
 /**
  * The runner reports its free space every 60 seconds, so a report that
- * follows the removal arrives within two minutes at the latest.
+ * follows a given moment arrives within two minutes at the latest.
  */
 const FREE_SPACE_REPORT_TIMEOUT_MS = 150_000;
 
@@ -70,10 +75,45 @@ function writeStandInAgent(): string {
   return folder;
 }
 
-/** Returns the bytes the disk holding `folder` has free. */
-function readFreeBytes(folder: string): number {
-  const { bavail, bsize } = statfsSync(folder);
-  return bavail * bsize;
+/**
+ * Returns how many reports of the runner's metrics the controller has stored
+ * in the last hour. The runner's metrics carry no time, but the controller
+ * stores one row per minute and a report is 60 seconds after the one before,
+ * so the count goes up by one with each report. A count higher than an
+ * earlier one shows that a report arrived in between.
+ */
+async function countMetricsReports(client: HerculeClient, runnerId: string): Promise<number> {
+  const { items } = await client.runnerMetrics.query({
+    query: {
+      runnerId,
+      since: new Date(Date.now() - HOUR_MS).toISOString(),
+      resolution: "fiveMinutes",
+      limit: 500,
+    },
+  });
+  return items.reduce((count, point) => count + point.minutes, 0);
+}
+
+/**
+ * Waits for a report of the runner's metrics that arrives after this call, and
+ * returns the free disk space it holds. Both sides of the free space check read
+ * it through here, so each is a report taken after the moment it stands for,
+ * never an older one the controller still holds.
+ */
+async function readFreeBytesOfNextReport(client: HerculeClient, runnerId: string): Promise<number> {
+  const reportsBefore = await countMetricsReports(client, runnerId);
+  return pollUntil(
+    async () => {
+      if ((await countMetricsReports(client, runnerId)) <= reportsBefore) return undefined;
+      // The report that raised the count is stored with the metrics, so these are it or a later one.
+      return (await client.runner.read({ params: { id: runnerId } })).metrics?.diskFreeBytes;
+    },
+    {
+      timeoutMs: FREE_SPACE_REPORT_TIMEOUT_MS,
+      intervalMs: 1_000,
+      timeoutMessage: "the runner reported no metrics",
+    },
+  );
 }
 
 /** Sets the time of last use of the workspace `workspaceId` to `usedAt`, in the database of the stopped controller in `home`. */
@@ -149,6 +189,8 @@ it("archives and removes an idle workspace from the cleanup dialog, and the mach
       timeout: 30_000,
     })
     .toBe("online");
+  // The bulk file is in the workspace and measured, and nothing is removed yet.
+  const freeBefore = await readFreeBytesOfNextReport(client, runner!.id);
 
   const { page } = await openSignedIn(url);
   await openFleet(page);
@@ -161,37 +203,27 @@ it("archives and removes an idle workspace from the cleanup dialog, and the mach
 
   await storage.getByRole("button", { name: "Clean up…" }).click();
   const dialog = page.getByRole("dialog", { name: "Clean up atlas" });
-  const confirm = dialog.getByRole("button", { name: /^Archive and remove 1, frees \d+ MB$/ });
+  const confirm = dialog.getByRole("button", {
+    name: /^Archive and remove 1, frees [\d.]+ (?:MB|GB)$/,
+  });
   // A Thread that is not Done is left unticked, because removing it archives it.
   await dialog.getByText("Fill the workspace", { exact: true }).click();
   await confirm.waitFor();
   // Nothing is archived or removed until the user confirms.
   expect((await client.session.read({ params: { id: thread.id } })).archived).toBeUndefined();
   expect(existsSync(workspaceFolder)).toBe(true);
-  const freeBefore = readFreeBytes(workspaceFolder);
   await confirm.click();
 
   await page
     .getByRole("status")
-    .getByText(/^Archived 1 thread and removed 1 workspace\. \d+ MB freed\.$/)
+    .getByText(/^Archived 1 thread and removed 1 workspace\. [\d.]+ (?:MB|GB) freed\.$/)
     .waitFor();
   expect((await client.session.read({ params: { id: thread.id } })).archived?.by).toBe("user");
   expect((await client.workspace.read({ params: { id: workspaceId } })).status).toBe("deleted");
   expect(existsSync(workspaceFolder)).toBe(false);
   await idleRow.waitFor({ state: "detached" });
 
-  // The runner reports its free space every minute, so a report that follows the removal shows the file's size back.
-  await pollUntil(
-    async () => {
-      const { metrics } = await client.runner.read({ params: { id: runner!.id } });
-      return metrics !== null && metrics.diskFreeBytes >= freeBefore + BULK_BYTES / 2
-        ? true
-        : undefined;
-    },
-    {
-      timeoutMs: FREE_SPACE_REPORT_TIMEOUT_MS,
-      intervalMs: 1_000,
-      timeoutMessage: `the runner never reported ${String(BULK_BYTES / 2)} bytes more free space than the ${String(freeBefore)} it had before the removal`,
-    },
-  );
-}, 240_000);
+  // The folder is gone, so the next report shows the file's size back.
+  const freeAfter = await readFreeBytesOfNextReport(client, runner!.id);
+  expect(freeAfter - freeBefore).toBeGreaterThanOrEqual(REQUIRED_GROWTH_BYTES);
+}, 360_000);

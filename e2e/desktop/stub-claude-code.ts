@@ -15,7 +15,7 @@
  *   answers that the turn is done.
  * - It exits when the runner closes its input.
  */
-import { writeFileSync } from "node:fs";
+import { closeSync, openSync, writeSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 /** The Claude Code release this build of Hercule expects its probe to find. */
@@ -32,6 +32,19 @@ if (process.argv.includes("--version")) {
 }
 
 const bulkBytes = Number(process.env["BULK_BYTES"]);
+
+/** Writes `bytes` of data to the new file `path` in 64 MiB steps, so the stand-in never holds the whole file in memory. */
+const writeBulkFile = (path: string, bytes: number): void => {
+  const step = Buffer.alloc(64 * 1024 * 1024, 1);
+  const file = openSync(path, "w");
+  try {
+    for (let written = 0; written < bytes; written += step.length) {
+      writeSync(file, step, 0, Math.min(step.length, bytes - written));
+    }
+  } finally {
+    closeSync(file);
+  }
+};
 
 createInterface({ input: process.stdin })
   .on("line", (line) => {
@@ -54,7 +67,7 @@ createInterface({ input: process.stdin })
       return;
     }
     if (frame.type !== "user") return;
-    writeFileSync("bulk.bin", Buffer.alloc(bulkBytes, 1));
+    writeBulkFile("bulk.bin", bulkBytes);
     send({
       type: "result",
       subtype: "success",
