@@ -54,6 +54,9 @@ const GIB = 1024 ** 3;
  */
 const GRAPH_EDGE_INSET = 1;
 
+/** How far a drawn y may differ from the y computed for its value, in drawing units. */
+const Y_MARGIN = 0.05;
+
 /**
  * Reads the line of the graph of the instrument labelled `label` on a
  * machine's page, and returns its path data and the height of its drawing
@@ -93,13 +96,14 @@ async function waitForGraphLine(
 
 /**
  * Returns the `y` of the last point of the graph line of `label`, in drawing
- * units (it grows downward), or -1 when there is no line. The `x` of every
+ * units (it grows downward), or infinity when there is no line, so
+ * that no check of a rise passes for a graph that draws nothing. The `x` of every
  * point depends on when the page read the history, so only the `y` tells
  * which value was drawn.
  */
 async function readLastPointY(page: Page, label: string): Promise<number> {
   const line = await readGraphLine(page, label);
-  if (line === null) return -1;
+  if (line === null) return Number.POSITIVE_INFINITY;
   return Number(line.d.match(/,(-?[\d.]+)\s*$/)![1]);
 }
 
@@ -236,21 +240,31 @@ describe("the Fleet page", () => {
       .poll(() => readLastPointY(page, "Memory"))
       .toBeCloseTo(placeOnGraph(0.25, height), 1);
 
-    // Report 2 lands in the same minute, so it replaces the first one's point.
-    // The page is not navigated or reloaded: the report reaches it as a push.
+    // Report 2 usually lands in the same minute as report 1 and replaces its
+    // row, but the test cannot control the controller's clock. When the two
+    // reports straddle a minute boundary, they are two rows of one five-minute
+    // point, which averages them (CPU 40%, memory 50% in use), or of two
+    // points (70% and 75%). So the last point must have risen to at least the
+    // mean of the two reports. Every one of those outcomes passes, and a page
+    // still drawing report 1 (10% and 25%) fails. The page is not navigated or
+    // reloaded: the report reaches it as a push.
+    //
     // The last point's y is checked, not the whole path, because every x moves
     // with the time the page reads the history, so any re-read changes the
     // path even when it brings the old values. Only CPU and Memory are checked
     // for a change: they draw five-minute points, and the page re-reads the
-    // hour points of Disk at most once an hour.
+    // hour points of Disk at most once an hour. A higher value has a lower y,
+    // and the margin covers the two decimals the path is rounded to.
     runner.reportMetrics({
       diskFreeBytes: 200 * GIB,
       availableMemoryBytes: 16 * GIB,
       cpu: { averagePercent: 70, peakPercent: 90 },
     });
-    await expect.poll(() => readLastPointY(page, "CPU")).toBeCloseTo(placeOnGraph(0.7, height), 1);
+    await expect
+      .poll(() => readLastPointY(page, "CPU"))
+      .toBeLessThanOrEqual(placeOnGraph(0.4, height) + Y_MARGIN);
     await expect
       .poll(() => readLastPointY(page, "Memory"))
-      .toBeCloseTo(placeOnGraph(0.75, height), 1);
+      .toBeLessThanOrEqual(placeOnGraph(0.5, height) + Y_MARGIN);
   });
 });
