@@ -25,6 +25,7 @@ import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import type { WorkspaceSessionObserver } from "../disk-usage";
 import {
   AdapterFailed,
   InputNotDelivered,
@@ -275,6 +276,12 @@ interface Live {
   readonly releaseGithubToken: () => void;
   /** The agent step whose turn runs in this session now, if any. */
   step: RunningStep | undefined;
+  /**
+   * Whether the session's start was reported to the workspace session
+   * observer. `tearDownSession` reports the exit only when it was, so the
+   * two always pair up.
+   */
+  workspaceStartReported: boolean;
 }
 
 /**
@@ -470,6 +477,12 @@ export interface Supervising {
    * runner says goodbye to the controller.
    */
   readonly shutdown: (reason: ExitReason) => Effect.Effect<void>;
+  /**
+   * Tells the observer each time a session starts or exits in a workspace,
+   * from now on. The observer lives as long as the process, like this
+   * supervisor. A second call replaces the first observer.
+   */
+  readonly observeWorkspaceSessions: (observer: WorkspaceSessionObserver) => void;
 }
 
 /**
@@ -583,6 +596,8 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
   // controller has proved its identity. Undefined while no such connection is
   // up, and then the events are dropped (spec 03 section 2.3).
   let attached: Connection | undefined;
+  // Told when a session starts or exits in a workspace. Set by `observeWorkspaceSessions`.
+  let workspaceSessions: WorkspaceSessionObserver | undefined;
   // Whether the attached controller reads `filesEdited` frames. Set with `attached`.
   let attachedReadsFilesEdited = false;
   // The edit watch of each workspace that has one, by workspace id. A watch
@@ -682,6 +697,10 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
       yield* removeSessionDirectories(held);
       yield* removeSessionSkillsFolder(held.sessionSkillsFolder);
       held.releaseGithubToken();
+      if (held.workspaceStartReported && held.workspaceId !== null) {
+        held.workspaceStartReported = false;
+        yield* workspaceSessions?.sessionEnded(held.workspaceId) ?? Effect.void;
+      }
       yield* Deferred.succeed(held.gone, undefined);
     });
 
@@ -1617,6 +1636,7 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
           // entry ends releases it.
           releaseGithubToken: arrived.releaseGithubToken,
           step: undefined,
+          workspaceStartReported: false,
         };
         // In the same step, with no yield between, so a stop finds either the
         // arrived start or this entry, and is never lost between the two.
@@ -1654,6 +1674,12 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
             error: buildInputStopped(),
             exitReason: "stopped",
           });
+        }
+        // Tell the observer before the harness exists, so the workspace is
+        // marked as used before the session can write a file in it.
+        if (frame.spec.workspaceId !== null && workspaceSessions !== undefined) {
+          held.workspaceStartReported = true;
+          yield* workspaceSessions.sessionStarted(frame.spec.workspaceId);
         }
         // Start the absolute timer here, not on `session.started`: the
         // runner itself promises to end the session at the deadline,
@@ -2123,5 +2149,8 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
     ),
     forConnection,
     shutdown,
+    observeWorkspaceSessions: (observer) => {
+      workspaceSessions = observer;
+    },
   };
 };

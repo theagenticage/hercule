@@ -45,6 +45,7 @@ import {
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   ARCHIVED_SESSION_FILES_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
   buildWorkspaceActionCapability,
@@ -65,6 +66,7 @@ import {
 } from "@hercule/protocol";
 import type { AttachmentCache, AttachmentUploader } from "./attachments";
 import type { CredentialRelay, GithubTokenCopies } from "./credentials";
+import type { DiskMeasurements } from "./disk-usage";
 import type { FileClock } from "./edit-marks";
 import { fitRepositorySkillsInspection } from "./frame-size";
 import { refreshFacts } from "./probe";
@@ -116,6 +118,9 @@ const NONCE_BYTES = 16;
  *   checkouts of a workspace.
  * - `ARCHIVED_SESSION_FILES_CAPABILITY`: this runner deletes the harness
  *   files of the archived sessions a workspace dispose lists.
+ * - `DISK_USAGE_CAPABILITY`: this runner measures the disk usage of its
+ *   workspaces, repository caches and Harness Homes, and sends it in a
+ *   `DiskUsageReport`.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -128,6 +133,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   ARCHIVED_SESSION_FILES_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -191,6 +197,8 @@ export interface ConnectOptions {
   readonly sessionSkillsFolders: SessionSkillsFolders;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
+  /** The disk usage of those workspaces. It outlives this connection. */
+  readonly diskMeasurements: Pick<DiskMeasurements, "reportTo">;
   /** The workspace steps on this machine. They outlive this connection. */
   readonly workspaceSteps: WorkspaceSteps;
   /** The socket this machine's credential helper asks for tokens on. */
@@ -394,7 +402,10 @@ export const connect = (
     let facts = options.facts;
     // Completed by the hello that proves the controller's identity, with the
     // part of its capabilities the session supervisor needs.
-    const proven = Deferred.makeUnsafe<{ readonly controllerReadsFilesEdited: boolean }>();
+    const proven = Deferred.makeUnsafe<{
+      readonly controllerReadsFilesEdited: boolean;
+      readonly controllerReadsDiskUsage: boolean;
+    }>();
     // The proof deadline starts when the socket opens. It limits how long the
     // peer takes to respond, not how long the network takes to connect.
     // Otherwise a slow connect could leave a valid controller no time to
@@ -806,6 +817,7 @@ export const connect = (
             proven,
             Effect.succeed({
               controllerReadsFilesEdited: message.capabilities.includes(FILES_EDITED_CAPABILITY),
+              controllerReadsDiskUsage: message.capabilities.includes(DISK_USAGE_CAPABILITY),
             }),
           );
           return;
@@ -1076,7 +1088,9 @@ export const connect = (
       // connection was attached, but the ones produced then are lost on the
       // way to the controller: the runner has no outbox yet that keeps events
       // for replay (spec 03 section 2.3).
-      yield* supervisor.attach(proved).pipe(Scope.provide(connection));
+      yield* supervisor
+        .attach({ controllerReadsFilesEdited: proved.controllerReadsFilesEdited })
+        .pipe(Scope.provide(connection));
       yield* supervisor.report;
       // Like the sessions report: the controller settles every listed step
       // whose record ended while this runner was away. One frame holds at
@@ -1096,6 +1110,11 @@ export const connect = (
             readDiskAndMemory: options.readDiskAndMemory,
             send: (metrics) => write(encodeFrameText({ _tag: "watermarkReport", metrics })),
           }),
+          // An older controller closes the connection on a frame it cannot
+          // read, so the disk usage is reported only when the hello lists it.
+          proved.controllerReadsDiskUsage
+            ? options.diskMeasurements.reportTo((diskUsage) => write(encodeFrameText(diskUsage)))
+            : Effect.never,
           refreshFacts({
             probe: reportFacts,
             reported: options.facts,

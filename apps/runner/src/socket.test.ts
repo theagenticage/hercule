@@ -19,6 +19,7 @@ import { locateRunnerFile } from "@hercule/home";
 import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
@@ -306,6 +307,11 @@ const HERCULE_TOOL = {
 
 const workspaces = makeTestWorkspaces({ storageDir: STORAGE_DIR });
 
+/** The disk measurements of a runner that never has anything to report. */
+const SILENT_DISK_MEASUREMENTS: ConnectOptions["diskMeasurements"] = {
+  reportTo: () => Effect.never,
+};
+
 /** The workspace steps of a runner that holds none. */
 const IDLE_STEPS = makeWorkspaceSteps({
   storageDir: STORAGE_DIR,
@@ -365,6 +371,7 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
           readControllerUrl: () => "https://controller.example:4938",
         }),
         workspaces,
+        diskMeasurements: SILENT_DISK_MEASUREMENTS,
         workspaceSteps: IDLE_STEPS,
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
@@ -530,6 +537,41 @@ describe("which controller a runner accepts", () => {
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 
+  it.each([
+    { listed: true, sent: 1 },
+    { listed: false, sent: 0 },
+  ])(
+    "sends the disk usage once after hello only when the controller lists the capability (listed: $listed)",
+    async ({ listed, sent }) => {
+      const stub = await stubController((real) => ({
+        ...real,
+        capabilities: listed ? [DISK_USAGE_CAPABILITY] : [],
+      }));
+      const report = { workspaces: [], truncated: false, runner: null };
+      const pending = runConnection(buildPin(stub), {
+        diskMeasurements: {
+          reportTo: (send) =>
+            Effect.andThen(send({ _tag: "diskUsageReport", diskUsage: report }), Effect.never),
+        },
+      });
+
+      await stub.connected();
+      // The metrics go out at the same moment, so the disk usage report is
+      // there by the time they are.
+      await waitUntilProven(stub);
+      await delay(50);
+      expect(stub.received.filter((frame) => frame._tag === "diskUsageReport")).toHaveLength(sent);
+      if (listed)
+        expect(stub.received.find((frame) => frame._tag === "diskUsageReport")).toEqual({
+          _tag: "diskUsageReport",
+          diskUsage: report,
+        });
+
+      stub.hangUp();
+      await pending;
+    },
+  );
+
   it("sends the metrics as soon as the controller has proved its identity", async () => {
     const stub = await stubController();
 
@@ -609,6 +651,7 @@ describe("which controller a runner accepts", () => {
         AGENT_STEPS_CAPABILITY,
         ATTACHMENTS_CAPABILITY,
         REPOSITORY_SKILLS_CAPABILITY,
+        DISK_USAGE_CAPABILITY,
       ]) as unknown,
     });
 
