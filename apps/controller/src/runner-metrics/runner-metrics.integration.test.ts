@@ -118,6 +118,24 @@ describe("runnerMetrics.query over HTTP", () => {
     });
   });
 
+  it("reads a time written with an offset or without milliseconds as the UTC time it names", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const runner = await harness.insertRunner({ name: "iris" });
+      await writeRows(harness, runner.id, [0, 7]);
+
+      const response = await query(harness.base, token, {
+        since: "2026-11-03T12:00:00+02:00",
+        until: "2026-11-03T10:30:00Z",
+        resolution: "fiveMinutes",
+      });
+
+      expect(response.status).toBe(200);
+      const page = (await response.json()) as PointsPage;
+      expect(page.items.map((point) => point.at)).toEqual([iso(0), iso(5)]);
+    });
+  });
+
   it("refuses a request without a span or a resolution as a validation error", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
@@ -126,6 +144,8 @@ describe("runnerMetrics.query over HTTP", () => {
         { since: iso(0) },
         { since: iso(0), resolution: "minute" },
         { since: "yesterday", resolution: "hour" },
+        { since: "2026-02-30T10:00:00Z", resolution: "hour" },
+        { since: "2026-11-03T10:00:00", resolution: "hour" },
       ]) {
         const response = await query(base, token, parameters);
         expect(response.status).toBe(400);

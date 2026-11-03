@@ -16,8 +16,8 @@ import {
   DEFAULT_PAGE_LIMIT,
   type Forbidden,
   type RunnerMetrics,
+  type RunnerMetricsQuery,
   type RunnerMetricsPoint,
-  type RunnerMetricsResolution,
   type Validation,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
@@ -41,46 +41,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** The longest span of five-minute points one query reads. */
 const MAX_FIVE_MINUTE_SPAN_MS = DAY_MS;
 
-/** What `runnerMetrics.query` takes, after the transport has decoded it. */
-export interface QueryInput {
-  readonly runnerId?: string;
-  readonly since: string;
-  readonly until?: string;
-  readonly resolution: RunnerMetricsResolution;
-  readonly limit?: number;
-  readonly cursor?: string;
-}
-
 /** One page of points. `nextCursor` is absent on the last page. */
-export interface RunnerMetricsPage {
+interface RunnerMetricsPage {
   readonly items: ReadonlyArray<RunnerMetricsPoint>;
   readonly nextCursor?: string;
 }
 
-/**
- * Parses an instant a caller sent into Unix milliseconds. Fails with
- * `Validation` naming the field when the text has the right shape but is not a
- * real date, such as month 13.
- */
-const parseInstant = (
-  field: "since" | "until",
-  text: string,
-): Effect.Effect<number, Validation> => {
-  const instant = Date.parse(text);
-  return Number.isNaN(instant)
-    ? Effect.fail(
-        createValidationError([
-          {
-            path: [field],
-            message: `${text} is not a real date and time; write it like 2026-11-02T08:00:00.000Z.`,
-          },
-        ]),
-      )
-    : Effect.succeed(instant);
-};
-
-const refuse = (field: "since" | "until", message: string): Validation =>
-  createValidationError([{ path: [field], message }]);
+/** Builds the refusal of a span, which names `since` because the span is what is wrong. */
+const refuseSpan = (message: string): Validation =>
+  createValidationError([{ path: ["since"], message }]);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -123,19 +92,15 @@ const make = Effect.gen(function* () {
      * runner or resolution.
      */
     query: (
-      input: QueryInput,
+      input: RunnerMetricsQuery,
     ): Effect.Effect<RunnerMetricsPage, Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("runnerMetrics.query");
-        const sinceMs = yield* parseInstant("since", input.since);
-        const untilMs =
-          input.until === undefined
-            ? Date.parse(yield* nowIso)
-            : yield* parseInstant("until", input.until);
+        const sinceMs = Date.parse(input.since);
+        const untilMs = Date.parse(input.until ?? (yield* nowIso));
         if (sinceMs >= untilMs) {
           return yield* Effect.fail(
-            refuse(
-              "since",
+            refuseSpan(
               "since must be before until, which is now when left out; ask for a span that starts before it ends.",
             ),
           );
@@ -143,8 +108,7 @@ const make = Effect.gen(function* () {
         const spanMs = untilMs - sinceMs;
         if (input.resolution === "fiveMinutes" && spanMs > MAX_FIVE_MINUTE_SPAN_MS) {
           return yield* Effect.fail(
-            refuse(
-              "since",
+            refuseSpan(
               "five-minute points cover at most 24 hours; ask for a shorter span, or use resolution hour for a longer one.",
             ),
           );
@@ -153,8 +117,7 @@ const make = Effect.gen(function* () {
           const days = Math.max(yield* readRetentionDays, MACHINE_PAGE_DAYS);
           if (spanMs > days * DAY_MS) {
             return yield* Effect.fail(
-              refuse(
-                "since",
+              refuseSpan(
                 `hour points cover at most ${String(days)} days, the longer of the history kept and the ${String(MACHINE_PAGE_DAYS)} days a machine's page draws; ask for a shorter span.`,
               ),
             );
@@ -165,8 +128,10 @@ const make = Effect.gen(function* () {
           rows.readPoints({
             runnerId: input.runnerId,
             resolution: input.resolution,
-            sinceMs: Math.floor(sinceMs / pointMs) * pointMs,
-            untilMs,
+            since: input.since,
+            until: input.until,
+            startMs: Math.floor(sinceMs / pointMs) * pointMs,
+            endMs: untilMs,
             limit: input.limit ?? DEFAULT_PAGE_LIMIT,
             cursor: input.cursor,
           }),

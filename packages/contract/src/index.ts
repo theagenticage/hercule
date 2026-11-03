@@ -498,9 +498,8 @@ export {
 } from "./groups/runner";
 export {
   RUNNER_METRICS_POINT_MS,
-  RUNNER_METRICS_QUERY_FIELDS,
-  RUNNER_METRICS_RESOLUTIONS,
   RunnerMetricsPoint,
+  RunnerMetricsQuery,
   RunnerMetricsResolution,
 } from "./groups/runner-metrics";
 export {

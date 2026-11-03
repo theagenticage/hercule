@@ -9,7 +9,7 @@ import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
-import { Id, Timestamp } from "../ids";
+import { Id, Timestamp, TimestampWithOffset } from "../ids";
 import { cursorParams, page } from "../pagination";
 import { Authenticated } from "../security";
 
@@ -17,7 +17,7 @@ import { Authenticated } from "../security";
  * How long a point is: `fiveMinutes` points start on UTC multiples of five
  * minutes, and `hour` points are whole UTC hours.
  */
-export const RUNNER_METRICS_RESOLUTIONS = ["fiveMinutes", "hour"] as const;
+const RUNNER_METRICS_RESOLUTIONS = ["fiveMinutes", "hour"] as const;
 
 export const RunnerMetricsResolution = Schema.Literals(RUNNER_METRICS_RESOLUTIONS);
 
@@ -66,22 +66,23 @@ export type RunnerMetricsPoint = Schema.Schema.Type<typeof RunnerMetricsPoint>;
 /**
  * The input of `runnerMetrics.query`. `since` is moved back to the start of
  * its point, so every point returned is whole. `until` is exclusive and
- * defaults to now. Without `runnerId`, the points of every runner.
+ * defaults to now. Without `runnerId`, the points of every runner. A time may
+ * be written with any offset, and is read as the UTC time it names.
  */
-export const RUNNER_METRICS_QUERY_FIELDS = {
+export const RunnerMetricsQuery = Schema.Struct({
   runnerId: Schema.optionalKey(Id),
-  since: Timestamp,
-  until: Schema.optionalKey(Timestamp),
+  since: TimestampWithOffset,
+  until: Schema.optionalKey(TimestampWithOffset),
   resolution: RunnerMetricsResolution,
-} as const;
+  ...cursorParams.fields,
+});
+
+export type RunnerMetricsQuery = Schema.Schema.Type<typeof RunnerMetricsQuery>;
 
 export const runnerMetrics = HttpApiGroup.make("runnerMetrics")
   .add(
     HttpApiEndpoint.get("query", "/runner-metrics", {
-      query: Schema.Struct({
-        ...RUNNER_METRICS_QUERY_FIELDS,
-        ...cursorParams.fields,
-      }),
+      query: RunnerMetricsQuery,
       success: page(RunnerMetricsPoint),
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),

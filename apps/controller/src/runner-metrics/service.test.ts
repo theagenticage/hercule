@@ -10,13 +10,13 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { RunnerMetrics } from "@hercule/contract";
+import type { RunnerMetrics, RunnerMetricsQuery } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { runnerRepository } from "../runners";
 import { Settings, SettingsLayer } from "../settings";
-import { RunnerMetricsService, RunnerMetricsServiceLayer, type QueryInput } from "./index";
+import { RunnerMetricsService, RunnerMetricsServiceLayer } from "./index";
 
 const layer = RunnerMetricsServiceLayer.pipe(
   Layer.provideMerge(SettingsLayer),
@@ -133,7 +133,7 @@ const readRows = (runnerId: string): Effect.Effect<ReadonlyArray<RawRow>, never,
       FROM runner_metrics WHERE runner_id = unhex(replace(${runnerId}, '-', '')) ORDER BY minute`;
   }).pipe(Effect.orDie);
 
-const query = (input: Partial<QueryInput> & Pick<QueryInput, "resolution">) =>
+const query = (input: Partial<RunnerMetricsQuery> & Pick<RunnerMetricsQuery, "resolution">) =>
   Effect.gen(function* () {
     const service = yield* RunnerMetricsService;
     return yield* service.query({
@@ -500,7 +500,7 @@ const readIssues = (error: unknown): ReadonlyArray<Issue> =>
     .error.details.issues;
 
 describe("a query's limits", () => {
-  const refusal = (input: Partial<QueryInput> & Pick<QueryInput, "resolution">) =>
+  const refusal = (input: Partial<RunnerMetricsQuery> & Pick<RunnerMetricsQuery, "resolution">) =>
     runAsUser(Effect.flip(query(input)));
 
   it("refuses a span that is empty or backwards, saying what to change", async () => {
@@ -578,12 +578,7 @@ describe("a query's limits", () => {
     ]);
   });
 
-  it("refuses text that has the shape of a time but is not one", async () => {
-    const error = await refusal({ resolution: "hour", since: "2026-13-45T10:00:00.000Z" });
-    expect(readIssues(error)[0]?.path).toEqual(["since"]);
-  });
-
-  it("refuses a cursor from another query", async () => {
+  it("refuses a cursor from another runner, resolution or span", async () => {
     const result = await runAsUser(
       Effect.gen(function* () {
         const service = yield* RunnerMetricsService;
@@ -592,41 +587,61 @@ describe("a query's limits", () => {
         for (let minute = 0; minute < 15; minute += 5) {
           yield* record(runner, report(50, 8), instant(minute));
         }
-        const page = yield* service.query({
+        const same = {
           runnerId: runner,
           since: instant(0),
           until: instant(60),
           resolution: "fiveMinutes",
-          limit: 1,
-        });
-        const cursor = page.nextCursor!;
-        const asHour = yield* Effect.flip(
-          service.query({
-            runnerId: runner,
-            since: instant(0),
-            until: instant(60),
-            resolution: "hour",
-            cursor,
-          }),
+        } as const;
+        const cursor = (yield* service.query({ ...same, limit: 1 })).nextCursor!;
+        return yield* Effect.forEach(
+          [
+            { ...same, runnerId: other },
+            { ...same, resolution: "hour" },
+            { ...same, since: instant(5) },
+            { ...same, until: instant(120) },
+          ] as const,
+          (changed) => Effect.flip(service.query({ ...changed, cursor })),
         );
-        const asOther = yield* Effect.flip(
-          service.query({
-            runnerId: other,
-            since: instant(0),
-            until: instant(60),
-            resolution: "fiveMinutes",
-            cursor,
-          }),
-        );
-        return [asHour, asOther];
       }),
     );
 
+    expect(result).toHaveLength(4);
     for (const error of result) {
-      expect(error).toMatchObject({
-        error: { code: "validation", details: { issues: [{ path: ["cursor"] }] } },
-      });
+      expect(readIssues(error)[0]?.path).toEqual(["cursor"]);
     }
+  });
+
+  it("follows a gap longer than a page: a short page of one runner still hands back a cursor", async () => {
+    const found = await runAsUser(
+      Effect.gen(function* () {
+        const service = yield* RunnerMetricsService;
+        const runner = yield* insertRunner("iris");
+        yield* record(runner, report(50, 8), instant(0));
+        yield* record(runner, report(50, 8), instant(40));
+        const points: Array<string> = [];
+        let cursor: string | undefined;
+        let pages = 0;
+        do {
+          const page = yield* service.query({
+            runnerId: runner,
+            since: instant(0),
+            until: instant(60),
+            resolution: "fiveMinutes",
+            limit: 1,
+            ...(cursor === undefined ? {} : { cursor }),
+          });
+          points.push(...page.items.map((point) => point.at));
+          cursor = page.nextCursor;
+          pages++;
+        } while (cursor !== undefined);
+        return { points, pages };
+      }),
+    );
+
+    expect(found.points).toEqual([instant(0), instant(40)]);
+    // The second page skips the gap in one step, so no page is empty.
+    expect(found.pages).toBe(2);
   });
 });
 
