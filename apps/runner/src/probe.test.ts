@@ -466,10 +466,17 @@ describe("buildThisMachine", () => {
       );
       const pid = Number(readFileSync(pidFile, "utf8"));
 
-      expect(printed._tag, "the tool never prints, so the caller gave up").toBe("None");
-      expect(await waitUntilGone(pid), `process ${pid} is still running`).toBe(true);
-      // Only needed when the assertion above failed: do not leave the sleeper behind.
-      if (isRunning(pid)) process.kill(pid, "SIGKILL");
+      try {
+        expect(printed._tag, "the tool never prints, so the caller gave up").toBe("None");
+        expect(await waitUntilGone(pid), `process ${pid} is still running`).toBe(true);
+      } finally {
+        // Only needed when an assertion above failed: do not leave the sleeper behind.
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // No such process: it already ended.
+        }
+      }
     });
 
     it("returns nothing when the tool exits with an error", async () => {
