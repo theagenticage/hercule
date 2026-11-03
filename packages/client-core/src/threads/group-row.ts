@@ -28,6 +28,7 @@ import {
   labelWorkspaceSessions,
   type SessionTab,
 } from "./siblings";
+import { WORKING_STATUSES } from "./status";
 import { describeThreadPlace } from "./thread-place";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
 
@@ -60,6 +61,12 @@ export interface GroupMember extends SessionTab {
   readonly counted: boolean;
   /** Whether the Office seats the session at work, as `isSessionSeated` decides it. */
   readonly seated: boolean;
+  /**
+   * Whether the session is queued, starting or busy, which is what stops the
+   * controller archiving it. Unlike `dot`, it holds for a Done Thread and for
+   * a session that waits on the user too.
+   */
+  readonly working: boolean;
   readonly dot: SessionDot;
   /** The oldest open Request's question, or `null` when nothing waits in this session. */
   readonly question: string | null;
@@ -285,6 +292,7 @@ export const describeGroupRows = ({
         askerLabel: session.id === group.lead.id ? null : tab.label,
         counted,
         seated: seatedIds.has(session.id),
+        working: WORKING_STATUSES.has(session.status),
         dot: decideDot(counted, pose),
         question: oldest === null ? null : formatRequestQuestion(oldest),
       };

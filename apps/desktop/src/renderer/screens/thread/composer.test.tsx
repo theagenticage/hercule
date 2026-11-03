@@ -168,7 +168,9 @@ const renderComposer = async (
       },
     },
   );
-  if (findResumeBlockedReason(thread.session) === null) {
+  // Only whether the thread is blocked matters here, not why, and a missing
+  // workspace changes the reason but never turns a blocked thread into an open one.
+  if (findResumeBlockedReason(thread.session, undefined) === null) {
     await waitFor(() => {
       expect(readSkillReads(rendered.calls, thread)).not.toHaveLength(0);
     });

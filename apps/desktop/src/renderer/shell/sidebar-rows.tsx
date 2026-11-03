@@ -31,9 +31,10 @@ import {
   type ReactNode,
 } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, type SessionDot } from "@hercule/client-core";
+import { describePose, findArchiveBlockReason, type SessionDot } from "@hercule/client-core";
 import { useAgeWords } from "../app/age-clock";
 import { buildAssistantLook, buildLook, Face } from "../faces";
+import { ArchiveIcon } from "../icons/archive";
 import { CheckIcon } from "../icons/check";
 import { ChevronRightIcon } from "../icons/chevron-right";
 import { ComposeIcon } from "../icons/compose";
@@ -504,6 +505,39 @@ function RowAction({
     >
       {icon}
       {word}
+    </button>
+  );
+}
+
+/**
+ * Renders the Archive button beside Reopen on a Done shelf row: an icon with
+ * no word, so the pair fits where Reopen alone sat. It is drawn and shown as
+ * `RowAction` is. While `blockReason` is a string, the row works: the button
+ * is disabled with that reason as its tooltip, and pressing it does nothing.
+ * It stays focusable so the keyboard user can read the tooltip too.
+ */
+function ArchiveAction({
+  itemKey,
+  blockReason,
+  onPress,
+}: {
+  readonly itemKey: string;
+  readonly blockReason: string | null;
+  readonly onPress: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="side-act side-act--icon"
+      data-key={itemKey}
+      aria-label="Archive"
+      aria-disabled={blockReason === null ? undefined : true}
+      title={blockReason ?? "Archive"}
+      onClick={() => {
+        if (blockReason === null) onPress();
+      }}
+    >
+      <ArchiveIcon size={ROW_GLYPH_SIZE} />
     </button>
   );
 }
@@ -993,13 +1027,19 @@ export const QuietLine = memo(function QuietLine({
 /**
  * Renders the Done shelf's heading: "Done" and the count of Done groups, as
  * a button that opens and closes the shelf. Pressing it calls `onToggle`.
+ *
+ * While the shelf is open, "Archive all" ends the heading and calls
+ * `onArchiveAll`. It is disabled, with the reason as its tooltip, when
+ * `item.canArchiveAll` is false because every row on the shelf works.
  */
 export const DoneHeader = memo(function DoneHeader({
   item,
   onToggle,
+  onArchiveAll,
 }: {
   readonly item: SidebarItemOf<"done-header">;
   readonly onToggle: () => void;
+  readonly onArchiveAll: () => void;
 }): JSX.Element {
   return (
     <h3
@@ -1011,6 +1051,22 @@ export const DoneHeader = memo(function DoneHeader({
         <ChevronRightIcon size={12} />
         <span>Done</span> <b className="count">{item.count}</b>
       </button>
+      {item.open && (
+        <button
+          type="button"
+          className="side-h-act"
+          data-key={item.key}
+          aria-disabled={item.canArchiveAll ? undefined : true}
+          title={
+            item.canArchiveAll ? undefined : "No row can be archived now: each one is working."
+          }
+          onClick={() => {
+            if (item.canArchiveAll) onArchiveAll();
+          }}
+        >
+          Archive all
+        </button>
+      )}
     </h3>
   );
 }, areSameData);
@@ -1023,6 +1079,8 @@ export const DoneHeader = memo(function DoneHeader({
  * on it or the keyboard's focus is in it, a Reopen button shows in the status
  * slot's place. Pressing
  * it calls `onReopen` with `item.row.threadIds`, every Thread of the group.
+ * Beside it, an Archive button calls `onArchive` with the group's key. It is disabled,
+ * with the reason as its tooltip, while a session of the group works.
  *
  * - A group of one Thread is a Done thread's row: the second line starts with
  *   the mark of its harness and reads "Done 2 hours ago".
@@ -1045,12 +1103,14 @@ export const DoneGroupRow = memo(function DoneGroupRow({
   onScreen,
   officeOpen,
   onReopen,
+  onArchive,
   onToggleGroup,
 }: {
   readonly item: SidebarItemOf<"done-group-row">;
   readonly onScreen: boolean;
   readonly officeOpen: boolean;
   readonly onReopen: (sessionIds: readonly string[]) => void;
+  readonly onArchive: (groupKey: string) => void;
   readonly onToggleGroup: (groupKey: string, unfold: boolean) => void;
 }): JSX.Element {
   const { row } = item;
@@ -1075,15 +1135,24 @@ export const DoneGroupRow = memo(function DoneGroupRow({
         />
       }
       action={
-        <RowAction
-          itemKey={item.key}
-          label="Reopen"
-          word="Reopen"
-          icon={<UndoIcon size={ROW_GLYPH_SIZE} />}
-          onPress={() => {
-            onReopen(row.threadIds);
-          }}
-        />
+        <span className="side-acts">
+          <RowAction
+            itemKey={item.key}
+            label="Reopen"
+            word="Reopen"
+            icon={<UndoIcon size={ROW_GLYPH_SIZE} />}
+            onPress={() => {
+              onReopen(row.threadIds);
+            }}
+          />
+          <ArchiveAction
+            itemKey={item.key}
+            blockReason={findArchiveBlockReason(row)}
+            onPress={() => {
+              onArchive(row.key);
+            }}
+          />
+        </span>
       }
       officeOpen={officeOpen}
       onToggleGroup={onToggleGroup}

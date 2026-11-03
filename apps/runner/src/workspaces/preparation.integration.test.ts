@@ -150,7 +150,11 @@ describe("durable preparation outcomes", () => {
       ],
     });
     const scope = Scope.makeUnsafe();
-    const manager = Effect.runSync(makeWorkspaces({ storageDir }).pipe(Scope.provide(scope)));
+    const manager = Effect.runSync(
+      makeWorkspaces({ storageDir, deleteSessionFiles: () => Effect.void }).pipe(
+        Scope.provide(scope),
+      ),
+    );
     const waiter = Effect.runFork(manager.provision(frame));
     let capturedSetupPid: number | undefined;
     let capturedDescendantPid: number | undefined;

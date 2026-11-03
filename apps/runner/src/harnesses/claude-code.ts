@@ -119,6 +119,7 @@ import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "./
 import type { LoginCommand } from "./login";
 import { SETUP_TOKEN_FOLDER_PREFIX } from "./setup-token-folder";
 import { runProcess, type Run } from "./process";
+import { readFolderNames, removeSessionFiles } from "./session-files";
 import { describeErrorAsFact, truncateFact, truncateMessage } from "./text";
 import { captureUnknownItemReporter } from "./message-reporting";
 import { buildUserMessage, ensureId } from "./events";
@@ -1668,6 +1669,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
 
   return {
     harnessId: CLAUDE_CODE,
+    harnessName: CLAUDE_CODE_NAME,
     binaryName: CLAUDE_BINARY,
 
     events: Stream.fromPubSub(published),
@@ -1910,6 +1912,25 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),
+
+    // Claude Code names a project folder after the cwd the session ran in,
+    // and the adapter is not given the cwd. The session's files are found by
+    // its id in every project folder instead. What Claude Code keeps per
+    // session, besides the transcript and its sidecar folder, is the
+    // environment folder and the file-edit backups, both named by the id.
+    deleteSessionFiles: (home, nativeSessionId) =>
+      removeSessionFiles(nativeSessionId, async () => {
+        const projects = join(home, "projects");
+        const perProject = (await readFolderNames(projects)).flatMap((project) => [
+          join(projects, project, `${nativeSessionId}.jsonl`),
+          join(projects, project, nativeSessionId),
+        ]);
+        return [
+          ...perProject,
+          join(home, "session-env", nativeSessionId),
+          join(home, "file-history", nativeSessionId),
+        ];
+      }),
     // The config is empty for every shipped harness, so it is not read.
     generateText: (ctx, spec) =>
       // The harness is closed, and its exit awaited, before the runner

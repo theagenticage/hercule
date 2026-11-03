@@ -24,7 +24,7 @@
  *   until the session is idle again.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Exit, Fiber, Option } from "effect";
+import { Cause, Duration, Effect, Exit, Fiber, Option } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type {
   ModelDescriptor,
@@ -7048,6 +7048,264 @@ describe("session.markDone and session.reopen", () => {
           yield* Fiber.interrupt(announced.fiber);
         }),
       );
+    });
+  });
+});
+
+/**
+ * An archived session takes no input and is never resumed or forked. The
+ * tests set the archive mark straight in the row: they are about what every
+ * other operation does with an archived session, not about `session.archive`.
+ */
+describe("an archived session", () => {
+  const ARCHIVED_REFUSAL =
+    "This thread is archived, so it cannot take input or be reopened. Start a new thread to carry on.";
+
+  /** Marks the session archived by the user, as `session.archive` does, and nothing else. */
+  const archive = (arranged: Arranged, id: string): Promise<unknown> =>
+    Effect.runPromise(
+      Effect.orDie(
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`UPDATE sessions SET archived_at = ${at}, archived_by = 'user'
+                               WHERE id = unhex(replace(${id}, '-', ''))`,
+        ),
+      ),
+    );
+
+  /** Checks that the response refuses with `invalid_state` and the archive message. */
+  const expectArchivedRefusal = async (response: Response): Promise<void> => {
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect(await readErrorBody(response)).toMatchObject({
+      code: "invalid_state",
+      message: ARCHIVED_REFUSAL,
+    });
+  };
+
+  /** Gives the session a ready workspace that it holds a lease on, as a placed session has. */
+  const holdWorkspace = (arranged: Arranged, id: string): Promise<unknown> => {
+    const workspace = Bun.randomUUIDv7().replaceAll("-", "");
+    const session = id.replaceAll("-", "");
+    return Effect.runPromise(
+      Effect.orDie(
+        withTransaction(
+          arranged.harness.sql,
+          Effect.all([
+            arranged.harness.sql`INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+              VALUES (unhex(${workspace}), unhex(${arranged.runnerId.replaceAll("-", "")}),
+                      'ephemeral', 'ready', ${at})`,
+            arranged.harness.sql`UPDATE sessions SET workspace_id = unhex(${workspace})
+              WHERE id = unhex(${session})`,
+            arranged.harness
+              .sql`INSERT INTO workspace_leases (workspace_id, holder_kind, holder_id, acquired_at)
+              VALUES (unhex(${workspace}), 'session', unhex(${session}), ${at})`,
+          ]),
+        ),
+      ),
+    );
+  };
+
+  /** Reads the lease of the session's workspace. */
+  const readLeases = (arranged: Arranged, id: string) =>
+    Effect.runPromise(
+      Effect.orDie(
+        arranged.harness.sql<{
+          readonly released_at: string | null;
+          readonly retention: string | null;
+          readonly kept_until: string | null;
+        }>`SELECT released_at, retention, kept_until FROM workspace_leases
+           WHERE holder_id = unhex(replace(${id}, '-', ''))`,
+      ),
+    );
+
+  it("refuses session.input, idle or exited, and stores nothing", async () => {
+    await withFleet(async (arranged) => {
+      // The exit's report lists only the exited session, so it is made first.
+      const exited = await startAndEndSession(arranged, "exited one");
+      const idle = await startIdleSession(arranged, "idle one");
+      await archive(arranged, idle.id);
+      await archive(arranged, exited.id);
+      const sentBefore = listInputFrames(arranged.wire).length;
+      const startsBefore = listFrames<SessionStart>(arranged.wire, "sessionStart").length;
+      const idleInputs = (await listInputs(arranged, idle.id)).length;
+      const exitedInputs = (await listInputs(arranged, exited.id)).length;
+
+      await expectArchivedRefusal(await sendInput(arranged, idle.id, { text: "more" }));
+      await expectArchivedRefusal(await sendInput(arranged, exited.id, { text: "more" }));
+
+      expect(await listInputs(arranged, idle.id)).toHaveLength(idleInputs);
+      expect(await listInputs(arranged, exited.id)).toHaveLength(exitedInputs);
+      expect(listInputFrames(arranged.wire)).toHaveLength(sentBefore);
+      expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(startsBefore);
+      expect((await readSession(arranged, exited.id)).status).toBe("exited");
+    });
+  });
+
+  it("refuses queueInput and stores nothing", async () => {
+    await withFleet(async (arranged) => {
+      const idle = await startIdleSession(arranged, "hello");
+      await archive(arranged, idle.id);
+      const inputs = (await listInputs(arranged, idle.id)).length;
+
+      const exit = await arranged.harness.runWithLiveSessions(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const live = yield* Live;
+          return yield* withTransaction(sql, live.queueInput({ id: idle.id, text: "more" }));
+        }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined).toMatchObject({
+        error: { code: "invalid_state", message: ARCHIVED_REFUSAL },
+      });
+      expect(await listInputs(arranged, idle.id)).toHaveLength(inputs);
+      expect(listInputFrames(arranged.wire)).toEqual([]);
+    });
+  });
+
+  it("refuses session.update and leaves the model selection as it was", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      await archive(arranged, session.id);
+
+      const response = await send(
+        "PATCH",
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}`,
+        {
+          body: { options: { effort: "high" } },
+          token: arranged.token,
+        },
+      );
+
+      await expectArchivedRefusal(response);
+      expect((await readSession(arranged, session.id)).modelSelection).toEqual(
+        session.modelSelection,
+      );
+    });
+  });
+
+  it("refuses input.steer and input.update on a queued input, and still lets it be cancelled", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+      reportEvent(arranged.wire, ...buildTranscript(session.id)[1]!);
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+      const queued = await sendInput(arranged, session.id, { text: "waiting" });
+      expect(queued.status, await queued.clone().text()).toBe(200);
+      const { inputId } = (await queued.json()) as { inputId: string };
+      await archive(arranged, session.id);
+      const sentBefore = listInputFrames(arranged.wire).length;
+
+      await expectArchivedRefusal(await steerInput(arranged, session.id, inputId));
+      await expectArchivedRefusal(
+        await patchInput(arranged, session.id, inputId, { text: "changed" }),
+      );
+
+      const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
+      expect(row).toMatchObject({ status: "queued", text: "waiting" });
+      expect(listInputFrames(arranged.wire)).toHaveLength(sentBefore);
+
+      const cancelled = await cancelInput(arranged, session.id, inputId);
+      expect(cancelled.status, await cancelled.clone().text()).toBe(200);
+    });
+  });
+
+  it("refuses session.reopen and keeps the Done mark", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await startIdleSession(arranged, "hello");
+      const marked = await readSessionResponse(await markDone(arranged, [thread.id]));
+      await archive(arranged, thread.id);
+
+      await expectArchivedRefusal(await reopen(arranged, [thread.id]));
+
+      expect((await readSession(arranged, thread.id)).done).toEqual(marked.done);
+    });
+  });
+
+  it("refuses session.continue, idle or exited, and places nothing", async () => {
+    await withFleet(async (arranged) => {
+      const exited = await startAndEndSession(arranged, "exited one");
+      const idle = await startIdleSession(arranged, "idle one");
+      await archive(arranged, idle.id);
+      await archive(arranged, exited.id);
+      const sessionsBefore = (await listSessions(arranged)).length;
+
+      for (const parent of [idle, exited]) {
+        await expectArchivedRefusal(
+          await continueSession(arranged, parent.id, { mode: "fork", prompt: "carry on" }),
+        );
+      }
+
+      expect(await listSessions(arranged)).toHaveLength(sessionsBefore);
+    });
+  });
+
+  it("still answers session.read and transcript.read, and reads as not resumable", async () => {
+    await withFleet(async (arranged) => {
+      const exited = await startAndEndSession(arranged, "hello");
+      expect(exited.resumable).toBe(true);
+      await archive(arranged, exited.id);
+
+      const read = await readSession(arranged, exited.id);
+      expect(read).toMatchObject({ id: exited.id, status: "exited", resumable: false });
+      const transcript = await get(
+        arranged.harness.base,
+        `/api/v1/sessions/${exited.id}/transcript`,
+        arranged.token,
+      );
+      expect(transcript.status, await transcript.clone().text()).toBe(200);
+    });
+  });
+
+  it("releases its workspace lease as archived when it exits, for the archived window", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      await holdWorkspace(arranged, session.id);
+      await archive(arranged, session.id);
+      expect(await readLeases(arranged, session.id)).toMatchObject([{ released_at: null }]);
+
+      arranged.wire.send({
+        _tag: "sessionsReport",
+        sessions: [
+          {
+            sessionId: session.id,
+            nativeSessionId: "native-1",
+            providerAccountId: session.providerAccountId,
+          },
+        ],
+      });
+      await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);
+      reportExited(arranged.wire, session.id, 4);
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
+
+      const [lease] = await readLeases(arranged, session.id);
+      expect(lease).toMatchObject({ retention: "archived" });
+      expect(lease!.released_at).not.toBeNull();
+      expect(Date.parse(lease!.kept_until!) - Date.parse(lease!.released_at!)).toBe(
+        7 * 24 * 3_600_000,
+      );
+    });
+  });
+
+  it("is told to stop again when a runner's report lists it live, once, and stays as it is", async () => {
+    await withFleet(async (arranged) => {
+      const gone = await startAndEndSession(arranged, "already exited");
+      const live = await startIdleSession(arranged, "still running");
+      await holdWorkspace(arranged, live.id);
+      await archive(arranged, live.id);
+      await archive(arranged, gone.id);
+
+      reportHeldSessions(arranged.wire, arranged, [live.id, gone.id]);
+      const first = await waitForFrames<SessionStopFrame>(arranged.wire, "sessionStop", 2);
+      expect(first.map((frame) => frame.sessionId).sort()).toEqual([live.id, gone.id].sort());
+
+      // After a reconnect the runner reports the same process again.
+      reportHeldSessions(arranged.wire, arranged, [live.id]);
+      const second = await waitForFrames<SessionStopFrame>(arranged.wire, "sessionStop", 3);
+      expect(second[2]).toEqual({ _tag: "sessionStop", sessionId: live.id });
+      expect((await readSession(arranged, live.id)).status).toBe("idle");
+      expect(await readLeases(arranged, live.id)).toMatchObject([{ released_at: null }]);
     });
   });
 });

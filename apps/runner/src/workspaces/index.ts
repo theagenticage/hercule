@@ -20,6 +20,7 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
+import type { DeleteSessionFiles } from "./archived-session-files";
 import { attachWorkspace, reserveManagedRepositories } from "./attachment";
 import { hasExpectedCheckoutIdentity } from "./identity";
 import { disposeWorkspace, detachWorkspace, hasSameRemovalIntent } from "./dispose";
@@ -105,6 +106,12 @@ export const makeWorkspaces = (options: {
   readonly gitEnv?: Record<string, string>;
   /** How long a setup command may run. Defaults to `SETUP_DEADLINE_MS`; tests set a shorter one. */
   readonly setupDeadlineMs?: number;
+  /**
+   * Deletes the harness files of one archived session, for a dispose that
+   * lists archived sessions. The harness adapters live outside this module,
+   * so the runner passes the function in.
+   */
+  readonly deleteSessionFiles: DeleteSessionFiles;
 }): Effect.Effect<Workspaces, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope;
@@ -135,6 +142,7 @@ export const makeWorkspaces = (options: {
       coordinateRepository,
       gitEnv: buildSubstrateEnv(process.env, options.gitEnv),
       setupDeadlineMs: options.setupDeadlineMs ?? SETUP_DEADLINE_MS,
+      deleteSessionFiles: options.deleteSessionFiles,
     };
 
     /**

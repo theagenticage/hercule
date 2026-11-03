@@ -113,18 +113,20 @@ import {
 } from "../permissions";
 import type { SendOutcome } from "../runners";
 import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
-import { permissionRequestSubscriptions } from "../subscriptions";
+import { permissionRequestSubscriptions, subscriptionRepository } from "../subscriptions";
 import { AccountUsage } from "../usage";
-import { WorkspaceService, type GithubAccount } from "../workspaces";
+import { WorkspaceService, type GithubAccount, type Retention } from "../workspaces";
 import {
   APPROVAL_ANSWER_IDS,
   buildApprovalNotification,
   buildRequestSubject,
   buildWaitEndedWithdrawReason,
   buildWithdrawReason,
+  WITHDRAW_REASON_SESSION_ARCHIVED,
   WITHDRAW_REASON_SESSION_ENDED,
   type WaitEndedBy,
 } from "./approval-notification";
+import { refuseArchived } from "./archived";
 import {
   findAttachmentRefusal,
   refuseUnacceptedAttachments,
@@ -567,6 +569,42 @@ const describeMarkDoneRefusal = (id: string, kind: SessionKind): string =>
 const describeReopenRefusal = (id: string, kind: SessionKind): string =>
   `${id} is not a Thread (its kind is ${kind}), so it is never Done and there is nothing to reopen. Nothing was reopened, so remove that id and try again`;
 
+/** The refusal of `session.archive` for a session that is not a Thread. */
+const ONLY_A_THREAD_CAN_BE_ARCHIVED =
+  "Only a Thread can be archived. Stop an Agent's session with `session.stop`.";
+
+/** The reason stored on the Queued Input an archive cancels. */
+const ARCHIVED_INPUT_REASON = "The session was archived, so it takes no more input.";
+
+/** The statuses of a session that is working, which an archive refuses to cut short. */
+const WORKING_STATUSES: ReadonlyArray<SessionStatus> = ["queued", "starting", "busy"];
+
+/**
+ * Returns the end reason of a subscription whose holding session was
+ * archived. The session is named because a reader of the row may have several
+ * sessions and needs to know which one held this subscription.
+ */
+const buildArchivedHolderReason = (sessionId: string): string =>
+  `session ${sessionId}, which held this subscription, was archived and takes no more input`;
+
+/**
+ * Returns the refusal of `session.archive` while sessions are working. It
+ * names each one by its title, or by its id when it has none, and says what
+ * to do. Nothing was archived when it is returned.
+ */
+const describeWorkingRefusal = (
+  working: ReadonlyArray<Pick<StoredSession, "id" | "title">>,
+): string => {
+  const names = working.map((session) => (session.title === "" ? session.id : session.title));
+  const list =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return names.length === 1
+    ? `${list} is working. Stop it first, or wait for its turn to end.`
+    : `${list} are working. Stop them first, or wait for their turns to end.`;
+};
+
 const NO_SUCH_SUBAGENT =
   "no such subagent on that session; list the session's subagents to find their ids";
 
@@ -742,6 +780,17 @@ const keepsInputsOnExit = (
 ): boolean => session.conversationId !== null && !session.conversationDeleted;
 
 /**
+ * Returns the retention an exited session's workspace lease is released with.
+ * An archived session never comes back, so it wins over the other two: an
+ * archived session is `archived`, a session that can still be resumed is
+ * `idle`, and any other is `orphan`.
+ */
+const decideExitRetention = (exited: Pick<StoredSession, "archived" | "resumable">): Retention => {
+  if (exited.archived !== null) return "archived";
+  return exited.resumable ? "idle" : "orphan";
+};
+
+/**
  * Checks whether an agent step's session keeps its waiting step prompt
  * through its last exit, so the prompt resumes the session in place.
  * `exited` is the session as read after the exit. It keeps the prompt when
@@ -776,6 +825,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* sessionRepository;
   const permissionRequests = yield* permissionRequestRepository;
   const requestSubscriptions = yield* permissionRequestSubscriptions;
+  const subscriptions = yield* subscriptionRepository;
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
   const providerAccounts = yield* providerAccountRepository;
@@ -1033,18 +1083,18 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Checks that the queued inputs of a session may be changed or cancelled.
-   * Fails with `NotFound` when there is no such session, and with
-   * `InvalidState` when the session answers an assistant's conversation:
-   * input to an assistant goes only through `conversation.send`, and the
-   * conversation keeps what was sent.
+   * Checks that the queued inputs of a session may be changed or cancelled,
+   * and returns the session. Fails with `NotFound` when there is no such
+   * session, and with `InvalidState` when the session answers an assistant's
+   * conversation: input to an assistant goes only through `conversation.send`,
+   * and the conversation keeps what was sent.
    */
   const requireChangeableInputs = (
     sessionId: string,
-  ): Effect.Effect<void, NotFound | InvalidState | SqlError> =>
+  ): Effect.Effect<StoredSession, NotFound | InvalidState | SqlError> =>
     Effect.flatMap(readSession(sessionId), (session) =>
       session.conversationId === null
-        ? Effect.void
+        ? Effect.succeed(session)
         : Effect.fail(createInvalidStateError(CONVERSATION_INPUT_FIXED)),
     );
 
@@ -1312,6 +1362,24 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Withdraws the open Permission Requests of these sessions, with one query
+   * for all of them, because no decision can reach a session that ended or
+   * was archived. Withdraws their approval notifications with `reason` and
+   * ends the subscriptions waiting on their decisions. Does nothing when no
+   * request is open.
+   */
+  const withdrawOpenPermissionRequests = (
+    sessionIds: ReadonlyArray<string>,
+    reason: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const withdrawn = yield* permissionRequests.withdrawOpen(sessionIds);
+      if (withdrawn.length === 0) return;
+      yield* notifier.withdrawDecisionsAbout(withdrawn.map(buildPermissionRequestSubject), reason);
+      yield* requestSubscriptions.endWithdrawn(sessionIds, withdrawn);
+    });
+
+  /**
    * Does the cleanup after sessions move to `exited`, whatever ended them.
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
@@ -1372,7 +1440,7 @@ const make = Effect.gen(function* () {
         if (session.workspaceId !== null && Option.isSome(after)) {
           yield* workspaces.release(
             { kind: "session", id: session.id },
-            after.value.resumable ? "idle" : "orphan",
+            decideExitRetention(after.value),
             after.value.exitedAt ?? (yield* nowIso),
           );
         }
@@ -1387,15 +1455,10 @@ const make = Effect.gen(function* () {
       }
       // No decision can reach an ended session, so its open requests are
       // withdrawn rather than left for the user to answer.
-      const endedIds = ended.map((session) => session.id);
-      const withdrawn = yield* permissionRequests.withdrawOpen(endedIds);
-      if (withdrawn.length > 0) {
-        yield* notifier.withdrawDecisionsAbout(
-          withdrawn.map(buildPermissionRequestSubject),
-          WITHDRAW_REASON_SESSION_ENDED,
-        );
-        yield* requestSubscriptions.endWithdrawn(endedIds, withdrawn);
-      }
+      yield* withdrawOpenPermissionRequests(
+        ended.map((session) => session.id),
+        WITHDRAW_REASON_SESSION_ENDED,
+      );
       yield* forgetSessions(ended);
     });
 
@@ -1699,7 +1762,7 @@ const make = Effect.gen(function* () {
       if (Option.isSome(after) && after.value.workspaceId !== null) {
         yield* workspaces.release(
           { kind: "session", id: sessionId },
-          after.value.resumable ? "idle" : "orphan",
+          decideExitRetention(after.value),
           after.value.exitedAt ?? (yield* nowIso),
         );
       }
@@ -1723,6 +1786,7 @@ const make = Effect.gen(function* () {
           runId,
           kind,
           done,
+          archived,
           activeSince,
           doneSince,
         } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
@@ -1780,6 +1844,7 @@ const make = Effect.gen(function* () {
             runId,
             kind,
             done,
+            archived,
             activeSince,
             doneSince,
           }),
@@ -1869,7 +1934,7 @@ const make = Effect.gen(function* () {
      * fails, no Thread is reopened.
      *
      * Fails with `NotFound` when an id is not a session, and with
-     * `InvalidState` when a session is not a Thread.
+     * `InvalidState` when a session is not a Thread or is archived.
      */
     reopen: (
       input: SessionIdsInput,
@@ -1885,13 +1950,157 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             for (const id of input.sessionIds) {
-              yield* readThread(id, describeReopenRefusal);
+              yield* refuseArchived(yield* readThread(id, describeReopenRefusal));
               yield* reopenThread(id, actor, at, undefined);
             }
             const composeRecord = yield* recordComposer;
             return yield* Effect.forEach(input.sessionIds, (id) =>
               Effect.map(readSession(id), composeRecord),
             );
+          }),
+        );
+      }),
+
+    /**
+     * Archives Threads for good, stamped with the caller, all at one time
+     * (spec 11 section 2, `session.archive`). Joins the caller's transaction.
+     * It checks no grant: the caller, `Live.archive`, has checked that only
+     * the user archives.
+     *
+     * For each Thread that is not archived yet, it marks the Thread Done if
+     * it is not, and archives it. When that leaves the Thread's workspace
+     * with no Thread that is not archived, it archives the workspace's Agent
+     * sessions too, so a sidebar row is archived whole, and gives the
+     * workspace back to automatic cleanup. For every session it archives, it
+     * cancels the Queued Input still waiting, ends the subscriptions it
+     * holds, and withdraws its open Permission Requests. A Thread that is
+     * already archived is left as it is.
+     *
+     * Returns the Threads after the move, in the order given, and the
+     * archived sessions that are `idle`. Each of those still has a harness on
+     * its runner, and the caller must stop it.
+     *
+     * The list is applied all or nothing: when it fails, nothing is written.
+     * Fails with `NotFound` when an id is not a session, and with
+     * `InvalidState` when a session is not a Thread, or when a Thread it
+     * archives, or an Agent session that follows it, is `queued`, `starting`
+     * or `busy`.
+     */
+    archiveThreads: (
+      input: SessionIdsInput,
+    ): Effect.Effect<
+      {
+        readonly threads: ReadonlyArray<Session>;
+        readonly sessionsToStop: ReadonlyArray<StoredSession>;
+      },
+      Exclude<ReadError | NotFound | InvalidState, Validation | Forbidden | Unauthenticated>
+    > =>
+      Effect.gen(function* () {
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const named = yield* Effect.forEach(input.sessionIds, (id) =>
+              readThread(id, () => ONLY_A_THREAD_CAN_BE_ARCHIVED),
+            );
+            const moving = [
+              ...new Map(
+                named.filter((thread) => thread.archived === null).map((t) => [t.id, t]),
+              ).values(),
+            ];
+            // The Thread an Agent session's audit entry names: the first
+            // Thread the call named in its workspace.
+            const namedThreadOf = new Map<string, string>();
+            for (const thread of moving) {
+              if (thread.workspaceId !== null && !namedThreadOf.has(thread.workspaceId)) {
+                namedThreadOf.set(thread.workspaceId, thread.id);
+              }
+            }
+            const inWorkspace = new Map<string | null, StoredSession[]>();
+            for (const session of yield* sessions.listThreadsAndAgentSessionsInWorkspaces([
+              ...namedThreadOf.keys(),
+            ])) {
+              const group = inWorkspace.get(session.workspaceId) ?? [];
+              group.push(session);
+              inWorkspace.set(session.workspaceId, group);
+            }
+            // A workspace ends up archived when each of its Threads is
+            // archived already or is archived by this call.
+            const movingIds = new Set(moving.map((thread) => thread.id));
+            const archivedWorkspaces = [...namedThreadOf].filter(([workspaceId]) =>
+              (inWorkspace.get(workspaceId) ?? []).every(
+                (session) =>
+                  session.kind !== "thread" ||
+                  session.archived !== null ||
+                  movingIds.has(session.id),
+              ),
+            );
+            const archivings = [
+              ...moving.map((session) => ({ session, threadId: session.id })),
+              ...archivedWorkspaces.flatMap(([workspaceId, threadId]) =>
+                (inWorkspace.get(workspaceId) ?? [])
+                  .filter((session) => session.kind === "agent" && session.archived === null)
+                  .map((session) => ({ session, threadId })),
+              ),
+            ];
+            const archiving = archivings.map(({ session }) => session);
+            const working = archiving.filter((session) =>
+              WORKING_STATUSES.includes(session.status),
+            );
+            if (working.length > 0) {
+              return yield* Effect.fail(createInvalidStateError(describeWorkingRefusal(working)));
+            }
+
+            for (const thread of moving) {
+              if (yield* sessions.markDone(thread.id, actor, at)) {
+                yield* audit.append({
+                  kind: "session.markedDone",
+                  actor,
+                  record: {
+                    topic: "session",
+                    id: thread.id,
+                    conversationId: thread.conversationId,
+                  },
+                  payload: { sessionId: thread.id },
+                  at,
+                });
+              }
+            }
+            for (const { session, threadId } of archivings) {
+              yield* sessions.archive(session.id, actor, at);
+              yield* audit.append({
+                kind: "session.archived",
+                actor,
+                record: {
+                  topic: "session",
+                  id: session.id,
+                  conversationId: session.conversationId,
+                },
+                payload: { sessionId: session.id, threadId },
+                at,
+              });
+              yield* inputs.cancelQueued(session.id, ARCHIVED_INPUT_REASON);
+              yield* subscriptions.endHeldBy(
+                { kind: "session", id: session.id },
+                { at, reason: buildArchivedHolderReason(session.id), actor },
+              );
+            }
+            yield* withdrawOpenPermissionRequests(
+              archiving.map((session) => session.id),
+              WITHDRAW_REASON_SESSION_ARCHIVED,
+            );
+            for (const [workspaceId] of archivedWorkspaces) {
+              yield* workspaces.returnToAutomaticCleanup(workspaceId);
+            }
+
+            const composeRecord = yield* recordComposer;
+            return {
+              threads: yield* Effect.forEach(input.sessionIds, (id) =>
+                Effect.map(readSession(id), composeRecord),
+              ),
+              sessionsToStop: archiving.filter((session) => session.status === "idle"),
+            };
           }),
         );
       }),
@@ -2770,12 +2979,16 @@ const make = Effect.gen(function* () {
      *
      * Fails with `Validation` when an image is gone or was uploaded by
      * someone else, or when the session's runner or the input's model cannot
-     * take images (`refuseUnacceptedAttachments`).
+     * take images (`refuseUnacceptedAttachments`), and with `InvalidState`
+     * when the session is archived.
      */
     takeInput: <E = never>(
       taking: TakeInputRequest<E>,
     ): Effect.Effect<StoredInput, E | Validation | SqlError | InvalidState> =>
       Effect.gen(function* () {
+        // Every caller stores input for a session it has read, whatever the
+        // route; an archived session takes none, from anyone.
+        yield* refuseArchived(Option.getOrThrow(yield* sessions.one(taking.sessionId)));
         const references = yield* provideSql(readClaimableAttachments(taking.attachments));
         if (references.length > 0) {
           const session = Option.getOrThrow(yield* sessions.one(taking.sessionId));
@@ -2914,7 +3127,8 @@ const make = Effect.gen(function* () {
      * - releases the workspace lease of every exited session in it again, as
      *   `orphan`. Such a session released its lease as `idle` when it could
      *   still be resumed, but once its conversation is gone nothing can
-     *   resume it, so its workspace is kept only for the short window.
+     *   resume it, so its workspace is kept only for the short window. An
+     *   archived session is left alone: its lease stays `archived`.
      *
      * A session that has not exited yet is left to its own exit, which
      * releases its lease as `orphan` because its conversation is gone by then.
@@ -2925,7 +3139,7 @@ const make = Effect.gen(function* () {
           yield* announceSessionChange({ id: sessionId, conversationId });
         }
         const at = yield* nowIso;
-        for (const sessionId of yield* sessions.listExitedWithWorkspaceInConversation(
+        for (const sessionId of yield* sessions.listExitedUnarchivedWithWorkspaceInConversation(
           conversationId,
         )) {
           yield* workspaces.release({ kind: "session", id: sessionId }, "orphan", at);
@@ -2939,7 +3153,7 @@ const make = Effect.gen(function* () {
      * claimed for one send, and returns it. Returns `none`, storing nothing,
      * when:
      *
-     * - the session's status is not `status`;
+     * - the session is archived, or its status is not `status`;
      * - another input of the session is sent and not yet answered: the
      *   runner takes one input per turn boundary (`holdsInputOnTheWire`);
      * - for `idle`, another input of the session waits to be sent. Every
@@ -2967,7 +3181,11 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // The caller passes the id of a stored session, and sessions are never deleted.
           const session = Option.getOrThrow(yield* sessions.one(sessionId));
-          if (session.status !== status || (yield* inputs.holdsInputOnTheWire(sessionId))) {
+          if (
+            session.archived !== null ||
+            session.status !== status ||
+            (yield* inputs.holdsInputOnTheWire(sessionId))
+          ) {
             return Option.none();
           }
           if (status === "idle" && Option.isSome(yield* inputs.oldestWaiting(sessionId))) {
@@ -3276,8 +3494,10 @@ const make = Effect.gen(function* () {
      * always sees the final result.
      *
      * The mismatch can also go the other way: the report lists a session the
-     * controller already ended while the runner was unreachable. Returns the
-     * ids of those sessions, so the caller can tell the runner to stop each.
+     * controller already ended while the runner was unreachable, or an
+     * archived session whose stop never arrived. Returns the ids of those
+     * sessions, so the caller can tell the runner to stop each. An archived
+     * session stays as it is, and keeps its lease until it exits.
      */
     bound: (
       runnerId: string,
@@ -3320,7 +3540,7 @@ const make = Effect.gen(function* () {
               }),
             { discard: true },
           );
-          return yield* sessions.listExitedAmong(
+          return yield* sessions.listToStopAmong(
             runnerId,
             bindings.map((binding) => binding.sessionId),
           );
@@ -3603,7 +3823,7 @@ const make = Effect.gen(function* () {
           decodeInputUpdate(input),
           createDecodeValidationError,
         );
-        yield* requireChangeableInputs(id);
+        yield* refuseArchived(yield* requireChangeableInputs(id));
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {

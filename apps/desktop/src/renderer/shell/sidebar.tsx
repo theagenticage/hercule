@@ -14,6 +14,7 @@ import { ComposeIcon } from "../icons/compose";
 import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
 import { SidebarIcon } from "../icons/sidebar";
+import { ArchiveRowsDialog, type ArchiveTarget } from "./archive-rows-dialog";
 import { AssistantsSection } from "./assistants-section";
 import { DoneToastHost } from "./done-toast";
 import { FaceSwitch } from "./face-switch";
@@ -48,7 +49,9 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *     group's Threads Done: the group leaves its project at once, and the
  *     toast over the list's bottom edge says "Marked done" with Undo. Then
  *     the Done shelf, closed until its heading is pressed, whose rows of
- *     several sessions unfold into their lines too. Then the Assistants
+ *     several sessions unfold into their lines too. A shelf row has Reopen
+ *     and Archive, and the open shelf's heading has "Archive all"; both ask
+ *     for confirmation first (`ArchiveRowsDialog`). Then the Assistants
  *     section, pinned under the list, while there is an assistant.
  *   - On the Hercule face, the System section;
  * - the foot: how many sessions are working, waiting and idle, the
@@ -190,6 +193,18 @@ export const Sidebar = memo(function Sidebar({
     setProjectMenu({ projectId, x, y });
   }, []);
 
+  // What the user asked to archive from the Done shelf, while the confirmation is open.
+  const [archiving, setArchiving] = useState<ArchiveTarget | null>(null);
+  const archiveRow = useCallback((groupKey: string) => {
+    setArchiving({ kind: "row", groupKey });
+  }, []);
+  const archiveAll = useCallback(() => {
+    setArchiving({ kind: "all" });
+  }, []);
+  const closeArchiveConfirmation = useCallback(() => {
+    setArchiving(null);
+  }, []);
+
   // The toast reads its store on its own, so showing, fading or dismissing a
   // toast does not draw the sidebar again.
   const { markDone, reopen } = useDoneMoves();
@@ -199,6 +214,8 @@ export const Sidebar = memo(function Sidebar({
       onCollapse: collapseSection,
       onMarkDone: markDone,
       onReopen: reopen,
+      onArchive: archiveRow,
+      onArchiveAll: archiveAll,
       onToggleDoneShelf: toggleDoneShelf,
       onToggleGroup: toggleGroup,
       onShowQuiet: showQuiet,
@@ -209,6 +226,8 @@ export const Sidebar = memo(function Sidebar({
       collapseSection,
       markDone,
       reopen,
+      archiveRow,
+      archiveAll,
       toggleDoneShelf,
       toggleGroup,
       showQuiet,
@@ -309,6 +328,9 @@ export const Sidebar = memo(function Sidebar({
             }}
           />
         </Suspense>
+      )}
+      {archiving !== null && (
+        <ArchiveRowsDialog target={archiving} onClose={closeArchiveConfirmation} />
       )}
       <DoneToastHost place="sidebar" />
       {face === "threads" && <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />}

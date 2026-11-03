@@ -1081,10 +1081,12 @@ describe("session frames on one connection", () => {
       emit: (event) => PubSub.publishUnsafe(events, event),
       adapter: {
         harnessId: HARNESS_ID,
+        harnessName: "Fake Harness",
         binaryName: "fake-harness",
         events: Stream.fromPubSub(events),
         usageReports: Stream.empty,
         probe: () => Effect.die("not probed here"),
+        deleteSessionFiles: () => Effect.die("no session files here"),
         generateText: () => Effect.die("no text generation here"),
         listSessions: Effect.suspend(() => {
           const gate = fake.listGate;

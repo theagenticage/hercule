@@ -203,17 +203,22 @@ const readDoneSince = (client: HerculeClient): string => {
 
 /**
  * Reads the sidebar's sessions: the Threads and the Agent sessions outside
- * runs and assistants, except the Threads marked Done more than 14 days ago.
- * The 14 days are fixed. Reading every Thread ever was about 500 KB of JSON
- * for 292 Threads, and every change read all of it again. The read follows
- * the cursor to the last page. Its key sits under the `sessions` prefix, so
+ * runs and assistants, except the Threads marked Done more than 14 days ago
+ * and the archived ones, which have no list in the app. The 14 days are
+ * fixed. Reading every Thread ever was about 500 KB of JSON for 292 Threads,
+ * and every change read all of it again. The read follows the cursor to the
+ * last page. Its key sits under the `sessions` prefix, so
  * a push on the `session` topic invalidates it.
  *
  * A component that wants the Threads alone reads `threadsQuery`, which shares
  * this read. The Done moves write their guesses into this one.
  */
 export const threadAndAgentSessionsQuery = (client: HerculeClient) => {
-  const filter = { kind: ["thread", "agent"], doneSince: readDoneSince(client) } as const;
+  const filter = {
+    kind: ["thread", "agent"],
+    doneSince: readDoneSince(client),
+    archived: false,
+  } as const;
   return queryOptions({
     queryKey: queryKeys.sessions(filter),
     queryFn: () => readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
@@ -1279,8 +1284,9 @@ export interface EndedWorkRecords {
  * Reads the work that ended in the last `WALK_CATCH_UP_SECONDS`, for the
  * world the Office opens on: a colleague whose work ended in that time may
  * still be walking out. It reads the runs that finished in that time with
- * their sessions, and the Agents' sessions that exited in that time. The
- * Threads marked Done in the last 14 days are in `threadsQuery` already.
+ * their sessions, and the Agents' sessions that exited in that time, except
+ * the archived ones, which have left the app. The Threads marked Done in the
+ * last 14 days are in `threadsQuery` already.
  *
  * The data never goes stale on its own, and no push reads it again: only
  * the Office's first world reads it. `ensureOfficeData` reads it afresh
@@ -1299,6 +1305,7 @@ export const endedWorkQuery = (client: HerculeClient) =>
               kind: ["agent", "run", "assistant"],
               status: "exited",
               activeSince: since,
+              archived: false,
               ...page,
             },
           }),

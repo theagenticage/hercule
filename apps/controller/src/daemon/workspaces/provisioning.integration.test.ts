@@ -116,7 +116,8 @@ const waitForDeleted = async (arranged: Arranged, id: string): Promise<Workspace
       ) as WorkspaceDispose | undefined,
   );
   expect((await readWorkspace(arranged, id)).status).toBe("disposing");
-  expect(frame.discardChanges ?? false).toBe(false);
+  // A run's workspace is removed whole, whatever files it holds.
+  expect(frame.discardChanges).toBe(true);
   expect(frame.requestId).toEqual(expect.any(String));
   arranged.wire.send({
     _tag: "workspaceReport",

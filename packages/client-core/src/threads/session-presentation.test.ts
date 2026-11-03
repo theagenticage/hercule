@@ -651,6 +651,15 @@ describe("the open session", () => {
     expect(prepare([], { openSession: asking }).waitingSessions).toHaveLength(1);
     expect(prepare([], { openSession: step }).groupRows).toEqual([]);
   });
+
+  it("does not add an open archived thread, so it has no row anywhere in the sidebar", () => {
+    const archived = { ...OLD_DONE, archived: { at: at(3), by: "user" } } as const;
+    const view = select([], { selectedId: "s-old" }, { openSession: archived });
+
+    expect(prepare([], { openSession: archived }).sessions).toEqual([]);
+    expect(view.doneShelf.rows).toEqual([]);
+    expect(view.openGroupKey).toBeNull();
+  });
 });
 
 describe("Waiting on you", () => {

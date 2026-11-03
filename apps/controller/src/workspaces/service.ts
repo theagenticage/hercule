@@ -40,8 +40,11 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
+  ARCHIVED_SESSION_FILES_CAPABILITY,
+  MAX_ARCHIVED_SESSIONS,
   supportsWorkspaceLifecycle,
   requiresWorkspaceLifecycle,
+  type ArchivedSession,
   type CredentialAnswer,
   type CredentialRequest,
   type GitIdentity,
@@ -86,6 +89,7 @@ import {
 import type { ConnectionTypes } from "../connections";
 import type { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
+import { resolveHarnessHome } from "../provider-accounts";
 import {
   isCheckedOut,
   NOT_CHECKED_OUT,
@@ -138,6 +142,20 @@ const DEFAULT_IDLE_TTL_DAYS = 30;
 
 /** How long an `inspection` lease keeps its workspace after its release, in days. */
 const DEFAULT_INSPECTION_TTL_DAYS = 14;
+
+/** How long an `archived` lease keeps its workspace after its release, in days. */
+const DEFAULT_ARCHIVED_TTL_DAYS = 7;
+
+/** Stored on a workspace removed whole when its runner cannot delete the harness's files. */
+const RUNNER_TOO_OLD_FOR_HARNESS_FILES =
+  "This machine's runner is too old to delete the harness's files. Update it.";
+
+/** Stored on a workspace removed whole when more archived sessions than one removal can list had files. */
+const TOO_MANY_ARCHIVED_SESSIONS = `The harness's files of more than ${String(MAX_ARCHIVED_SESSIONS)} archived sessions were not all deleted.`;
+
+/** Returns the warning stored on a workspace removed while some archived sessions' accounts are deleted. */
+const describeKeptFiles = (count: number): string =>
+  `The harness's files of ${String(count)} archived ${count === 1 ? "session" : "sessions"} were kept: their account was deleted.`;
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -221,6 +239,8 @@ const computeRetentionWindow = (
       return (controller["workspace.idleTtlDays"] ?? DEFAULT_IDLE_TTL_DAYS) * DAY_MS;
     case "inspection":
       return (controller["workspace.inspectionTtlDays"] ?? DEFAULT_INSPECTION_TTL_DAYS) * DAY_MS;
+    case "archived":
+      return (controller["workspace.archivedTtlDays"] ?? DEFAULT_ARCHIVED_TTL_DAYS) * DAY_MS;
   }
 };
 
@@ -752,6 +772,78 @@ const make = Effect.gen(function* () {
       return opened;
     });
 
+  /**
+   * Lists the archived sessions of a workspace whose harness files the runner
+   * deletes with it, for a runner that honours `archivedSessions`. Returns
+   * `warnings` instead when it cannot: for a runner too old to delete them,
+   * for sessions whose provider account was deleted, and when there are more
+   * sessions than one removal lists.
+   *
+   * The Harness Home is named by `resolveHarnessHome` from the session's
+   * account and harness, the same way a session's start names it. Those never
+   * change after the session started, so the name is the one the session used.
+   */
+  const listArchivedSessionFiles = (
+    workspace: StoredWorkspace,
+  ): Effect.Effect<
+    {
+      readonly archivedSessions: ReadonlyArray<ArchivedSession>;
+      readonly warnings: ReadonlyArray<string>;
+    },
+    SqlError
+  > =>
+    Effect.gen(function* () {
+      const found = yield* workspaces.listArchivedSessionFiles(
+        workspace.id,
+        MAX_ARCHIVED_SESSIONS + 1,
+      );
+      if (found.length === 0) return { archivedSessions: [], warnings: [] };
+      const runner = yield* runners.read(workspace.runnerId);
+      if (
+        Option.isNone(runner) ||
+        !(runner.value.negotiatedCapabilities ?? []).includes(ARCHIVED_SESSION_FILES_CAPABILITY)
+      )
+        return { archivedSessions: [], warnings: [RUNNER_TOO_OLD_FOR_HARNESS_FILES] };
+      // Deleting a provider account leaves its Harness Homes on the runners, but
+      // the home of such a session can no longer be named, so its files stay.
+      const listed = found.slice(0, MAX_ARCHIVED_SESSIONS);
+      const kept = listed.filter((session) => session.accountDeleted).length;
+      return {
+        archivedSessions: listed
+          .filter((session) => !session.accountDeleted)
+          .map((session) => ({
+            harnessId: session.harnessId,
+            harnessHome: resolveHarnessHome(
+              {
+                id: session.providerAccountId,
+                legacyHomeFolder: session.legacyHomeFolder,
+                legacyHomeHarnessId: session.legacyHomeHarnessId,
+              },
+              session.harnessId,
+            ),
+            nativeSessionId: session.nativeSessionId,
+          })),
+        warnings: [
+          ...(kept === 0 ? [] : [describeKeptFiles(kept)]),
+          ...(found.length > MAX_ARCHIVED_SESSIONS ? [TOO_MANY_ARCHIVED_SESSIONS] : []),
+        ],
+      };
+    });
+
+  /**
+   * Reserves a removal and returns its frozen instruction.
+   *
+   * A dispose is sent with `discardChanges: true`, and so removes the workspace
+   * whole, when the caller asked for it or when the workspace is:
+   *
+   * - archived (at least one Thread, every Thread archived), whoever disposes;
+   * - a run's workspace (a run holds a lease, no Thread works in it), when the
+   *   sweep disposes of it.
+   *
+   * Both are decided here, from the sessions and leases, in the reserving
+   * transaction. For an archived workspace the instruction also lists the
+   * archived sessions whose harness files the runner deletes.
+   */
   const reserveRemoval = (
     workspace: StoredWorkspace,
     tag: "workspaceDispose" | "workspaceDetach",
@@ -763,13 +855,20 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<WorkspaceRemoval, SqlError | InvalidState> =>
     Effect.gen(function* () {
       const previous = yield* workspaces.readRemoval(workspace.id);
+      const archived = tag === "workspaceDispose" && (yield* workspaces.isArchived(workspace.id));
+      const removeWhole =
+        discardChanges ||
+        archived ||
+        (tag === "workspaceDispose" &&
+          expired !== undefined &&
+          (yield* workspaces.isRunWorkspace(workspace.id)));
       if (workspace.status === "disposing") {
         if (
           Option.isSome(previous) &&
           previous.value.frame._tag === tag &&
           (tag === "workspaceDetach" ||
             (previous.value.frame._tag === "workspaceDispose" &&
-              (previous.value.frame.discardChanges ?? false) === discardChanges))
+              (previous.value.frame.discardChanges ?? false) === removeWhole))
         )
           return previous.value.frame;
         return yield* Effect.fail(
@@ -779,6 +878,9 @@ const make = Effect.gen(function* () {
         );
       }
       const requestId = uuidToString(mintUuid());
+      const files = archived
+        ? yield* listArchivedSessionFiles(workspace)
+        : { archivedSessions: [], warnings: [] };
       const frame: WorkspaceRemoval =
         tag === "workspaceDetach"
           ? { _tag: "workspaceDetach", workspaceId: workspace.id, requestId }
@@ -786,13 +888,17 @@ const make = Effect.gen(function* () {
               _tag: "workspaceDispose",
               workspaceId: workspace.id,
               requestId,
-              ...(discardChanges ? { discardChanges: true } : {}),
+              ...(removeWhole ? { discardChanges: true } : {}),
+              ...(files.archivedSessions.length === 0
+                ? {}
+                : { archivedSessions: files.archivedSessions }),
             };
       yield* workspaces.reserveRemoval(workspace.id, frame, {
         actor,
         ...(expired === undefined
           ? {}
           : { reason: expired.retention, holder: formatHolder(expired.holder) }),
+        ...(files.warnings.length === 0 ? {} : { warnings: files.warnings }),
       });
       yield* audit.append({
         kind: "workspace.disposalRequested",
@@ -802,7 +908,7 @@ const make = Effect.gen(function* () {
           runnerId: workspace.runnerId,
           requestId,
           operation: tag,
-          discardChanges,
+          discardChanges: removeWhole,
         },
         at: yield* nowIso,
       });
@@ -845,6 +951,14 @@ const make = Effect.gen(function* () {
       }
       if (report.status === "deleted") {
         yield* workspaces.markDisposed(report.workspaceId, at);
+        const warnings = [...(report.warnings ?? []), ...(removal.value.audit.warnings ?? [])];
+        if (warnings.length > 0) {
+          const kept = yield* workspaces.one(report.workspaceId);
+          yield* workspaces.recordWarnings(report.workspaceId, [
+            ...(Option.isSome(kept) ? kept.value.warnings : []),
+            ...warnings,
+          ]);
+        }
         yield* audit.append({
           kind:
             removal.value.frame._tag === "workspaceDetach"
@@ -1195,6 +1309,25 @@ const make = Effect.gen(function* () {
           if (holder.kind === "session") yield* workspaces.retainForThread(holder.id, workspaceId);
         }),
       ),
+
+    /**
+     * Gives an archived workspace back to automatic cleanup, in the caller's
+     * transaction. The sessions code calls it when a workspace has become
+     * archived.
+     *
+     * - A primary keeps its policy, because the sweep never deletes one.
+     * - Every released lease of an archived session is released again with the
+     *   retention `archived`. It keeps its own release time, so it is kept for
+     *   the archived window counted from the session's exit, with the window
+     *   read from the settings now.
+     * - An active lease is never touched: a session that is still running
+     *   keeps its workspace until it exits.
+     */
+    returnToAutomaticCleanup: (workspaceId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const window = computeRetentionWindow("archived", yield* settings.all());
+        yield* workspaces.returnToAutomaticCleanup(workspaceId, window);
+      }),
 
     /** Applies manual retention using the actual stored session's Thread classification. */
     retainForThread: workspaces.retainForThread,

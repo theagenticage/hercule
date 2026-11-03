@@ -185,7 +185,10 @@ export function ThreadComposer({
   const resolved = resolveThreadConfig(catalogs, thread, pending.picks);
   const { config } = resolved;
   const fields = buildComposerFields(catalogs, resolved);
-  const readOnly = findResumeBlockedReason(session);
+  const readOnly = findResumeBlockedReason(
+    session,
+    workspaces.find((each) => each.id === session.workspaceId),
+  );
   const busy = session.status === "busy";
   const workspaceLabel = buildThreadWorkspaceLabel(session, workspaces);
   const placeholder = buildComposerPlaceholder({

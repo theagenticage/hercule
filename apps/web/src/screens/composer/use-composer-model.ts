@@ -215,7 +215,13 @@ export function useComposerModel(
     onSettled: releaseSend,
   });
   const stopAgent = useStopAgent(client, session?.id ?? null);
-  const readOnly = session === null ? null : findResumeBlockedReason(session);
+  const readOnly =
+    session === null
+      ? null
+      : findResumeBlockedReason(
+          session,
+          catalogs.workspaces?.find((each) => each.id === session.workspaceId),
+        );
   const busy = session?.status === "busy";
 
   return {

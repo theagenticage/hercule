@@ -18,7 +18,7 @@ import {
   providerAccountRepository,
 } from "../../provider-accounts";
 import { DRAINING, RETIRED, runnerRepository } from "../../runners";
-import { ACCOUNT_DELETED, type StoredSession } from "../../sessions";
+import { ACCOUNT_DELETED, refuseArchived, type StoredSession } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 
 const STILL_LIVE = "that session is still live; stop it first";
@@ -51,6 +51,7 @@ const describeWorkspaceGone = (status: string): string =>
  * error, whose message states the reason, when:
  *
  * - the session is still live;
+ * - the session is archived;
  * - the session answered an assistant's conversation that was deleted;
  * - the session left no transcript;
  * - its workspace is gone;
@@ -76,6 +77,7 @@ export const resumable: Effect.Effect<
     Effect.gen(function* () {
       if (session.status !== "exited")
         return yield* Effect.fail(createInvalidStateError(STILL_LIVE));
+      yield* refuseArchived(session);
       if (session.conversationDeleted)
         return yield* Effect.fail(createInvalidStateError(CONVERSATION_DELETED));
       if (session.nativeSessionId === null)

@@ -82,7 +82,8 @@ export function ProjectCrumb({
  * - `open` is the open tab: a session's, or a Draft Thread's own "New thread"
  *   tab, which has no session yet and is drawn after the tabs only for a draft.
  * - `newThread` is the workspace and the project that the "+" button starts a
- *   thread in, or `null` for no "+" button.
+ *   thread in, or `null` for no "+" button. A `workspaceId` of `null` starts
+ *   the thread in the project alone, as an archived thread's "+" does.
  * - `freeSpace` is drawn in the room after the pill, such as "Syncing…". It
  *   takes only the room the pill leaves, so it never changes the fit.
  * - `className` adds classes to the nav, such as the one that styles a run's
@@ -108,7 +109,10 @@ export function ThreadTabsPill({
   readonly workName: string | null;
   readonly tabs: readonly SessionTab[];
   readonly open: OpenTab;
-  readonly newThread: { readonly projectId: string | null; readonly workspaceId: string } | null;
+  readonly newThread: {
+    readonly projectId: string | null;
+    readonly workspaceId: string | null;
+  } | null;
   readonly freeSpace?: ReactNode;
 }): JSX.Element {
   const roomRef = useRef<HTMLDivElement>(null);
@@ -171,13 +175,16 @@ export function ThreadTabsPill({
         {newThread === null ? null : (
           <Link
             to="/"
-            search={
-              newThread.projectId === null
-                ? { workspace: newThread.workspaceId }
-                : { project: newThread.projectId, workspace: newThread.workspaceId }
-            }
+            search={{
+              ...(newThread.projectId === null ? {} : { project: newThread.projectId }),
+              ...(newThread.workspaceId === null ? {} : { workspace: newThread.workspaceId }),
+            }}
             className="icon-btn"
-            title="New thread in this workspace"
+            title={
+              newThread.workspaceId === null
+                ? "New thread in this project"
+                : "New thread in this workspace"
+            }
           >
             <PlusIcon />
           </Link>

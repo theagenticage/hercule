@@ -79,6 +79,7 @@ import {
   buildConversationTimeouts,
   buildStepSessionTimeouts,
   readSessionOrFail,
+  refuseArchived,
   sessionRecordComposer,
   SessionService,
   sessionRepository,
@@ -1538,7 +1539,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Opens a new session that continues from the harness-native session an
-     * exited parent left behind. Returns the new session. It runs on the same
+     * exited parent left behind. Returns the new session. Fails with
+     * `InvalidState` when the parent is archived. It runs on the same
      * runner, account and harness as the parent, because that is where the native
      * state is (spec 06 section 4.1). Resuming the parent itself is done by
      * `session.input`.
@@ -1590,6 +1592,9 @@ const make = Effect.gen(function* () {
           if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
           }
+          // Before the resume check, which names a session that is still live
+          // before it names the archive.
+          yield* refuseArchived(parent);
           const nativeSessionId = yield* resumableNativeSession(parent);
           // Called only for its failures: it fails when the account can no
           // longer run in the harness, or this build no longer carries it. It

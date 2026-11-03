@@ -328,7 +328,7 @@ export const CLI = {
     fields: {
       controller: {
         flag: "controller",
-        help: 'The controller\'s operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry, how deep runs may nest (run.nestingLimit) and which model makes text generations (textGeneration.model: "automatic" by default, "off", or {"providerAccountId":"<account id>","harnessId":"<harness id>","model":"<model slug>"} with "harnessId" optional; a chosen model never falls back to another account).',
+        help: 'The controller\'s operational settings as a JSON object: retention, backup, session timeouts, how long an idle assistant session stays loaded (session.idleUnloadMinutes), workspace expiry (workspace.orphanTtlHours, workspace.idleTtlDays, workspace.inspectionTtlDays, workspace.archivedTtlDays), how deep runs may nest (run.nestingLimit) and which model makes text generations (textGeneration.model: "automatic" by default, "off", or {"providerAccountId":"<account id>","harnessId":"<harness id>","model":"<model slug>"} with "harnessId" optional; a chosen model never falls back to another account).',
       },
       user: {
         flag: "user",
@@ -3781,6 +3781,10 @@ export const CLI = {
         flag: "done",
         help: "true for only the Threads marked Done, false for every session that is not; mark one with `hercule session done`.",
       },
+      archived: {
+        flag: "archived",
+        help: "true for only the archived sessions, false for the ones that are not; archive Threads with `hercule session archive`.",
+      },
       activeSince: {
         flag: "active-since",
         help: "Only sessions that had not exited before this UTC instant, with milliseconds: sessions that are not exited, and sessions that exited at or after it.",
@@ -4232,6 +4236,26 @@ export const CLI = {
     errors: {
       invalid_state:
         "one session is not a Thread: it was spawned from an Agent, by a run or by an assistant, so it is never Done and there is nothing to reopen; the message names its id. Leave it out of the list. None of the list was reopened",
+    },
+  },
+
+  "session.archive": {
+    command: "session archive",
+    help: "Archives Threads for good: they leave the sidebar and can never be resumed. Their transcripts stay readable. Each Thread is marked Done first. When a call leaves a workspace with no Thread that is not archived, the Agent sessions of that workspace are archived with it, and the workspace goes back to automatic cleanup. The list is applied all or nothing: if one id is unknown, is not a Thread, or is working, none is archived. Archiving a Thread that is already archived changes nothing. Only you can archive; a session cannot, whatever its profile holds. It cannot be undone.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "7b41d0a5"] }],
+    fields: {
+      sessionIds: {
+        positional: true,
+        placeholder: "session-id",
+        help: "A Thread's id, or a tail of eight or more characters; find it with `hercule session list --kind thread --archived false`. Give several to archive them in one call.",
+        resolves: "session.query",
+        resolvesQuery: { kind: "thread" },
+      },
+    },
+    errors: {
+      invalid_state:
+        "one session is not a Thread, or a Thread (or an Agent session that would be archived with it) is working: queued, starting or busy. The message names it. Stop it first with `hercule session stop`, or wait for its turn to end, or leave it out of the list. None of the list was archived",
+      forbidden: USER_ONLY_FORBIDDEN,
     },
   },
 

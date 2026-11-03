@@ -79,6 +79,7 @@ const make = Effect.gen(function* () {
                 conversationId: undefined,
                 kind: undefined,
                 done: undefined,
+                archived: undefined,
                 runId: undefined,
                 activeSince: undefined,
                 doneSince: undefined,

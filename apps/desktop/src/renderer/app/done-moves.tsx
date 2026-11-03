@@ -1,7 +1,7 @@
 /**
- * Marking threads done, and reopening them (spec 17 §Sidebar, the Done
- * shelf, the thread header). The sidebar and the thread screen share one
- * move queue and one toast, offered by `DoneMovesProvider`.
+ * Marking threads done, reopening them, and archiving them (spec 17 §Sidebar,
+ * the Done shelf, the thread header). The sidebar and the thread screen share
+ * one move queue and one toast, offered by `DoneMovesProvider`.
  */
 import {
   createContext,
@@ -64,6 +64,16 @@ interface DoneRequest {
   readonly sessionIds: readonly string[];
   readonly move: DoneMove;
   readonly announce: boolean;
+}
+
+/**
+ * An archive of a list of threads. `text` is the toast shown once the
+ * controller has archived them.
+ */
+interface ArchiveRequest {
+  readonly sessionIds: readonly string[];
+  readonly move: "archive";
+  readonly text: string;
 }
 
 /** Returns the move that reverses `move`. */
@@ -183,14 +193,15 @@ const DONE_MOVES_KEY = ["done-moves"];
 const isLastDoneMove = (queryClient: QueryClient): boolean =>
   queryClient.isMutating({ mutationKey: DONE_MOVES_KEY }) === 1;
 
-/** The three Done moves, as `useRunDoneMoves` describes them. */
+/** The four moves, as `useRunDoneMoves` describes them. */
 interface DoneMoves {
   readonly markDone: (sessionIds: readonly string[]) => void;
   readonly reopen: (sessionIds: readonly string[]) => void;
+  readonly archive: (sessionIds: readonly string[], text: string) => void;
   readonly undo: (undo: DoneUndo) => void;
 }
 
-/** What `useDoneMoves` returns: the three moves, and the store of the toast they show. */
+/** What `useDoneMoves` returns: the moves, and the store of the toast they show. */
 export interface DoneMovesValue extends DoneMoves {
   readonly toasts: DoneToastStore;
 }
@@ -207,6 +218,13 @@ export interface DoneMovesValue extends DoneMoves {
  *   calls it.
  * - `undo(undo)` makes the move of a toast's Undo on exactly the threads of
  *   that toast. It shows no toast of its own.
+ * - `archive(sessionIds, text)` is sent in the same queue, so it is ordered
+ *   with the Done moves. The controller can refuse it, for instance when a
+ *   session of the row started working, so nothing is written before it
+ *   answers. Once it has, the Threads leave the cached list, their own
+ *   cached records follow the answer, and `text` shows as a toast with no
+ *   Undo, because nothing reverses an archive. A refusal shows the
+ *   controller's message as an alert.
  * - A move that fails reads the thread list again, so the rows go back to
  *   where the controller has them, and shows the error in the toast as an
  *   alert. While the toast shows the Undo of a newer move, the error waits
@@ -224,7 +242,7 @@ export interface DoneMovesValue extends DoneMoves {
  * cancels the reads running then, which may hold a state from before its
  * answer, and reads the list, and the Threads moved since the last read, again.
  *
- * The three functions keep their identity across renders, so the memoized
+ * The functions keep their identity across renders, so the memoized
  * rows that take them do not draw again.
  */
 const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMoves => {
@@ -242,13 +260,23 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
   const { mutate } = useMutation({
     mutationKey: DONE_MOVES_KEY,
     scope: { id: "done-moves" },
-    mutationFn: ({ sessionIds, move }: DoneRequest) =>
+    mutationFn: ({ sessionIds, move }: DoneRequest | ArchiveRequest) =>
       move === "markDone"
         ? client.session.markDone({ payload: { sessionIds } })
-        : client.session.reopen({ payload: { sessionIds } }),
+        : move === "reopen"
+          ? client.session.reopen({ payload: { sessionIds } })
+          : client.session.archive({ payload: { sessionIds } }),
     // A move in a scope waits for the one before it to finish before it is
     // sent, but its `onMutate` runs at once, so the list follows the user.
-    onMutate: async ({ sessionIds, move, announce }) => {
+    onMutate: async (request) => {
+      const { sessionIds } = request;
+      if (request.move === "archive") {
+        // Nothing is applied before the controller answers, so there is no
+        // read to cancel; the last move still reads these Threads again.
+        for (const id of sessionIds) movedSinceRead.current.add(id);
+        return { pendingMove: null, toastSerial: null };
+      }
+      const { move, announce } = request;
       // A read that started before the move would answer without it and
       // put the rows back, so it is cancelled; the last move reads again.
       // Pending from now, not after the cancelling below, so the moves are
@@ -268,7 +296,21 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
         toastSerial: toasts.show(text, { move: reverseDoneMove(move), sessionIds }),
       };
     },
-    onSuccess: (answered, { sessionIds }) => {
+    onSuccess: (answered, request) => {
+      const { sessionIds } = request;
+      if (request.move === "archive") {
+        const archived = new Set(sessionIds);
+        queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
+          sessions?.filter((session) => !archived.has(session.id)),
+        );
+        for (const session of answered) {
+          queryClient.setQueryData(sessionQuery(client, session.id).queryKey, (cached) =>
+            cached === undefined ? undefined : session,
+          );
+        }
+        toasts.showNotice(request.text);
+        return;
+      }
       if (!isLastDoneMove(queryClient)) return;
       const answers = new Map(answered.map((session) => [session.id, session]));
       updateCachedSessions(
@@ -278,14 +320,17 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
         (session) => answers.get(session.id) ?? session,
       );
     },
-    onError: (error, { sessionIds, move }, context) => {
-      const text = describeDoneMove(move, sessionIds.length, true);
+    onError: (error, request, context) => {
+      const text =
+        request.move === "archive"
+          ? "Couldn't archive"
+          : describeDoneMove(request.move, request.sessionIds.length, true);
       toasts.showFailure(`${text}: ${readErrorMessage(error)}`, context?.toastSerial ?? null);
     },
     // Runs after the answer or the error, for a move that succeeded and for
     // one that failed alike.
     onSettled: async (_answered, _error, _request, context) => {
-      if (context !== undefined) pending.current.delete(context.pendingMove);
+      if (context?.pendingMove != null) pending.current.delete(context.pendingMove);
       if (!isLastDoneMove(queryClient)) return;
       // The moves no longer cover the cached Threads, so a read that started
       // while one was pending, and answers now, would put back a state from
@@ -313,13 +358,19 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
     },
     [mutate],
   );
+  const archive = useCallback(
+    (sessionIds: readonly string[], text: string) => {
+      mutate({ sessionIds, move: "archive", text });
+    },
+    [mutate],
+  );
   const undo = useCallback(
     ({ move, sessionIds }: DoneUndo) => {
       mutate({ sessionIds, move, announce: false });
     },
     [mutate],
   );
-  return { markDone, reopen, undo };
+  return { markDone, reopen, archive, undo };
 };
 
 const DoneMovesContext = createContext<DoneMovesValue | null>(null);
@@ -343,10 +394,10 @@ export function DoneMovesProvider({
   readonly children: ReactNode;
 }): JSX.Element {
   const [toasts] = useState(createDoneToastStore);
-  const { markDone, reopen, undo } = useRunDoneMoves(client, toasts);
+  const { markDone, reopen, archive, undo } = useRunDoneMoves(client, toasts);
   const value = useMemo(
-    () => ({ markDone, reopen, undo, toasts }),
-    [markDone, reopen, undo, toasts],
+    () => ({ markDone, reopen, archive, undo, toasts }),
+    [markDone, reopen, archive, undo, toasts],
   );
   return <DoneMovesContext value={value}>{children}</DoneMovesContext>;
 }

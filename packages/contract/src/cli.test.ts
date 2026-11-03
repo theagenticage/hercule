@@ -276,6 +276,7 @@ const COMMANDS: Record<string, string> = {
   "session.continue": "session continue",
   "session.markDone": "session done",
   "session.reopen": "session reopen",
+  "session.archive": "session archive",
 
   "input.query": "input list",
   "input.update": "input update",
@@ -482,6 +483,7 @@ const RESOLVES: Record<string, string> = {
   "session.stop id": "session.query",
   "session.continue id": "session.query",
   "session.markDone sessionIds": "session.query",
+  "session.archive sessionIds": "session.query",
   "session.reopen sessionIds": "session.query",
 
   "input.query id": "session.query",

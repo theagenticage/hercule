@@ -357,6 +357,7 @@ const make = Effect.gen(function* () {
                 runId: undefined,
                 kind: undefined,
                 done: undefined,
+                archived: undefined,
                 activeSince: undefined,
                 doneSince: undefined,
               }),

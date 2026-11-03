@@ -44,6 +44,7 @@ import {
   FILES_EDITED_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
   buildWorkspaceActionCapability,
@@ -113,6 +114,8 @@ const NONCE_BYTES = 16;
  *   gives them to the session.
  * - `REPOSITORY_SKILLS_CAPABILITY`: this runner lists the skills in the
  *   checkouts of a workspace.
+ * - `ARCHIVED_SESSION_FILES_CAPABILITY`: this runner deletes the harness
+ *   files of the archived sessions a workspace dispose lists.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -124,6 +127,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   TEXT_GENERATION_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;

@@ -171,6 +171,16 @@ export const ThreadDone = Schema.Struct({ at: Timestamp, by: Actor });
 export type ThreadDone = Schema.Schema.Type<typeof ThreadDone>;
 
 /**
+ * The mark of a session the user has put away for good: when it was archived,
+ * and by whom. The actor is always the user, because only the user archives.
+ * An archived session takes no input and is never resumed, forked or
+ * reopened; its transcript stays readable. Nothing clears the mark.
+ */
+export const SessionArchived = Schema.Struct({ at: Timestamp, by: Actor });
+
+export type SessionArchived = Schema.Schema.Type<typeof SessionArchived>;
+
+/**
  * The start of the name of the branch the controller creates a Thread's own
  * worktree on: the full name is this prefix and the last characters of the
  * session id, such as `hercule/thread-a1b2c3d4`. Clients use it to tell a
@@ -357,6 +367,13 @@ export const Session = Schema.Struct({
    * `session.reopen` clears it, and so does new input to the Thread.
    */
   done: Schema.optionalKey(ThreadDone),
+  /**
+   * Set once the session is archived (`session.archive`); absent otherwise.
+   * An archived Thread always has `done` too. When every Thread of a
+   * workspace is archived, every Agent session of that workspace is archived
+   * with them, so a sidebar row is archived whole. Final: nothing clears it.
+   */
+  archived: Schema.optionalKey(SessionArchived),
   /**
    * The last time the Thread was reopened: by `session.reopen`, or by new
    * input while it was Done. Absent until it is first reopened. A list of
@@ -828,6 +845,11 @@ export const SessionFilter = Schema.Struct({
    */
   done: Schema.optionalKey(Schema.Boolean),
   /**
+   * `true` lists only the archived sessions; `false` lists only the ones that
+   * are not archived.
+   */
+  archived: Schema.optionalKey(Schema.Boolean),
+  /**
    * Only sessions that had not exited before this instant: sessions that are
    * not exited, and sessions that exited at or after it. A resumed session
    * keeps the `exitedAt` of its last exit while it is live again, so a live
@@ -889,10 +911,10 @@ export const SkillsPreviewFilter = Schema.Struct({
 
 export type SkillsPreviewFilter = Schema.Schema.Type<typeof SkillsPreviewFilter>;
 
-/** The most Threads one call of `session.markDone` or `session.reopen` names. */
+/** The most Threads one call of `session.markDone`, `session.reopen` or `session.archive` names. */
 export const MAX_SESSION_IDS = MAX_PAGE_LIMIT;
 
-/** The payload of `session.markDone` and `session.reopen`: the Threads to move, in one call. */
+/** The payload of `session.markDone`, `session.reopen` and `session.archive`: the Threads to move, in one call. */
 export const SessionIdsInput = Schema.Struct({
   sessionIds: atMost(Id, MAX_SESSION_IDS).check(Schema.isMinLength(1)),
 });
@@ -987,6 +1009,11 @@ export const session = HttpApiGroup.make("session")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("reopen", "/sessions/reopen", {
+      payload: SessionIdsInput,
+      success: Schema.Array(Session),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("archive", "/sessions/archive", {
       payload: SessionIdsInput,
       success: Schema.Array(Session),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],

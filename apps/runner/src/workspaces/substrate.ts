@@ -10,6 +10,7 @@
  * or a setup command never gets the runner's Home or settings.
  */
 import type * as Effect from "effect/Effect";
+import type { DeleteSessionFiles } from "./archived-session-files";
 import type { Registry } from "./registry";
 import type { GitEnv } from "./git";
 
@@ -33,6 +34,8 @@ export interface Substrate {
    */
   readonly gitEnv: GitEnv;
   readonly setupDeadlineMs: number;
+  /** Deletes the harness files of an archived session whose workspace was removed. */
+  readonly deleteSessionFiles: DeleteSessionFiles;
 }
 
 /**

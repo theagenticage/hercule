@@ -202,6 +202,8 @@ const make = Effect.gen(function* () {
         // A process for a session the controller has already ended keeps
         // running without a token, and it blocks a resume of that session on
         // the runner. Nothing else would stop it, so the runner is told to.
+        // An archived session still running is stopped here too: the stop sent
+        // when it was archived may have been lost.
         for (const id of ended) {
           yield* connections.tell(traffic.runnerId, sessions.stopping(id));
         }

@@ -82,6 +82,7 @@ import {
   stopChild,
   type Run,
 } from "../process";
+import { removeSessionFiles } from "../session-files";
 import { truncateFact, truncateMessage } from "../text";
 import { captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
@@ -1890,6 +1891,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
 
   return {
     harnessId: PI,
+    harnessName: PI_NAME,
     binaryName: PI_BINARY,
 
     events: Stream.fromPubSub(published),
@@ -2272,6 +2274,13 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       }),
 
     listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
+
+    // pi keeps one file per session, its transcript.
+    deleteSessionFiles: (home, nativeSessionId) =>
+      removeSessionFiles(nativeSessionId, () => {
+        const transcript = findTranscript(home, nativeSessionId);
+        return Promise.resolve(transcript === undefined ? [] : [transcript]);
+      }),
     generateText: generateText,
 
     install: makePiInstall(seam.run),
