@@ -14,6 +14,7 @@ export { api } from "./api";
 export {
   canonicalizeRemote,
   ContextCompactionDetail,
+  DISK_USAGE_CAPABILITY,
   findSkillReferences,
   ImageGenerationDetail,
   isSkillNameCharacter,
@@ -728,6 +729,7 @@ export {
   GitRemoteName,
   MAX_BRANCH_LENGTH,
   MAX_DISPOSE_MANY_ITEMS,
+  USED_SINCE_LOOKED_REFUSAL,
   WORKSPACE_SORT_FIELDS,
   WORKSPACE_STATUSES,
   Workspace,

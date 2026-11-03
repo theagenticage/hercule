@@ -74,6 +74,7 @@ import {
   type WorkspaceStatus,
   type WorkspaceAttachInput,
   THREAD_BRANCH_PREFIX,
+  USED_SINCE_LOOKED_REFUSAL,
 } from "@hercule/contract";
 import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import {
@@ -186,9 +187,6 @@ export const buildRunBranch = (runId: string): string => `hercule/run-${runId}`;
 const ALREADY_GONE = "that workspace is already gone";
 
 const MAIN_REMOVED_ON_ITS_OWN = "A main workspace is removed on its own, with workspace.dispose.";
-
-const USED_SINCE_LOOKED =
-  "Someone used this workspace since you looked. Check it again before you remove it.";
 
 /**
  * Builds the refusal for disposing of a workspace that holders still use. It
@@ -1207,7 +1205,7 @@ const make = Effect.gen(function* () {
         if (workspace.kind === "primary")
           return yield* Effect.fail(createInvalidStateError(MAIN_REMOVED_ON_ITS_OWN));
         if (expectedLastUsedAt !== undefined && workspace.lastUsedAt !== expectedLastUsedAt)
-          return yield* Effect.fail(createInvalidStateError(USED_SINCE_LOOKED));
+          return yield* Effect.fail(createInvalidStateError(USED_SINCE_LOOKED_REFUSAL));
         return yield* requireDisposable(workspace);
       }),
 

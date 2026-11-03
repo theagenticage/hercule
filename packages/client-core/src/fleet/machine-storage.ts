@@ -9,7 +9,14 @@
  * is not re-exported from the package index, so the first screen does not
  * carry it.
  */
-import type { Event, Runner, RunnerMetricsPoint, Session, Workspace } from "@hercule/contract";
+import {
+  DISK_USAGE_CAPABILITY,
+  type Event,
+  type Runner,
+  type RunnerMetricsPoint,
+  type Session,
+  type Workspace,
+} from "@hercule/contract";
 import { formatDayStamp } from "../time-context";
 import {
   buildIdleWorkspaceRows,
@@ -21,13 +28,6 @@ import {
 import { forecastDiskLimit } from "./disk-forecast";
 import { describeSweptWorkspaces } from "./machine-activity";
 import { describeForecastDays, measureDisk } from "./machine";
-
-/**
- * The capability a runner lists in its hello when it measures disk usage
- * (`DISK_USAGE_CAPABILITY` of the runner protocol). The contract does not
- * re-export the protocol's constant, so the word is repeated here.
- */
-const DISK_USAGE_CAPABILITY = "diskUsage";
 
 /** How many workspaces "Largest idle workspaces" lists. */
 const LARGEST_IDLE_COUNT = 5;

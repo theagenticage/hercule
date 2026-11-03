@@ -24,6 +24,7 @@ import {
   MAX_DISPOSE_MANY_ITEMS,
   MAX_PAGE_LIMIT,
   MAX_SESSION_IDS,
+  USED_SINCE_LOOKED_REFUSAL,
   type Session,
   type Workspace,
 } from "@hercule/contract";
@@ -412,20 +413,16 @@ export const describeCleanupDialog = (
 
 /**
  * Where one removal stands: `removing` while the runner works on it,
- * `removed` once the workspace is deleted, `refused` with the reason when it
- * stays.
+ * `removed` once the workspace is deleted, `refused` when it stays. A refused
+ * outcome has the reason to show under the row and whether the row offers Try
+ * again: `retry` is false for a workspace used since the dialog showed it,
+ * because asking again with the same `expectedLastUsedAt` can only be refused
+ * again.
  */
 export type RemovalOutcome =
   | { readonly kind: "removing" }
   | { readonly kind: "removed" }
-  | { readonly kind: "refused"; readonly message: string };
-
-/**
- * The start of the controller's refusal of a workspace that was used after
- * the dialog showed it. The refusal arrives as text, so this is how the
- * dialog recognises it.
- */
-const USED_SINCE_REFUSAL = "Someone used this workspace since you looked.";
+  | { readonly kind: "refused"; readonly message: string; readonly retry: boolean };
 
 /** The words under a refused row for a workspace that was used after the dialog opened. */
 const USED_SINCE_WORDS = "Used since you looked.";
@@ -433,10 +430,17 @@ const USED_SINCE_WORDS = "Used since you looked.";
 /** The reason shown for a refused removal that came with no message. */
 const UNKNOWN_REFUSAL = "The machine did not say why. Try again.";
 
-/** Returns the words to show under a refused row for the controller's `message`. */
-const describeRefusal = (message: string | null | undefined): string => {
-  if (message === null || message === undefined || message === "") return UNKNOWN_REFUSAL;
-  return message.startsWith(USED_SINCE_REFUSAL) ? USED_SINCE_WORDS : message;
+/** Builds the refused outcome for the controller's or the runner's `message`. */
+const buildRefusal = (message: string | null | undefined): RemovalOutcome => {
+  if (message === USED_SINCE_LOOKED_REFUSAL) {
+    return { kind: "refused", message: USED_SINCE_WORDS, retry: false };
+  }
+  return {
+    kind: "refused",
+    message:
+      message === null || message === undefined || message === "" ? UNKNOWN_REFUSAL : message,
+    retry: true,
+  };
 };
 
 /** What `archiveAndRemoveWorkspaces` returns. */
@@ -494,10 +498,7 @@ export const archiveAndRemoveWorkspaces = async (
     archivedCount,
     removals: results.map((result) => ({
       workspaceId: result.workspaceId,
-      outcome:
-        result.outcome === "requested"
-          ? { kind: "removing" }
-          : { kind: "refused", message: describeRefusal(result.message) },
+      outcome: result.outcome === "requested" ? { kind: "removing" } : buildRefusal(result.message),
     })),
   };
 };
@@ -511,7 +512,7 @@ export const archiveAndRemoveWorkspaces = async (
 export const decideRemovalOutcome = (workspace: Workspace): RemovalOutcome => {
   if (workspace.status === "deleted") return { kind: "removed" };
   if (workspace.status === "disposing") return { kind: "removing" };
-  return { kind: "refused", message: describeRefusal(workspace.message) };
+  return buildRefusal(workspace.message);
 };
 
 /** The words that tell the user how a cleanup ended. See `describeCleanupOutcome`. */

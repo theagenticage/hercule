@@ -222,6 +222,16 @@ const WorkspaceDisposeWithoutBody = Schema.Null.pipe(
 /** The most workspaces one call of `workspace.disposeMany` names. */
 export const MAX_DISPOSE_MANY_ITEMS = 200;
 
+/**
+ * The message `workspace.disposeMany` refuses an item with when the workspace
+ * was used after the caller showed it: its `lastUsedAt` is no longer the
+ * item's `expectedLastUsedAt`. Exported so a client can recognise this refusal
+ * by equality. Asking again with the same `expectedLastUsedAt` can only be
+ * refused again.
+ */
+export const USED_SINCE_LOOKED_REFUSAL =
+  "Someone used this workspace since you looked. Check it again before you remove it.";
+
 /** One workspace to remove in `workspace.disposeMany`. */
 export const WorkspaceDisposeManyItem = closedStruct({
   workspaceId: Id,

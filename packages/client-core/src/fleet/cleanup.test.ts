@@ -4,7 +4,7 @@
  * archive-then-remove call against a stub controller, and the words of the
  * outcome.
  */
-import type { Session, Workspace } from "@hercule/contract";
+import { USED_SINCE_LOOKED_REFUSAL, type Session, type Workspace } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildErrorBody, createApiStub, type Handler } from "../api-stub";
 import { createClient } from "../client";
@@ -383,8 +383,7 @@ describe("archiveAndRemoveWorkspaces", () => {
           {
             workspaceId: uuid(10),
             outcome: "refused",
-            message:
-              "Someone used this workspace since you looked. Check it again before you remove it.",
+            message: USED_SINCE_LOOKED_REFUSAL,
           },
           {
             workspaceId: uuid(11),
@@ -401,10 +400,13 @@ describe("archiveAndRemoveWorkspaces", () => {
       status: "started",
       archivedCount: 2,
       removals: [
-        { workspaceId: uuid(10), outcome: { kind: "refused", message: "Used since you looked." } },
+        {
+          workspaceId: uuid(10),
+          outcome: { kind: "refused", message: "Used since you looked.", retry: false },
+        },
         {
           workspaceId: uuid(11),
-          outcome: { kind: "refused", message: "Stop sessions 01a0 first." },
+          outcome: { kind: "refused", message: "Stop sessions 01a0 first.", retry: true },
         },
       ],
     });
@@ -463,6 +465,7 @@ describe("decideRemovalOutcome", () => {
     expect(decideRemovalOutcome(refused)).toEqual({
       kind: "refused",
       message: "The runner refused safe removal.",
+      retry: true,
     });
   });
 
@@ -470,6 +473,7 @@ describe("decideRemovalOutcome", () => {
     expect(decideRemovalOutcome(buildIdle(10, 1, { message: null }))).toEqual({
       kind: "refused",
       message: "The machine did not say why. Try again.",
+      retry: true,
     });
   });
 });
@@ -481,7 +485,7 @@ describe("describeCleanupOutcome", () => {
     freesBytes: freesGb * GB,
   });
   const removed: RemovalOutcome = { kind: "removed" };
-  const refused: RemovalOutcome = { kind: "refused", message: "No." };
+  const refused: RemovalOutcome = { kind: "refused", message: "No.", retry: true };
 
   it("words the toast when every workspace was removed", () => {
     const items = [item(1, 30), item(2, 11)];
