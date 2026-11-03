@@ -4,7 +4,7 @@
  * the Settings rows with their saves, refusals and Retire.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HARNESSES } from "@hercule/client-core/testing";
 import type { Harness, ProviderAccount, Runner } from "@hercule/contract";
@@ -254,6 +254,29 @@ describe("a machine that is away", () => {
     await openMachine({ runner: OFFLINE });
 
     expect(within(getSoftware()).queryByRole("button", { name: /^Sign in/ })).toBeNull();
+  });
+});
+
+describe("a machine that is retired while its page is open", () => {
+  it("shows that the machine was not found, with a link to Fleet that lists no card for it", async () => {
+    const user = userEvent.setup();
+    const FORGE: Runner = { ...ATLAS, id: "01a06d02-a000-7000-8000-000000000002", name: "forge" };
+    let served: readonly Runner[] = [ATLAS, FORGE];
+    const { live, router } = await openMachine({
+      overrides: { "GET /api/v1/runners": () => ({ body: { items: served } }) },
+    });
+
+    await waitFor(() => expect(live.readTopics()).toContain("runner"));
+    served = [{ ...ATLAS, lifecycle: "retired" }, FORGE];
+    act(() => live.pushInvalidation("runner", [ATLAS.id]));
+
+    const headline = await screen.findByRole("heading", { name: "This machine was not found." });
+    // The header's crumb and the sidebar link to Fleet too; this is the link of the screen itself.
+    await user.click(within(headline.parentElement!).getByRole("link", { name: "Fleet" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/fleet"));
+    expect(await screen.findByRole("button", { name: "forge" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "atlas" })).toBeNull();
   });
 });
 
