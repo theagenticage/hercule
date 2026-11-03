@@ -155,8 +155,9 @@ describe("a command's fields against the schema", () => {
 
   it("gives every paged command a non-empty sort field list, except a list with one fixed order", () => {
     // `signal list` reads each view in the one order the view is defined by,
-    // so it pages with --limit and --cursor but takes no --sort.
-    const FIXED_ORDER = ["signal list"];
+    // and `runner metrics` reads points by runner and then oldest first, so
+    // they page with --limit and --cursor but take no --sort.
+    const FIXED_ORDER = ["signal list", "runner metrics"];
     const paged = COMMANDS.filter((command) => command.paged);
     expect(paged.length).toBeGreaterThan(0);
     for (const command of paged) {

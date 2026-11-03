@@ -118,6 +118,7 @@ import { ModelProfileService, ModelProfileServiceLayer } from "../model-profiles
 import { ProviderAccountService } from "../provider-accounts";
 import { ProviderService, ProviderServiceLayer } from "../providers";
 import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
+import { RunnerMetricsService, RunnerMetricsServiceLayer } from "../runner-metrics";
 import { RunService, RunServiceLayer } from "../runs";
 import { Setup, SetupLayer } from "../setup";
 import { TaskService, TaskServiceLayer, TaskTracking, TaskTrackingLayer } from "../tasks";
@@ -616,6 +617,13 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   }),
 );
 
+const runnerMetricsRoutes = HttpApiBuilder.group(api, "runnerMetrics", (handlers) =>
+  Effect.gen(function* () {
+    const runnerMetrics = yield* RunnerMetricsService;
+    return handlers.handle("query", ({ query }) => withApiErrors(runnerMetrics.query(query)));
+  }),
+);
+
 const pluginRoutes = HttpApiBuilder.group(api, "plugin", (handlers) =>
   Effect.gen(function* () {
     const plugins = yield* Plugins;
@@ -978,6 +986,7 @@ const operationServices = Layer.mergeAll(
   HarnessInstallLayer,
   FactsRefreshLayer,
   RunnerJoinLayer,
+  RunnerMetricsServiceLayer,
   // The inbound driver uses both dispatch and `Live`, placement uses dispatch,
   // and matched inputs are delivered through `Live` too. Setup creates the
   // first assistant, and so does the creation of the first account. So those are provided to the group rather than merged
@@ -1117,6 +1126,7 @@ export const handlerLayers = Layer.mergeAll(
   eventKindRoutes,
   runRoutes,
   runnerRoutes,
+  runnerMetricsRoutes,
   pluginRoutes,
   harnessRoutes,
   providerRoutes,
