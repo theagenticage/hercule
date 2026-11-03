@@ -1,0 +1,44 @@
+/* The status dot and the meter, which the Fleet page's cards and rows and a
+   machine's page all draw. Where they sit is each screen's own stylesheet. */
+
+/* ---------- Status dots ---------- */
+.fleet-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.fleet-dot--offline {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fail);
+}
+.fleet-dot--draining {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+
+/* ---------- Meters ---------- */
+.fleet-meter {
+  position: relative;
+  display: block;
+  flex: none;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  overflow: hidden;
+}
+/* The fill is the plain ink, as in the other meters of the app (Settings,
+   Providers), so it stands out from its track in every theme. */
+.fleet-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink);
+}
+.fleet-meter--you i {
+  background: var(--you-ink);
+}
+.fleet-meter--fail i {
+  background: var(--fail);
+}

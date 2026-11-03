@@ -194,6 +194,29 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     nonTextParts: [],
   },
   {
+    name: "fleet",
+    path: "fleet.html",
+    contentSelector: ".fleet-grid .fleet-card",
+    nonTextParts: [
+      { selector: ".fleet-sec-h .seg", kind: "boundary" },
+      { selector: ".fleet-dot", kind: "mark" },
+      // The running and waiting blocks and the bar's fill. The free blocks are an empty track.
+      { selector: ".fleet-sessions i.is-run", kind: "mark" },
+      { selector: ".fleet-sessions i.is-wait", kind: "mark" },
+      { selector: ".fleet-meter i", kind: "mark" },
+    ],
+  },
+  {
+    name: "machine",
+    path: "fleet.html?machine=atlas",
+    contentSelector: ".machine-page .machine-page-sw-row",
+    nonTextParts: [
+      { selector: ".machine-page-number-field", kind: "boundary" },
+      { selector: ".toggle", kind: "boundary" },
+      { selector: ".machine-page-head .fleet-dot", kind: "mark" },
+    ],
+  },
+  {
     name: "settings-appearance",
     path: "settings-appearance.html",
     contentSelector: ".set-body .set-sec",

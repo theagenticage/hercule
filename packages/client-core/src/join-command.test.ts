@@ -16,4 +16,16 @@ describe("joinCommand", () => {
       `hercule runner join ${origin} --token ${token} --reserved`,
     );
   });
+
+  it("quotes an address a shell would read as syntax, such as an IPv6 one", () => {
+    expect(joinCommand({ origin: "http://[::1]:4937", token, reserved: false })).toBe(
+      `hercule runner join 'http://[::1]:4937' --token ${token}`,
+    );
+  });
+
+  it("quotes a token that holds a single quote, and escapes the quote", () => {
+    expect(joinCommand({ origin, token: "it's a token", reserved: true })).toBe(
+      `hercule runner join ${origin} --token 'it'\\''s a token' --reserved`,
+    );
+  });
 });

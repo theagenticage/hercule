@@ -11,9 +11,9 @@ export type SidebarFace = "threads" | "orchestration";
  *
  * - A thread, the new-thread screen and an assistant's Conversation show the
  *   threads face.
- * - Intake, Workflows, a run's page, Discussions and the Wiki show the
- *   orchestration face, where their rows are. A run's page belongs to the
- *   Workflows row.
+ * - Intake, Workflows, a run's page, Discussions, the Wiki and Fleet (the
+ *   Fleet page and a machine's pages) show the orchestration face, where their
+ *   rows are. A run's page belongs to the Workflows row.
  * - The Office and Settings keep the face, because their ways in sit on both
  *   faces: the Office in the shared row, Settings at the foot. So nothing on
  *   the sidebar moves when one of them opens.
@@ -29,7 +29,9 @@ export const decideScreenFace = (pathname: string): SidebarFace | null => {
     pathname === "/discussions" ||
     pathname.startsWith("/discussions/") ||
     pathname === "/wiki" ||
-    pathname.startsWith("/wiki/")
+    pathname.startsWith("/wiki/") ||
+    pathname === "/fleet" ||
+    pathname.startsWith("/fleet/")
     ? "orchestration"
     : null;
 };

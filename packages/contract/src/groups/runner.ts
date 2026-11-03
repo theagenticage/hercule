@@ -159,8 +159,13 @@ export const RunnerRetireInput = closedStruct(RUNNER_RETIRE_FIELDS);
 
 export type RunnerRetireInput = Schema.Schema.Type<typeof RunnerRetireInput>;
 
-/** Shown here and nowhere else: the controller keeps only its hash. */
+/**
+ * Shown here and nowhere else: the controller keeps only its hash. The `id` is
+ * the one `JoinTokenRef` lists, so a client can tell this token among the open
+ * ones.
+ */
 export const MintedJoinToken = Schema.Struct({
+  id: Id,
   token: Schema.NonEmptyString,
   expiresAt: Timestamp,
 });

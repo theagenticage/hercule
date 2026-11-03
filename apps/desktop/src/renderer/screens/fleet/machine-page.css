@@ -1,0 +1,260 @@
+/* A machine's page: its head, room line, offline banner, and the Software and
+   Settings sections. The measurements are the fleet prototype's (`fx-hero`,
+   `fx-banner`, `fx-room-line`, `fx-psec`, `fx-sw`). Every class starts with
+   `machine-page-`. Each departure from the prototype is explained in a
+   comment. */
+
+.machine-page {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* ---------- The head ---------- */
+.machine-page-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.machine-page-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.machine-page-head-text {
+  flex: 1;
+  min-width: 0;
+}
+.machine-page-head-text h2 {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+}
+.machine-page-head-text p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.machine-page-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.machine-page-status .fleet-dot {
+  width: 7px;
+  height: 7px;
+}
+
+/* ---------- The room line and the offline banner ---------- */
+.machine-page-room {
+  margin: 30px 0 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+}
+.machine-page-room b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.machine-page-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 22px;
+  padding: 13px 14px 13px 16px;
+  border-radius: var(--r-md);
+  background: var(--fail-tint);
+}
+.machine-page-banner > div {
+  flex: 1;
+  display: grid;
+  gap: 3px;
+}
+.machine-page-banner p {
+  margin: 0;
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.machine-page-banner span {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.55;
+}
+.machine-page-banner code {
+  color: var(--ink);
+  font-size: var(--t-11);
+}
+
+/* ---------- A section ---------- */
+.machine-page-section {
+  margin-top: 48px;
+  scroll-margin-top: var(--fleet-header-clearance);
+}
+.machine-page-section > h3 {
+  margin: 0 0 14px;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+
+/* ---------- Software ---------- */
+.machine-page-sw-heading {
+  margin: 16px 0 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.machine-page-sw {
+  container: machine-page-sw / inline-size;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+/* The prototype's row has five columns, the last two for the policy and the
+   Install and Update buttons. This page has no policy and installs nothing,
+   so the row has the name, the version, the note and the action. */
+.machine-page-sw-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 190px) 110px minmax(0, 1fr) 96px;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+}
+.machine-page-sw-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-weight: var(--w-medium);
+}
+.machine-page-sw-version {
+  font-size: var(--t-12);
+}
+.machine-page-sw-version.is-muted {
+  color: var(--muted);
+}
+.machine-page-sw-version.is-faint,
+.machine-page-sw-note {
+  color: var(--faint);
+}
+.machine-page-sw-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-12);
+}
+.machine-page-sw-note.is-fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.machine-page-sw-note.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.machine-page-sw-note.is-muted {
+  color: var(--muted);
+}
+.machine-page-sw-action {
+  display: flex;
+  justify-content: flex-end;
+}
+/* In a narrow section the note moves under the name, where it has the whole
+   row to wrap in, instead of being cut off. */
+@container machine-page-sw (width < 600px) {
+  .machine-page-sw-row {
+    grid-template-columns: minmax(0, 1fr) 110px auto;
+    grid-template-areas:
+      "name version action"
+      "note note note";
+    row-gap: 0;
+  }
+  .machine-page-sw-name {
+    grid-area: name;
+  }
+  .machine-page-sw-version {
+    grid-area: version;
+  }
+  .machine-page-sw-action {
+    grid-area: action;
+  }
+  .machine-page-sw-note {
+    grid-area: note;
+    /* Starts under the name's text, after its 13px logo and 9px gap, and
+       sits close to it. */
+    margin-top: -8px;
+    padding: 0 0 8px 22px;
+    white-space: normal;
+  }
+  .machine-page-sw-note:empty {
+    display: none;
+  }
+}
+.machine-page-sw-footnote {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- Settings ---------- */
+/* The prototype's steppers and value are static. These are fields, and the
+   Settings frame's rows are `.set-row`. */
+.machine-page-number {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+input.machine-page-number-field {
+  width: 88px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.machine-page-unit {
+  color: var(--muted);
+}
+.machine-page-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.machine-page-label {
+  padding-right: 4px;
+}
+.machine-page-label-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--faint);
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.machine-page-label-remove:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+input.machine-page-label-field {
+  width: 120px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-12);
+}

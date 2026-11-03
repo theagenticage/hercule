@@ -7,9 +7,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./discussion-text": "./src/discussion-text.ts",
+    "./fleet": "./src/fleet/fleet.ts",
     "./graph-layout": "./src/graph-layout.ts",
     "./graph-model": "./src/graph-model.ts",
     "./list-time": "./src/list-time.ts",
+    "./machine-page": "./src/fleet/machine-page.ts",
     "./node-details": "./src/node-details.ts",
     "./project-groups": "./src/project-groups.ts",
     "./run-marks": "./src/run-marks.ts",

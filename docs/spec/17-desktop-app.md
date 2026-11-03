@@ -1939,7 +1939,7 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 - **The pixel reference** is the prototype on branch [`prototype/fleet-page`](https://github.com/theagenticage/hercule/tree/prototype/fleet-page), variant G: `pnpm prototype:fleet`, then `specimens/fleet-prototype.html?variant=G` (`&view=list` for the list, `&theme=` for any theme). Its **Data check** toggle marks what needs data the controller did not have when it was drawn. Where this text and the prototype disagree, the prototype decides a measurement and this text decides a behaviour, until slice 50 records the Fleet goldens. From then on the goldens and `tokens.css` decide a measurement, as for every screen ([ADR 0047](../adr/0047-the-desktop-app-is-its-own-pixel-reference.md)), and the prototype is only the record of the design. The prototype draws buttons v1 does not build (Update, Install, "Review and update"); they stay there as the reference for [#974](https://github.com/theagenticage/hercule/issues/974), and v1 draws none of them.
 - **Desktop only.** The web app's Fleet screen keeps what it shows today; giving it the new data is [#977](https://github.com/theagenticage/hercule/issues/977).
 - **Retired machines are not shown,** anywhere on the screen.
-- **Sizes are in GB of 10⁹ bytes,** as macOS's Finder counts them, with one decimal under 100 GB. So the default disk limit, 10 GiB, shows as 10.7 GB.
+- **Sizes are in GB of 10⁹ bytes,** as macOS's Finder counts them, with one decimal under 100 GB. So the default disk limit, 10 GiB, shows as 10.7 GB. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* Memory is the exception: it follows Apple's About This Mac and Activity Monitor, which count binary gigabytes (2³⁰ bytes), so a Mac with 64 GiB of RAM shows "64 GB memory".
 
 ### The routes and the way in
 
@@ -1952,8 +1952,9 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 
 ### The Fleet page
 
-- **The lead** is one sentence in two or three parts, such as "Three machines need you. 93 sessions running on 5 machines, 3 waiting. Room for 40 more right now." With nothing that needs the user, it starts "Every machine is healthy." The count of machines that need the user is in words up to ten, in `--you-ink`; the rest is in `--ink`. `describeFleet` in `@hercule/client-core` builds it.
-- **Machines** is the first section: a heading, and a segmented control, **Grid | List**, at its right. The choice is kept for the window's life; a launch opens Grid. Machines are in the order they joined, which never changes while the page is open, so nothing jumps when a state changes.
+- **The lead** is one sentence in two or three parts, such as "Three machines need you. 93 sessions running on 5 machines, 3 waiting. Room for 40 more right now." With nothing that needs the user, it starts "Every machine is healthy." The count of machines that need the user is in words up to ten, in `--you-ink`; the rest is in `--ink`. ~~`describeFleet` in `@hercule/client-core` builds it.~~ `describeFleetPage` in `@hercule/client-core` builds it, with the rest of the page's text. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)*
+- **Machines** is the first section: a heading, and a segmented control, **Grid | List**, at its right. The choice is kept for the window's life; a launch opens Grid. Machines are in the order they joined, which never changes while the page is open, so nothing jumps when a state changes. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* The order is the runners' ids, which are UUIDv7 and sort by creation time ([spec 04](04-state-store.md)).
+- **The machines are not virtualized.** *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* A fleet is a handful of machines, so the list draws every card or row and costs a few dozen elements. Rule 1 virtualizes every unbounded list and asks the spec to say why one is not ([Rules](#rules)); this list is not unbounded in practice. Revisit it if people run many machines.
 - **An empty fleet** (only the controller's own runner, or none online yet) shows one card for each machine it has, and under them a dashed card: "Add a machine. Run one command on another computer and it joins your fleet.", which opens Add a machine.
 - **Software** is the second section (below).
 
@@ -1963,14 +1964,14 @@ The plan for #669, measured by it and recorded in [Measured](#measured):
 - **sessions against the cap**, drawn by the rule below, with "12 of 16" beside them;
 - **Disk** and **Memory** as two gauges with their percentages, coloured by the rules below; a click on a gauge opens the machine's page at that gauge's section;
 - the small faces of who works there: one per Thread row, run and assistant running on the machine, at most 5, then "+n";
-- **Room** for more: "Room for 4", "Full", or "Takes no new work";
+- **Room** for more: "Room for 4", "Full", or ~~"Takes no new work" while the disk is below its limit~~; *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* The card's Room reads only "Room for 4" or "Full". No Room shows while the machine is away, told to take no new work, or has its disk below its limit, because the status word or the line of what needs the user already says so. The list's Room cell shows "–" then;
 - **what needs the user,** at most one line, the most serious first (below), with the button that fixes it.
 
 A click anywhere else on the card opens the machine's page.
 
 **The list** is one row per machine with columns that line up: Machine (icon, name and status), Sessions (the same drawing, smaller, and "12 of 16"), Room, Disk (gauge, percentage, and "Limit in 12 days" in `--you-ink` while the forecast shows, else the free space), Memory (gauge and percentage), and Needs you (the line and its button). A row opens the machine's page.
 
-**Sessions are drawn** as one block per slot while the cap is at most 16: filled for a running session, empty for a free slot, and one marigold block per session waiting for a slot, after the cap. Above 16 they are one bar, cut every 10 sessions, with the same three fills. So a machine with a cap of 100 reads at a glance without 100 blocks.
+**Sessions are drawn** as one block per slot while the cap is at most 16: filled for a running session, empty for a free slot, and one marigold block per session waiting for a slot, after the cap. Above 16 they are one bar, cut every 10 sessions, with the same three fills. So a machine with a cap of 100 reads at a glance without 100 blocks. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* The blocks are drawn only while the sessions running are at most 16 too, so a cap lowered from 100 to 4 with 100 running is a bar, not 100 blocks. In blocks at most 16 waiting blocks are drawn: the drawing is clipped to its place anyway, and the text beside it carries the count. When more sessions run than the cap allows, a 1.5px rule marks the cap, after the cap-th block or inside the bar, and the waiting part of a bar is cut every 10 sessions like the rest.
 
 **What needs the user**, decided by `findMachineNeeds` in `@hercule/client-core`:
 
@@ -1978,12 +1979,12 @@ A click anywhere else on the card opens the machine's page.
 |---|---|---|---|
 | `--fail` | offline or unreachable | "Offline since 09:12" or "Not heard from since 09:12" | none; the machine's page shows what to do |
 | `--fail` | free disk below the disk limit | "Disk below its limit. It takes no new sessions." | Clean up… |
-| `--you` | Threads waiting for a slot | "3 threads wait for a slot" | Allow 15 |
+| `--you` | ~~Threads~~ sessions waiting for a slot, when the machine takes new sessions and running plus waiting is above the cap *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* | "3 threads wait for a slot", or "3 sessions wait for a slot" unless every waiting session is a Thread | Allow 15 |
 | `--you` | disk 85% full or more | "Disk 87% full" | Clean up… |
 | `--you` | the forecast reaches the limit within 21 days | "Disk reaches its limit in about 12 days" | Clean up… |
 
 - A machine needs the user when any row applies. The card's line is the first that applies, in the table's order.
-- **Allow N** sets the session cap to the sessions running plus the sessions waiting (`runner.update { maxConcurrentSessions }`), so every waiting Thread starts. Its tooltip explains it: "Lets 15 sessions run here at once: the 12 running and the 3 waiting."
+- **Allow N** sets the session cap to the sessions running plus the sessions waiting (`runner.update { maxConcurrentSessions }`), so every waiting ~~Thread~~ session starts. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* Every session queued for a slot counts, of any kind, and the row applies only when the cap is what holds the sessions back: the machine is online, not told to take no new work, its disk is not below its limit, and running plus waiting is above the cap. Raising the cap of a machine that is offline, draining or short of disk would start nothing. So Allow never lowers the cap. Its tooltip explains it: "Lets 15 sessions run here at once: the 12 running and the 3 waiting."
 - **Clean up…** opens the cleanup dialog for that machine (below).
 - **The gauges.** Disk is `--you` from 85% and `--fail` below its limit. Memory is `--you` from 80% and `--fail` from 92%, but memory never makes a machine need the user: a session's tools, a `dotnet build` or a container, use memory the session cannot be blamed for, and the number swings.
 - **Software updates are quiet:** "2 updates" in `--muted` under the line, never a hue, and never counted in the lead. It counts the harnesses and the runner older than their latest release ([Software](#software)); toolchains are not counted.
@@ -2010,7 +2011,7 @@ Tools down, machines across, in two groups: **Harnesses** (the Hercule runner fi
 
 One centred column, in this order. The jump links of the header follow the sections.
 
-1. **The head:** the icon, the name, the status dot and word, and under the name its OS and architecture, RAM and disk size, and "Runner 0.9.3", with "update available" in `--muted` when the controller is newer. Then the **room line**, which says how many more sessions can start and what limits it: "Room for 4 more, under its cap of 16", "No room: its disk is below its limit, so it takes no new sessions", "No room: it takes no new work". `describeRoom` builds it.
+1. **The head:** the icon, the name, the status dot and word, and under the name its ~~OS and architecture, RAM~~ OS ("macOS", "Linux", "Windows"), its architecture, its memory ("64 GB memory") *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* and disk size, and "Runner 0.9.3", with "update available" in `--muted` when the controller is newer. Then the **room line**, which says how many more sessions can start and what limits it: "Room for 4 more, under its cap of 16", "No room: its disk is below its limit, so it takes no new sessions", "No room: it takes no new work". ~~`describeRoom` builds it.~~ `describeMachinePage` in `@hercule/client-core` builds it, with the rest of the head. *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)*
 2. **An offline or unreachable machine** shows a banner under the head instead: "atlas has not been heard from since 09:12. It may be asleep, off the network, or without power. Its 3 threads can carry on once it is back, and work waiting for it starts then. If it does not come back by itself, start Hercule on it again: `hercule service start`. What you see below is from 09:12.", with Retire… at its right. `hercule service start` starts the runner's Service Unit (spec 15); a machine that runs `hercule runner` in a terminal is started the same way it was.
 3. **The instruments,** four graphs drawn from the stored metrics ([Graphs and the forecast](#graphs-and-the-forecast)):
    - **Sessions**, the last 24 hours: the sessions running in each 5 minutes, with the minutes in which Threads waited in marigold, and the cap as a line;
@@ -2103,6 +2104,8 @@ Each row has a checkbox, the name, what removing it frees, and when it was last 
 
 Live topics while a Fleet route is open: `runner`, `runnerMetrics`, `session`, `provider` and `workspace`. The shell already holds `session`.
 
+*(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)* A Fleet page reads the sessions as counts per runner (`countRunnerSessions`), never as the list, so a push that changes only a session's usage or last activity redraws nothing. While the window is hidden the page does not observe the sessions' read, so a `session` push reads nothing; showing the window reads the list once if a push marked it out of date.
+
 ### What Fleet costs
 
 Stated before the slices build it ([Performance](#performance), as ADR 0037 asks), and measured once the feature is built, by [#989](https://github.com/theagenticage/hercule/issues/989), in [Measured](#measured):
@@ -2120,7 +2123,7 @@ Stated before the slices build it ([Performance](#performance), as ADR 0037 asks
 
 ### Fleet's tests
 
-- **Unit tests** cover each `client-core` function the pages call: `describeFleet`, `findMachineNeeds` with every row of its table and their order, `describeRoom`, the sessions' drawing above and below 16 slots, `buildMachineWork`, the Software grid's Latest and cells (a harness newer than its latest release shows the check; a toolchain is never marked older), `forecastDiskLimit` (a steady fill, too little history, a cleanup's jump, a limit past 60 days), `describeMachineActivity` and its folding, and `archiveAndRemoveWorkspaces`.
+- **Unit tests** cover each `client-core` function the pages call: ~~`describeFleet`~~ `describeFleetPage` *(Amended 2026-11-03, [#981](https://github.com/theagenticage/hercule/issues/981).)*, `findMachineNeeds` with every row of its table and their order, ~~`describeRoom`~~ `describeMachinePage`'s room line, the sessions' drawing (inside `describeFleetPage`) above and below 16 slots, `buildMachineWork`, the Software grid's Latest and cells (a harness newer than its latest release shows the check; a toolchain is never marked older), `forecastDiskLimit` (a steady fill, too little history, a cleanup's jump, a limit past 60 days), `describeMachineActivity` and its folding, and `archiveAndRemoveWorkspaces`.
 - **Integration tests** cover the routes and the Fleet row, Grid and List, a gauge opening its section, Allow N, the cleanup dialog's groups, the refusal of a workspace used since it opened, and its result, and the settings rows.
 - **The goldens** gain the Fleet page in Grid and a machine's page, with the cleanup dialog's fixture world: 15 screens and 90 PNGs. AGENTS.md's count changes with them.
 - **End-to-end tests**, against the compiled binary in a scratch `HERCULE_HOME`: the Fleet row opens the page and the face follows; a second runner joins from Add a machine's command and its card appears; Allow N raises the cap and a waiting Thread starts; the cleanup dialog archives and removes an idle workspace and the disk's free space grows; a machine's activity lists the removal.

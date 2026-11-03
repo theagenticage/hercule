@@ -4,6 +4,7 @@ import {
   useMutationState,
   useQueryClient,
   type DataTag,
+  type QueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
 import { readErrorMessage } from "@hercule/client-core";
@@ -38,6 +39,36 @@ interface SavedRecordFieldOptions<
    * cache could put back a value another writer changed.
    */
   readonly readLatest?: (id: string) => Promise<ListedRecord>;
+}
+
+/**
+ * Returns the mutation scope shared by every save of the record `id`.
+ * Mutations in one scope run one after another, in the order they were made.
+ * A save that changes a record other than through `useSavedRecordField`, such
+ * as a drain, uses this scope too, so all writes to one record reach the
+ * controller in the order the user made them. Other records have other scopes
+ * and stay independent.
+ */
+export const buildRecordScope = (id: string): { readonly id: string } => ({ id: `record:${id}` });
+
+/**
+ * Puts `saved`, a record the controller returned from a save, in the cached
+ * list under `listKey`, replacing the record with the same id. The caller
+ * sees the saved values at once. Then reads the list again, and resolves when
+ * that read has answered. The put is done before this returns, so a caller
+ * can act on it before the read answers.
+ *
+ * A record that is not in the list is not added.
+ */
+export function keepSavedRecord<ListedRecord extends { readonly id: string }>(
+  queryClient: QueryClient,
+  listKey: DataTag<QueryKey, ReadonlyArray<ListedRecord>, Error>,
+  saved: ListedRecord,
+): Promise<void> {
+  queryClient.setQueryData(listKey, (records) =>
+    records?.map((each) => (each.id === saved.id ? saved : each)),
+  );
+  return queryClient.invalidateQueries({ queryKey: listKey });
 }
 
 /** A field saved by `useSavedRecordField`: the failed change is returned with its error. */
@@ -105,7 +136,7 @@ export function useSavedRecordField<
   const [failure, setFailure] = useState<{ change: Change; error: Error } | null>(null);
   const mutation = useMutation({
     mutationKey,
-    scope: { id: `record:${id}` },
+    scope: buildRecordScope(id),
     mutationFn: async (change: Change): Promise<ListedRecord | null> => {
       const cached = queryClient.getQueryData(listKey)?.find((each) => each.id === id);
       if (cached === undefined) return null;
@@ -119,10 +150,7 @@ export function useSavedRecordField<
     },
     onSuccess: async (updated) => {
       if (updated === null) return;
-      queryClient.setQueryData(listKey, (records) =>
-        records?.map((each) => (each.id === updated.id ? updated : each)),
-      );
-      await queryClient.invalidateQueries({ queryKey: listKey });
+      await keepSavedRecord(queryClient, listKey, updated);
     },
   });
   return {

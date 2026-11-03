@@ -19,7 +19,7 @@ const SCREENS = join(HERE, "../../../screens");
 
 /**
  * The folders and single files whose sources are compiled: the route folders
- * of the three pages and of a run's page, the screens they draw, the folders
+ * of the three pages, of a run's page and of Fleet, the screens they draw, the folders
  * they share, Intake's screen, the parts of its Tracking pane, the line of a Done signal's trip, and the Done moves' queue and toast. A folder is compiled
  * without its tests.
  */
@@ -28,6 +28,8 @@ const PATHS = [
   join(HERE, "runs"),
   join(HERE, "discussions"),
   join(HERE, "wiki"),
+  join(HERE, "fleet"),
+  join(SCREENS, "fleet"),
   join(SCREENS, "workflows"),
   join(SCREENS, "discussions"),
   join(SCREENS, "wiki"),
