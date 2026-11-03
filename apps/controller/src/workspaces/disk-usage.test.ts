@@ -153,6 +153,23 @@ describe("storing the disk usage a runner reports", () => {
     );
   });
 
+  it("drops an id that is not a canonical id instead of failing the whole report", async () => {
+    await withWorkspaces(({ a }) =>
+      Effect.gen(function* () {
+        const { changed } = yield* record([
+          measured("not-a-uuid", 1, 1),
+          measured("A".repeat(64), 2, 2),
+          measured(a, 3, 3),
+        ]);
+        expect(changed).toEqual([a]);
+        expect(yield* record([measured("not-a-uuid", 1, 1)])).toEqual({
+          changed: [],
+          announced: [],
+        });
+      }),
+    );
+  });
+
   it("keeps the workspaces a shortened report leaves out", async () => {
     await withWorkspaces(({ a, b }) =>
       Effect.gen(function* () {

@@ -2,8 +2,8 @@
  * The pure logic of the Storage section on a machine's page of the desktop
  * Fleet screen (spec 17 §A machine's page point 5): the head with the free
  * space and the forecast, the disk as one bar in parts, the line on automatic
- * cleanup, the largest idle workspaces and the state of the Clean up…
- * button. No function here reads a clock or a store.
+ * cleanup, and the largest idle workspaces. No function here reads a clock
+ * or a store.
  *
  * This module is its own subpath (`@hercule/client-core/machine-storage`) and
  * is not re-exported from the package index, so the first screen does not
@@ -20,20 +20,20 @@ import {
 import { formatDayStamp } from "../time-context";
 import {
   buildIdleWorkspaceRows,
-  describeCleanUpDisabledHint,
-  formatDiskSize,
   isIdleWorkspace,
   listCleanupCandidates,
   type IdleWorkspaceRow,
 } from "./cleanup";
 import { forecastDiskLimit } from "./disk-forecast";
-import { describeSweptWorkspaces } from "./machine-activity";
-import { describeForecastDays, measureDisk } from "./machine";
+import {
+  describeMachineActivity,
+  describeSweptWorkspaces,
+  readSweepReason,
+} from "./machine-activity";
+import { describeForecastDays, formatDiskSize, measureDisk } from "./machine";
 
 /** How many workspaces "Largest idle workspaces" lists. */
 const LARGEST_IDLE_COUNT = 5;
-
-const MS_PER_MINUTE = 60_000;
 
 const OTHER_TOOLTIP =
   "Everything else on the disk: your own files, and package stores such as pnpm's, which workspaces link to.";
@@ -109,10 +109,6 @@ export interface MachineStorage {
   readonly automaticCleanup: AutomaticCleanup | null;
   /** The five largest idle workspaces a Thread used, largest first. Empty when `tooOld` is set. */
   readonly largestIdle: readonly IdleWorkspaceRow[];
-  readonly cleanUp: {
-    /** Why Clean up… is disabled, or `null` when the machine is online and it is enabled. */
-    readonly disabledHint: string | null;
-  };
 }
 
 /**
@@ -132,33 +128,28 @@ const sum = <Item>(items: readonly Item[], pick: (item: Item) => number): number
 /**
  * Describes the newest removal the sweep made out of the machine's `events`
  * (its audit log entries, newest first), or returns `null` when none is among
- * them. Only the sweep records a reason on `workspace.deleted`, so an entry
- * with one is the sweep's. Entries with the same reason in the same minute as
- * the newest one are counted together, as the activity list folds them.
- * `now` and `timezone` word the day.
+ * them. `readSweepReason` tells which entries are the sweep's. The count is the
+ * activity list's own fold of the newest entry, so the page and the list never
+ * disagree. `now` and `timezone` word the day.
  */
 const describeLastSweep = (
-  events: readonly Pick<Event, "kind" | "payload" | "receivedAt">[],
+  events: readonly Pick<Event, "id" | "kind" | "payload" | "actor" | "receivedAt">[],
   timezone: string,
   now: Date,
 ): string | null => {
-  const readSweepReason = (event: Pick<Event, "kind" | "payload">): string | undefined => {
-    const reason = event.kind === "workspace.deleted" ? event.payload["reason"] : undefined;
-    return typeof reason === "string" ? reason : undefined;
-  };
-  const newest = events.find((event) => readSweepReason(event) !== undefined);
+  const sweeps = events.filter((event) => readSweepReason(event) !== undefined);
+  const newest = sweeps[0];
   if (newest === undefined) return null;
-  const reason = readSweepReason(newest)!;
-  const minute = Math.floor(Date.parse(newest.receivedAt) / MS_PER_MINUTE);
-  const count = events.filter(
-    (event) =>
-      readSweepReason(event) === reason &&
-      Math.floor(Date.parse(event.receivedAt) / MS_PER_MINUTE) === minute,
-  ).length;
+  const folded = describeMachineActivity(sweeps, {
+    filter: "all",
+    timezone,
+    today: now,
+    accounts: [],
+  })[0]?.entries[0];
   const day = formatDayStamp(new Date(newest.receivedAt), timezone, now);
-  if (day === undefined) return null;
+  if (folded === undefined || day === undefined) return null;
   const when = day === "Today" ? "today" : day === "Yesterday" ? "yesterday" : `on ${day}`;
-  return `Last: removed ${describeSweptWorkspaces(reason, count)}, ${when}.`;
+  return `Last: removed ${describeSweptWorkspaces(readSweepReason(newest)!, folded.count)}, ${when}.`;
 };
 
 const AUTOMATIC_CLEANUP_RULES: AutomaticCleanupRules = {
@@ -273,7 +264,7 @@ export interface MachineStorageSources {
   /** The hour points of this machine alone, oldest first, for the forecast. */
   readonly hourPoints: readonly RunnerMetricsPoint[];
   /** The machine's recent audit log entries, newest first, as the activity list reads them. */
-  readonly events: readonly Pick<Event, "kind" | "payload" | "receivedAt">[];
+  readonly events: readonly Pick<Event, "id" | "kind" | "payload" | "actor" | "receivedAt">[];
   readonly timezone: string;
   readonly now: Date;
 }
@@ -284,13 +275,15 @@ export interface MachineStorageSources {
  * - The head has the free space and, when `forecastDiskLimit` finds one, the
  *   forecast. A runner that reported no disk yet has "Disk not reported yet".
  * - A runner known to lack the disk usage capability (`canMeasureStorage`)
- *   shows its bar empty, all free, and the line that says it is too old. The
- *   workspaces, the activity and the Threads are not read for it.
- * - "Largest idle workspaces" are the machine's cleanup candidates that a
- *   Thread used, the five with the biggest `sizeBytes` first. A workspace
- *   never measured goes last.
- * - Clean up… is disabled while the machine is not online
- *   (`describeCleanUpDisabledHint`).
+ *   shows its bar empty, all free, and the line that says it is too old, with
+ *   no automatic cleanup line and no largest idle workspaces.
+ * - The bar shows what fills the disk, so its "Idle workspaces" part counts
+ *   every idle workspace (`isIdleWorkspace`) of the machine, main and run
+ *   workspaces included. Clean up… offers fewer: only the ephemeral ones a
+ *   Thread used (`listCleanupCandidates`).
+ * - "Largest idle workspaces" are those cleanup candidates, the five that
+ *   removing would give back the most space (`freesBytes`), largest first.
+ *   A workspace never measured goes last.
  */
 export const describeMachineStorage = ({
   runner,
@@ -306,9 +299,6 @@ export const describeMachineStorage = ({
   const totalBytes = disk?.use?.totalBytes ?? null;
   const tooOld = !canMeasureStorage(negotiatedCapabilities);
   const forecast = forecastDiskLimit(hourPoints, runner, now.getTime());
-  const cleanUp = {
-    disabledHint: describeCleanUpDisabledHint(runner.name, runner.connectivity === "online"),
-  };
   const head = {
     freeText:
       disk === null
@@ -327,7 +317,6 @@ export const describeMachineStorage = ({
       tooOld: null,
       automaticCleanup: null,
       largestIdle: [],
-      cleanUp,
     };
   }
   if (tooOld) {
@@ -338,7 +327,6 @@ export const describeMachineStorage = ({
         "This machine's runner is too old to measure its storage. Update it to see what fills the disk.",
       automaticCleanup: null,
       largestIdle: [],
-      cleanUp,
     };
   }
   const largestIdle = buildIdleWorkspaceRows(
@@ -346,7 +334,7 @@ export const describeMachineStorage = ({
     threads,
     now,
   )
-    .toSorted((a, b) => (b.sizeBytes ?? -1) - (a.sizeBytes ?? -1))
+    .toSorted((a, b) => (b.freesBytes ?? -1) - (a.freesBytes ?? -1))
     .slice(0, LARGEST_IDLE_COUNT);
   return {
     head,
@@ -361,6 +349,5 @@ export const describeMachineStorage = ({
       rules: AUTOMATIC_CLEANUP_RULES,
     },
     largestIdle,
-    cleanUp,
   };
 };

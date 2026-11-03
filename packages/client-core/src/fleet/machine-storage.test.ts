@@ -1,8 +1,8 @@
 /**
  * Tests the Storage section of a machine's page through `describeMachineStorage`:
  * the head, the bar's parts and how they are counted, the largest idle
- * workspaces and their measuring notes, the automatic cleanup line, the
- * state of a runner too old to measure, and the Clean up… button.
+ * workspaces and their measuring notes, the automatic cleanup line,
+ * and the state of a runner too old to measure.
  */
 import type { Event, Runner, RunnerFacts, RunnerMetricsPoint, Workspace } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
@@ -220,7 +220,7 @@ describe("describeMachineStorage largest idle workspaces", () => {
   const threadIn = (workspace: Workspace, title: string) =>
     buildSession({ id: `t-${workspace.id}`, workspaceId: workspace.id, title });
 
-  it("lists the five largest idle workspaces a Thread used, by size, with their names", () => {
+  it("lists the five largest idle workspaces a Thread used, by what removing frees, with their names", () => {
     const workspaces = Array.from({ length: 7 }, (_, index) =>
       idle(`w-${String(index)}`, index + 1),
     );
@@ -245,6 +245,22 @@ describe("describeMachineStorage largest idle workspaces", () => {
       lastUsedText: "1 week ago",
       measuringNote: null,
     });
+  });
+
+  it("orders by what removing frees, not by the size on disk", () => {
+    const bigButFrees = (id: string, sizeGb: number, freesGb: number) =>
+      idle(id, freesGb, {
+        diskUsage: { sizeBytes: sizeGb * GB, freesBytes: freesGb * GB, measuredAt: daysAgo(1) },
+      });
+    const sharesMost = bigButFrees("w-shares", 50, 1);
+    const sharesLittle = bigButFrees("w-alone", 10, 9);
+
+    const { largestIdle } = describeStorage(buildRunner(), {
+      workspaces: [sharesMost, sharesLittle],
+      threads: [threadIn(sharesMost, "Shares"), threadIn(sharesLittle, "Alone")],
+    });
+
+    expect(largestIdle.map((row) => row.name)).toEqual(["Alone", "Shares"]);
   });
 
   it("leaves out workspaces used in the last 7 days and main workspaces", () => {
@@ -305,7 +321,9 @@ describe("describeMachineStorage automatic cleanup", () => {
     id: number,
     reason: string,
     at: string,
-  ): Pick<Event, "kind" | "payload" | "receivedAt"> => ({
+  ): Pick<Event, "id" | "kind" | "payload" | "actor" | "receivedAt"> => ({
+    id,
+    actor: null,
     kind: "workspace.deleted",
     payload: { workspaceId: `w-${String(id)}`, reason },
     receivedAt: at,
@@ -349,12 +367,15 @@ describe("describeMachineStorage automatic cleanup", () => {
 
   it("has no last removal when the removals in the activity are not the sweep's", () => {
     const byUser = {
-      kind: "workspace.deleted",
+      ...swept(1, "none", "2026-11-02T08:30:10.000Z"),
       payload: { workspaceId: "w-1" },
-      receivedAt: "2026-11-02T08:30:10.000Z",
-    } as const;
+    };
+    const unknownReason = swept(2, "from-a-newer-controller", "2026-11-02T08:30:10.000Z");
 
     expect(describeStorage(buildRunner(), { events: [byUser] }).automaticCleanup?.last).toBeNull();
+    expect(
+      describeStorage(buildRunner(), { events: [unknownReason] }).automaticCleanup?.last,
+    ).toBeNull();
     expect(describeStorage(buildRunner()).automaticCleanup?.last).toBeNull();
   });
 });
@@ -392,19 +413,4 @@ describe("canMeasureStorage", () => {
     expect(canMeasureStorage([])).toBe(false);
     expect(canMeasureStorage(["somethingElse"])).toBe(false);
   });
-});
-
-describe("describeMachineStorage Clean up…", () => {
-  it("is enabled while the machine is online", () => {
-    expect(describeStorage(buildRunner()).cleanUp.disabledHint).toBeNull();
-  });
-
-  it.each(["offline", "unreachable"] as const)(
-    "is disabled while the machine is %s",
-    (connectivity) => {
-      expect(describeStorage(buildRunner({ connectivity })).cleanUp.disabledHint).toBe(
-        "atlas is offline. Cleaning up needs it online.",
-      );
-    },
-  );
 });

@@ -38,6 +38,7 @@ import {
   buildKeyset,
   mintUuid,
   buildPage,
+  UUID_PATTERN,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -1148,7 +1149,9 @@ const make = Effect.gen(function* () {
      * with no measurement keeps the stored numbers and updates only the error,
      * because a failed attempt leaves the earlier measurement in place. An
      * entry for a workspace that does not exist, or that belongs to another
-     * runner, is dropped. A workspace the report does not list is not touched,
+     * runner, is dropped. So is an entry whose id is not a canonical id: the
+     * protocol lets a runner send any short id, and such an id names no
+     * workspace, so it must not make the whole report fail. A workspace the report does not list is not touched,
      * so a report cut short by the runner clears nothing. When an id is listed
      * twice, the last entry counts.
      */
@@ -1157,7 +1160,11 @@ const make = Effect.gen(function* () {
       entries: ReadonlyArray<WorkspaceDiskUsageEntry>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
-        const reported = new Map(entries.map((entry) => [entry.workspaceId, entry]));
+        const reported = new Map(
+          entries
+            .filter((entry) => UUID_PATTERN.test(entry.workspaceId))
+            .map((entry) => [entry.workspaceId, entry]),
+        );
         if (reported.size === 0) return [];
         const stored = yield* sql<
           Pick<

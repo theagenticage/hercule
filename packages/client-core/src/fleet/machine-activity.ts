@@ -259,6 +259,18 @@ const SWEPT_WORKSPACES: ReadonlyMap<string, readonly [string, string]> = new Map
 ]);
 
 /**
+ * Returns the reason the sweep recorded when it removed a workspace, or
+ * `undefined` when `event` is not a sweep's removal. Only the sweep records
+ * one of the reasons this list knows on `workspace.deleted`, so that is what
+ * makes an entry the sweep's.
+ */
+export const readSweepReason = (event: Pick<Event, "kind" | "payload">): string | undefined => {
+  if (event.kind !== "workspace.deleted") return undefined;
+  const reason = event.payload["reason"];
+  return typeof reason === "string" && SWEPT_WORKSPACES.has(reason) ? reason : undefined;
+};
+
+/**
  * Returns the phrase for `count` workspaces the sweep removed for `reason`,
  * such as "a workspace of a finished run" or "2 workspaces of finished runs".
  * A reason this list does not know gives "a workspace" or "2 workspaces".

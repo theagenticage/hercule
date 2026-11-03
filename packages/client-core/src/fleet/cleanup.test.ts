@@ -4,7 +4,12 @@
  * archive-then-remove call against a stub controller, and the words of the
  * outcome.
  */
-import { USED_SINCE_LOOKED_REFUSAL, type Session, type Workspace } from "@hercule/contract";
+import {
+  MAX_SESSION_WORKSPACE_IDS,
+  USED_SINCE_LOOKED_REFUSAL,
+  type Session,
+  type Workspace,
+} from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildErrorBody, createApiStub, type Handler } from "../api-stub";
 import { createClient } from "../client";
@@ -105,15 +110,18 @@ describe("listCleanupCandidates", () => {
 });
 
 describe("readCleanupThreads", () => {
-  it("reads archived Threads too, in one read per 500 workspaces", async () => {
+  it("reads archived Threads too, in one read per 150 workspaces", async () => {
     const api = createApiStub({ "GET /api/v1/sessions": { body: { items: [] } } });
     const client = createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch });
-    const ids = Array.from({ length: 501 }, (_, index) => uuid(index + 1));
+    const ids = Array.from({ length: 151 }, (_, index) => uuid(index + 1));
 
     await readCleanupThreads(client, ids);
 
     const queries = api.calls.map((call) => new URLSearchParams(call.search));
-    expect(queries.map((query) => query.getAll("workspaceId").length)).toEqual([500, 1]);
+    expect(queries.map((query) => query.getAll("workspaceId").length)).toEqual([
+      MAX_SESSION_WORKSPACE_IDS,
+      1,
+    ]);
     expect(queries[0]!.get("kind")).toBe("thread");
     expect(queries[0]!.has("archived")).toBe(false);
   });
@@ -465,7 +473,7 @@ describe("archiveAndRemoveWorkspaces", () => {
     });
   });
 
-  it("fails on an error that is not the controller's refusal", async () => {
+  it("does not claim the archive failed when the call gets no answer", async () => {
     const { client } = buildController(
       () => {
         throw new Error("network down");
@@ -473,7 +481,14 @@ describe("archiveAndRemoveWorkspaces", () => {
       { body: { results: [] } },
     );
 
-    await expect(archiveAndRemoveWorkspaces(client, plan)).rejects.toThrow();
+    const start = await archiveAndRemoveWorkspaces(client, plan);
+
+    expect(start.status).toBe("archiveUnconfirmed");
+    expect(start).toMatchObject({
+      message: expect.stringMatching(
+        /^Could not confirm that the threads were archived: .+[^.]\. Check them before you try again\.$/,
+      ),
+    });
   });
 });
 

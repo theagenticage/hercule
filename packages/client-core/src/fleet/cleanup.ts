@@ -22,8 +22,8 @@
  */
 import {
   MAX_DISPOSE_MANY_ITEMS,
-  MAX_PAGE_LIMIT,
   MAX_SESSION_IDS,
+  MAX_SESSION_WORKSPACE_IDS,
   USED_SINCE_LOOKED_REFUSAL,
   type Session,
   type Workspace,
@@ -33,7 +33,7 @@ import { ApiError } from "../errors";
 import { readEveryPage } from "../read-every-page";
 import { buildSessionGroups } from "../threads/session-groups";
 import { describeAge } from "../threads/age";
-import { plural, splitDiskSize } from "./machine";
+import { formatDiskSize, plural } from "./machine";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -45,15 +45,6 @@ const MAX_CLEANUP_ROWS = MAX_DISPOSE_MANY_ITEMS;
 
 /** The most Threads one cleanup archives: the limit of one `session.archive` call. */
 const MAX_ARCHIVED_THREADS = MAX_SESSION_IDS;
-
-/**
- * Formats a disk size in units of 10^9 bytes as Finder shows it, without a
- * trailing ".0": "420 MB", "41 GB", "12.5 GB", "1,000 GB".
- */
-export const formatDiskSize = (bytes: number): string => {
-  const { amount, unit } = splitDiskSize(bytes);
-  return `${amount.endsWith(".0") ? amount.slice(0, -2) : amount} ${unit}`;
-};
 
 /**
  * Checks whether nothing has started or ended a session in `workspace` for 7
@@ -101,7 +92,7 @@ export const describeCleanUpDisabledHint = (
 
 /**
  * Reads every Thread, archived ones included, that was placed in one of
- * `workspaceIds`, in as many reads as the filter's limit of ids needs. Fails
+ * `workspaceIds`, in as many reads as `MAX_SESSION_WORKSPACE_IDS` ids per read needs. Fails
  * when a read fails.
  */
 export const readCleanupThreads = async (
@@ -109,8 +100,8 @@ export const readCleanupThreads = async (
   workspaceIds: readonly string[],
 ): Promise<readonly Session[]> => {
   const threads: Session[] = [];
-  for (let start = 0; start < workspaceIds.length; start += MAX_PAGE_LIMIT) {
-    const chunk = workspaceIds.slice(start, start + MAX_PAGE_LIMIT);
+  for (let start = 0; start < workspaceIds.length; start += MAX_SESSION_WORKSPACE_IDS) {
+    const chunk = workspaceIds.slice(start, start + MAX_SESSION_WORKSPACE_IDS);
     threads.push(
       ...(await readEveryPage((page) =>
         client.session.query({ query: { workspaceId: chunk, kind: "thread", ...page } }),
@@ -457,6 +448,12 @@ const buildRefusal = (message: string | null | undefined): RemovalOutcome => {
 export type CleanupStart =
   /** The archive was refused, so nothing was removed. `message` is the controller's. */
   | { readonly status: "archiveRefused"; readonly message: string }
+  /**
+   * The archive call failed without an answer (the connection dropped), so
+   * the archive may or may not have happened. Nothing was removed. `message`
+   * is worded for the user and says to check the threads.
+   */
+  | { readonly status: "archiveUnconfirmed"; readonly message: string }
   | {
       readonly status: "started";
       /** How many Threads the archive archived; 0 when there was none to archive. */
@@ -486,9 +483,11 @@ export type CleanupStart =
  * `plan.items`, each with the `lastUsedAt` the dialog showed.
  *
  * A refused archive, such as a Thread that started working again, removes
- * nothing and returns the controller's message. Fails on any other error of
- * the archive. A removal the controller accepts answers `removing`: its
- * outcome arrives later, and `decideRemovalOutcome` reads it. Once the archive
+ * nothing and returns the controller's message. An archive call that fails
+ * with no answer from the controller returns `archiveUnconfirmed`, because
+ * the archive may have been committed. A removal the controller accepts
+ * answers `removing`: its outcome arrives later, and `decideRemovalOutcome`
+ * reads it. Once the archive
  * is done this never fails, because the archive cannot be undone and its count
  * must reach the user: when the removal call fails it returns `removalUnknown`.
  *
@@ -507,7 +506,11 @@ export const archiveAndRemoveWorkspaces = async (
       archivedCount = archived.filter((session) => session.kind === "thread").length;
     } catch (error) {
       if (error instanceof ApiError) return { status: "archiveRefused", message: error.message };
-      throw error;
+      const reason = (error instanceof Error ? error.message : String(error)).replace(/\.+$/, "");
+      return {
+        status: "archiveUnconfirmed",
+        message: `Could not confirm that the threads were archived: ${reason}. Check them before you try again.`,
+      };
     }
   }
   let results;
@@ -515,6 +518,10 @@ export const archiveAndRemoveWorkspaces = async (
     ({ results } = await client.workspace.disposeMany({
       payload: {
         items: plan.items.map(({ workspaceId, expectedLastUsedAt }) =>
+          // The controller stamps `lastUsedAt` when it creates a workspace, so a null
+          // one is a row from before that was recorded. Such a row sends no
+          // `expectedLastUsedAt`, so it is not checked against use since the dialog
+          // opened. The controller still refuses it while a session holds it.
           expectedLastUsedAt === null ? { workspaceId } : { workspaceId, expectedLastUsedAt },
         ),
       },
