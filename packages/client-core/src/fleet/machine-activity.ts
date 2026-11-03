@@ -258,6 +258,17 @@ const SWEPT_WORKSPACES: ReadonlyMap<string, readonly [string, string]> = new Map
   ["archived", ["an archived thread's workspace", "archived threads' workspaces"]],
 ]);
 
+/**
+ * Returns the phrase for `count` workspaces the sweep removed for `reason`,
+ * such as "a workspace of a finished run" or "2 workspaces of finished runs".
+ * A reason this list does not know gives "a workspace" or "2 workspaces".
+ */
+export const describeSweptWorkspaces = (reason: string, count: number): string => {
+  const swept = SWEPT_WORKSPACES.get(reason);
+  if (count === 1) return swept === undefined ? "a workspace" : swept[0];
+  return `${String(count)} ${swept === undefined ? "workspaces" : swept[1]}`;
+};
+
 /** Words for a session that was stopped, by the reason the entry records. */
 const STOPPED_SESSIONS: ReadonlyMap<string, Wording> = new Map([
   ["crash", buildCountedWording("Session crashed", "# sessions crashed")],
