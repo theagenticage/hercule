@@ -3,7 +3,7 @@
  * It builds two packages, with the config in `electron-builder.yml`:
  *
  * - the release package, into `dist/release`: `Hercule.app` on macOS, a
- *   `.deb` on Linux;
+ *   `.deb` and an Arch Linux package on Linux;
  * - the test package, into `dist/test`: the same app with the Node inspector
  *   fuse on, which Playwright needs (see `electron-builder.yml`). On macOS it
  *   is signed ad hoc, so the real signature never covers that fuse. On Linux
@@ -22,7 +22,7 @@ const TEST_PACKAGE = [
 const BUILDS_BY_PLATFORM: Record<string, ReadonlyArray<ReadonlyArray<string>>> = {
   darwin: [["--mac"], ["--mac", ...TEST_PACKAGE, "--config.mac.identity=null"]],
   linux: [
-    ["--linux", "deb"],
+    ["--linux", "deb", "pacman"],
     ["--linux", "dir", ...TEST_PACKAGE],
   ],
 };

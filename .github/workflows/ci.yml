@@ -494,17 +494,24 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm test:desktop:container
 
-  # Builds the desktop app's Linux package, a `.deb`, installs it on a real
-  # Ubuntu 24.04 host the way a user would, and starts it. The `edge` release
-  # publishes this very file (`edge-build.needs`), so a package that does not
-  # install or start blocks the release.
+  # Builds the desktop app's Linux packages, a `.deb` and an Arch Linux
+  # package, installs each the way a user would, and starts the app. The `.deb`
+  # goes on a real Ubuntu 24.04 host, the Arch package in an `archlinux`
+  # container. The `edge` release publishes these very files
+  # (`edge-build.needs`), so a package that does not install or start blocks
+  # the release.
   #
-  # This needs a real host, not a container. Ubuntu 24.04 sets
+  # The `.deb` needs a real host, not a container. Ubuntu 24.04 sets
   # `kernel.apparmor_restrict_unprivileged_userns=1`, which stops Chromium's
   # sandbox from starting unless an AppArmor profile allows it. The `.deb`
   # installs that profile, and only a host that enforces the sysctl shows
   # whether it works. The app refuses `--no-sandbox`, so a broken profile
   # shows as an app that aborts at start.
+  #
+  # Arch has no AppArmor, so a container tells what a real Arch host would:
+  # whether pacman installs the package with only its dependencies, whether
+  # every library is found, and whether the app starts with its sandbox.
+  # `apps/desktop/container/arch-install-check.sh` does that.
   #
   # It runs only when something the build reads can have changed, and always on
   # `main`. The first step decides, as in `ui-metrics`, and the later steps
@@ -512,7 +519,7 @@ jobs:
   # for it.
   desktop-linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -551,17 +558,25 @@ jobs:
       # turns `0.1.0-edge.9` into the Debian version `0.1.0~edge.9`, which
       # sorts below `0.1.0~edge.10` and below a plain `0.1.0`. Every build
       # of the `.deb` needs the suffix: a plain `0.1.0` would sort above all
-      # edge builds, and no later edge build could replace it. The change
-      # stays in this runner's checkout.
+      # edge builds, and no later edge build could replace it. For the Arch
+      # package the version is `0.1.0_edge.9`, which pacman sorts above a
+      # plain `0.1.0`: Arch has no `~`. The change stays in this runner's
+      # checkout.
       - name: Give the package a version that grows with every run
         if: steps.changes.outputs.run == 'true'
         run: |
           base=$(node -p 'require("./apps/desktop/package.json").version')
           (cd apps/desktop && npm pkg set "version=$base-edge.${{ github.run_number }}")
 
-      # Builds the release `.deb` and the test package, and checks the
-      # renderer's bundle budget and main's startup file.
-      - name: Build the package
+      # fpm builds the Arch package with `bsdtar` and compresses it with
+      # `zstd`; the runner image has neither guaranteed.
+      - name: Install the tools that build the Arch Linux package
+        if: steps.changes.outputs.run == 'true'
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools zstd
+
+      # Builds the release `.deb` and Arch package and the test package, and
+      # checks the renderer's bundle budget and main's startup file.
+      - name: Build the packages
         if: steps.changes.outputs.run == 'true'
         run: pnpm build:desktop
 
@@ -735,29 +750,66 @@ jobs:
           require_apparmor_profile
           start_and_check upgraded
 
+      # The same check for the Arch package, in a bare `archlinux` container:
+      # pacman installs it with only its dependencies, ldd finds every
+      # library, and the app starts without a sandbox switch. The second
+      # package is the same files built again with a higher version, from the
+      # unpacked app (`--prepackaged`), so pacman's version order and the
+      # install script's upgrade run too.
+      #
+      # An Arch host has no AppArmor, so the restriction the Ubuntu check set
+      # is lifted: the container shares the host's kernel, and with the
+      # restriction on, the app's sandbox in the container would depend on how
+      # Docker confines it, which no Arch user has. Docker's default seccomp
+      # profile blocks the user namespaces the sandbox needs, which a real
+      # Arch kernel allows, so the profile is switched off for this container.
+      - name: Install the Arch package in a bare Arch container, start the app, upgrade it, start it again
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          packages=$RUNNER_TEMP/arch-packages
+          mkdir -p "$packages" "$RUNNER_TEMP/arch-upgrade" "$RUNNER_TEMP/arch-debug"
+          cp apps/desktop/dist/release/Hercule-linux-x86_64.pkg.tar.zst "$packages/first.pkg.tar.zst"
+          version=$(node -p 'require("./apps/desktop/package.json").version')
+          (cd apps/desktop && pnpm exec electron-builder --linux pacman \
+            --prepackaged dist/release/linux-unpacked \
+            --config.directories.output="$RUNNER_TEMP/arch-upgrade" \
+            --config.extraMetadata.version="$version.1")
+          cp "$RUNNER_TEMP/arch-upgrade/Hercule-linux-x86_64.pkg.tar.zst" "$packages/second.pkg.tar.zst"
+          docker run --rm --security-opt seccomp=unconfined --shm-size=1g \
+            -v "$PWD/apps/desktop/container":/check:ro \
+            -v "$packages":/packages:ro \
+            -v "$RUNNER_TEMP/arch-debug":/debug \
+            archlinux:latest \
+            bash /check/arch-install-check.sh /packages/first.pkg.tar.zst /packages/second.pkg.tar.zst /debug
+
       # The screen, the window list and the app's logs, which show why the
       # check failed where the log cannot. They are kept for a week.
       - if: failure() && steps.changes.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: desktop-linux-debug
-          path: ${{ runner.temp }}/desktop-linux-debug
+          path: |
+            ${{ runner.temp }}/desktop-linux-debug
+            ${{ runner.temp }}/arch-debug
           retention-days: 7
           if-no-files-found: ignore
 
-      # Only the `.deb`. The build also writes `latest-linux.yml` for an
+      # Only the two packages. The build also writes `latest-linux.yml` for an
       # updater that does not exist. One day is enough for `edge-build`.
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: hercule-desktop-linux
-          path: apps/desktop/dist/release/Hercule-linux-amd64.deb
+          path: |
+            apps/desktop/dist/release/Hercule-linux-amd64.deb
+            apps/desktop/dist/release/Hercule-linux-x86_64.pkg.tar.zst
           retention-days: 1
           if-no-files-found: error
 
   # Builds the rolling `edge` prerelease: the binary and the desktop app for
   # macOS on Apple silicon, and the Linux binaries and the desktop app's
-  # `.deb`, from the commit that just passed the jobs above
+  # `.deb` and Arch package, from the commit that just passed the jobs above
   # (spec 15 section 1). `edge-publish` then publishes what it built.
   #
   # The asset names and the format of SHA256SUMS are what `install.sh` reads;
@@ -907,9 +959,10 @@ jobs:
           cp linux-binaries/hercule-linux-x64 edge-assets/
           cp linux-binaries/hercule-linux-arm64 edge-assets/
           cp linux-desktop/Hercule-linux-amd64.deb edge-assets/
+          cp linux-desktop/Hercule-linux-x86_64.pkg.tar.zst edge-assets/
           ditto -c -k --keepParent "$APP" edge-assets/Hercule-darwin-arm64.zip
           cd edge-assets
-          shasum -a 256 hercule-darwin-arm64 hercule-linux-x64 hercule-linux-arm64 Hercule-darwin-arm64.zip Hercule-linux-amd64.deb > SHA256SUMS
+          shasum -a 256 hercule-darwin-arm64 hercule-linux-x64 hercule-linux-arm64 Hercule-darwin-arm64.zip Hercule-linux-amd64.deb Hercule-linux-x86_64.pkg.tar.zst > SHA256SUMS
           cat SHA256SUMS
 
       # Installs what is about to be published, the way a user would, with a
@@ -1018,7 +1071,7 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/install.sh | sh
           \`\`\`
 
-          On macOS this installs the desktop app too. On Linux it prints the commands that install the desktop app's \`.deb\`, which needs root.
+          On macOS this installs the desktop app too. On Linux it prints the commands that install the desktop app's \`.deb\` or Arch package, which need root.
           EOF
           # The release or the tag may be gone already, after a run that
           # stopped halfway. A tag that is still there is caught below.

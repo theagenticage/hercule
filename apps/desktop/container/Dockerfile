@@ -45,15 +45,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # window manager and take screenshots of the whole screen; and a keyring,
 # gnome-keyring, with `secret-tool` to look inside it. The third is what the
 # toolchain downloads and unpacks with. `binutils` is there for `ar`, which
-# fpm runs to build a `.deb`. Fonts are DejaVu only, so a
+# fpm runs to build a `.deb`, and `libarchive-tools` (`bsdtar`) and `zstd` for
+# the Arch Linux package. Fonts are DejaVu only, so a
 # screenshot does not depend on whatever a host has installed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libcups2t64 libdrm2 \
       libgbm1 libgtk-3-0t64 libnotify4 libnss3 libsecret-1-0 libx11-xcb1 \
       libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 libxss1 libxtst6 \
       xvfb openbox dbus dbus-x11 x11-utils imagemagick fonts-dejavu-core \
-      gnome-keyring libsecret-tools \
-      ca-certificates curl unzip xz-utils binutils git \
+      gnome-keyring libsecret-tools xdotool \
+      ca-certificates curl unzip xz-utils binutils libarchive-tools zstd git \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /tmp/.X11-unix /cache && chmod 1777 /tmp/.X11-unix && chmod 777 /cache
 

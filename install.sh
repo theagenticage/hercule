@@ -13,10 +13,11 @@
 # - the binary, at ~/.local/bin/hercule;
 # - on macOS, the desktop app, at /Applications/Hercule.app.
 #
-# On Linux it installs no app, because the app is a .deb, which only root can
-# install, and this script runs without root, also on machines with no screen.
-# On x86_64 it prints the commands that download the .deb from the release and
-# install it with apt instead.
+# On Linux it installs no app, because the app is a package, which only root
+# can install, and this script runs without root, also on machines with no
+# screen. On x86_64 it prints the commands that download the package from the
+# release and install it instead: a .deb with apt where apt exists, or an Arch
+# package with pacman where pacman exists.
 #
 # A first install starts nothing. It prints the next step instead. On macOS
 # with the default Hercule Home, that is first the app, which asks whether
@@ -149,9 +150,11 @@ read_installed_hercule_home() {
 main() {
   os=$(uname -s)
   arch=$(uname -m)
-  # The desktop app's package on the release, for the Linux machines that have
-  # one. The release has none for aarch64 yet.
-  deb_name=
+  # The desktop app's package on the release and the command that installs a
+  # package file, for the Linux machines that have one. The release has none
+  # for aarch64 yet.
+  package_name=
+  package_install_command=
 
   # Detect platform and set binary name
   case "$os" in
@@ -169,7 +172,13 @@ main() {
       case "$arch" in
         x86_64)
           binary_name="hercule-linux-x64"
-          deb_name="Hercule-linux-amd64.deb"
+          if command -v pacman > /dev/null 2>&1; then
+            package_name="Hercule-linux-x86_64.pkg.tar.zst"
+            package_install_command="sudo pacman -U"
+          elif command -v apt > /dev/null 2>&1; then
+            package_name="Hercule-linux-amd64.deb"
+            package_install_command="sudo apt install"
+          fi
           ;;
         aarch64) binary_name="hercule-linux-arm64" ;;
         *)
@@ -339,10 +348,12 @@ main() {
     printf '. It joins this %s and starts the runner as a service.\n' "$machine_word"
   fi
 
-  # Installing the .deb takes root, so the script only says how.
-  if [ -n "$deb_name" ]; then
-    printf '\nTo install the desktop app on Debian or Ubuntu, run:\n\n  curl -fL -o /tmp/%s %s\n  sudo apt install /tmp/%s\n' \
-      "$deb_name" "$(quote_shell_word "$release_url/$deb_name")" "$deb_name"
+  # Installing a package takes root, so the script only says how.
+  if [ -n "$package_name" ]; then
+    printf '\nTo install the desktop app, run:\n\n  curl -fL -o /tmp/%s %s\n  %s /tmp/%s\n' \
+      "$package_name" "$(quote_shell_word "$release_url/$package_name")" "$package_install_command" "$package_name"
+  elif [ "$os" = Linux ] && [ "$arch" = x86_64 ]; then
+    printf '\nThe desktop app comes as a package for Debian and Ubuntu (apt) and for Arch Linux (pacman). This machine has neither.\n'
   fi
 }
 

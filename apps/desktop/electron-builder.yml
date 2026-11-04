@@ -1,7 +1,7 @@
-# Packages the desktop app: `Hercule.app` on macOS, a `.deb` on Linux. The
-# product name comes from `productName` in package.json, which Electron also
-# reads at run time, so the app's name and its user data folder agree with the
-# bundle's name.
+# Packages the desktop app: `Hercule.app` on macOS, a `.deb` and an Arch Linux
+# package on Linux. The product name comes from `productName` in package.json,
+# which Electron also reads at run time, so the app's name and its user data
+# folder agree with the bundle's name.
 #
 # `pnpm package` (`scripts/package.ts`) runs electron-builder twice with this
 # config:
@@ -70,7 +70,9 @@ mac:
 # that scoped name. The `.deb` is built with fpm, which needs `ar` from the
 # `binutils` package on the machine that packages.
 linux:
-  target: deb
+  target:
+    - deb
+    - pacman
   executableName: hercule-desktop
   # A 512 pixel PNG, drawn from the Bureau book's app icon tile. `build/icon.svg`
   # is its source.
@@ -106,6 +108,35 @@ deb:
     - libsecret-1-0
     - libasound2t64 | libasound2
     - libgbm1
+
+# The Arch Linux package, built with fpm like the `.deb`. fpm needs `bsdtar`
+# (Arch's `libarchive`, Debian's `libarchive-tools`) and `zstd` on the machine
+# that packages. Arch's package names are not Debian's, and Arch has no
+# recommended packages: pacman installs `depends` and nothing else, so the
+# list has to hold every library Electron loads. A test lists them with ldd on
+# a bare Arch install.
+pacman:
+  packageName: hercule-desktop
+  compression: zstd
+  # `${arch}` expands to `x64` for this target, not to Arch's name for the CPU,
+  # so the name is written out. pacman requires the `.pkg.tar.zst` ending.
+  artifactName: Hercule-linux-x86_64.pkg.tar.zst
+  # electron-builder gives fpm `amd64` for this target, which pacman refuses
+  # as the architecture of a package. Arch calls it `x86_64`.
+  fpm:
+    - --architecture=x86_64
+  depends:
+    - gtk3
+    - libnotify
+    - nss
+    - libxss
+    - libxtst
+    - xdg-utils
+    - at-spi2-core
+    - util-linux-libs
+    - libsecret
+    - alsa-lib
+    - mesa
 
 # The file name every build of the `.deb` has, so the `edge` release can
 # replace it in place. `${arch}` is Debian's name for the CPU, amd64 or arm64.
