@@ -1,6 +1,6 @@
 # Desktop app
 
-The desktop app is a macOS app built on Electron and drawn in the Crew Bureau design system. Like the web app, it is an ordinary client of the public API, with no privileged path ([ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md), [ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)). It shares the contract and `client-core` with the web app, and nothing else.
+The desktop app is a ~~macOS app~~ macOS and Linux app *(amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017))* built on Electron and drawn in the Crew Bureau design system. Like the web app, it is an ordinary client of the public API, with no privileged path ([ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md), [ADR 0017](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)). It shares the contract and `client-core` with the web app, and nothing else.
 
 This document covers:
 
@@ -15,7 +15,7 @@ This document covers:
 
 What a thread does - its sidebar, its transcript, its composer, its Requests - is owned by [./14-web-app.md](./14-web-app.md). This document owns how the desktop app draws that behaviour, and what the desktop adds.
 
-**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings). *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Slices 20 to 22 add [the assistant](#design-system). *(Amended 2026-10-10, [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395).)* Slice 24 adds [the Hercule face](#the-hercule-face), slices 25 to 35 add [Intake](#intake), and slice 36 reopens the last screen at launch. *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* Slices 37 to 40 add [Workflows](#workflows).
+**Status:** locked 2026-09-29 for [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275), with [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md). Slices 1 to 8 are built, ~~except the `link.open` channel (see [The IPC contract](#the-ipc-contract))~~ and the `link.open` channel is built with the first run *(amended 2026-10-02, [A first run in the desktop app that needs no browser and no terminal (#313)](https://github.com/theagenticage/hercule/issues/313), which adds [The first run](#the-first-run))*. *(Amended 2026-10-03, [Office v1 in the desktop app (#332)](https://github.com/theagenticage/hercule/issues/332).)* Slice 9 adds [the Office](#the-office). *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Slices 11 to 19 add [Settings](#settings). *(Amended 2026-10-06, [Desktop app: an assistant's Conversation in Crew Bureau (#448)](https://github.com/theagenticage/hercule/issues/448).)* Slices 20 to 22 add [the assistant](#design-system). *(Amended 2026-10-10, [Write the Intake changes and the build tickets that replace #91 (#395)](https://github.com/theagenticage/hercule/issues/395).)* Slice 24 adds [the Hercule face](#the-hercule-face), slices 25 to 35 add [Intake](#intake), and slice 36 reopens the last screen at launch. *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* Slices 37 to 40 add [Workflows](#workflows). *(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* Linux joins macOS in the first milestone ([Linux](#linux), [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md)).
 
 ## Scope of the first milestone
 
@@ -28,7 +28,7 @@ The first milestone is threads, in a native shell:
 - connecting to a controller, and signing in and out
 - the native behaviour below: the window, the menu and shortcuts, the dock badge and notifications
 
-Everything else comes later (see [Post-v1](#post-v1)). That includes ~~the Hercule face and its screens,~~ the Hercule face's other screens *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, ~~assistants,~~ All sessions, ~~Settings,~~ the desktop app as installer, and Windows and Linux.
+Everything else comes later (see [Post-v1](#post-v1)). That includes ~~the Hercule face and its screens,~~ the Hercule face's other screens *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, ~~assistants,~~ All sessions, ~~Settings,~~ the desktop app as installer, and ~~Windows and Linux~~ Windows *(amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017): Linux moves into v1, below)*
 
 *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run moves into v1: from "the app is installed" to a first thread, with no browser and no terminal ([The first run](#the-first-run)). It brings three pieces with it:
 
@@ -47,6 +47,8 @@ Everything else comes later (see [Post-v1](#post-v1)). That includes ~~the Hercu
 *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [#394](https://github.com/theagenticage/hercule/issues/394), [#512](https://github.com/theagenticage/hercule/issues/512).)* The Hercule face and Intake move into v1. Intake is the list of what a source or an agent asks of the user, and it needs a way in; the way in is the sidebar's second face, which [./14-web-app.md](./14-web-app.md) §App shell already settled and the book draws ([The Hercule face](#the-hercule-face), [Intake](#intake)). The face's other screens stay post-v1: Check-in, Tasks, Runs, ~~Workflows~~ and Notifications *(amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548): Workflows moves into v1, below)*.
 
 *(Amended 2026-10-11, [Desktop Workflows: spec 17 §Workflows and the book's pages (#548)](https://github.com/theagenticage/hercule/issues/548).)* Workflows moves into v1: the list of the user's workflows, an open workflow with its graph and its runs, and a run's page ([Workflows](#workflows)). It reads existing operations and the additions of [#549](https://github.com/theagenticage/hercule/issues/549), and writes only the switches that turn a workflow on and off and pause a start trigger, a run's Cancel and Re-run, and Delete workspace on a run's page. Creating and editing a workflow stay post-v1 ([#543](https://github.com/theagenticage/hercule/issues/543)).
+
+*(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* Linux moves into v1, from [Post-v1](#post-v1): the app runs on Ubuntu 24.04 on x64 and ships as a `.deb` on the `edge` release. Windows stays later. A pull request that changes the desktop app is checked on one platform, Linux or Mac, never both, and CI covers the other ([Testing](#testing), [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md)). What differs on Linux is in [Linux](#linux).
 
 ## Architecture
 
@@ -74,14 +76,14 @@ The desktop app has three layers. Each has one job.
 
 `apps/desktop` (`@hercule/desktop`) is one package with three entry points, `src/main`, `src/preload` and `src/renderer`, plus `src/ipc`, the IPC contract that all three import.
 
-- **Build.** It is the second package with a build of its own, after `apps/web`. Vite builds the three bundles, one config per layer, and `electron-builder` packages the `.app`. The repository is on Vite 8, and `electron-vite` 5 supports only Vite 5 to 7, so a small dev script (`apps/desktop/scripts/dev.ts`) does what `electron-vite dev` would: it starts the renderer's dev server, rebuilds main and the preload when they change, and restarts Electron.
+- **Build.** It is the second package with a build of its own, after `apps/web`. Vite builds the three bundles, one config per layer, and `electron-builder` packages the `.app` on macOS and a `.deb` on Linux *(amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017))*. The repository is on Vite 8, and `electron-vite` 5 supports only Vite 5 to 7, so a small dev script (`apps/desktop/scripts/dev.ts`) does what `electron-vite dev` would: it starts the renderer's dev server, rebuilds main and the preload when they change, and restarts Electron.
 - **Its components are its own.** They live in the renderer. They move into a package of their own only when a second app needs them.
 - **Imports allowed:** `@hercule/contract` and `@hercule/client-core`.
 - **Imports forbidden:** `@hercule/ui`, `@hercule/web`, the controller, the runner, `@hercule/protocol`, `@hercule/plugin-host`, `@hercule/cli` and `@hercule/hercule`.
   - `@hercule/contract` itself imports `@hercule/protocol` and `@hercule/plugin-host`. The desktop app may therefore reach those two through the contract, but never import them itself. The other six are forbidden even through a library.
 - **Imports forbidden within the layers:**
   - The renderer never imports `electron` or a Node built-in.
-  - The preload imports only `electron` and the IPC contract's types.
+  - The preload imports only `electron`, the IPC contract's types, and the platform reader in `src/ipc/platform`. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017).)* The reader imports nothing, so loading it brings in neither the contract nor Effect. The preload needs it to tell the page which platform it runs on ([Linux](#linux)); dep-lint and eslint allow that one folder and nothing else of `src/ipc`.
   - Main never imports React.
 - **`pnpm dep-lint` enforces the import rules.**
 
@@ -327,9 +329,10 @@ The flow is the web app's ([./14-web-app.md](./14-web-app.md) §Auth in the clie
 
 Only the storage differs:
 
-- **At rest,** main encrypts the token with Electron's `safeStorage` and writes it into the app's user data directory. On macOS, `safeStorage` keeps its key in the Keychain. The token is never in `localStorage` and never on disk in plain text.
+- **At rest,** main encrypts the token with Electron's `safeStorage` and writes it into the app's user data directory. On macOS, `safeStorage` keeps its key in the Keychain. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017).)* On Linux it uses the desktop's keyring (`gnome_libsecret`, or a KWallet backend). The token is never in `localStorage` and never on disk in plain text.
 - **It is stored together with the controller URL it belongs to,** so one controller's token is never sent to another. Both sit in the app's settings file and change in one write. Connecting to a different controller deletes the token; connecting to the same one again keeps it. The URL is encrypted together with the token, and main deletes a token whose URL does not match the saved one, or that has no saved URL beside it, or whose encrypted value names no URL. Otherwise another program could edit the settings file and have the token sent to a server of its own.
-- **When the Keychain fails:**
+- **When the Keychain fails** (the keyring, on Linux):
+  - *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017).)* On Linux these also count as a failure: Electron's `basic_text` backend, its `unknown` backend, and a keyring that cannot be reached (not running, or locked). `basic_text` encrypts with one key written in Electron's source, so it protects nothing. Electron picks it on its own when it does not recognise the desktop, and it reports encryption as available or not depending on its version, so the app does not ask: it reads the backend and refuses these three. A failure is handled as below, and the sheet and the log say "keyring" where a Mac's say "Keychain".
   - If the saved token cannot be decrypted, for example because the Keychain key changed or access was denied, main deletes it, and the user signs in again.
   - If a new token cannot be encrypted, main saves nothing and tells the user they will have to sign in again next time. The user stays signed in for this run. There is no plain-text fallback.
 - **At boot,** the renderer reads the token once through the bridge, before it creates the client. Its `TokenStore` then reads from memory, and each write is sent to main.
@@ -361,7 +364,7 @@ So the released app is signed with one certificate for every build ([Security ba
   - `RunAsNode` off
   - `EnableNodeOptionsEnvironmentVariable` off
   - `EnableNodeCliInspectArguments` off
-  - `EnableEmbeddedAsarIntegrityValidation` on
+  - `EnableEmbeddedAsarIntegrityValidation` on *(amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017): Electron implements this fuse only on macOS and Windows, so on Linux it is set and does nothing; see **What Linux does not have**, below)*
   - `OnlyLoadAppFromAsar` on
   - `GrantFileProtocolExtraPrivileges` off: the app loads nothing over `file://`
 - **The test package differs from the release package in one fuse.** Playwright's Electron driver attaches through `--inspect`, which `EnableNodeCliInspectArguments` turns off. The end-to-end tests and the perf script therefore run a second package with only that fuse on. A packaging test reads every fuse off the release `.app` and checks it.
@@ -375,6 +378,7 @@ So the released app is signed with one certificate for every build ([Security ba
   - `--user-data-dir=<folder>` gives each test its own folder. It exposes nothing: a program that can write a folder it names can write the app's own.
   - `-ApplePersistenceIgnoreState` followed by `YES` keeps macOS from offering to reopen windows after a test stops the app. The app does not use window restoration.
 - **The refusal applies only while the Node inspector is closed.** An open inspector already gives full control of main, so refusing arguments would add nothing. The release package's fuse keeps the inspector closed, so there the refusal always applies. The test package runs with the inspector open, which lets Playwright pass `--remote-debugging-port` and the tests pass `--use-mock-keychain`.
+- *(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* **`--use-mock-keychain` on Linux** does nothing by itself, as Chromium reads the switch only on macOS. Main turns it into Electron's fixed-key mode (`safeStorage.setUsePlainTextEncryption(true)`) only while the Node inspector is open, so the release package, whose inspector stays closed, never reaches it. The tests pass `--password-store=basic` with it, because the fixed-key mode only allows the `basic_text` backend and does not select it. Electron chooses its backend before the app is ready, from the desktop variables and the D-Bus session it inherits, and a test started on a GNOME or KDE desktop would reach that developer's real keyring. With both switches no test does. The launches of the release package, and the real-keyring launches of `e2e/desktop/keyring.test.ts`, pass neither.
 - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* **`--hercule-binary=<path>` is a test switch like `--use-mock-keychain`.** It names the binary main runs in place of `~/.local/bin/hercule` ([The first run](#the-first-run)). It is not on the allow-list, and main reads it only while the inspector is open. So a released app never lets anyone choose which binary main runs, and the end-to-end tests can run a stand-in.
 - *(Added 2026-10-19, [#796](https://github.com/theagenticage/hercule/issues/796).)* **Thread copies keep transcripts unencrypted on disk.** The copies ([Thread copies](#thread-copies)) sit in the renderer's IndexedDB, inside the app's user data folder. Any program running as the user can read that folder, as it can read the rest of it. Unlike the token, the copies are not encrypted with `safeStorage`.
   - **Why this is accepted:** the controller already holds every transcript unencrypted in its database, so a copy adds no new kind of data. The app treats the user's Mac account as the trust boundary for it. The token is encrypted because it gives access to the controller; a copy gives none, but it holds the data.
@@ -392,6 +396,15 @@ So the released app is signed with one certificate for every build ([Security ba
   - `disable-library-validation`, because the self-signed certificate has no Team ID, and with library validation on macOS refuses to load Electron's frameworks into the app. So the libraries the app itself loads are not checked against its signature; a Developer ID, which has a Team ID, removes this exception.
 - An ad hoc build, such as a pull request's or the test package, runs without the hardened runtime. CI runs the packaging test on the signed `edge` build too, so a build under the runtime is checked to start.
 - **Gatekeeper does not trust the certificate.** The app still opens, because the installer downloads it with `curl`, which sets no quarantine flag.
+
+*(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* **What Linux does not have.** The baseline above holds on Linux except for these points. The fuses are set the same on both platforms, so a passing packaging test says nothing about them:
+
+- **No hardened runtime.** A program of the same user can start the app with a library of its own in `LD_PRELOAD`, and run inside the process that holds the token's key. The Mac's hardened runtime stops the equivalent, `DYLD_INSERT_LIBRARIES`.
+- **No integrity check of `app.asar`.** Electron implements `EnableEmbeddedAsarIntegrityValidation` only on macOS and Windows, so on Linux a program of the same user can change the app's code.
+- **`ELECTRON_DISABLE_SANDBOX` turns the sandbox off.** Electron turns Chromium's sandbox off on Linux when the variable exists in the environment at all, even with an empty value. The app does not refuse it, because a program of the same user that can set an environment variable can already use `LD_PRELOAD`. The tests of the release package remove the variable from the launch, and the `desktop-linux` CI job checks that the app it started has not got it. The test package runs with `--no-sandbox` on Linux, which Playwright passes itself, so only the release package's tests show that the sandbox works.
+- **The sandbox needs the package.** The app refuses `--no-sandbox`. Chromium's sandbox on Linux needs user namespaces, which Ubuntu 24.04 restricts for programs without an AppArmor profile. The `.deb` installs the profile, and sets the SUID bit on the sandbox helper only where user namespaces do not work. So the `.deb` is the supported way to install the app.
+- **The token is as safe as the user's keyring.** An unlocked keyring gives the token to any program of the same user that asks it, as on a Mac. On a desktop that Chromium does not recognise, such as i3, sway or openbox, Electron picks `basic_text` even when an unlocked keyring runs. The app then stores no token, and the user signs in on each launch ([Auth and the token](#auth-and-the-token)). Whether to pick a keyring there is open in [#1018](https://github.com/theagenticage/hercule/issues/1018).
+- **Thread copies rest unencrypted on disk,** as on a Mac ([Thread copies](#thread-copies)). Disk encryption is the user's protection for a lost or stolen machine.
 
 ## The IPC contract
 
@@ -463,7 +476,7 @@ A new channel is added to the contract, and to this table, in the same change.
 
 ## Native behaviour
 
-Each item below is an acceptance criterion. The end-to-end test checks it where it can.
+Each item below is an acceptance criterion. The end-to-end test checks it where it can. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017).)* The items are the macOS app's. [Linux](#linux) lists where Linux differs: the window's frame, what closing the window does, the menu, the shortcut key and the order in which the window shows.
 
 - **Title bar:**
   - `titleBarStyle: "hiddenInset"`, with the traffic lights sitting in the sidebar's top strip. *(Amended 2026-10-13, [#626](https://github.com/theagenticage/hercule/issues/626).)* While the sidebar is hidden, they sit over the main pane's top band ([The sidebar's layout](#the-sidebars-layout)).
@@ -474,6 +487,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - It is shown when the frame that draws its first screen, fonts included, has reached the window, or 3 seconds after its page first painted, whichever is first. It is also shown at once when its page fails to load or its renderer exits. Showing on `ready-to-show` would show an empty page for a few frames: `ready-to-show` fires when the bare HTML first paints, 50 to 80 ms before the first screen has painted.
   - The 3-second limit means a renderer that fails before it reports still gets its window. It sits well above the "connecting" screen's 1-second delay, because that delay starts only once the renderer's code has loaded and its router has started, and fonts and a few frames follow it. So a healthy renderer shows its window by reporting, even on a slow Mac's cold launch. A crash or a failed load does not wait for the limit.
   - The renderer reports its first screen through the IPC contract once the frame that draws it has been presented: it times a sentinel element that draws nothing with Element Timing, whose entry arrives only once its frame has been presented, or has failed to present. A frame that fails to present is rare; the window then shows a frame early, and the screen appears with the next frame. Two animation frames are not enough, because the second can run before the first frame has reached the window. The "connecting" screen reports too, so a slow controller does not keep the window hidden.
+  - *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017).)* **On Linux the report comes first.** Under X11 a hidden window presents no frame, so the frame never reaches the window while main keeps it hidden. A page that waited for it would run into the 3-second limit at every launch, and main would log an error. On Linux the page therefore waits until the screen has its layout, its fonts and two animation frames, which Chromium runs for a hidden window. It then starts observing presentation, reports the first screen, and main shows the window. The page goes on to wait for the real presentation, and the first-screen mark is still the time of a presented frame (`presented-frame.ts`). The order is the reverse of a Mac's: on Linux the window shows before its first screen has been presented, on a Mac after. The first-frame check cannot tell what the first frames look like on Linux, because it needs macOS.
   - When the appearance changes, main updates the background colour. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* So does a change on the Appearance page.
 - **Theme follows the system, live:** Whitehaven when macOS is light, Orient Express when it is dark, through `prefers-color-scheme`. ~~Bureau's other three themes, and a glass setting, arrive with Settings.~~ *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* These are the defaults. Appearance picks the day and the night theme, or one theme that does not follow the system, and the glass level ([Settings](#settings)).
 - **Accessibility settings:**
@@ -545,6 +559,30 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - ~~Scroll bars are the system's overlay scroll bars, unstyled, so they follow the System Settings choice.~~ Scroll bars are thin and drawn in the theme's ink, with no track behind them. *(Amended 2026-10-20.)* macOS draws classic scroll bars, 15px wide on a white track, whenever a mouse is attached, and they clash with every theme. `scrollbar-width: thin` and a `scrollbar-color` of the ink at 30% on a transparent track replace them (`styles/base.css`). The thumb darkens to the ink at 50% while the pointer is over the scroll area; CSS cannot target the thumb itself. `scrollbar-color` is declared on every element, so a hover restyles only the hovered elements: 0.1 ms for a 3,900-element list, against 1.6 ms when it is set once on the root and overridden on hover. Both macOS styles keep their behaviour: with a trackpad the bar is an overlay that takes no room and fades out while the list is still, and with a mouse the bar is 11px wide (`--scrollbar-width`). The `::-webkit-scrollbar` pseudo-elements stay unused, because they always take room, even where macOS draws an overlay. The cost is CSS alone: no process, no timer and no work while idle, and +206 bytes of CSS in the bundle (+42 gzipped). It does add a small style cost on a theme change and on a pointer move, and nothing is measured yet on a streaming transcript in the packaged app; both are recorded in [Measured](#measured).
   - Right-clicking text opens the native context menu (Copy, Look Up, Search). Right-clicking chrome opens nothing. *(Amended 2026-10-31, [#936](https://github.com/theagenticage/hercule/issues/936); slice 44.)* One exception: a right-click on a project's heading in the sidebar opens the project's own menu, a renderer popover with "Model profile" ([Providers](#the-sections), Models, "A project's profile"). It is not a native menu. The heading of the threads that belong to no project opens nothing. The menu has no keyboard path yet, because a sidebar heading is not focusable; the profile can also be set in the New project form and with `hercule project update --model-profile`.
 - **The composer draws the ~~`+` attach and~~ voice ~~buttons~~ button, with nothing behind ~~them~~ it yet.** ~~They keep~~ It keeps the composer's full shape, as in the web app ([./14-web-app.md](./14-web-app.md) §App shell). ~~They show their~~ It shows its hover and pressed states, and a click does nothing. *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465): `+` attach now attaches images; see [Images in prompts](#images-in-prompts).)*
+
+## Linux
+
+*(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* The app runs on Linux as well as on macOS. The first format is a `.deb` on the `edge` release, for Ubuntu 24.04 on x64 ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §1). Where this document says Mac or macOS, it describes the macOS app. This section, and the lines that name Linux, say where Linux differs. Windows stays later ([Post-v1](#post-v1)). Making the client feel Linux-native (shortcut labels, wording, the window's top strip, an update path, arm64) is [#1018](https://github.com/theagenticage/hercule/issues/1018).
+
+### What differs
+
+Main reads the platform once, at start, and throws on any system but macOS and Linux (`readDesktopPlatform(process.platform)`). `main/platform-behaviour.ts` maps the platform to what differs, and nothing else in main tests the platform.
+
+| | macOS | Linux |
+|---|---|---|
+| Window frame | `hiddenInset`, with the traffic lights in the sidebar's top strip | The system's own frame and title bar |
+| Closing the window | Hides it; the Dock icon shows it again | Quits the app, because there is no Dock to bring a hidden window back from. Main stops the close and starts the quit while the window still exists, so its state is saved |
+| App menu | macOS's own, with Services, Hide, Hide Others, Show All, Substitutions and Speech | An ordinary menu named Hercule, without those items |
+| Toggle Developer Tools | Electron's own shortcut | `F12`, because Electron's `Ctrl+Shift+I` is also Go › Intake |
+| Shortcut key | `⌘` | `Ctrl` |
+| Key store for the token | The Keychain | The desktop's keyring |
+| First screen | The page reports once its frame has been presented, then the window shows | The page reports before its frame is presented, the window shows, then the page waits for the presentation ([Native behaviour](#native-behaviour), No flash) |
+
+- **The page reads the platform from `bridge.platform`,** which the preload sets from `process.platform`. It never reads `navigator.platform`, so a page drawn outside the app, such as the specimens, the goldens and the test bridges, says `mac` and keeps the Mac look. A component that needs the platform takes it from the bridge or as a prop. A missing platform is a type error, never a silent Mac default.
+- **The shortcut key.** The menu's accelerators are `CmdOrCtrl`, so the menu shows and takes `Ctrl` on Linux with no code of ours. The renderer's own shortcuts ask `isPrimaryModifierHeld(event, platform)`: `⌘` on a Mac, `Ctrl` on Linux. On a Mac `Ctrl` is never the primary key, because `Ctrl+F` and `Ctrl+A` are text-editing keys there. This document writes `⌘` throughout; on Linux read `Ctrl`. The tooltips and key hints still draw `⌘` on Linux ([#1018](https://github.com/theagenticage/hercule/issues/1018)).
+- **The preload may import `src/ipc/platform`.** This is a deliberate small exception to "the preload imports only `electron` and the contract's types" ([Package](#package)). The folder imports nothing, so the preload loads neither the contract nor Effect. dep-lint and eslint allow that folder and no other part of `src/ipc`.
+- **Not checked on a Linux desktop yet,** and so not promised: the badge count (`app.setBadgeCount`), the native notifications, and the system's dark theme and accessibility settings. They are the macOS text above until [#1018](https://github.com/theagenticage/hercule/issues/1018) checks them.
+- **The token and the security baseline differ,** as [Auth and the token](#auth-and-the-token) and [Security baseline](#security-baseline) (**What Linux does not have**) say. The measurements differ too: [Performance](#platforms).
 
 ## Design system
 
@@ -3019,6 +3057,33 @@ Measured on Linux on 2026-10-29 with `vite build --config vite.renderer.config.t
 
 **Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS, and this was run on Linux. The design adds no process, timer or listener, but that is the design and not a measurement. On 2026-10-29 Rogier excepted #895 from the macOS readings and from `pnpm test:desktop`, as for #893, #894 and #897: it merges without them.
 
+*(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* **Linux, issue #1017.** The change makes the app run on Linux. It adds a platform and no feature, so the cost is the cost of the code that tells the platforms apart, and of the Linux path to the first screen. The cost:
+
+- **Processes:** none added. On Linux Chromium has two zygotes, helpers that fork the other processes. The perf script lists them and does not count them against the four.
+- **Work while idle:** none added. The platform code is a table that main reads once, and a string the preload reads once. No timer, listener or subscription belongs to it.
+- **Work per streamed token:** none added. The streaming path is not touched. A shortcut compares one more string per key event.
+- **Work at launch:** on Linux the page waits for two animation frames before it reports its first screen. The macOS path is unchanged.
+- **Memory:** a few small modules in main and the preload, and one string in the bridge. No Mac reading was taken: the change was checked on Linux, as [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md) allows. On Linux there is no earlier build to compare with, because the app did not run there. The first Linux reading is the reference table under [Platforms](#platforms), and later changes compare with it.
+- **Bundle bytes:** main's startup file grew by about 1.5 kB and the renderer's first screen by 0.3 kB. The estimate before the build was under 2 kB for main.
+
+Measured on Linux on 2026-11-04 with `pnpm --filter @hercule/desktop build` and `check-bundle-budget.ts` called as `build:desktop` calls it, before (`fd6e40ba2`, the commit this branch started from) and after (`90361a5b1`, the head of the Linux work), each in a temporary worktree of its own. Gzipped figures use `Bun.gzipSync`, as the checker does, and a kB is 1,024 bytes.
+
+| Measure | Budget | `fd6e40ba2` | `90361a5b1` | Change |
+|---|---|---|---|---|
+| Main's startup file (`out/main/index.js`), minified | 170 kB (174,080 bytes) | 172,560 bytes (168.5 kB) | 174,109 bytes (170.0 kB) | +1,549 bytes. **Over the budget by 29 bytes.** Before this change 1,520 bytes were left |
+| The same file, gzipped | none | 57,731 bytes | 58,414 bytes | +683 bytes |
+| Main's chunks loaded on first use (4 files) | none | 82,162 bytes | 82,162 bytes | none |
+| The first screen's total, as `check-bundle-budget.ts` counts it | 250 kB guide | 486.8 kB (27 chunks) | 487.1 kB (28 chunks) | +0.3 kB. Over the guide as before. The new chunk is `primary-modifier` |
+| The entry chunk (`first-screen-*.js`), gzipped | none | 431,014 bytes | 431,164 bytes | +150 bytes |
+| The Office's chunk, gzipped | 241.5 kB (247,296 bytes) | 237,012 bytes | 237,009 bytes | -3 bytes |
+| Every JavaScript and CSS file in `out/renderer`, raw | none | 3,848,915 bytes (180 files) | 3,850,966 bytes (181 files) | +2,051 bytes |
+| The same files, each gzipped and summed | none | 1,252,683 bytes | 1,253,661 bytes | +978 bytes |
+| The preload bundle | none | 1,385 bytes | 1,600 bytes | +215 bytes |
+
+**Main's startup file is 29 bytes over its budget.** `build:desktop` passes because it runs the check with `--guide`. The budget stands as written. It is for Rogier to decide whether main gives the bytes back or the budget is raised with its reason, as for [#892](https://github.com/theagenticage/hercule/issues/892).
+
+**Not measured:** a Mac. Process count, memory, idle wakeups and the time of a streamed row were not taken on a Mac, and the Linux perf run has no earlier build. The design adds no process, timer or listener, but that is the design and not a measurement.
+
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
 
 - **A slice is not measured against the budgets,** and a reading over one does not stop it. The perf script and the size checks in `pnpm build:desktop` report such a reading and pass.
@@ -3061,7 +3126,7 @@ What the numbers show:
 
 ### Budgets
 
-The reference setup:
+The reference setup *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017). These budgets were measured on a Mac, and are judged on a Mac; [Platforms](#platforms) says how a Linux reading relates to them.)*:
 
 - the machine above
 - the packaged app
@@ -3126,6 +3191,45 @@ These are starting budgets. The first performance pass measures the real thread 
 
   The limits started above the capped reading, at 20% and 35%, so v1 could ship with the cap alone. The Office's first measurement in the app brought them down to its highest readings plus 10%, as every budget comes down ([Measured](#measured)).
 - **Memory and the chunk took their limits from the Office's first measurement** ([Measured](#measured)), because before it no measurement of the Office inside the packaged app existed, and a limit would have been a guess. The memory limits come from the highest of eight launches, so the swing between launches, about 7%, does not fail the next change. With the Office open, the app holds several times the app's own Memory row: almost all of it is the GPU process's, and bringing it down is [#370](https://github.com/theagenticage/hercule/issues/370). The first run's room already reads above the app's memory budget ([#330](https://github.com/theagenticage/hercule/issues/330)).
+
+### Platforms
+
+*(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* The app runs on macOS and on Linux, and a desktop change is measured on one of them, the one its author has. A Mac and a Linux machine read different things, so each budget is judged only where its reading means the same.
+
+**Judged on a Mac only.** Every budget above was measured on the reference Mac and stays as written: the times of launch and paint, the summed footprint and the renderer's, the wakeups and the CPU. A Linux reading is never compared with them. The perf script prints it, with a note that says so, and does not judge it.
+
+**Judged on both, because they are counts:**
+
+- the process count, with the zygotes listed and not counted;
+- bundle bytes;
+- work per streamed token: writes per frame, and reads per push;
+- no idle timers: the age clock's fires, read counts and topics held.
+
+**Judged on Linux, before against after.** Memory and time on Linux have no budget. A change is compared with the same tree without it, on the same machine and setup, back to back in the same container image, with the host's load recorded. The tolerance is about 5 MB of PSS summed and 3 MB for the renderer. A time needs repeats, because one launch can be several hundred milliseconds off (see the table).
+
+**A change is measured on the platform its author has.** A Linux author is not blocked by a Mac budget, and a Mac author is not blocked by a Linux reading. The record of the change in [Measured](#measured) names the platform.
+
+**What the readings are called on Linux:**
+
+- Memory is the proportional set size (PSS) from `/proc/<pid>/smaps_rollup`. It is not the physical footprint. Do not call it footprint.
+- A voluntary context switch is not a wakeup. Electron reports voluntary context switches as `idleWakeupsPerSecond` on Linux, and the kernel's interrupt wakeups on a Mac.
+- The start time of the GPU and renderer processes is not measured. Linux gives it to the second, so the steps read before the app was spawned.
+
+**What Xvfb and software rendering distort.** The container's screen is Xvfb with a window manager (openbox). The GPU process draws on the CPU, so its memory and CPU are not a GPU's. The gaps between frames mean little. Launch and paint times follow the host's load. The renderer's and the browser's memory are the most trustworthy Linux readings.
+
+**The Linux reference table,** measured on 2026-11-04 with `--providers-only` (40 threads), in the container image of `apps/desktop/container`, on an AMD Ryzen 7 255 (16 CPUs, 27 GB) with Docker 29.9, Electron 44.4.5 and Xvfb at 1920 by 1080 with openbox. The host was quiet.
+
+| Measure | Settings › Profile open | Settings › Providers open |
+|---|---|---|
+| Window shown, from spawn | 703 ms | 390 ms |
+| PSS, summed | 343 MB | 355 MB |
+| PSS, the renderer | 110 MB | 122 MB |
+
+- **The Providers launch, by process:** Browser 94 MB, GPU 81, Network 30, Tab (the renderer) 122, and two zygotes of 14 MB each. The sum includes the zygotes.
+- **The working set,** summed, is 673 MB. It counts the pages the processes share once in each.
+- **Idle:** about 0.5% of a core for the Browser and about 1% for the renderer. The age clock fired 0 times.
+- **The first launch of a run is not stable.** Across runs it took from 399 to 871 ms to show the window, and the cause is not known. Do not read a single launch.
+- **Re-record the table on any Electron or image change.** Run `pnpm --filter @hercule/desktop perf -- --providers-only` in the container, which takes about 7 minutes. Use the `docker run` line of `apps/desktop/container/run.sh` with that command in place of the test command, and run it from a worktree of your own: a shared tree is rebuilt by other agents while it runs.
 
 ### Rules
 
@@ -3199,7 +3303,7 @@ These rules keep the budgets:
 
 ### Measuring
 
-- **The perf script.** A script in `apps/desktop` launches the packaged app against a controller in a scratch `HERCULE_HOME`, opens the fixture thread, and reports the budget table.
+- **The perf script.** A script in `apps/desktop` launches the packaged app against a controller in a scratch `HERCULE_HOME`, opens the fixture thread, and reports the budget table. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017).)* It runs on macOS and on Linux. Run it in the container on a headless Linux machine. On Linux it reads the numbers named under [Platforms](#platforms), and shows a Mac budget without judging it. Everything below describes a Mac run unless it says Linux.
   - **No tool is attached while it reads memory, CPU and wakeups.** It reads them from a plain launch of the app. An attached Playwright makes the renderer read 7 to 14 MB higher.
   - **The plain launch passes three switches:** `--inspect=0` and `--remote-debugging-port=0` open main's Node inspector and a DevTools port, which the script connects to only while it reads, and `--use-mock-keychain` lets the app read the token saved at sign-in without the real Keychain.
   - **The measured launch is the app's third.** On the second, Chromium writes its code cache, and the renderer reads about 7 MB higher.
@@ -3214,7 +3318,7 @@ These rules keep the budgets:
   - **CPU is a share of one core:** the growth of `cumulativeCPUUsage`, in seconds, divided by the seconds sampled. `percentCPUUsage` cannot be used for this: on macOS, Electron divides it by the number of logical CPUs, so on the reference machine's 16 it reads one sixteenth of a share of one core.
 - **CI checks what does not depend on the machine:**
   - the renderer bundle budget and main's startup file. While the budgets are guides, a build over one prints a warning and passes.
-  - ~~the process count. A new process fails the test, because it changes the process model, which a slice must justify.~~ *(Amended 2026-10-01, [#275](https://github.com/theagenticage/hercule/issues/275).)* The process count is checked by the end-to-end suite, which runs on a developer's Mac, not in CI (see [Testing](#testing)). A new process fails that test, because it changes the process model, which a slice must justify.
+  - ~~the process count. A new process fails the test, because it changes the process model, which a slice must justify.~~ *(Amended 2026-10-01, [#275](https://github.com/theagenticage/hercule/issues/275).)* The process count is checked by the end-to-end suite, which ~~runs on a developer's Mac, not in CI~~ runs on the author's platform and in CI on Linux *(amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017))* (see [Testing](#testing)). A new process fails that test, because it changes the process model, which a slice must justify.
   - ~~no long tasks while streaming the fixture, once slice 5 streams. While the budgets are guides, it only reports.~~ *(Amended 2026-09-30, [#275](https://github.com/theagenticage/hercule/issues/275).)* CI does not count long tasks. How long a task runs depends on the machine: a task that runs 40 ms on the reference machine can run 80 ms on a slower one.
 - **The rest is recorded by each performance pass,** in [Measured](#measured). Launch time, memory, wakeups and long tasks depend on the machine, so they are measured on the reference machine.
 
@@ -5409,15 +5513,21 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - decoding against the IPC contract
   - that a face's seed always gives the same face
 - **Renderer component tests** work as they do in `apps/web`.
-- **End-to-end tests** live in `e2e/desktop/`. They use Playwright's Electron driver to launch the test package (see [Security baseline](#security-baseline)) against the compiled `hercule` binary, in a scratch `HERCULE_HOME`. Each slice adds at least one. They run the production origin, so they cover the CORS path. ~~CI runs them on macOS, the target platform.~~ *(Amended 2026-10-01, [#275](https://github.com/theagenticage/hercule/issues/275).)* They run on a developer's Mac, before a pull request that changes the desktop app, and not in CI. They check windows, pixels and timing, and CI's virtual Macs differ from a user's Mac in all three: a 1024 × 768 screen at 1x with the Dock showing, Reduce motion and Reduce transparency on, and a slow machine. There, 5 of the 98 tests that pass on a developer's Mac failed. In one, macOS shrank a saved 1000 × 700 window to fit a work area 679 points high, as it should, and the test expected the window to keep its size.
-  - *(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* One file does run in CI: the `edge-build` job runs `e2e/desktop/package.test.ts` on the certificate-signed release package, which only that job builds, under the hardened runtime. The test checks the fuses, `app.asar`, the signature, and that the app starts and quits; none of that depends on the screen or the machine's speed.
+- **End-to-end tests** live in `e2e/desktop/`. They use Playwright's Electron driver to launch the test package (see [Security baseline](#security-baseline)) against the compiled `hercule` binary, in a scratch `HERCULE_HOME`. Each slice adds at least one. They run the production origin, so they cover the CORS path. ~~CI runs them on macOS, the target platform.~~ *(Amended 2026-10-01, [#275](https://github.com/theagenticage/hercule/issues/275).)* ~~They run on a developer's Mac, before a pull request that changes the desktop app, and not in CI.~~ *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* They run on macOS and on Linux. A pull request that changes the desktop app needs them green on one of the two, never both, and CI covers the other (**Where they run**, below). They check windows, pixels and timing, and CI's virtual Macs differ from a user's Mac in all three: a 1024 × 768 screen at 1x with the Dock showing, Reduce motion and Reduce transparency on, and a slow machine. There, 5 of the 98 tests that pass on a developer's Mac failed. In one, macOS shrank a saved 1000 × 700 window to fit a work area 679 points high, as it should, and the test expected the window to keep its size.
+  - *(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017); [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md).)* **Where they run.**
+    - `pnpm test:desktop` runs on macOS and on Linux, after `pnpm build:binary` and `pnpm build:desktop`.
+    - On a headless Linux machine with Docker, `pnpm test:desktop:container` builds the image in `apps/desktop/container`, builds the binary and the app in it, and runs the suite on a virtual screen (Xvfb with openbox, a D-Bus session and GNOME Keyring). Its arguments go to `vitest`, such as one test file.
+    - A test of something that exists on one platform only runs there: the signature check and the traffic lights on macOS, the keyring test on Linux. Every other test runs on both.
+    - The tests that depend on a screen's size, its accessibility settings or the machine's speed are skipped on a hosted Mac, where CI cannot make them true. The macOS job runs the files that do not depend on those, and `pnpm compare:bureau`. The Linux jobs run the whole suite, install the `.deb` on a real Ubuntu 24.04 host to check that the sandbox starts, and run `ui:metrics`.
+    - So a Mac-only regression in what the skipped tests check can reach `main` without a developer having seen it. That is accepted ([ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md)). A Mac budget is judged only when someone measures on a Mac ([Platforms](#platforms)).
+  - *(Amended 2026-10-01, [#308](https://github.com/theagenticage/hercule/issues/308).)* One file ~~does~~ ran in CI at first, and more run now *(amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017))*: the `edge-build` job runs `e2e/desktop/package.test.ts` on the certificate-signed release package, which only that job builds, under the hardened runtime. The test checks the fuses, `app.asar`, the signature, and that the app starts and quits; none of that depends on the screen or the machine's speed.
   - Each launch passes `--user-data-dir=<scratch dir>`, so the settings file, the token and the single-instance lock never touch the real app's.
   - Each launch passes `--use-mock-keychain`, so no test touches the real Keychain.
   - Each launch removes `ELECTRON_RUN_AS_NODE` and every `HERCULE_*` variable from Electron's environment.
   - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Each launch that opens main's inspector passes `--hercule-binary=<path in the user data dir>`, so main runs that path in place of `~/.local/bin/hercule` and no test runs this Mac's own `hercule service`: even `status` reads this Mac's launchd, and `install` writes `~/Library/LaunchAgents/` whatever the Home is. With no file there, main finds no binary. A first-run test writes a stand-in there with `e2e/desktop/stand-in-binary.ts`: a script with a scratch Home that answers `service status --json`, `service install --json` and `setup-url`. Its `serve` kind starts the compiled `hercule serve` in that Home on install, in a session of its own as launchd would, with a `PATH` of only `/usr/bin` and `/bin`, so its runner finds no coding agent and the providers step is never done whatever the Mac has installed *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*; the others fail the install with one line (`start-error`), report a runner (`runner`), or report no Service Unit with nothing answering (`fresh`). Main accepts the switch only where it accepts every argument: in a development run, or with the inspector open. A release package refuses it.
 - **Screenshots.** ~~Every slice takes light and dark screenshots of its screens, and they are compared with the Bureau pages before review.~~ A change to a screen is checked against the app's goldens (**The app's goldens**, below). A screen the goldens do not cover is checked by eye, with the `capture:*` commands this section lists. *(Amended 2026-10-26, [#855](https://github.com/theagenticage/hercule/issues/855); [ADR 0047](../adr/0047-the-desktop-app-is-its-own-pixel-reference.md).)*
   - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* `pnpm --filter @hercule/desktop capture:sidebar-states` captures the sidebar states the book never draws, in both themes, for a check by eye: ~~workspace labels~~ workspace lines and unsent rows *(amended 2026-10-08, [#473](https://github.com/theagenticage/hercule/issues/473))*, offline, queued, asleep and away threads, long names, the caps and their "more" rows, and "No project". It writes them to `apps/desktop/out/sidebar-states/`.
-- **The Bureau comparison.** `pnpm compare:bureau` compares the app's pieces with the book's, pixel for pixel, in Whitehaven and Orient Express. CI runs it.
+- **The Bureau comparison.** `pnpm compare:bureau` compares the app's pieces with the book's, pixel for pixel, in Whitehaven and Orient Express. CI runs it. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017). It runs on macOS, in CI. Nobody needs a Mac for it, and it is not run by hand.)*
   - *(Amended 2026-10-26, [#855](https://github.com/theagenticage/hercule/issues/855); [ADR 0047](../adr/0047-the-desktop-app-is-its-own-pixel-reference.md).)* **It compares the piece sheet only.** The comparisons of whole screens, in the bullets below and in the area bullets after them (the sidebar, thread, draft, Workflows, Settings, the assistant, the Hercule face's switch and Intake), are replaced by the app's goldens ([The app's goldens](#testing), below). Their sentences stay as the record of how those screens were first compared, and each `pnpm compare:bureau` that names a screen in the area bullets is replaced by the goldens. Both sides of the piece sheet draw on the book's frozen palette, the book's `tokens.css`, so retuning a theme in the app does not fail it. The comparison covers how the pieces are drawn, not the app's colours.
   - Two sheets draw the same cells in a 1440 × 900 window: the reference sheet with the book's own `crew.js` from ~~`docs/design/crew-bureau/`~~ `docs/design/crew-bureau-2/` *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*, the specimen sheet with the app's components. A cell is a face in a pose, size, shape or wardrobe, the user avatar, a mark or an icon.
   - *(Added 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* ~~It also compares the app's sidebar with the sidebar of the book's `session-active.html`, item by item, with the app fed the book's threads at the book's time.~~
@@ -5434,8 +5544,8 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
   - The same Playwright Chromium code as `capture:ui` records them, so a nightly run on a Linux machine can re-record them. The job's budget is 3 minutes.
   - The comparison is exact: every decoded pixel is equal. A missing golden, an extra golden and a size mismatch fail it too.
   - `pnpm --filter @hercule/desktop ui:metrics --write-goldens` re-records them. It never skips the metrics ratchet. Every golden that moved is looked at before it is committed, as the Android app's Roborazzi goldens are.
-  - The goldens do not cover what shows only on a Mac, such as font smoothing on an external monitor at 1x. An eye check on a Mac covers that.
-- **The first-frame check.** `apps/desktop/scripts/first-frame.ts` records the window with ScreenCaptureKit as macOS first puts it on screen, and checks that it already holds the whole first screen, focus ring included, for the sign-in screen and the shell in both themes. Re-run it after every Electron upgrade. It rests on Chromium behaviour no other test covers, and an upgrade can change any of it:
+  - The goldens do not cover what shows only on a Mac, such as font smoothing on an external monitor at 1x. An eye check on a Mac covers that. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017). It is not a step of a pull request: Rogier looks at it on his monitors ([ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md)).)*
+- **The first-frame check.** `apps/desktop/scripts/first-frame.ts` records the window with ScreenCaptureKit as macOS first puts it on screen, and checks that it already holds the whole first screen, focus ring included, for the sign-in screen and the shell in both themes. Re-run it after every Electron upgrade. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017). It runs on macOS only, because it records the window with ScreenCaptureKit; on Linux it says it measured nothing and exits with 1. CI does not run it, and a pull request is not held for it.)* It rests on Chromium behaviour no other test covers, and an upgrade can change any of it:
   - a hidden window still draws and presents its page's frames;
   - an Element Timing entry's `renderTime` is when its frame was presented, or failed to present;
   - `show()` shows the frame the window holds, not an empty one.
@@ -5502,7 +5612,7 @@ The desktop app is itself post-v1 in [./01-overview-and-scope.md](./01-overview-
   - blinking only faces in view, and only while the window has focus
 - **Auto-update.**
 - **Several controllers.**
-- **Windows and Linux.** Main keeps the platform calls in one place so they can be swapped.
+- ~~**Windows and Linux.**~~ **Windows.** Main keeps the platform calls in one place so they can be swapped. *(Amended 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017): Linux moved into v1, [Linux](#linux). `readDesktopPlatform` throws on any other system, so Windows adds a platform to it and to `platform-behaviour.ts`.)*
 - **Destroying the renderer when the window closes,** while main keeps a light watch for the dock badge and notifications. This is a candidate if measurements show that the hidden renderer's memory matters. In the first milestone, closing the window hides it ([Native behaviour](#native-behaviour)).
 
 ## Sources
@@ -5526,6 +5636,7 @@ ADRs:
 - [ADR 0027 - A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
 - *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* [ADR 0040 - Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)
 - *(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* [ADR 0048 - Harnesses and provider accounts are separate](../adr/0048-harnesses-and-provider-accounts-are-separate.md)
+- *(Added 2026-11-04, [#1017](https://github.com/theagenticage/hercule/issues/1017).)* [ADR 0051 - The desktop app ships on Linux, and a desktop change is checked on one platform](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md)
 
 Prototype: the Crew Bureau book, ~~[`docs/design/crew-bureau/index.html`](../design/crew-bureau/index.html)~~ its second edition, [`docs/design/crew-bureau-2/index.html`](../design/crew-bureau-2/index.html) *(amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*.
 
