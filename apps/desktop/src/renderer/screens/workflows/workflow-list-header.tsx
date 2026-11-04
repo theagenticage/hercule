@@ -11,6 +11,7 @@
 import { useEffect, useRef, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import { WORKFLOW_LIST_FILTERS, type WorkflowListFilter } from "@hercule/client-core/workflow-rows";
+import { usePrimaryModifier } from "../../app/primary-modifier";
 import { SearchIcon } from "../../icons/search";
 import { SidebarIcon } from "../../icons/sidebar";
 import "../session/floating-header.css";
@@ -110,7 +111,7 @@ export function WorkflowColumnHeader({
  * or, when `isBoxed`, boxed at the top of the column. `search` is its text,
  * and typing calls `onSearchChange`.
  *
- * While the field is mounted, ⌘F focuses it and selects its text, so typing
+ * While the field is mounted, ⌘F (Ctrl+F on Linux) focuses it and selects its text, so typing
  * replaces the last search. ⌘F does nothing while a dialog is open, or when
  * something else has already handled the key press.
  */
@@ -124,11 +125,13 @@ export function WorkflowSearchField({
   readonly isBoxed: boolean;
 }): JSX.Element {
   const searchRef = useRef<HTMLInputElement>(null);
+  const primaryModifier = usePrimaryModifier();
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent): void => {
       if (event.defaultPrevented) return;
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (!primaryModifier.isHeld(event) || primaryModifier.isOtherHeld(event)) return;
+      if (event.altKey || event.shiftKey) return;
       // Caps Lock turns the key into "F".
       if (event.key.toLowerCase() !== "f") return;
       // An open dialog is modal, and the search field behind it cannot take focus.
@@ -139,7 +142,7 @@ export function WorkflowSearchField({
     };
     window.addEventListener("keydown", focusSearch);
     return () => window.removeEventListener("keydown", focusSearch);
-  }, []);
+  }, [primaryModifier]);
 
   return (
     <label className={isBoxed ? "find find--box" : "pill find"}>

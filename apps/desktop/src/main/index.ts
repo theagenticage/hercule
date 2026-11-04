@@ -30,6 +30,7 @@ import { app, Menu, Notification, protocol, safeStorage, shell } from "electron"
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import { readDesktopPlatform } from "../ipc/platform/desktop-platform";
 import { AppScheme, makeAppSchemeLayer } from "./app-scheme";
 import { AppSettings, makeAppSettingsLayer } from "./app-settings";
 import { askControllerForBrotli } from "./controller-encoding";
@@ -48,7 +49,7 @@ import { secureSession, secureWebContents } from "./security";
 import { StoredTokenLayer } from "./stored-token";
 import { makeUrgentSignalNotificationsLayer } from "./urgent-signal-notifications";
 import { makeWaitingNotificationsLayer } from "./waiting-notifications";
-import { MainWindowLayer } from "./window";
+import { makeMainWindowLayer } from "./window";
 
 /**
  * The address of the renderer's dev server, set by `scripts/dev.ts`. A
@@ -79,6 +80,10 @@ const openFolder = (folder: string): Effect.Effect<void> =>
 
 /** Starts the app; see this module's comment. Call it once the single-instance lock is held. */
 const startApp = (): void => {
+  // The one place main reads the platform: the window and the menu take it
+  // as an argument. It throws on a platform the app does not support, so the
+  // app never starts with the wrong window or menu.
+  const platform = readDesktopPlatform(process.platform);
   const waitingNotifications = makeWaitingNotificationsLayer({
     Notification,
     setBadgeCount: (count) => app.setBadgeCount(count),
@@ -91,10 +96,10 @@ const startApp = (): void => {
     },
   });
   const windowMenuAndNotifications = Layer.mergeAll(
-    makeMainMenuLayer(Menu, !app.isPackaged),
+    makeMainMenuLayer(Menu, !app.isPackaged, platform),
     waitingNotifications,
     makeUrgentSignalNotificationsLayer({ Notification }),
-  ).pipe(Layer.provideMerge(MainWindowLayer));
+  ).pipe(Layer.provideMerge(makeMainWindowLayer(platform)));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       makeThisMacLayer({ binaryPath, openFolder }).pipe(

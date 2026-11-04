@@ -10,6 +10,7 @@ import {
   type SignalAnswer,
   type SignalAnswerStyle,
 } from "@hercule/client-core";
+import { usePrimaryModifier } from "../../app/primary-modifier";
 import { buildLook, Face } from "../../faces";
 import { LedgerAnswer } from "./ledger-answer";
 
@@ -208,6 +209,7 @@ function ReplyBox({
   readonly onAct: (actionId: string, text: string) => void;
 }): JSX.Element {
   const { action, suggested } = answer;
+  const primaryModifier = usePrimaryModifier();
   const describeId = `${idPrefix}-${action.id}-describe`;
   const errorId = `${idPrefix}-${action.id}-error`;
   const empty = draft.trim() === "";
@@ -230,7 +232,7 @@ function ReplyBox({
             onDraftChange(action.id, event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && event.metaKey) {
+            if (event.key === "Enter" && primaryModifier.isHeld(event)) {
               event.preventDefault();
               send();
             }

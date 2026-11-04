@@ -23,6 +23,7 @@ import {
   type DescribeLine,
   type SessionRequest,
 } from "@hercule/contract";
+import { usePrimaryModifier } from "../../app/primary-modifier";
 import { useRequestDraft, useSendAnswers } from "../../app/request-drafts";
 import { buildLook, Face, type Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
@@ -287,6 +288,7 @@ export function RequestDock({
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client, pendingSubmissions } = controller;
+  const primaryModifier = usePrimaryModifier();
   const titleId = useId();
   const card = buildApprovalCard(request);
   const answers = card.rows.map((row): DockAnswer<ApprovalDecision> => ({
@@ -384,14 +386,14 @@ export function RequestDock({
     if (
       request.kind === "question" &&
       isSendKey(event.nativeEvent) &&
-      !event.ctrlKey &&
+      !primaryModifier.isOtherHeld(event) &&
       !event.altKey
     ) {
       // ↩ on a button presses that button. ⌘↵ is the app's send key, and
       // left alone it would reach the menu's Send and send the composer's
       // message, so it is caught wherever the focus is in the dock, even
       // once the answers are sent.
-      if (event.target instanceof HTMLButtonElement && !event.metaKey) return;
+      if (event.target instanceof HTMLButtonElement && !primaryModifier.isHeld(event)) return;
       event.preventDefault();
       stepThroughQuestions("next");
       return;

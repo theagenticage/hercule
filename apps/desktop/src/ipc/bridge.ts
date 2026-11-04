@@ -1,13 +1,14 @@
 /**
  * The types of the bridge: the object the preload exposes to the renderer as
- * `window.bridge`, with one function per channel of the IPC contract. They
- * are derived from the contract, so a channel with no bridge function, or a
- * function whose types differ from its channel's, is a type error in the
- * preload.
+ * `window.bridge`, with one function per channel of the IPC contract, and the
+ * platform the app runs on. The functions are derived from the contract, so a
+ * channel with no bridge function, or a function whose types differ from its
+ * channel's, is a type error in the preload.
  *
  * This file holds types only. The preload and the renderer import it with
  * `import type`, so neither loads the contract, nor Effect, at run time.
  */
+import type { DesktopPlatform } from "./platform/desktop-platform";
 import type {
   EncodedIpcPayload,
   EncodedIpcRequest,
@@ -60,8 +61,15 @@ type IpcChannelEntity<Name> = Name extends `${infer Entity}.${string}` ? Entity 
  *   `controllerUrl.read()`;
  * - the main-to-renderer channel `menu.command` is the function
  *   `menu.onCommand(listener)`.
+ *
+ * Besides the channels, the bridge holds `platform`, the operating system the
+ * app runs on. The page reads it here, not from the browser's own
+ * `navigator.platform`, so a page drawn outside the app, such as the
+ * specimens and the screenshots of the goldens, says which platform it draws.
  */
-export type Bridge = {
+export type Bridge = BridgeChannels & { readonly platform: DesktopPlatform };
+
+type BridgeChannels = {
   readonly [
     Entity in IpcChannelEntity<RendererToMainIpcChannelName | MainToRendererIpcChannelName>
   ]: {

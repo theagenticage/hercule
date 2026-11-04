@@ -45,6 +45,7 @@ export interface ShowableWindow {
   setFullScreen(flag: boolean): void;
   getNormalBounds(): Bounds;
   on(event: "moved" | "resized", listener: () => void): unknown;
+  on(event: "close", listener: (event: { preventDefault(): void }) => void): unknown;
   once(event: "ready-to-show" | "closed" | "leave-full-screen", listener: () => void): unknown;
   off(event: "leave-full-screen", listener: () => void): unknown;
   readonly webContents: {
@@ -72,6 +73,13 @@ export interface WindowVisibilityOptions {
    * goes back to full screen when it first shows.
    */
   readonly restoreFullScreen: boolean;
+  /**
+   * What closing the window does when the app is not quitting: "hides" hides
+   * it and keeps the app running, "quits" quits the app.
+   */
+  readonly closingWindow: "hides" | "quits";
+  /** Quits the app, which closes the window. */
+  readonly quitApp: () => void;
   /** Saves the window's state. */
   readonly saveWindowState: (state: WindowState) => void;
   /** Logs an error. */
@@ -89,12 +97,16 @@ export interface WindowVisibilityOptions {
  * last resort. Showing earlier would show an empty page, filled with the
  * background colour only.
  *
+ * Closing the window, with the system's close button or a shortcut, hides
+ * it or quits the app, as `closingWindow` says. Quitting the app closes the
+ * window either way.
+ *
  * It saves the window's state when closing hides the window and when the app
  * quits, never while the window moves or resizes.
  */
 export const makeWindowVisibility = (
   window: ShowableWindow,
-  { restoreFullScreen, saveWindowState, logError }: WindowVisibilityOptions,
+  { restoreFullScreen, closingWindow, quitApp, saveWindowState, logError }: WindowVisibilityOptions,
 ) => {
   // In full screen, Electron's normal bounds are the bounds it last set
   // itself, and miss any move or resize the user made before. So the bounds
@@ -110,6 +122,8 @@ export const makeWindowVisibility = (
   let shownOnce = false;
   // True while closing has hidden the window, until it shows again.
   let hiddenByClosing = false;
+  // True once the app is quitting, so that closing the window lets it close.
+  let quitting = false;
   // The timer that shows the window if its page never reports its first
   // screen. It starts when the page first paints.
   let firstScreenTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -120,6 +134,33 @@ export const makeWindowVisibility = (
       : { bounds: window.getNormalBounds(), fullScreen: false };
 
   const hideAfterLeavingFullScreen = () => window.hide();
+
+  /**
+   * Hides the window, as closing it does, and saves its state.
+   *
+   * A window in full screen is saved as full screen, so it returns to full
+   * screen at the next launch. It leaves full screen before it hides:
+   * hidden while in full screen, it would leave an empty black space
+   * behind.
+   *
+   * The state is saved here, not on the window's `hide` event. On macOS,
+   * Electron emits `hide` when the window stops being visible on screen:
+   * it fires when other windows cover this one, and it does not fire when
+   * a window that is already covered hides.
+   */
+  const hideWindow = (): void => {
+    hiddenByClosing = true;
+    saveWindowState(measureWindowState());
+    if (!window.isFullScreen()) {
+      window.hide();
+      return;
+    }
+    // Closing twice during the animation still leaves one hide waiting,
+    // so that showing the window cancels it.
+    window.off("leave-full-screen", hideAfterLeavingFullScreen);
+    window.once("leave-full-screen", hideAfterLeavingFullScreen);
+    window.setFullScreen(false);
+  };
 
   /**
    * Shows the window the first time, and does nothing once it has shown.
@@ -167,6 +208,16 @@ export const makeWindowVisibility = (
   window.webContents.once("render-process-gone", (_event, details) => {
     showWindowWithoutFirstScreen(`its renderer process exited (${details.reason})`);
   });
+  // Closing is always stopped here, and the window closes only once the app
+  // quits. A quit that the close starts saves the window's state first
+  // (see `prepareToQuit`), while the window still exists to be measured, and
+  // then closes the window, which this handler lets through.
+  window.on("close", (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    if (closingWindow === "hides") hideWindow();
+    else quitApp();
+  });
   // A window that closes before the timer fires is gone, and showing it then
   // would throw.
   window.once("closed", () => clearTimeout(firstScreenTimeout));
@@ -197,40 +248,18 @@ export const makeWindowVisibility = (
     },
 
     /**
-     * Hides the window, as closing it does, and saves its state.
+     * Lets the window close, and saves its state while it still has one. Call
+     * it when the app starts to quit, before Electron closes the window. The
+     * flag is set here, not in an effect, because Electron closes the window
+     * right after the quit starts.
      *
-     * A window in full screen is saved as full screen, so it returns to full
-     * screen at the next launch. It leaves full screen before it hides:
-     * hidden while in full screen, it would leave an empty black space
-     * behind.
-     *
-     * The state is saved here, not on the window's `hide` event. On macOS,
-     * Electron emits `hide` when the window stops being visible on screen:
-     * it fires when other windows cover this one, and it does not fire when
-     * a window that is already covered hides.
+     * The state is saved only when the window is on screen. A window that is
+     * not on screen is not saved again: one that closing hid was saved then,
+     * and one that has not shown yet has nothing new to save. Saving either
+     * now would lose a full screen that the saved state holds.
      */
-    hideWindow: (): void => {
-      hiddenByClosing = true;
-      saveWindowState(measureWindowState());
-      if (!window.isFullScreen()) {
-        window.hide();
-        return;
-      }
-      // Closing twice during the animation still leaves one hide waiting,
-      // so that showing the window cancels it.
-      window.off("leave-full-screen", hideAfterLeavingFullScreen);
-      window.once("leave-full-screen", hideAfterLeavingFullScreen);
-      window.setFullScreen(false);
-    },
-
-    /**
-     * Saves the window's state as the app quits, when the window is on
-     * screen. A window that is not on screen is not saved again: one that
-     * closing hid was saved then, and one that has not shown yet has nothing
-     * new to save. Saving either now would lose a full screen that the
-     * saved state holds.
-     */
-    saveWindowStateOnQuit: (): void => {
+    prepareToQuit: (): void => {
+      quitting = true;
       if (shownOnce && !hiddenByClosing) saveWindowState(measureWindowState());
     },
   };

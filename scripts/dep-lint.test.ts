@@ -58,6 +58,12 @@ export const start = (): void => console.log(VERSION);`,
   "ipc/contract.ts": `import { Schema } from "effect";
 export type Reply<Response> = { readonly response: Response };
 export const Message = Schema.String;`,
+  // The platform folder is the one part of the IPC folder the preload may
+  // link at run time, because it imports nothing.
+  "ipc/platform/platform.ts": `export const read = (name: string): string => name;`,
+  "preload/platform.ts": `import { contextBridge } from "electron";
+import { read } from "../ipc/platform/platform";
+contextBridge.exposeInMainWorld("hercule", { platform: read(process.platform) });`,
   // `import type` is erased along with the import.
   "preload/clean.ts": `import { contextBridge, ipcRenderer } from "electron";
 import type { Reply } from "../ipc/contract";
@@ -239,6 +245,11 @@ describe("dep-lint on the desktop app's layers", () => {
 
   it("passes a preload that links electron and imports types with `import type`", async () => {
     const { stdout } = await runDepLint("desktop preload", "preload/clean.ts");
+    expect(stdout).toContain("is clean");
+  });
+
+  it("passes a preload that links the IPC folder's platform folder at run time", async () => {
+    const { stdout } = await runDepLint("desktop preload", "preload/platform.ts");
     expect(stdout).toContain("is clean");
   });
 

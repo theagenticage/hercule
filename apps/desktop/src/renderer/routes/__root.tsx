@@ -1,6 +1,7 @@
 import { useEffect, type JSX } from "react";
 import { createRootRouteWithContext, Outlet, useRouter } from "@tanstack/react-router";
 import type { RouterContext, SavedController } from "../app/context";
+import { PrimaryModifierProvider } from "../app/primary-modifier";
 import { signOut } from "../app/sign-out";
 import { stepHistoryInFocusedField } from "../app/step-history-in-focused-field";
 
@@ -8,6 +9,9 @@ import { stepHistoryInFocusedField } from "../app/step-history-in-focused-field"
  * The root route. It renders the matched child route: the first run, the
  * connect screen, or the `_connected` layout route, under which sit every
  * screen that needs the controller.
+ *
+ * It tells every screen which platform the app runs on, for its shortcuts
+ * (see `PrimaryModifierProvider`).
  *
  * It also carries out Sign Out from the app menu whenever a controller is
  * saved. Sign Out lives here rather than in the shell, so it also works from
@@ -19,13 +23,13 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function Root(): JSX.Element {
-  const { controller } = Route.useRouteContext();
+  const { controller, bridge } = Route.useRouteContext();
   return (
-    <>
+    <PrimaryModifierProvider platform={bridge.platform}>
       <StepHistoryOnMenuCommand />
       {controller === null ? null : <SignOutOnMenuCommand controller={controller} />}
       <Outlet />
-    </>
+    </PrimaryModifierProvider>
   );
 }
 

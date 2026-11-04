@@ -22,6 +22,7 @@ import {
 import { buildRouterContext } from "../../app/context";
 import { DoneMovesProvider } from "../../app/done-moves";
 import type { PendingSubmissions } from "../../app/pending-submissions";
+import { PrimaryModifierProvider } from "../../app/primary-modifier";
 import { ensureShellData, ensureThreadData } from "../../app/queries";
 import { useKeepRequestDrafts } from "../../app/request-drafts";
 import { SessionPresentationProvider } from "../../app/session-presentation";
@@ -102,7 +103,15 @@ export const renderThreadPart = async (
   if (controller === null) throw new Error("The fake bridge must hold a controller URL.");
   const { client } = controller;
 
-  const rootRoute = createRootRoute({ component: Outlet });
+  const rootRoute = createRootRoute({
+    component: function Root() {
+      return (
+        <PrimaryModifierProvider platform={bridge.platform}>
+          <Outlet />
+        </PrimaryModifierProvider>
+      );
+    },
+  });
   const connectedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "_connected",

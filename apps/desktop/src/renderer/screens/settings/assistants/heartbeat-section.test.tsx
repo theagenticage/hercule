@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Heartbeat } from "@hercule/contract";
+import { PrimaryModifierProvider } from "../../../app/primary-modifier";
 import { HeartbeatSection } from "./heartbeat-section";
 
 const HEARTBEAT: Heartbeat = {
@@ -25,17 +26,19 @@ const renderSection = (
   const onSave = vi.fn<(change: Partial<Heartbeat>) => void>();
   const onSavePrompt = vi.fn<(prompt: string) => void>();
   render(
-    <HeartbeatSection
-      assistantName="Ada"
-      heartbeat={heartbeat}
-      nowMinutes={9 * 60 + 41}
-      nowTimezone={unknownTimezone === null ? "Europe/Amsterdam" : "UTC"}
-      unknownTimezone={unknownTimezone}
-      error={null}
-      onSave={onSave}
-      promptError={promptError}
-      onSavePrompt={onSavePrompt}
-    />,
+    <PrimaryModifierProvider platform="mac">
+      <HeartbeatSection
+        assistantName="Ada"
+        heartbeat={heartbeat}
+        nowMinutes={9 * 60 + 41}
+        nowTimezone={unknownTimezone === null ? "Europe/Amsterdam" : "UTC"}
+        unknownTimezone={unknownTimezone}
+        error={null}
+        onSave={onSave}
+        promptError={promptError}
+        onSavePrompt={onSavePrompt}
+      />
+    </PrimaryModifierProvider>,
   );
   return { onSave, onSavePrompt };
 };

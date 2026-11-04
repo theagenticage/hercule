@@ -4,6 +4,7 @@ import type { Menu as ElectronMenu, MenuItemConstructorOptions } from "electron"
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { GoMenuItem } from "../ipc/contract";
+import type { DesktopPlatform } from "../ipc/platform/desktop-platform";
 import { MainMenu, makeMainMenuLayer } from "./menu";
 import {
   makeFakeMainWindow,
@@ -81,14 +82,15 @@ beforeEach(() => {
 
 /**
  * Runs `use` against the service built on a fake of Electron's `Menu`, a fake
- * window and the temporary settings file, in the packaged app unless
- * `development` is true. `use` receives the service and a function that
+ * window and the temporary settings file, on macOS and in the packaged app
+ * unless `platform` and `development` say otherwise. `use` receives the service and a function that
  * chooses an item of the menu bar installed last. Returns that menu bar and
  * the calls made to the window.
  */
 const runWithMenu = async (
   use: (menu: MainMenu["Service"], choose: ChooseMenuItem) => Effect.Effect<unknown>,
   development = false,
+  platform: DesktopPlatform = "mac",
 ): Promise<MenuRun> => {
   let menuBar: MenuTemplate = [];
   // The fake builds no menu: the template stands in for the menu it builds.
@@ -103,7 +105,7 @@ const runWithMenu = async (
   const choose: ChooseMenuItem = (name, label) =>
     Effect.sync(() => (findMenuItem(menuBar, name, label)?.click as () => void)());
   const window = makeFakeMainWindow();
-  const layer = makeMainMenuLayer(Menu, development).pipe(
+  const layer = makeMainMenuLayer(Menu, development, platform).pipe(
     Layer.provide(Layer.mergeAll(settingsFile.layer, window.layer)),
   );
   await Effect.runPromise(
@@ -115,9 +117,14 @@ const runWithMenu = async (
   return { menuBar, window: window.calls };
 };
 
-/** Returns the menu bar the service installs at start, in the packaged app unless `development` is true. */
-const readFirstMenuBar = async (development = false): Promise<MenuTemplate> =>
-  (await runWithMenu(() => Effect.void, development)).menuBar;
+/**
+ * Returns the menu bar the service installs at start, on macOS and in the
+ * packaged app unless `development` and `platform` say otherwise.
+ */
+const readFirstMenuBar = async (
+  development = false,
+  platform: DesktopPlatform = "mac",
+): Promise<MenuTemplate> => (await runWithMenu(() => Effect.void, development, platform)).menuBar;
 
 describe("MainMenu", () => {
   it("has the app menu, File, Edit, View, Go, Thread and Window, in that order", async () => {
@@ -423,5 +430,72 @@ describe("MainMenu", () => {
       "reload",
       "toggleDevTools",
     ]);
+  });
+});
+
+describe("MainMenu on Linux", () => {
+  /** Returns the roles and labels of the items of `items`, with a submenu's own inside a list. */
+  const describeItems = (items: MenuTemplate): Array<unknown> =>
+    items.map((item) =>
+      Array.isArray(item.submenu)
+        ? [item.label, describeItems(item.submenu)]
+        : (item.role ?? item.label ?? item.type),
+    );
+
+  it("names the app menu itself, instead of using the role that only macOS names", async () => {
+    const menuBar = await readFirstMenuBar(false, "linux");
+    expect(menuBar.map((item) => item.label ?? item.role)).toEqual([
+      "Hercule",
+      "File",
+      "Edit",
+      "View",
+      "Go",
+      "Thread",
+      "windowMenu",
+    ]);
+  });
+
+  it("leaves Services, Hide, Hide Others and Show All out of the app menu, and keeps Settings…, Sign Out and Quit", async () => {
+    expect(describeItems(listMenuItems(await readFirstMenuBar(false, "linux"), "Hercule"))).toEqual(
+      ["about", "separator", "Settings…", "separator", "Sign Out", "separator", "quit"],
+    );
+  });
+
+  it("leaves Substitutions and Speech out of Edit", async () => {
+    expect(describeItems(listMenuItems(await readFirstMenuBar(false, "linux"), "Edit"))).toEqual([
+      "Undo",
+      "Redo",
+      "separator",
+      "cut",
+      "copy",
+      "paste",
+      "pasteAndMatchStyle",
+      "delete",
+      "selectAll",
+    ]);
+  });
+
+  it("keeps Settings… and Sign Out working", async () => {
+    const { window } = await runWithMenu(
+      (menu, choose) =>
+        Effect.all([
+          menu.setSignedIn(true),
+          choose("Hercule", "Settings…"),
+          choose("Hercule", "Sign Out"),
+        ]),
+      false,
+      "linux",
+    );
+    expect(window).toEqual([
+      'showAndSend menu.command "openSettings"',
+      'showAndSend menu.command "signOut"',
+    ]);
+  });
+
+  it("moves Toggle Developer Tools off Ctrl+Shift+I, which Go > Intake takes, in development", async () => {
+    const menuBar = await readFirstMenuBar(true, "linux");
+    const toggle = listMenuItems(menuBar, "View").find((item) => item.role === "toggleDevTools");
+    const intake = findMenuItem(menuBar, "Go", "Intake");
+    expect([toggle?.accelerator, intake?.accelerator]).toEqual(["F12", "CmdOrCtrl+Shift+I"]);
   });
 });

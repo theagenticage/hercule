@@ -56,6 +56,7 @@ import {
 } from "@hercule/contract";
 import { DEFAULT_APPEARANCE, type TextSizeStep } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
+import type { DesktopPlatform } from "../../ipc/platform/desktop-platform";
 import type {
   Appearance,
   AppearanceSaveOutcome,
@@ -133,6 +134,9 @@ export interface FakeBridge {
  * test passes its own. A save of the Appearance replaces what a later read
  * returns, unless `saveAppearance` answers it as `NotSaved`. Every save is
  * recorded either way.
+ *
+ * `platform` is the platform the app says it runs on: a Mac unless a test
+ * passes another.
  */
 export const createFakeBridge = ({
   controllerUrl = null,
@@ -148,6 +152,7 @@ export const createFakeBridge = ({
   firstRun = null,
   appearance = DEFAULT_APPEARANCE,
   saveAppearance = () => Promise.resolve({ _tag: "Saved" }),
+  platform = "mac",
 }: {
   readonly controllerUrl?: string | null;
   readonly token?: string | null;
@@ -162,6 +167,7 @@ export const createFakeBridge = ({
   readonly firstRun?: FirstRunProgress | null;
   readonly appearance?: Appearance;
   readonly saveAppearance?: (next: Appearance) => Promise<AppearanceSaveOutcome>;
+  readonly platform?: DesktopPlatform;
 } = {}): FakeBridge => {
   const tokenWrites: (string | null)[] = [];
   const savedUrls: string[] = [];
@@ -180,6 +186,7 @@ export const createFakeBridge = ({
   const urgentSignalLists: EncodedIpcRequest<"urgentSignals.set">[] = [];
   return {
     bridge: {
+      platform,
       controllerUrl: {
         read: () => Promise.resolve(controllerUrl),
         save: (url) => {

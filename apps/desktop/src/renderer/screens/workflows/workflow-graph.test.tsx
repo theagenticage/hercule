@@ -19,6 +19,8 @@ import {
   type RunOverlay,
 } from "@hercule/client-core/graph-model";
 import type { NodeCard } from "@hercule/client-core/node-details";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
+import { PrimaryModifierProvider } from "../../app/primary-modifier";
 import { WorkflowGraph } from "./workflow-graph";
 import { layOutGraphDrawing } from "./workflow-graph-layout";
 
@@ -93,10 +95,10 @@ const stubPaneWidth = (width: number) => {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(width);
 };
 
-/** Renders the graph of `DRAWING` beside a button outside it. */
-const renderGraph = () =>
+/** Renders the graph of `DRAWING` beside a button outside it, on a Mac unless `platform` says otherwise. */
+const renderGraph = (platform: DesktopPlatform = "mac") =>
   render(
-    <>
+    <PrimaryModifierProvider platform={platform}>
       <WorkflowGraph
         drawing={DRAWING}
         readCard={(nodeId) => CARDS[nodeId]}
@@ -106,7 +108,7 @@ const renderGraph = () =>
       />
       <button type="button">Outside</button>
       <input aria-label="Search" />
-    </>,
+    </PrimaryModifierProvider>,
   );
 
 /**
@@ -292,6 +294,17 @@ describe("the graph's zoom", () => {
     expect(press({ key: "f", metaKey: true })).toBe(true);
   });
 
+  it("zooms with Ctrl instead of ⌘ on Linux", () => {
+    stubPaneWidth(Math.round(SIZE.width * 0.5) + 24);
+    renderGraph("linux");
+    const pane = screen.getByRole("group", { name: "The steps of Review" });
+
+    expect(fireEvent.keyDown(pane, { key: "=", metaKey: true })).toBe(true);
+    expect(readZoom()).toBe("80%");
+    expect(fireEvent.keyDown(pane, { key: "=", ctrlKey: true })).toBe(false);
+    expect(readZoom()).toBe("100%");
+  });
+
   it("ignores the keys outside the graph", () => {
     stubPaneWidth(Math.round(SIZE.width * 0.5) + 24);
     renderGraph();
@@ -351,14 +364,16 @@ const listRunClasses = (element: Element): ReadonlyArray<string> =>
 /** Renders the graph of `DRAWING` with `overlay`, and returns a function that draws it again with another. */
 const renderRun = (overlay: RunOverlay | undefined) => {
   const graph = (next: RunOverlay | undefined) => (
-    <WorkflowGraph
-      drawing={DRAWING}
-      readCard={(nodeId) => CARDS[nodeId]}
-      timezone="UTC"
-      label="The steps of Review"
-      plugins={[]}
-      overlay={next}
-    />
+    <PrimaryModifierProvider platform="mac">
+      <WorkflowGraph
+        drawing={DRAWING}
+        readCard={(nodeId) => CARDS[nodeId]}
+        timezone="UTC"
+        label="The steps of Review"
+        plugins={[]}
+        overlay={next}
+      />
+    </PrimaryModifierProvider>
   );
   const { rerender, container } = render(graph(overlay));
   return {

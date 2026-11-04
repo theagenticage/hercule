@@ -5,20 +5,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { PrimaryModifierProvider } from "../../app/primary-modifier";
 import { SettingTextRow } from "./setting-text-row";
 
 const renderRow = (error: string | null = null) => {
   const onCommit = vi.fn<(text: string) => void>();
   const onEditStart = vi.fn<() => void>();
   render(
-    <SettingTextRow
-      label="Persona"
-      hint="Instructions added to every session."
-      value="Be brief."
-      error={error}
-      onCommit={onCommit}
-      onEditStart={onEditStart}
-    />,
+    <PrimaryModifierProvider platform="mac">
+      <SettingTextRow
+        label="Persona"
+        hint="Instructions added to every session."
+        value="Be brief."
+        error={error}
+        onCommit={onCommit}
+        onEditStart={onEditStart}
+      />
+    </PrimaryModifierProvider>,
   );
   return { onCommit, onEditStart, area: screen.getByRole("textbox", { name: "Persona" }) };
 };
