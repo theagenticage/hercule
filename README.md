@@ -33,6 +33,15 @@ The script installs:
 - the `hercule` binary at `~/.local/bin/hercule`. When `~/.local/bin` is not on your `PATH`, it prints the line to add to your shell profile.
 - on macOS, the desktop app at `/Applications/Hercule.app`.
 
+On Linux the script installs no app, because the app is a `.deb` and installing it takes root. On x86_64 the script ends by printing the two commands that do it; on Debian or Ubuntu they are:
+
+```sh
+curl -fL -o /tmp/Hercule-linux-amd64.deb https://github.com/theagenticage/hercule/releases/download/edge/Hercule-linux-amd64.deb
+sudo apt install /tmp/Hercule-linux-amd64.deb
+```
+
+Run them again to update the app. There is no `.deb` for aarch64 yet.
+
 A first install starts nothing, because only you know what this machine is for. To run the controller on it:
 
 ```sh

@@ -132,7 +132,11 @@ function writeRelease(
 ): string {
   const dir = makeTemporaryDir("hercule-install-release-");
   for (const asset of assets) writeFileSync(join(dir, asset), `not ${asset}`);
-  writeFileSync(join(dir, "SHA256SUMS"), sha256sums);
+  const debLine =
+    process.platform === "linux" && process.arch === "x64"
+      ? `${"0".repeat(64)}  Hercule-linux-amd64.deb\n`
+      : "";
+  writeFileSync(join(dir, "SHA256SUMS"), sha256sums + debLine);
   return dir;
 }
 
@@ -144,7 +148,9 @@ interface BinaryCall {
 
 /**
  * Writes a release that install.sh accepts and installs: on macOS a zipped app
- * and binary, on Linux just the binary, plus a SHA256SUMS that matches. The
+ * and binary, on Linux just the binary, plus a SHA256SUMS that matches. On
+ * Linux x64 SHA256SUMS also lists the desktop app's `.deb`, which the real
+ * release holds but install.sh does not download. The
  * binary is a shell script that records every call. `hercule --version` prints
  * a version, and `hercule service ...` prints a line and exits with
  * `serviceExitCode`.
@@ -418,9 +424,37 @@ describe("install.sh", () => {
       `HERCULE_HOME='${join(home, "scratch-home")}' '${join(home, ".local", "bin", "hercule")}' service install\n`,
     );
     expect(stdout).toContain('"Add machine"');
-    // The app is never named on Linux.
+    // The macOS app is never named on Linux.
     expect(stdout).not.toContain("Applications folder");
   });
+
+  // The .deb needs root, so install.sh prints how to install it and does
+  // nothing more. The URL is the release it downloaded from.
+  it.runIf(isLinuxX64)("prints the commands that install the desktop app's .deb", () => {
+    const release = writeInstallableRelease();
+
+    const { status, stdout, applicationsDir } = runInstall(release.dir, {
+      buildHerculeHome: () => undefined,
+    });
+
+    expect(status).toBe(0);
+    expect(stdout).toContain(
+      `To install the desktop app on Debian or Ubuntu, run:\n\n  curl -fL -o /tmp/Hercule-linux-amd64.deb '${pathToFileURL(release.dir).href}/Hercule-linux-amd64.deb'\n  sudo apt install /tmp/Hercule-linux-amd64.deb\n`,
+    );
+    expect(readdirSync(applicationsDir)).toEqual([]);
+  });
+
+  it.runIf(isLinuxArm64)(
+    "prints no .deb commands, because the release has none for aarch64",
+    () => {
+      const release = writeInstallableRelease();
+
+      const { status, stdout } = runInstall(release.dir, { buildHerculeHome: () => undefined });
+
+      expect(status).toBe(0);
+      expect(stdout).not.toContain(".deb");
+    },
+  );
 
   it.runIf(isLinux)(
     "updates the installed service with `hercule service install` and the Home it names on Linux",

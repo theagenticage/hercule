@@ -131,8 +131,8 @@ jobs:
       - run: pnpm build:binary
       - run: bun --bun run vitest run --project binary e2e/upgrade.test.ts
 
-  # The desktop app is macOS only (spec 17), so it is packaged and compared
-  # with the Bureau book on a macOS runner.
+  # The desktop app is packaged and compared with the Bureau book on a macOS
+  # runner. Its Linux package is built and tried by `desktop-linux`.
   #
   # The end-to-end suite, `pnpm test:desktop`, does not run here. It checks
   # windows, pixels and timing, and CI's virtual Macs differ from a user's
@@ -429,18 +429,238 @@ jobs:
         run: |
           HERCULE_RELEASE_URL="file://$PWD/test-release" sh install.sh
           ~/.local/bin/hercule --version
-          # Verify no app was installed (Linux has no app).
+          # The installer needs no root, so it installs no app on Linux. It
+          # only prints how to install the `.deb`.
           [ ! -d /Applications ]
+          [ ! -e /opt/Hercule ]
+
+  # Builds the desktop app's Linux package, a `.deb`, installs it on a real
+  # Ubuntu 24.04 host the way a user would, and starts it. The `edge` release
+  # publishes this very file (`edge-build.needs`), so a package that does not
+  # install or start blocks the release.
+  #
+  # This needs a real host, not a container. Ubuntu 24.04 sets
+  # `kernel.apparmor_restrict_unprivileged_userns=1`, which stops Chromium's
+  # sandbox from starting unless an AppArmor profile allows it. The `.deb`
+  # installs that profile, and only a host that enforces the sysctl shows
+  # whether it works. The app refuses `--no-sandbox`, so a broken profile
+  # shows as an app that aborts at start.
+  #
+  # It runs only when something the build reads can have changed, and always on
+  # `main`. The first step decides, as in `ui-metrics`, and the later steps
+  # skip when it says no, so the job still succeeds and `edge-build` can wait
+  # for it.
+  desktop-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The first step diffs against the pull request's base. A shallow
+          # clone does not have that history.
+          fetch-depth: 0
+
+      - name: Decide whether the Linux package applies
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # What the build reads: the app, the packages it links, the bundle
+          # budget check, and the toolchain.
+          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/|packages/client-core/|packages/contract/|scripts/check-bundle-budget\.ts$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
+          if [ -n "$touched" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "The Linux package applies, because of:"
+            echo "$touched"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No file the Linux package reads changed, so it is skipped."
+          fi
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: ./.github/actions/setup
+
+      # An update replaces an installed package only when the new one has a
+      # higher version, and `package.json` holds a constant one. So the
+      # version carries the run number, which only grows. electron-builder
+      # turns `0.1.0-edge.9` into the Debian version `0.1.0~edge.9`, which
+      # sorts below `0.1.0~edge.10` and below a plain `0.1.0`. Every build
+      # of the `.deb` needs the suffix: a plain `0.1.0` would sort above all
+      # edge builds, and no later edge build could replace it. The change
+      # stays in this runner's checkout.
+      - name: Give the package a version that grows with every run
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          base=$(node -p 'require("./apps/desktop/package.json").version')
+          (cd apps/desktop && npm pkg set "version=$base-edge.${{ github.run_number }}")
+
+      # Builds the release `.deb` and the test package, and checks the
+      # renderer's bundle budget and main's startup file.
+      - name: Build the package
+        if: steps.changes.outputs.run == 'true'
+        run: pnpm build:desktop
+
+      # The gate. The app is installed with apt, started as the normal user
+      # with a scratch HOME and no sandbox switch, and must show a window and
+      # stay up. Then a second build with a higher version is installed over
+      # it, and the same check runs again, so the upgrade path of the package
+      # is tested too. The second build is the first one repacked with a
+      # higher version number: the files are the same, but the install
+      # scripts, the AppArmor profile and dpkg's version order all run.
+      - name: Install the package, start the app, upgrade the package, start it again
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          first=$PWD/apps/desktop/dist/release/Hercule-linux-amd64.deb
+          debug_dir=$RUNNER_TEMP/desktop-linux-debug
+          mkdir -p "$debug_dir"
+
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool x11-utils dbus-x11 imagemagick
+
+          echo "kernel.apparmor_restrict_unprivileged_userns = $(sysctl -n kernel.apparmor_restrict_unprivileged_userns)"
+          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" != 1 ]; then
+            echo "::warning::This host does not restrict unprivileged user namespaces, so the check below does not test the AppArmor profile."
+          fi
+
+          first_version=$(dpkg-deb -f "$first" Version)
+          echo "Package version: $first_version"
+          case "$first_version" in
+            *"~edge."*) ;;
+            *)
+              echo "::error::The package version is $first_version. An edge package must carry the ~edge.<run> suffix, or a later edge build cannot replace it."
+              exit 1
+              ;;
+          esac
+
+          # The screen and the D-Bus session the app needs. Both are stopped
+          # by the process ids kept here when the step ends.
+          export DISPLAY=:99
+          Xvfb "$DISPLAY" -screen 0 1920x1080x24 -nolisten tcp > "$debug_dir/xvfb.log" 2>&1 &
+          xvfb_pid=$!
+          eval "$(dbus-launch --sh-syntax)"
+          trap 'kill "$xvfb_pid" "$DBUS_SESSION_BUS_PID" 2> /dev/null || true' EXIT
+          for _ in $(seq 100); do
+            xprop -root > /dev/null 2>&1 && break
+            sleep 0.1
+          done
+          xprop -root > /dev/null || { echo "::error::Xvfb did not start."; cat "$debug_dir/xvfb.log"; exit 1; }
+
+          # Saves what a person would look at, then stops the job.
+          fail() {
+            echo "::error::$*"
+            import -window root "$debug_dir/screen.png" 2> /dev/null || true
+            xwininfo -root -tree > "$debug_dir/windows.txt" 2>&1 || true
+            pgrep -af '^/opt/Hercule/' | cut -c1-200 || true
+            exit 1
+          }
+
+          # Starts the installed app, waits for a window, checks that it stays
+          # up without the sandbox switched off, and quits it.
+          start_and_check() {
+            label=$1
+            log=$debug_dir/app-$label.log
+            home=$(mktemp -d)
+            # `env` replaces itself with the app, so $! is the app's own pid.
+            # The app is not given the switches that turn the sandbox off.
+            env -u ELECTRON_DISABLE_SANDBOX HOME="$home" /opt/Hercule/hercule-desktop > "$log" 2>&1 &
+            app_pid=$!
+
+            window_found=false
+            for _ in $(seq 60); do
+              kill -0 "$app_pid" 2> /dev/null || { cat "$log"; fail "The app ($label) exited before it showed a window. Its log is above."; }
+              if xdotool search --onlyvisible --any --class hercule --name hercule > /dev/null 2>&1; then
+                window_found=true
+                break
+              fi
+              sleep 1
+            done
+            $window_found || { cat "$log"; fail "The app ($label) showed no window within 60 seconds."; }
+
+            # The window can be a splash that is followed by a crash.
+            sleep 10
+            kill -0 "$app_pid" 2> /dev/null || { cat "$log"; fail "The app ($label) showed a window and then exited."; }
+            xdotool search --onlyvisible --any --class hercule --name hercule > /dev/null 2>&1 || fail "The app ($label) is running, but its window is gone."
+
+            if tr '\0' '\n' < "/proc/$app_pid/environ" | grep -q '^ELECTRON_DISABLE_SANDBOX='; then
+              fail "The app ($label) runs with ELECTRON_DISABLE_SANDBOX set."
+            fi
+            pgrep -af '^/opt/Hercule/hercule-desktop' | cut -c1-160
+            if pgrep -f '^/opt/Hercule/hercule-desktop .*--no-sandbox' > /dev/null; then
+              fail "A process of the app ($label) runs with --no-sandbox."
+            fi
+            echo "The app ($label) shows a window, has been up for 10 seconds, and runs with its sandbox."
+
+            kill -TERM "$app_pid"
+            for _ in $(seq 30); do
+              kill -0 "$app_pid" 2> /dev/null || break
+              sleep 1
+            done
+            if kill -0 "$app_pid" 2> /dev/null; then
+              kill -KILL "$app_pid"
+              fail "The app ($label) did not quit within 30 seconds of SIGTERM."
+            fi
+            rm -rf "$home"
+          }
+
+          sudo apt-get install -y "$first"
+          echo "Installed: $(dpkg-query -W -f='${Version}' hercule-desktop)"
+          echo "--- AppArmor profile files"
+          find /etc/apparmor.d -maxdepth 1 -iname '*hercule*' -ls | grep . || echo "none"
+          echo "--- AppArmor status"
+          sudo aa-status 2>&1 | grep -iE 'profiles are loaded|hercule' || echo "no profile of the app is loaded"
+          start_and_check first
+
+          second_version="$first_version.1"
+          dpkg --compare-versions "$second_version" gt "$first_version"
+          work=$(mktemp -d)
+          sudo dpkg-deb -R "$first" "$work/package"
+          sudo sed -i "s/^Version: .*/Version: $second_version/" "$work/package/DEBIAN/control"
+          sudo dpkg-deb --root-owner-group -b "$work/package" "$work/Hercule-upgrade.deb"
+          sudo apt-get install -y "$work/Hercule-upgrade.deb"
+          installed=$(dpkg-query -W -f='${Version}' hercule-desktop)
+          if [ "$installed" != "$second_version" ]; then
+            fail "After the upgrade the installed version is $installed, not $second_version."
+          fi
+          echo "Upgraded: $first_version -> $installed"
+          echo "--- AppArmor status"
+          sudo aa-status 2>&1 | grep -iE 'profiles are loaded|hercule' || echo "no profile of the app is loaded"
+          start_and_check upgraded
+
+      # The screen, the window list and the app's logs, which show why the
+      # check failed where the log cannot. They are kept for a week.
+      - if: failure() && steps.changes.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-linux-debug
+          path: ${{ runner.temp }}/desktop-linux-debug
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # Only the `.deb`. The build also writes `latest-linux.yml` for an
+      # updater that does not exist. One day is enough for `edge-build`.
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: hercule-desktop-linux
+          path: apps/desktop/dist/release/Hercule-linux-amd64.deb
+          retention-days: 1
+          if-no-files-found: error
 
   # Builds the rolling `edge` prerelease: the binary and the desktop app for
-  # macOS on Apple silicon, from the commit that just passed the jobs above
+  # macOS on Apple silicon, and the Linux binaries and the desktop app's
+  # `.deb`, from the commit that just passed the jobs above
   # (spec 15 section 1). `edge-publish` then publishes what it built.
   #
   # The asset names and the format of SHA256SUMS are what `install.sh` reads;
   # change them together.
   edge-build:
-    # Edge publishes only a commit that passed every check, the upgrade test
-    # and the Linux install test.
+    # Edge publishes only a commit that passed every check, the upgrade test,
+    # the Linux install test and the Linux package's install and start.
     needs:
       - typecheck
       - lint
@@ -451,6 +671,7 @@ jobs:
       - android
       - edge-linux
       - edge-linux-install
+      - desktop-linux
       - upgrade
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
@@ -559,11 +780,16 @@ jobs:
       # timing, which a CI runner cannot match (see the desktop job).
       - run: pnpm exec vitest run --project desktop e2e/desktop/package.test.ts
 
-      # Download the Linux binaries that edge-linux built (same workflow run).
+      # Download the Linux binaries that edge-linux built, and the `.deb` that
+      # desktop-linux built and installed (same workflow run).
       - uses: actions/download-artifact@v8
         with:
           name: hercule-linux
           path: linux-binaries
+      - uses: actions/download-artifact@v8
+        with:
+          name: hercule-desktop-linux
+          path: linux-desktop
 
       # `ditto --keepParent` keeps the bundle's symlinks and signature intact,
       # which a plain `zip` does not. SHA256SUMS lists bare file names, so
@@ -574,9 +800,10 @@ jobs:
           cp hercule edge-assets/hercule-darwin-arm64
           cp linux-binaries/hercule-linux-x64 edge-assets/
           cp linux-binaries/hercule-linux-arm64 edge-assets/
+          cp linux-desktop/Hercule-linux-amd64.deb edge-assets/
           ditto -c -k --keepParent "$APP" edge-assets/Hercule-darwin-arm64.zip
           cd edge-assets
-          shasum -a 256 hercule-darwin-arm64 hercule-linux-x64 hercule-linux-arm64 Hercule-darwin-arm64.zip > SHA256SUMS
+          shasum -a 256 hercule-darwin-arm64 hercule-linux-x64 hercule-linux-arm64 Hercule-darwin-arm64.zip Hercule-linux-amd64.deb > SHA256SUMS
           cat SHA256SUMS
 
       # Installs what is about to be published, the way a user would, with a
@@ -684,6 +911,8 @@ jobs:
           \`\`\`
           curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/install.sh | sh
           \`\`\`
+
+          On macOS this installs the desktop app too. On Linux it prints the commands that install the desktop app's \`.deb\`, which needs root.
           EOF
           # The release or the tag may be gone already, after a run that
           # stopped halfway. A tag that is still there is caught below.

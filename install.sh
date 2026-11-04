@@ -13,13 +13,18 @@
 # - the binary, at ~/.local/bin/hercule;
 # - on macOS, the desktop app, at /Applications/Hercule.app.
 #
+# On Linux it installs no app, because the app is a .deb, which only root can
+# install, and this script runs without root, also on machines with no screen.
+# On x86_64 it prints the commands that download the .deb from the release and
+# install it with apt instead.
+#
 # A first install starts nothing. It prints the next step instead. On macOS
 # with the default Hercule Home, that is first the app, which asks whether
 # this Mac runs Hercule or connects to it elsewhere. Then, for every Home,
-# `hercule service install` to run Hercule on this machine without the app (or
-# on Linux, which has no app), or the join command from the Fleet's "Add
-# machine" to make this machine a runner of a controller elsewhere. The app is
-# named only for the default Home, because the app always uses that Home.
+# `hercule service install` to run Hercule on this machine without the app, or
+# the join command from the Fleet's "Add machine" to make this machine a runner
+# of a controller elsewhere. The app is named only for the default Home,
+# because the app always uses that Home.
 #
 # An update is a run that finds the service unit installed
 # (~/Library/LaunchAgents/sh.hercule.service.plist on macOS, or
@@ -144,6 +149,9 @@ read_installed_hercule_home() {
 main() {
   os=$(uname -s)
   arch=$(uname -m)
+  # The desktop app's package on the release, for the Linux machines that have
+  # one. The release has none for aarch64 yet.
+  deb_name=
 
   # Detect platform and set binary name
   case "$os" in
@@ -159,7 +167,10 @@ main() {
       ;;
     Linux)
       case "$arch" in
-        x86_64) binary_name="hercule-linux-x64" ;;
+        x86_64)
+          binary_name="hercule-linux-x64"
+          deb_name="Hercule-linux-amd64.deb"
+          ;;
         aarch64) binary_name="hercule-linux-arm64" ;;
         *)
           fail "the edge build runs on macOS on Apple silicon and on Linux on x86_64 and aarch64, and this machine is Linux $arch."
@@ -326,6 +337,12 @@ main() {
       printf ', with %s in place of hercule' "$hercule_command"
     fi
     printf '. It joins this %s and starts the runner as a service.\n' "$machine_word"
+  fi
+
+  # Installing the .deb takes root, so the script only says how.
+  if [ -n "$deb_name" ]; then
+    printf '\nTo install the desktop app on Debian or Ubuntu, run:\n\n  curl -fL -o /tmp/%s %s\n  sudo apt install /tmp/%s\n' \
+      "$deb_name" "$(quote_shell_word "$release_url/$deb_name")" "$deb_name"
   fi
 }
 
