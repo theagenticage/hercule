@@ -1,9 +1,11 @@
 # A Linux machine with a screen, for running and testing the desktop app on a
 # machine that has none, such as a headless server or CI. It holds Ubuntu 24.04,
 # the libraries Electron needs, a virtual X screen (Xvfb), a small window
-# manager (openbox) and a D-Bus session, which `entry.sh` starts. It also holds
-# the repository's pinned Node, Bun and pnpm, so a `node_modules` installed on
-# the host runs in it. The repository is mounted, never copied in.
+# manager (openbox) and a D-Bus session, which `entry.sh` starts. It holds
+# GNOME Keyring too, which the keyring smoke test (`e2e/desktop/keyring.test.ts`)
+# starts on a D-Bus session of its own. It also holds the repository's pinned
+# Node, Bun and pnpm, so a `node_modules` installed on the host runs in it. The
+# repository is mounted, never copied in.
 #
 # Build, from the repository root:
 #
@@ -39,8 +41,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # The first group is what Electron loads at start. The second is the display:
 # Xvfb, openbox, D-Bus, and xprop and ImageMagick's `import`, which find the
-# window manager and take screenshots of the whole screen. The third is what
-# the toolchain downloads and unpacks with. `binutils` is there for `ar`, which
+# window manager and take screenshots of the whole screen; and a keyring,
+# gnome-keyring, with `secret-tool` to look inside it. The third is what the
+# toolchain downloads and unpacks with. `binutils` is there for `ar`, which
 # fpm runs to build a `.deb`. Fonts are DejaVu only, so a
 # screenshot does not depend on whatever a host has installed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -48,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libgbm1 libgtk-3-0t64 libnotify4 libnss3 libsecret-1-0 libx11-xcb1 \
       libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 libxss1 libxtst6 \
       xvfb openbox dbus dbus-x11 x11-utils imagemagick fonts-dejavu-core \
+      gnome-keyring libsecret-tools \
       ca-certificates curl unzip xz-utils binutils git \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /tmp/.X11-unix /cache && chmod 1777 /tmp/.X11-unix && chmod 777 /cache
