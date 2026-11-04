@@ -522,9 +522,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb xdotool x11-utils dbus-x11 imagemagick
 
-          echo "kernel.apparmor_restrict_unprivileged_userns = $(sysctl -n kernel.apparmor_restrict_unprivileged_userns)"
-          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" != 1 ]; then
-            echo "::warning::This host does not restrict unprivileged user namespaces, so the check below does not test the AppArmor profile."
+          # The check means something only on a host that enforces AppArmor
+          # and restricts unprivileged user namespaces, as Ubuntu 24.04 does by
+          # default. A runner image may change that, so the job turns the
+          # restriction on and fails when it cannot, rather than passing
+          # without testing the profile.
+          apparmor_enabled=$(cat /sys/module/apparmor/parameters/enabled 2> /dev/null || echo missing)
+          echo "AppArmor enabled: $apparmor_enabled"
+          if [ "$apparmor_enabled" != Y ]; then
+            echo "::error::AppArmor is not enabled on this runner, so the package's AppArmor profile cannot be tested."
+            exit 1
+          fi
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1
+          restrict=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
+          echo "kernel.apparmor_restrict_unprivileged_userns = $restrict"
+          if [ "$restrict" != 1 ]; then
+            echo "::error::kernel.apparmor_restrict_unprivileged_userns is $restrict, not 1, so the sandbox check would not need the package's AppArmor profile."
+            exit 1
           fi
 
           first_version=$(dpkg-deb -f "$first" Version)
@@ -557,6 +571,17 @@ jobs:
             xwininfo -root -tree > "$debug_dir/windows.txt" 2>&1 || true
             pgrep -af '^/opt/Hercule/' | cut -c1-200 || true
             exit 1
+          }
+
+          # Prints the AppArmor status and fails unless the package installed a
+          # profile for the app and the kernel has loaded it. Without it the
+          # restriction above stops the app's sandbox from starting.
+          require_apparmor_profile() {
+            echo "--- AppArmor profile files"
+            find /etc/apparmor.d -maxdepth 1 -iname '*hercule*' -ls | grep . || fail "The package installed no AppArmor profile in /etc/apparmor.d."
+            echo "--- AppArmor profiles loaded for the app"
+            sudo grep -i hercule /sys/kernel/security/apparmor/profiles || fail "The kernel has no loaded AppArmor profile for the app."
+            sudo aa-status 2>&1 | grep -E 'profiles are loaded|profiles are in enforce mode' || true
           }
 
           # Starts the installed app, waits for a window, checks that it stays
@@ -609,10 +634,7 @@ jobs:
 
           sudo apt-get install -y "$first"
           echo "Installed: $(dpkg-query -W -f='${Version}' hercule-desktop)"
-          echo "--- AppArmor profile files"
-          find /etc/apparmor.d -maxdepth 1 -iname '*hercule*' -ls | grep . || echo "none"
-          echo "--- AppArmor status"
-          sudo aa-status 2>&1 | grep -iE 'profiles are loaded|hercule' || echo "no profile of the app is loaded"
+          require_apparmor_profile
           start_and_check first
 
           second_version="$first_version.1"
@@ -627,8 +649,7 @@ jobs:
             fail "After the upgrade the installed version is $installed, not $second_version."
           fi
           echo "Upgraded: $first_version -> $installed"
-          echo "--- AppArmor status"
-          sudo aa-status 2>&1 | grep -iE 'profiles are loaded|hercule' || echo "no profile of the app is loaded"
+          require_apparmor_profile
           start_and_check upgraded
 
       # The screen, the window list and the app's logs, which show why the
