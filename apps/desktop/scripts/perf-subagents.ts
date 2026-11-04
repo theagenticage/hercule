@@ -53,6 +53,7 @@ import {
   WAKEUPS_NAME,
   buildTopicRows,
   countAppProcesses,
+  describeAppProcesses,
   evaluateInPage,
   findProcessUse,
   formatWithin,
@@ -799,7 +800,7 @@ export function reportSubagentLaunch(measured: SubagentLaunch): void {
     [
       "Processes",
       `none added: ${String(BUDGET.processes)}`,
-      `${String(processes)}: ${measured.memoryPaneOpen.map((sample) => sample.label).join(", ")}`,
+      describeAppProcesses(measured.memoryPaneOpen, processes),
       processes <= BUDGET.processes,
     ],
     [

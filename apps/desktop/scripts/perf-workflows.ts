@@ -113,6 +113,7 @@ import {
   VISIBLE_SAMPLE_AT_MS,
   WAKEUPS_NAME,
   countAppProcesses,
+  describeAppProcesses,
   evaluateInPage,
   findProcessUse,
   formatWithin,
@@ -1379,7 +1380,7 @@ export function buildAtRestRows(measured: LaunchAtRest, agesText: string): Budge
     [
       "Processes",
       `none added: ${String(BUDGET.processes)}`,
-      `${String(countAppProcesses(memory))}: ${memory.map((sample) => sample.label).join(", ")}`,
+      describeAppProcesses(memory),
       countAppProcesses(memory) <= BUDGET.processes,
     ],
     [

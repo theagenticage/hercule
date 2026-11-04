@@ -82,6 +82,15 @@ export const MEMORY_NAME = MEASURED_ON_MAC ? "Footprint" : "PSS";
 /** `MEMORY_NAME` as it reads in the middle of a sentence. */
 export const MEMORY_NAME_IN_SENTENCE = MEASURED_ON_MAC ? "footprint" : "PSS";
 
+/**
+ * Whether the start time of a process, from `app.getAppMetrics()`, can be
+ * read. On Linux Chromium adds the process's start, counted in ticks since
+ * boot, to the boot time, which the kernel gives to the second, so the time
+ * can be off by up to a second: a run read the GPU process starting half a
+ * second before the app was spawned.
+ */
+export const READS_PROCESS_START_TIMES = MEASURED_ON_MAC;
+
 /** What the wakeups reading is called in the tables (see `MEASURED_ON_MAC`). */
 export const WAKEUPS_NAME = MEASURED_ON_MAC ? "Wakeups" : "Voluntary context switches";
 
@@ -95,8 +104,12 @@ export function describeMeasurements(): string[] {
     "Measured on Linux. The Mac's budgets are shown but not judged here:",
     "- Memory is PSS (`/proc/<pid>/smaps_rollup`), not the Mac's physical footprint.",
     "- Wakeups are voluntary context switches a second, not the Mac's interrupt wakeups.",
-    "- Times are this machine's. A virtual screen (Xvfb) draws with the CPU, and a window",
-    "  manager is not a Mac's window server, so launch and paint times are not a Mac's.",
+    "- Times are this machine's. Under a virtual screen (Xvfb, as in the container) Chromium",
+    "  draws with the CPU, and the window manager is not a Mac's window server, so launch",
+    "  and paint times are not a Mac's.",
+    "- Window shown comes before First screen here. A hidden window presents no frame under X11,",
+    "  so the page reports once it is laid out and drawn, and the frame is presented after the show.",
+    "- The GPU and renderer process start times are not measured: Linux gives them to the second.",
     "- The first-frame check (`pnpm --filter @hercule/desktop first-frame`) needs macOS and is not run.",
     "- A verdict that holds on any machine, such as the process count, the age clock's fires",
     "  or the reads a push causes, is still judged.",
@@ -393,6 +406,23 @@ export async function readLinuxProcessMemory(pid: number): Promise<ProcessMemory
  */
 export const countAppProcesses = (memory: readonly ProcessMemory[]): number =>
   memory.filter((sample) => sample.label !== "Zygote").length;
+
+/**
+ * Describes the processes of `memory` for the process count's row: how many
+ * count against the budget (`count`, the number in `memory` unless given), and
+ * their labels. The zygotes, which do not count, are listed after them.
+ */
+export function describeAppProcesses(
+  memory: readonly ProcessMemory[],
+  count: number = countAppProcesses(memory),
+): string {
+  const labels = (samples: readonly ProcessMemory[]) => samples.map((sample) => sample.label);
+  const zygotes = memory.filter((sample) => sample.label === "Zygote");
+  const counted = `${String(count)}: ${labels(memory.filter((sample) => !zygotes.includes(sample))).join(", ")}`;
+  return zygotes.length === 0
+    ? counted
+    : `${counted}; not counted, Linux's: ${labels(zygotes).join(", ")}`;
+}
 
 /**
  * Starts the signed-in app on `userDataDir`, waits for the shell, quits, and

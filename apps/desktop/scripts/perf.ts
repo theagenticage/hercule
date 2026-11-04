@@ -290,9 +290,11 @@ import {
   HIDDEN_SETTLE_MS,
   MEMORY_NAME,
   MEMORY_READ_AT_MS,
+  READS_PROCESS_START_TIMES,
   VISIBLE_SAMPLE_AT_MS,
   WAKEUPS_NAME,
   countAppProcesses,
+  describeAppProcesses,
   describeMeasurements,
   evaluateInPage,
   findProcessUse,
@@ -429,10 +431,10 @@ const NUDGE_SETTLE_MS = 2_000;
 interface LaunchTimes {
   /** Until main's Node environment was ready, before any of the app's own code ran. */
   readonly nodeReadyMs: number;
-  /** Until main started the GPU process. */
-  readonly gpuProcessMs: number;
-  /** Until main started the renderer process. */
-  readonly rendererProcessMs: number;
+  /** Until main started the GPU process, or null where the start time is not read (see `READS_PROCESS_START_TIMES`). */
+  readonly gpuProcessMs: number | null;
+  /** Until main started the renderer process, or null where the start time is not read. */
+  readonly rendererProcessMs: number | null;
   /** Until the renderer started loading the page. */
   readonly pageStartMs: number;
   /** Until the page first painted. */
@@ -647,8 +649,8 @@ async function measurePlainLaunch(
     measured = {
       launch: {
         nodeReadyMs: mainSteps.nodeReady - spawnedAt,
-        gpuProcessMs: mainSteps.gpuProcess - spawnedAt,
-        rendererProcessMs: mainSteps.rendererProcess - spawnedAt,
+        gpuProcessMs: READS_PROCESS_START_TIMES ? mainSteps.gpuProcess - spawnedAt : null,
+        rendererProcessMs: READS_PROCESS_START_TIMES ? mainSteps.rendererProcess - spawnedAt : null,
         pageStartMs: firstScreen.pageStart - spawnedAt,
         firstPaintMs: firstScreen.firstPaint - spawnedAt,
         firstScreenMs: firstScreen.firstScreen - spawnedAt,
@@ -1256,7 +1258,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
     [
       "Processes",
       `${BUDGET.processes}: browser, GPU, network utility, renderer`,
-      `${countAppProcesses(memory)}: ${memory.map((sample) => sample.label).join(", ")}`,
+      describeAppProcesses(memory),
       countAppProcesses(memory) <= BUDGET.processes,
     ],
     [
@@ -1376,7 +1378,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
           launch.firstPaintMs,
           launch.firstScreenMs,
           launch.windowShownMs,
-        ].map((ms) => ms.toFixed(0)),
+        ].map((ms) => ms?.toFixed(0) ?? "not measured on Linux"),
       ],
     ),
   );
