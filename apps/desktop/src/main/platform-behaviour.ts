@@ -38,15 +38,31 @@ export interface PlatformBehaviour {
    * Linux. Messages to the user and the log name it.
    */
   readonly keyStoreName: "Keychain" | "keyring";
+
+  /**
+   * True when Undo and Redo from the Edit menu may step a native control that
+   * no web contents of the app owns, such as the search field of the folder
+   * sheet, by sending the action to the first responder. Only macOS has the
+   * first responder chain. False when such a step does nothing, because the
+   * call does not exist there.
+   */
+  readonly stepsNativeControls: boolean;
 }
 
 /** The behaviour of each platform. */
 export const PLATFORM_BEHAVIOUR: { readonly [Platform in DesktopPlatform]: PlatformBehaviour } = {
-  mac: { insetTitleBar: true, closingWindow: "hides", hasMacMenu: true, keyStoreName: "Keychain" },
+  mac: {
+    insetTitleBar: true,
+    closingWindow: "hides",
+    hasMacMenu: true,
+    keyStoreName: "Keychain",
+    stepsNativeControls: true,
+  },
   linux: {
     insetTitleBar: false,
     closingWindow: "quits",
     hasMacMenu: false,
     keyStoreName: "keyring",
+    stepsNativeControls: false,
   },
 };

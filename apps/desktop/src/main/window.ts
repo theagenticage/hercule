@@ -207,8 +207,11 @@ const make = Effect.fnUntraced(function* (platform: DesktopPlatform) {
         else if (focused !== null) focused[step]();
         // No web contents of the app has the focus, so a native control has
         // it, such as the search field of the folder sheet. macOS steps it, as
-        // the menu's Undo and Redo roles did.
-        else Menu.sendActionToFirstResponder(step === "undo" ? "undo:" : "redo:");
+        // the menu's Undo and Redo roles did. Linux has no first responder,
+        // and the call does not exist there.
+        else if (behaviour.stepsNativeControls) {
+          Menu.sendActionToFirstResponder(step === "undo" ? "undo:" : "redo:");
+        }
       }),
     showWarning: (message) =>
       Effect.sync(() => {
