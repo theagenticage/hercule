@@ -75,7 +75,10 @@ These come from the spec and ADRs; restated here because violating them is expen
 - **Never edit generated files by hand** (derived clients, OpenAPI documents, lockfiles).
 - **Every operation has a CLI row.** An operation added to `packages/contract` lands its row in the CLI table beside the operation table in the same change: spelling, purpose, examples and a line per field, or `hidden: true` with the reason. The row type and the tree tests refuse a contract without it. (Spec 11 §6.3)
 - **Never silently substitute behaviour.** Access-mode fallback, trigger pauses, dropped events: the system tells the user; so do you. One exception, decided by Rogier on 2026-10-18 (#749): the edit watch of spec 19 §4.1 is best effort, so what it cannot observe goes to the runner's log, never to a thread. A second, decided by Rogier on 2026-10-26 (#613): a session whose GitHub Connection has no usable token at start gets no `GH_TOKEN`, and `gh` then falls back to the machine's own login without a message.
-- **In the desktop app, performance and resource use come first.** Before a desktop change is built, its plan states what it will cost and how that cost is measured: processes, memory, work while idle, work per streamed token, and bundle bytes. Afterwards the measurement is recorded in spec 17 §Performance. A change that misses a budget does not merge. (ADR 0037)
+- **In the desktop app, performance and resource use come first.** Before a desktop change is built, its plan states what it will cost and how that cost is measured: processes, memory, work while idle, work per streamed token, and bundle bytes. Afterwards the measurement is recorded in spec 17 §Performance. A change that misses a budget does not merge (ADR 0037). Measure on the platform you have, Mac or Linux, and say which in the record. Not having a Mac never blocks a change (ADR 0051, spec 17 §Performance › Platforms):
+  - budgets measured on a Mac are judged only on a Mac, and a Linux reading is never compared with them;
+  - counts are judged on either platform: process count, bundle bytes, work per streamed token, no idle timers;
+  - memory and time on Linux are judged before against after, on the same machine and setup, back to back. The Linux reference table is in the spec.
 - **Never touch `~/.hercule`.** That is the user's live Hercule Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hercule` command that writes) uses a throwaway home: `HERCULE_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hercule/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
 - **A migration that rewrites existing rows adds a fixture to the upgrade test.** The upgrade test (`e2e/upgrade.test.ts`) fills a database with the previous edge build and migrates it to the new binary. A migration that transforms data (the provider remodel, qualified harness ids, any UPDATE or data-shape change) must add test coverage for the rows it rewrites: create those rows with the edge binary, verify they migrate and are still readable. A migration that only adds tables, columns, or indexes needs no new fixture.
 - **Never kill processes by pattern.** `pkill -f vite`, `pkill -f node`, `killall bun` and the like reach every worktree and every session on this machine, not just yours; another agent's dev server, controller or test run dies with no trace of why. Stop only what you started, by the PID you captured when you started it (or the port you bound), and leave anything you did not start alone.
@@ -105,7 +108,7 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 | `packages/client-core` | `@hercule/client-core` | The client library. The only client package that writes Effect code |
 | `packages/ui` | `@hercule/ui` | The React component library |
 | `apps/web` | `@hercule/web` | The web app. Routes and presentation only |
-| `apps/desktop` | `@hercule/desktop` | The macOS desktop app on Electron (spec 17): main on Effect, a typed preload bridge, and a React renderer drawn in Crew Bureau. Links only `@hercule/contract` and `@hercule/client-core` |
+| `apps/desktop` | `@hercule/desktop` | The desktop app on Electron, for macOS and Linux (spec 17): main on Effect, a typed preload bridge, and a React renderer drawn in Crew Bureau. Links only `@hercule/contract` and `@hercule/client-core` |
 | `apps/android` | | The Android app (spec 18): a Gradle project in Kotlin and Compose, not a pnpm package. No `pnpm` command builds it |
 | `plugins/*` | | One package per plugin, added by its own ticket |
 
@@ -155,23 +158,32 @@ pnpm build:binary  # vite build, the bundle budget check, then bun build --compi
 pnpm test:binary   # ./hercule serves the embedded web app beside the API
 ```
 
-The desktop pair works the same way. `pnpm test:desktop` launches the packaged app, so it needs the build before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. On a pull request, CI runs `pnpm build:desktop` and `pnpm compare:bureau` on macOS, and `pnpm --filter @hercule/desktop ui:metrics` on Linux; on `main`, the `edge-build` job also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease. The rest of the end-to-end suite checks windows, pixels and timing, and CI's virtual Macs differ from a user's Mac in all three, so run `pnpm test:desktop` on a Mac before a PR that changes the desktop app.
+The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` launches the packaged app, so it needs `pnpm build:desktop` before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. On a headless Linux machine with Docker, `pnpm test:desktop:container` builds both in a container and runs the suite on a virtual screen (`apps/desktop/container`).
+
+**A desktop PR needs these checks on one platform, Linux or Mac, never both** (Rogier, 2026-11-04, ADR 0051). Use the one you have. A headless Linux machine is enough. CI covers the other:
+
+- macOS runs `pnpm build:desktop`, `pnpm compare:bureau` and the end-to-end files that do not depend on a screen, timing or focus. `compare:bureau` runs only there, and nobody needs a Mac to run it.
+- Linux runs the whole end-to-end suite in the container, installs the `.deb` on a real Ubuntu 24.04 host and starts it with the sandbox on, and runs `ui:metrics`.
+- On `main`, `edge-build` also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease.
 
 ```
-pnpm build:desktop # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
-pnpm test:desktop  # Playwright drives the test package: window, security, fuses, IPC
+pnpm build:desktop           # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
+pnpm test:desktop            # Playwright drives the test package: window, security, fuses, IPC
+pnpm test:desktop:container  # the same on a headless Linux machine: Docker, a virtual screen
 ```
 
 The desktop app's looks are checked in two places. The app is its own pixel reference (ADR 0047):
 
-- **The goldens** are 90 PNGs in `apps/desktop/ui-goldens/`: the 15 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them: check it by eye on a Mac.
-- **The piece sheet** (faces, marks, icons) is compared with the frozen Crew Bureau book by `pnpm compare:bureau`, on macOS. The book is not edited.
+- **The goldens** are 90 PNGs in `apps/desktop/ui-goldens/`: the 15 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them. Rogier checks it by eye on his Mac; it is not a step of your PR.
+- **The piece sheet** (faces, marks, icons) is compared with the frozen Crew Bureau book by `pnpm compare:bureau`, in CI on macOS. The book is not edited.
 
 ```
 pnpm --filter @hercule/desktop ui:metrics                   # the metrics, the ratchet, and the goldens
 pnpm --filter @hercule/desktop ui:metrics --write-goldens   # re-record the goldens (never bypasses the ratchet)
 pnpm --filter @hercule/desktop ui:metrics --write-baseline  # re-write the metrics baseline; a worse number needs its reason in the PR body
 ```
+
+On a machine that has no Chromium libraries, run `ui:metrics` in the container: use the `docker run` line of `apps/desktop/container/run.sh` with that command in place of the test command.
 
 The Android app has a check of its own, which no `pnpm` command runs. CI runs it in a job of its own, `android`, on a macOS runner: the screenshot goldens are recorded on a Mac, and Linux rasterises vector shapes slightly differently. It needs JDK 21 (newer JDKs are too new for the Android Gradle plugin) and the Android SDK with platforms 36 and 37 and build-tools 37, located by `JAVA_HOME` and `ANDROID_HOME`; `apps/android/README.md` has the paths. Run it before a PR that changes `apps/android`:
 
