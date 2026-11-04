@@ -3,7 +3,7 @@
 # user installs it. It runs as root inside the official `archlinux` image, and
 # is run by `desktop-linux` in .github/workflows/ci.yml and by hand:
 #
-#   docker run --rm --security-opt seccomp=unconfined \
+#   docker run --rm --security-opt seccomp=unconfined --cap-add SYS_PTRACE \
 #     -v "$PWD/apps/desktop/container":/check:ro -v /path/to/packages:/packages:ro \
 #     archlinux:latest bash /check/arch-install-check.sh \
 #       /packages/first.pkg.tar.zst /packages/second.pkg.tar.zst /tmp/debug
@@ -23,6 +23,9 @@
 # `--security-opt seccomp=unconfined` lets Chromium create user namespaces,
 # which Docker's default profile blocks. Without it the sandbox cannot start,
 # the same as on a host that forbids user namespaces.
+# `--cap-add SYS_PTRACE` lets root, which runs this script, read
+# /proc/<pid>/exe and /proc/<pid>/environ of the app, which runs as another
+# user. Docker drops that capability by default.
 set -Eeuo pipefail
 # A command that fails without a message of its own would stop the script
 # silently. This names the line and the command.
@@ -93,8 +96,11 @@ useradd --create-home tester
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
 export DISPLAY=:99
-as_tester() { setpriv --reuid=tester --regid=tester --init-groups "$@"; }
-as_tester Xvfb "$DISPLAY" -screen 0 1920x1080x24 -nolisten tcp > "$debug_dir/xvfb.log" 2>&1 &
+# The words that run a command as the normal user. This is an array, not a
+# function: a function started in the background runs in a shell of its own,
+# and `$!` would then be that shell's pid, not the program's.
+as_tester=(setpriv --reuid=tester --regid=tester --init-groups)
+"${as_tester[@]}" Xvfb "$DISPLAY" -screen 0 1920x1080x24 -nolisten tcp > "$debug_dir/xvfb.log" 2>&1 &
 for _ in $(seq 100); do
   xprop -root > /dev/null 2>&1 && break
   sleep 0.1
@@ -122,10 +128,19 @@ start_and_check() {
   chown tester "$home"
   # `setpriv` and `env` replace themselves with the app, so $! is the app's own
   # pid. The app gets no switch that turns the sandbox off.
-  as_tester env -u ELECTRON_DISABLE_SANDBOX HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+  "${as_tester[@]}" env -u ELECTRON_DISABLE_SANDBOX HOME="$home" XDG_CONFIG_HOME="$home/.config" \
     XDG_CACHE_HOME="$home/.cache" XDG_DATA_HOME="$home/.local/share" \
     /opt/Hercule/hercule-desktop > "$log" 2>&1 &
   app_pid=$!
+
+  # The pid kept here is what the rest of the check reads and signals, so it
+  # must be the app itself and not a shell or a wrapper around it.
+  for _ in $(seq 50); do
+    [ "$(readlink "/proc/$app_pid/exe" 2> /dev/null)" = /opt/Hercule/hercule-desktop ] && break
+    sleep 0.1
+  done
+  [ "$(readlink "/proc/$app_pid/exe" 2> /dev/null)" = /opt/Hercule/hercule-desktop ] ||
+    fail "Process $app_pid is not /opt/Hercule/hercule-desktop but $(readlink "/proc/$app_pid/exe" 2> /dev/null || echo 'a process that is gone')."
 
   window_found=false
   for _ in $(seq 60); do
@@ -178,6 +193,16 @@ start_and_check() {
     kill -KILL "$app_pid"
     fail "The app ($label) did not quit within 30 seconds of SIGTERM."
   fi
+  # Its other processes end with it. A window left over from this run would
+  # let the next check pass on the old app.
+  for _ in $(seq 30); do
+    pgrep -f '^/opt/Hercule/hercule-desktop' > /dev/null || break
+    sleep 1
+  done
+  if pgrep -f '^/opt/Hercule/hercule-desktop' > /dev/null; then
+    fail "Processes of the app ($label) are still running 30 seconds after it quit."
+  fi
+  has_viewable_window && fail "A window of the app ($label) is still on the screen after it quit."
   rm -rf "$home"
 }
 
