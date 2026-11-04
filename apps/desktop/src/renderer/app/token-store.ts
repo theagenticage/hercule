@@ -3,7 +3,7 @@ import type { Bridge } from "../../ipc/bridge";
 
 /**
  * Creates the token store the client keeps its login token in. Main holds the
- * token, encrypted with the Keychain, and the store reaches it through the
+ * token, encrypted with the system key store, and the store reaches it through the
  * bridge.
  *
  * - `read` returns `bootToken`, the token boot read from main. The client

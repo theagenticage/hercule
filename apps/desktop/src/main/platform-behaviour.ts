@@ -31,10 +31,22 @@ export interface PlatformBehaviour {
    * with a label of its own, and those items are left out.
    */
   readonly hasMacMenu: boolean;
+
+  /**
+   * What the platform calls the place that keeps the key which encrypts the
+   * login token, as the user knows it: the Keychain on macOS, the keyring on
+   * Linux. Messages to the user and the log name it.
+   */
+  readonly keyStoreName: "Keychain" | "keyring";
 }
 
 /** The behaviour of each platform. */
 export const PLATFORM_BEHAVIOUR: { readonly [Platform in DesktopPlatform]: PlatformBehaviour } = {
-  mac: { insetTitleBar: true, closingWindow: "hides", hasMacMenu: true },
-  linux: { insetTitleBar: false, closingWindow: "quits", hasMacMenu: false },
+  mac: { insetTitleBar: true, closingWindow: "hides", hasMacMenu: true, keyStoreName: "Keychain" },
+  linux: {
+    insetTitleBar: false,
+    closingWindow: "quits",
+    hasMacMenu: false,
+    keyStoreName: "keyring",
+  },
 };

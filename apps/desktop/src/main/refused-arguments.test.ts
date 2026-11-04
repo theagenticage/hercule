@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
+import {
+  findRefusedArgument,
+  readBinaryPathArgument,
+  requestsMockKeychain,
+} from "./refused-arguments";
 
 /** The arguments the end-to-end tests start the app with. */
 const TEST_ARGS = ["-ApplePersistenceIgnoreState", "YES", "--user-data-dir=/tmp/hercule-e2e"];
@@ -92,5 +96,24 @@ describe("readBinaryPathArgument", () => {
 
   it("returns undefined without the switch", () => {
     expect(readBinaryPathArgument(TEST_ARGS, false, false)).toBeUndefined();
+  });
+});
+
+describe("requestsMockKeychain", () => {
+  it("is true with the switch and the inspector open, as in the test package", () => {
+    expect(requestsMockKeychain([...TEST_ARGS, "--use-mock-keychain"], true)).toBe(true);
+  });
+
+  it("is false with the inspector closed, as in the release package, even with the switch", () => {
+    // The release package refuses the switch before it gets here; this is
+    // the second guard, so a fixed key is never used without an open inspector.
+    expect(requestsMockKeychain([...TEST_ARGS, "--use-mock-keychain"], false)).toBe(false);
+    expect(findRefusedArgument([...TEST_ARGS, "--use-mock-keychain"], true, false)).toBe(
+      "--use-mock-keychain",
+    );
+  });
+
+  it("is false without the switch", () => {
+    expect(requestsMockKeychain(TEST_ARGS, true)).toBe(false);
   });
 });

@@ -454,7 +454,7 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
     response: Schema.NullOr(Schema.String),
   },
   /**
-   * Stores the login token, encrypted with the Keychain, or removes it when
+   * Stores the login token, encrypted with the system key store, or removes it when
    * the request is null. Refused when no controller URL is saved, because a
    * token belongs to one controller.
    */

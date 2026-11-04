@@ -41,7 +41,11 @@ import { registerIpcHandlers } from "./ipc";
 import { MainWindow } from "./main-window";
 import { makeMainMenuLayer } from "./menu";
 import { PickedSkillFoldersLayer } from "./picked-skill-folders";
-import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
+import {
+  findRefusedArgument,
+  readBinaryPathArgument,
+  requestsMockKeychain,
+} from "./refused-arguments";
 import { APP_SCHEME } from "./renderer-origin";
 import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
@@ -67,6 +71,15 @@ const devServerUrl = app.isPackaged ? null : (process.env.HERCULE_DESKTOP_DEV_SE
 const binaryPath =
   readBinaryPathArgument(process.argv.slice(1), app.isPackaged, inspector.url() !== undefined) ??
   path.join(homedir(), ".local", "bin", "hercule");
+
+/**
+ * True when an end-to-end test asked for a fixed key in place of the system's
+ * key store; see `requestsMockKeychain`.
+ */
+const usesFixedKeyForTests = requestsMockKeychain(
+  process.argv.slice(1),
+  inspector.url() !== undefined,
+);
 
 /** Opens `folder` in Finder. A folder Finder cannot open is logged as a warning. */
 const openFolder = (folder: string): Effect.Effect<void> =>
@@ -104,7 +117,11 @@ const startApp = (): void => {
     Layer.mergeAll(
       makeThisMacLayer({ binaryPath, openFolder }).pipe(
         Layer.provideMerge(makeControllerConnectionLayer(fetchWithoutRedirects)),
-        Layer.provideMerge(StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage)))),
+        Layer.provideMerge(
+          StoredTokenLayer.pipe(
+            Layer.provide(makeSafeStorageLayer(safeStorage, platform, usesFixedKeyForTests)),
+          ),
+        ),
       ),
       makeRunnerIdentityLayer(fetchWithoutRedirects),
       makeAppSchemeLayer(devServerUrl),

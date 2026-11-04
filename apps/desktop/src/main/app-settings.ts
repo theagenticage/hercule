@@ -1,7 +1,7 @@
 /**
  * The app's settings file: the one small file main keeps in the app's user
  * data folder, `settings.json`. It holds the saved controller URL, the login
- * token as the Keychain encrypted it, the window's state, the steps of the
+ * token as the system key store encrypted it, the window's state, the steps of the
  * first run the user put off, and the Appearance. The token sits beside the URL of the
  * controller it belongs to, so that one write changes both.
  *
@@ -75,7 +75,7 @@ export const WindowState = Schema.Struct({
 export type WindowState = typeof WindowState.Type;
 
 /**
- * The login token as the Keychain encrypted it. The file holds it in base64,
+ * The login token as the system key store encrypted it. The file holds it in base64,
  * so it is the only key a person cannot read.
  */
 const EncryptedToken = Schema.Uint8ArrayFromBase64;
@@ -233,11 +233,11 @@ const make = (file: string) =>
           }),
         ),
 
-      /** Returns the stored token, as the Keychain encrypted it, or `null` when none is stored. */
+      /** Returns the stored token, as the system key store encrypted it, or `null` when none is stored. */
       readEncryptedToken: Effect.sync(() => encryptedToken),
 
       /**
-       * Saves `encrypted`, the login token as the Keychain encrypted it, or
+       * Saves `encrypted`, the login token as the system key store encrypted it, or
        * removes the stored token when `encrypted` is `null`.
        *
        * Fails with NoControllerSaved when a token is given and no controller

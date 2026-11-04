@@ -1,9 +1,10 @@
 /**
  * The login token the renderer's client uses, stored between launches in the
- * settings file, encrypted with the Keychain's key. Spec 17 (§Auth and the
+ * settings file, encrypted with the key of the system's key store (the
+ * Keychain on macOS, the keyring on Linux). Spec 17 (§Auth and the
  * token) owns the rules:
  *
- * - The token is never stored in plain text. When the Keychain cannot
+ * - The token is never stored in plain text. When the key store cannot
  *   encrypt it, nothing is stored, and the user signs in again at the next
  *   launch.
  * - The token is encrypted together with the controller URL it was stored
@@ -33,11 +34,14 @@ import { SafeStorage } from "./safe-storage";
 import { UrgentSignalNotifications } from "./urgent-signal-notifications";
 import { WaitingNotifications } from "./waiting-notifications";
 
-/** The text the sheet shows when the Keychain cannot encrypt the token. */
-const KEYCHAIN_WARNING =
-  "Hercule could not save your sign-in to the Keychain, so you will need to sign in again next time.";
+/**
+ * Returns the text the sheet shows when the key store, named `keyStoreName`,
+ * cannot encrypt the token.
+ */
+const buildKeyStoreWarning = (keyStoreName: string): string =>
+  `Hercule could not save your sign-in to the ${keyStoreName}, so you will need to sign in again next time.`;
 
-/** What the Keychain encrypts: the login token and the controller URL it was stored for, as JSON. */
+/** What the key store encrypts: the login token and the controller URL it was stored for, as JSON. */
 const TokenForController = Schema.fromJsonString(
   Schema.Struct({ controllerUrl: Schema.String, token: Schema.NonEmptyString }),
 );
@@ -45,7 +49,7 @@ const encodeTokenForController = Schema.encodeSync(TokenForController);
 const decodeTokenForController = Schema.decodeUnknownOption(TokenForController);
 
 /**
- * Builds the token service on the settings file, the Keychain, the menu, the
+ * Builds the token service on the settings file, the key store, the menu, the
  * window, the waiting notifications and the urgent signals' notifications.
  */
 const make = Effect.gen(function* () {
@@ -92,7 +96,7 @@ const make = Effect.gen(function* () {
    * again, when:
    *
    * - no controller URL is saved;
-   * - the Keychain cannot decrypt the token, because its key changed or
+   * - the key store cannot decrypt the token, because its key changed or
    *   access was denied;
    * - the token was stored for another controller URL than the saved one.
    */
@@ -104,7 +108,7 @@ const make = Effect.gen(function* () {
     const decrypted = yield* Effect.result(safeStorage.decrypt(encrypted));
     if (Result.isFailure(decrypted)) {
       return yield* removeStoredToken(
-        `the Keychain could not decrypt it: ${decrypted.failure.message}`,
+        `the ${safeStorage.keyStoreName} could not decrypt it: ${decrypted.failure.message}`,
       );
     }
     const stored = decodeTokenForController(decrypted.success);
@@ -121,7 +125,7 @@ const make = Effect.gen(function* () {
 
   /**
    * Encrypts `token` together with `controllerUrl`, the saved controller URL,
-   * and stores it. When the Keychain cannot encrypt it, stores nothing and
+   * and stores it. When the key store cannot encrypt it, stores nothing and
    * shows the user a warning sheet.
    */
   const encryptAndStore = (controllerUrl: string, token: string): Effect.Effect<void> =>
@@ -129,8 +133,10 @@ const make = Effect.gen(function* () {
       Effect.matchEffect({
         onFailure: (error) =>
           Effect.logWarning(
-            `Did not store the login token, because the Keychain could not encrypt it: ${error.message}`,
-          ).pipe(Effect.andThen(window.showWarning(KEYCHAIN_WARNING))),
+            `Did not store the login token, because the ${safeStorage.keyStoreName} could not encrypt it: ${error.message}`,
+          ).pipe(
+            Effect.andThen(window.showWarning(buildKeyStoreWarning(safeStorage.keyStoreName))),
+          ),
         onSuccess: settings.saveEncryptedToken,
       }),
       // The settings file is in the app's own folder, so a write that fails
@@ -152,7 +158,7 @@ const make = Effect.gen(function* () {
     /**
      * Stores `token`, encrypted, or removes the stored token when `token` is
      * null, and enables Sign Out exactly when `token` is not null; see
-     * reflectSignedIn. When the Keychain cannot encrypt the token, stores
+     * reflectSignedIn. When the key store cannot encrypt the token, stores
      * nothing and shows the user a warning sheet; the user stays signed in
      * until the app quits.
      *

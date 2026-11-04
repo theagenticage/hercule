@@ -10,8 +10,11 @@
  *   `authorization` header included;
  * - `--proxy-server`, `--host-resolver-rules` and `--ignore-certificate-errors`
  *   send the app's requests, and the token with them, to another server;
- * - `--use-mock-keychain` makes Electron encrypt the stored token with a fixed
- *   key instead of one kept in the macOS Keychain, so anyone can decrypt it.
+ * - `--use-mock-keychain` makes the app encrypt the stored token with a fixed
+ *   key instead of one kept in the macOS Keychain or the Linux keyring, so
+ *   anyone can decrypt it. Chromium reads the switch itself on macOS; on
+ *   Linux it does nothing by itself, and main acts on it only while the
+ *   inspector is open (see `requestsMockKeychain`).
  *
  * The list holds whole arguments, and an argument that is not a switch is
  * refused too, because a switch cannot be told apart by how it starts:
@@ -91,3 +94,26 @@ export const readBinaryPathArgument = (
     .findLast((arg) => arg.startsWith(BINARY_PATH_SWITCH))
     ?.slice(BINARY_PATH_SWITCH.length);
 };
+
+/** The switch that asks for the key store to be replaced by a fixed key. */
+const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
+
+/**
+ * Checks whether the app must encrypt the login token with a fixed key
+ * instead of the system's key store, because `args` holds
+ * `--use-mock-keychain` and the Node inspector is open.
+ *
+ * The end-to-end tests pass the switch, so that no test touches the real
+ * Keychain or needs a keyring. Chromium reads the switch itself on macOS. On
+ * Linux main reads it here, and turns it into Electron's fixed-key mode. The
+ * inspector must be open, as for every argument the release package refuses
+ * (see `findRefusedArgument`): a token encrypted with a fixed key is readable
+ * by any program, so a release package, whose fuses keep the inspector
+ * closed, never encrypts that way. Pass the inspector's real state,
+ * `inspector.url() !== undefined`, not whether `--inspect` is on the command
+ * line.
+ */
+export const requestsMockKeychain = (
+  args: ReadonlyArray<string>,
+  inspectorOpen: boolean,
+): boolean => inspectorOpen && args.includes(MOCK_KEYCHAIN_SWITCH);
