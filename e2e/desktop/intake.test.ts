@@ -336,6 +336,10 @@ describe("Intake", () => {
 
     // The Office keeps the face; Go › Intake brings back Intake and its face.
     await chooseMenuItem(app, "Go", "Office");
+    // The Office is on screen only once it has loaded and mounted. Where it
+    // draws in software (Linux without a GPU) that takes seconds, and a face
+    // chosen before then is overwritten when the Office mounts.
+    await page.locator(".office").waitFor();
     await expect.poll(() => readScreenTitle(page)).not.toBe("Intake");
     expect(await readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
     await chooseMenuItem(app, "View", "Threads");

@@ -129,18 +129,21 @@ export function buildSandboxArgs(kind: PackageKind): string[] {
 }
 
 /**
- * Builds the argument that lets Chromium draw WebGL in software, which is
- * `--enable-unsafe-swiftshader` on Linux and nothing otherwise.
+ * Builds the argument that lets Chromium use the machine's graphics driver
+ * even when its blocklist rejects it, which is `--ignore-gpu-blocklist` on
+ * Linux and nothing otherwise.
  *
- * The Office draws with WebGL. On a Linux machine without a usable GPU, such
- * as a virtual screen in a container or on a CI runner, Chromium blocks WebGL
- * and the Office shows "This screen did not load". With this switch Chromium
- * falls back to its software renderer. A machine with a GPU still uses it. Only
- * the test package takes the switch: the release package refuses it, and a
- * user's machine decides for itself.
+ * The Office draws with WebGL. On a Linux machine without a GPU, such as a
+ * virtual screen in a container or on a CI runner, the only driver is Mesa's
+ * software renderer, and Chromium blocks it: the Office shows "This screen
+ * did not load". With this switch Mesa draws it, several times faster than
+ * Chromium's own fallback renderer (`--enable-unsafe-swiftshader`), which
+ * made the Office tests take longer than their time limit. Only the test
+ * package takes the switch: the release package refuses it, and a user's
+ * machine decides for itself.
  */
-export function buildSoftwareGraphicsArgs(): string[] {
-  return process.platform === "linux" ? ["--enable-unsafe-swiftshader"] : [];
+export function buildGraphicsArgs(): string[] {
+  return process.platform === "linux" ? ["--ignore-gpu-blocklist"] : [];
 }
 
 /**
@@ -311,7 +314,7 @@ export function launchTestPackage(
       ...buildAppArgs(userDataDir),
       ...buildMockKeychainArgs(),
       buildBinaryPathArgument(userDataDir),
-      ...buildSoftwareGraphicsArgs(),
+      ...buildGraphicsArgs(),
       ...extraArgs,
     ],
     env: buildAppEnv(),
@@ -362,7 +365,7 @@ export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
     [
       ...buildAppArgs(userDataDir),
       ...buildSandboxArgs("test"),
-      ...buildSoftwareGraphicsArgs(),
+      ...buildGraphicsArgs(),
       ...buildMockKeychainArgs(),
       buildBinaryPathArgument(userDataDir),
       "--inspect=0",

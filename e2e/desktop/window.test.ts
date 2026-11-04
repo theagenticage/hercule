@@ -331,11 +331,23 @@ describe("the window's state", () => {
 
   it("moves a window saved where no display is back onto a display", async () => {
     const userDataDir = createUserDataDirForTest();
+    // The window is saved at a size that fits the work area, read from a
+    // first launch. A work area can be smaller than the usual 1000 by 700
+    // window, such as a hosted Mac's 679 points high, and the system then
+    // shrinks the window, as it should.
+    const probe = await launchForTest(userDataDir);
+    const area = await probe.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea);
+    await probe.close();
+    const size = {
+      width: Math.min(1000, area.width - 40),
+      height: Math.min(700, area.height - 80),
+    };
+
     // macOS keeps part of a window on a display, so the app cannot be made to
     // save a position on none. The test writes the settings file itself,
     // with a position far off every display, as when the display the window
     // was on has been unplugged since.
-    const offScreen = { x: -30_000, y: -30_000, width: 1000, height: 700 };
+    const offScreen = { x: -30_000, y: -30_000, ...size };
     writeFileSync(
       join(userDataDir, "settings.json"),
       JSON.stringify({ window: { bounds: offScreen, fullScreen: false } }),
@@ -346,7 +358,7 @@ describe("the window's state", () => {
       bounds: BrowserWindow.getAllWindows()[0]!.getBounds(),
       workAreas: screen.getAllDisplays().map((display) => display.workArea),
     }));
-    expect({ width: bounds.width, height: bounds.height }).toEqual({ width: 1000, height: 700 });
+    expect({ width: bounds.width, height: bounds.height }).toEqual(size);
     const insideWorkArea = workAreas.some(
       (area) =>
         bounds.x >= area.x &&
