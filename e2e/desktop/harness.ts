@@ -15,6 +15,13 @@
  * A test that connects or signs in reaches a real controller: the compiled
  * binary, `./hercule`, started in a scratch Hercule Home by
  * `scripts/controller-process.ts`. Run `pnpm build:binary` first as well.
+ *
+ * The suite runs on macOS and on Linux. On Linux, `pnpm test:desktop:container`
+ * builds everything and runs the suite on a virtual screen in a container
+ * (`apps/desktop/container`); on a Linux desktop with a screen, the libraries
+ * Electron needs and `pnpm exec playwright install chromium`, `pnpm
+ * test:desktop` runs it directly. A test that differs between the platforms
+ * reads `RUNS_ON_MAC`.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -46,6 +53,7 @@ import {
   launchPlainApp,
   launchTestPackage,
   quitApp,
+  RUNS_ON_MAC,
   signIn,
   signInOnce,
   stopPlainApp,
@@ -83,6 +91,15 @@ export function createUserDataDirForTest(): string {
   onTestFinished(() => rmSync(userDataDir, { recursive: true, force: true }));
   return userDataDir;
 }
+
+/**
+ * True on a macOS runner of GitHub Actions, the only place where a Mac runs
+ * the suite unattended. Its screen is virtual and nobody is signed in to
+ * give a window the keyboard focus, so a test that needs the window to be
+ * focused cannot pass there. Such a test is skipped with `skipIf(ON_HOSTED_MAC)`
+ * and says why beside it; a developer's Mac and Linux run it.
+ */
+export const ON_HOSTED_MAC = RUNS_ON_MAC && process.env["GITHUB_ACTIONS"] === "true";
 
 /** A running test package, with its one window. */
 export interface LaunchedApp {
