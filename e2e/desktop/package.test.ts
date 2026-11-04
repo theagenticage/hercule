@@ -15,13 +15,13 @@ import { promisify } from "node:util";
 import { describe, expect, it, onTestFinished } from "vitest";
 import {
   buildAppArgs,
+  buildPackageEnv,
   findAppArchive,
   findExecutable,
   findPackagedApp,
   writeSettings,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
-import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
   createUserDataDirForTest,
   findUnusedLoopbackUrl,
@@ -138,7 +138,7 @@ describe("the release package", () => {
     const userDataDir = createUserDataDirForTest();
     writeSettings(userDataDir, { controllerUrl: await findUnusedLoopbackUrl() });
     const first = spawn(findExecutable("release"), buildAppArgs(userDataDir), {
-      env: buildAppEnv(),
+      env: buildPackageEnv("release"),
       stdio: "ignore",
     });
     onTestFinished(() => {

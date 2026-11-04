@@ -38,6 +38,7 @@ import type { MessagePause, ScriptStep } from "../../apps/desktop/scripts/script
 import {
   assertExitedCleanly,
   buildAppArgs,
+  buildPackageEnv,
   buildSandboxArgs,
   evaluateInMain,
   findExecutable,
@@ -54,7 +55,6 @@ import {
   type TestPackageOptions,
 } from "../../apps/desktop/scripts/packaged-app";
 import { pollUntil } from "../../apps/desktop/scripts/poll";
-import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
   findCompiledBinary,
   PASSWORD,
@@ -742,13 +742,15 @@ export function runSecondInstance(
   kind: PackageKind,
   userDataDir: string,
 ): Promise<number | NodeJS.Signals> {
+  // The test package refuses `--no-sandbox` while its inspector is closed, as
+  // it refuses every argument but `buildAppArgs`'s, so the launch that passes
+  // it opens the inspector as well.
+  const sandboxArgs = buildSandboxArgs(kind);
+  const inspectorArgs = sandboxArgs.length === 0 ? [] : ["--inspect=0"];
   const child = spawn(
     findExecutable(kind),
-    [...buildAppArgs(userDataDir), ...buildSandboxArgs(kind)],
-    {
-      env: buildAppEnv(),
-      stdio: "ignore",
-    },
+    [...buildAppArgs(userDataDir), ...sandboxArgs, ...inspectorArgs],
+    { env: buildPackageEnv(kind), stdio: "ignore" },
   );
   return waitForExit(child, "the second instance");
 }

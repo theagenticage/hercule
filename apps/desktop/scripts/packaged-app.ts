@@ -123,6 +123,23 @@ export function buildSandboxArgs(kind: PackageKind): string[] {
 }
 
 /**
+ * Builds the environment a launch of the packaged app of the given kind gets:
+ * `buildAppEnv`'s, and for the release package without
+ * `ELECTRON_DISABLE_SANDBOX`.
+ *
+ * Electron turns Chromium's sandbox off on Linux when that variable exists at
+ * all, even with an empty value, and no fuse or argument check stops it. A
+ * shell that exports it would make a test of the release package run without
+ * the sandbox and still pass, so the release package never sees it. The test
+ * package runs without the sandbox anyway (see `buildSandboxArgs`).
+ */
+export function buildPackageEnv(kind: PackageKind): Record<string, string> {
+  const env = buildAppEnv();
+  if (kind === "release") delete env.ELECTRON_DISABLE_SANDBOX;
+  return env;
+}
+
+/**
  * Builds the path of the stand-in binary a launch on `userDataDir` runs in
  * place of `~/.local/bin/hercule`, to find and start Hercule on this Mac.
  * There is no file at the path until a test writes a stand-in binary there
