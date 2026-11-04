@@ -69,6 +69,7 @@ afterEach(() => {
   // A test that ends before its wait does leaves the sentinel behind, and the
   // next test would find it instead of its own.
   document.body.replaceChildren();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -185,6 +186,19 @@ describe("reportFirstScreen", () => {
       await settle();
       expect(presentedAt).toBe(90);
       expect(findSentinel()).toBeNull();
+    });
+
+    it("reports after 250 ms when no animation frame runs, as in a hidden window on native Wayland", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      holdAnimationFrames();
+      const report = vi.fn(() => Promise.resolve(undefined));
+      void reportFirstScreen(makeBridge(report, "linux"));
+
+      await vi.advanceTimersByTimeAsync(249);
+      expect(report).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(report).toHaveBeenCalledOnce();
+      expect(findSentinel()).not.toBeNull();
     });
 
     it("logs a failed report and returns null", async () => {
