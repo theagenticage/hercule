@@ -131,20 +131,37 @@ jobs:
       - run: pnpm build:binary
       - run: bun --bun run vitest run --project binary e2e/upgrade.test.ts
 
-  # The desktop app is packaged and compared with the Bureau book on a macOS
-  # runner. Its Linux package is built and tried by `desktop-linux`.
+  # The desktop app is packaged on a macOS runner, compared with the Bureau
+  # book, and the part of the end-to-end suite that does not depend on the
+  # machine runs against it. Its Linux package is built and tried by
+  # `desktop-linux`, and the whole suite runs on Linux in `desktop-e2e-linux`.
+  # Together they let a developer check a desktop change on one platform, a
+  # Mac or Linux, and leave the other to CI.
   #
-  # The end-to-end suite, `pnpm test:desktop`, does not run here. It checks
-  # windows, pixels and timing, and CI's virtual Macs differ from a user's
-  # Mac in all three: a 1024 by 768 screen at 1x with the Dock showing,
-  # Reduce motion and Reduce transparency on, and a slow machine. Run it on
-  # a Mac before a pull request that changes the desktop app.
+  # What runs here is what a Mac behaves differently on from Linux, and what a
+  # virtual Mac can check reliably: the packaged app's start, its second
+  # launch and its quit (package.test.ts, refused-arguments.test.ts), its
+  # security (security.test.ts: the page's policy, navigation, permissions and
+  # IPC), the connect screen with its CORS check (connect.test.ts), signing
+  # in and out with the token (sign-in.test.ts, sign-out.test.ts), the menu
+  # bar (menu.test.ts), and the window with what closing it and activating the
+  # app do (window.test.ts).
+  #
+  # The rest does not run here, because it checks pixels, timing or the
+  # keyboard focus, and CI's virtual Macs differ from a user's Mac in all
+  # three: a 1024 by 768 screen at 1x with the Dock showing, Reduce motion and
+  # Reduce transparency on, a slow machine, and no one to give a window the
+  # focus. In the files that do run, the tests that depend on those carry
+  # `skipIf(ON_HOSTED_MAC)` with the reason beside them. A change that can
+  # break the rest is checked by its author on a Mac or on Linux, and Linux
+  # CI runs all of it.
   desktop:
     runs-on: macos-latest
     # A fresh runner spends a few minutes on the install and Electron's
-    # 100 MB download. The bound stops a capture that hangs, such as on a
-    # macOS alert, from holding the runner for GitHub's default of six hours.
-    timeout-minutes: 10
+    # 100 MB download, and the binary build and the end-to-end tests add a few
+    # more. The bound stops a capture or a test that hangs, such as on a macOS
+    # alert, from holding the runner for GitHub's default of six hours.
+    timeout-minutes: 25
     env:
       # No signing identity exists in this job. Without this, electron-builder
       # looks for one in the keychain; the packages are signed ad hoc instead.
@@ -178,6 +195,21 @@ jobs:
           name: bureau-compare
           path: apps/desktop/out/bureau-compare
           retention-days: 7
+
+      # The end-to-end tests sign in to a real controller, the compiled binary,
+      # and run the test package that `pnpm build:desktop` built.
+      - run: pnpm build:binary
+      - name: Run the end-to-end tests that do not depend on the machine
+        run: >-
+          pnpm test:desktop
+          e2e/desktop/package.test.ts
+          e2e/desktop/refused-arguments.test.ts
+          e2e/desktop/security.test.ts
+          e2e/desktop/connect.test.ts
+          e2e/desktop/sign-in.test.ts
+          e2e/desktop/sign-out.test.ts
+          e2e/desktop/menu.test.ts
+          e2e/desktop/window.test.ts
 
   # The ratchet of the desktop UI hill climb (docs/research/ui-hill-climb.md,
   # section 4.1): `ui:metrics` measures contrast, edges, discipline, targets,
@@ -433,6 +465,34 @@ jobs:
           # only prints how to install the `.deb`.
           [ ! -d /Applications ]
           [ ! -e /opt/Hercule ]
+
+  # The desktop app's whole end-to-end suite, `pnpm test:desktop`, on Linux in
+  # the container of `apps/desktop/container`: Ubuntu 24.04 with a virtual
+  # screen, a window manager and a D-Bus session. It builds the compiled binary
+  # and the desktop app in the container, then runs every test. A developer
+  # runs the same command on any Linux machine with Docker, so a failure here
+  # can be reproduced there.
+  #
+  # `desktop-linux` installs the `.deb` on a real host and starts it, which a
+  # container cannot show. This job runs the app's behaviour. Together with the
+  # `desktop` job on macOS, which runs the part of the suite that does not
+  # depend on the machine, they let a pull request be checked on one platform.
+  #
+  # It runs on every change, like `desktop`: the path filter at the top
+  # applies to the whole workflow. The tests start the real controller, so
+  # almost any file can change their result.
+  #
+  # The host installs the dependencies, which the container mounts. The
+  # container downloads Electron and Playwright's Chromium into a Docker volume
+  # that lives only as long as the runner, so every run downloads them again,
+  # about 250 MB, which takes seconds on a runner.
+  desktop-e2e-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: pnpm test:desktop:container
 
   # Builds the desktop app's Linux package, a `.deb`, installs it on a real
   # Ubuntu 24.04 host the way a user would, and starts it. The `edge` release
@@ -704,7 +764,8 @@ jobs:
   # change them together.
   edge-build:
     # Edge publishes only a commit that passed every check, the upgrade test,
-    # the Linux install test and the Linux package's install and start.
+    # the Linux install test, the Linux package's install and start, and the
+    # desktop app's end-to-end suite on Linux.
     needs:
       - typecheck
       - lint
@@ -716,6 +777,7 @@ jobs:
       - edge-linux
       - edge-linux-install
       - desktop-linux
+      - desktop-e2e-linux
       - upgrade
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
@@ -820,8 +882,8 @@ jobs:
           fi
 
       # The release package's fuses, its app.asar, its signature, and that it
-      # starts and quits. The rest of the desktop suite checks pixels and
-      # timing, which a CI runner cannot match (see the desktop job).
+      # starts and quits, on the signed package. The rest of the desktop suite
+      # runs in the `desktop` and `desktop-e2e-linux` jobs, on the unsigned one.
       - run: pnpm exec vitest run --project desktop e2e/desktop/package.test.ts
 
       # Download the Linux binaries that edge-linux built, and the `.deb` that
