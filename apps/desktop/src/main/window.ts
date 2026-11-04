@@ -3,7 +3,7 @@
  * with Electron: how it opens, shows, hides and remembers where it was.
  *
  * - It opens hidden, painted with the background of the theme in use, and
- *   shows once its first screen has reached it, so it never shows an empty
+ *   shows once its page reports its first screen, so it never shows an empty
  *   page (see `./window-visibility.ts`). It repaints its background when the
  *   theme in use changes.
  * - It opens where it was when the app last hid it or quit, moved onto a
@@ -59,7 +59,7 @@ const chooseWindowBounds = (saved: WindowState | null): Bounds =>
 
 /**
  * Creates the window for `platform`, hidden, and wires its events. The window
- * shows itself once its first screen has reached it.
+ * shows itself once its page reports its first screen.
  *
  * The window and the listeners on the app are released when main's runtime
  * shuts down: the listeners are removed, and the window is destroyed if it

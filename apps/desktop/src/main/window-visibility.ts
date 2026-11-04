@@ -13,11 +13,13 @@ import type { Bounds, WindowState } from "./app-settings";
  * A healthy page always reports before this limit. When the controller is
  * slow, the "connecting" screen reports instead: the router shows it 1 second
  * after the first navigation starts (the `pendingMs` of the `_connected`
- * route), and it reports once its fonts have loaded and its frame has reached
- * the window. That 1 second starts late: only after the renderer's code has
- * compiled and the router's context has been read, while this limit starts at
- * the first paint. So the limit leaves room for a cold launch on a slow Mac,
- * and the timer shows the window only for a renderer that never reports.
+ * route), and it reports once its fonts have loaded and, on macOS, its frame
+ * has reached the window (on Linux, once the screen is laid out and drawn;
+ * see `reportFirstScreen`). That 1 second starts late: only after the
+ * renderer's code has compiled and the router's context has been read, while
+ * this limit starts at the first paint. So the limit leaves room for a cold
+ * launch on a slow Mac, and the timer shows the window only for a renderer
+ * that never reports.
  *
  * A crash or a failed load shows the window at once, so the longer limit
  * costs nothing there.
@@ -90,12 +92,19 @@ export interface WindowVisibilityOptions {
  * Takes over showing and hiding `window`, a window that is still hidden and
  * has not started loading its page, and returns the functions that do it.
  *
- * The window shows for the first time when its page reports that its first
- * screen has reached the window (see `showWindowFirstTime`), or 3 seconds
- * after its page first painted, whichever is first. It also shows at once when its page
- * fails to load or its renderer process exits, so that the wait is only the
- * last resort. Showing earlier would show an empty page, filled with the
+ * The window shows for the first time when its page reports its first
+ * screen (see `showWindowFirstTime`), or 3 seconds after its page first
+ * painted, whichever is first. It also shows at once when its page fails to
+ * load or its renderer process exits, so that the wait is only the last
+ * resort. Showing earlier would show an empty page, filled with the
  * background colour only.
+ *
+ * What the report means depends on the platform. On macOS the page reports
+ * once the frame that draws its first screen has reached the window, because
+ * Chromium presents frames in a hidden window there. On Linux under X11 a
+ * hidden window presents no frame, so the page reports once the screen is
+ * laid out and drawn, main shows the window, and the frame is presented after
+ * the show (see `reportFirstScreen` in the renderer's `presented-frame.ts`).
  *
  * Closing the window, with the system's close button or a shortcut, hides
  * it or quits the app, as `closingWindow` says. Quitting the app closes the
@@ -224,17 +233,18 @@ export const makeWindowVisibility = (
 
   return {
     /**
-     * Shows the window the first time, as the page asks once its first
-     * screen has reached the window. Once the window has shown, it does
-     * nothing: the page reports again after each reload, and the
-     * "connecting" screen reports too.
+     * Shows the window the first time, as the page asks when it reports its
+     * first screen (on macOS, once that screen has reached the window; on
+     * Linux, before it has). Once the window has shown, it does nothing: the
+     * page reports again after each reload, and the "connecting" screen
+     * reports too.
      */
     showWindowFirstTime,
 
     /**
      * Shows the window and focuses it. Before the first show it does
-     * nothing, because the window shows itself once its first screen has
-     * reached it.
+     * nothing, because the window shows itself when its page reports its
+     * first screen.
      *
      * A window that closing is still taking out of full screen stays on
      * screen: the hide waiting for the end of the animation is cancelled.
