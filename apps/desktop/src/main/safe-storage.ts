@@ -62,56 +62,12 @@ export type ElectronSafeStorageCalls = Pick<
 >;
 
 /**
- * Throws an error, on Linux, unless `safeStorage` encrypts with a key that a
- * real keyring keeps. Does nothing when `fixedKeyForTests` is true.
- *
- * On Linux, Electron picks its backend from the desktop environment that
- * Chromium recognises (`XDG_CURRENT_DESKTOP` and similar variables). When it
- * recognises none it picks `basic_text`, which encrypts with one key written
- * in Electron's source, so anyone could decrypt the token. Electron 44 then
- * reports encryption as unavailable, unless `setUsePlainTextEncryption(true)`
- * was called, and older versions reported it as available. This check does
- * not depend on which: a backend that is not a keyring never encrypts the
- * token. It also fails when the backend is a keyring that is not running or
- * is locked, which Electron reports as unavailable.
- *
- * Electron selects the backend before the app is ready, so it is known
- * here. `isEncryptionAvailable` still runs before the backend is read: the
- * first call is what initialises the encryption and reaches the key, and so
- * reports whether the keyring answers.
- */
-const assertKeyringEncrypts = (
-  safeStorage: ElectronSafeStorageCalls,
-  fixedKeyForTests: boolean,
-): void => {
-  if (fixedKeyForTests) {
-    // This only allows the fixed key; it does not select the backend. The
-    // launch must also pass `--password-store=basic`, so that Electron does not
-    // choose the real keyring of the desktop the test runs on.
-    safeStorage.setUsePlainTextEncryption(true);
-    return;
-  }
-  const available = safeStorage.isEncryptionAvailable();
-  const backend = safeStorage.getSelectedStorageBackend();
-  if (backend === "basic_text" || backend === "unknown") {
-    throw new Error(
-      `There is no keyring to keep the sign-in in. The desktop environment is not one that Electron recognises (it chose the "${backend}" backend), and that backend encrypts with a key anyone can read. Start the app in a desktop session that runs GNOME Keyring or KWallet, with XDG_CURRENT_DESKTOP set.`,
-    );
-  }
-  if (!available) {
-    throw new Error(
-      `The keyring is not available (Electron chose the "${backend}" backend but cannot reach it). Start GNOME Keyring or KWallet and unlock it.`,
-    );
-  }
-};
-
-/**
  * Builds the SafeStorage service on Electron's `safeStorage` for `platform`.
  * Use it only once the app is ready: on macOS, the first call reads the key
  * from the Keychain, and blocks main while it does.
  *
  * On Linux, every encryption and decryption first checks that a real keyring
- * is behind `safeStorage`; see `assertKeyringEncrypts`.
+ * is behind `safeStorage`; see `assertKeyringEncrypts` in `linux-key-store.ts`.
  *
  * `fixedKeyForTests` is true when an end-to-end test asked for the mock
  * Keychain. On Linux, it makes `safeStorage` encrypt with a fixed key, because
@@ -125,26 +81,34 @@ export const makeSafeStorageLayer = (
   platform: DesktopPlatform,
   fixedKeyForTests: boolean,
 ): Layer.Layer<SafeStorage> => {
-  const checkKeyStore = (): void => {
-    if (platform === "linux") assertKeyringEncrypts(safeStorage, fixedKeyForTests);
-  };
+  // The check is imported at the first use, because only Linux needs it and
+  // nothing needs it before the token is read, which keeps it out of the file
+  // main loads at launch.
+  const checkKeyStore: Effect.Effect<void, KeyStoreError> =
+    platform === "linux"
+      ? Effect.promise(() => import("./linux-key-store")).pipe(
+          Effect.flatMap((module) =>
+            Effect.try({
+              try: () => module.assertKeyringEncrypts(safeStorage, fixedKeyForTests),
+              catch: toKeyStoreError,
+            }),
+          ),
+        )
+      : Effect.void;
   return Layer.succeed(SafeStorage)({
     keyStoreName: PLATFORM_BEHAVIOUR[platform].keyStoreName,
     encrypt: (text) =>
-      Effect.try({
-        try: () => {
-          checkKeyStore();
-          return safeStorage.encryptString(text);
-        },
-        catch: toKeyStoreError,
-      }),
+      Effect.andThen(
+        checkKeyStore,
+        Effect.try({ try: () => safeStorage.encryptString(text), catch: toKeyStoreError }),
+      ),
     decrypt: (encrypted) =>
-      Effect.try({
-        try: () => {
-          checkKeyStore();
-          return safeStorage.decryptString(Buffer.from(encrypted));
-        },
-        catch: toKeyStoreError,
-      }),
+      Effect.andThen(
+        checkKeyStore,
+        Effect.try({
+          try: () => safeStorage.decryptString(Buffer.from(encrypted)),
+          catch: toKeyStoreError,
+        }),
+      ),
   });
 };

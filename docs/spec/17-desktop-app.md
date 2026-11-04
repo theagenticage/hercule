@@ -3066,13 +3066,13 @@ Measured on Linux on 2026-10-29 with `vite build --config vite.renderer.config.t
 - **Memory:** a few small modules in main and the preload, and one string in the bridge. No Mac reading was taken: the change was checked on Linux, as [ADR 0051](../adr/0051-the-desktop-app-ships-on-linux-and-a-desktop-change-is-checked-on-one-platform.md) allows. On Linux there is no earlier build to compare with, because the app did not run there. The first Linux reading is the reference table under [Platforms](#platforms), and later changes compare with it.
 - **Bundle bytes:** main's startup file grew by about 1.5 kB and the renderer's first screen by 0.3 kB. The estimate before the build was under 2 kB for main.
 
-Measured on Linux on 2026-11-04 with `pnpm --filter @hercule/desktop build` and `check-bundle-budget.ts` called as `build:desktop` calls it, before (`fd6e40ba2`, the commit this branch started from) and after (`90361a5b1`, the head of the Linux work), each in a temporary worktree of its own. Gzipped figures use `Bun.gzipSync`, as the checker does, and a kB is 1,024 bytes.
+Measured on Linux on 2026-11-04 with `pnpm --filter @hercule/desktop build` and `check-bundle-budget.ts` called as `build:desktop` calls it, before (`fd6e40ba2`, the commit this branch started from) and after (the head of the Linux work, with the token check of `linux-key-store.ts` imported at first use), each in a temporary worktree of its own. Gzipped figures use `Bun.gzipSync`, as the checker does, and a kB is 1,024 bytes.
 
-| Measure | Budget | `fd6e40ba2` | `90361a5b1` | Change |
+| Measure | Budget | `fd6e40ba2` | After | Change |
 |---|---|---|---|---|
-| Main's startup file (`out/main/index.js`), minified | 170 kB (174,080 bytes) | 172,560 bytes (168.5 kB) | 174,109 bytes (170.0 kB) | +1,549 bytes. **Over the budget by 29 bytes.** Before this change 1,520 bytes were left |
-| The same file, gzipped | none | 57,731 bytes | 58,414 bytes | +683 bytes |
-| Main's chunks loaded on first use (4 files) | none | 82,162 bytes | 82,162 bytes | none |
+| Main's startup file (`out/main/index.js`), minified | 170 kB (174,080 bytes) | 172,560 bytes (168.5 kB) | 173,602 bytes (169.5 kB) | +1,042 bytes. Within the budget by 478 bytes; before this change 1,520 bytes were left. Without the lazy import of the token check the file was 174,109 bytes, 29 over |
+| The same file, gzipped | none | 57,731 bytes | 58,168 bytes | +437 bytes |
+| Main's chunks loaded on first use | none | 82,162 bytes (4 files) | 82,814 bytes (5 files) | +652 bytes: the new `linux-key-store` chunk, which only Linux loads |
 | The first screen's total, as `check-bundle-budget.ts` counts it | 250 kB guide | 486.8 kB (27 chunks) | 487.1 kB (28 chunks) | +0.3 kB. Over the guide as before. The new chunk is `primary-modifier` |
 | The entry chunk (`first-screen-*.js`), gzipped | none | 431,014 bytes | 431,164 bytes | +150 bytes |
 | The Office's chunk, gzipped | 241.5 kB (247,296 bytes) | 237,012 bytes | 237,009 bytes | -3 bytes |
@@ -3080,7 +3080,7 @@ Measured on Linux on 2026-11-04 with `pnpm --filter @hercule/desktop build` and 
 | The same files, each gzipped and summed | none | 1,252,683 bytes | 1,253,661 bytes | +978 bytes |
 | The preload bundle | none | 1,385 bytes | 1,600 bytes | +215 bytes |
 
-**Main's startup file is 29 bytes over its budget.** `build:desktop` passes because it runs the check with `--guide`. The budget stands as written. It is for Rogier to decide whether main gives the bytes back or the budget is raised with its reason, as for [#892](https://github.com/theagenticage/hercule/issues/892).
+**Main's startup file is within its budget, by 478 bytes.** It was 29 bytes over. The check that the token is encrypted only with a real keyring runs when the token is first read or saved, on Linux only, so it moved into its own chunk, `linux-key-store`, which main imports at that moment, as it does `this-mac-services`. The budget is unchanged, and the check passes without `--guide`. Most of the remaining 1,042 bytes are the menu, the window and `PLATFORM_BEHAVIOUR`, which launch needs.
 
 **Not measured:** a Mac. Process count, memory, idle wakeups and the time of a streamed row were not taken on a Mac, and the Linux perf run has no earlier build. The design adds no process, timer or listener, but that is the design and not a measurement.
 
