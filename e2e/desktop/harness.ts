@@ -38,6 +38,7 @@ import type { MessagePause, ScriptStep } from "../../apps/desktop/scripts/script
 import {
   assertExitedCleanly,
   buildAppArgs,
+  buildSandboxArgs,
   evaluateInMain,
   findExecutable,
   isWindowVisible,
@@ -741,10 +742,14 @@ export function runSecondInstance(
   kind: PackageKind,
   userDataDir: string,
 ): Promise<number | NodeJS.Signals> {
-  const child = spawn(findExecutable(kind), buildAppArgs(userDataDir), {
-    env: buildAppEnv(),
-    stdio: "ignore",
-  });
+  const child = spawn(
+    findExecutable(kind),
+    [...buildAppArgs(userDataDir), ...buildSandboxArgs(kind)],
+    {
+      env: buildAppEnv(),
+      stdio: "ignore",
+    },
+  );
   return waitForExit(child, "the second instance");
 }
 
