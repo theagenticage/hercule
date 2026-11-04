@@ -251,6 +251,14 @@ it("shows the window on the page's report, not on main's time limit", async () =
   // processes, but both count from the machine's clock, so their times
   // compare to well under a millisecond.
   const windowShownAt = await readWindowShownTime(app);
+  // On Linux the mark comes after the show, when the frame the show caused is
+  // presented, so on a busy machine it can still be missing when the launch
+  // returns.
+  await expect
+    .poll(() => readPageEntryTime(page, "first-screen"), {
+      message: "the page never marked its first screen as presented",
+    })
+    .not.toBeNull();
   const firstScreenAt = await readPageEntryTime(page, "first-screen");
   const firstPaintAt = await readPageEntryTime(page, "first-paint");
   expect(windowShownAt).not.toBeNull();
