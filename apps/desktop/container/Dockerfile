@@ -27,8 +27,8 @@
 #   the sandbox (see `buildSandboxArgs` in `scripts/packaged-app.ts`), so only
 #   tests of the release package need this.
 # - The `hercule-desktop-cache` volume keeps what electron-builder downloads
-#   (Electron, and fpm which builds the `.deb`) between runs. Leave it out and
-#   each run downloads them again.
+#   (Electron, and fpm which builds the `.deb`) and Playwright's Chromium
+#   between runs. Leave it out and each run downloads them again.
 FROM ubuntu:24.04
 
 ARG NODE_VERSION=24.14.0
@@ -37,7 +37,8 @@ ARG PNPM_VERSION=10.12.1
 
 ENV DEBIAN_FRONTEND=noninteractive \
     ELECTRON_CACHE=/cache/electron \
-    ELECTRON_BUILDER_CACHE=/cache/electron-builder
+    ELECTRON_BUILDER_CACHE=/cache/electron-builder \
+    PLAYWRIGHT_BROWSERS_PATH=/cache/playwright
 
 # The first group is what Electron loads at start. The second is the display:
 # Xvfb, openbox, D-Bus, and xprop and ImageMagick's `import`, which find the
