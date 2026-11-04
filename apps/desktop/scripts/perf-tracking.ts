@@ -66,7 +66,14 @@ import {
   SIGNALS_LIST,
   type MotionCost,
 } from "./perf-intake.ts";
-import { drivePage, waitForPageSocketUrl, type PageDriver } from "./perf-measures.ts";
+import {
+  drivePage,
+  formatWithin,
+  macLimit,
+  waitForPageSocketUrl,
+  type PageDriver,
+  type Within,
+} from "./perf-measures.ts";
 import { readMainThreadMs } from "./perf-workflows.ts";
 import { pollUntil } from "./poll.ts";
 
@@ -842,7 +849,7 @@ export async function measureTrackingInteractions(
 // The report.
 
 /** A row of the report: the row, its limit, what was measured, and whether it is within (null for no limit). */
-type ReportRow = [string, string, string, boolean | null];
+type ReportRow = [string, string, string, Within];
 
 const formatSeries = (cost: SeriesCost): string =>
   `${formatActivity(cost)}; renderer main thread ${(cost.mainThreadMs / cost.changes).toFixed(1)} ms a change`;
@@ -894,27 +901,32 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
   const oncePerCreation =
     "at most one task.queryTracking for each run's creation, nothing for its later pushes";
   const elsewhere = "one opacity animation, plus one transform per row that moves";
-  const motionRows: [string, string, MotionCost, boolean][] = [
+  // Each row: its name, its limit, the motion, whether it played the right
+  // number of animations, and whether it is also held to dropping no frame.
+  const motionRows: [string, string, MotionCost, boolean, boolean][] = [
     [
       "Opening Tracking with T",
       "one animation for the sheet, at most 13 for the cascade, done within 450 ms; transform and opacity only; hover and focus transitions are not counted",
       motion.open,
-      motion.open.animations <= 14 && droppedNoMotionFrame(motion.open),
+      motion.open.animations <= 14,
+      true,
     ],
     [
       "Closing Tracking with T",
       "one animation, 180 ms",
       motion.close,
-      motion.close.animations === 1 && droppedNoMotionFrame(motion.close),
+      motion.close.animations === 1,
+      true,
     ],
-    ["A state change: a Working row stops", elsewhere, motion.stateChange, true],
+    ["A state change: a Working row stops", elsewhere, motion.stateChange, true, false],
     [
       "A handoff from the pane",
       "one animation for the lifted copy, plus one transform per row that moves on screen",
       motion.handoff,
       true,
+      false,
     ],
-    ["A tick-off with E on a Finished row", elsewhere, motion.tickOff, true],
+    ["A tick-off with E on a Finished row", elsewhere, motion.tickOff, true, false],
   ];
   const rows: ReportRow[] = [
     [
@@ -991,13 +1003,16 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
         hidden.heldShown.includes("run") &&
         hidden.shown.snapshots >= 1,
     ],
-    ...motionRows.map(([row, limit, cost, within]): ReportRow => [
+    // The animations and the properties they change hold on any machine. The
+    // frames and the time the motion took are a Mac's limit.
+    ...motionRows.map(([row, limit, cost, hasRightCount, dropsNoFrame]): ReportRow => [
       row,
       limit,
       formatMotionCell(cost),
-      within &&
-        cost.properties.every((property) => ["opacity", "transform"].includes(property)) &&
-        isStillAfter(cost),
+      hasRightCount &&
+      cost.properties.every((property) => ["opacity", "transform"].includes(property))
+        ? macLimit((!dropsNoFrame || droppedNoMotionFrame(cost)) && isStillAfter(cost))
+        : false,
     ]),
   ];
 
@@ -1017,7 +1032,7 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
     row,
     limit,
     measuredText,
-    within === null ? "-" : within ? "yes" : "over",
+    formatWithin(within),
   ];
   console.log(formatTable(["Row", "Limit", "Measured", "Within"], rows.map(cells)));
   console.log();

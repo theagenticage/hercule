@@ -48,12 +48,16 @@ import type { ThreadFixture } from "./perf-fixture.ts";
 import {
   BUDGET,
   findRendererMainTasks,
+  formatWithin,
+  macLimit,
+  MEMORY_NAME_IN_SENTENCE,
   openScreenOnce,
   readCpuMs,
   readProcessMemory,
   readTrace,
   TIMELINE_CATEGORY,
   type TraceEvent,
+  type Within,
   waitForPageSocketUrl,
 } from "./perf-measures.ts";
 import { readMainThreadMs } from "./perf-workflows.ts";
@@ -963,7 +967,7 @@ export function reportIntakeWork(measured: IntakeWork): void {
   const { pushes, burst, splitOpen, splitClose, arrival, arrivalBurst, inboxZero } = measured;
   // Budget, limit, measured, and whether the measurement is within the
   // limit, or null for a measure that is recorded but has no budget.
-  const budgets: [string, string, string, boolean | null][] = [
+  const budgets: [string, string, string, Within][] = [
     [
       "Per push, renderer main thread",
       `recorded; the thread list's nudge limit is ${String(BUDGET.rendererMainThreadPerNudgeMs)} ms`,
@@ -999,31 +1003,35 @@ export function reportIntakeWork(measured: IntakeWork): void {
       `Opening the split, ${String(INTAKE_SIGNALS + PUSH_COUNT + BURST_SIZE)} rows`,
       "no dropped frame",
       formatSplit(splitOpen),
-      droppedNoFrame(splitOpen),
+      macLimit(droppedNoFrame(splitOpen)),
     ],
     [
       `Closing the split, ${String(INTAKE_SIGNALS + PUSH_COUNT + BURST_SIZE)} rows`,
       "no dropped frame",
       formatSplit(splitClose),
-      droppedNoFrame(splitClose),
+      macLimit(droppedNoFrame(splitClose)),
     ],
     [
       `One arrival on screen, ${String(arrival.rowsBefore)} rows before it`,
       "no dropped frame; nothing draws after --dur-2",
       formatMotion(arrival),
-      droppedNoMotionFrame(arrival) && isStillAfter(arrival),
+      macLimit(droppedNoMotionFrame(arrival) && isStillAfter(arrival)),
     ],
     [
       `Burst of ${String(BURST_SIZE)} arriving on screen, ${String(arrivalBurst.rowsBefore)} rows before it`,
       "one block; no dropped frame; nothing draws after --dur-2",
       formatMotion(arrivalBurst),
-      arrivalBurst.starts === 1 && droppedNoMotionFrame(arrivalBurst) && isStillAfter(arrivalBurst),
+      macLimit(
+        arrivalBurst.starts === 1 &&
+          droppedNoMotionFrame(arrivalBurst) &&
+          isStillAfter(arrivalBurst),
+      ),
     ],
     [
       "Inbox zero, after the user's Done of the last signal, with the pane open",
       "no dropped frame; nothing draws after 800 ms plus the pane's --dur-3",
       formatMotion(inboxZero),
-      droppedNoMotionFrame(inboxZero) && isStillAfter(inboxZero),
+      macLimit(droppedNoMotionFrame(inboxZero) && isStillAfter(inboxZero)),
     ],
   ];
 
@@ -1038,7 +1046,7 @@ export function reportIntakeWork(measured: IntakeWork): void {
         budget,
         limit,
         measuredText,
-        within === null ? "-" : within ? "yes" : "over",
+        formatWithin(within),
       ]),
     ),
   );
@@ -1292,18 +1300,18 @@ export async function measureEverythingWork(userDataDir: string): Promise<Everyt
 
 /** Prints what the Everything scenario measured, against the limits spec 17 sets. */
 export function reportEverythingWork(measured: EverythingWork): void {
-  const sumFootprintMb = (memory: EverythingWork["memory"]) =>
-    memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
-  const readFootprintMb = (memory: EverythingWork["memory"], label: string) =>
-    memory.find((sample) => sample.label === label)?.footprintMb ?? 0;
-  const formatFootprint = (memory: EverythingWork["memory"]) =>
-    `${sumFootprintMb(memory).toFixed(0)} MB summed: renderer ${readFootprintMb(memory, "Tab").toFixed(0)} MB, GPU ${readFootprintMb(memory, "GPU").toFixed(0)} MB`;
-  const summedFootprintMb = sumFootprintMb(measured.memoryAfterRest);
-  const rendererFootprintMb = readFootprintMb(measured.memoryAfterRest, "Tab");
-  const summedGrowthMb = summedFootprintMb - sumFootprintMb(measured.memoryOnToDo);
-  const rendererGrowthMb = rendererFootprintMb - readFootprintMb(measured.memoryOnToDo, "Tab");
+  const sumMemoryMb = (memory: EverythingWork["memory"]) =>
+    memory.reduce((sum, sample) => sum + sample.memoryMb, 0);
+  const readMemoryMb = (memory: EverythingWork["memory"], label: string) =>
+    memory.find((sample) => sample.label === label)?.memoryMb ?? 0;
+  const formatMemory = (memory: EverythingWork["memory"]) =>
+    `${sumMemoryMb(memory).toFixed(0)} MB summed: renderer ${readMemoryMb(memory, "Tab").toFixed(0)} MB, GPU ${readMemoryMb(memory, "GPU").toFixed(0)} MB`;
+  const summedMemoryMb = sumMemoryMb(measured.memoryAfterRest);
+  const rendererMemoryMb = readMemoryMb(measured.memoryAfterRest, "Tab");
+  const summedGrowthMb = summedMemoryMb - sumMemoryMb(measured.memoryOnToDo);
+  const rendererGrowthMb = rendererMemoryMb - readMemoryMb(measured.memoryOnToDo, "Tab");
   const pages = Math.ceil(EVENT_COUNT / EVENTS_PAGE_SIZE);
-  const rows: [string, string, string, boolean | null][] = [
+  const rows: [string, string, string, Within][] = [
     [
       "Opening Everything",
       "recorded; not budgeted",
@@ -1331,21 +1339,21 @@ export function reportEverythingWork(measured: EverythingWork): void {
     [
       "Memory on To do, 35 s after Intake showed",
       "recorded",
-      formatFootprint(measured.memoryOnToDo),
+      formatMemory(measured.memoryOnToDo),
       null,
     ],
-    ["Memory 4 s after the scroll", "recorded", formatFootprint(measured.memory), null],
+    ["Memory 4 s after the scroll", "recorded", formatMemory(measured.memory), null],
     [
-      "Memory 34 s after the scroll, summed footprint",
+      `Memory 34 s after the scroll, summed ${MEMORY_NAME_IN_SENTENCE}`,
       `at most ${String(BUDGET.summedFootprintMb)} MB`,
-      `${summedFootprintMb.toFixed(0)} MB, ${summedGrowthMb.toFixed(0)} MB more than on To do`,
-      summedFootprintMb <= BUDGET.summedFootprintMb,
+      `${summedMemoryMb.toFixed(0)} MB, ${summedGrowthMb.toFixed(0)} MB more than on To do`,
+      macLimit(summedMemoryMb <= BUDGET.summedFootprintMb),
     ],
     [
-      "Memory 34 s after the scroll, renderer footprint",
+      `Memory 34 s after the scroll, renderer ${MEMORY_NAME_IN_SENTENCE}`,
       `at most ${String(BUDGET.rendererFootprintMb)} MB`,
-      `${rendererFootprintMb.toFixed(0)} MB, ${rendererGrowthMb.toFixed(0)} MB more than on To do`,
-      rendererFootprintMb <= BUDGET.rendererFootprintMb,
+      `${rendererMemoryMb.toFixed(0)} MB, ${rendererGrowthMb.toFixed(0)} MB more than on To do`,
+      macLimit(rendererMemoryMb <= BUDGET.rendererFootprintMb),
     ],
   ];
 
@@ -1360,7 +1368,7 @@ export function reportEverythingWork(measured: EverythingWork): void {
         budget,
         limit,
         measuredText,
-        within === null ? "-" : within ? "yes" : "over",
+        formatWithin(within),
       ]),
     ),
   );

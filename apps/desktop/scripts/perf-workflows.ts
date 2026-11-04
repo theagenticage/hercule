@@ -107,11 +107,16 @@ import type { ThreadFixture } from "./perf-fixture.ts";
 import {
   BUDGET,
   HIDDEN_SETTLE_MS,
+  MEMORY_NAME,
   MEMORY_READ_AT_MS,
   SAMPLE_MS,
   VISIBLE_SAMPLE_AT_MS,
+  WAKEUPS_NAME,
+  countAppProcesses,
   evaluateInPage,
   findProcessUse,
+  formatWithin,
+  macLimit,
   openScreenOnce,
   readCpuMs,
   readProcessMemory,
@@ -121,6 +126,7 @@ import {
   warmUpApp,
   type ProcessMemory,
   type ProcessUse,
+  type Within,
 } from "./perf-measures.ts";
 import { pollUntil } from "./poll.ts";
 
@@ -1342,7 +1348,7 @@ export const formatUse = (sample: ProcessUse | undefined): string[] =>
     : [sample.cpuPercent.toFixed(1), sample.wakeupsPerSecond.toFixed(1)];
 
 /** A row of a budget table: the budget, its limit, what was measured, and whether that is within the limit, or null for a measure with no budget. */
-export type BudgetRow = [string, string, string, boolean | null];
+export type BudgetRow = [string, string, string, Within];
 
 /**
  * Builds the budget rows every Workflows launch shares from `measured`: the
@@ -1352,17 +1358,17 @@ export type BudgetRow = [string, string, string, boolean | null];
 export function buildAtRestRows(measured: LaunchAtRest, agesText: string): BudgetRow[] {
   const { memory, visible, hidden } = measured;
   const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
-  const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
+  const summedMemoryMb = memory.reduce((sum, sample) => sum + sample.memoryMb, 0);
   const renderer = memory.find((sample) => sample.label === "Tab");
   const rendererMb = renderer?.workingSetMb ?? 0;
-  const rendererFootprintMb = renderer?.footprintMb ?? 0;
+  const rendererMemoryMb = renderer?.memoryMb ?? 0;
   const rendererLimit = `no wakeups from the app (at most ${String(BUDGET.rendererWakeups)}/s)`;
   const readUse = (samples: readonly ProcessUse[], type: string) => {
     const use = findProcessUse(samples, type);
     return use === undefined
       ? { text: "-", wakeups: 0 }
       : {
-          text: `${use.cpuPercent.toFixed(1)}% CPU, ${use.wakeupsPerSecond.toFixed(1)} wakeups/s`,
+          text: `${use.cpuPercent.toFixed(1)}% CPU, ${use.wakeupsPerSecond.toFixed(1)} ${WAKEUPS_NAME.toLowerCase()}/s`,
           wakeups: use.wakeupsPerSecond,
         };
   };
@@ -1373,20 +1379,20 @@ export function buildAtRestRows(measured: LaunchAtRest, agesText: string): Budge
     [
       "Processes",
       `none added: ${String(BUDGET.processes)}`,
-      `${String(memory.length)}: ${memory.map((sample) => sample.label).join(", ")}`,
-      memory.length <= BUDGET.processes,
+      `${String(countAppProcesses(memory))}: ${memory.map((sample) => sample.label).join(", ")}`,
+      countAppProcesses(memory) <= BUDGET.processes,
     ],
     [
-      "Footprint, summed",
+      `${MEMORY_NAME}, summed`,
       `at most ${String(BUDGET.summedFootprintMb)} MB`,
-      `${summedFootprintMb.toFixed(0)} MB`,
-      summedFootprintMb <= BUDGET.summedFootprintMb,
+      `${summedMemoryMb.toFixed(0)} MB`,
+      macLimit(summedMemoryMb <= BUDGET.summedFootprintMb),
     ],
     [
-      "Footprint, renderer",
+      `${MEMORY_NAME}, renderer`,
       `at most ${String(BUDGET.rendererFootprintMb)} MB`,
-      `${rendererFootprintMb.toFixed(0)} MB`,
-      rendererFootprintMb <= BUDGET.rendererFootprintMb,
+      `${rendererMemoryMb.toFixed(0)} MB`,
+      macLimit(rendererMemoryMb <= BUDGET.rendererFootprintMb),
     ],
     ["Working set, summed", "recorded; not budgeted", `${summedMb.toFixed(0)} MB`, null],
     ["Working set, renderer", "recorded; not budgeted", `${rendererMb.toFixed(0)} MB`, null],
@@ -1394,13 +1400,13 @@ export function buildAtRestRows(measured: LaunchAtRest, agesText: string): Budge
       "Idle visible, renderer",
       rendererLimit,
       rendererVisible.text,
-      rendererVisible.wakeups <= BUDGET.rendererWakeups,
+      macLimit(rendererVisible.wakeups <= BUDGET.rendererWakeups),
     ],
     [
       "Idle visible, GPU",
       `at most ${String(BUDGET.gpuWakeupsVisible)} wakeups/s`,
       gpuVisible.text,
-      gpuVisible.wakeups <= BUDGET.gpuWakeupsVisible,
+      macLimit(gpuVisible.wakeups <= BUDGET.gpuWakeupsVisible),
     ],
     [
       `Idle visible, age clock over ${(measured.visibleMs / 1_000).toFixed(0)} s`,
@@ -1412,7 +1418,7 @@ export function buildAtRestRows(measured: LaunchAtRest, agesText: string): Budge
       "Idle hidden, renderer",
       rendererLimit,
       rendererHidden.text,
-      rendererHidden.wakeups <= BUDGET.rendererWakeups,
+      macLimit(rendererHidden.wakeups <= BUDGET.rendererWakeups),
     ],
     [
       "Idle hidden, age clock over 13 s",
@@ -1480,7 +1486,7 @@ function buildPushRows(
       `${prefix}, renderer main thread`,
       `at most ${String(BUDGET.rendererMainThreadPerNudgeMs)} ms, the thread list's nudge limit`,
       formatMsPerPush(pushes.rendererMainThreadMs),
-      mainThreadPerPushMs <= BUDGET.rendererMainThreadPerNudgeMs,
+      macLimit(mainThreadPerPushMs <= BUDGET.rendererMainThreadPerNudgeMs),
     ],
     [
       `${prefix}, renderer CPU`,
@@ -1508,7 +1514,7 @@ export function printLaunch(
 ): void {
   const { memory, visible, hidden } = measured;
   const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
-  const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
+  const summedMemoryMb = memory.reduce((sum, sample) => sum + sample.memoryMb, 0);
   // A process that started or exited between the two samples is in one of
   // them only, so the table lists every process either sample saw.
   const seen = [...new Map([...visible, ...hidden].map((sample) => [sample.pid, sample.label]))];
@@ -1520,15 +1526,15 @@ export function printLaunch(
   console.log("Memory, 13 s after the page opened:");
   console.log(
     formatTable(
-      ["Process", "PID", "Working set MB", "Footprint MB"],
+      ["Process", "PID", "Working set MB", `${MEMORY_NAME} MB`],
       [
         ...memory.map((sample) => [
           sample.label,
           String(sample.pid),
           sample.workingSetMb.toFixed(1),
-          sample.footprintMb.toFixed(1),
+          sample.memoryMb.toFixed(1),
         ]),
-        ["Sum", "", summedMb.toFixed(1), summedFootprintMb.toFixed(1)],
+        ["Sum", "", summedMb.toFixed(1), summedMemoryMb.toFixed(1)],
       ],
     ),
   );
@@ -1543,9 +1549,9 @@ export function printLaunch(
         "Process",
         "PID",
         "CPU %, visible",
-        "Wakeups/s, visible",
+        `${WAKEUPS_NAME}/s, visible`,
         "CPU %, hidden",
-        "Wakeups/s, hidden",
+        `${WAKEUPS_NAME}/s, hidden`,
       ],
       seen.map(([pid, label]) => [
         label,
@@ -1563,7 +1569,7 @@ export function printLaunch(
         budget,
         limit,
         measuredText,
-        within === null ? "-" : within ? "yes" : "over",
+        formatWithin(within),
       ]),
     ),
   );
@@ -1612,6 +1618,12 @@ function buildMotionRow(label: string, motion: MotionCost, budget: MotionBudget)
       : Math.max(...animations.map((each) => each.endedAtMs)) -
         Math.min(...animations.map((each) => each.startedAtMs));
   const required = Object.entries(budget.required);
+  // The animations that played and where they ran hold on any machine. The
+  // time they took is a Mac's limit.
+  const hasRightAnimations =
+    required.every(([name, count]) => (counts.get(name) ?? 0) >= count) &&
+    animations.length <= budget.limit &&
+    onMainThread.length === 0;
   return [
     label,
     `${required.map(([name, count]) => `${name} at least ${String(count)}`).join(", ")}; ` +
@@ -1624,11 +1636,14 @@ function buildMotionRow(label: string, motion: MotionCost, budget: MotionBudget)
       `), longest ${longestMs.toFixed(0)} ms, all within ${spanMs.toFixed(0)} ms; ` +
       `${String(onMainThread.length)} not on the compositor alone` +
       onMainThread.map((animation) => `, ${animation.name} on ${animation.element}`).join(""),
-    required.every(([name, count]) => (counts.get(name) ?? 0) >= count) &&
-      animations.length <= budget.limit &&
-      (budget.eachLimitMs === undefined || longestMs <= budget.eachLimitMs) &&
-      (budget.spanLimitMs === undefined || spanMs <= budget.spanLimitMs) &&
-      onMainThread.length === 0,
+    !hasRightAnimations
+      ? false
+      : budget.eachLimitMs === undefined && budget.spanLimitMs === undefined
+        ? true
+        : macLimit(
+            (budget.eachLimitMs === undefined || longestMs <= budget.eachLimitMs) &&
+              (budget.spanLimitMs === undefined || spanMs <= budget.spanLimitMs),
+          ),
   ];
 }
 
@@ -1653,7 +1668,7 @@ export function reportWorkflowWork(measured: WorkflowWork): void {
       "controller local; at most 500 ms",
       `${opening.firstStripsFromPageStartMs.toFixed(0)} ms from the page's start ` +
         `(${opening.firstStripsFromSpawnMs.toFixed(0)} ms from spawn)`,
-      opening.firstStripsFromPageStartMs <= 500,
+      macLimit(opening.firstStripsFromPageStartMs <= 500),
     ],
     [
       "Opening the list, until the last request for the strips answered",
@@ -1704,20 +1719,20 @@ function buildTodayTimelineRows(measured: OpenWorkflowWork): BudgetRow[] {
   const formatProcessUse = (use: ProcessUse | undefined) =>
     use === undefined
       ? "-"
-      : `${use.cpuPercent.toFixed(1)}% CPU, ${use.wakeupsPerSecond.toFixed(1)} wakeups/s`;
+      : `${use.cpuPercent.toFixed(1)}% CPU, ${use.wakeupsPerSecond.toFixed(1)} ${WAKEUPS_NAME.toLowerCase()}/s`;
   const seconds = (measured.todayVisibleMs / 1_000).toFixed(0);
   return [
     [
       `Idle visible on today's timeline, renderer over ${seconds} s`,
       `no wakeups from the app (at most ${String(BUDGET.rendererWakeups)}/s)`,
       formatProcessUse(renderer),
-      (renderer?.wakeupsPerSecond ?? 0) <= BUDGET.rendererWakeups,
+      macLimit((renderer?.wakeupsPerSecond ?? 0) <= BUDGET.rendererWakeups),
     ],
     [
       `Idle visible on today's timeline, GPU over ${seconds} s`,
       `at most ${String(BUDGET.gpuWakeupsVisible)} wakeups/s`,
       formatProcessUse(gpu),
-      (gpu?.wakeupsPerSecond ?? 0) <= BUDGET.gpuWakeupsVisible,
+      macLimit((gpu?.wakeupsPerSecond ?? 0) <= BUDGET.gpuWakeupsVisible),
     ],
     [
       `Idle visible on today's timeline, age clock over ${seconds} s`,
@@ -1809,7 +1824,7 @@ export function reportRunPageWork(measured: RunPageWork): void {
       perTickMs === null
         ? "no tick"
         : `${perTickMs.toFixed(2)} ms (${measured.tickMainThreadMs.toFixed(0)} ms over the sample, Chromium's own work included)`,
-      perTickMs === null ? null : perTickMs <= BUDGET.rendererMainThreadPerNudgeMs,
+      perTickMs === null ? null : macLimit(perTickMs <= BUDGET.rendererMainThreadPerNudgeMs),
     ],
     // A run's page draws no strips, no Running section, no Runs list and no
     // day, so a push should read none of them. Its own reads, the run and its

@@ -23,6 +23,9 @@
  * The equals sign keeps a negative `x` from being read as an option. Without
  * `--at` the window opens centred on the main display, as at a first launch.
  *
+ * It runs on macOS only: on any other platform it says that it measured
+ * nothing and exits with code 1.
+ *
  * It needs the Screen Recording permission for the terminal it runs in, and
  * `swiftc` (Xcode's command line tools), to compile the recorder,
  * `./first-frame-recorder.swift`.
@@ -607,6 +610,18 @@ function parseSavedWindow(text: string): WindowState {
     bounds: { x: Number(found[1]), y: Number(found[2]), ...DEFAULT_WINDOW_SIZE },
     fullScreen: false,
   };
+}
+
+// The check cannot run anywhere else, so it stops and says so, rather than
+// reporting a pass that nothing measured.
+if (process.platform !== "darwin") {
+  console.error(
+    "The first-frame check is not measured on Linux. It records the window with macOS's " +
+      "ScreenCaptureKit through a Swift program (`first-frame-recorder.swift`), and it checks " +
+      "what macOS does when a hidden window first goes on screen. Nothing here records " +
+      "the frames a window holds on X11 the same way. Run it on a Mac.",
+  );
+  process.exit(1);
 }
 
 const { values, positionals } = parseArgs({
