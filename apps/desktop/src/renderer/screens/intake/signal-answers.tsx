@@ -4,13 +4,13 @@
  * of an answer with a text field while that box is open.
  */
 import type { JSX } from "react";
-import { useRouteContext } from "@tanstack/react-router";
 import type { DescribeLine, SignalAction } from "@hercule/contract";
 import {
   trimAnswerEllipsis,
   type SignalAnswer,
   type SignalAnswerStyle,
 } from "@hercule/client-core";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { isPrimaryModifierHeld } from "../../app/primary-modifier";
 import { buildLook, Face } from "../../faces";
 import { LedgerAnswer } from "./ledger-answer";
@@ -98,6 +98,7 @@ export function SignalAnswers({
   onOpenReply,
   onDraftChange,
   onAct,
+  platform,
 }: {
   readonly answers: ReadonlyArray<SignalAnswer>;
   readonly openReplyId: string | null;
@@ -109,6 +110,8 @@ export function SignalAnswers({
   readonly onOpenReply: (actionId: string) => void;
   readonly onDraftChange: (actionId: string, text: string) => void;
   readonly onAct: (actionId: string, text?: string) => void;
+  /** The platform the app runs on, which decides the key that sends a Reply with ⏎: ⌘ on a Mac, Ctrl on Linux. */
+  readonly platform: DesktopPlatform;
 }): JSX.Element {
   return (
     <div className="ad-answers">
@@ -123,6 +126,7 @@ export function SignalAnswers({
             idPrefix={idPrefix}
             onDraftChange={onDraftChange}
             onAct={onAct}
+            platform={platform}
           />
         ) : (
           <div key={`ledger:${group.answers[0]!.action.id}`} className="ledger">
@@ -200,6 +204,7 @@ function ReplyBox({
   idPrefix,
   onDraftChange,
   onAct,
+  platform,
 }: {
   readonly answer: SignalAnswer;
   readonly draft: string;
@@ -208,9 +213,9 @@ function ReplyBox({
   readonly idPrefix: string;
   readonly onDraftChange: (actionId: string, text: string) => void;
   readonly onAct: (actionId: string, text: string) => void;
+  readonly platform: DesktopPlatform;
 }): JSX.Element {
   const { action, suggested } = answer;
-  const { bridge } = useRouteContext({ from: "/_connected" });
   const describeId = `${idPrefix}-${action.id}-describe`;
   const errorId = `${idPrefix}-${action.id}-error`;
   const empty = draft.trim() === "";
@@ -233,7 +238,7 @@ function ReplyBox({
             onDraftChange(action.id, event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && isPrimaryModifierHeld(event, bridge.platform)) {
+            if (event.key === "Enter" && isPrimaryModifierHeld(event, platform)) {
               event.preventDefault();
               send();
             }
