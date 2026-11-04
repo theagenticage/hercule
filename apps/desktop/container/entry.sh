@@ -10,6 +10,14 @@ set -eu
 
 export DISPLAY=:99
 
+# D-Bus and the keyring look up the user they run as, and fail for a user ID
+# with no passwd entry. The container runs as the host user, whose ID the image
+# does not know (a CI runner is 1001, a laptop 1000 or 501), so the entry is
+# added here.
+if ! getent passwd "$(id -u)" >/dev/null; then
+  echo "hercule:x:$(id -u):$(id -g):hercule:${HOME:-/tmp}:/bin/sh" >> /etc/passwd
+fi
+
 # Waits up to 10 seconds for a command to succeed, and fails with the log of
 # the program it was waiting for.
 wait_for() {

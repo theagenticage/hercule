@@ -40,6 +40,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ELECTRON_BUILDER_CACHE=/cache/electron-builder \
     PLAYWRIGHT_BROWSERS_PATH=/cache/playwright
 
+# `/etc/passwd` is writable so that `entry.sh` can add the user the container
+# runs as. The container runs as the host user (`--user`), whose ID this image
+# does not know, and D-Bus and the keyring refuse to start for an ID that has no
+# passwd entry. The image holds nothing private, so this costs nothing.
 # The first group is what Electron loads at start. The second is the display:
 # Xvfb, openbox, D-Bus, and xprop and ImageMagick's `import`, which find the
 # window manager and take screenshots of the whole screen; and a keyring,
@@ -56,7 +60,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnome-keyring libsecret-tools xdotool \
       ca-certificates curl unzip xz-utils binutils libarchive-tools zstd git \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /tmp/.X11-unix /cache && chmod 1777 /tmp/.X11-unix && chmod 777 /cache
+    && mkdir -p /tmp/.X11-unix /cache && chmod 1777 /tmp/.X11-unix && chmod 777 /cache \
+    && chmod 666 /etc/passwd
 
 RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
       | tar -xJ -C /usr/local --strip-components=1 \
