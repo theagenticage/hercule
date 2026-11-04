@@ -23,7 +23,10 @@
 # `--security-opt seccomp=unconfined` lets Chromium create user namespaces,
 # which Docker's default profile blocks. Without it the sandbox cannot start,
 # the same as on a host that forbids user namespaces.
-set -euo pipefail
+set -Eeuo pipefail
+# A command that fails without a message of its own would stop the script
+# silently. This names the line and the command.
+trap 'echo "::error::arch-install-check.sh stopped at line $LINENO, running: $BASH_COMMAND"' ERR
 
 first=$1
 second=$2
@@ -66,10 +69,13 @@ echo "--- chrome-sandbox mode and owner: $(stat -c '%a %U' /opt/Hercule/chrome-s
 # tools bring in cannot hide a missing dependency. Libraries that Electron
 # opens at run time are not listed by ldd; starting the app covers those.
 echo "--- Libraries every program and library in /opt/Hercule needs"
+# `grep` exits 1 when a file has no missing library, which is the normal case,
+# so each pipeline ends in `|| true`. Without it, `set -e` stops the script
+# whenever the last file `find` lists is a program with every library found.
 missing=$(
   find /opt/Hercule -type f | while read -r file; do
     [ "$(head -c4 "$file" | od -An -c | tr -d ' ')" = '177ELF' ] || continue
-    ldd "$file" 2> /dev/null | grep 'not found' | sed "s#^#$file: #"
+    ldd "$file" 2>&1 | grep 'not found' | sed "s#^#$file: #" || true
   done
 )
 if [ -n "$missing" ]; then
