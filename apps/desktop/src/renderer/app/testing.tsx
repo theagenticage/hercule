@@ -187,6 +187,7 @@ export const createFakeBridge = ({
   return {
     bridge: {
       platform,
+      hiddenWindowDraws: true,
       controllerUrl: {
         read: () => Promise.resolve(controllerUrl),
         save: (url) => {

@@ -260,6 +260,7 @@ const createScriptedBridge = ({
   const done = (): Promise<undefined> => Promise.resolve(undefined);
   return {
     platform: "mac",
+    hiddenWindowDraws: true,
     controllerUrl: {
       read: () => Promise.resolve(controllerUrl),
       save: (url) => Promise.resolve({ _tag: "Saved", origin: url }),

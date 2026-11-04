@@ -69,7 +69,6 @@ afterEach(() => {
   // A test that ends before its wait does leaves the sentinel behind, and the
   // next test would find it instead of its own.
   document.body.replaceChildren();
-  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -118,8 +117,11 @@ describe("waitForPresentedFrame", () => {
 
 describe("reportFirstScreen", () => {
   /** Returns a bridge for `platform` whose `firstScreen.report` runs `report`. */
-  const makeBridge = (report: () => Promise<undefined>, platform: DesktopPlatform = "mac") =>
-    ({ platform, firstScreen: { report } }) as unknown as Bridge;
+  const makeBridge = (
+    report: () => Promise<undefined>,
+    platform: DesktopPlatform = "mac",
+    hiddenWindowDraws = true,
+  ) => ({ platform, hiddenWindowDraws, firstScreen: { report } }) as unknown as Bridge;
 
   it("reports the first screen once its frame was presented, and returns when", async () => {
     const report = vi.fn(() => Promise.resolve(undefined));
@@ -188,15 +190,12 @@ describe("reportFirstScreen", () => {
       expect(findSentinel()).toBeNull();
     });
 
-    it("reports after 250 ms when no animation frame runs, as in a hidden window on native Wayland", async () => {
-      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    it("reports without waiting for an animation frame when a hidden window draws none, as on native Wayland", async () => {
       holdAnimationFrames();
       const report = vi.fn(() => Promise.resolve(undefined));
-      void reportFirstScreen(makeBridge(report, "linux"));
+      void reportFirstScreen(makeBridge(report, "linux", false));
 
-      await vi.advanceTimersByTimeAsync(249);
-      expect(report).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1);
+      await settle();
       expect(report).toHaveBeenCalledOnce();
       expect(findSentinel()).not.toBeNull();
     });

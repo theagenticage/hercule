@@ -65,6 +65,18 @@ function readPageEntryTime(page: Page, name: string): Promise<number | null> {
   }, name);
 }
 
+/**
+ * Waits until the page has recorded the performance entry `name`, and returns
+ * when, as `readPageEntryTime` does. On Linux the page paints after the window
+ * shows, so on a loaded machine its entries can come after the launch returns.
+ */
+async function waitForPageEntryTime(page: Page, name: string): Promise<number> {
+  await expect
+    .poll(() => readPageEntryTime(page, name), { message: `the page never recorded ${name}` })
+    .not.toBeNull();
+  return (await readPageEntryTime(page, name))!;
+}
+
 /** The parts of Electron's `NativeImage` that the capture comparison reads. */
 interface Capture {
   getSize(): { width: number; height: number };
@@ -254,16 +266,9 @@ it("shows the window on the page's report, not on main's time limit", async () =
   // On Linux the mark comes after the show, when the frame the show caused is
   // presented, so on a busy machine it can still be missing when the launch
   // returns.
-  await expect
-    .poll(() => readPageEntryTime(page, "first-screen"), {
-      message: "the page never marked its first screen as presented",
-    })
-    .not.toBeNull();
-  const firstScreenAt = await readPageEntryTime(page, "first-screen");
-  const firstPaintAt = await readPageEntryTime(page, "first-paint");
+  const firstScreenAt = await waitForPageEntryTime(page, "first-screen");
+  const firstPaintAt = await waitForPageEntryTime(page, "first-paint");
   expect(windowShownAt).not.toBeNull();
-  expect(firstScreenAt).not.toBeNull();
-  expect(firstPaintAt).not.toBeNull();
 
   if (process.platform === "linux") {
     // A hidden window under X11 presents no frame, so the page reports
@@ -302,9 +307,8 @@ it("shows the window on the connecting screen's report when the saved controller
   expect(await page.getByText(`Connecting to ${server.url}…`).isVisible()).toBe(true);
   expect(readMainOutput()).not.toContain(SHOWN_WITHOUT_FIRST_SCREEN_ERROR);
   const windowShownAt = await readWindowShownTime(app);
-  const firstPaintAt = await readPageEntryTime(page, "first-paint");
+  const firstPaintAt = await waitForPageEntryTime(page, "first-paint");
   expect(windowShownAt).not.toBeNull();
-  expect(firstPaintAt).not.toBeNull();
   expect(
     windowShownAt! - firstPaintAt!,
     "the window was shown by main's time limit, not by the connecting screen's report",

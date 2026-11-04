@@ -523,6 +523,7 @@ const SILENT_LIVE: Live = {
  */
 const REFUSING_BRIDGE: Bridge = {
   platform: "mac",
+  hiddenWindowDraws: true,
   controllerUrl: {
     read: () => Promise.reject(buildBridgeCallError("controllerUrl.read")),
     save: () => Promise.reject(buildBridgeCallError("controllerUrl.save")),

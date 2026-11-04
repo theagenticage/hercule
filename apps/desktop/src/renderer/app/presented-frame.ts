@@ -74,31 +74,11 @@ const waitForLayoutAndFonts = async (): Promise<void> => {
   await document.fonts.ready;
 };
 
-/**
- * The longest `waitForAnimationFrames` waits, in milliseconds. A hidden window
- * on native Wayland runs no animation frame at all: the compositor sends no
- * frame callback to a surface that has never been shown, so waiting without a
- * limit would keep the window hidden for good. Under X11 two frames take
- * about 30 ms, so the limit leaves room for a slow machine.
- */
-const ANIMATION_FRAME_WAIT_LIMIT_MS = 250;
-
-/**
- * Waits for `count` animation frames to run, one after the other, or for
- * `ANIMATION_FRAME_WAIT_LIMIT_MS`, whichever comes first.
- */
+/** Waits for `count` animation frames to run, one after the other. */
 const waitForAnimationFrames = async (count: number): Promise<void> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const limit = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, ANIMATION_FRAME_WAIT_LIMIT_MS);
-  });
-  const frames = (async () => {
-    for (let frame = 0; frame < count; frame += 1) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-  })();
-  await Promise.race([frames, limit]);
-  clearTimeout(timer);
+  for (let frame = 0; frame < count; frame += 1) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
 };
 
 /**
@@ -182,13 +162,15 @@ const createSentinel = (): HTMLSpanElement => {
  *   `waitForPresentedFrame`).
  * - On Linux, it cannot wait for that: main keeps the window hidden until
  *   the report, and a hidden window presents no frame. It waits until the
- *   screen has its layout, its fonts and two animation frames, then starts
- *   observing presentation, reports, and only then waits for the
- *   presentation. The returned time is still that of a presented frame. Under
- *   X11 a hidden window runs animation frames. Under native Wayland it runs
- *   none, so the wait for them has a time limit (see
- *   `ANIMATION_FRAME_WAIT_LIMIT_MS`), and the first frame the window draws is
- *   the first the page paints, from a layout that is already complete.
+ *   screen has its layout and its fonts, then starts observing presentation,
+ *   reports, and only then waits for the presentation. The returned time is
+ *   still that of a presented frame. Under X11 a hidden window draws, so
+ *   before it reports the page also waits for two animation frames, which
+ *   means the screen has been painted once. Under native Wayland a hidden
+ *   window draws nothing and runs no animation frame (`Bridge.hiddenWindowDraws`
+ *   is false), so the page does not wait for them, and the first frame the
+ *   window draws is the first the page paints, from a layout that is already
+ *   complete.
  *
  * Returns null when the wait or the report failed. A failure is logged, not
  * thrown: the page cannot do anything about it, and main's time limit then
@@ -198,7 +180,7 @@ export const reportFirstScreen = async (bridge: Bridge): Promise<DOMHighResTimeS
   try {
     if (bridge.platform === "linux") {
       await waitForLayoutAndFonts();
-      await waitForAnimationFrames(2);
+      if (bridge.hiddenWindowDraws) await waitForAnimationFrames(2);
       const presentation = observePresentation();
       await bridge.firstScreen.report();
       return await presentation;

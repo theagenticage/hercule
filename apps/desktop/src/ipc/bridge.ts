@@ -63,11 +63,22 @@ type IpcChannelEntity<Name> = Name extends `${infer Entity}.${string}` ? Entity 
  *   `menu.onCommand(listener)`.
  *
  * Besides the channels, the bridge holds `platform`, the operating system the
- * app runs on. The page reads it here, not from the browser's own
+ * app runs on, and `hiddenWindowDraws`. The page reads the platform here, not from the browser's own
  * `navigator.platform`, so a page drawn outside the app, such as the
  * specimens and the screenshots of the goldens, says which platform it draws.
  */
-export type Bridge = BridgeChannels & { readonly platform: DesktopPlatform };
+export type Bridge = BridgeChannels & {
+  readonly platform: DesktopPlatform;
+  /**
+   * True when a window that has never been shown still draws frames, so the
+   * page can wait for its first paint while main keeps the window hidden. False
+   * on native Wayland, where the compositor sends no frame callback to a
+   * surface that has never been shown, so the page draws nothing and runs no
+   * animation frame until the window shows. Chromium picks Wayland when
+   * `XDG_SESSION_TYPE` is `wayland`, and the preload reads the same variable.
+   */
+  readonly hiddenWindowDraws: boolean;
+};
 
 type BridgeChannels = {
   readonly [

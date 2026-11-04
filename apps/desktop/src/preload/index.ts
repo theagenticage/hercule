@@ -68,6 +68,8 @@ const subscribeToChannel = <Name extends MainToRendererIpcChannelName>(
 const bridge: Bridge = {
   // A sandboxed preload has Electron's own `process`, with `platform`.
   platform: readDesktopPlatform(process.platform),
+  // A sandboxed preload can read the environment. See `Bridge`.
+  hiddenWindowDraws: process.env["XDG_SESSION_TYPE"] !== "wayland",
   controllerUrl: {
     read: () => invokeChannel("controllerUrl.read"),
     save: (url) => invokeChannel("controllerUrl.save", url),
