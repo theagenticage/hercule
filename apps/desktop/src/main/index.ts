@@ -41,11 +41,8 @@ import { registerIpcHandlers } from "./ipc";
 import { MainWindow } from "./main-window";
 import { makeMainMenuLayer } from "./menu";
 import { PickedSkillFoldersLayer } from "./picked-skill-folders";
-import {
-  findRefusedArgument,
-  readBinaryPathArgument,
-  requestsMockKeychain,
-} from "./refused-arguments";
+import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
+import { looksLikeKde } from "./password-store";
 import { APP_SCHEME } from "./renderer-origin";
 import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
@@ -72,15 +69,6 @@ const binaryPath =
   readBinaryPathArgument(process.argv.slice(1), app.isPackaged, inspector.url() !== undefined) ??
   path.join(homedir(), ".local", "bin", "hercule");
 
-/**
- * True when an end-to-end test asked for a fixed key in place of the system's
- * key store; see `requestsMockKeychain`.
- */
-const usesFixedKeyForTests = requestsMockKeychain(
-  process.argv.slice(1),
-  inspector.url() !== undefined,
-);
-
 /** Opens `folder` in Finder. A folder Finder cannot open is logged as a warning. */
 const openFolder = (folder: string): Effect.Effect<void> =>
   Effect.promise(() => shell.openPath(folder)).pipe(
@@ -97,6 +85,18 @@ const startApp = (): void => {
   // as an argument. It throws on a platform the app does not support, so the
   // app never starts with the wrong window or menu.
   const platform = readDesktopPlatform(process.platform);
+  // Electron reads the password store switch when it sets up encryption, which
+  // is after it has run this synchronous part of main and before the app is
+  // ready, so the switch must be appended here and never later. It is
+  // appended unless a switch is already there (the end-to-end tests pass
+  // `--password-store=basic`; the release package refuses the argument).
+  if (
+    platform === "linux" &&
+    !app.commandLine.hasSwitch("password-store") &&
+    !looksLikeKde(process.env)
+  ) {
+    app.commandLine.appendSwitch("password-store", "gnome-libsecret");
+  }
   const waitingNotifications = makeWaitingNotificationsLayer({
     Notification,
     setBadgeCount: (count) => app.setBadgeCount(count),
@@ -118,9 +118,7 @@ const startApp = (): void => {
       makeThisMacLayer({ binaryPath, openFolder }).pipe(
         Layer.provideMerge(makeControllerConnectionLayer(fetchWithoutRedirects)),
         Layer.provideMerge(
-          StoredTokenLayer.pipe(
-            Layer.provide(makeSafeStorageLayer(safeStorage, platform, usesFixedKeyForTests)),
-          ),
+          StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage, platform))),
         ),
       ),
       makeRunnerIdentityLayer(fetchWithoutRedirects),

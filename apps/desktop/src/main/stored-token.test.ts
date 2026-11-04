@@ -22,26 +22,45 @@ beforeEach(() => {
   return settingsFile.remove;
 });
 
+/** What a keyring's problem tells the user, as on Linux. */
+const ADVICE = "Install a keyring such as gnome-keyring or KeePassXC, and keep it unlocked.";
+
+/** How a fake key store fails; see `makeFakeSafeStorage`. */
+type Failing = false | "denied" | "unavailable";
+
 /**
  * A fake key store: it "encrypts" by prefixing the text with `sealed:`, and
- * decrypts only what carries that prefix. `failing` makes both fail, as when
- * the key store denies access to its key. `keyStoreName` is what the
- * platform calls the key store.
+ * decrypts only what carries that prefix. `failing` makes both fail: "denied"
+ * as when the key store denies access to its key, "unavailable" as when no
+ * keyring runs or it is locked. `keyStoreName` is what the platform calls the
+ * key store.
  */
 const makeFakeSafeStorage = (
-  failing: boolean,
+  failing: Failing,
   keyStoreName: "Keychain" | "keyring",
 ): Layer.Layer<SafeStorage> =>
   Layer.succeed(SafeStorage)({
     keyStoreName,
     encrypt: (text) =>
       failing
-        ? Effect.fail(new KeyStoreError({ message: "access denied" }))
+        ? Effect.fail(
+            new KeyStoreError({
+              message: "access denied",
+              unavailable: failing === "unavailable",
+              advice: keyStoreName === "keyring" ? ADVICE : null,
+            }),
+          )
         : Effect.succeed(new TextEncoder().encode(`sealed:${text}`)),
     decrypt: (encrypted) => {
       const text = new TextDecoder().decode(encrypted);
       return failing || !text.startsWith("sealed:")
-        ? Effect.fail(new KeyStoreError({ message: "wrong key" }))
+        ? Effect.fail(
+            new KeyStoreError({
+              message: "wrong key",
+              unavailable: failing === "unavailable",
+              advice: null,
+            }),
+          )
         : Effect.succeed(text.slice("sealed:".length));
     },
   });
@@ -58,7 +77,7 @@ interface Seen {
 
 /**
  * Runs `effect` against a token service built on the temporary settings file,
- * with a fake key store that fails when `keyStoreFailing` is true, and that
+ * with a fake key store that fails as `keyStoreFailing` says, and that
  * the platform calls `keyStoreName`. Returns the
  * effect's exit and what the menu, the window and the notifications saw.
  *
@@ -68,7 +87,7 @@ interface Seen {
  */
 const runWithStoredToken = async <A, E>(
   effect: Effect.Effect<A, E, StoredToken>,
-  keyStoreFailing = false,
+  keyStoreFailing: Failing = false,
   keyStoreName: "Keychain" | "keyring" = "Keychain",
 ): Promise<{ exit: Exit.Exit<A, E> } & Seen> => {
   const signedIn: Array<boolean> = [];
@@ -187,7 +206,7 @@ describe("the stored token", () => {
 
   it("is removed, and reads as null, when the key store cannot decrypt it", async () => {
     writeConnectedSettings({ token: storedTokenFor(CONTROLLER_URL, "secret-token") });
-    const outcome = await runWithStoredToken(read, true);
+    const outcome = await runWithStoredToken(read, "denied");
     expect(outcome).toEqual({
       exit: Exit.succeed(null),
       signedIn: [false],
@@ -195,6 +214,19 @@ describe("the stored token", () => {
       window: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
+  });
+
+  it("is kept, and reads as null, when the key store cannot be used this time", async () => {
+    const token = storedTokenFor(CONTROLLER_URL, "secret-token");
+    writeConnectedSettings({ token });
+    const outcome = await runWithStoredToken(read, "unavailable", "keyring");
+    expect(outcome).toEqual({
+      exit: Exit.succeed(null),
+      signedIn: [false],
+      notificationsSignedIn: [false],
+      window: [],
+    });
+    expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL, token });
   });
 
   it.each<[string, object, object]>([
@@ -228,14 +260,14 @@ describe("the stored token", () => {
     async (keyStoreName) => {
       writeConnectedSettings();
       const before = readFileText();
-      const outcome = await runWithStoredToken(write("secret-token"), true, keyStoreName);
+      const outcome = await runWithStoredToken(write("secret-token"), "denied", keyStoreName);
       expect(outcome).toEqual({
         exit: Exit.void,
         // The user stays signed in until the app quits, so Sign Out is enabled.
         signedIn: [true],
         notificationsSignedIn: [true],
         window: [
-          `showWarning Hercule could not save your sign-in to the ${keyStoreName}, so you will need to sign in again next time.`,
+          `showWarning Hercule could not save your sign-in to the ${keyStoreName}, so you will need to sign in again next time.${keyStoreName === "keyring" ? ` ${ADVICE}` : ""}`,
         ],
       });
       expect(readFileText()).toBe(before);

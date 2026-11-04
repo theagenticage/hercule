@@ -6,13 +6,16 @@
  *
  * - With a keyring (GNOME Keyring, unlocked, on a D-Bus session of the
  *   test's own), the token is saved encrypted with the keyring's key, and a
- *   relaunch is still signed in.
+ *   relaunch is still signed in. That holds on a desktop Chromium does not
+ *   recognise (Hyprland, sway, a session with no desktop variables), where
+ *   Chromium alone would pick the public `basic_text` key: the app asks for
+ *   the keyring there. On KDE it leaves the choice to Chromium, which picks
+ *   KWallet.
  * - In the mock keychain mode, which every other test uses, the app uses
  *   the `basic_text` backend and its fixed key, even on a desktop that has a
  *   keyring, so a test never reaches the developer's own keyring.
- * - Without one, Chromium picks the `basic_text` backend, whose key is
- *   public. The app then saves no token and shows the sheet that says so,
- *   while the user stays signed in for the run.
+ * - Without one, the app saves no token and shows the sheet that says so and
+ *   says what to install, while the user stays signed in for the run.
  *
  * The tests run on Linux only, and the keyring ones only where `dbus-daemon`,
  * `gnome-keyring-daemon` and `secret-tool` are installed, as in the
@@ -139,7 +142,10 @@ async function startKeyringForTest(): Promise<Record<string, string>> {
       { message: "the keyring did not unlock", timeout: 15_000 },
     )
     .toBe(0);
-  return { DBUS_SESSION_BUS_ADDRESS: address, XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR };
+  // Only the bus address goes to the app. The private runtime folder is for
+  // the keyring daemon's own socket: the app would lose its Wayland display
+  // socket, which lives in the real one.
+  return { DBUS_SESSION_BUS_ADDRESS: address };
 }
 
 /** Returns the first line `child` writes to its standard output. */
@@ -201,14 +207,19 @@ const readStoredToken = (page: Page): Promise<string | null> =>
   page.evaluate(() => (globalThis as PageGlobal).bridge.token.read());
 
 describe.skipIf(!onLinux)("the login token on Linux", () => {
-  it.skipIf(!hasKeyring)(
-    "is encrypted with the keyring's key, and a relaunch is still signed in",
-    async () => {
+  it.skipIf(!hasKeyring).each([
+    ["GNOME", { XDG_CURRENT_DESKTOP: "GNOME" }],
+    ["Hyprland, which Chromium does not recognise", { XDG_CURRENT_DESKTOP: "Hyprland" }],
+    ["sway, which Chromium does not recognise", { XDG_CURRENT_DESKTOP: "sway" }],
+    ["a session with no desktop variables", {}],
+  ])(
+    "on %s, is encrypted with the keyring's key, and a relaunch is still signed in",
+    async (_desktop, desktop) => {
       const keyring = await startKeyringForTest();
       const controller = await startControllerForTest({ setUp: true });
       const userDataDir = createUserDataDirForTest();
       writeSettings(userDataDir, { controllerUrl: controller.url });
-      const env = { ...keyring, XDG_CURRENT_DESKTOP: "GNOME" };
+      const env = { ...keyring, ...desktop };
 
       const first = await launchOnDesktop(userDataDir, env);
       expect(
@@ -267,9 +278,15 @@ describe.skipIf(!onLinux)("the login token on Linux", () => {
     const userDataDir = createUserDataDirForTest();
     writeSettings(userDataDir, { controllerUrl: controller.url });
 
-    const { app, page } = await launchOnDesktop(userDataDir, {});
+    // No session bus at all, so no Secret Service can be reached or started.
+    // With a bus, D-Bus would start a keyring that is installed but not set
+    // up, which asks the user for a password and blocks main until answered.
+    const { app, page } = await launchOnDesktop(userDataDir, {
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent/bus",
+    });
+    // The desktop is not recognised, so the app asks for the keyring.
     expect(await app.evaluate(({ safeStorage }) => safeStorage.getSelectedStorageBackend())).toBe(
-      "basic_text",
+      "gnome_libsecret",
     );
     // The sheet is a native dialog that no page can read, so the test records
     // what main asks it to show.
@@ -290,7 +307,7 @@ describe.skipIf(!onLinux)("the login token on Linux", () => {
         { message: "the sheet was not shown" },
       )
       .toEqual([
-        "Hercule could not save your sign-in to the keyring, so you will need to sign in again next time.",
+        "Hercule could not save your sign-in to the keyring, so you will need to sign in again next time. Install a keyring such as gnome-keyring or KeePassXC, and keep it unlocked.",
       ]);
     expect(readSettings(userDataDir)).not.toHaveProperty("token");
     // The user stays signed in for this run: the sign-in screen is gone.
@@ -299,5 +316,21 @@ describe.skipIf(!onLinux)("the login token on Linux", () => {
         message: "the sign-in screen stayed",
       })
       .toBe(0);
+  });
+
+  it.each([
+    ["KDE 6", { XDG_CURRENT_DESKTOP: "KDE", KDE_SESSION_VERSION: "6" }, "kwallet6"],
+    ["KDE 5", { XDG_CURRENT_DESKTOP: "KDE", KDE_SESSION_VERSION: "5" }, "kwallet5"],
+    [
+      "KDE named after another desktop",
+      { XDG_CURRENT_DESKTOP: "Hyprland:KDE", KDE_SESSION_VERSION: "6" },
+      "kwallet6",
+    ],
+  ])("leaves %s on KWallet, as Chromium picks it", async (_desktop, desktop, backend) => {
+    const userDataDir = createUserDataDirForTest();
+    const { app } = await launchOnDesktop(userDataDir, desktop);
+    expect(await app.evaluate(({ safeStorage }) => safeStorage.getSelectedStorageBackend())).toBe(
+      backend,
+    );
   });
 });

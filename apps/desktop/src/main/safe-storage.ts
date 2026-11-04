@@ -25,6 +25,15 @@ import { PLATFORM_BEHAVIOUR } from "./platform-behaviour";
  */
 export class KeyStoreError extends Data.TaggedError("KeyStoreError")<{
   readonly message: string;
+  /**
+   * True when the key store could not be used at all this time, such as a
+   * keyring that is not running or is locked: the key is not known to have
+   * changed, and the same data may decrypt at the next launch. False when the
+   * key store answered and refused, or the data does not decrypt with its key.
+   */
+  readonly unavailable: boolean;
+  /** A sentence that tells the user what to do about it, or null when there is none. */
+  readonly advice: string | null;
 }> {}
 
 /** Encryption and decryption of text with the system key store's key. */
@@ -49,7 +58,11 @@ export class SafeStorage extends Context.Service<
 
 /** Returns the KeyStoreError for `error`, which Electron's `safeStorage` threw. */
 const toKeyStoreError = (error: unknown): KeyStoreError =>
-  new KeyStoreError({ message: error instanceof Error ? error.message : String(error) });
+  new KeyStoreError({
+    message: error instanceof Error ? error.message : String(error),
+    unavailable: false,
+    advice: null,
+  });
 
 /** The parts of Electron's `safeStorage` the SafeStorage layer uses. */
 export type ElectronSafeStorageCalls = Pick<
@@ -67,19 +80,11 @@ export type ElectronSafeStorageCalls = Pick<
  * from the Keychain, and blocks main while it does.
  *
  * On Linux, every encryption and decryption first checks that a real keyring
- * is behind `safeStorage`; see `assertKeyringEncrypts` in `linux-key-store.ts`.
- *
- * `fixedKeyForTests` is true when an end-to-end test asked for the mock
- * Keychain. On Linux, it makes `safeStorage` encrypt with a fixed key, because
- * there is no keyring to start in a test. It is ignored on macOS, where
- * Chromium reads the same switch itself. Pass true only when the Node
- * inspector is open (see `requestsMockKeychain`): a token encrypted with a
- * fixed key is readable by any program.
+ * is behind `safeStorage`; see `findKeyringProblem` in `linux-key-store.ts`.
  */
 export const makeSafeStorageLayer = (
   safeStorage: ElectronSafeStorageCalls,
   platform: DesktopPlatform,
-  fixedKeyForTests: boolean,
 ): Layer.Layer<SafeStorage> => {
   // The check is imported at the first use, because only Linux needs it and
   // nothing needs it before the token is read, which keeps it out of the file
@@ -89,9 +94,14 @@ export const makeSafeStorageLayer = (
       ? Effect.promise(() => import("./linux-key-store")).pipe(
           Effect.flatMap((module) =>
             Effect.try({
-              try: () => module.assertKeyringEncrypts(safeStorage, fixedKeyForTests),
+              try: () => module.findKeyringProblem(safeStorage),
               catch: toKeyStoreError,
             }),
+          ),
+          Effect.flatMap((problem) =>
+            problem === undefined
+              ? Effect.void
+              : Effect.fail(new KeyStoreError({ ...problem, unavailable: true })),
           ),
         )
       : Effect.void;

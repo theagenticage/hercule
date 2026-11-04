@@ -36,10 +36,12 @@ import { WaitingNotifications } from "./waiting-notifications";
 
 /**
  * Returns the text the sheet shows when the key store, named `keyStoreName`,
- * cannot encrypt the token.
+ * cannot encrypt the token. `advice` is a sentence that says what the user
+ * can do about it, or null.
  */
-const buildKeyStoreWarning = (keyStoreName: string): string =>
-  `Hercule could not save your sign-in to the ${keyStoreName}, so you will need to sign in again next time.`;
+const buildKeyStoreWarning = (keyStoreName: string, advice: string | null): string =>
+  `Hercule could not save your sign-in to the ${keyStoreName}, so you will need to sign in again next time.` +
+  (advice === null ? "" : ` ${advice}`);
 
 /** What the key store encrypts: the login token and the controller URL it was stored for, as JSON. */
 const TokenForController = Schema.fromJsonString(
@@ -99,6 +101,10 @@ const make = Effect.gen(function* () {
    * - the key store cannot decrypt the token, because its key changed or
    *   access was denied;
    * - the token was stored for another controller URL than the saved one.
+   *
+   * Returns null and keeps the stored token when the key store cannot be used
+   * at all this time, such as a locked keyring that was not unlocked; see
+   * `KeyStoreError`.
    */
   const decryptStoredToken: Effect.Effect<string | null> = Effect.gen(function* () {
     const encrypted = yield* settings.readEncryptedToken;
@@ -107,6 +113,15 @@ const make = Effect.gen(function* () {
     if (controllerUrl === null) return yield* removeStoredToken("no controller URL is saved");
     const decrypted = yield* Effect.result(safeStorage.decrypt(encrypted));
     if (Result.isFailure(decrypted)) {
+      // A key store that cannot be used this time, such as a locked keyring
+      // that was not unlocked, has not lost the key. Keeping the token lets
+      // the next launch, with the keyring unlocked, read it.
+      if (decrypted.failure.unavailable) {
+        yield* Effect.logWarning(
+          `Could not read the stored login token: ${decrypted.failure.message}`,
+        );
+        return null;
+      }
       return yield* removeStoredToken(
         `the ${safeStorage.keyStoreName} could not decrypt it: ${decrypted.failure.message}`,
       );
@@ -135,7 +150,9 @@ const make = Effect.gen(function* () {
           Effect.logWarning(
             `Did not store the login token, because the ${safeStorage.keyStoreName} could not encrypt it: ${error.message}`,
           ).pipe(
-            Effect.andThen(window.showWarning(buildKeyStoreWarning(safeStorage.keyStoreName))),
+            Effect.andThen(
+              window.showWarning(buildKeyStoreWarning(safeStorage.keyStoreName, error.advice)),
+            ),
           ),
         onSuccess: settings.saveEncryptedToken,
       }),
