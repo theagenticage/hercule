@@ -520,7 +520,7 @@ jobs:
           mkdir -p "$debug_dir"
 
           sudo apt-get update
-          sudo apt-get install -y xvfb xdotool x11-utils dbus-x11 imagemagick
+          sudo apt-get install -y xvfb x11-utils dbus-x11 imagemagick
 
           # The check means something only on a host that enforces AppArmor
           # and restricts unprivileged user namespaces, as Ubuntu 24.04 does by
@@ -584,6 +584,24 @@ jobs:
             sudo aa-status 2>&1 | grep -E 'profiles are loaded|profiles are in enforce mode' || true
           }
 
+          # Checks that the app has a window on the screen: one whose
+          # class instance is hercule-desktop, that is mapped and viewable
+          # (IsViewable), and at least 200 by 200 pixels. A hidden window, or
+          # one of the small helper windows Chromium makes, does not count.
+          # There is no window manager in this job, so the check reads X
+          # itself.
+          has_viewable_window() {
+            for id in $(xwininfo -root -tree | awk '/\("hercule-desktop" / { print $1 }'); do
+              info=$(xwininfo -id "$id" 2> /dev/null) || continue
+              width=$(echo "$info" | awk '/^ *Width:/ { print $2 }')
+              height=$(echo "$info" | awk '/^ *Height:/ { print $2 }')
+              if echo "$info" | grep -q 'Map State: IsViewable' && [ "${width:-0}" -ge 200 ] && [ "${height:-0}" -ge 200 ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
           # Starts the installed app, waits for a window, checks that it stays
           # up without the sandbox switched off, and quits it.
           start_and_check() {
@@ -591,14 +609,19 @@ jobs:
             log=$debug_dir/app-$label.log
             home=$(mktemp -d)
             # `env` replaces itself with the app, so $! is the app's own pid.
-            # The app is not given the switches that turn the sandbox off.
-            env -u ELECTRON_DISABLE_SANDBOX HOME="$home" /opt/Hercule/hercule-desktop > "$log" 2>&1 &
+            # The app is not given the switches that turn the sandbox off. The
+            # runner sets XDG_CONFIG_HOME, which Chromium reads before HOME, so
+            # without these the app would keep its state in the runner's own
+            # folders and the second start would reuse the first one's.
+            env -u ELECTRON_DISABLE_SANDBOX HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+              XDG_CACHE_HOME="$home/.cache" XDG_DATA_HOME="$home/.local/share" \
+              /opt/Hercule/hercule-desktop > "$log" 2>&1 &
             app_pid=$!
 
             window_found=false
             for _ in $(seq 60); do
               kill -0 "$app_pid" 2> /dev/null || { cat "$log"; fail "The app ($label) exited before it showed a window. Its log is above."; }
-              if xdotool search --onlyvisible --any --class hercule --name hercule > /dev/null 2>&1; then
+              if has_viewable_window; then
                 window_found=true
                 break
               fi
@@ -609,7 +632,7 @@ jobs:
             # The window can be a splash that is followed by a crash.
             sleep 10
             kill -0 "$app_pid" 2> /dev/null || { cat "$log"; fail "The app ($label) showed a window and then exited."; }
-            xdotool search --onlyvisible --any --class hercule --name hercule > /dev/null 2>&1 || fail "The app ($label) is running, but its window is gone."
+            has_viewable_window || fail "The app ($label) is running, but its window is gone."
 
             if tr '\0' '\n' < "/proc/$app_pid/environ" | grep -q '^ELECTRON_DISABLE_SANDBOX='; then
               fail "The app ($label) runs with ELECTRON_DISABLE_SANDBOX set."
