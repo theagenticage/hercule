@@ -51,3 +51,7 @@ RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-l
     && npm install --global "pnpm@${PNPM_VERSION}"
 
 RUN useradd -u 1000 -M -d /tmp/home hercule
+
+# The cache volume copies this folder's owner and mode when it is first made,
+# so a fresh volume is writable by the user the container runs as.
+RUN mkdir -p /cache && chmod 777 /cache

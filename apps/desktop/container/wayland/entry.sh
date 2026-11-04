@@ -39,12 +39,29 @@ exec dbus-run-session -- sh -c '
   export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1
   sway -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
   sway_pid=$!
+  fail() {
+    echo "entry.sh: $1; the log of sway:" >&2
+    cat /tmp/sway.log >&2
+    exit 1
+  }
+  # The command runs only once sway has made a display socket and answers on
+  # its IPC socket. A sway that cannot start, for instance without
+  # `--cap-add SYS_NICE`, must fail the run, not leave a command running
+  # with no Wayland session.
+  ready=
   for _ in $(seq 100); do
-    ls "$XDG_RUNTIME_DIR" | grep -q "^wayland-" && break
+    kill -0 "$sway_pid" 2>/dev/null || fail "sway exited"
+    socket=$(ls "$XDG_RUNTIME_DIR" 2>/dev/null | grep "^wayland-" | grep -v lock | head -1 || true)
+    ipc=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1 || true)
+    if [ -n "$socket" ] && [ -n "$ipc" ] && SWAYSOCK=$ipc swaymsg -t get_version >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
     sleep 0.1
   done
-  export WAYLAND_DISPLAY=$(ls "$XDG_RUNTIME_DIR" | grep "^wayland-" | grep -v lock | head -1)
-  export SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock | head -1)
+  [ -n "$ready" ] || fail "sway did not become ready within 10 seconds"
+  export WAYLAND_DISPLAY=$socket
+  export SWAYSOCK=$ipc
   export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-Hyprland}
   unset DISPLAY
   if [ "${SESSION_TYPE:-wayland}" = unset ]; then
