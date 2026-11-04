@@ -135,7 +135,7 @@ async function startFakeUpstream(): Promise<{
 async function openDraft(app: Parameters<typeof chooseMenuItem>[0], page: Page): Promise<void> {
   await chooseMenuItem(app, "File", "New Thread");
   await page.getByRole("dialog", { name: "New thread in" }).waitFor();
-  await page.keyboard.press("Meta+1");
+  await page.keyboard.press("ControlOrMeta+1");
   await page.getByRole("heading", { name: "What should the agent do in notes?" }).waitFor();
 }
 

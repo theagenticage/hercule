@@ -33,7 +33,7 @@ import { findUnusedLoopbackUrl } from "./harness";
  *
  * - `serve`: no Service Unit is installed, until main installs one. Its
  *   install starts a real controller, the compiled `./hercule serve`, in the
- *   scratch Home, in the background, and exits at once. Run `pnpm
+ *   scratch Home, in the background, and exits once the controller listens. Run `pnpm
  *   build:binary` first.
  * - `start-error`: no Service Unit is installed, and the install fails with
  *   `START_ERROR_LINE`.
@@ -150,13 +150,24 @@ export async function writeStandInBinaryForTest(
     serve: [
       // Main kills the stand-in's whole process group once the stand-in
       // exits, as it would kill anything the real install left behind, so
-      // `set -m` starts the controller in a process group of its own, as
-      // launchd would. The controller also writes to a file, not to the
+      // the controller starts in a session of its own, as launchd would
+      // start it. The controller also writes to a file, not to the
       // stand-in's output, which main stops reading soon after the exit.
-      "set -m",
+      //
+      // The stand-in does not exit before the controller has printed that it
+      // is listening. By then the controller has left the group, so the kill
+      // cannot reach it: perl needs a moment to start and call `setsid`, and
+      // a stand-in that exits at once is killed with it still in the group.
+      //
+      // Perl also closes every file descriptor above the standard three. On
+      // Linux the controller would otherwise keep the app's pipes to the test
+      // open, and the app would not count as closed until the controller
+      // stopped.
       `if [ ! -f ${quoteForShell(pidFile)} ]; then`,
-      `  HERCULE_HOME=${quoteForShell(home)} PATH=/usr/bin:/bin /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' ${quoteForShell(compiled ?? "")} serve -c bind.port=${port} > ${quoteForShell(join(home, "stand-in-serve.log"))} 2>&1 < /dev/null &`,
+      `  HERCULE_HOME=${quoteForShell(home)} PATH=/usr/bin:/bin /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); POSIX::close($_) for 3..1023; exec @ARGV' ${quoteForShell(compiled ?? "")} serve -c bind.port=${port} > ${quoteForShell(join(home, "stand-in-serve.log"))} 2>&1 < /dev/null &`,
       `  echo $! > ${quoteForShell(pidFile)}`,
+      "  tries=0",
+      `  while [ $tries -lt 100 ] && ! grep -q 'is listening' ${quoteForShell(join(home, "stand-in-serve.log"))}; do sleep 0.1; tries=$((tries + 1)); done`,
       "fi",
       ...status,
     ],

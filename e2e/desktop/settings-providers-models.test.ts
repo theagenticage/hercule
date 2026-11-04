@@ -53,7 +53,7 @@ async function openDraft(
 ): Promise<void> {
   await chooseMenuItem(app, "File", "New Thread");
   await page.getByRole("dialog", { name: "New thread in" }).waitFor();
-  await page.keyboard.press("Meta+1");
+  await page.keyboard.press("ControlOrMeta+1");
   await page
     .getByRole("heading", { name: `What should the agent do in ${projectName}?` })
     .waitFor();

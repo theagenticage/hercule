@@ -17,7 +17,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
-import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
+import { isWindowVisible, RUNS_ON_MAC } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
   chooseMenuItem,
@@ -150,7 +150,7 @@ describe("the menu bar", () => {
     const { app, page, field } = await openThreadComposer();
     await field.click();
     await copyToClipboard(app, "Add a retry");
-    await page.keyboard.press("Meta+V");
+    await page.keyboard.press("ControlOrMeta+V");
     await expect.poll(() => readFieldText(field)).toBe("Add a retry");
 
     await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
@@ -173,12 +173,13 @@ describe("the menu bar", () => {
     await expect.poll(() => address.inputValue()).toBe("http://127.0.0.1:4937");
   });
 
-  it.each([
+  // Only macOS has a first responder to send an action to: Electron's
+  // `Menu.sendActionToFirstResponder` does not exist on Linux.
+  describe.skipIf(!RUNS_ON_MAC).each([
     ["Undo", "undo:"],
     ["Redo", "redo:"],
-  ])(
-    "sends Edit > %s to the native control that has the focus, such as the folder sheet's field",
-    async (label, action) => {
+  ])("Edit > %s", (label, action) => {
+    it("is sent to the native control that has the focus, such as the folder sheet's field", async () => {
       const { app } = await launchForTest();
       await focusWindow(app);
       // The sheet's fields cannot be typed into from a test, so main's call
@@ -206,8 +207,8 @@ describe("the menu bar", () => {
           ),
         )
         .toEqual([action]);
-    },
-  );
+    });
+  });
 
   it.each(["Undo", "Redo"])(
     "keeps a hidden window hidden when Edit > %s is chosen",

@@ -144,8 +144,18 @@ export async function launchForTest(
   options?: TestPackageOptions,
 ): Promise<LaunchedApp> {
   const app = await launchTestPackage(userDataDir, options);
+  // Playwright drops its handle on the process once the app has closed, so
+  // the test's final `close` reads the process from here.
+  const child = app.process();
   let closing: Promise<void> | undefined;
-  const close = () => (closing ??= quitApp(app));
+  // An app that quit by itself, such as one whose window was closed where
+  // closing the window quits, has nothing left to quit; it must have exited
+  // cleanly.
+  const close = () =>
+    (closing ??=
+      child.exitCode === null && child.signalCode === null
+        ? quitApp(app)
+        : Promise.resolve(assertExitedCleanly(child)));
   onTestFinished(close);
 
   // Playwright reads main's output from the start and passes on only what
@@ -279,8 +289,9 @@ export interface ArrangedFleet {
   /**
    * Stops the controller, calls `whileStopped`, and starts it again on the
    * same port and home. The controller holds its database locked while it
-   * runs, so this is the way to write to it directly. Call it at most once
-   * per test. Fails when the controller does not start again.
+   * runs, so this is the way to write to it directly. Its runner connects
+   * again, and the controller probes the accounts of the runner that
+   * connects. Fails when the controller does not start again.
    */
   readonly restartController: (whileStopped: () => void) => Promise<void>;
   readonly fleet: Fleet;
@@ -323,11 +334,12 @@ export async function arrangeFleet(
     const [own] = await readRunners();
     await client.runner.retire({ params: { id: own!.id }, payload: {} });
   }
+  let running: Pick<Controller, "stop"> = controller;
   return {
     url: controller.url,
     home: controller.home,
     restartController: async (whileStopped) => {
-      await controller.stop();
+      await running.stop();
       whileStopped();
       const restarted = await startController({
         home: controller.home,
@@ -338,6 +350,7 @@ export async function arrangeFleet(
       onTestFinished(async () => {
         await restarted.stop();
       });
+      running = restarted;
     },
     fleet,
     client,

@@ -32,6 +32,13 @@ import { buildAppEnv, isProcessRunning } from "./processes.ts";
 import type { WindowState } from "../src/main/app-settings.ts";
 
 /**
+ * True when the app is run on macOS, and false on Linux. A test or script
+ * that differs between the two reads this, so the platform is asked in one
+ * place.
+ */
+export const RUNS_ON_MAC = process.platform === "darwin";
+
+/**
  * Where electron-builder puts the unpacked app on this platform, relative to
  * `dist/<kind>`, as `pnpm build:desktop` builds it.
  *
@@ -43,14 +50,13 @@ import type { WindowState } from "../src/main/app-settings.ts";
  * Every other path to something in the package starts from here, so this is
  * the one place that tells the two platforms apart.
  */
-const PACKAGE_LAYOUT =
-  process.platform === "darwin"
-    ? {
-        app: join(process.arch === "arm64" ? "mac-arm64" : "mac", "Hercule.app"),
-        executable: "Contents/MacOS/Hercule",
-        archive: "Contents/Resources/app.asar",
-      }
-    : { app: "linux-unpacked", executable: "hercule-desktop", archive: "resources/app.asar" };
+const PACKAGE_LAYOUT = RUNS_ON_MAC
+  ? {
+      app: join(process.arch === "arm64" ? "mac-arm64" : "mac", "Hercule.app"),
+      executable: "Contents/MacOS/Hercule",
+      archive: "Contents/Resources/app.asar",
+    }
+  : { app: "linux-unpacked", executable: "hercule-desktop", archive: "resources/app.asar" };
 
 /**
  * The two packages `pnpm build:desktop` builds: `release` is what ships, and
@@ -101,7 +107,7 @@ export function findAppArchive(kind: PackageKind): string {
  *   file. Linux has no such alert, so it gets no such argument.
  */
 export function buildAppArgs(userDataDir: string): string[] {
-  const macArgs = process.platform === "darwin" ? ["-ApplePersistenceIgnoreState", "YES"] : [];
+  const macArgs = RUNS_ON_MAC ? ["-ApplePersistenceIgnoreState", "YES"] : [];
   return [...macArgs, `--user-data-dir=${userDataDir}`];
 }
 
@@ -120,6 +126,21 @@ export function buildAppArgs(userDataDir: string): string[] {
  */
 export function buildSandboxArgs(kind: PackageKind): string[] {
   return kind === "test" && process.platform === "linux" ? ["--no-sandbox"] : [];
+}
+
+/**
+ * Builds the argument that lets Chromium draw WebGL in software, which is
+ * `--enable-unsafe-swiftshader` on Linux and nothing otherwise.
+ *
+ * The Office draws with WebGL. On a Linux machine without a usable GPU, such
+ * as a virtual screen in a container or on a CI runner, Chromium blocks WebGL
+ * and the Office shows "This screen did not load". With this switch Chromium
+ * falls back to its software renderer. A machine with a GPU still uses it. Only
+ * the test package takes the switch: the release package refuses it, and a
+ * user's machine decides for itself.
+ */
+export function buildSoftwareGraphicsArgs(): string[] {
+  return process.platform === "linux" ? ["--enable-unsafe-swiftshader"] : [];
 }
 
 /**
@@ -290,6 +311,7 @@ export function launchTestPackage(
       ...buildAppArgs(userDataDir),
       ...buildMockKeychainArgs(),
       buildBinaryPathArgument(userDataDir),
+      ...buildSoftwareGraphicsArgs(),
       ...extraArgs,
     ],
     env: buildAppEnv(),
@@ -340,6 +362,7 @@ export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
     [
       ...buildAppArgs(userDataDir),
       ...buildSandboxArgs("test"),
+      ...buildSoftwareGraphicsArgs(),
       ...buildMockKeychainArgs(),
       buildBinaryPathArgument(userDataDir),
       "--inspect=0",
