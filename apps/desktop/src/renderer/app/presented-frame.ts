@@ -1,7 +1,9 @@
 /**
- * Waits until what the page shows has reached the window, and reports the
- * first screen to main then, so that main shows the window only once the
- * window already holds that screen.
+ * Waits until what the page shows is ready to be shown, and reports the first
+ * screen to main then, so that main shows the window only once the window
+ * already holds that screen. On macOS the page waits until the screen has
+ * reached the window; on Linux it cannot, and waits until the screen is laid
+ * out and drawn (see `reportFirstScreen`).
  */
 import type { Bridge } from "../../ipc/bridge";
 
@@ -51,34 +53,63 @@ interface ElementTimingEntry extends PerformanceEntry {
  * runs once the first frame has been handed to the compositor, which can be
  * before that frame reaches the window.
  *
- * In a hidden window, Chromium still draws and presents frames, so the wait
- * ends there too.
+ * On macOS, Chromium draws and presents frames in a hidden window too, so
+ * the wait ends there. On Linux under X11 it does not: a hidden window
+ * presents no frame, and the wait would never end while main keeps the
+ * window hidden until the page reports. `reportFirstScreen` therefore waits
+ * differently on Linux; see `observePresentation`.
  */
 export const waitForPresentedFrame = async (): Promise<DOMHighResTimeStamp> => {
+  await waitForLayoutAndFonts();
+  return observePresentation();
+};
+
+/**
+ * Forces the page's layout, which makes Chromium start loading the fonts the
+ * layout needs, then waits until every font is loaded. See step 1 of
+ * `waitForPresentedFrame`.
+ */
+const waitForLayoutAndFonts = async (): Promise<void> => {
   document.documentElement.getBoundingClientRect();
   await document.fonts.ready;
+};
 
-  const sentinel = createSentinel();
-  try {
-    return await new Promise<DOMHighResTimeStamp>((resolve) => {
-      // The entry is picked by its element: two waits can run at once, and
-      // each waits for its own sentinel.
-      const observer = new PerformanceObserver((list) => {
-        const entry = (list.getEntries() as Array<ElementTimingEntry>).find(
-          (candidate) => candidate.element === sentinel,
-        );
-        if (entry === undefined) return;
-        observer.disconnect();
-        resolve(entry.renderTime);
-      });
-      // The observer is registered before the sentinel is added, so it
-      // receives the entry without asking for buffered ones.
-      observer.observe({ type: "element" });
-      document.body.append(sentinel);
-    });
-  } finally {
-    sentinel.remove();
+/** Waits for `count` animation frames to run, one after the other. */
+const waitForAnimationFrames = async (count: number): Promise<void> => {
+  for (let frame = 0; frame < count; frame += 1) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   }
+};
+
+/**
+ * Adds the sentinel to the page and returns a promise of when the frame that
+ * painted it was presented, or failed to present, on the page's performance
+ * timeline. Removes the sentinel then. See steps 2 and 3 of
+ * `waitForPresentedFrame`.
+ *
+ * The observer and the sentinel are in place when the function returns, so
+ * the caller can do something else before it awaits the promise, such as
+ * asking main to show the window.
+ */
+const observePresentation = (): Promise<DOMHighResTimeStamp> => {
+  const sentinel = createSentinel();
+  return new Promise<DOMHighResTimeStamp>((resolve) => {
+    // The entry is picked by its element: two waits can run at once, and
+    // each waits for its own sentinel.
+    const observer = new PerformanceObserver((list) => {
+      const entry = (list.getEntries() as Array<ElementTimingEntry>).find(
+        (candidate) => candidate.element === sentinel,
+      );
+      if (entry === undefined) return;
+      observer.disconnect();
+      sentinel.remove();
+      resolve(entry.renderTime);
+    });
+    // The observer is registered before the sentinel is added, so it
+    // receives the entry without asking for buffered ones.
+    observer.observe({ type: "element" });
+    document.body.append(sentinel);
+  });
 };
 
 /**
@@ -122,18 +153,33 @@ const createSentinel = (): HTMLSpanElement => {
 };
 
 /**
- * Reports the screen on the page now to main as the first screen, once the
- * frame that draws it has been presented, or has failed to present (see
- * `waitForPresentedFrame`). Main shows the window on the report at launch,
- * and ignores it after.
+ * Reports the screen on the page now to main as the first screen, so that
+ * main shows the window, and returns when a frame that draws it was
+ * presented, or failed to present, on the page's performance timeline.
+ * Main shows the window on the report at launch, and ignores it after.
  *
- * Returns when the frame was presented or failed, on the page's performance
- * timeline, or null when the wait or the report failed. A failure is logged,
- * not thrown: the page cannot do anything about it, and main's time limit
- * then shows the window instead.
+ * - On macOS, it reports once the frame has been presented (see
+ *   `waitForPresentedFrame`).
+ * - On Linux, it cannot wait for that: main keeps the window hidden until
+ *   the report, and a hidden window under X11 presents no frame. It waits
+ *   until the screen has its layout, its fonts and two animation frames,
+ *   which Chromium runs for a hidden window, then starts observing
+ *   presentation, reports, and only then waits for the presentation. The
+ *   returned time is still that of a presented frame.
+ *
+ * Returns null when the wait or the report failed. A failure is logged, not
+ * thrown: the page cannot do anything about it, and main's time limit then
+ * shows the window instead.
  */
 export const reportFirstScreen = async (bridge: Bridge): Promise<DOMHighResTimeStamp | null> => {
   try {
+    if (bridge.platform === "linux") {
+      await waitForLayoutAndFonts();
+      await waitForAnimationFrames(2);
+      const presentation = observePresentation();
+      await bridge.firstScreen.report();
+      return await presentation;
+    }
     const presentedAt = await waitForPresentedFrame();
     await bridge.firstScreen.report();
     return presentedAt;
