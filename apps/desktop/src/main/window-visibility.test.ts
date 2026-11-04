@@ -50,15 +50,23 @@ const makeWindow = () => {
   const once = (event: string, listener: Listener) =>
     listeners.push({ event, listener, once: true });
   let fullScreen = false;
+  let destroyed = false;
   let bounds = CREATED_AT;
 
   const window: ShowableWindow = {
     show: () => calls.push("show"),
     hide: () => calls.push("hide"),
     focus: () => calls.push("focus"),
-    isFullScreen: () => fullScreen,
     setFullScreen: (flag) => calls.push(`setFullScreen(${String(flag)})`),
-    getNormalBounds: () => (fullScreen ? CREATED_AT : bounds),
+    // Like Electron's, a destroyed window throws when it is asked anything.
+    isFullScreen: () => {
+      if (destroyed) throw new Error("Object has been destroyed");
+      return fullScreen;
+    },
+    getNormalBounds: () => {
+      if (destroyed) throw new Error("Object has been destroyed");
+      return fullScreen ? CREATED_AT : bounds;
+    },
     on,
     once,
     off: (event, listener) => {
@@ -118,6 +126,10 @@ const makeWindow = () => {
     moveTo: (next: Bounds) => {
       bounds = next;
       emit("moved");
+    },
+    /** Destroys the window, as Electron does once it has closed: it then throws when asked anything. */
+    destroy: () => {
+      destroyed = true;
     },
     /** Ends the animation into full screen, which resizes the window. */
     finishEnteringFullScreen: () => {
@@ -328,6 +340,19 @@ describe("closing the window, where it quits the app", () => {
     const { close, calls } = makeShownWindow("quits");
     expect(close()).toBe(false);
     expect(calls).toEqual(["quitApp"]);
+  });
+
+  it("does not measure the window again when Electron emits a second quit after the window is gone", () => {
+    const { visibility, close, destroy, calls, saved, moveTo } = makeShownWindow("quits");
+    moveTo(MOVED_TO);
+    close();
+    visibility.prepareToQuit();
+    close();
+    destroy();
+
+    expect(() => visibility.prepareToQuit()).not.toThrow();
+    expect(calls).toEqual(["quitApp", "save"]);
+    expect(saved).toEqual([{ bounds: MOVED_TO, fullScreen: false }]);
   });
 
   it("saves the window's state once, as the quit starts, and then lets the window close", () => {

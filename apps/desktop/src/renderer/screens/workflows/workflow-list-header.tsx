@@ -9,9 +9,9 @@
  *   the top of the column instead.
  */
 import { useEffect, useRef, type JSX } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouteContext } from "@tanstack/react-router";
 import { WORKFLOW_LIST_FILTERS, type WorkflowListFilter } from "@hercule/client-core/workflow-rows";
-import { usePrimaryModifier } from "../../app/primary-modifier";
+import { isOtherModifierHeld, isPrimaryModifierHeld } from "../../app/primary-modifier";
 import { SearchIcon } from "../../icons/search";
 import { SidebarIcon } from "../../icons/sidebar";
 import "../session/floating-header.css";
@@ -125,12 +125,13 @@ export function WorkflowSearchField({
   readonly isBoxed: boolean;
 }): JSX.Element {
   const searchRef = useRef<HTMLInputElement>(null);
-  const primaryModifier = usePrimaryModifier();
+  const { bridge } = useRouteContext({ from: "/_connected" });
+  const { platform } = bridge;
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent): void => {
       if (event.defaultPrevented) return;
-      if (!primaryModifier.isHeld(event) || primaryModifier.isOtherHeld(event)) return;
+      if (!isPrimaryModifierHeld(event, platform) || isOtherModifierHeld(event, platform)) return;
       if (event.altKey || event.shiftKey) return;
       // Caps Lock turns the key into "F".
       if (event.key.toLowerCase() !== "f") return;
@@ -142,7 +143,7 @@ export function WorkflowSearchField({
     };
     window.addEventListener("keydown", focusSearch);
     return () => window.removeEventListener("keydown", focusSearch);
-  }, [primaryModifier]);
+  }, [platform]);
 
   return (
     <label className={isBoxed ? "find find--box" : "pill find"}>

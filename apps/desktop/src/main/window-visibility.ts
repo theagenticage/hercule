@@ -253,12 +253,17 @@ export const makeWindowVisibility = (
      * flag is set here, not in an effect, because Electron closes the window
      * right after the quit starts.
      *
+     * Only the first call does anything. Electron can emit `before-quit`
+     * again after the window is gone, when a close that quits the app starts
+     * a second quit, and measuring a destroyed window throws.
+     *
      * The state is saved only when the window is on screen. A window that is
      * not on screen is not saved again: one that closing hid was saved then,
      * and one that has not shown yet has nothing new to save. Saving either
      * now would lose a full screen that the saved state holds.
      */
     prepareToQuit: (): void => {
+      if (quitting) return;
       quitting = true;
       if (shownOnce && !hiddenByClosing) saveWindowState(measureWindowState());
     },

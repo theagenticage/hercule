@@ -20,7 +20,6 @@ import {
 } from "@hercule/client-core/graph-model";
 import type { NodeCard } from "@hercule/client-core/node-details";
 import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
-import { PrimaryModifierProvider } from "../../app/primary-modifier";
 import { WorkflowGraph } from "./workflow-graph";
 import { layOutGraphDrawing } from "./workflow-graph-layout";
 
@@ -98,17 +97,18 @@ const stubPaneWidth = (width: number) => {
 /** Renders the graph of `DRAWING` beside a button outside it, on a Mac unless `platform` says otherwise. */
 const renderGraph = (platform: DesktopPlatform = "mac") =>
   render(
-    <PrimaryModifierProvider platform={platform}>
+    <>
       <WorkflowGraph
         drawing={DRAWING}
         readCard={(nodeId) => CARDS[nodeId]}
         timezone="UTC"
         label="The steps of Review"
         plugins={[{ id: "github", displayName: "GitHub", mark: { paths: [GITHUB_MARK_PATH] } }]}
+        platform={platform}
       />
       <button type="button">Outside</button>
       <input aria-label="Search" />
-    </PrimaryModifierProvider>,
+    </>,
   );
 
 /**
@@ -364,16 +364,15 @@ const listRunClasses = (element: Element): ReadonlyArray<string> =>
 /** Renders the graph of `DRAWING` with `overlay`, and returns a function that draws it again with another. */
 const renderRun = (overlay: RunOverlay | undefined) => {
   const graph = (next: RunOverlay | undefined) => (
-    <PrimaryModifierProvider platform="mac">
-      <WorkflowGraph
-        drawing={DRAWING}
-        readCard={(nodeId) => CARDS[nodeId]}
-        timezone="UTC"
-        label="The steps of Review"
-        plugins={[]}
-        overlay={next}
-      />
-    </PrimaryModifierProvider>
+    <WorkflowGraph
+      drawing={DRAWING}
+      readCard={(nodeId) => CARDS[nodeId]}
+      timezone="UTC"
+      label="The steps of Review"
+      plugins={[]}
+      overlay={next}
+      platform="mac"
+    />
   );
   const { rerender, container } = render(graph(overlay));
   return {

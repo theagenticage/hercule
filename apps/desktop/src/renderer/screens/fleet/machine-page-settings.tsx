@@ -4,6 +4,7 @@ import { CloseIcon } from "../../icons/close";
 import { PlusIcon } from "../../icons/plus";
 import { SettingRow } from "../settings/setting-row";
 import { useTextDraft } from "../settings/use-text-draft";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import "./machine-page.css";
 
 /**
@@ -27,6 +28,7 @@ export function MachineNumberRow({
   error,
   parse,
   onSave,
+  platform,
 }: {
   readonly label: string;
   readonly hint: string;
@@ -36,9 +38,11 @@ export function MachineNumberRow({
   readonly error: string | null;
   readonly parse: (text: string) => ParsedField<number>;
   readonly onSave: (value: number) => void;
+  /** The platform the app runs on, which decides the key that commits with ⏎: ⌘ on a Mac, Ctrl on Linux. */
+  readonly platform: DesktopPlatform;
 }): JSX.Element {
   const [refusal, setRefusal] = useState<string | null>(null);
-  const draft = useTextDraft(value, (text) => {
+  const draft = useTextDraft(platform, value, (text) => {
     const parsed = parse(text);
     if ("refusal" in parsed) {
       setRefusal(parsed.refusal);

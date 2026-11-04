@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Rotation } from "@hercule/contract";
-import { PrimaryModifierProvider } from "../../../app/primary-modifier";
 import { RotationSection } from "./rotation-section";
 
 const ROTATION: Rotation = { contextFraction: 0.7, maxContextTokens: 200_000, dailyAt: "04:00" };
@@ -14,9 +13,13 @@ const ROTATION: Rotation = { contextFraction: 0.7, maxContextTokens: 200_000, da
 const renderSection = () => {
   const onSave = vi.fn<(change: Partial<Rotation>) => void>();
   render(
-    <PrimaryModifierProvider platform="mac">
-      <RotationSection assistantName="Ada" rotation={ROTATION} error={null} onSave={onSave} />
-    </PrimaryModifierProvider>,
+    <RotationSection
+      assistantName="Ada"
+      rotation={ROTATION}
+      error={null}
+      onSave={onSave}
+      platform="mac"
+    />,
   );
   return onSave;
 };

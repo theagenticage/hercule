@@ -4,13 +4,14 @@
  * of an answer with a text field while that box is open.
  */
 import type { JSX } from "react";
+import { useRouteContext } from "@tanstack/react-router";
 import type { DescribeLine, SignalAction } from "@hercule/contract";
 import {
   trimAnswerEllipsis,
   type SignalAnswer,
   type SignalAnswerStyle,
 } from "@hercule/client-core";
-import { usePrimaryModifier } from "../../app/primary-modifier";
+import { isPrimaryModifierHeld } from "../../app/primary-modifier";
 import { buildLook, Face } from "../../faces";
 import { LedgerAnswer } from "./ledger-answer";
 
@@ -209,7 +210,7 @@ function ReplyBox({
   readonly onAct: (actionId: string, text: string) => void;
 }): JSX.Element {
   const { action, suggested } = answer;
-  const primaryModifier = usePrimaryModifier();
+  const { bridge } = useRouteContext({ from: "/_connected" });
   const describeId = `${idPrefix}-${action.id}-describe`;
   const errorId = `${idPrefix}-${action.id}-error`;
   const empty = draft.trim() === "";
@@ -232,7 +233,7 @@ function ReplyBox({
             onDraftChange(action.id, event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && primaryModifier.isHeld(event)) {
+            if (event.key === "Enter" && isPrimaryModifierHeld(event, bridge.platform)) {
               event.preventDefault();
               send();
             }

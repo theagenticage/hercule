@@ -46,7 +46,8 @@ const REPLY_MODES: ReadonlyArray<{ readonly value: AssistantReply; readonly labe
  * when a saved change reaches the assistant's session (spec 12 §7).
  */
 export function HowItWorksSection({ assistant }: { readonly assistant: Assistant }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { controller, bridge } = useRouteContext({ from: "/_connected" });
+  const { client } = controller;
   const name = useSavedDraftField(assistant, "name");
   const persona = useSavedDraftField(assistant, "systemPrompt");
   const profile = useSavedDraftField(assistant, "permissionProfileId");
@@ -74,7 +75,7 @@ export function HowItWorksSection({ assistant }: { readonly assistant: Assistant
   );
   // A name that is empty or only spaces is not saved, and the field shows the
   // saved name again, as it does for Esc.
-  const nameInput = useTextDraft(name.value, (text) => {
+  const nameInput = useTextDraft(bridge.platform, name.value, (text) => {
     if (text.trim() !== "") name.save(text);
   });
   return (
@@ -92,6 +93,7 @@ export function HowItWorksSection({ assistant }: { readonly assistant: Assistant
         )}
       />
       <SettingTextRow
+        platform={bridge.platform}
         label="Persona"
         hint={`Instructions added to every session ${assistant.name} starts, on top of the harness’s own.`}
         value={persona.value}

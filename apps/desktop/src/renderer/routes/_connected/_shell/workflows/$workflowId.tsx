@@ -179,7 +179,7 @@ function OpenWorkflowRoute(): JSX.Element {
  * as not found while the cache still holds the workflow.
  */
 function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Element {
-  const { controller } = Route.useRouteContext();
+  const { controller, bridge } = Route.useRouteContext();
   const { client } = controller;
   const search = Route.useSearch();
   const runsView = search.runsView ?? "list";
@@ -247,6 +247,7 @@ function OpenWorkflow({ workflowId }: { readonly workflowId: string }): JSX.Elem
         plugins={plugins}
         timezone={timezone}
         label={`The steps of ${definition.name}`}
+        platform={bridge.platform}
       />
       <WorkflowTabs
         client={client}
