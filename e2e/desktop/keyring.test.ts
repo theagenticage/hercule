@@ -7,11 +7,14 @@
  * - With a keyring (GNOME Keyring, unlocked, on a D-Bus session of the
  *   test's own), the token is saved encrypted with the keyring's key, and a
  *   relaunch is still signed in.
+ * - In the mock keychain mode, which every other test uses, the app uses
+ *   the `basic_text` backend and its fixed key, even on a desktop that has a
+ *   keyring, so a test never reaches the developer's own keyring.
  * - Without one, Chromium picks the `basic_text` backend, whose key is
  *   public. The app then saves no token and shows the sheet that says so,
  *   while the user stays signed in for the run.
  *
- * The tests run on Linux only, and the first one only where `dbus-daemon`,
+ * The tests run on Linux only, and the keyring ones only where `dbus-daemon`,
  * `gnome-keyring-daemon` and `secret-tool` are installed, as in the
  * container of `apps/desktop/container`. The keyring is private to the test:
  * it never touches the developer's own. Run `pnpm build:desktop` and
@@ -26,6 +29,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import {
   buildAppArgs,
   buildBinaryPathArgument,
+  buildMockKeychainArgs,
   findExecutable,
   quitApp,
   readSettings,
@@ -152,28 +156,29 @@ function readFirstLine(child: ChildProcess): Promise<string> {
   });
 }
 
-/** An app started without the mock keychain, and a way to quit it. */
-interface AppOnRealKeyStore {
+/** An app started by `launchOnDesktop`, and a way to quit it. */
+interface LaunchedOnDesktop {
   readonly app: ElectronApplication;
   readonly page: Page;
   readonly close: () => Promise<void>;
 }
 
 /**
- * Starts the test package on `userDataDir` for the current test, without
- * `--use-mock-keychain`, so the app encrypts with what the machine has.
- * `env` is added to the environment, after the variables that name the
- * desktop environment are removed from it.
+ * Starts the test package on `userDataDir` for the current test. It passes no
+ * mock keychain arguments unless `extraArgs` holds them, so by default the app
+ * encrypts with what the machine has. `env` is added to the environment, after
+ * the variables that name the desktop environment are removed from it.
  */
-async function launchOnRealKeyStore(
+async function launchOnDesktop(
   userDataDir: string,
   env: Record<string, string>,
-): Promise<AppOnRealKeyStore> {
+  extraArgs: ReadonlyArray<string> = [],
+): Promise<LaunchedOnDesktop> {
   const baseEnv = buildAppEnv();
   for (const name of DESKTOP_ENVIRONMENT_VARIABLES) delete baseEnv[name];
   const app = await _electron.launch({
     executablePath: findExecutable("test"),
-    args: [...buildAppArgs(userDataDir), buildBinaryPathArgument(userDataDir)],
+    args: [...buildAppArgs(userDataDir), buildBinaryPathArgument(userDataDir), ...extraArgs],
     env: { ...baseEnv, ...env },
     colorScheme: null,
   });
@@ -184,6 +189,12 @@ async function launchOnRealKeyStore(
   await page.waitForLoadState("load");
   return { app, page, close };
 }
+
+/** Returns the first three characters of the encrypted token saved in `userDataDir`'s settings file. */
+const readSavedTokenPrefix = (userDataDir: string): string =>
+  Buffer.from(readSettings(userDataDir)["token"] as string, "base64")
+    .subarray(0, 3)
+    .toString("latin1");
 
 /** Reads the token main decrypts from the settings file, as the page asks for it at start. */
 const readStoredToken = (page: Page): Promise<string | null> =>
@@ -199,7 +210,7 @@ describe.skipIf(!onLinux)("the login token on Linux", () => {
       writeSettings(userDataDir, { controllerUrl: controller.url });
       const env = { ...keyring, XDG_CURRENT_DESKTOP: "GNOME" };
 
-      const first = await launchOnRealKeyStore(userDataDir, env);
+      const first = await launchOnDesktop(userDataDir, env);
       expect(
         await first.app.evaluate(({ safeStorage }) => safeStorage.getSelectedStorageBackend()),
       ).toBe("gnome_libsecret");
@@ -216,10 +227,38 @@ describe.skipIf(!onLinux)("the login token on Linux", () => {
       expect(file).not.toContain(token);
       const saved = Buffer.from(readSettings(userDataDir)["token"] as string, "base64");
       expect(saved.toString("latin1")).not.toContain(token);
-      expect(saved.subarray(0, 3).toString("latin1")).toBe("v11");
+      expect(readSavedTokenPrefix(userDataDir)).toBe("v11");
 
-      const second = await launchOnRealKeyStore(userDataDir, env);
+      const second = await launchOnDesktop(userDataDir, env);
       expect(await readStoredToken(second.page)).toBe(token);
+    },
+  );
+
+  it.skipIf(!hasKeyring)(
+    "never uses the desktop's keyring in the mock keychain mode, even on a desktop that has one",
+    async () => {
+      const keyring = await startKeyringForTest();
+      const controller = await startControllerForTest({ setUp: true });
+      const userDataDir = createUserDataDirForTest();
+      writeSettings(userDataDir, { controllerUrl: controller.url });
+
+      // The environment of a GNOME desktop with its keyring running: a test
+      // started there must not reach that keyring.
+      const { app, page } = await launchOnDesktop(
+        userDataDir,
+        { ...keyring, XDG_CURRENT_DESKTOP: "GNOME" },
+        buildMockKeychainArgs(),
+      );
+      expect(await app.evaluate(({ safeStorage }) => safeStorage.getSelectedStorageBackend())).toBe(
+        "basic_text",
+      );
+      await signInAndReadToken(page, controller.url);
+      await expect
+        .poll(() => readSettings(userDataDir)["token"], { message: "the token was not saved" })
+        .toBeTypeOf("string");
+
+      // `v10` marks the fixed key of `basic_text`, `v11` a keyring's key.
+      expect(readSavedTokenPrefix(userDataDir)).toBe("v10");
     },
   );
 
@@ -228,7 +267,7 @@ describe.skipIf(!onLinux)("the login token on Linux", () => {
     const userDataDir = createUserDataDirForTest();
     writeSettings(userDataDir, { controllerUrl: controller.url });
 
-    const { app, page } = await launchOnRealKeyStore(userDataDir, {});
+    const { app, page } = await launchOnDesktop(userDataDir, {});
     expect(await app.evaluate(({ safeStorage }) => safeStorage.getSelectedStorageBackend())).toBe(
       "basic_text",
     );

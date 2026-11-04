@@ -75,14 +75,19 @@ export type ElectronSafeStorageCalls = Pick<
  * token. It also fails when the backend is a keyring that is not running or
  * is locked, which Electron reports as unavailable.
  *
- * `isEncryptionAvailable` runs before the backend is read, because the first
- * call is what starts Electron's encryption and so selects the backend.
+ * Electron selects the backend before the app is ready, so it is known
+ * here. `isEncryptionAvailable` still runs before the backend is read: the
+ * first call is what initialises the encryption and reaches the key, and so
+ * reports whether the keyring answers.
  */
 const assertKeyringEncrypts = (
   safeStorage: ElectronSafeStorageCalls,
   fixedKeyForTests: boolean,
 ): void => {
   if (fixedKeyForTests) {
+    // This only allows the fixed key; it does not select the backend. The
+    // launch must also pass `--password-store=basic`, so that Electron does not
+    // choose the real keyring of the desktop the test runs on.
     safeStorage.setUsePlainTextEncryption(true);
     return;
   }

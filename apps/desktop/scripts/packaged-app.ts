@@ -238,6 +238,26 @@ export async function signIn(
  */
 export const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
 
+/**
+ * Builds the arguments that make a launch of the test package encrypt its
+ * sign-in with a fixed key: `MOCK_KEYCHAIN_SWITCH`, and on Linux also
+ * `--password-store=basic`.
+ *
+ * On Linux, the switch alone only lets Electron use a fixed key if it has
+ * chosen the `basic_text` backend. Electron chooses its backend before the app
+ * is ready, from the desktop environment variables and the D-Bus session it
+ * inherits. On a developer's GNOME or KDE desktop it would choose their real
+ * keyring, and a test could create an item in it or open its unlock prompt.
+ * `--password-store=basic` chooses `basic_text` whatever the desktop is. Pass
+ * both together, never one: only the test package accepts them, and the
+ * release package refuses both.
+ */
+export function buildMockKeychainArgs(): string[] {
+  return process.platform === "linux"
+    ? [MOCK_KEYCHAIN_SWITCH, "--password-store=basic"]
+    : [MOCK_KEYCHAIN_SWITCH];
+}
+
 /** What a launch of the test package may add to the usual launch; see `launchTestPackage`. */
 export interface TestPackageOptions {
   /** Where and at what size Playwright records a video of the window. */
@@ -252,7 +272,7 @@ export interface TestPackageOptions {
 /**
  * Starts the test package with Playwright's Electron driver, on the given
  * user data directory, and returns Playwright's handle on it. The app runs on
- * the mock keychain (see `MOCK_KEYCHAIN_SWITCH`).
+ * the mock keychain (see `buildMockKeychainArgs`).
  *
  * Given an `executablePath`, Playwright passes only `--inspect=0` and
  * `--remote-debugging-port=0` before the app's own arguments. It does not
@@ -268,7 +288,7 @@ export function launchTestPackage(
     executablePath: findExecutable("test"),
     args: [
       ...buildAppArgs(userDataDir),
-      MOCK_KEYCHAIN_SWITCH,
+      ...buildMockKeychainArgs(),
       buildBinaryPathArgument(userDataDir),
       ...extraArgs,
     ],
@@ -320,7 +340,7 @@ export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
     [
       ...buildAppArgs(userDataDir),
       ...buildSandboxArgs("test"),
-      MOCK_KEYCHAIN_SWITCH,
+      ...buildMockKeychainArgs(),
       buildBinaryPathArgument(userDataDir),
       "--inspect=0",
       "--remote-debugging-port=0",
