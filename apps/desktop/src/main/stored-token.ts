@@ -140,8 +140,8 @@ const make = Effect.gen(function* () {
 
   /**
    * Encrypts `token` together with `controllerUrl`, the saved controller URL,
-   * and stores it. When the key store cannot encrypt it, stores nothing and
-   * shows the user a warning sheet.
+   * and stores it. When the key store cannot encrypt it, stores nothing,
+   * removes the token stored before, and shows the user a warning sheet.
    */
   const encryptAndStore = (controllerUrl: string, token: string): Effect.Effect<void> =>
     safeStorage.encrypt(encodeTokenForController({ controllerUrl, token })).pipe(
@@ -150,6 +150,10 @@ const make = Effect.gen(function* () {
           Effect.logWarning(
             `Did not store the login token, because the ${safeStorage.keyStoreName} could not encrypt it: ${error.message}`,
           ).pipe(
+            // The token stored for the previous login stays no longer: the
+            // next launch with a working key store would sign the user in as
+            // that account, and not as the one they just signed in as.
+            Effect.andThen(settings.saveEncryptedToken(null)),
             Effect.andThen(
               window.showWarning(buildKeyStoreWarning(safeStorage.keyStoreName, error.advice)),
             ),
@@ -176,7 +180,8 @@ const make = Effect.gen(function* () {
      * Stores `token`, encrypted, or removes the stored token when `token` is
      * null, and enables Sign Out exactly when `token` is not null; see
      * reflectSignedIn. When the key store cannot encrypt the token, stores
-     * nothing and shows the user a warning sheet; the user stays signed in
+     * nothing, removes the token stored before, and shows the user a warning
+     * sheet; the user stays signed in
      * until the app quits.
      *
      * Fails with NoControllerSaved, and changes nothing, when a token is given

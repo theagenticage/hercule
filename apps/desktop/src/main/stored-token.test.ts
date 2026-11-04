@@ -259,7 +259,6 @@ describe("the stored token", () => {
     "is not stored when the key store cannot encrypt it, and a sheet names the %s",
     async (keyStoreName) => {
       writeConnectedSettings();
-      const before = readFileText();
       const outcome = await runWithStoredToken(write("secret-token"), "denied", keyStoreName);
       expect(outcome).toEqual({
         exit: Exit.void,
@@ -270,9 +269,20 @@ describe("the stored token", () => {
           `showWarning Hercule could not save your sign-in to the ${keyStoreName}, so you will need to sign in again next time.${keyStoreName === "keyring" ? ` ${ADVICE}` : ""}`,
         ],
       });
-      expect(readFileText()).toBe(before);
+      expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
     },
   );
+
+  it("removes the token of the previous account when the new account's token cannot be stored, so the next launch does not sign in as the old one", async () => {
+    writeConnectedSettings({ token: storedTokenFor(CONTROLLER_URL, "old-account-token") });
+    // The keyring is locked and not unlocked, and the user signs in as another account.
+    await runWithStoredToken(write("new-account-token"), "unavailable", "keyring");
+    expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
+
+    // The next launch, with the keyring unlocked, finds no token at all.
+    const next = await runWithStoredToken(read);
+    expect(next.exit).toEqual(Exit.succeed(null));
+  });
 
   it("is refused, and changes nothing, when no controller URL is saved", async () => {
     const outcome = await runWithStoredToken(write("secret-token"));
