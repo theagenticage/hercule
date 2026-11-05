@@ -52,6 +52,9 @@ import {
 } from "./packaged-app.ts";
 import { runWithThreadFixture } from "./perf-fixture.ts";
 import {
+  WAKEUPS_NAME,
+  countAppProcesses,
+  describeMeasurements,
   findProcessUse,
   openThreadOnce,
   readProcessMemory,
@@ -204,11 +207,11 @@ interface Reading {
   readonly memory: readonly ProcessMemory[];
 }
 
-/** Returns the footprint of the processes whose label starts with `label`, summed, in MB. */
-const sumFootprint = (memory: readonly ProcessMemory[], label?: string): number =>
+/** Returns the memory (`MEMORY_NAME`) of the processes whose label starts with `label`, summed, in MB. */
+const sumMemory = (memory: readonly ProcessMemory[], label?: string): number =>
   memory
     .filter((process) => label === undefined || process.label.startsWith(label))
-    .reduce((sum, process) => sum + process.footprintMb, 0);
+    .reduce((sum, process) => sum + process.memoryMb, 0);
 
 const screenshots = Array.from({ length: IMAGE_COUNT }, (_, index) => buildScreenshot(index + 1));
 const imageBytes = screenshots.reduce((sum, bytes) => sum + bytes.length, 0);
@@ -295,6 +298,8 @@ const result = await runWithThreadFixture(async (fixture) => {
   }
 });
 
+const measurementNotes = describeMeasurements();
+if (measurementNotes.length > 0) console.log(`\n${measurementNotes.join("\n")}`);
 console.log(
   `\n${String(IMAGE_COUNT)} screenshots of ${String(SCREEN_WIDTH)} × ${String(SCREEN_HEIGHT)}, ` +
     `${(imageBytes / 1024 / 1024).toFixed(1)} MB of PNG in all. ` +
@@ -305,11 +310,11 @@ console.log(
     ["Step", "Summed", "Browser", "GPU", "Renderer", "Processes"],
     result.readings.map(({ step, memory }) => [
       step,
-      sumFootprint(memory).toFixed(1),
-      sumFootprint(memory, "Browser").toFixed(1),
-      sumFootprint(memory, "GPU").toFixed(1),
-      sumFootprint(memory, "Tab").toFixed(1),
-      String(memory.length),
+      sumMemory(memory).toFixed(1),
+      sumMemory(memory, "Browser").toFixed(1),
+      sumMemory(memory, "GPU").toFixed(1),
+      sumMemory(memory, "Tab").toFixed(1),
+      String(countAppProcesses(memory)),
     ]),
   ),
 );
@@ -317,6 +322,6 @@ const renderer = findProcessUse(result.idle, "Tab");
 const gpu = findProcessUse(result.idle, "GPU");
 console.log(
   `\nIdle with 10 on the shelf, visible: renderer ${renderer?.cpuPercent.toFixed(1) ?? "?"}% ` +
-    `and ${String(renderer?.wakeupsPerSecond ?? "?")} wakeups a second; ` +
+    `and ${String(renderer?.wakeupsPerSecond ?? "?")} ${WAKEUPS_NAME.toLowerCase()} a second; ` +
     `GPU ${gpu?.cpuPercent.toFixed(1) ?? "?"}% and ${String(gpu?.wakeupsPerSecond ?? "?")}.`,
 );

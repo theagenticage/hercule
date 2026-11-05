@@ -1,5 +1,6 @@
 import { useId, type JSX } from "react";
 import { useTextDraft } from "./use-text-draft";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 
 /**
  * Renders one setting whose value is a long text: its label and hint above a
@@ -20,6 +21,7 @@ export function SettingTextRow({
   error,
   onCommit,
   onEditStart,
+  platform,
 }: {
   readonly label: string;
   readonly hint: string;
@@ -28,9 +30,11 @@ export function SettingTextRow({
   readonly error: string | null;
   readonly onCommit: (text: string) => void;
   readonly onEditStart?: () => void;
+  /** The platform the app runs on, which decides the key that commits with ⏎: ⌘ on a Mac, Ctrl on Linux. */
+  readonly platform: DesktopPlatform;
 }): JSX.Element {
   const id = useId();
-  const draft = useTextDraft(value, onCommit, onEditStart);
+  const draft = useTextDraft(platform, value, onCommit, onEditStart);
   return (
     <>
       <div className="set-row set-row--text">

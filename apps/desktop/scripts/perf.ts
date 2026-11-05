@@ -202,7 +202,9 @@
  * for each process:
  *
  * - The physical footprint, which the budget limits: the memory `footprint`
- *   reports and Activity Monitor shows for a process.
+ *   reports and Activity Monitor shows for a process. On Linux, which has no
+ *   footprint, it is the PSS instead, and no Mac budget is judged against it
+ *   (see `MEASURED_ON_MAC` in `perf-measures.ts`).
  * - The working set, the resident size `ps` reports, which is the number
  *   `app.getAppMetrics()` reports on macOS. It is printed for information
  *   only. It counts the Electron framework's pages, which all four processes
@@ -286,10 +288,18 @@ import { runWithThreadFixture, type LongThread, type ThreadFixture } from "./per
 import {
   BUDGET,
   HIDDEN_SETTLE_MS,
+  MEMORY_NAME,
   MEMORY_READ_AT_MS,
+  READS_PROCESS_START_TIMES,
   VISIBLE_SAMPLE_AT_MS,
+  WAKEUPS_NAME,
+  countAppProcesses,
+  describeAppProcesses,
+  describeMeasurements,
   evaluateInPage,
   findProcessUse,
+  formatWithin,
+  macLimit,
   findRendererMainTasks,
   openThreadOnce,
   readCpuMs,
@@ -302,6 +312,7 @@ import {
   warmUpApp,
   type ProcessMemory,
   type ProcessUse,
+  type Within,
 } from "./perf-measures.ts";
 import {
   INTAKE_SIGNALS,
@@ -420,10 +431,10 @@ const NUDGE_SETTLE_MS = 2_000;
 interface LaunchTimes {
   /** Until main's Node environment was ready, before any of the app's own code ran. */
   readonly nodeReadyMs: number;
-  /** Until main started the GPU process. */
-  readonly gpuProcessMs: number;
-  /** Until main started the renderer process. */
-  readonly rendererProcessMs: number;
+  /** Until main started the GPU process, or null where the start time is not read (see `READS_PROCESS_START_TIMES`). */
+  readonly gpuProcessMs: number | null;
+  /** Until main started the renderer process, or null where the start time is not read. */
+  readonly rendererProcessMs: number | null;
   /** Until the renderer started loading the page. */
   readonly pageStartMs: number;
   /** Until the page first painted. */
@@ -638,8 +649,8 @@ async function measurePlainLaunch(
     measured = {
       launch: {
         nodeReadyMs: mainSteps.nodeReady - spawnedAt,
-        gpuProcessMs: mainSteps.gpuProcess - spawnedAt,
-        rendererProcessMs: mainSteps.rendererProcess - spawnedAt,
+        gpuProcessMs: READS_PROCESS_START_TIMES ? mainSteps.gpuProcess - spawnedAt : null,
+        rendererProcessMs: READS_PROCESS_START_TIMES ? mainSteps.rendererProcess - spawnedAt : null,
         pageStartMs: firstScreen.pageStart - spawnedAt,
         firstPaintMs: firstScreen.firstPaint - spawnedAt,
         firstScreenMs: firstScreen.firstScreen - spawnedAt,
@@ -1141,13 +1152,13 @@ function reportStreaming(cost: StreamingCost, thread: LongThread): void {
           "Renderer main thread, longest task",
           `no task over ${String(BUDGET.streamingTaskMs)} ms`,
           `${cost.longestTaskMs.toFixed(1)} ms (${String(cost.longTasks)} over ${String(BUDGET.streamingTaskMs)} ms)`,
-          cost.longTasks === 0 ? "yes" : "over",
+          formatWithin(macLimit(cost.longTasks === 0)),
         ],
         [
           "Paragraph writes",
           "at most one a frame, over the whole turn",
           `${String(cost.paragraphWrites)} in ${String(cost.frames)} frames`,
-          cost.paragraphWrites <= cost.frames ? "yes" : "over",
+          formatWithin(cost.paragraphWrites <= cost.frames),
         ],
       ],
     ),
@@ -1185,14 +1196,14 @@ function reportLaunch(measured: MeasuredLaunch): void {
     sample.label,
     String(sample.pid),
     sample.workingSetMb.toFixed(1),
-    sample.footprintMb.toFixed(1),
+    sample.memoryMb.toFixed(1),
   ]);
   const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
-  const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
-  memoryRows.push(["Sum", "", summedMb.toFixed(1), summedFootprintMb.toFixed(1)]);
+  const summedMemoryMb = memory.reduce((sum, sample) => sum + sample.memoryMb, 0);
+  memoryRows.push(["Sum", "", summedMb.toFixed(1), summedMemoryMb.toFixed(1)]);
   const renderer = memory.find((sample) => sample.label === "Tab");
   const rendererMb = renderer?.workingSetMb ?? 0;
-  const rendererFootprintMb = renderer?.footprintMb ?? 0;
+  const rendererMemoryMb = renderer?.memoryMb ?? 0;
 
   // A process that started or exited between the two samples is in one of
   // them only, so the table lists every process either sample saw.
@@ -1217,12 +1228,12 @@ function reportLaunch(measured: MeasuredLaunch): void {
 
   // Budget, limit, measured, and whether the measurement is within the limit,
   // or null for a measure that is recorded but has no budget.
-  const budgets: [string, string, string, boolean | null][] = [
+  const budgets: [string, string, string, Within][] = [
     [
       "Launch, spawn to window shown",
       `shown within ${BUDGET.launchMs} ms of spawn (warm, signed in)`,
       `${launch.windowShownMs.toFixed(0)} ms`,
-      launch.windowShownMs <= BUDGET.launchMs,
+      macLimit(launch.windowShownMs <= BUDGET.launchMs),
     ],
     ...(measured.reopens === null
       ? []
@@ -1231,8 +1242,8 @@ function reportLaunch(measured: MeasuredLaunch): void {
             `Launch, spawn to ${FIRST_SCREEN_NAMES[measured.reopens]}`,
             `painted within ${BUDGET.transcriptPaintMs} ms of spawn (warm, signed in)`,
             `${launch.firstScreenMs.toFixed(0)} ms`,
-            launch.firstScreenMs <= BUDGET.transcriptPaintMs,
-          ] satisfies [string, string, string, boolean],
+            macLimit(launch.firstScreenMs <= BUDGET.transcriptPaintMs),
+          ] satisfies [string, string, string, Within],
         ]),
     ...(measured.providersPaintMs === null
       ? []
@@ -1241,26 +1252,26 @@ function reportLaunch(measured: MeasuredLaunch): void {
             "Opening Settings › Providers",
             `the cards on screen within ${BUDGET.providersPaintMs} ms of the click on the row (the reads are the shell's, so none is waited for)`,
             `${measured.providersPaintMs.toFixed(0)} ms`,
-            measured.providersPaintMs <= BUDGET.providersPaintMs,
-          ] satisfies [string, string, string, boolean],
+            macLimit(measured.providersPaintMs <= BUDGET.providersPaintMs),
+          ] satisfies [string, string, string, Within],
         ]),
     [
       "Processes",
       `${BUDGET.processes}: browser, GPU, network utility, renderer`,
-      `${memory.length}: ${memory.map((sample) => sample.label).join(", ")}`,
-      memory.length <= BUDGET.processes,
+      describeAppProcesses(memory),
+      countAppProcesses(memory) <= BUDGET.processes,
     ],
     [
-      "Footprint, summed",
+      `${MEMORY_NAME}, summed`,
       `at most ${BUDGET.summedFootprintMb} MB`,
-      `${summedFootprintMb.toFixed(0)} MB`,
-      summedFootprintMb <= BUDGET.summedFootprintMb,
+      `${summedMemoryMb.toFixed(0)} MB`,
+      macLimit(summedMemoryMb <= BUDGET.summedFootprintMb),
     ],
     [
-      "Footprint, renderer",
+      `${MEMORY_NAME}, renderer`,
       `at most ${BUDGET.rendererFootprintMb} MB`,
-      `${rendererFootprintMb.toFixed(0)} MB`,
-      rendererFootprintMb <= BUDGET.rendererFootprintMb,
+      `${rendererMemoryMb.toFixed(0)} MB`,
+      macLimit(rendererMemoryMb <= BUDGET.rendererFootprintMb),
     ],
     ["Working set, summed", "recorded; not budgeted", `${summedMb.toFixed(0)} MB`, null],
     ["Working set, renderer", "recorded; not budgeted", `${rendererMb.toFixed(0)} MB`, null],
@@ -1268,13 +1279,13 @@ function reportLaunch(measured: MeasuredLaunch): void {
       "Idle visible, GPU",
       `at most ${BUDGET.gpuWakeupsVisible} wakeups/s`,
       `${gpuWakeups.toFixed(1)}/s`,
-      gpuWakeups <= BUDGET.gpuWakeupsVisible,
+      macLimit(gpuWakeups <= BUDGET.gpuWakeupsVisible),
     ],
     [
       "Idle visible, renderer",
       rendererLimit,
       `${rendererWakeupsVisible.toFixed(1)}/s`,
-      rendererWakeupsVisible <= BUDGET.rendererWakeups,
+      macLimit(rendererWakeupsVisible <= BUDGET.rendererWakeups),
     ],
     [
       "Idle visible, age clock over 60 s",
@@ -1290,7 +1301,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
       "Idle hidden, renderer",
       rendererLimit,
       `${rendererWakeupsHidden.toFixed(1)}/s`,
-      rendererWakeupsHidden <= BUDGET.rendererWakeups,
+      macLimit(rendererWakeupsHidden <= BUDGET.rendererWakeups),
     ],
     [
       "Idle hidden, age clock over 60 s",
@@ -1308,7 +1319,9 @@ function reportLaunch(measured: MeasuredLaunch): void {
               : "recorded; the limit is for 500 threads",
             formatPerNudge(nudges.rendererMainThreadMs),
             checksNudgeLimit
-              ? nudges.rendererMainThreadMs / NUDGE_COUNT <= BUDGET.rendererMainThreadPerNudgeMs
+              ? macLimit(
+                  nudges.rendererMainThreadMs / NUDGE_COUNT <= BUDGET.rendererMainThreadPerNudgeMs,
+                )
               : null,
           ],
           [
@@ -1329,7 +1342,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
             `${String(nudges.threadListReads)} for ${String(NUDGE_COUNT)} nudges`,
             null,
           ],
-        ] satisfies [string, string, string, boolean | null][])),
+        ] satisfies [string, string, string, Within][])),
   ];
 
   console.log(`## ${measured.name}`);
@@ -1365,7 +1378,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
           launch.firstPaintMs,
           launch.firstScreenMs,
           launch.windowShownMs,
-        ].map((ms) => ms.toFixed(0)),
+        ].map((ms) => ms?.toFixed(0) ?? "not measured on Linux"),
       ],
     ),
   );
@@ -1375,14 +1388,14 @@ function reportLaunch(measured: MeasuredLaunch): void {
       ? "Memory, once the page was quiet:"
       : "Memory, 13 s after the page opened:",
   );
-  console.log(formatTable(["Process", "PID", "Working set MB", "Footprint MB"], memoryRows));
+  console.log(formatTable(["Process", "PID", "Working set MB", `${MEMORY_NAME} MB`], memoryRows));
   console.log();
   console.log(
     measured.idle === "quiescent"
       ? "CPU and wakeups over 10 s: visible from when the page was quiet, hidden from 3 s after hiding:"
       : "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
   );
-  const useHeader = ["CPU %", "Wakeups/s"];
+  const useHeader = ["CPU %", `${WAKEUPS_NAME}/s`];
   console.log(
     formatTable(
       [
@@ -1402,7 +1415,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
         budget,
         limit,
         measuredText,
-        within === null ? "-" : within ? "yes" : "over",
+        formatWithin(within),
       ]),
     ),
   );
@@ -1800,6 +1813,9 @@ async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
   await measureEverything(fixture, userDataDir);
   return { streaming, longThread: thread, subagents };
 }
+
+const measurementNotes = describeMeasurements();
+if (measurementNotes.length > 0) console.log(`${measurementNotes.join("\n")}\n`);
 
 const launches = await runWithThreadFixture(async (fixture) => {
   const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-"));

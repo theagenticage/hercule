@@ -43,7 +43,8 @@ export function MachineSettings({
   readonly runner: Runner;
   readonly onRetire: () => void;
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { controller, bridge } = useRouteContext({ from: "/_connected" });
+  const { client } = controller;
 
   const cap = useSavedRunnerField<number, number>(
     client,
@@ -90,6 +91,7 @@ export function MachineSettings({
         error={cap.error}
         parse={parseSessionCap}
         onSave={cap.save}
+        platform={bridge.platform}
       />
       <MachineLabelsRow
         labels={labels.value}
@@ -113,6 +115,7 @@ export function MachineSettings({
         error={diskLimit.error}
         parse={parseDiskLimit}
         onSave={diskLimit.save}
+        platform={bridge.platform}
       />
       <MachineSwitchRow
         label="Stop new work"

@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,6 +32,49 @@ interface InstallSetup {
   readonly launchAgent?: string;
   /** The content of an installed systemd unit, if there is one (Linux). */
   readonly systemdUnit?: string;
+  /**
+   * The package managers the run finds on its PATH (Linux). When set, the PATH
+   * holds only the tools install.sh needs plus a stand-in for each package
+   * manager named here, so the result does not depend on the machine the test
+   * runs on. When left out, the run uses the machine's own PATH.
+   */
+  readonly packageManagers?: ReadonlyArray<"apt" | "pacman">;
+}
+
+/** The programs install.sh runs on Linux, apart from shell built-ins. */
+const INSTALL_TOOLS = [
+  "sh",
+  "uname",
+  "id",
+  "mktemp",
+  "curl",
+  "sha256sum",
+  "sed",
+  "grep",
+  "head",
+  "cp",
+  "chmod",
+  "mv",
+  "mkdir",
+  "rm",
+];
+
+/**
+ * Makes a folder that holds the programs install.sh needs, linked from where
+ * this machine has them, and an empty executable for each of `packageManagers`.
+ * Returns the folder, to be used as the PATH.
+ */
+function makeToolPath(packageManagers: ReadonlyArray<string>): string {
+  const dir = makeTemporaryDir("hercule-install-tools-");
+  for (const tool of INSTALL_TOOLS) {
+    const found = spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" });
+    expect(found.status, `${tool} is installed`).toBe(0);
+    symlinkSync(found.stdout.trim(), join(dir, tool));
+  }
+  for (const manager of packageManagers) {
+    writeFileSync(join(dir, manager), "#!/bin/sh\n", { mode: 0o755 });
+  }
+  return dir;
 }
 
 /** What one run of install.sh did. */
@@ -65,7 +109,10 @@ function runInstall(releaseDir: string, setup: InstallSetup = {}): InstallResult
   const result = spawnSync("sh", [script], {
     encoding: "utf8",
     env: {
-      PATH: process.env.PATH,
+      PATH:
+        setup.packageManagers === undefined
+          ? process.env.PATH
+          : makeToolPath(setup.packageManagers),
       HOME: home,
       ...(herculeHome === undefined ? {} : { HERCULE_HOME: herculeHome }),
       HERCULE_RELEASE_URL: pathToFileURL(releaseDir).href,
@@ -144,7 +191,9 @@ interface BinaryCall {
 
 /**
  * Writes a release that install.sh accepts and installs: on macOS a zipped app
- * and binary, on Linux just the binary, plus a SHA256SUMS that matches. The
+ * and binary, on Linux just the binary, plus a SHA256SUMS that matches. On
+ * Linux x64 SHA256SUMS also lists the desktop app's packages, which the real
+ * release holds but install.sh does not download. The
  * binary is a shell script that records every call. `hercule --version` prints
  * a version, and `hercule service ...` prints a line and exits with
  * `serviceExitCode`.
@@ -210,7 +259,15 @@ esac
       return `${hash}  ${asset}\n`;
     })
     .join("");
-  writeFileSync(join(dir, "SHA256SUMS"), sha256sums);
+  // The real release lists its desktop packages too, which install.sh does
+  // not download, and its checksum check must skip.
+  const packageLines =
+    process.platform === "linux" && process.arch === "x64"
+      ? ["Hercule-linux-amd64.deb", "Hercule-linux-x86_64.pkg.tar.zst"]
+          .map((name) => `${"0".repeat(64)}  ${name}\n`)
+          .join("")
+      : "";
+  writeFileSync(join(dir, "SHA256SUMS"), sha256sums + packageLines);
 
   const readBinaryCalls = (): ReadonlyArray<BinaryCall> =>
     existsSync(callsFile)
@@ -418,9 +475,72 @@ describe("install.sh", () => {
       `HERCULE_HOME='${join(home, "scratch-home")}' '${join(home, ".local", "bin", "hercule")}' service install\n`,
     );
     expect(stdout).toContain('"Add machine"');
-    // The app is never named on Linux.
+    // The macOS app is never named on Linux.
     expect(stdout).not.toContain("Applications folder");
   });
+
+  // A package takes root to install, so install.sh prints how and does
+  // nothing more. The URL is the release it downloaded from, and the command
+  // is the one of the machine's package manager.
+  it.runIf(isLinuxX64)("prints the commands that install the desktop app's .deb with apt", () => {
+    const release = writeInstallableRelease();
+
+    const { status, stdout, applicationsDir } = runInstall(release.dir, {
+      buildHerculeHome: () => undefined,
+      packageManagers: ["apt"],
+    });
+
+    expect(status).toBe(0);
+    expect(stdout).toContain(
+      `To install the desktop app, run:\n\n  curl -fL -o /tmp/Hercule-linux-amd64.deb '${pathToFileURL(release.dir).href}/Hercule-linux-amd64.deb'\n  sudo apt install /tmp/Hercule-linux-amd64.deb\n`,
+    );
+    expect(readdirSync(applicationsDir)).toEqual([]);
+  });
+
+  it.runIf(isLinuxX64)(
+    "prints the commands that install the desktop app's Arch package with pacman",
+    () => {
+      const release = writeInstallableRelease();
+
+      const { status, stdout } = runInstall(release.dir, {
+        buildHerculeHome: () => undefined,
+        packageManagers: ["pacman"],
+      });
+
+      expect(status).toBe(0);
+      expect(stdout).toContain(
+        `To install the desktop app, run:\n\n  curl -fL -o /tmp/Hercule-linux-x86_64.pkg.tar.zst '${pathToFileURL(release.dir).href}/Hercule-linux-x86_64.pkg.tar.zst'\n  sudo pacman -U /tmp/Hercule-linux-x86_64.pkg.tar.zst\n`,
+      );
+    },
+  );
+
+  it.runIf(isLinuxX64)("says the desktop app has no package for a machine with neither", () => {
+    const release = writeInstallableRelease();
+
+    const { status, stdout } = runInstall(release.dir, {
+      buildHerculeHome: () => undefined,
+      packageManagers: [],
+    });
+
+    expect(status).toBe(0);
+    expect(stdout).toContain("This machine has neither.");
+    expect(stdout).not.toContain("To install the desktop app");
+  });
+
+  it.runIf(isLinuxArm64)(
+    "prints no desktop app commands, because the release has no package for aarch64",
+    () => {
+      const release = writeInstallableRelease();
+
+      const { status, stdout } = runInstall(release.dir, {
+        buildHerculeHome: () => undefined,
+        packageManagers: ["apt", "pacman"],
+      });
+
+      expect(status).toBe(0);
+      expect(stdout).not.toContain("desktop app");
+    },
+  );
 
   it.runIf(isLinux)(
     "updates the installed service with `hercule service install` and the Home it names on Linux",

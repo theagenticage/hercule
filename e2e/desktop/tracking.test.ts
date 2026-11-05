@@ -361,6 +361,9 @@ describe("Tracking", () => {
     const signalId = await raiseSignal(arranged, "Only the user may hand this off");
     const runner = await arranged.fleet.enlistRunner("tracking-runner");
     const [thread] = await arranged.fleet.spawnThreads(1, { runner });
+    // The runner holds the thread, and so its token, once the controller has
+    // started it there.
+    await arranged.waitForStatus(thread!.id, "busy");
 
     const refused = await runCli(["signal", "hand-off", signalId, "--workflow", workflowId], {
       home: arranged.home,

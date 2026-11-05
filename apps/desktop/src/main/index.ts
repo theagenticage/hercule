@@ -30,6 +30,7 @@ import { app, Menu, Notification, protocol, safeStorage, shell } from "electron"
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import { readDesktopPlatform } from "../ipc/platform/desktop-platform";
 import { AppScheme, makeAppSchemeLayer } from "./app-scheme";
 import { AppSettings, makeAppSettingsLayer } from "./app-settings";
 import { askControllerForBrotli } from "./controller-encoding";
@@ -41,6 +42,7 @@ import { MainWindow } from "./main-window";
 import { makeMainMenuLayer } from "./menu";
 import { PickedSkillFoldersLayer } from "./picked-skill-folders";
 import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
+import { looksLikeKde } from "./password-store";
 import { APP_SCHEME } from "./renderer-origin";
 import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
@@ -48,7 +50,7 @@ import { secureSession, secureWebContents } from "./security";
 import { StoredTokenLayer } from "./stored-token";
 import { makeUrgentSignalNotificationsLayer } from "./urgent-signal-notifications";
 import { makeWaitingNotificationsLayer } from "./waiting-notifications";
-import { MainWindowLayer } from "./window";
+import { makeMainWindowLayer } from "./window";
 
 /**
  * The address of the renderer's dev server, set by `scripts/dev.ts`. A
@@ -79,6 +81,22 @@ const openFolder = (folder: string): Effect.Effect<void> =>
 
 /** Starts the app; see this module's comment. Call it once the single-instance lock is held. */
 const startApp = (): void => {
+  // The one place main reads the platform: the window and the menu take it
+  // as an argument. It throws on a platform the app does not support, so the
+  // app never starts with the wrong window or menu.
+  const platform = readDesktopPlatform(process.platform);
+  // Electron reads the password store switch when it sets up encryption, which
+  // is after it has run this synchronous part of main and before the app is
+  // ready, so the switch must be appended here and never later. It is
+  // appended unless a switch is already there (the end-to-end tests pass
+  // `--password-store=basic`; the release package refuses the argument).
+  if (
+    platform === "linux" &&
+    !app.commandLine.hasSwitch("password-store") &&
+    !looksLikeKde(process.env)
+  ) {
+    app.commandLine.appendSwitch("password-store", "gnome-libsecret");
+  }
   const waitingNotifications = makeWaitingNotificationsLayer({
     Notification,
     setBadgeCount: (count) => app.setBadgeCount(count),
@@ -91,15 +109,17 @@ const startApp = (): void => {
     },
   });
   const windowMenuAndNotifications = Layer.mergeAll(
-    makeMainMenuLayer(Menu, !app.isPackaged),
+    makeMainMenuLayer(Menu, !app.isPackaged, platform),
     waitingNotifications,
     makeUrgentSignalNotificationsLayer({ Notification }),
-  ).pipe(Layer.provideMerge(MainWindowLayer));
+  ).pipe(Layer.provideMerge(makeMainWindowLayer(platform)));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       makeThisMacLayer({ binaryPath, openFolder }).pipe(
         Layer.provideMerge(makeControllerConnectionLayer(fetchWithoutRedirects)),
-        Layer.provideMerge(StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage)))),
+        Layer.provideMerge(
+          StoredTokenLayer.pipe(Layer.provide(makeSafeStorageLayer(safeStorage, platform))),
+        ),
       ),
       makeRunnerIdentityLayer(fetchWithoutRedirects),
       makeAppSchemeLayer(devServerUrl),

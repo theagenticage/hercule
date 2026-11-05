@@ -35,28 +35,38 @@ const makeWindow = () => {
   const errors: Array<string> = [];
   // The listeners take the arguments Electron passes after the event, each
   // typed by the interface the stand-in fills.
-  type Listener = (event: unknown, ...args: Array<never>) => void;
+  type Listener = (event: never, ...args: Array<never>) => void;
   const listeners: Array<{ event: string; listener: Listener; once: boolean }> = [];
-  const emit = (event: string, ...args: ReadonlyArray<unknown>) => {
+  const emitWithEvent = (event: string, eventObject: unknown, ...args: ReadonlyArray<unknown>) => {
     for (const entry of listeners.filter((entry) => entry.event === event)) {
       if (entry.once) listeners.splice(listeners.indexOf(entry), 1);
-      entry.listener({}, ...(args as Array<never>));
+      entry.listener(eventObject as never, ...(args as Array<never>));
     }
   };
+  const emit = (event: string, ...args: ReadonlyArray<unknown>) =>
+    emitWithEvent(event, {}, ...args);
   const on = (event: string, listener: Listener) =>
     listeners.push({ event, listener, once: false });
   const once = (event: string, listener: Listener) =>
     listeners.push({ event, listener, once: true });
   let fullScreen = false;
+  let destroyed = false;
   let bounds = CREATED_AT;
 
   const window: ShowableWindow = {
     show: () => calls.push("show"),
     hide: () => calls.push("hide"),
     focus: () => calls.push("focus"),
-    isFullScreen: () => fullScreen,
     setFullScreen: (flag) => calls.push(`setFullScreen(${String(flag)})`),
-    getNormalBounds: () => (fullScreen ? CREATED_AT : bounds),
+    // Like Electron's, a destroyed window throws when it is asked anything.
+    isFullScreen: () => {
+      if (destroyed) throw new Error("Object has been destroyed");
+      return fullScreen;
+    },
+    getNormalBounds: () => {
+      if (destroyed) throw new Error("Object has been destroyed");
+      return fullScreen ? CREATED_AT : bounds;
+    },
     on,
     once,
     off: (event, listener) => {
@@ -80,15 +90,46 @@ const makeWindow = () => {
     calls,
     saved,
     errors,
-    /** Takes over showing and hiding the stand-in, for a window saved in full screen or not. */
-    makeVisibility: ({ restoreFullScreen = false } = {}) =>
-      makeWindowVisibility(window, { restoreFullScreen, saveWindowState, logError }),
+    /**
+     * Takes over showing and hiding the stand-in, for a window saved in full
+     * screen or not, whose closing hides it unless `closingWindow` says it
+     * quits the app.
+     */
+    makeVisibility: ({
+      restoreFullScreen = false,
+      closingWindow = "hides",
+    }: { restoreFullScreen?: boolean; closingWindow?: "hides" | "quits" } = {}) =>
+      makeWindowVisibility(window, {
+        restoreFullScreen,
+        closingWindow,
+        quitApp: () => calls.push("quitApp"),
+        saveWindowState,
+        logError,
+      }),
     /** Emits `event`, as Electron does on the window or its web contents. */
     emit,
+    /**
+     * Closes the window, as the user does with its close button. Returns
+     * whether the window closed: Electron closes it unless a listener
+     * prevents the default.
+     */
+    close: () => {
+      let prevented = false;
+      emitWithEvent("close", {
+        preventDefault: () => {
+          prevented = true;
+        },
+      });
+      return !prevented;
+    },
     /** Moves the window, as the user does by dragging it. */
     moveTo: (next: Bounds) => {
       bounds = next;
       emit("moved");
+    },
+    /** Destroys the window, as Electron does once it has closed: it then throws when asked anything. */
+    destroy: () => {
+      destroyed = true;
     },
     /** Ends the animation into full screen, which resizes the window. */
     finishEnteringFullScreen: () => {
@@ -104,10 +145,13 @@ const makeWindow = () => {
   };
 };
 
-/** Makes a stand-in window, and a visibility for it that has shown the window. */
-const makeShownWindow = () => {
+/**
+ * Makes a stand-in window, and a visibility for it that has shown the window.
+ * Closing the window hides it unless `closingWindow` says it quits the app.
+ */
+const makeShownWindow = (closingWindow: "hides" | "quits" = "hides") => {
   const stand = makeWindow();
-  const visibility = stand.makeVisibility();
+  const visibility = stand.makeVisibility({ closingWindow });
   visibility.showWindowFirstTime();
   stand.calls.length = 0;
   return { ...stand, visibility };
@@ -244,22 +288,22 @@ describe("showWindow", () => {
   });
 });
 
-describe("hideWindow", () => {
+describe("closing the window, where it hides the window", () => {
   it("saves a window that is not in full screen and hides it", () => {
-    const { visibility, calls, saved, moveTo } = makeShownWindow();
+    const { close, calls, saved, moveTo } = makeShownWindow();
     moveTo(MOVED_TO);
-    visibility.hideWindow();
+    expect(close()).toBe(false);
     expect(calls).toEqual(["save", "hide"]);
     expect(saved).toEqual([{ bounds: MOVED_TO, fullScreen: false }]);
   });
 
   it("saves a window in full screen as full screen, at the bounds it last had outside it, and hides it once out of full screen", () => {
-    const { visibility, calls, saved, moveTo, finishEnteringFullScreen, finishLeavingFullScreen } =
+    const { close, calls, saved, moveTo, finishEnteringFullScreen, finishLeavingFullScreen } =
       makeShownWindow();
     moveTo(MOVED_TO);
     finishEnteringFullScreen();
 
-    visibility.hideWindow();
+    close();
     expect(calls).toEqual(["save", "setFullScreen(false)"]);
     expect(saved).toEqual([{ bounds: MOVED_TO, fullScreen: true }]);
 
@@ -268,63 +312,103 @@ describe("hideWindow", () => {
   });
 
   it("keeps a window shown again while it leaves full screen on screen", () => {
-    const { visibility, calls, finishEnteringFullScreen, finishLeavingFullScreen } =
+    const { visibility, close, calls, finishEnteringFullScreen, finishLeavingFullScreen } =
       makeShownWindow();
     finishEnteringFullScreen();
 
-    visibility.hideWindow();
+    close();
     visibility.showWindow();
     finishLeavingFullScreen();
     expect(calls).toEqual(["save", "setFullScreen(false)", "show", "focus"]);
   });
 
   it("keeps a window closed twice and shown again while it leaves full screen on screen", () => {
-    const { visibility, calls, finishEnteringFullScreen, finishLeavingFullScreen } =
+    const { visibility, close, calls, finishEnteringFullScreen, finishLeavingFullScreen } =
       makeShownWindow();
     finishEnteringFullScreen();
 
-    visibility.hideWindow();
-    visibility.hideWindow();
+    close();
+    close();
     visibility.showWindow();
     finishLeavingFullScreen();
     expect(calls).not.toContain("hide");
   });
 });
 
-describe("saveWindowStateOnQuit", () => {
+describe("closing the window, where it quits the app", () => {
+  it("quits the app instead of closing the window, and hides nothing", () => {
+    const { close, calls } = makeShownWindow("quits");
+    expect(close()).toBe(false);
+    expect(calls).toEqual(["quitApp"]);
+  });
+
+  it("does not measure the window again when Electron emits a second quit after the window is gone", () => {
+    const { visibility, close, destroy, calls, saved, moveTo } = makeShownWindow("quits");
+    moveTo(MOVED_TO);
+    close();
+    visibility.prepareToQuit();
+    close();
+    destroy();
+
+    expect(() => visibility.prepareToQuit()).not.toThrow();
+    expect(calls).toEqual(["quitApp", "save"]);
+    expect(saved).toEqual([{ bounds: MOVED_TO, fullScreen: false }]);
+  });
+
+  it("saves the window's state once, as the quit starts, and then lets the window close", () => {
+    const { visibility, close, calls, saved, moveTo } = makeShownWindow("quits");
+    moveTo(MOVED_TO);
+
+    close();
+    // Electron starts the quit, saving the state while the window still exists.
+    visibility.prepareToQuit();
+    expect(close()).toBe(true);
+    expect(calls).toEqual(["quitApp", "save"]);
+    expect(saved).toEqual([{ bounds: MOVED_TO, fullScreen: false }]);
+  });
+});
+
+describe("prepareToQuit", () => {
   it("saves a window in full screen as full screen, at the bounds it last had outside it", () => {
     const { visibility, saved, moveTo, finishEnteringFullScreen } = makeShownWindow();
     moveTo(MOVED_TO);
     finishEnteringFullScreen();
 
-    visibility.saveWindowStateOnQuit();
+    visibility.prepareToQuit();
     expect(saved).toEqual([{ bounds: MOVED_TO, fullScreen: true }]);
   });
 
   it("saves nothing before the window has shown the first time", () => {
     const { saved, makeVisibility } = makeWindow();
-    makeVisibility().saveWindowStateOnQuit();
+    makeVisibility().prepareToQuit();
     expect(saved).toEqual([]);
   });
 
   it("keeps the full screen saved when closing hid the window", () => {
-    const { visibility, saved, finishEnteringFullScreen, finishLeavingFullScreen } =
+    const { visibility, close, saved, finishEnteringFullScreen, finishLeavingFullScreen } =
       makeShownWindow();
     finishEnteringFullScreen();
-    visibility.hideWindow();
+    close();
     finishLeavingFullScreen();
 
-    visibility.saveWindowStateOnQuit();
+    visibility.prepareToQuit();
     expect(saved).toEqual([{ bounds: CREATED_AT, fullScreen: true }]);
   });
 
+  it("lets the window close, which it did not before, where closing hides it", () => {
+    const { visibility, close } = makeShownWindow();
+    expect(close()).toBe(false);
+    visibility.prepareToQuit();
+    expect(close()).toBe(true);
+  });
+
   it("saves again once the window is shown again", () => {
-    const { visibility, saved, moveTo } = makeShownWindow();
-    visibility.hideWindow();
+    const { visibility, close, saved, moveTo } = makeShownWindow();
+    close();
     visibility.showWindow();
     moveTo(MOVED_TO);
 
-    visibility.saveWindowStateOnQuit();
+    visibility.prepareToQuit();
     expect(saved).toEqual([
       { bounds: CREATED_AT, fullScreen: false },
       { bounds: MOVED_TO, fullScreen: false },

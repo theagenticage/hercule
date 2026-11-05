@@ -15,6 +15,13 @@
  * A test that connects or signs in reaches a real controller: the compiled
  * binary, `./hercule`, started in a scratch Hercule Home by
  * `scripts/controller-process.ts`. Run `pnpm build:binary` first as well.
+ *
+ * The suite runs on macOS and on Linux. On Linux, `pnpm test:desktop:container`
+ * builds everything and runs the suite on a virtual screen in a container
+ * (`apps/desktop/container`); on a Linux desktop with a screen, the libraries
+ * Electron needs and `pnpm exec playwright install chromium`, `pnpm
+ * test:desktop` runs it directly. A test that differs between the platforms
+ * reads `RUNS_ON_MAC`.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -38,12 +45,15 @@ import type { MessagePause, ScriptStep } from "../../apps/desktop/scripts/script
 import {
   assertExitedCleanly,
   buildAppArgs,
+  buildPackageEnv,
+  buildSandboxArgs,
   evaluateInMain,
   findExecutable,
   isWindowVisible,
   launchPlainApp,
   launchTestPackage,
   quitApp,
+  RUNS_ON_MAC,
   signIn,
   signInOnce,
   stopPlainApp,
@@ -53,7 +63,6 @@ import {
   type TestPackageOptions,
 } from "../../apps/desktop/scripts/packaged-app";
 import { pollUntil } from "../../apps/desktop/scripts/poll";
-import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
   findCompiledBinary,
   PASSWORD,
@@ -82,6 +91,15 @@ export function createUserDataDirForTest(): string {
   onTestFinished(() => rmSync(userDataDir, { recursive: true, force: true }));
   return userDataDir;
 }
+
+/**
+ * True on a macOS runner of GitHub Actions, the only place where a Mac runs
+ * the suite unattended. Its screen is virtual and nobody is signed in to
+ * give a window the keyboard focus, so a test that needs the window to be
+ * focused cannot pass there. Such a test is skipped with `skipIf(ON_HOSTED_MAC)`
+ * and says why beside it; a developer's Mac and Linux run it.
+ */
+export const ON_HOSTED_MAC = RUNS_ON_MAC && process.env["GITHUB_ACTIONS"] === "true";
 
 /** A running test package, with its one window. */
 export interface LaunchedApp {
@@ -143,8 +161,18 @@ export async function launchForTest(
   options?: TestPackageOptions,
 ): Promise<LaunchedApp> {
   const app = await launchTestPackage(userDataDir, options);
+  // Playwright drops its handle on the process once the app has closed, so
+  // the test's final `close` reads the process from here.
+  const child = app.process();
   let closing: Promise<void> | undefined;
-  const close = () => (closing ??= quitApp(app));
+  // An app that quit by itself, such as one whose window was closed where
+  // closing the window quits, has nothing left to quit; it must have exited
+  // cleanly.
+  const close = () =>
+    (closing ??=
+      child.exitCode === null && child.signalCode === null
+        ? quitApp(app)
+        : Promise.resolve(assertExitedCleanly(child)));
   onTestFinished(close);
 
   // Playwright reads main's output from the start and passes on only what
@@ -278,8 +306,9 @@ export interface ArrangedFleet {
   /**
    * Stops the controller, calls `whileStopped`, and starts it again on the
    * same port and home. The controller holds its database locked while it
-   * runs, so this is the way to write to it directly. Call it at most once
-   * per test. Fails when the controller does not start again.
+   * runs, so this is the way to write to it directly. Its runner connects
+   * again, and the controller probes the accounts of the runner that
+   * connects. Fails when the controller does not start again.
    */
   readonly restartController: (whileStopped: () => void) => Promise<void>;
   readonly fleet: Fleet;
@@ -322,11 +351,12 @@ export async function arrangeFleet(
     const [own] = await readRunners();
     await client.runner.retire({ params: { id: own!.id }, payload: {} });
   }
+  let running: Pick<Controller, "stop"> = controller;
   return {
     url: controller.url,
     home: controller.home,
     restartController: async (whileStopped) => {
-      await controller.stop();
+      await running.stop();
       whileStopped();
       const restarted = await startController({
         home: controller.home,
@@ -337,6 +367,7 @@ export async function arrangeFleet(
       onTestFinished(async () => {
         await restarted.stop();
       });
+      running = restarted;
     },
     fleet,
     client,
@@ -741,10 +772,16 @@ export function runSecondInstance(
   kind: PackageKind,
   userDataDir: string,
 ): Promise<number | NodeJS.Signals> {
-  const child = spawn(findExecutable(kind), buildAppArgs(userDataDir), {
-    env: buildAppEnv(),
-    stdio: "ignore",
-  });
+  // The test package refuses `--no-sandbox` while its inspector is closed, as
+  // it refuses every argument but `buildAppArgs`'s, so the launch that passes
+  // it opens the inspector as well.
+  const sandboxArgs = buildSandboxArgs(kind);
+  const inspectorArgs = sandboxArgs.length === 0 ? [] : ["--inspect=0"];
+  const child = spawn(
+    findExecutable(kind),
+    [...buildAppArgs(userDataDir), ...sandboxArgs, ...inspectorArgs],
+    { env: buildPackageEnv(kind), stdio: "ignore" },
+  );
   return waitForExit(child, "the second instance");
 }
 

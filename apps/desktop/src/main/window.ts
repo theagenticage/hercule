@@ -3,27 +3,22 @@
  * with Electron: how it opens, shows, hides and remembers where it was.
  *
  * - It opens hidden, painted with the background of the theme in use, and
- *   shows once its first screen has reached it, so it never shows an empty
+ *   shows once its page reports its first screen, so it never shows an empty
  *   page (see `./window-visibility.ts`). It repaints its background when the
  *   theme in use changes.
  * - It opens where it was when the app last hid it or quit, moved onto a
  *   display when that position is on none. The first time, it opens at
  *   1440 by 900, centred.
- * - Closing it hides it; the app keeps running. Quitting closes it.
+ * - Closing it hides it and the app keeps running, or quits the app, as the
+ *   platform's `closingWindow` says. Quitting closes it either way.
+ * - On macOS the page fills the whole window, title bar included, and
+ *   macOS draws the traffic lights over it. Elsewhere the window has the
+ *   system's own frame, title bar and menu bar.
  * - Its state is saved when closing hides it and when the app quits, never
  *   while it moves or resizes.
  */
 import path from "node:path";
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  Menu,
-  nativeTheme,
-  screen,
-  webContents,
-  type Event,
-} from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeTheme, screen, webContents } from "electron";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
@@ -33,8 +28,10 @@ import {
   type IpcPayload,
   type MainToRendererIpcChannelName,
 } from "../ipc/contract";
+import type { DesktopPlatform } from "../ipc/platform/desktop-platform";
 import { AppSettings, type Bounds, type WindowState } from "./app-settings";
 import { MainWindow } from "./main-window";
+import { PLATFORM_BEHAVIOUR } from "./platform-behaviour";
 import { RENDERER_URL } from "./renderer-origin";
 import { chooseWindowBackground } from "./window-background";
 import {
@@ -61,14 +58,15 @@ const chooseWindowBounds = (saved: WindowState | null): Bounds =>
     : placeWindowOnDisplays(saved.bounds, screen.getAllDisplays());
 
 /**
- * Creates the window, hidden, and wires its events. The window shows itself
- * once its first screen has reached it.
+ * Creates the window for `platform`, hidden, and wires its events. The window
+ * shows itself once its page reports its first screen.
  *
  * The window and the listeners on the app are released when main's runtime
  * shuts down: the listeners are removed, and the window is destroyed if it
  * is still open.
  */
-const make = Effect.gen(function* () {
+const make = Effect.fnUntraced(function* (platform: DesktopPlatform) {
+  const behaviour = PLATFORM_BEHAVIOUR[platform];
   // Electron creates no window before it is ready, and an `activate` or
   // `second-instance` event can build this layer before then.
   yield* Effect.promise(() => app.whenReady());
@@ -100,8 +98,7 @@ const make = Effect.gen(function* () {
     );
   };
 
-  // With `hiddenInset`, the page fills the whole window, title bar included,
-  // so the window's bounds are also the page's.
+  // With `hiddenInset`, the page fills the whole window, title bar included.
   const window = yield* Effect.acquireRelease(
     Effect.sync(
       () =>
@@ -111,8 +108,9 @@ const make = Effect.gen(function* () {
           minHeight: MINIMUM_WINDOW_SIZE.height,
           show: false,
           backgroundColor: initialBackground,
-          titleBarStyle: "hiddenInset",
-          trafficLightPosition: TRAFFIC_LIGHT_POSITION,
+          ...(behaviour.insetTitleBar
+            ? { titleBarStyle: "hiddenInset", trafficLightPosition: TRAFFIC_LIGHT_POSITION }
+            : {}),
           webPreferences: {
             preload: path.join(import.meta.dirname, "../preload/index.cjs"),
             sandbox: true,
@@ -136,30 +134,13 @@ const make = Effect.gen(function* () {
 
   const visibility = makeWindowVisibility(window, {
     restoreFullScreen: saved?.fullScreen ?? false,
+    closingWindow: behaviour.closingWindow,
+    quitApp: () => app.quit(),
     saveWindowState: startSavingWindowState,
     logError: (message) => {
       runInBackground(Effect.logError(message));
     },
   });
-  let quitting = false;
-
-  /** Hides the window instead of closing it, unless the app is quitting. */
-  const hideInsteadOfClosing = (event: Event) => {
-    if (quitting) return;
-    event.preventDefault();
-    visibility.hideWindow();
-  };
-
-  /**
-   * Lets the window close, and saves its state while it still has one. The
-   * flag is set here, not in an effect, because Electron closes the window
-   * right after this event.
-   */
-  const prepareToQuit = () => {
-    quitting = true;
-    visibility.saveWindowStateOnQuit();
-  };
-
   // A save that keeps the theme, such as a Glass change, leaves the colour as
   // it is, so Electron is not asked to repaint the window for nothing.
   // Electron returns the colour in upper case.
@@ -169,7 +150,6 @@ const make = Effect.gen(function* () {
   });
   const repaintOnSystemAppearanceChange = () => Effect.runSync(paintBackground);
 
-  window.on("close", hideInsteadOfClosing);
   // After the window has closed, macOS can still report a change to it, such
   // as the window being hidden, and Electron still emits the event on the
   // destroyed window. A listener that reads the window then throws "Object
@@ -184,8 +164,8 @@ const make = Effect.gen(function* () {
     () => Effect.sync(() => nativeTheme.off("updated", repaintOnSystemAppearanceChange)),
   );
   yield* Effect.acquireRelease(
-    Effect.sync(() => app.on("before-quit", prepareToQuit)),
-    () => Effect.sync(() => app.off("before-quit", prepareToQuit)),
+    Effect.sync(() => app.on("before-quit", visibility.prepareToQuit)),
+    () => Effect.sync(() => app.off("before-quit", visibility.prepareToQuit)),
   );
 
   const show = Effect.sync(visibility.showWindow);
@@ -227,8 +207,11 @@ const make = Effect.gen(function* () {
         else if (focused !== null) focused[step]();
         // No web contents of the app has the focus, so a native control has
         // it, such as the search field of the folder sheet. macOS steps it, as
-        // the menu's Undo and Redo roles did.
-        else Menu.sendActionToFirstResponder(step === "undo" ? "undo:" : "redo:");
+        // the menu's Undo and Redo roles did. Linux has no first responder,
+        // and the call does not exist there.
+        else if (behaviour.stepsNativeControls) {
+          Menu.sendActionToFirstResponder(step === "undo" ? "undo:" : "redo:");
+        }
       }),
     showWarning: (message) =>
       Effect.sync(() => {
@@ -240,6 +223,7 @@ const make = Effect.gen(function* () {
   });
 });
 
-/** Builds the window service; see `make`. */
-export const MainWindowLayer: Layer.Layer<MainWindow, never, AppSettings> =
-  Layer.effect(MainWindow)(make);
+/** Builds the window service for `platform`; see `make`. */
+export const makeMainWindowLayer = (
+  platform: DesktopPlatform,
+): Layer.Layer<MainWindow, never, AppSettings> => Layer.effect(MainWindow)(make(platform));

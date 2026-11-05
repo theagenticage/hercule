@@ -1,5 +1,6 @@
 import { useMemo, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import type { HerculeClient } from "@hercule/client-core";
 import { buildGraphDrawing, buildRunOverlay } from "@hercule/client-core/graph-model";
 import { buildRunNodeCard } from "@hercule/client-core/node-details";
@@ -39,6 +40,7 @@ export function RunGraph({
   readonly timezone: string;
   readonly onOpenSession: (sessionId: string) => void;
 }): JSX.Element {
+  const { bridge } = useRouteContext({ from: "/_connected" });
   const { data: everyTrigger } = useSuspenseQuery(triggersQuery(client));
   const { data: accounts } = useSuspenseQuery(providerAccountsQuery(client));
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
@@ -68,6 +70,7 @@ export function RunGraph({
         })
       }
       overlay={overlay}
+      platform={bridge.platform}
       plugins={plugins}
       timezone={timezone}
       label={`The steps of ${run.plan.name}`}

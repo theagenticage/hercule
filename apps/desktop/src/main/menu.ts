@@ -19,13 +19,29 @@ import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import type { Destination, GoMenuItem, HistoryStep, MenuCommand } from "../ipc/contract";
+import type { DesktopPlatform } from "../ipc/platform/desktop-platform";
 import { AppSettings } from "./app-settings";
 import { MainWindow } from "./main-window";
+import { PLATFORM_BEHAVIOUR } from "./platform-behaviour";
+
+/**
+ * The name of the app menu where the platform does not name it. macOS names
+ * the app menu itself, after the app, whatever label it has.
+ */
+const APP_MENU_LABEL = "Hercule";
+
+/**
+ * The shortcut of Toggle Developer Tools where the platform has no macOS
+ * menu. Electron's role takes Ctrl+Shift+I there, which is also the shortcut
+ * of Go > Intake.
+ */
+const TOGGLE_DEVELOPER_TOOLS_ACCELERATOR = "F12";
 
 /**
  * Builds the Edit menu: the items of Electron's `editMenu` role on macOS,
  * spelled out, except that Undo and Redo call `stepHistory` instead of the
- * roles' own.
+ * roles' own. Substitutions and Speech are macOS's own, and `hasMacMenu`
+ * false leaves them out.
  *
  * The roles ask Chromium to undo or redo, and Chromium relies on its own
  * edit history for that. An editor such as the message field keeps a history
@@ -47,18 +63,11 @@ import { MainWindow } from "./main-window";
  * The items never show or focus the window, as the roles never did: they act
  * where the keyboard focus is, see `MainWindow.stepHistoryInFocusedContents`.
  */
-const buildEditMenu = (stepHistory: (step: HistoryStep) => void): MenuItemConstructorOptions => ({
-  label: "Edit",
-  submenu: [
-    { label: "Undo", accelerator: "CmdOrCtrl+Z", click: () => stepHistory("undo") },
-    { label: "Redo", accelerator: "Shift+CmdOrCtrl+Z", click: () => stepHistory("redo") },
-    { type: "separator" },
-    { role: "cut" },
-    { role: "copy" },
-    { role: "paste" },
-    { role: "pasteAndMatchStyle" },
-    { role: "delete" },
-    { role: "selectAll" },
+const buildEditMenu = (
+  stepHistory: (step: HistoryStep) => void,
+  hasMacMenu: boolean,
+): MenuItemConstructorOptions => {
+  const macOnlyItems: Array<MenuItemConstructorOptions> = [
     { type: "separator" },
     {
       label: "Substitutions",
@@ -74,8 +83,23 @@ const buildEditMenu = (stepHistory: (step: HistoryStep) => void): MenuItemConstr
       label: "Speech",
       submenu: [{ role: "startSpeaking" }, { role: "stopSpeaking" }],
     },
-  ],
-});
+  ];
+  return {
+    label: "Edit",
+    submenu: [
+      { label: "Undo", accelerator: "CmdOrCtrl+Z", click: () => stepHistory("undo") },
+      { label: "Redo", accelerator: "Shift+CmdOrCtrl+Z", click: () => stepHistory("redo") },
+      { type: "separator" },
+      { role: "cut" },
+      { role: "copy" },
+      { role: "paste" },
+      { role: "pasteAndMatchStyle" },
+      { role: "delete" },
+      { role: "selectAll" },
+      ...(hasMacMenu ? macOnlyItems : []),
+    ],
+  };
+};
 
 /**
  * Builds the menu bar's template, for `Menu.buildFromTemplate`.
@@ -84,15 +108,21 @@ const buildEditMenu = (stepHistory: (step: HistoryStep) => void): MenuItemConstr
  *   Hide, Hide Others, Show All and Quit. Settings… (⌘,) sits under About,
  *   between separators, where macOS apps place it, and calls `openSettings`.
  *   Sign Out sits above Quit, between separators, and calls `signOut`.
+ *   Where `hasMacMenu` is false, it is an ordinary menu named
+ *   `APP_MENU_LABEL`, without Services, Hide, Hide Others and Show All: they
+ *   are macOS's own.
  * - File holds New Thread, ⌘N, which calls `newThread`, and Close Window,
  *   ⌘W, where macOS users look for it. Closing the window hides it; the app
- *   keeps running.
+ *   keeps running. Where closing the window quits the app, the item is
+ *   Electron's, labelled Close, and quits it too.
  * - View holds Threads, ⌥⌘1, which calls `showThreadsFace`, and Hercule,
  *   ⌥⌘2, which calls `showOrchestrationFace`: they switch the sidebar's
  *   face. They take ⌥⌘ because ⌘1 to ⌘9 already pick an item in Go. Below
  *   a separator, Toggle Sidebar, ⌘B, calls `toggleSidebar`, which hides or
  *   shows the sidebar.
  *   `development` adds Reload and Toggle Developer Tools, under a separator.
+ *   Where `hasMacMenu` is false, Toggle Developer Tools takes
+ *   `TOGGLE_DEVELOPER_TOOLS_ACCELERATOR`.
  * - Go starts with Office, ⌘⇧O, which calls `openOffice`, then Intake, ⌘⇧I,
  *   which calls `openIntake`, then Workflows, ⌘⇧W, which calls
  *   `openWorkflows`, because all three are places to go, as a thread is.
@@ -105,7 +135,8 @@ const buildEditMenu = (stepHistory: (step: HistoryStep) => void): MenuItemConstr
  *   send the page does nothing, as ⏎ in an empty field does.
  * - Edit holds what Electron's own Edit menu holds on macOS, except that
  *   Undo, ⌘Z, and Redo, ⇧⌘Z, call `stepHistory`, for the reason
- *   `buildEditMenu` gives. Window is Electron's own.
+ *   `buildEditMenu` gives, and that it has no Substitutions and Speech where
+ *   `hasMacMenu` is false. Window is Electron's own.
  * - Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar,
  *   Office, Intake and Workflows are enabled only when `signedIn` is true. Only the shell
  *   carries them out, and the shell never shows while signed out, so they
@@ -114,7 +145,7 @@ const buildEditMenu = (stepHistory: (step: HistoryStep) => void): MenuItemConstr
  *   they stay enabled and do nothing.
  *
  * The app menu lists its items itself, because Electron's own app menu takes
- * no extra item. Its role still names it after the app.
+ * no extra item. On macOS its role names it after the app.
  *
  * The page sees a key press before the menu does, and a page that handles
  * the press stops the menu's item. So ⌘1 to ⌘9 pick a project while the
@@ -122,6 +153,7 @@ const buildEditMenu = (stepHistory: (step: HistoryStep) => void): MenuItemConstr
  * field.
  */
 const buildMenuTemplate = (options: {
+  readonly hasMacMenu: boolean;
   readonly development: boolean;
   readonly signedIn: boolean;
   readonly goItems: ReadonlyArray<GoMenuItem>;
@@ -138,38 +170,45 @@ const buildMenuTemplate = (options: {
   readonly send: () => void;
   readonly stepHistory: (step: HistoryStep) => void;
 }): Array<MenuItemConstructorOptions> => {
-  const appMenu: MenuItemConstructorOptions = {
-    role: "appMenu",
-    submenu: [
-      { role: "about" },
-      { type: "separator" },
-      {
-        label: "Settings…",
-        accelerator: "CmdOrCtrl+,",
-        enabled: options.signedIn,
-        click: options.openSettings,
-      },
-      { type: "separator" },
-      { role: "services" },
-      { type: "separator" },
-      { role: "hide" },
-      { role: "hideOthers" },
-      { role: "unhide" },
-      { type: "separator" },
-      {
-        id: "signOut",
-        label: "Sign Out",
-        enabled: options.signedIn,
-        click: options.signOut,
-      },
-      { type: "separator" },
-      { role: "quit" },
-    ],
-  };
+  const macOnlyAppMenuItems: Array<MenuItemConstructorOptions> = [
+    { role: "services" },
+    { type: "separator" },
+    { role: "hide" },
+    { role: "hideOthers" },
+    { role: "unhide" },
+    { type: "separator" },
+  ];
+  const appMenuItems: Array<MenuItemConstructorOptions> = [
+    { role: "about" },
+    { type: "separator" },
+    {
+      label: "Settings…",
+      accelerator: "CmdOrCtrl+,",
+      enabled: options.signedIn,
+      click: options.openSettings,
+    },
+    { type: "separator" },
+    ...(options.hasMacMenu ? macOnlyAppMenuItems : []),
+    {
+      id: "signOut",
+      label: "Sign Out",
+      enabled: options.signedIn,
+      click: options.signOut,
+    },
+    { type: "separator" },
+    { role: "quit" },
+  ];
+  // The `appMenu` role is for macOS only: elsewhere Electron gives it the
+  // app's `name`, which is the package's, not the product's.
+  const appMenu: MenuItemConstructorOptions = options.hasMacMenu
+    ? { role: "appMenu", submenu: appMenuItems }
+    : { label: APP_MENU_LABEL, submenu: appMenuItems };
   const developmentViewItems: Array<MenuItemConstructorOptions> = [
     { type: "separator" },
     { role: "reload" },
-    { role: "toggleDevTools" },
+    options.hasMacMenu
+      ? { role: "toggleDevTools" }
+      : { role: "toggleDevTools", accelerator: TOGGLE_DEVELOPER_TOOLS_ACCELERATOR },
   ];
   return [
     appMenu,
@@ -188,7 +227,7 @@ const buildMenuTemplate = (options: {
         { role: "close", accelerator: "CmdOrCtrl+W" },
       ],
     },
-    buildEditMenu(options.stepHistory),
+    buildEditMenu(options.stepHistory, options.hasMacMenu),
     {
       label: "View",
       submenu: [
@@ -275,8 +314,8 @@ export class MainMenu extends Context.Service<
 >()("hercule/desktop/MainMenu") {}
 
 /**
- * Builds the MainMenu service on Electron's `Menu`: it builds the menu bar and
- * makes it the app's. The items only a signed-in user can choose, such as
+ * Builds the MainMenu service on Electron's `Menu`, for `platform`: it builds
+ * the menu bar and makes it the app's. The items only a signed-in user can choose, such as
  * Sign Out, start enabled when a login token is stored, and Go lists no
  * item until the page sends its items.
  *
@@ -296,6 +335,7 @@ export class MainMenu extends Context.Service<
 export const makeMainMenuLayer = (
   Menu: Pick<typeof ElectronMenu, "buildFromTemplate" | "setApplicationMenu">,
   development: boolean,
+  platform: DesktopPlatform,
 ): Layer.Layer<MainMenu, never, AppSettings | MainWindow> =>
   Layer.effect(MainMenu)(
     Effect.gen(function* () {
@@ -319,6 +359,7 @@ export const makeMainMenuLayer = (
         Menu.setApplicationMenu(
           Menu.buildFromTemplate(
             buildMenuTemplate({
+              hasMacMenu: PLATFORM_BEHAVIOUR[platform].hasMacMenu,
               development,
               signedIn,
               goItems,

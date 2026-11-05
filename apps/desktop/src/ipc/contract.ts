@@ -454,7 +454,7 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
     response: Schema.NullOr(Schema.String),
   },
   /**
-   * Stores the login token, encrypted with the Keychain, or removes it when
+   * Stores the login token, encrypted with the system key store, or removes it when
    * the request is null. Refused when no controller URL is saved, because a
    * token belongs to one controller.
    */
@@ -485,8 +485,10 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
     response: Schema.NullOr(Schema.String),
   },
   /**
-   * Reports that the frame that draws the page's first screen, fonts
-   * included, has reached the window. Main shows the window if it has not
+   * Reports that the page's first screen is ready to show, fonts included:
+   * on macOS the frame that draws it has reached the window, and on Linux,
+   * where a hidden window presents no frame, the screen is laid out and
+   * drawn. Main shows the window if it has not
    * shown yet, and otherwise does nothing: the page reports again after each
    * reload, and more than one screen can report at launch, so a second report
    * is normal and never refused.

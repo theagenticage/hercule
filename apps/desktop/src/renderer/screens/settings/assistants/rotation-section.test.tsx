@@ -12,7 +12,15 @@ const ROTATION: Rotation = { contextFraction: 0.7, maxContextTokens: 200_000, da
 
 const renderSection = () => {
   const onSave = vi.fn<(change: Partial<Rotation>) => void>();
-  render(<RotationSection assistantName="Ada" rotation={ROTATION} error={null} onSave={onSave} />);
+  render(
+    <RotationSection
+      assistantName="Ada"
+      rotation={ROTATION}
+      error={null}
+      onSave={onSave}
+      platform="mac"
+    />,
+  );
   return onSave;
 };
 

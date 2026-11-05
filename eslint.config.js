@@ -492,10 +492,11 @@ export default tseslint.config(
             {
               regex: "^(?!electron$|\\.\\./ipc(/|$))",
               message:
-                "The preload imports only `electron` and types from ../ipc, because it holds nothing but the bridge (spec 17). Move this code to main or the renderer.",
+                "The preload imports only `electron`, types from ../ipc and the code in ../ipc/platform, because it holds nothing but the bridge (spec 17). Move this code to main or the renderer.",
             },
             {
-              regex: "^\\.\\./ipc(/|$)",
+              // The platform folder imports nothing, so it is the one part of ../ipc the preload may run.
+              regex: "^\\.\\./ipc(?!/platform(/|$))(/|$)",
               allowTypeImports: true,
               message:
                 "The preload uses only the IPC contract's types (spec 17). Write `import type`.",

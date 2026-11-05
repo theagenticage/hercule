@@ -183,7 +183,8 @@ function SignalDetail({
   readonly onOpenRun: (runId: string) => void;
   readonly ref: Ref<SignalPaneHandle>;
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { controller, bridge } = useRouteContext({ from: "/_connected" });
+  const { client } = controller;
   const queryClient = useQueryClient();
   const moves = useIntakeMoves();
   const idPrefix = useId();
@@ -448,6 +449,7 @@ function SignalDetail({
               locked={act.isPending || moves.pending}
               failure={failure}
               idPrefix={idPrefix}
+              platform={bridge.platform}
               onOpenReply={focusReply}
               onDraftChange={(actionId, text) => {
                 setDrafts((current) => ({ ...current, [actionId]: text }));

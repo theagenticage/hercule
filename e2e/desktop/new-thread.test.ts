@@ -42,7 +42,7 @@ describe("a new thread", () => {
     const picker = page.getByRole("dialog", { name: "New thread in" });
     await picker.waitFor();
     expect(await picker.locator(".proj-name").allTextContents()).toEqual(["notes", "webshop"]);
-    await page.keyboard.press("Meta+1");
+    await page.keyboard.press("ControlOrMeta+1");
 
     await page.getByRole("heading", { name: "What should the agent do in notes?" }).waitFor();
     await picker.waitFor({ state: "hidden" });

@@ -139,6 +139,11 @@ it("archives and removes an idle workspace from the cleanup dialog, and the mach
   });
   const [runner] = (await client.runner.query({ query: { limit: 10 } })).items;
   await client.runner.update({ params: { id: runner!.id }, payload: { name: "atlas" } });
+  // The runner can connect before setup creates the account. The probe that
+  // follows a runner's connection then finds no account, and nothing probes
+  // the new account until the next sweep, an hour later. A restart makes the
+  // runner connect again, and the probe that follows finds the account.
+  await restartController(() => {});
   // The controller places a thread only on a runner whose probe of the account found a sign-in.
   const accountId = await pollUntil(
     async () =>

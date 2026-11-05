@@ -10,8 +10,11 @@
  *   `authorization` header included;
  * - `--proxy-server`, `--host-resolver-rules` and `--ignore-certificate-errors`
  *   send the app's requests, and the token with them, to another server;
- * - `--use-mock-keychain` makes Electron encrypt the stored token with a fixed
- *   key instead of one kept in the macOS Keychain, so anyone can decrypt it.
+ * - `--use-mock-keychain` makes the app encrypt the stored token with a fixed
+ *   key instead of one kept in the macOS Keychain or the Linux keyring, so
+ *   anyone can decrypt it. Chromium reads the switch itself on macOS; on
+ *   Linux it does nothing by itself, and main acts on it only while the
+ *   inspector is open (see `findKeyringProblem` in `linux-key-store.ts`).
  *
  * The list holds whole arguments, and an argument that is not a switch is
  * refused too, because a switch cannot be told apart by how it starts:

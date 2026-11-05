@@ -33,7 +33,7 @@ describe("Workflows", () => {
     );
     await expect.poll(() => page.getByText("No workflows yet").isVisible()).toBe(true);
 
-    await page.keyboard.press("Meta+f");
+    await page.keyboard.press("ControlOrMeta+f");
     await expect
       .poll(() => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? null))
       .toBe("Search workflows");

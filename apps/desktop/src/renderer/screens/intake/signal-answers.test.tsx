@@ -52,6 +52,7 @@ describe("SignalAnswers", () => {
           onOpenReply={nothing}
           onDraftChange={nothing}
           onAct={nothing}
+          platform="mac"
         />,
       );
       expect(screen.getByRole("button", { name: "Hand to Review PR" })).toBeTruthy();

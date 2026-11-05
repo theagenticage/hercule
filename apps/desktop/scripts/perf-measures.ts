@@ -10,6 +10,7 @@
  */
 import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -48,6 +49,99 @@ export const BUDGET = {
   providersPaintMs: 150,
   streamingTaskMs: 50,
 } as const;
+
+/**
+ * Whether the run is on a Mac, the machine spec 17's budgets were set on. This
+ * is the one place that decides what the perf scripts measure on which
+ * platform: everything below that differs between a Mac and Linux reads this,
+ * and anything that is not a Mac is read the way Linux is.
+ *
+ * A reading on Linux is not a Mac reading with another name, so on Linux:
+ *
+ * - Memory is the proportional set size (PSS) from `/proc/<pid>/smaps_rollup`,
+ *   not the physical footprint. PSS counts each page a process maps once,
+ *   split evenly among the processes that map it, so the app's processes add
+ *   up to what the app holds. The Mac's footprint is built from the pages a
+ *   process dirtied or compressed and leaves out the clean pages that files
+ *   back, which PSS includes, so the two numbers are not comparable.
+ * - Wakeups are what Electron reports on Linux for `idleWakeupsPerSecond`: the
+ *   voluntary context switches of the process's threads, which is every time
+ *   a thread slept and was woken. On a Mac Electron reports the kernel's
+ *   interrupt wakeups, a different count.
+ * - A reading of memory, wakeups or time is shown, but never judged against
+ *   the Mac's budget: it was taken on other hardware, under a virtual screen
+ *   with software rendering if the machine has no display. Only a verdict that
+ *   holds on any machine, such as a count of processes, is judged (see
+ *   `macLimit`).
+ */
+const MEASURED_ON_MAC = process.platform === "darwin";
+
+/** What the memory reading is called in the tables: the Mac's footprint, or Linux's PSS. */
+export const MEMORY_NAME = MEASURED_ON_MAC ? "Footprint" : "PSS";
+
+/** `MEMORY_NAME` as it reads in the middle of a sentence. */
+export const MEMORY_NAME_IN_SENTENCE = MEASURED_ON_MAC ? "footprint" : "PSS";
+
+/**
+ * Whether the start time of a process, from `app.getAppMetrics()`, can be
+ * read. On Linux Chromium adds the process's start, counted in ticks since
+ * boot, to the boot time, which the kernel gives to the second, so the time
+ * can be off by up to a second: a run read the GPU process starting half a
+ * second before the app was spawned.
+ */
+export const READS_PROCESS_START_TIMES = MEASURED_ON_MAC;
+
+/** What the wakeups reading is called in the tables (see `MEASURED_ON_MAC`). */
+export const WAKEUPS_NAME = MEASURED_ON_MAC ? "Wakeups" : "Voluntary context switches";
+
+/**
+ * Returns the lines that tell the reader of a run's tables what its readings
+ * mean on this machine, or none on a Mac, where they mean what spec 17 says.
+ */
+export function describeMeasurements(): string[] {
+  if (MEASURED_ON_MAC) return [];
+  return [
+    "Measured on Linux. The Mac's budgets are shown but not judged here:",
+    "- Memory is PSS (`/proc/<pid>/smaps_rollup`), not the Mac's physical footprint.",
+    "- Wakeups are voluntary context switches a second, not the Mac's interrupt wakeups.",
+    "- Times are this machine's. Under a virtual screen (Xvfb, as in the container) Chromium",
+    "  draws with the CPU, and the window manager is not a Mac's window server, so launch",
+    "  and paint times are not a Mac's.",
+    "- Window shown comes before First screen here. A hidden window presents no frame under X11,",
+    "  so the page reports once it is laid out and drawn, and the frame is presented after the show.",
+    "- The GPU and renderer process start times are not measured: Linux gives them to the second.",
+    "- The first-frame check (`pnpm --filter @hercule/desktop first-frame`) needs macOS and is not run.",
+    "- A verdict that holds on any machine, such as the process count, the age clock's fires",
+    "  or the reads a push causes, is still judged.",
+    "Compare a Linux run only with another Linux run on the same machine and setup.",
+  ];
+}
+
+/** The verdict of a reading that has a Mac's limit, on a platform where that limit does not apply. */
+export const NOT_JUDGED = "not judged (Mac limit)";
+
+/**
+ * What a reading is judged as in a table of budgets: `true` when it is within
+ * its limit, `false` when over, `null` when it has no limit, and `NOT_JUDGED`
+ * for a limit that was set on a Mac, read on another platform.
+ */
+export type Within = boolean | null | typeof NOT_JUDGED;
+
+/**
+ * Marks `within` as the comparison of a reading with a limit that was set on
+ * a Mac: a limit on memory, wakeups or time. On Linux it is not judged, because
+ * the reading is another quantity or was taken on other hardware (see
+ * `MEASURED_ON_MAC`). A comparison that needs no Mac, such as a count of
+ * processes or of timer fires, is passed on as it is.
+ */
+export const macLimit = (within: boolean): Within => (MEASURED_ON_MAC ? within : NOT_JUDGED);
+
+/** Formats a verdict for the "Within" column of a table of budgets: "yes", "over", or "-" when there is no limit. */
+export function formatWithin(within: Within): string {
+  if (within === null) return "-";
+  if (within === NOT_JUDGED) return NOT_JUDGED;
+  return within ? "yes" : "over";
+}
 
 /**
  * When memory is read, in milliseconds after the page opens. Every earlier
@@ -135,12 +229,20 @@ export interface ProcessMemory {
    * The process type, as `app.getAppMetrics()` names it: `Browser` for the
    * app's own process, and `GPU`, `Tab` or `Utility` for a helper. A utility
    * process has its service after it, such as `Utility (Network Service)`.
+   * On Linux the zygotes, Chromium's helpers that fork the other processes,
+   * are `Zygote`; `app.getAppMetrics()` does not list them.
    */
   readonly label: string;
-  /** The resident size, as `ps` reports it. */
+  /** The resident size, as `ps` reports it on a Mac and `/proc` on Linux. */
   readonly workingSetMb: number;
-  /** The physical footprint, as `footprint` reports it and Activity Monitor shows it. */
-  readonly footprintMb: number;
+  /**
+   * The memory the process holds, by the platform's own measure, called
+   * `MEMORY_NAME` in the tables: the physical footprint on a Mac, as
+   * `footprint` reports it and Activity Monitor shows it, and the PSS on
+   * Linux. The two are different quantities, so never compare one with the
+   * other (see `MEASURED_ON_MAC`).
+   */
+  readonly memoryMb: number;
 }
 
 /** The process types of Chromium's `--type` switch, by the name `app.getAppMetrics()` gives them. */
@@ -148,6 +250,7 @@ export const PROCESS_TYPES: Readonly<Record<string, string>> = {
   "gpu-process": "GPU",
   renderer: "Tab",
   utility: "Utility",
+  zygote: "Zygote",
 };
 
 /**
@@ -163,26 +266,43 @@ export const SERVICE_NAMES: Readonly<Record<string, string>> = {
 export const runFile = promisify(execFile);
 
 /**
+ * Returns the label of a process from its command line: its type from the
+ * `--type` switch, and the service it runs from `--utility-sub-type` when it
+ * has one. The app's own process has no `--type`, so it is `Browser`.
+ */
+function buildProcessLabel(command: string): string {
+  const type = /--type=(\S+)/.exec(command)?.[1];
+  const service = /--utility-sub-type=(\S+)/.exec(command)?.[1];
+  const name = type === undefined ? "Browser" : (PROCESS_TYPES[type] ?? type);
+  return service === undefined ? name : `${name} (${SERVICE_NAMES[service] ?? service})`;
+}
+
+/**
+ * Reads the memory of the app's process `pid` and of its descendants, with
+ * the measure of the platform the run is on (see `MEASURED_ON_MAC`). Fails
+ * when a reading fails.
+ */
+export const readProcessMemory = (pid: number): Promise<ProcessMemory[]> =>
+  MEASURED_ON_MAC ? readMacProcessMemory(pid) : readLinuxProcessMemory(pid);
+
+/**
  * Reads the memory of the app's process `pid` and of each of its children
  * with `ps` and `footprint`. Fails when either command fails.
  *
  * A helper's type comes from the `--type` switch on its command line. The
  * app's own process has none.
  */
-export async function readProcessMemory(pid: number): Promise<ProcessMemory[]> {
+async function readMacProcessMemory(pid: number): Promise<ProcessMemory[]> {
   const { stdout } = await runFile("ps", ["-A", "-o", "pid=,ppid=,rss=,command="]);
   const found = stdout.split("\n").flatMap((line) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (match === null) return [];
     const [, ownPid, parentPid, rssKb, command] = match;
     if (Number(ownPid) !== pid && Number(parentPid) !== pid) return [];
-    const type = /--type=(\S+)/.exec(command!)?.[1];
-    const service = /--utility-sub-type=(\S+)/.exec(command!)?.[1];
-    const name = type === undefined ? "Browser" : (PROCESS_TYPES[type] ?? type);
     return [
       {
         pid: Number(ownPid),
-        label: service === undefined ? name : `${name} (${SERVICE_NAMES[service] ?? service})`,
+        label: buildProcessLabel(command!),
         workingSetMb: Number(rssKb) / 1024,
       },
     ];
@@ -205,11 +325,103 @@ export async function readProcessMemory(pid: number): Promise<ProcessMemory[]> {
       const bytes = report.processes.find((entry) => entry.pid === sample.pid)?.auxiliary
         .phys_footprint;
       if (bytes === undefined) throw new Error(`footprint did not report process ${sample.pid}`);
-      return { ...sample, footprintMb: bytes / 1024 / 1024 };
+      return { ...sample, memoryMb: bytes / 1024 / 1024 };
     });
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
+}
+
+/**
+ * Reads what `/proc/<pid>/stat` holds that the perf scripts need: the parent
+ * process, and the CPU time the process has used, in clock ticks.
+ *
+ * The file is `pid (name) state ppid ...`. The name can hold spaces and
+ * brackets, so the fields are counted from the last closing bracket.
+ */
+async function readLinuxProcessStat(
+  pid: number,
+): Promise<{ readonly parentPid: number; readonly cpuTicks: number }> {
+  const stat = await readFile(`/proc/${String(pid)}/stat`, "utf8");
+  // Starting at the state, which is field 3 of the file: ppid is field 4,
+  // utime field 14 and stime field 15.
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  return {
+    parentPid: Number(fields[1]),
+    cpuTicks: Number(fields[11]) + Number(fields[12]),
+  };
+}
+
+/**
+ * Reads the memory of the app's process `pid` and of all its descendants
+ * from `/proc`. Fails when a process cannot be read, rather than leaving it
+ * out or reading it as zero.
+ *
+ * The app's processes are not all its children: Chromium on Linux forks the
+ * GPU process and the renderer from zygote processes, so they are the app's
+ * grandchildren. Memory is PSS, the proportional set size (see
+ * `MEASURED_ON_MAC`), and the working set is the resident size, both from
+ * `smaps_rollup`.
+ */
+export async function readLinuxProcessMemory(pid: number): Promise<ProcessMemory[]> {
+  const parents = new Map<number, number>();
+  for (const entry of await readdir("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    try {
+      parents.set(Number(entry), (await readLinuxProcessStat(Number(entry))).parentPid);
+    } catch {
+      // The process exited after the folder listing.
+    }
+  }
+  const tree = [pid];
+  for (const member of tree) {
+    for (const [child, parent] of parents) if (parent === member) tree.push(child);
+  }
+  tree.sort((a, b) => a - b);
+
+  const readKb = (rollup: string, field: string, owner: number) => {
+    const match = new RegExp(`^${field}:\\s+(\\d+) kB$`, "m").exec(rollup);
+    if (match === null) throw new Error(`/proc/${String(owner)}/smaps_rollup has no ${field}`);
+    return Number(match[1]);
+  };
+  return Promise.all(
+    tree.map(async (member) => {
+      const [rollup, command] = await Promise.all([
+        readFile(`/proc/${String(member)}/smaps_rollup`, "utf8"),
+        readFile(`/proc/${String(member)}/cmdline`, "utf8"),
+      ]);
+      return {
+        pid: member,
+        label: buildProcessLabel(command.replaceAll("\0", " ")),
+        workingSetMb: readKb(rollup, "Rss", member) / 1024,
+        memoryMb: readKb(rollup, "Pss", member) / 1024,
+      };
+    }),
+  );
+}
+
+/**
+ * Returns the processes of `memory` that count against the budget's number
+ * of processes: all but the zygotes, which only Linux has.
+ */
+export const countAppProcesses = (memory: readonly ProcessMemory[]): number =>
+  memory.filter((sample) => sample.label !== "Zygote").length;
+
+/**
+ * Describes the processes of `memory` for the process count's row: how many
+ * count against the budget (`count`, the number in `memory` unless given), and
+ * their labels. The zygotes, which do not count, are listed after them.
+ */
+export function describeAppProcesses(
+  memory: readonly ProcessMemory[],
+  count: number = countAppProcesses(memory),
+): string {
+  const labels = (samples: readonly ProcessMemory[]) => samples.map((sample) => sample.label);
+  const zygotes = memory.filter((sample) => sample.label === "Zygote");
+  const counted = `${String(count)}: ${labels(memory.filter((sample) => !zygotes.includes(sample))).join(", ")}`;
+  return zygotes.length === 0
+    ? counted
+    : `${counted}; not counted, Linux's: ${labels(zygotes).join(", ")}`;
 }
 
 /**
@@ -349,10 +561,16 @@ export const findProcessUse = (samples: readonly ProcessUse[], type: string) =>
   samples.find((sample) => sample.type === type);
 
 /**
- * Returns the CPU time the process `pid` has used so far, in milliseconds.
- * `ps` reports it to the hundredth of a second, as `[hours:]minutes:seconds`.
+ * Returns the CPU time the process `pid` has used so far, in milliseconds,
+ * all its threads together. A Mac's `ps` reports it to the hundredth of a
+ * second, as `[hours:]minutes:seconds`; on Linux it is read from `/proc`.
  */
 export async function readCpuMs(pid: number): Promise<number> {
+  if (!MEASURED_ON_MAC) {
+    // The kernel counts CPU time in ticks of 1/100 s on every Linux platform
+    // that has a Node (the user-space clock `USER_HZ`).
+    return (await readLinuxProcessStat(pid)).cpuTicks * 10;
+  }
   const { stdout } = await runFile("ps", ["-o", "time=", "-p", String(pid)]);
   return (
     stdout

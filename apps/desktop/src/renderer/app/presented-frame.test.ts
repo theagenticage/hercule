@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bridge } from "../../ipc/bridge";
+import type { DesktopPlatform } from "../../ipc/platform/desktop-platform";
 import { reportFirstScreen, waitForPresentedFrame } from "./presented-frame";
 
 /**
@@ -115,9 +116,12 @@ describe("waitForPresentedFrame", () => {
 });
 
 describe("reportFirstScreen", () => {
-  /** Returns a bridge whose `firstScreen.report` runs `report`. */
-  const makeBridge = (report: () => Promise<undefined>) =>
-    ({ firstScreen: { report } }) as unknown as Bridge;
+  /** Returns a bridge for `platform` whose `firstScreen.report` runs `report`. */
+  const makeBridge = (
+    report: () => Promise<undefined>,
+    platform: DesktopPlatform = "mac",
+    hiddenWindowDraws = true,
+  ) => ({ platform, hiddenWindowDraws, firstScreen: { report } }) as unknown as Bridge;
 
   it("reports the first screen once its frame was presented, and returns when", async () => {
     const report = vi.fn(() => Promise.resolve(undefined));
@@ -148,5 +152,73 @@ describe("reportFirstScreen", () => {
       "Could not report the first screen to main, so main's time limit will show the window instead:",
       error,
     );
+  });
+
+  describe("on Linux, where a hidden window presents no frame", () => {
+    /** Runs animation frame callbacks only when a test calls the returned function. */
+    const holdAnimationFrames = (): (() => void) => {
+      const waiting: Array<FrameRequestCallback> = [];
+      vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+        waiting.push(callback),
+      );
+      return () => waiting.splice(0).forEach((callback) => callback(0));
+    };
+
+    it("reports before the frame is presented, once the screen has two animation frames, then returns when the frame was presented", async () => {
+      const runAnimationFrame = holdAnimationFrames();
+      const report = vi.fn(() => Promise.resolve(undefined));
+      let presentedAt: number | null | undefined;
+      void reportFirstScreen(makeBridge(report, "linux")).then((time) => (presentedAt = time));
+
+      await settle();
+      expect(findSentinel()).toBeNull();
+      runAnimationFrame();
+      await settle();
+      expect(findSentinel()).toBeNull();
+      runAnimationFrame();
+      await settle();
+
+      // Nothing was presented, yet main is told, and the sentinel is watched.
+      expect(report).toHaveBeenCalledOnce();
+      expect(presentedAt).toBeUndefined();
+      const sentinel = findSentinel()!;
+      expect(readObserver().observed).toEqual({ type: "element" });
+
+      readObserver().deliver(sentinel, 90);
+      await settle();
+      expect(presentedAt).toBe(90);
+      expect(findSentinel()).toBeNull();
+    });
+
+    it("reports without waiting for an animation frame when a hidden window draws none, as on native Wayland", async () => {
+      holdAnimationFrames();
+      const report = vi.fn(() => Promise.resolve(undefined));
+      void reportFirstScreen(makeBridge(report, "linux", false));
+
+      await settle();
+      expect(report).toHaveBeenCalledOnce();
+      expect(findSentinel()).not.toBeNull();
+    });
+
+    it("logs a failed report and returns null", async () => {
+      const runAnimationFrame = holdAnimationFrames();
+      const error = new Error("main refused the message");
+      const logError = vi.spyOn(console, "error").mockImplementation(() => {});
+      let presentedAt: number | null | undefined;
+      void reportFirstScreen(makeBridge(() => Promise.reject(error), "linux")).then(
+        (time) => (presentedAt = time),
+      );
+      await settle();
+      runAnimationFrame();
+      await settle();
+      runAnimationFrame();
+      await settle();
+
+      expect(presentedAt).toBeNull();
+      expect(logError).toHaveBeenCalledWith(
+        "Could not report the first screen to main, so main's time limit will show the window instead:",
+        error,
+      );
+    });
   });
 });

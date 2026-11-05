@@ -32,10 +32,31 @@ import { buildAppEnv, isProcessRunning } from "./processes.ts";
 import type { WindowState } from "../src/main/app-settings.ts";
 
 /**
- * The folder electron-builder writes the `.app` into for this machine:
- * `mac-arm64` on Apple silicon, `mac` on Intel.
+ * True when the app is run on macOS, and false on Linux. A test or script
+ * that differs between the two reads this, so the platform is asked in one
+ * place.
  */
-const MAC_FOLDER = process.arch === "arm64" ? "mac-arm64" : "mac";
+export const RUNS_ON_MAC = process.platform === "darwin";
+
+/**
+ * Where electron-builder puts the unpacked app on this platform, relative to
+ * `dist/<kind>`, as `pnpm build:desktop` builds it.
+ *
+ * - macOS: `Hercule.app` inside `mac-arm64` on Apple silicon or `mac` on
+ *   Intel;
+ * - Linux: the `linux-unpacked` folder, which holds the executable and its
+ *   `resources` folder directly.
+ *
+ * Every other path to something in the package starts from here, so this is
+ * the one place that tells the two platforms apart.
+ */
+const PACKAGE_LAYOUT = RUNS_ON_MAC
+  ? {
+      app: join(process.arch === "arm64" ? "mac-arm64" : "mac", "Hercule.app"),
+      executable: "Contents/MacOS/Hercule",
+      archive: "Contents/Resources/app.asar",
+    }
+  : { app: "linux-unpacked", executable: "hercule-desktop", archive: "resources/app.asar" };
 
 /**
  * The two packages `pnpm build:desktop` builds: `release` is what ships, and
@@ -45,13 +66,14 @@ const MAC_FOLDER = process.arch === "arm64" ? "mac-arm64" : "mac";
 export type PackageKind = "release" | "test";
 
 /**
- * Returns the path of the packaged `Hercule.app` of the given kind.
+ * Returns the path of the packaged app of the given kind: `Hercule.app` on
+ * macOS, the `linux-unpacked` folder on Linux.
  *
  * Fails when it has not been built, saying how to build it: the perf script
  * and the end-to-end tests run an existing package rather than building one.
  */
 export function findPackagedApp(kind: PackageKind): string {
-  const app = join(import.meta.dirname, "../dist", kind, MAC_FOLDER, "Hercule.app");
+  const app = join(import.meta.dirname, "../dist", kind, PACKAGE_LAYOUT.app);
   if (!existsSync(app)) {
     throw new Error(`no packaged app at ${app}: run \`pnpm build:desktop\` first.`);
   }
@@ -60,7 +82,12 @@ export function findPackagedApp(kind: PackageKind): string {
 
 /** Returns the path of the executable inside the packaged app of the given kind. */
 export function findExecutable(kind: PackageKind): string {
-  return join(findPackagedApp(kind), "Contents/MacOS/Hercule");
+  return join(findPackagedApp(kind), PACKAGE_LAYOUT.executable);
+}
+
+/** Returns the path of the `app.asar` archive inside the packaged app of the given kind. */
+export function findAppArchive(kind: PackageKind): string {
+  return join(findPackagedApp(kind), PACKAGE_LAYOUT.archive);
 }
 
 /**
@@ -68,18 +95,72 @@ export function findExecutable(kind: PackageKind): string {
  *
  * - `--user-data-dir` keeps the app's settings file and its single-instance
  *   lock apart from the real app's and from every other launch's.
- * - `-ApplePersistenceIgnoreState YES` sets that macOS user default for this
- *   launch only. After an app crashes, macOS shows an alert at its next
- *   launch, offering to reopen its windows, and the app's main thread waits
- *   until someone answers it. macOS ties the alert to the bundle identifier,
- *   not to the user data directory, so a run in which the app crashed would
- *   leave the next run's first launch hanging on the alert, and that test
- *   would fail for a crash it did not cause. The crash itself still fails the
- *   test that caused it (see `quitApp`). The app does not use macOS's window
- *   restoring: it places its window from its own settings file.
+ * - On macOS, `-ApplePersistenceIgnoreState YES` sets that macOS user default
+ *   for this launch only. After an app crashes, macOS shows an alert at its
+ *   next launch, offering to reopen its windows, and the app's main thread
+ *   waits until someone answers it. macOS ties the alert to the bundle
+ *   identifier, not to the user data directory, so a run in which the app
+ *   crashed would leave the next run's first launch hanging on the alert, and
+ *   that test would fail for a crash it did not cause. The crash itself still
+ *   fails the test that caused it (see `quitApp`). The app does not use
+ *   macOS's window restoring: it places its window from its own settings
+ *   file. Linux has no such alert, so it gets no such argument.
  */
 export function buildAppArgs(userDataDir: string): string[] {
-  return ["-ApplePersistenceIgnoreState", "YES", `--user-data-dir=${userDataDir}`];
+  const macArgs = RUNS_ON_MAC ? ["-ApplePersistenceIgnoreState", "YES"] : [];
+  return [...macArgs, `--user-data-dir=${userDataDir}`];
+}
+
+/**
+ * Builds the argument that turns Chromium's sandbox off for a launch of the
+ * given kind, which is `--no-sandbox` for the test package on Linux and
+ * nothing otherwise.
+ *
+ * Chromium's sandbox on Linux needs unprivileged user namespaces, and on a
+ * machine where they are off (a default Docker container, Ubuntu 24.04 with
+ * no AppArmor profile for the app) an app started without it aborts. The test
+ * package's inspector is open, so it accepts any argument, and Playwright
+ * passes this one itself when it launches the app. A launch that spawns the
+ * test package directly has to pass it. The release package must never get it:
+ * it refuses the argument, and a test of it must show that its sandbox works.
+ */
+export function buildSandboxArgs(kind: PackageKind): string[] {
+  return kind === "test" && process.platform === "linux" ? ["--no-sandbox"] : [];
+}
+
+/**
+ * Builds the argument that lets Chromium use the machine's graphics driver
+ * even when its blocklist rejects it, which is `--ignore-gpu-blocklist` on
+ * Linux and nothing otherwise.
+ *
+ * The Office draws with WebGL. On a Linux machine without a GPU, such as a
+ * virtual screen in a container or on a CI runner, the only driver is Mesa's
+ * software renderer, and Chromium blocks it: the Office shows "This screen
+ * did not load". With this switch Mesa draws it, several times faster than
+ * Chromium's own fallback renderer (`--enable-unsafe-swiftshader`), which
+ * made the Office tests take longer than their time limit. Only the test
+ * package takes the switch: the release package refuses it, and a user's
+ * machine decides for itself.
+ */
+export function buildGraphicsArgs(): string[] {
+  return process.platform === "linux" ? ["--ignore-gpu-blocklist"] : [];
+}
+
+/**
+ * Builds the environment a launch of the packaged app of the given kind gets:
+ * `buildAppEnv`'s, and for the release package without
+ * `ELECTRON_DISABLE_SANDBOX`.
+ *
+ * Electron turns Chromium's sandbox off on Linux when that variable exists at
+ * all, even with an empty value, and no fuse or argument check stops it. A
+ * shell that exports it would make a test of the release package run without
+ * the sandbox and still pass, so the release package never sees it. The test
+ * package runs without the sandbox anyway (see `buildSandboxArgs`).
+ */
+export function buildPackageEnv(kind: PackageKind): Record<string, string> {
+  const env = buildAppEnv();
+  if (kind === "release") delete env.ELECTRON_DISABLE_SANDBOX;
+  return env;
 }
 
 /**
@@ -181,6 +262,26 @@ export async function signIn(
  */
 export const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
 
+/**
+ * Builds the arguments that make a launch of the test package encrypt its
+ * sign-in with a fixed key: `MOCK_KEYCHAIN_SWITCH`, and on Linux also
+ * `--password-store=basic`.
+ *
+ * On Linux, the switch alone only lets Electron use a fixed key if it has
+ * chosen the `basic_text` backend. Electron chooses its backend before the app
+ * is ready, from the desktop environment variables and the D-Bus session it
+ * inherits. On a developer's GNOME or KDE desktop it would choose their real
+ * keyring, and a test could create an item in it or open its unlock prompt.
+ * `--password-store=basic` chooses `basic_text` whatever the desktop is. Pass
+ * both together, never one: only the test package accepts them, and the
+ * release package refuses both.
+ */
+export function buildMockKeychainArgs(): string[] {
+  return process.platform === "linux"
+    ? [MOCK_KEYCHAIN_SWITCH, "--password-store=basic"]
+    : [MOCK_KEYCHAIN_SWITCH];
+}
+
 /** What a launch of the test package may add to the usual launch; see `launchTestPackage`. */
 export interface TestPackageOptions {
   /** Where and at what size Playwright records a video of the window. */
@@ -195,7 +296,7 @@ export interface TestPackageOptions {
 /**
  * Starts the test package with Playwright's Electron driver, on the given
  * user data directory, and returns Playwright's handle on it. The app runs on
- * the mock keychain (see `MOCK_KEYCHAIN_SWITCH`).
+ * the mock keychain (see `buildMockKeychainArgs`).
  *
  * Given an `executablePath`, Playwright passes only `--inspect=0` and
  * `--remote-debugging-port=0` before the app's own arguments. It does not
@@ -211,8 +312,9 @@ export function launchTestPackage(
     executablePath: findExecutable("test"),
     args: [
       ...buildAppArgs(userDataDir),
-      MOCK_KEYCHAIN_SWITCH,
+      ...buildMockKeychainArgs(),
       buildBinaryPathArgument(userDataDir),
+      ...buildGraphicsArgs(),
       ...extraArgs,
     ],
     env: buildAppEnv(),
@@ -262,7 +364,9 @@ export async function launchPlainApp(userDataDir: string): Promise<PlainApp> {
     findExecutable("test"),
     [
       ...buildAppArgs(userDataDir),
-      MOCK_KEYCHAIN_SWITCH,
+      ...buildSandboxArgs("test"),
+      ...buildGraphicsArgs(),
+      ...buildMockKeychainArgs(),
       buildBinaryPathArgument(userDataDir),
       "--inspect=0",
       "--remote-debugging-port=0",

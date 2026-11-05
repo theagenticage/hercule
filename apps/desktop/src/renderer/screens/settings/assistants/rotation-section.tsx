@@ -9,6 +9,7 @@ import {
 import type { Rotation } from "@hercule/contract";
 import { UndoIcon } from "../../../icons/undo";
 import { TimeField } from "./time-field";
+import type { DesktopPlatform } from "../../../../ipc/platform/desktop-platform";
 import "./schedule.css";
 
 /**
@@ -27,11 +28,14 @@ export function RotationSection({
   rotation,
   error,
   onSave,
+  platform,
 }: {
   readonly assistantName: string;
   readonly rotation: Rotation;
   readonly error: string | null;
   readonly onSave: (change: Partial<Rotation>) => void;
+  /** The platform the app runs on, which decides the key that commits a time with ⏎: ⌘ on a Mac, Ctrl on Linux. */
+  readonly platform: DesktopPlatform;
 }): JSX.Element {
   const [timeError, setTimeError] = useState<string | null>(null);
   const shownError = timeError ?? error;
@@ -88,6 +92,7 @@ export function RotationSection({
         </span>{" "}
         tokens, and daily at{" "}
         <TimeField
+          platform={platform}
           label="Daily at"
           value={rotation.dailyAt}
           onCommit={(text) => {

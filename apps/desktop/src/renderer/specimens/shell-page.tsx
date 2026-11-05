@@ -517,10 +517,13 @@ const SILENT_LIVE: Live = {
  * reason the client refuses every request, except what the shell sends main
  * for the Go menu, the dock badge and the notifications: it accepts that,
  * and ignores it. It reads the Appearance as the defaults, so the page looks
- * as it does on a Mac where the user never changed them. It sends no menu command and opens no thread or
- * assistant.
+ * as it does on a Mac where the user never changed them, and says the platform
+ * is a Mac, so that the screenshots keep the Mac's look. It sends no menu
+ * command and opens no thread or assistant.
  */
 const REFUSING_BRIDGE: Bridge = {
+  platform: "mac",
+  hiddenWindowDraws: true,
   controllerUrl: {
     read: () => Promise.reject(buildBridgeCallError("controllerUrl.read")),
     save: () => Promise.reject(buildBridgeCallError("controllerUrl.save")),

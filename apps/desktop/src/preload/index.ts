@@ -1,14 +1,16 @@
 /**
  * Exposes the bridge to the renderer as `window.bridge`: one function per
- * channel of the IPC contract, and nothing else.
+ * channel of the IPC contract, and the platform the app runs on.
  *
  * The preload imports only types from the contract, so it loads no Effect and
- * stays one small file. It checks nothing itself: main checks the sender and
+ * stays one small file. The one thing it loads from the IPC folder is the
+ * platform reader, which imports nothing. It checks nothing itself: main checks the sender and
  * decodes the request of every message, because the renderer is untrusted,
  * and main has encoded every payload it sends against the contract.
  */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { Bridge } from "../ipc/bridge";
+import { readDesktopPlatform } from "../ipc/platform/desktop-platform";
 import type {
   EncodedIpcPayload,
   EncodedIpcRequest,
@@ -64,6 +66,10 @@ const subscribeToChannel = <Name extends MainToRendererIpcChannelName>(
 };
 
 const bridge: Bridge = {
+  // A sandboxed preload has Electron's own `process`, with `platform`.
+  platform: readDesktopPlatform(process.platform),
+  // A sandboxed preload can read the environment. See `Bridge`.
+  hiddenWindowDraws: process.env["XDG_SESSION_TYPE"] !== "wayland",
   controllerUrl: {
     read: () => invokeChannel("controllerUrl.read"),
     save: (url) => invokeChannel("controllerUrl.save", url),

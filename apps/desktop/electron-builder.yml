@@ -1,16 +1,19 @@
-# Packages the desktop app as `Hercule.app`. The product name comes from
-# `productName` in package.json, which Electron also reads at run time, so the
-# app's name and its user data folder agree with the bundle's name.
+# Packages the desktop app: `Hercule.app` on macOS, a `.deb` and an Arch Linux
+# package on Linux. The product name comes from `productName` in package.json,
+# which Electron also reads at run time, so the app's name and its user data
+# folder agree with the bundle's name.
 #
-# `pnpm package` runs electron-builder twice with this config:
+# `pnpm package` (`scripts/package.ts`) runs electron-builder twice with this
+# config:
 #
 # - the release package, into dist/release;
 # - the test package, into dist/test. It differs from the release package in
 #   one fuse, EnableNodeCliInspectArguments, which it leaves on because
-#   Playwright's Electron driver starts the app with `--inspect`, and in being
-#   signed ad hoc, so it never carries a real signature with that fuse on. The
-#   end-to-end tests and the perf script run it; a test reads every fuse off
-#   the release package.
+#   Playwright's Electron driver starts the app with `--inspect`. On macOS it
+#   is also signed ad hoc, so it never carries a real signature with that fuse
+#   on, and on Linux it is an unpacked folder, not a `.deb`, because the
+#   tests run the executable in place. The end-to-end tests and the perf
+#   script run it; a test reads every fuse off the release package.
 
 # The macOS bundle identifier. It cannot change once the app is released.
 appId: sh.hercule.desktop
@@ -56,6 +59,88 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+
+# The macOS app has no icon of its own: nothing here names one, so macOS shows
+# Electron's default. electron-builder reads the macOS icon from `mac.icon` and
+# the Linux one from `linux.icon`; no ticket has asked for a macOS one yet.
+#
+# Linux. Without `executableName` the executable is named after `name` in
+# package.json, `@hercule/desktop`, and comes out as `@herculedesktop`. The
+# `.deb`'s package name is set to a plain Debian name rather than derived from
+# that scoped name. The `.deb` is built with fpm, which needs `ar` from the
+# `binutils` package on the machine that packages.
+linux:
+  target:
+    - deb
+    - pacman
+  executableName: hercule-desktop
+  # A 512 pixel PNG, drawn from the Bureau book's app icon tile. `build/icon.svg`
+  # is its source.
+  icon: build/icon.png
+  category: Development
+  # Writes `desktopName` into the packaged package.json, so Electron sets the
+  # window's class to the name of the installed `.desktop` file and the desktop
+  # shows the app's icon on its window.
+  syncDesktopName: true
+  maintainer: Rogier Pennink <rogierpennink@users.noreply.github.com>
+  synopsis: The Hercule desktop app
+  # The `.desktop` file's comment, which a launcher shows under the name, and
+  # the package's long description.
+  description: Desktop app for the Hercule agent orchestration platform.
+
+deb:
+  packageName: hercule-desktop
+  # electron-builder's own list, which a `depends` here replaces, plus two
+  # libraries Electron links that the list leaves out: the sound library and
+  # libgbm. On a machine that has them installed only as recommended packages,
+  # or not at all, such as a minimal server, the `.deb` installs and the app
+  # then fails to start. Ubuntu 24.04 names the sound library libasound2t64,
+  # older releases libasound2.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libasound2t64 | libasound2
+    - libgbm1
+
+# The Arch Linux package, built with fpm like the `.deb`. fpm needs `bsdtar`
+# (Arch's `libarchive`, Debian's `libarchive-tools`) and `zstd` on the machine
+# that packages. Arch's package names are not Debian's, and Arch has no
+# recommended packages: pacman installs `depends` and nothing else, so the
+# list has to hold every library Electron loads. A test lists them with ldd on
+# a bare Arch install.
+pacman:
+  packageName: hercule-desktop
+  compression: zstd
+  # `${arch}` expands to `x64` for this target, not to Arch's name for the CPU,
+  # so the name is written out. pacman requires the `.pkg.tar.zst` ending.
+  artifactName: Hercule-linux-x86_64.pkg.tar.zst
+  # electron-builder gives fpm `amd64` for this target, which pacman refuses
+  # as the architecture of a package. Arch calls it `x86_64`.
+  fpm:
+    - --architecture=x86_64
+  depends:
+    - gtk3
+    - libnotify
+    - nss
+    - libxss
+    - libxtst
+    - xdg-utils
+    - at-spi2-core
+    - util-linux-libs
+    - libsecret
+    - alsa-lib
+    - mesa
+
+# The file name every build of the `.deb` has, so the `edge` release can
+# replace it in place. `${arch}` is Debian's name for the CPU, amd64 or arm64.
+artifactName: Hercule-linux-${arch}.${ext}
 
 # Spec 17, §Security baseline. Flipping a fuse changes the Electron binary and
 # so breaks its ad hoc signature; `resetAdHocDarwinSignature` signs it again,

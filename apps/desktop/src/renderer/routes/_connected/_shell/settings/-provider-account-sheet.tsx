@@ -124,7 +124,7 @@ export function OpenedProviderAccountSheet({
   const [replacingCredential, setReplacingCredential] = useState(false);
   const [timezone] = useState(() => resolveBrowserTimezone());
   const label = useSavedProviderAccountLabel(client, account);
-  const draft = useTextDraft(label.value, label.save);
+  const draft = useTextDraft(bridge.platform, label.value, label.save);
   const defaultHarness = useSavedProviderAccountDefaultHarness(client, account);
   const install = useMutation({
     mutationFn: (machine: ProviderAccountMachine) =>

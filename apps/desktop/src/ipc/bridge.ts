@@ -1,13 +1,14 @@
 /**
  * The types of the bridge: the object the preload exposes to the renderer as
- * `window.bridge`, with one function per channel of the IPC contract. They
- * are derived from the contract, so a channel with no bridge function, or a
- * function whose types differ from its channel's, is a type error in the
- * preload.
+ * `window.bridge`, with one function per channel of the IPC contract, and the
+ * platform the app runs on. The functions are derived from the contract, so a
+ * channel with no bridge function, or a function whose types differ from its
+ * channel's, is a type error in the preload.
  *
  * This file holds types only. The preload and the renderer import it with
  * `import type`, so neither loads the contract, nor Effect, at run time.
  */
+import type { DesktopPlatform } from "./platform/desktop-platform";
 import type {
   EncodedIpcPayload,
   EncodedIpcRequest,
@@ -60,8 +61,26 @@ type IpcChannelEntity<Name> = Name extends `${infer Entity}.${string}` ? Entity 
  *   `controllerUrl.read()`;
  * - the main-to-renderer channel `menu.command` is the function
  *   `menu.onCommand(listener)`.
+ *
+ * Besides the channels, the bridge holds `platform`, the operating system the
+ * app runs on, and `hiddenWindowDraws`. The page reads the platform here, not from the browser's own
+ * `navigator.platform`, so a page drawn outside the app, such as the
+ * specimens and the screenshots of the goldens, says which platform it draws.
  */
-export type Bridge = {
+export type Bridge = BridgeChannels & {
+  readonly platform: DesktopPlatform;
+  /**
+   * True when a window that has never been shown still draws frames, so the
+   * page can wait for its first paint while main keeps the window hidden. False
+   * on native Wayland, where the compositor sends no frame callback to a
+   * surface that has never been shown, so the page draws nothing and runs no
+   * animation frame until the window shows. Chromium picks Wayland when
+   * `XDG_SESSION_TYPE` is `wayland`, and the preload reads the same variable.
+   */
+  readonly hiddenWindowDraws: boolean;
+};
+
+type BridgeChannels = {
   readonly [
     Entity in IpcChannelEntity<RendererToMainIpcChannelName | MainToRendererIpcChannelName>
   ]: {

@@ -214,11 +214,11 @@ const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
     target: "node",
     bundler: "vite",
     reason:
-      "The desktop preload is the bridge and nothing else, so at runtime it links its own files\n" +
-      "and electron alone. Types are free, such as the IPC contract's, when they are imported\n" +
-      "with `import type`.\n" +
+      "The desktop preload is the bridge and nothing else, so at runtime it links its own files,\n" +
+      "the IPC folder's platform/ folder (it has no imports) and electron alone. Types are free,\n" +
+      "such as the IPC contract's, when they are imported with `import type`.\n" +
       DESKTOP_PACKAGES_REASON,
-    firstParty: { own: ["."], packages: [] },
+    firstParty: { own: [".", "../ipc/platform"], packages: [] },
     forbidden: [{ what: "anything but electron", pattern: /^(?!electron$)/ }],
   },
   {

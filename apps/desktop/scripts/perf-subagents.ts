@@ -44,14 +44,20 @@ import type { ThreadFixture } from "./perf-fixture.ts";
 import {
   BUDGET,
   HIDDEN_SETTLE_MS,
+  MEMORY_NAME,
   MEMORY_READ_AT_MS,
   PARSE_FRAMES,
   READ_HELD_TOPICS,
   RECORD_FRAMES,
   VISIBLE_SAMPLE_AT_MS,
+  WAKEUPS_NAME,
   buildTopicRows,
+  countAppProcesses,
+  describeAppProcesses,
   evaluateInPage,
   findProcessUse,
+  formatWithin,
+  macLimit,
   openThreadOnce,
   readProcessMemory,
   sampleIdleUse,
@@ -60,6 +66,7 @@ import {
   type ProcessMemory,
   type ProcessUse,
   type TopicStep,
+  type Within,
 } from "./perf-measures.ts";
 import { pollUntil } from "./poll.ts";
 import type { ScriptStep } from "./scripted-runner.ts";
@@ -740,11 +747,11 @@ async function measureSubagentNudges(
   return { otherThreadBurst: await playBurst(otherId), openThreadBurst: await playBurst(openId) };
 }
 
-/** Sums the footprint of every process, and returns it with the renderer's, in MB. */
-function sumFootprints(memory: readonly ProcessMemory[]): { summed: number; renderer: number } {
+/** Sums the memory (`MEMORY_NAME`) of every process, and returns it with the renderer's, in MB. */
+function sumMemories(memory: readonly ProcessMemory[]): { summed: number; renderer: number } {
   return {
-    summed: memory.reduce((sum, sample) => sum + sample.footprintMb, 0),
-    renderer: memory.find((sample) => sample.label === "Tab")?.footprintMb ?? 0,
+    summed: memory.reduce((sum, sample) => sum + sample.memoryMb, 0),
+    renderer: memory.find((sample) => sample.label === "Tab")?.memoryMb ?? 0,
   };
 }
 
@@ -757,9 +764,12 @@ function formatRowChanges(durations: DurationCounts, ids: readonly string[]): st
 /** Prints what the subagent scenario measured, against spec 17 §What subagents cost. */
 export function reportSubagentLaunch(measured: SubagentLaunch): void {
   const { runningVisible, runningHidden, endedVisible, endedHidden } = measured;
-  const closed = sumFootprints(measured.memoryPaneClosed);
-  const opened = sumFootprints(measured.memoryPaneOpen);
-  const processes = Math.max(measured.memoryPaneClosed.length, measured.memoryPaneOpen.length);
+  const closed = sumMemories(measured.memoryPaneClosed);
+  const opened = sumMemories(measured.memoryPaneOpen);
+  const processes = Math.max(
+    countAppProcesses(measured.memoryPaneClosed),
+    countAppProcesses(measured.memoryPaneOpen),
+  );
   const rendererLimit = `no wakeups from the app (at most ${String(BUDGET.rendererWakeups)}/s)`;
   const readWakeups = (sample: PaneSample, type: string) =>
     findProcessUse(sample.use, type)?.wakeupsPerSecond ?? 0;
@@ -786,36 +796,36 @@ export function reportSubagentLaunch(measured: SubagentLaunch): void {
 
   // Budget, limit, measured, and whether the measurement is within the
   // limit, or null for a measure that is recorded but has no budget.
-  const budgets: [string, string, string, boolean | null][] = [
+  const budgets: [string, string, string, Within][] = [
     [
       "Processes",
       `none added: ${String(BUDGET.processes)}`,
-      `${String(processes)}: ${measured.memoryPaneOpen.map((sample) => sample.label).join(", ")}`,
+      describeAppProcesses(measured.memoryPaneOpen, processes),
       processes <= BUDGET.processes,
     ],
     [
-      "Footprint, summed, pane closed",
+      `${MEMORY_NAME}, summed, pane closed`,
       `at most ${String(BUDGET.summedFootprintMb)} MB`,
       `${closed.summed.toFixed(0)} MB`,
-      closed.summed <= BUDGET.summedFootprintMb,
+      macLimit(closed.summed <= BUDGET.summedFootprintMb),
     ],
     [
-      "Footprint, renderer, pane closed",
+      `${MEMORY_NAME}, renderer, pane closed`,
       `at most ${String(BUDGET.rendererFootprintMb)} MB`,
       `${closed.renderer.toFixed(0)} MB`,
-      closed.renderer <= BUDGET.rendererFootprintMb,
+      macLimit(closed.renderer <= BUDGET.rendererFootprintMb),
     ],
     [
-      `Footprint, summed, pane open on ${String(measured.paneRows)} rows`,
+      `${MEMORY_NAME}, summed, pane open on ${String(measured.paneRows)} rows`,
       `at most ${String(BUDGET.summedFootprintMb)} MB`,
       `${opened.summed.toFixed(0)} MB (${(opened.summed - closed.summed).toFixed(1)} MB more)`,
-      opened.summed <= BUDGET.summedFootprintMb,
+      macLimit(opened.summed <= BUDGET.summedFootprintMb),
     ],
     [
-      `Footprint, renderer, pane open on ${String(measured.paneRows)} rows`,
+      `${MEMORY_NAME}, renderer, pane open on ${String(measured.paneRows)} rows`,
       `at most ${String(BUDGET.rendererFootprintMb)} MB`,
       `${opened.renderer.toFixed(0)} MB (${(opened.renderer - closed.renderer).toFixed(1)} MB more)`,
-      opened.renderer <= BUDGET.rendererFootprintMb,
+      macLimit(opened.renderer <= BUDGET.rendererFootprintMb),
     ],
     [
       "Idle visible, renderer, 4 running",
@@ -833,25 +843,25 @@ export function reportSubagentLaunch(measured: SubagentLaunch): void {
       "Idle hidden, renderer, 4 running",
       rendererLimit,
       `${readWakeups(runningHidden, "Tab").toFixed(1)}/s`,
-      readWakeups(runningHidden, "Tab") <= BUDGET.rendererWakeups,
+      macLimit(readWakeups(runningHidden, "Tab") <= BUDGET.rendererWakeups),
     ],
     [
       "Idle visible, renderer, every subagent ended",
       rendererLimit,
       `${readWakeups(endedVisible, "Tab").toFixed(1)}/s`,
-      readWakeups(endedVisible, "Tab") <= BUDGET.rendererWakeups,
+      macLimit(readWakeups(endedVisible, "Tab") <= BUDGET.rendererWakeups),
     ],
     [
       "Idle visible, GPU, every subagent ended",
       `at most ${String(BUDGET.gpuWakeupsVisible)} wakeups/s`,
       `${readWakeups(endedVisible, "GPU").toFixed(1)}/s`,
-      readWakeups(endedVisible, "GPU") <= BUDGET.gpuWakeupsVisible,
+      macLimit(readWakeups(endedVisible, "GPU") <= BUDGET.gpuWakeupsVisible),
     ],
     [
       "Idle hidden, renderer, every subagent ended",
       rendererLimit,
       `${readWakeups(endedHidden, "Tab").toFixed(1)}/s`,
-      readWakeups(endedHidden, "Tab") <= BUDGET.rendererWakeups,
+      macLimit(readWakeups(endedHidden, "Tab") <= BUDGET.rendererWakeups),
     ],
     [
       `Durations, running rows on screen, visible ${visibleSeconds.toFixed(1)} s`,
@@ -933,19 +943,19 @@ export function reportSubagentLaunch(measured: SubagentLaunch): void {
   console.log("Memory, 13 s after the page opened (pane closed) and 13 s after the pane opened:");
   console.log(
     formatTable(
-      ["Process", "PID", "Footprint MB, pane closed", "Footprint MB, pane open"],
+      ["Process", "PID", `${MEMORY_NAME} MB, pane closed`, `${MEMORY_NAME} MB, pane open`],
       measured.memoryPaneOpen.map((sample) => [
         sample.label,
         String(sample.pid),
         measured.memoryPaneClosed
           .find((entry) => entry.label === sample.label)
-          ?.footprintMb.toFixed(1) ?? "-",
-        sample.footprintMb.toFixed(1),
+          ?.memoryMb.toFixed(1) ?? "-",
+        sample.memoryMb.toFixed(1),
       ]),
     ),
   );
   console.log();
-  console.log("CPU % / wakeups a second over 10 s, with the pane open:");
+  console.log(`CPU % / ${WAKEUPS_NAME.toLowerCase()} a second over 10 s, with the pane open:`);
   console.log(
     formatTable(
       [
@@ -972,7 +982,7 @@ export function reportSubagentLaunch(measured: SubagentLaunch): void {
         budget,
         limit,
         measuredText,
-        within === null ? "-" : within ? "yes" : "over",
+        formatWithin(within),
       ]),
     ),
   );

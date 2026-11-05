@@ -297,12 +297,19 @@ describe("the thread view", () => {
     const { url, fleet, client } = await arrangeFleet();
     const runner = await fleet.enlistRunner("studio");
     // The script waits on a Request until the thread is open, so the whole
-    // message streams while the page listens.
+    // message streams while the page listens. The message stops in the middle
+    // of its second paragraph until the test has seen that paragraph being
+    // written next to the first one, drawn as markdown: on a slow machine the
+    // page can otherwise take the whole message in one frame, and there would
+    // be no such state to see.
+    const insideSecondParagraph = createMessagePause(
+      FIRST_PARAGRAPH.markdown.split(" ").length + 2,
+    );
     const { thread, played } = await fleet.spawnScriptedThread(
       { runner, prompt: "Why does the checkout test fail?" },
       [
         { kind: "command", command: "pnpm test", ask: true },
-        { kind: "message", text: ANSWER, deltaMs: 40 },
+        { kind: "message", text: ANSWER, deltaMs: 40, pauses: [insideSecondParagraph.pause] },
         { kind: "end", state: "completed" },
       ],
     );
@@ -319,6 +326,13 @@ describe("the thread view", () => {
       params: { id: thread.id },
       payload: { requestId: openRequest!.requestId, decision: "allow" },
     });
+    await expect
+      .poll(async () => {
+        const last = (await page.evaluate(READ_LAST_AGENT_TEXT)) as AgentTextSnapshot | undefined;
+        return last?.text === FIRST_PARAGRAPH.rendered && (last.openParagraph ?? "") !== "";
+      })
+      .toBe(true);
+    insideSecondParagraph.resume();
     await played;
     await fleet.waitForTurn(thread.id, 1, "completed");
 

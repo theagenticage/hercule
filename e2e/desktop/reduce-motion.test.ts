@@ -38,14 +38,18 @@ it("starts no transition when a control is hovered with Reduce motion on, and on
   );
   const restingBackground = await readBackground();
   await button.hover();
+  // The page handles the hover some time after it is sent, so the test waits
+  // until the button has changed. Without that wait, a page that has not
+  // handled the hover yet has no transition either, and the check below would
+  // mean nothing. Reading the style also applies the change.
+  await expect.poll(readBackground).not.toBe(restingBackground);
   // `getAnimations` recalculates the page's style first, so a transition the
   // hover started would be in the list.
   expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
-  expect(await readBackground()).not.toBe(restingBackground);
   // Reading the style applies the change while Reduce motion is still on, so
   // the button's return to rest cannot start a transition below.
   await page.mouse.move(0, 0);
-  expect(await readBackground()).toBe(restingBackground);
+  await expect.poll(readBackground).toBe(restingBackground);
 
   // With Reduce motion off, the same hover starts the button's transition.
   // That proves the hover changes a property that transitions, so the empty

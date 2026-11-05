@@ -10,11 +10,16 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ElectronApplication, Page } from "playwright";
 import { describe, expect, it } from "vitest";
-import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
+import {
+  isWindowVisible,
+  readSettings,
+  RUNS_ON_MAC,
+} from "../../apps/desktop/scripts/packaged-app";
 import {
   createUserDataDirForTest,
   launchForTest,
   runSecondInstance,
+  waitForExit,
   type PageGlobal,
 } from "./harness";
 
@@ -74,7 +79,9 @@ describe("the window", () => {
     ).toBeNull();
   });
 
-  it("sits the traffic lights where the Bureau pages draw them", async () => {
+  // Only macOS has traffic lights and an inset title bar: on Linux the window
+  // has the system's own frame, and Electron has no `getWindowButtonPosition`.
+  it.skipIf(!RUNS_ON_MAC)("sits the traffic lights where the Bureau pages draw them", async () => {
     const { app } = await launchForTest();
 
     const position = await app.evaluate(({ BrowserWindow }) =>
@@ -166,9 +173,11 @@ describe("the window", () => {
   it("puts New Thread, ⌘N, and Close Window, ⌘W, in the File menu", async () => {
     const { app } = await launchForTest();
 
-    // macOS runs the menu item itself, and only for a focused window, which
-    // a test cannot count on: its screen may be locked. So the test checks
+    // The menu runs the item itself, and only for a focused window, which a
+    // test cannot count on: a Mac's screen may be locked. So the test checks
     // the menu main installs, and the next test checks what closing does.
+    // Where closing the window quits the app (Linux), the item is Electron's
+    // own and is labelled Close.
     const file = await app.evaluate(({ Menu }) =>
       Menu.getApplicationMenu()!
         .items.find((item) => item.label === "File")
@@ -177,27 +186,69 @@ describe("the window", () => {
     );
     expect(file).toEqual([
       { label: "New Thread", role: null, accelerator: "CmdOrCtrl+N" },
-      { label: "Close Window", role: "close", accelerator: "CmdOrCtrl+W" },
+      {
+        label: RUNS_ON_MAC ? "Close Window" : "Close",
+        role: "close",
+        accelerator: "CmdOrCtrl+W",
+      },
     ]);
   });
 
-  it("hides when it is closed, the app keeps running, and activating the app shows it again", async () => {
-    const { app } = await launchForTest();
+  // Where closing the window hides it (macOS), a click on the Dock icon brings
+  // it back. Linux has no Dock, so closing quits: the next test.
+  it.skipIf(!RUNS_ON_MAC)(
+    "hides when it is closed, the app keeps running, and activating the app shows it again",
+    async () => {
+      const { app } = await launchForTest();
 
-    // The red traffic light and ⌘W both close the window this way.
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]!.close();
-    });
-    await expect.poll(() => isWindowVisible(app)).toBe(false);
-    expect(await countWindows(app)).toBe(1);
-    expect(app.process().exitCode).toBeNull();
+      // The red traffic light and ⌘W both close the window this way.
+      await app.evaluate(({ BrowserWindow }) => {
+        BrowserWindow.getAllWindows()[0]!.close();
+      });
+      await expect.poll(() => isWindowVisible(app)).toBe(false);
+      expect(await countWindows(app)).toBe(1);
+      expect(app.process().exitCode).toBeNull();
 
-    // A click on the dock icon emits `activate` on the app.
-    await app.evaluate(({ app }) => {
-      app.emit("activate", {}, false);
-    });
-    await expect.poll(() => isWindowVisible(app)).toBe(true);
-  });
+      // A click on the dock icon emits `activate` on the app.
+      await app.evaluate(({ app }) => {
+        app.emit("activate", {}, false);
+      });
+      await expect.poll(() => isWindowVisible(app)).toBe(true);
+    },
+  );
+
+  it.skipIf(RUNS_ON_MAC)(
+    "quits when it is closed, and the next launch opens the window where it was",
+    async () => {
+      const userDataDir = createUserDataDirForTest();
+      const first = await launchForTest(userDataDir);
+      const { x, y, width, height } = await first.app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]!.getBounds(),
+      );
+      // A position and a size the window does not have by default.
+      const moved = { x: x + 20, y: y + 20, width: width - 100, height: height - 100 };
+      await first.app.evaluate(({ BrowserWindow }, bounds) => {
+        BrowserWindow.getAllWindows()[0]!.setBounds(bounds);
+      }, moved);
+      const bounds = await first.app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]!.getBounds(),
+      );
+      expect(bounds).toEqual(moved);
+
+      await first.app.evaluate(({ BrowserWindow }) => {
+        BrowserWindow.getAllWindows()[0]!.close();
+      });
+
+      expect(await waitForExit(first.app.process(), "the app after its window closed")).toBe(0);
+      expect(readSettings(userDataDir)["window"]).toEqual({ bounds, fullScreen: false });
+      const second = await launchForTest(userDataDir);
+      expect(
+        await second.app.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]!.getBounds(),
+        ),
+      ).toEqual(bounds);
+    },
+  );
 
   it("ignores a hide reported after the window has closed, so quitting shows no error", async () => {
     const { app, userDataDir, close } = await launchForTest();
@@ -280,11 +331,23 @@ describe("the window's state", () => {
 
   it("moves a window saved where no display is back onto a display", async () => {
     const userDataDir = createUserDataDirForTest();
+    // The window is saved at a size that fits the work area, read from a
+    // first launch. A work area can be smaller than the usual 1000 by 700
+    // window, such as a hosted Mac's 679 points high, and the system then
+    // shrinks the window, as it should.
+    const probe = await launchForTest(userDataDir);
+    const area = await probe.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea);
+    await probe.close();
+    const size = {
+      width: Math.min(1000, area.width - 40),
+      height: Math.min(700, area.height - 80),
+    };
+
     // macOS keeps part of a window on a display, so the app cannot be made to
     // save a position on none. The test writes the settings file itself,
     // with a position far off every display, as when the display the window
     // was on has been unplugged since.
-    const offScreen = { x: -30_000, y: -30_000, width: 1000, height: 700 };
+    const offScreen = { x: -30_000, y: -30_000, ...size };
     writeFileSync(
       join(userDataDir, "settings.json"),
       JSON.stringify({ window: { bounds: offScreen, fullScreen: false } }),
@@ -295,7 +358,7 @@ describe("the window's state", () => {
       bounds: BrowserWindow.getAllWindows()[0]!.getBounds(),
       workAreas: screen.getAllDisplays().map((display) => display.workArea),
     }));
-    expect({ width: bounds.width, height: bounds.height }).toEqual({ width: 1000, height: 700 });
+    expect({ width: bounds.width, height: bounds.height }).toEqual(size);
     const insideWorkArea = workAreas.some(
       (area) =>
         bounds.x >= area.x &&

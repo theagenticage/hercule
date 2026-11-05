@@ -27,7 +27,8 @@ export function AssistantRecord({
   readonly pose: Pose;
   readonly onDeleted: (id: string) => void;
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { controller, bridge } = useRouteContext({ from: "/_connected" });
+  const { client } = controller;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   // The time is read once, when the record opens: the heartbeat's "now" mark
   // does not move while the section is open, so the app does no work while idle.
@@ -76,12 +77,14 @@ export function AssistantRecord({
           onSave={heartbeat.save}
           promptError={prompt.error}
           onSavePrompt={prompt.save}
+          platform={bridge.platform}
         />
         <RotationSection
           assistantName={assistant.name}
           rotation={rotation.value}
           error={rotation.error}
           onSave={rotation.save}
+          platform={bridge.platform}
         />
         <DeleteSection assistant={assistant} onDeleted={onDeleted} />
       </div>
