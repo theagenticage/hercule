@@ -153,6 +153,35 @@ export function DraftComposer({
   const { catalogs, resolved, fields, workspaceMenu, branch, workspaceLabel } = view;
   const { problem } = fields.machine;
   const signIn = problem?.signIn ?? null;
+  const machinePick = (
+    <DraftPick
+      className="lip-pick"
+      label={fields.machine.name}
+      glyph={
+        problem === null ? (
+          <LaptopIcon size={13} />
+        ) : (
+          <span className="lip-alert">
+            <AlertIcon size={13} />
+          </span>
+        )
+      }
+      locked={fields.machine.locked}
+      menuLabel="Machine"
+      align="end"
+      width="widest"
+    >
+      {(close) => (
+        <MachineMenuContent
+          rows={fields.machine.rows}
+          onPick={(runnerId) => {
+            onChoose({ kind: "runner", runnerId });
+            close();
+          }}
+        />
+      )}
+    </DraftPick>
+  );
   const { config } = resolved;
   const { pill } = fields.model;
   const descriptors = fields.options;
@@ -273,56 +302,31 @@ export function DraftComposer({
           </DraftPick>
         )}
         <span className="spacer" />
-        {/* The machine and its problem read as one item, so they share a
-            span and the lip's wider gap stays between items. */}
-        <span className="lip-machine">
-          <DraftPick
-            className="lip-pick"
-            label={fields.machine.name}
-            glyph={
-              problem === null ? (
-                <LaptopIcon size={13} />
-              ) : (
-                <span className="lip-alert">
-                  <AlertIcon size={13} />
-                </span>
-              )
-            }
-            locked={fields.machine.locked}
-            menuLabel="Machine"
-            align="end"
-            width="widest"
-          >
-            {(close) => (
-              <MachineMenuContent
-                rows={fields.machine.rows}
-                onPick={(runnerId) => {
-                  onChoose({ kind: "runner", runnerId });
-                  close();
+        {problem === null ? (
+          machinePick
+        ) : (
+          // The machine and its problem read as one item, so they share a
+          // span and the lip's wider gap stays between items. A machine with
+          // no problem has no span, so the lip is the book's.
+          <span className="lip-machine">
+            {machinePick}
+            <span aria-hidden="true">·</span>
+            {signIn === null ? (
+              problem.reason
+            ) : (
+              <button
+                type="button"
+                className="link"
+                aria-label={`Sign in to ${signIn.subject}`}
+                onClick={() => {
+                  onSignIn(signIn);
                 }}
-              />
+              >
+                Sign in
+              </button>
             )}
-          </DraftPick>
-          {problem === null ? null : (
-            <>
-              <span aria-hidden="true">·</span>
-              {signIn === null ? (
-                problem.reason
-              ) : (
-                <button
-                  type="button"
-                  className="link"
-                  aria-label={`Sign in to ${signIn.subject}`}
-                  onClick={() => {
-                    onSignIn(signIn);
-                  }}
-                >
-                  Sign in
-                </button>
-              )}
-            </>
-          )}
-        </span>
+          </span>
+        )}
       </div>
     </div>
   );

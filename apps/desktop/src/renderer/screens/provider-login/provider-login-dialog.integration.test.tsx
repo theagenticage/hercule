@@ -166,9 +166,10 @@ describe("the provider sign-in dialog", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(screen.queryByRole("alert")).toBeNull();
-    const signedIn = document.querySelector<HTMLElement>(".lip-machine")!;
-    expect(signedIn.textContent).toBe("moss");
-    expect(signedIn.querySelector(".lip-alert")).toBeNull();
+    // A machine with no problem is the book's lip again: its laptop and its name.
+    expect(document.querySelector(".lip-machine")).toBeNull();
+    expect(document.querySelector(".lip-alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "moss" })).toBeTruthy();
   });
 
   it("offers the sign-in beside a machine that the workspace it joins decides", async () => {
