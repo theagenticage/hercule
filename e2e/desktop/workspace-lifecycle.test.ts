@@ -707,8 +707,17 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     .locator(`a.side-row[href="/threads/${shared.id}"]`)
     .first()
     .click();
+  // The details button of the thread that was open before the click is still
+  // on screen until the page has moved to the new thread. A press on it then
+  // opens a dialog on a page that goes away, and the dialog goes with it.
+  await page
+    .getByRole("navigation", { name: "Threads", exact: true })
+    .locator(`a.side-row[href="/threads/${shared.id}"][aria-current="page"]`)
+    .first()
+    .waitFor();
   await page.getByRole("button", { name: /workspace.*details|details.*workspace/i }).click();
   const adoptedDetails = page.getByRole("dialog", { name: "Workspace details", exact: true });
+  await adoptedDetails.waitFor();
   await expect
     .poll(() =>
       adoptedDetails

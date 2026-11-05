@@ -393,6 +393,21 @@ describe("Intake", () => {
       .poll(() => openSignalPane(page).locator(".ad-title").textContent())
       .toBe("Bump the checkout timeout");
 
+    // The list narrows to make room for the pane two frames after the pane
+    // opens, and on a busy machine those frames can come seconds late. A pane
+    // closed before the list has narrowed has no motion to wait for and stays
+    // drawn, so the test waits for the narrowed list. The pane also draws the
+    // new signal from scratch, which drops the focus, and the page gives it
+    // back to the list a moment later; a key pressed in between reaches
+    // nothing, so the test waits for the focus too.
+    await page.locator(".asks.has-pane").waitFor();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.activeElement?.closest('section[aria-label="Signals"]') !== null,
+        ),
+      )
+      .toBe(true);
     // Esc closes the pane and keeps the row selected; a second Esc clears
     // the selection.
     await page.keyboard.press("Escape");

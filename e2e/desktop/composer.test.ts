@@ -122,6 +122,8 @@ function readDistanceFromBottom(page: Page): Promise<number> {
  * the strip below the card.
  */
 async function scrollParagraphToCardBottom(page: Page, start: string): Promise<void> {
+  // The transcript draws its rows some time after the thread opens.
+  await page.locator(".msg-body p").filter({ hasText: start }).first().waitFor();
   await page.evaluate((start) => {
     const transcript = document.querySelector('section[aria-label="Transcript"]')!;
     const paragraph = [...transcript.querySelectorAll(".msg-body p")].find((each) =>
