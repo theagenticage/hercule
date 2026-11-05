@@ -11,8 +11,10 @@ import { describe, expect, it } from "vitest";
  *   paint properties: color, background, border-color, box-shadow, opacity,
  *   transform, content-visibility. A layout property may transition only
  *   once a measurement shows it is cheap; so far that is the width of a
- *   split's sized column, as its side pane opens or closes, and the width of
- *   the shell's sidebar, as it is shown or hidden.
+ *   split's sized column, as its side pane opens or closes, the width of
+ *   the shell's sidebar, as it is shown or hidden, and the height of a
+ *   profile's rows in the model menu, as one profile folds and another
+ *   unfolds.
  *
  * It also checks that:
  *
@@ -75,8 +77,8 @@ const ENDLESS_ANIMATIONS = [
 ];
 
 /**
- * The rules allowed to transition `width`, each because spec 17 records a
- * measurement showing it drops no frame:
+ * The rules allowed to transition a layout property, each with that property,
+ * because spec 17 records a measurement showing it is cheap:
  *
  * - Intake's list, the sized column of a split, as its side pane opens or
  *   closes. The column's rows are lines of a fixed count, each cut with an
@@ -86,10 +88,16 @@ const ENDLESS_ANIMATIONS = [
  *   hidden. The sidebar inside keeps its width, so a frame never lays out
  *   its rows again; it lays out the box and the main pane beside it, which
  *   was measured with a long transcript open.
+ * - The rows of a Model Profile in the composer's model menu, and the 4px
+ *   under them, as the profile folds or unfolds. The menu is a popover in the
+ *   top layer, so a frame lays out the menu alone, and its rows are lines of
+ *   one height whose width does not change while they fold.
  */
-const SPLIT_WIDTH_TRANSITIONS = [
-  { file: "screens/intake/intake.css", rule: ".asks-list" },
-  { file: "shell/shell.css", rule: ".side-slot" },
+const LAYOUT_TRANSITIONS = [
+  { file: "screens/intake/intake.css", rule: ".asks-list", property: "width" },
+  { file: "shell/shell.css", rule: ".side-slot", property: "width" },
+  { file: "screens/thread/model-menu-list.css", rule: ".ac-body", property: "height" },
+  { file: "screens/thread/model-menu-list.css", rule: ".ac-body", property: "margin-bottom" },
 ];
 
 /** One declaration of a stylesheet, with the blocks it sits in. */
@@ -219,10 +227,10 @@ const appliesToEveryElement = (declaration: Declaration): boolean =>
 function checkTransition(declaration: Declaration): string[] {
   if (declaration.value === "none") return [];
   const where = describeLocation(declaration);
-  const isSplitColumn = SPLIT_WIDTH_TRANSITIONS.some(
+  const layoutProperties = LAYOUT_TRANSITIONS.filter(
     (entry) => entry.file === declaration.file && declaration.blocks.at(-1) === entry.rule,
-  );
-  const allowed = isSplitColumn ? [...PAINT_PROPERTIES, "width"] : PAINT_PROPERTIES;
+  ).map((entry) => entry.property);
+  const allowed = [...PAINT_PROPERTIES, ...layoutProperties];
   return splitOutsideParentheses(declaration.value, /,/).flatMap((item) => {
     const words = splitOutsideParentheses(item, /\s/);
     const times = words.filter(isTime);

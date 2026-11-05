@@ -30,6 +30,13 @@
   max-height: calc(100% - 16px);
   overflow-y: auto;
 }
+/* The model menu scrolls inside its list (model-menu-list.css), never as a
+   whole: two scroll areas inside each other would each show a scroll bar. */
+.menu:popover-open:has(> .model-menu) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .menu--end {
   position-area: block-start span-inline-start;
 }
@@ -181,6 +188,12 @@ button.line:hover {
    gap to the menu's edge. */
 .menu-filter {
   width: 100%;
+}
+/* The filter has the focus while its menu is open, and the section around it
+   leaves only 8px to the popover's edge. With the page's 2px offset, the ring
+   would nearly touch the rim, so here it hugs the field. */
+.menu-filter:focus-visible {
+  outline-offset: 0;
 }
 .pop-sec:has(> .menu-filter) {
   padding-top: 8px;

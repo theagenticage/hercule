@@ -1,16 +1,49 @@
 /* The model menu's list. The composer's menu is a flex column of the filter,
    this list, and for a thread that has started, its foot; the list scrolls
    inside it, so the filter stays in view, and the whole menu is at most 60%
-   of the window's height (spec 17 §The composer). */
+   of the window's height (spec 17 §The composer). In the composer, the
+   popover around it is a flex column too, which never scrolls itself
+   (menus.css), so the menu also shrinks to the space above the composer and
+   the list is the one place that scrolls.
+
+   `overscroll-behavior` keeps a scroll that reaches the end of the list from
+   moving the thread behind the popover. */
 .model-menu {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   max-height: 60vh;
 }
 .model-menu-list {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* With one profile unfolded, the heads stay in view and only the unfolded
+   profile's rows scroll. Each profile's box gives way (`display: contents`),
+   so its head and its body are items of the list itself: a head keeps its
+   height, and only bodies shrink to what the heads leave free. Were the
+   profile's box the item, a profile folding away would shrink below its own
+   head, which would slide over the head under it and then jump back when the
+   fold ends.
+
+   The body ends 4px above the head under it, so its rows never run into the
+   head's rule. That space folds with the body (below). */
+.model-menu-list.pins-heads > .ac {
+  display: contents;
+}
+.pins-heads .ac-head {
+  flex: none;
+}
+.pins-heads .ac-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.pins-heads .ac-body {
+  margin-bottom: 4px;
 }
 /* The rule between the filter and the list that follows it. */
 .pop-sec:has(> .menu-filter) + .model-menu-list {
@@ -24,8 +57,9 @@
    follows the prototype's `.ac-h` (r3.css), which is 34px high and sets the
    profiles apart with a rule between them. What an unfolded profile holds is
    indented by 10px, as the prototype's `.ac-b` is, so the lanes read as its
-   children. */
-.ac + .ac {
+   children. The rule is drawn on the head, because the profile's own box
+   gives way while the heads stay in view (above). */
+.ac + .ac > .ac-head {
   border-top: 1px solid var(--divider);
 }
 .ac-head {
@@ -73,13 +107,53 @@
 }
 /* Under its head, the first section needs no rule above it, and sits 3px
    lower, which puts its label 12px under the head as the prototype's does. */
-.ac-head + .pop-sec {
+.ac-body > .pop-sec:first-child {
   padding-top: 3px;
-  border-top: 0;
 }
-.ac-head ~ .pop-sec,
-.ac-head ~ .menu-note {
+.ac-body {
   margin-left: 10px;
+}
+
+/* Switching profiles: the profile that was open folds away while the clicked
+   one unfolds, in the same time, so the heads between them glide to their new
+   places and the menu's edge follows. Each body fades as it goes and comes.
+   `interpolate-size` lets the height move to and from `auto`. Under Reduce
+   motion the menu switches at once, and no profile folds (`ModelMenu`).
+
+   While the two change places, their scroll bars are drawn clear rather than
+   switched off. A scroll bar that takes room (a mouse is attached) then keeps
+   its room, so the rows keep their width and are never laid out again when
+   the switch ends; only the bar's colour comes back.
+
+   Height is a layout property, which spec 17's motion rule lets transition
+   only where a measurement shows it is cheap (§Measured, "The model menu's
+   fold"): the popover sits in the top layer, so a frame lays out only the
+   menu, never the page behind it. */
+@media (prefers-reduced-motion: no-preference) {
+  .model-menu-list {
+    interpolate-size: allow-keywords;
+  }
+  .ac-body {
+    transition:
+      height var(--dur-2) var(--ease-out),
+      margin-bottom var(--dur-2) var(--ease-out),
+      opacity var(--dur-2) var(--ease-out);
+  }
+  .ac-body.is-folding {
+    height: 0;
+    margin-bottom: 0;
+    opacity: 0;
+  }
+  .ac-body:is(.is-folding, .is-unfolding) {
+    scrollbar-color: transparent transparent;
+  }
+  @starting-style {
+    .ac-body.is-unfolding {
+      height: 0;
+      margin-bottom: 0;
+      opacity: 0;
+    }
+  }
 }
 
 /* Not in the book. A lane that a screen outside the composer lights, such as
