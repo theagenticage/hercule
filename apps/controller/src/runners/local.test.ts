@@ -27,6 +27,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { bootWith, type BootOutcome, type ControllerServices } from "../bootstrap";
 import { operationLayers, serve } from "../http";
+import { findFreePort } from "../promotion/testing";
 import { waitUntil } from "../sessions/testing";
 import { Settings } from "../settings";
 import {
@@ -65,17 +66,6 @@ const isAlive = (pid: number): boolean => {
   } catch {
     return false;
   }
-};
-
-/**
- * Returns a free port, found by binding one and releasing it. The boot needs
- * the address before it runs, because the child is told where to join.
- */
-const findFreePort = async (): Promise<number> => {
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
-  const port = Number(server.port);
-  await server.stop(true);
-  return port;
 };
 
 /**
