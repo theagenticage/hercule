@@ -26,6 +26,7 @@ import type {
 import { buildAccessModeMenu, type AccessModeMenuItem } from "./access-modes";
 import {
   buildProviderAccountName,
+  describeHarnessOnRunner,
   findHarnessLoginMethod,
   findProviderAccountNameIfAmbiguous,
   findProviderAccountReadiness,
@@ -79,6 +80,17 @@ export interface ComposerBlocked {
   readonly signIn: SignInTarget | null;
   /** Whether adding an account would fix the problem, because the user has none to run the thread with. */
   readonly addAccount: boolean;
+}
+
+/**
+ * Why the thread's account cannot run on the thread's machine, and the
+ * sign-in that fixes it when a sign-in does.
+ */
+export interface MachineProblem {
+  /** The reason in a few words, such as "not signed in" or "offline" (see `findDimmedReason`). */
+  readonly reason: string;
+  /** The sign-in that fixes the problem, or `null` when no sign-in does. */
+  readonly signIn: SignInTarget | null;
 }
 
 /** A runner the thread could be placed on, and whether it is the current one. */
@@ -138,7 +150,12 @@ export interface ComposerFields {
   readonly workspace: ComposerField & { readonly value: WorkspacePick };
   /** The runner: the current one with the reason it is dimmed, if it is, and all runners. */
   readonly machine: ComposerField & {
+    /** The runner's name and, when it is dimmed, why: "moss · not signed in". */
     readonly label: string;
+    /** The runner's name alone, or "no machine". */
+    readonly name: string;
+    /** Why the account cannot run on the runner, or `null` when it can. */
+    readonly problem: MachineProblem | null;
     /**
      * The runner every other field reads from. It is not always
      * `config.runnerId`: when no runner is selectable, the draft has picked
@@ -183,7 +200,8 @@ const UNREADY_WORKSPACE_REASONS: Readonly<Record<Exclude<WorkspaceStatus, "ready
  *   it (it left the catalog, or the harness does not list it).
  *
  * Only a missing sign-in or token, and the lack of an account, can be fixed
- * with a button from here.
+ * with a button from here. `signIn` is the sign-in that fixes the account on
+ * the runner (`findSignInFix`), or `null` when none does.
  */
 const findBlocker = (
   joined: Workspace | undefined,
@@ -191,6 +209,7 @@ const findBlocker = (
   account: ProviderAccount | undefined,
   runner: Runner | undefined,
   readiness: ProviderAccountReadinessState,
+  signIn: SignInTarget | null,
   entry: ResolvedModelProfileEntry | undefined,
 ): ComposerBlocked | null => {
   const stop = (
@@ -211,6 +230,10 @@ const findBlocker = (
   // what is wrong.
   if (entry?.problem?.reason === "harness-not-allowed") return stop(entry.problem.message);
   const name = buildProviderAccountName(providers, account);
+  // Whether the credential is a token a sign-in makes or a key the user types
+  // in decides the words; whether the sign-in can run on this runner is a
+  // separate question, answered by `signIn`.
+  const holdsToken = findHarnessLoginMethod(providers, account) === "create-token";
   switch (readiness) {
     case "ready":
       // The runner can run the account. Only the model itself can still be at fault.
@@ -218,26 +241,52 @@ const findBlocker = (
         ? null
         : stop(entry.problem.message);
     case "credential-missing":
-      return findHarnessLoginMethod(providers, account) === "create-token"
-        ? stop(`${name} has no token; make one`, {
-            signIn: buildSignInTarget(providers, account, runner),
-          })
+      return holdsToken
+        ? stop(`${name} has no token; make one`, { signIn })
         : stop(`${name} has no key; add one`);
     case "token-expired":
-      return findHarnessLoginMethod(providers, account) === "create-token"
-        ? stop(`${name}'s token expired; make a new one`, {
-            signIn: buildSignInTarget(providers, account, runner),
-          })
+      return holdsToken
+        ? stop(`${name}'s token expired; make a new one`, { signIn })
         : stop(`${name}'s key expired; add a new one`);
     case "harness-too-old":
       return stop(`The harness on ${runner.name} is older than Hercule supports; update it`);
     case "harness-missing":
       return stop(`${name} is not on ${runner.name}`);
     case "not-signed-in":
-      return stop(`${name} is not signed in on ${runner.name}`, {
-        signIn: buildSignInTarget(providers, account, runner),
-      });
+      return stop(`${name} is not signed in on ${runner.name}`, { signIn });
   }
+};
+
+/**
+ * Returns the sign-in that makes `account` ready on `runner`, or `null` when
+ * no sign-in does or none can run there now. A sign-in fixes:
+ *
+ * - an account that is not signed in on the runner;
+ * - a missing or expired token that a sign-in makes.
+ *
+ * A key the user types in is not fixed by a sign-in. The sign-in runs in the
+ * account's default harness, whatever harness the thread picked, so it can
+ * run only on a runner that is online and active, and has that harness
+ * installed and an adapter for it.
+ */
+const findSignInFix = (
+  catalogs: Pick<ThreadCatalogs, "providers" | "harnesses">,
+  account: ProviderAccount,
+  runner: Runner,
+  readiness: ProviderAccountReadinessState,
+): SignInTarget | null => {
+  const method = findHarnessLoginMethod(catalogs.providers, account);
+  const fixes =
+    method !== null &&
+    (readiness === "not-signed-in" ||
+      ((readiness === "credential-missing" || readiness === "token-expired") &&
+        method === "create-token"));
+  const harness = catalogs.harnesses.find((each) => each.id === account.defaultHarnessId);
+  if (!fixes || harness === undefined || runner.lifecycle !== "active") return null;
+  const { reachable, present, adapter } = describeHarnessOnRunner(runner, harness);
+  return reachable && present && adapter
+    ? buildSignInTarget(catalogs.providers, account, runner)
+    : null;
 };
 
 const findLockedReason = (kind: ThreadKind, field: string): string | null =>
@@ -304,6 +353,10 @@ export const buildComposerFields = (
   const dimmed =
     account === undefined || runner === undefined ? null : findDimmedReason(runner, readiness);
   const name = runner?.name ?? "no machine";
+  const signIn =
+    account === undefined || runner === undefined
+      ? null
+      : findSignInFix(catalogs, account, runner, readiness);
 
   return {
     accessMode: {
@@ -357,6 +410,8 @@ export const buildComposerFields = (
           : dimmed === null
             ? name
             : `${name} · ${dimmed}`,
+      name,
+      problem: dimmed === null ? null : { reason: dimmed, signIn },
       runnerId: runner?.id ?? null,
       rows,
     },
@@ -379,6 +434,7 @@ export const buildComposerFields = (
             account,
             runner,
             readiness,
+            signIn,
             resolved.kind === "draft" ? resolved.entry : undefined,
           ),
   };

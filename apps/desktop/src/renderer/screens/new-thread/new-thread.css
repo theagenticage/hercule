@@ -93,6 +93,12 @@ button.lip-pick:hover,
 .lip-pick[aria-expanded="true"] {
   color: var(--ink);
 }
+/* Not in the book. When the thread's account cannot run on the machine, the
+   laptop gives way to an alert mark in marigold, the book's colour for "your
+   move", and the machine is followed by Sign in or by the reason. */
+.lip-alert {
+  color: var(--you-ink);
+}
 .starts {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

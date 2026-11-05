@@ -336,6 +336,8 @@ export interface DraftScreenRecords {
    * Bureau book draws no skill chip, so the list read by it is empty.
    */
   readonly skillsPreview: SkillsPreviewFilter;
+  /** The message of a start that failed, which the composer shows under its row. None when left out. */
+  readonly failure?: string;
 }
 
 /** What Settings > Assistants reads besides the sidebar's lists. */
@@ -1467,10 +1469,11 @@ async function mountShellSpecimen(
   seedQueryCache(queryClient, client, records, screens);
   const pendingSubmissions = createPendingSubmissions();
   if (screens.draft !== undefined) {
-    pendingSubmissions.writePicks(
-      buildDraftKey(screens.draft.projectId, null),
-      screens.draft.picks,
-    );
+    const key = buildDraftKey(screens.draft.projectId, null);
+    pendingSubmissions.writePicks(key, screens.draft.picks);
+    if (screens.draft.failure !== undefined) {
+      pendingSubmissions.recordFailure(key, screens.draft.failure);
+    }
   }
   for (const sessionId of unsentThreadIds) {
     pendingSubmissions.writeText(sessionId, "Also check the alt text on the gallery page");

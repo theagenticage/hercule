@@ -198,6 +198,23 @@ export const WEBSHOP_DRAFT: DraftScreenRecords = {
   skillsPreview: { runnerId: STUDIO_MAC.id, resourceId: [WEBSHOP_REPO.id] },
 };
 
+/**
+ * The Draft Thread in webshop on Codex, which is not signed in on
+ * studio-mac: the lip offers the sign-in, and the composer shows the start
+ * the controller refused for it.
+ */
+const SIGNED_OUT_DRAFT: DraftScreenRecords = {
+  ...WEBSHOP_DRAFT,
+  picks: {
+    ...DRAFT_PICKS,
+    providerAccountId: GPT.providerAccountId,
+    harnessId: GPT.harnessId,
+    model: GPT.slug,
+    options: {},
+  },
+  failure: "OpenAI is not signed in on studio-mac",
+};
+
 /** The user's GitHub Connection, made an hour before `SPECIMEN_NOW`. */
 const GITHUB_CONNECTION: Connection = {
   id: "c-github",
@@ -251,7 +268,8 @@ export interface DraftFixture {
 
 /**
  * Returns the fixture for the book's `?state=`: `first`, `first-no-repo`,
- * or, for no state or any other, the draft with its start cards. When
+ * `signed-out`, or, for no state or any other, the draft with its start
+ * cards. When
  * webshop has no repo, the shell's lists are the sidebar specimen's, which
  * hold no repo and no workspace.
  */
@@ -261,6 +279,8 @@ export const chooseDraftFixture = (state: string | null): DraftFixture => {
       return { records: DRAFT_PAGE_RECORDS, draft: FIRST_DRAFT };
     case "first-no-repo":
       return { records: SPECIMEN_RECORDS, draft: FIRST_NO_REPO_DRAFT };
+    case "signed-out":
+      return { records: DRAFT_PAGE_RECORDS, draft: SIGNED_OUT_DRAFT };
     default:
       return { records: DRAFT_PAGE_RECORDS, draft: WEBSHOP_DRAFT };
   }

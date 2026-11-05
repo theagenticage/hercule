@@ -7,6 +7,7 @@ import {
   type SignInTarget,
   type ThreadChoice,
 } from "@hercule/client-core";
+import { AlertIcon } from "../../icons/alert";
 import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
@@ -87,6 +88,11 @@ function DraftPick({
  * any, the model, Dictate and Send; then the lip under it, with the
  * workspace, the branch when there is one to pick, and the machine.
  *
+ * When the account cannot run on the machine, the machine's laptop glyph
+ * turns into an alert mark, and the machine is followed by Sign in when a
+ * sign-in fixes the problem, which calls `onSignIn`, or else by the reason,
+ * such as "offline".
+ *
  * Every selector makes one choice, which is passed to `onChoose`, and the
  * caller records it in the draft's picks. Joining an existing workspace sets
  * the machine too, because the draft is resolved to the workspace's machine.
@@ -139,12 +145,43 @@ export function DraftComposer({
   readonly fieldRef: Ref<HTMLElement>;
   readonly onTextChange: (text: string) => void;
   readonly onChoose: (choice: ThreadChoice) => void;
-  /** Opens the sign-in a dimmed entry of the model menu offers. */
+  /** Opens the sign-in a dimmed entry of the model menu, or the machine in the lip, offers. */
   readonly onSignIn: (target: SignInTarget) => void;
   readonly onSubmit: () => void;
   readonly onOpenWorkspaceMenu: () => void;
 }): JSX.Element {
-  const { catalogs, resolved, fields, workspaceMenu, branch, workspaceLabel, machineLabel } = view;
+  const { catalogs, resolved, fields, workspaceMenu, branch, workspaceLabel } = view;
+  const { problem } = fields.machine;
+  const signIn = problem?.signIn ?? null;
+  const machinePick = (
+    <DraftPick
+      className="lip-pick"
+      label={fields.machine.name}
+      glyph={
+        problem === null ? (
+          <LaptopIcon size={13} />
+        ) : (
+          <span className="lip-alert">
+            <AlertIcon size={13} />
+          </span>
+        )
+      }
+      locked={fields.machine.locked}
+      menuLabel="Machine"
+      align="end"
+      width="widest"
+    >
+      {(close) => (
+        <MachineMenuContent
+          rows={fields.machine.rows}
+          onPick={(runnerId) => {
+            onChoose({ kind: "runner", runnerId });
+            close();
+          }}
+        />
+      )}
+    </DraftPick>
+  );
   const { config } = resolved;
   const { pill } = fields.model;
   const descriptors = fields.options;
@@ -265,25 +302,31 @@ export function DraftComposer({
           </DraftPick>
         )}
         <span className="spacer" />
-        <DraftPick
-          className="lip-pick"
-          label={machineLabel}
-          glyph={<LaptopIcon size={13} />}
-          locked={fields.machine.locked}
-          menuLabel="Machine"
-          align="end"
-          width="widest"
-        >
-          {(close) => (
-            <MachineMenuContent
-              rows={fields.machine.rows}
-              onPick={(runnerId) => {
-                onChoose({ kind: "runner", runnerId });
-                close();
-              }}
-            />
-          )}
-        </DraftPick>
+        {problem === null ? (
+          machinePick
+        ) : (
+          // The machine and its problem read as one item, so they share a
+          // span and the lip's wider gap stays between items. A machine with
+          // no problem has no span, so the lip is the book's.
+          <span className="lip-machine">
+            {machinePick}
+            <span aria-hidden="true">·</span>
+            {signIn === null ? (
+              problem.reason
+            ) : (
+              <button
+                type="button"
+                className="link"
+                aria-label={`Sign in to ${signIn.subject}`}
+                onClick={() => {
+                  onSignIn(signIn);
+                }}
+              >
+                Sign in
+              </button>
+            )}
+          </span>
+        )}
       </div>
     </div>
   );

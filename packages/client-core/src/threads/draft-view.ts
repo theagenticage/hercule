@@ -59,8 +59,6 @@ export interface DraftView {
   readonly joinedWorkspace: Workspace | undefined;
   /** The words the lip shows for the workspace: "Main workspace", "New workspace", or a branch. */
   readonly workspaceLabel: string;
-  /** The words the lip shows for the machine: its name, and why it is dimmed when it is. */
-  readonly machineLabel: string;
   /** The branch menu, or `null` when the draft joins a workspace or has no checkout. */
   readonly branch: BranchField | null;
   /** The selected source workspaces to inspect when a decision menu opens. */
@@ -125,7 +123,6 @@ export const buildDraftView = (
   // right, so it names the workspace as a started thread's lip does.
   const workspaceLabel = joined?.kind === "primary" ? "Main workspace" : workspaceMenu.label;
   const machineName = runners.find((each) => each.id === runnerId)?.name ?? null;
-  const machine = machineName ?? "no machine";
   // A main workspace picked by its repo is joined as well, so the row names
   // it as a started thread's row would.
   const rowWorkspace =
@@ -141,11 +138,6 @@ export const buildDraftView = (
     workspaceMenu,
     joinedWorkspace: joined,
     workspaceLabel,
-    // A joined workspace's machine is labelled "set by the workspace …",
-    // for a machine menu that stands apart from the workspace's. The lip
-    // shows the two side by side, so it names the machine, and its tooltip
-    // says why it cannot change.
-    machineLabel: joined === undefined ? fields.machine.label : machine,
     branch: buildBranchField(pick, { workspaces, runnerId }),
     workspaceInspectionIds: findWorkspaceInspectionIds(pick, workspaces, runnerId),
     // The group follows the workspace the lip shows, so a pick moves the row.

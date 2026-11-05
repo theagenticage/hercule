@@ -95,8 +95,9 @@ export interface ComposerStop {
  * decides; `canSend` only draws Send as off. A `readOnly` field takes no
  * text.
  *
- * `error` is drawn in the app's error colour and announced; `notice`, shown
- * only when there is no `error`, is a quiet line, such as why Send is off.
+ * `error` is drawn in the app's error colour, on one line, and announced;
+ * `notice`, shown only when there is no `error`, is a quiet line, such as why
+ * Send is off.
  *
  * With `step`, Send gives way to the step controls and Stop, when given,
  * stays at the row's end beside them: the composer is answering a question
@@ -300,7 +301,7 @@ export function ComposerCard({
           ) : null}
         </div>
         {error !== null ? (
-          <p className="composer-error" role="alert">
+          <p className="composer-error" role="alert" title={error}>
             {error}
           </p>
         ) : notice !== null ? (

@@ -83,8 +83,8 @@ const READS: DraftReads = {
 
 /** Returns the parts of a draft the lip and the sidebar row show. */
 const readLabels = (...args: Parameters<typeof buildDraftView>) => {
-  const { workspaceLabel, machineLabel, rowPlaceLabel, place } = buildDraftView(...args);
-  return { workspaceLabel, machineLabel, rowPlaceLabel, place };
+  const { workspaceLabel, fields, rowPlaceLabel, place } = buildDraftView(...args);
+  return { workspaceLabel, machineName: fields.machine.name, rowPlaceLabel, place };
 };
 
 describe("buildDraftView", () => {
@@ -93,7 +93,7 @@ describe("buildDraftView", () => {
   it("uses a new workspace before any pick, and names only its machine on the row", () => {
     expect(readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: null }, {})).toEqual({
       workspaceLabel: "New workspace",
-      machineLabel: "moss",
+      machineName: "moss",
       rowPlaceLabel: { clip: "moss", keep: "" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
     });
@@ -124,7 +124,7 @@ describe("buildDraftView", () => {
       readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id }, {}),
     ).toEqual({
       workspaceLabel: "Main workspace",
-      machineLabel: "moss",
+      machineName: "moss",
       rowPlaceLabel: { clip: "", keep: "main" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id, createsWorkspace: false },
     });
@@ -135,7 +135,7 @@ describe("buildDraftView", () => {
       readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id }, {}),
     ).toEqual({
       workspaceLabel: "hercule/thread-3f1",
-      machineLabel: "moss",
+      machineName: "moss",
       rowPlaceLabel: { clip: "moss", keep: "" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id, createsWorkspace: false },
     });

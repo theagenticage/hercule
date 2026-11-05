@@ -5,7 +5,7 @@
  * a device code that expires.
  */
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CapabilitySnapshot, ProviderAccount, Runner } from "@hercule/contract";
 import { PROVIDERS } from "@hercule/client-core/testing";
@@ -20,6 +20,7 @@ import {
   type Call,
   type Handler,
 } from "../../app/testing";
+import { buildDraftKey } from "../../app/pending-submissions";
 
 const [WEBSHOP] = SIDEBAR_FIXTURE.projects;
 const [MOSS_RECORD] = SIDEBAR_FIXTURE.runners;
@@ -119,6 +120,76 @@ describe("the provider sign-in dialog", () => {
     ]);
     expect(screen.queryByText("Can't start yet.")).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Message" }));
+  });
+
+  it("opens from the machine in the lip too, keeps a failed start on Cancel, and clears it once signed in", async () => {
+    let accounts: readonly ProviderAccount[] = [SIGNED_OUT];
+    stubApi({
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [MOSS], accounts }),
+      "GET /api/v1/provider-accounts": () => ({ body: accounts }),
+      [`POST ${SIGN_IN_PATH}`]: { body: { url: "https://claude.ai/oauth/authorize?code=1" } },
+      [`POST ${CODE_PATH}`]: () => {
+        accounts = [buildAccount({ status: "ok" }, "2026-09-10T09:00:00.000Z")];
+        return { body: accounts[0] };
+      },
+    });
+    const { router } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+      { path: `/?project=${WEBSHOP!.id}` },
+    );
+    await screen.findByRole("textbox", { name: "Message" });
+    // A start the controller refused before the draft knew of the sign-in.
+    act(() => {
+      router.options.context.controller!.pendingSubmissions.recordFailure(
+        buildDraftKey(WEBSHOP!.id, null),
+        "Anthropic is not signed in on moss",
+      );
+    });
+    expect(screen.getByRole("alert").textContent).toBe("Anthropic is not signed in on moss");
+    const lip = document.querySelector<HTMLElement>(".lip-machine")!;
+    expect(lip.textContent).toBe("moss·Sign in");
+    expect(lip.querySelector(".lip-alert")).not.toBeNull();
+    const signIn = within(lip).getByRole("button", { name: "Sign in to Anthropic on moss" });
+
+    await userEvent.click(signIn);
+    await screen.findByRole("dialog", { name: "Sign in to Anthropic on moss" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(screen.getByRole("alert").textContent).toBe("Anthropic is not signed in on moss");
+
+    await userEvent.click(signIn);
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to Anthropic on moss" });
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "Code" }), "abc{Enter}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    // A machine with no problem is the book's lip again: its laptop and its name.
+    expect(document.querySelector(".lip-machine")).toBeNull();
+    expect(document.querySelector(".lip-alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "moss" })).toBeTruthy();
+  });
+
+  it("offers the sign-in beside a machine that the workspace it joins decides", async () => {
+    const [primary] = SIDEBAR_FIXTURE.workspaces;
+    stubApi(buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [MOSS], accounts: [SIGNED_OUT] }));
+    await renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
+      path: `/?project=${WEBSHOP!.id}&workspace=${primary!.id}`,
+    });
+    await screen.findByRole("textbox", { name: "Message" });
+
+    const lip = document.querySelector<HTMLElement>(".lip-machine")!;
+    expect(within(lip).getByTitle("The workspace it joins decides the machine").textContent).toBe(
+      "moss",
+    );
+    await userEvent.click(
+      within(lip).getByRole("button", { name: "Sign in to Anthropic on moss" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Sign in to Anthropic on moss" }),
+    ).toBeTruthy();
   });
 
   it("marks the field and says why when the vendor refuses the code, and stays open", async () => {

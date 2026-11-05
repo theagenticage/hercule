@@ -9,7 +9,7 @@
  * finite operations here to check a request and to record its outcome.
  */
 export {
-  buildRunnerRefusal,
+  findRunnerRefusal,
   findModels,
   ProviderAccountRunners,
   ProviderAccountRunnersLayer,

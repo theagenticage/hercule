@@ -373,21 +373,34 @@ const make = Effect.gen(function* () {
       `,
 
     /**
-     * Returns the id and the reported facts of every runner in the fleet, in
-     * the order the runners were added. A retired runner is left out: it has
-     * left the fleet. `facts` is null for a runner that has not said hello.
+     * Returns the id, the name and the reported facts of every runner in the
+     * fleet, in the order the runners were added. A retired runner is left
+     * out: it has left the fleet. `facts` is null for a runner that has not
+     * said hello.
      */
     listFacts: (): Effect.Effect<
-      ReadonlyArray<{ readonly id: string; readonly facts: RunnerFacts | null }>,
+      ReadonlyArray<{
+        readonly id: string;
+        readonly name: string;
+        readonly facts: RunnerFacts | null;
+      }>,
       SqlError
     > =>
       Effect.gen(function* () {
-        const rows = yield* sql<{ readonly id: Uint8Array; readonly facts: string | null }>`
-          SELECT id, facts FROM runners WHERE lifecycle <> 'retired' ORDER BY created_at, id
+        const rows = yield* sql<{
+          readonly id: Uint8Array;
+          readonly name: string;
+          readonly facts: string | null;
+        }>`
+          SELECT id, name, facts FROM runners WHERE lifecycle <> 'retired' ORDER BY created_at, id
         `;
         return yield* Effect.forEach(rows, (row) => {
           const id = uuidToString(row.id);
-          return Effect.map(decodeFacts(id, row.facts), (facts) => ({ id, facts }));
+          return Effect.map(decodeFacts(id, row.facts), (facts) => ({
+            id,
+            name: row.name,
+            facts,
+          }));
         });
       }),
 

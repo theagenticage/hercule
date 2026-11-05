@@ -333,6 +333,30 @@ describe("the new-thread screen", () => {
     expect(readFieldText(screen.getByRole("textbox", { name: "Message" }))).toBe("Fix the cart");
   });
 
+  it("drops a refused start's reason when the user changed a pick while it ran", async () => {
+    const held = holdAnswer();
+    const { field, router } = await openDraft(`/?project=${WEBSHOP.id}`, {
+      "POST /api/v1/sessions": held.handler,
+    });
+    await userEvent.type(field, "Fix the cart{Enter}");
+
+    // The refusal is about the picks the start was sent with, not the new ones.
+    act(() => {
+      router.options.context.controller!.pendingSubmissions.writePicks(
+        buildDraftKey(WEBSHOP.id, null),
+        { accessMode: "full-access" },
+      );
+    });
+    held.answer({
+      status: 409,
+      body: buildErrorBody("invalid_state", "moss is at its limit of 4 sessions."),
+    });
+    await act(() => Promise.resolve());
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(readFieldText(field)).toBe("Fix the cart");
+  });
+
   it("keeps what the user typed while the thread started, for the next draft", async () => {
     const held = holdAnswer();
     const { field, router } = await openDraft(`/?project=${WEBSHOP.id}`, {

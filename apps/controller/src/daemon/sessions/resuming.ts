@@ -13,7 +13,7 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createInvalidStateError, type InvalidState } from "@hercule/contract";
 import {
-  buildRunnerRefusal,
+  findRunnerRefusal,
   ProviderAccountRunners,
   providerAccountRepository,
 } from "../../provider-accounts";
@@ -112,9 +112,8 @@ export const resumable: Effect.Effect<
       // Check the runner that holds the native state, not the whole fleet,
       // because the transcript exists only on that runner.
       const available = yield* accountRunners.list(session.providerAccountId, session.harnessId);
-      if (!available.runnerIds.includes(session.runnerId)) {
-        return yield* Effect.fail(createInvalidStateError(buildRunnerRefusal(available)));
-      }
+      const refusal = findRunnerRefusal(available, session.runnerId);
+      if (refusal !== null) return yield* Effect.fail(createInvalidStateError(refusal));
       return session.nativeSessionId;
     });
 });
