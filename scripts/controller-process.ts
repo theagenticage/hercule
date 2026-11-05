@@ -19,6 +19,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -132,6 +133,24 @@ export interface Ran {
 export function pickCandidatePort(): number {
   return 20_000 + Math.floor(Math.random() * 12_768);
 }
+
+/**
+ * Returns a port on 127.0.0.1 that nothing listened on a moment ago. The port
+ * is picked below the range the kernel uses for outgoing connections, so
+ * that, between this check and the moment a test's child process binds the
+ * port, only a process that deliberately listens there can take it.
+ */
+export const findFreePort = async (): Promise<number> => {
+  for (;;) {
+    const port = pickCandidatePort();
+    const isFree = await new Promise<boolean>((resolve) => {
+      const server = createServer();
+      server.once("error", () => resolve(false));
+      server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
+    });
+    if (isFree) return port;
+  }
+};
 
 /** A controller process that is running and responding. */
 export interface Controller {

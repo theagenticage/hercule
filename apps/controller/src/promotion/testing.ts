@@ -11,17 +11,15 @@
  *   gate to reach a state, so a test never waits for a fixed time, and
  *   `QUIET_LOOP_TIMINGS`, which keeps the controller's own loops away from
  *   the gate so a count of held work is exact;
- * - helpers to create promotion tokens, request transfers and find a free port.
+ * - helpers to create promotion tokens and request transfers.
  */
 import { writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
-import { pickCandidatePort } from "../../../../scripts/controller-process";
 import { post, type ServerOptions } from "../http/testing";
 import { AuditLogLayer } from "../events";
 import { ControllerIdentity } from "../identity";
@@ -221,22 +219,4 @@ export const sealController = async (base: string, promotionToken: string): Prom
   });
   if (response.status !== 200)
     throw new Error(`the switch answered ${String(response.status)}: ${await response.text()}`);
-};
-
-/**
- * Returns a port on 127.0.0.1 that nothing listened on a moment ago. The port
- * is picked below the range the kernel uses for outgoing connections, so
- * that, between this check and the moment a test's child process binds the
- * port, only a process that deliberately listens there can take it.
- */
-export const findFreePort = async (): Promise<number> => {
-  for (;;) {
-    const port = pickCandidatePort();
-    const isFree = await new Promise<boolean>((resolve) => {
-      const server = createServer();
-      server.once("error", () => resolve(false));
-      server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
-    });
-    if (isFree) return port;
-  }
 };

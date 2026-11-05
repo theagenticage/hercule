@@ -27,7 +27,10 @@
  * behaviour is tested with intervals of tens of milliseconds passed to the
  * harness, because a real Bun server cannot run on a `TestClock`.
  */
+import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -865,6 +868,81 @@ describe("the liveness check", () => {
         for (const entry of entries) expect(entry.actor).toBe("system");
 
         again.wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+});
+
+describe("a goodbye that is still queued when the close arrives", () => {
+  /**
+   * Returns one masked WebSocket frame. The mask key is all zeros, which is
+   * valid and leaves the payload as it is, so the bytes are easy to build.
+   */
+  const buildClientFrame = (opcode: number, payload: Buffer): Buffer => {
+    const length =
+      payload.length < 126
+        ? Buffer.from([payload.length | 0x80])
+        : Buffer.from([126 | 0x80, payload.length >> 8, payload.length & 0xff]);
+    return Buffer.concat([Buffer.from([0x80 | opcode]), length, Buffer.alloc(4), payload]);
+  };
+
+  it("marks the runner offline, never unreachable", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+
+        // A runner that leaves sends its reports, then its goodbye, then
+        // closes. The controller handles frames one at a time, so when it
+        // reads the close it may not have reached the goodbye yet. A client
+        // library cannot send all of it in one write, so this test writes the
+        // bytes itself: enough reports that the controller is still handling
+        // them when the close is read.
+        const tcp = connect(Number(new URL(harness.base).port), "127.0.0.1");
+        await once(tcp, "connect");
+        tcp.write(
+          [
+            "GET /api/v1/runners/socket HTTP/1.1",
+            `Host: ${new URL(harness.base).host}`,
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+            "Sec-WebSocket-Version: 13",
+            `Authorization: Bearer ${joined.credential}`,
+            "\r\n",
+          ].join("\r\n"),
+        );
+        const upgrade = await new Promise<Buffer>((resolve) => tcp.once("data", resolve));
+        expect(upgrade.toString()).toContain("101");
+        tcp.write(buildClientFrame(0x1, Buffer.from(JSON.stringify(buildHello()))));
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        const report = buildClientFrame(
+          0x1,
+          Buffer.from(JSON.stringify({ _tag: "factsReport", facts: FACTS })),
+        );
+        tcp.write(
+          Buffer.concat([
+            ...Array.from({ length: 300 }, () => report),
+            buildClientFrame(0x1, Buffer.from(JSON.stringify({ _tag: "goodbye" }))),
+            buildClientFrame(0x8, Buffer.from([0x03, 0xe8])),
+          ]),
+        );
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity !== "online",
+        );
+
+        expect(await readStateTransitions(harness)).toEqual(["online", "offline"]);
+        tcp.destroy();
       },
       { pings: FAST },
     );

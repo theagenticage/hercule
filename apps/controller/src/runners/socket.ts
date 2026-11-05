@@ -15,12 +15,14 @@
  * returning the response would end it with the request scope, and the server
  * would receive nothing.
  */
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Option from "effect/Option";
@@ -164,6 +166,28 @@ const encodeFrameText = (message: typeof ControllerToRunner.Type): string =>
   JSON.stringify(encodeFrame(message));
 
 const FACTS_REQUEST = encodeFrameText({ _tag: "factsRequest" } satisfies RunnerFactsRequest);
+
+/**
+ * The close codes that mean the runner, or the network under it, ended the
+ * connection: 1000 (normal), 1005 (closed with no status) and 1006 (dropped
+ * with no close frame). The frames received before such a close are still
+ * valid and are handled. Any other code is one the controller itself sent, or
+ * a violation (1002, 1008, 1009), and the frames still queued are dropped.
+ */
+const RUNNER_ENDED_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005, 1006]);
+
+/**
+ * How long the controller handles the frames still queued when a greeted
+ * runner's connection closes, before it gives the rest up. The frames are
+ * small writes and queue offers, and none waits for a promotion thaw, so a
+ * drain takes milliseconds. Five seconds is far more than that, and short
+ * enough that a stuck write does not keep a dead connection looking online.
+ */
+const QUEUED_FRAMES_DEADLINE = Duration.seconds(5);
+
+/** Checks whether the runner or the network ended the connection, as opposed to the controller. */
+const endedByRunnerOrNetwork = (error: Socket.SocketError): boolean =>
+  error.reason._tag === "SocketCloseError" && RUNNER_ENDED_CLOSE_CODES.has(error.reason.code);
 
 /** Returns the capabilities both sides offer, which are the only ones either may use. */
 const negotiateCapabilities = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
@@ -371,20 +395,55 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     // only to the next read, so a loop that reads again after each handler
     // would not notice a close while a handler is still waiting (for example
     // a hello held by a promotion's freeze), and the handler would go on to
-    // greet a runner that is gone. Here the read failing on the close
-    // interrupts the handler in progress.
+    // greet a runner that is gone.
+    //
+    // What happens to the frames still queued when the read ends:
+    //
+    // - Before the hello is answered, the handler is interrupted at once. It
+    //   may be the hello itself, waiting for a freeze to end.
+    // - After it, and when the runner or the network ended the connection,
+    //   the queued frames are handled in order before the connection is
+    //   recorded as ended. A leaving runner sends its last session events
+    //   and its goodbye, then closes, so they are often read together with
+    //   the close. Dropping them would leave those sessions looking live and
+    //   record a planned shutdown as `unreachable`. Every handler after the
+    //   hello only writes to the database, offers to an unbounded queue, or
+    //   skips its work during a freeze, so none waits for a thaw. The wait
+    //   is still bounded by `QUEUED_FRAMES_DEADLINE`, because a write to a
+    //   closed socket can wait without end.
+    // - After a close the controller sent, or a violation, the handler is
+    //   interrupted at once.
     //
     // The queue is unbounded on purpose: only an authenticated runner can
     // send frames, and Bun's server socket cannot pause a sender, so a bound
     // here would only move the backlog into the socket's own read buffer.
     const receiveFrames = Effect.gen(function* () {
       const pull = yield* Socket.readerString(socket);
-      const frames = yield* Queue.unbounded<string>();
+      const frames = yield* Queue.unbounded<string, Cause.Done>();
       const readFrames = Effect.forever(
         Effect.flatMap(pull, (batch) => Queue.offerAll(frames, batch)),
       );
-      const handleFramesInOrder = Effect.forever(Effect.flatMap(Queue.take(frames), handleFrame));
-      return yield* Effect.raceFirst(readFrames, handleFramesInOrder);
+      const handleFramesInOrder = Effect.forever(
+        Effect.flatMap(Queue.take(frames), handleFrame),
+      ).pipe(Effect.catchIf(Cause.isDone, () => Effect.void));
+      const handling = yield* Effect.forkChild(handleFramesInOrder);
+
+      const ending = yield* Effect.raceFirst(
+        Effect.flip(readFrames),
+        Effect.andThen(Fiber.join(handling), Effect.never),
+      );
+
+      if (greeted && endedByRunnerOrNetwork(ending)) {
+        yield* Queue.end(frames);
+        const drained = yield* Effect.timeoutOption(Fiber.join(handling), QUEUED_FRAMES_DEADLINE);
+        if (Option.isNone(drained)) {
+          yield* Effect.logWarning(
+            `Runner ${runnerId}: its connection closed, and the frames it had sent were not all handled within ${Duration.format(QUEUED_FRAMES_DEADLINE)}. The rest were dropped.`,
+          );
+        }
+      }
+      yield* Fiber.interrupt(handling);
+      return yield* Effect.fail(ending);
     });
 
     /**
