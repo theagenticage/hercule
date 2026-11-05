@@ -17,8 +17,7 @@ import {
   decideMachineAction,
   type ProviderAccountMachineAction,
 } from "./provider-account-machines";
-import type { HarnessLoginMethod } from "./provider-accounts";
-import { describeHarnessOnRunner } from "./provider-rows";
+import { describeHarnessOnRunner, type HarnessLoginMethod } from "./provider-accounts";
 
 /**
  * Checks whether the user picks one of several kinds of account at `provider`,

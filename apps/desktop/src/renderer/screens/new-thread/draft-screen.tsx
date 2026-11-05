@@ -88,7 +88,9 @@ interface SentDraft {
  * ⏎ or Send starts the thread with what the composer shows, and opens it once
  * the controller has started it. A failed start keeps the draft and shows
  * why under the composer's row, also when the user left while it ran and
- * came back.
+ * came back. The line goes once the user changes a pick, or signs the
+ * draft's account in on the draft's machine, because the start it describes
+ * was made with what came before.
  *
  * What the draft holds, the text, the images and the picks, is kept in memory for as
  * long as the app runs, in the pending submissions under the draft's project
@@ -160,7 +162,11 @@ export function DraftScreen({
     // again, after the user left and came back, has a mutation of its own,
     // which never saw this start fail.
     onError: (error, sent) => {
-      pendingSubmissions.recordFailure(key, readErrorMessage(error));
+      // A failure is about the picks the start was sent with. When the user
+      // has picked something else since, it no longer applies.
+      if (pendingSubmissions.read(key).picks === sent.picks) {
+        pendingSubmissions.recordFailure(key, readErrorMessage(error));
+      }
       // An image the controller swept before the start is marked on its
       // tile, so the user sees which one to attach again.
       const expired = findExpiredShelfKeys(error, sent.attachments);
@@ -193,6 +199,9 @@ export function DraftScreen({
   const recordThreadChoice = (choice: ThreadChoice): void => {
     const { picks } = pendingSubmissions.read(key);
     pendingSubmissions.writePicks(key, applyThreadChoice(picks, choice));
+    // A failed start was about the picks it was sent with, so it no longer
+    // applies once they change.
+    pendingSubmissions.clearFailure(key);
   };
   const submit = (): void => {
     if (!canSend || isMutationRunning(queryClient, startKey)) return;
@@ -333,6 +342,18 @@ export function DraftScreen({
             client={client}
             providerAccountId={signIn.providerAccountId}
             runnerId={signIn.runnerId}
+            // A failed start on the account and machine just signed in may
+            // have failed for the missing sign-in, so the next start is the
+            // one to tell. A sign-in of another account, from the model
+            // menu, says nothing about it.
+            onSignedIn={() => {
+              if (
+                signIn.providerAccountId === view.resolved.config.providerAccountId &&
+                signIn.runnerId === fields.machine.runnerId
+              ) {
+                pendingSubmissions.clearFailure(key);
+              }
+            }}
             onClose={() => {
               setSignIn(null);
               fieldRef.current?.focus();

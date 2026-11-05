@@ -197,11 +197,14 @@ describe("buildComposerFields", () => {
         [{ runnerId: LOCAL.id, state: "credential-missing" }],
       );
 
-      expect(draftOn(LOCAL, noKey).blocked).toEqual({
+      const fields = draftOn(LOCAL, noKey);
+
+      expect(fields.blocked).toEqual({
         reason: "Z.ai has no key; add one",
         signIn: null,
         addAccount: false,
       });
+      expect(fields.machine.problem).toEqual({ reason: "no key or token", signIn: null });
     });
 
     it("blocks a draft whose token expired, and offers to make a new one", () => {
@@ -235,6 +238,21 @@ describe("buildComposerFields", () => {
           runnerId: LOCAL.id,
           subject: "Anthropic on moss",
         },
+        addAccount: false,
+      });
+      // The machine's problem offers the same sign-in as the blocker.
+      expect(fields.machine.problem?.signIn).toEqual(fields.blocked?.signIn);
+
+      // Without Claude Code on the runner, the token cannot be made there,
+      // but it is still a token, not a key.
+      const withoutClaude = { ...LOCAL, facts: { ...LOCAL.facts!, harnesses: [] } };
+      const elsewhere = composeDraft(
+        { ...buildCatalogs([expired]), runners: [withoutClaude], providers: tokenProviders },
+        buildConfig({ providerAccountId: expired.id, runnerId: LOCAL.id, model: null }),
+      );
+      expect(elsewhere.blocked).toEqual({
+        reason: "Anthropic's token expired; make a new one",
+        signIn: null,
         addAccount: false,
       });
     });
@@ -547,6 +565,44 @@ describe("buildComposerFields: the runner", () => {
     expect(fields.machine.label).toBe("moss · not signed in");
   });
 
+  it("names the runner apart from its problem, and offers the sign-in that fixes it", () => {
+    const fields = composeDraft(
+      buildCatalogs([SIGNED_OUT]),
+      buildConfig({ providerAccountId: SIGNED_OUT.id }),
+    );
+
+    expect(fields.machine.name).toBe("moss");
+    expect(fields.machine.problem).toEqual({
+      reason: "not signed in",
+      signIn: {
+        providerAccountId: SIGNED_OUT.id,
+        runnerId: LOCAL.id,
+        subject: "Anthropic on moss",
+      },
+    });
+  });
+
+  it("offers no sign-in on a runner without the account's default harness, where the sign-in cannot run", () => {
+    // The controller still says the account is not signed in there, but the
+    // sign-in runs in Claude Code, which is not installed on this runner.
+    const withoutClaude = { ...LOCAL, facts: { ...LOCAL.facts!, harnesses: [] } };
+    const fields = composeDraft(
+      { ...buildCatalogs([SIGNED_OUT]), runners: [withoutClaude] },
+      buildConfig({ providerAccountId: SIGNED_OUT.id }),
+    );
+
+    expect(fields.machine.problem).toEqual({ reason: "not signed in", signIn: null });
+    expect(fields.blocked).toEqual({
+      reason: "Anthropic is not signed in on moss",
+      signIn: null,
+      addAccount: false,
+    });
+  });
+
+  it("has no problem on a runner where the account is ready", () => {
+    expect(composeDraft(buildCatalogs([CLAUDE]), buildConfig()).machine.problem).toBeNull();
+  });
+
   it("blocks a draft on a runner that was retired after the user picked it, and says so in its label", () => {
     const retired = { ...LOCAL, lifecycle: "retired" as const, connectivity: "offline" as const };
     const fields = composeDraft(
@@ -608,6 +664,8 @@ describe("buildComposerFields: a runner the user picked", () => {
 
     expect(fields.machine.runnerId).toBe(COVE.id);
     expect(fields.machine.label).toBe(`cove · ${state}`);
+    // Signing in fixes nothing while the runner itself is away.
+    expect(fields.machine.problem).toEqual({ reason: state, signIn: null });
     expect(fields.blocked).toEqual({ reason: `cove is ${state}`, signIn: null, addAccount: false });
   });
 

@@ -7,9 +7,11 @@ import type {
   AccountKind,
   AccountSetupStep,
   CapabilitySnapshot,
+  Harness,
   Provider,
   ProviderAccount,
   ProviderAccountReadinessState,
+  Runner,
 } from "@hercule/contract";
 import type { CredentialField } from "./connection-types";
 
@@ -106,6 +108,33 @@ export const findProviderAccountReadiness = (
 ): ProviderAccountReadinessState =>
   account.readiness.find((row) => row.harnessId === harnessId && row.runnerId === runnerId)
     ?.state ?? "harness-missing";
+
+/** What a runner has of a harness. */
+export interface HarnessOnRunner {
+  /** Whether the runner's build has an adapter that can drive the harness. */
+  readonly adapter: boolean;
+  /** The harness's binary as the runner found it on its `PATH`, or `undefined` when it is not there. */
+  readonly binary: NonNullable<Runner["facts"]>["harnesses"][number] | undefined;
+  /** Whether the runner found the harness's binary. */
+  readonly present: boolean;
+  /** Whether the runner is connected. Every action runs on the runner, so an offline one offers none. */
+  readonly reachable: boolean;
+}
+
+/** Returns what `runner` has of `harness`, from the runner's facts. */
+export const describeHarnessOnRunner = (runner: Runner, harness: Harness): HarnessOnRunner => {
+  // The binary name the runner reports from its `PATH` is the harness's
+  // `binaryName`, so no lookup table is needed.
+  const binary = (runner.facts?.harnesses ?? []).find(
+    (each) => each.name === harness.binaryName && each.present,
+  );
+  return {
+    adapter: (runner.facts?.adapters ?? []).includes(harness.id),
+    binary,
+    present: binary !== undefined,
+    reachable: runner.connectivity === "online",
+  };
+};
 
 /** Returns the Account Kind the account was created as, or `undefined` when its provider no longer declares it. */
 export const findProviderAccountKind = (

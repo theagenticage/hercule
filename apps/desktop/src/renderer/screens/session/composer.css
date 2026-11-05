@@ -276,12 +276,20 @@ button.pick:not([aria-disabled="true"]):hover,
   text-overflow: ellipsis;
 }
 /* Not in the book, which draws no failed send. The error sits under the
-   row, on the field's left edge, in the app's error type. */
+   row, on the field's left edge, in the app's error type. It keeps to one
+   line, so the card does not grow with a long message: what does not fit
+   ends in an ellipsis, and the line's tooltip holds the whole message. A
+   notice, which is not an error, wraps. */
 .composer-error {
   margin: 0;
   padding: 0 16px 10px;
   color: var(--fail-ink);
   font-size: var(--t-12);
+}
+.composer-error:not(.composer-notice) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 /* Not in the book, whose field always takes text. A thread that cannot be
    resumed takes none, so the pointer stays an arrow over it rather than an
