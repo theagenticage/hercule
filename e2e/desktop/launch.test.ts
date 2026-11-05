@@ -275,13 +275,13 @@ it("shows the window on the page's report, not on main's time limit", async () =
     // before its frame is presented, and the frame it marks is the one that
     // showing the window caused.
     expect(
-      firstScreenAt! - windowShownAt!,
+      firstScreenAt - windowShownAt!,
       "the first screen was marked as presented before the window was shown, and a hidden window presents nothing",
     ).toBeGreaterThan(0);
   } else {
     // On macOS the page reports after its frame was presented.
     expect(
-      windowShownAt! - firstScreenAt!,
+      windowShownAt! - firstScreenAt,
       "the window showed before its first screen had been presented",
     ).toBeGreaterThan(0);
   }
@@ -291,7 +291,7 @@ it("shows the window on the page's report, not on main's time limit", async () =
   // Main's time limit fires at the earliest this long after the first paint.
   // A window shown sooner was shown by the page's report.
   expect(
-    windowShownAt! - firstPaintAt!,
+    windowShownAt! - firstPaintAt,
     "the window was shown by main's time limit, not by the page's report",
   ).toBeLessThan(FIRST_SCREEN_TIMEOUT_MS);
 });
@@ -310,7 +310,7 @@ it("shows the window on the connecting screen's report when the saved controller
   const firstPaintAt = await waitForPageEntryTime(page, "first-paint");
   expect(windowShownAt).not.toBeNull();
   expect(
-    windowShownAt! - firstPaintAt!,
+    windowShownAt! - firstPaintAt,
     "the window was shown by main's time limit, not by the connecting screen's report",
   ).toBeLessThan(FIRST_SCREEN_TIMEOUT_MS);
 });
