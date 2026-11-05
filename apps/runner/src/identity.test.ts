@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import { Cause, Effect } from "effect";
 import { networkInterfaces } from "node:os";
 import { IDENTITY_PORT_COUNT } from "@hercule/protocol";
+import { findFreePort } from "../../../scripts/controller-process";
 import { serveIdentity } from "./identity";
 import { probeFacts, type Machine } from "./probe";
 
@@ -90,13 +91,6 @@ const occupyPortRange = async (
     }
   }
   throw new Error(`no run of ${String(length)} free ports on this machine`);
-};
-
-/** Returns a port that was free a moment ago. Another process may still take it. */
-const findFreePort = async (): Promise<number> => {
-  const held = occupyPort(0);
-  await held.release();
-  return held.port;
 };
 
 /** Returns a non-loopback IPv4 address of this machine, or undefined when it has none. */

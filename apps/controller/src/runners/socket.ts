@@ -165,6 +165,9 @@ const encodeFrameText = (message: typeof ControllerToRunner.Type): string =>
 
 const FACTS_REQUEST = encodeFrameText({ _tag: "factsRequest" } satisfies RunnerFactsRequest);
 
+/** The text of the `goodbye` frame, which every runner sends in this form. */
+const GOODBYE_TEXT = JSON.stringify({ _tag: "goodbye" } satisfies typeof RunnerToController.Type);
+
 /** Returns the capabilities both sides offer, which are the only ones either may use. */
 const negotiateCapabilities = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
   CAPABILITIES.filter((capability) => theirs.includes(capability));
@@ -355,6 +358,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             if (!greeted) return;
             return yield* connections.reportedLoginEnded(runnerId, mine, message);
           case "goodbye":
+            // Already noted when the frame was read; see `receiveFrames`.
             departure = "offline";
             return;
         }
@@ -381,7 +385,15 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
       const pull = yield* Socket.readerString(socket);
       const frames = yield* Queue.unbounded<string>();
       const readFrames = Effect.forever(
-        Effect.flatMap(pull, (batch) => Queue.offerAll(frames, batch)),
+        Effect.flatMap(pull, (batch) => {
+          // A goodbye is noted here, as it is read, and not only when it is
+          // handled. The runner closes right after its goodbye, and the read
+          // that sees the close ends this race and drops the frames still
+          // queued. A goodbye lost that way would record a planned shutdown
+          // as `unreachable`.
+          if (batch.includes(GOODBYE_TEXT)) departure = "offline";
+          return Queue.offerAll(frames, batch);
+        }),
       );
       const handleFramesInOrder = Effect.forever(Effect.flatMap(Queue.take(frames), handleFrame));
       return yield* Effect.raceFirst(readFrames, handleFramesInOrder);

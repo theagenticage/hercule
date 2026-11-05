@@ -43,7 +43,8 @@ import {
 } from "../../../../scripts/controller-process";
 import { mintUuid } from "../db";
 import { promote } from "./promote";
-import { createPromotionToken, findFreePort } from "./testing";
+import { findFreePort } from "../../../../scripts/controller-process";
+import { createPromotionToken } from "./testing";
 import { get, post, readErrorBody, send } from "../http/testing";
 import { dialRunnerSocket, takeFrameWithTag } from "../runners/testing";
 

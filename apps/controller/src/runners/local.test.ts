@@ -25,9 +25,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Option } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
+import { findFreePort } from "../../../../scripts/controller-process";
 import { bootWith, type BootOutcome, type ControllerServices } from "../bootstrap";
 import { operationLayers, serve } from "../http";
-import { findFreePort } from "../promotion/testing";
 import { waitUntil } from "../sessions/testing";
 import { Settings } from "../settings";
 import {
