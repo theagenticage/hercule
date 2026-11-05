@@ -235,10 +235,25 @@ describe("Tracking", () => {
     );
     await expect.poll(() => readHerculeSegment(page)).toBe("Hercule, 2 to do");
 
-    // The Mark done control shows while the pointer is on the row.
+    // The Mark done control takes the pointer only while the pointer is on the
+    // row. The page works out which element the pointer is on when the pointer
+    // moves, so a row the page drew again after the pointer arrived is not
+    // hovered until the pointer moves once more, and the control under the
+    // age label would stay out of reach. The test moves the pointer onto the
+    // row until the control is what the page finds at the control's point.
     const row = tracking(page).locator(".tr-run-item");
-    await row.hover();
-    await row.getByRole("button", { name: "Mark done" }).click();
+    const markDone = row.getByRole("button", { name: "Mark done" });
+    await expect
+      .poll(async () => {
+        await row.hover();
+        return markDone.evaluate((button) => {
+          const box = button.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+          return hit !== null && button.contains(hit);
+        });
+      })
+      .toBe(true);
+    await markDone.click();
     await expect.poll(() => readTrackingRows(page)).toEqual([]);
     const [task] = (await arranged.client.task.query({ query: { limit: 10 } })).items;
     expect(task).toMatchObject({ title: "Webhook deliveries fail", status: "done" });
