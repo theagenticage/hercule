@@ -28,7 +28,7 @@ import { withTransaction } from "../../db";
 import { PromotionState } from "../../promotion";
 import { createInvalidStateError } from "@hercule/contract";
 import {
-  buildRunnerRefusal,
+  findRunnerRefusal,
   HarnessAccounts,
   ModelCatalogs,
   ProviderAccountRunners,
@@ -154,10 +154,9 @@ const make = Effect.gen(function* () {
                 requireAccountRunnable: (providerAccountId, harnessId) =>
                   Effect.gen(function* () {
                     const available = yield* accountRunners.list(providerAccountId, harnessId);
-                    if (!available.runnerIds.includes(runnerId)) {
-                      return yield* Effect.fail(
-                        createInvalidStateError(buildRunnerRefusal(available)),
-                      );
+                    const refusal = findRunnerRefusal(available, runnerId);
+                    if (refusal !== null) {
+                      return yield* Effect.fail(createInvalidStateError(refusal));
                     }
                   }),
                 prepareHarnessAccount: harnessAccounts.prepare,

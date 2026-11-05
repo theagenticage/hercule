@@ -49,22 +49,31 @@ import {
  *   "Anthropic · work in Claude Code".
  * - `noRunnerMessage` is null when `runnerIds` is not empty. Otherwise it says
  *   what is missing, in words a user can act on.
+ * - `refusals` holds, for each runner in the fleet that cannot run the
+ *   account, the one reason that applies there, such as "Anthropic · work is
+ *   not signed in on atlas". Read it through `findRunnerRefusal`.
  */
 export interface AccountRunners {
   readonly runnerIds: ReadonlyArray<string>;
   readonly subject: string;
   readonly noRunnerMessage: string | null;
+  readonly refusals: ReadonlyMap<string, string>;
 }
 
 /**
- * Returns the message for a caller that needs the account to run on one
- * particular runner and it cannot: the reason no runner can run it when that
- * is the case, else a message about that runner.
+ * Returns why the account cannot run on `runnerId`, in one short sentence a
+ * user can act on, or `null` when it can run there. The sentence names the one
+ * cause that applies to that runner: a missing key or token, the harness not
+ * installed or too old there, or no sign-in there. A runner that is not in
+ * the fleet any more is retired.
+ *
+ * Use it when the caller needs the account to run on one particular runner;
+ * `noRunnerMessage` is for a caller that lets the controller choose.
  */
-export const buildRunnerRefusal = (available: AccountRunners): string =>
-  available.noRunnerMessage ??
-  `${available.subject} cannot run on that machine: the harness must be installed there and, ` +
-    "for a subscription account, signed in on that machine";
+export const findRunnerRefusal = (available: AccountRunners, runnerId: string): string | null =>
+  available.runnerIds.includes(runnerId)
+    ? null
+    : (available.refusals.get(runnerId) ?? available.noRunnerMessage ?? "that machine is retired");
 
 /**
  * Returns the models the harness itself listed for an account, from its
@@ -123,7 +132,11 @@ interface RunnabilityWorld {
   readonly harnesses: ReadonlyArray<RegisteredHarness>;
   readonly storedAccounts: ReadonlyArray<StoredProviderAccount>;
   readonly storedSecrets: ReadonlyMap<string, ReadonlyArray<{ readonly name: string }>>;
-  readonly fleet: ReadonlyArray<{ readonly id: string; readonly facts: RunnerFacts | null }>;
+  readonly fleet: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly facts: RunnerFacts | null;
+  }>;
   readonly versions: ReadonlyMap<string, string>;
   readonly signedIn: ReadonlyArray<{
     readonly providerAccountId: string;
@@ -250,6 +263,7 @@ const make = Effect.gen(function* () {
         runnerIds: [],
         subject: "that provider account",
         noRunnerMessage: "that provider account no longer exists",
+        refusals: new Map(),
       };
     }
     const accountName = describeProviderAccount(account, world.providers);
@@ -264,16 +278,43 @@ const make = Effect.gen(function* () {
         runnerIds: [],
         subject: `${accountName} in ${harnessId}`,
         noRunnerMessage: `${accountName} cannot run in ${harnessId}: ${choice.reason}`,
+        refusals: new Map(),
       };
     }
-    const subject = `${accountName} in ${choice.harness.displayName}`;
+    const harnessName = choice.harness.displayName;
+    const subject = `${accountName} in ${harnessName}`;
+    const { states, credentialProblem, verdicts } = decideStates(world, account, choice);
+    // Returns why the account cannot run on one runner, or null when it can.
+    // A missing or expired key or token is the same on every runner, and
+    // decideStates gives the credential states only with that problem.
+    const describeRefusal = (
+      state: ProviderAccountReadinessState,
+      runnerName: string,
+    ): string | null => {
+      if (credentialProblem !== null) return credentialProblem;
+      switch (state) {
+        case "harness-missing":
+          return `${harnessName} is not installed on ${runnerName}`;
+        case "harness-too-old":
+          return `${harnessName} on ${runnerName} is older than Hercule supports; update it`;
+        case "not-signed-in":
+          return `${accountName} is not signed in on ${runnerName}`;
+        default:
+          return null;
+      }
+    };
+    const refusals = new Map<string, string>();
+    states.forEach(({ runnerId, state }, index) => {
+      const refusal = describeRefusal(state, world.fleet[index]!.name);
+      if (refusal !== null) refusals.set(runnerId, refusal);
+    });
     const none = (noRunnerMessage: string): AccountRunners => ({
       runnerIds: [],
       subject,
       noRunnerMessage,
+      refusals,
     });
 
-    const { states, credentialProblem, verdicts } = decideStates(world, account, choice);
     if (credentialProblem !== null) return none(credentialProblem);
     const harnessProblem = findHarnessProblem(choice.harness, verdicts);
     if (harnessProblem !== null) return none(harnessProblem);
@@ -285,7 +326,7 @@ const make = Effect.gen(function* () {
         `${accountName} is not signed in on any connected machine; sign in from Settings › Providers`,
       );
     }
-    return { runnerIds, subject, noRunnerMessage: null };
+    return { runnerIds, subject, noRunnerMessage: null, refusals };
   };
 
   const listMany = (

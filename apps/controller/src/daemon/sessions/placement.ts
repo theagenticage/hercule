@@ -59,7 +59,7 @@ import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { PromotionState } from "../../promotion";
 import {
-  buildRunnerRefusal,
+  findRunnerRefusal,
   findModels,
   ProviderAccountRunners,
   providerAccountRepository,
@@ -482,9 +482,8 @@ const make = Effect.gen(function* () {
           createInvalidStateError(runner.lifecycle === "retired" ? RETIRED : DRAINING),
         );
       }
-      if (!available.runnerIds.includes(runnerId)) {
-        return yield* Effect.fail(createInvalidStateError(buildRunnerRefusal(available)));
-      }
+      const refusal = findRunnerRefusal(available, runnerId);
+      if (refusal !== null) return yield* Effect.fail(createInvalidStateError(refusal));
       return runnerId;
     });
 

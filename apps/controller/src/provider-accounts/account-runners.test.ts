@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
-import { findModels, ProviderAccountRunners } from "./account-runners";
+import { findModels, findRunnerRefusal, ProviderAccountRunners } from "./account-runners";
 import { providerAccountRepository, type StoredSnapshot } from "./repository";
 import {
   addAccount,
@@ -214,6 +214,59 @@ describe("ProviderAccountRunners.list", () => {
 
     expect(available.runnerIds).toEqual([]);
     expect(available.noRunnerMessage).toContain("Acme does not allow Subscription accounts");
+  });
+});
+
+describe("findRunnerRefusal", () => {
+  it("names the one cause that applies to each runner, in one line", async () => {
+    const { available, runners } = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: MACHINE_KIND, label: "work" });
+        const ready = yield* addRunner("moss");
+        const signedOut = yield* addRunner("atlas");
+        const bare = yield* addRunner("bare", { binaryPresent: false });
+        yield* addSnapshot(account.id, ALPHA_HARNESS_ID, ready);
+        return {
+          available: yield* listRunners(account.id),
+          runners: { ready, signedOut, bare },
+        };
+      }),
+    );
+
+    expect(findRunnerRefusal(available, runners.ready)).toBeNull();
+    expect(findRunnerRefusal(available, runners.signedOut)).toBe(
+      "Acme · work is not signed in on atlas",
+    );
+    expect(findRunnerRefusal(available, runners.bare)).toBe(
+      "Harness alpha is not installed on bare",
+    );
+    expect(findRunnerRefusal(available, "not-in-the-fleet")).toBe("that machine is retired");
+  });
+
+  it("names the runner even when no runner is signed in", async () => {
+    const { available, laptop } = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const laptop = yield* addRunner("laptop");
+        return { available: yield* listRunners(account.id), laptop };
+      }),
+    );
+
+    expect(findRunnerRefusal(available, laptop)).toBe("Acme is not signed in on laptop");
+  });
+
+  it("gives the credential's problem on every runner, because it is the same everywhere", async () => {
+    const { available, laptop } = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: KEY_KIND });
+        const laptop = yield* addRunner("laptop", { binaryPresent: false });
+        return { available: yield* listRunners(account.id), laptop };
+      }),
+    );
+
+    expect(findRunnerRefusal(available, laptop)).toBe(
+      "Acme has no key. Add one in Settings › Providers.",
+    );
   });
 });
 
