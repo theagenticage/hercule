@@ -88,6 +88,16 @@ const findInside = (container: Element | null, selector: string): HTMLElement | 
  * - `onEnterLane` and `onLeaveLane` receive the id of the Provider Account
  *   whose lane the pointer enters or leaves.
  * - `highlightedAccountId` draws the lane of that Provider Account lit.
+ * - `foldingProfile` is the profile that was unfolded before the head the
+ *   user clicked last, or `null`. Its rows stay drawn, inert, while they fold
+ *   away, and `onFoldEnd` is called once every transition of the switch has
+ *   finished or been cancelled, so the caller can drop them. The profile that
+ *   unfolds in its place grows in at the same time.
+ *
+ * With exactly one profile unfolded, only that profile's rows scroll: the
+ * heads above and below it stay in view, so every other profile is one click
+ * away however long the open one is. While a filter unfolds several
+ * profiles, the whole list scrolls instead.
  */
 export function ModelMenuList({
   menu,
@@ -100,6 +110,8 @@ export function ModelMenuList({
   onEnterLane,
   onLeaveLane,
   highlightedAccountId = null,
+  foldingProfile = null,
+  onFoldEnd,
 }: {
   readonly menu: ModelMenu;
   readonly providers: ThreadCatalogs["providers"];
@@ -111,6 +123,8 @@ export function ModelMenuList({
   readonly onEnterLane?: ((providerAccountId: string) => void) | undefined;
   readonly onLeaveLane?: ((providerAccountId: string) => void) | undefined;
   readonly highlightedAccountId?: string | null;
+  readonly foldingProfile?: ModelMenuProfile | null;
+  readonly onFoldEnd?: (() => void) | undefined;
 }): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
   const focusRequest = useRef<FocusRequest | null>(null);
@@ -133,6 +147,27 @@ export function ModelMenuList({
     const lost = document.activeElement === null || document.activeElement === document.body;
     if (!sourceElement.isConnected && lost) findTarget()?.focus();
   });
+
+  // Ends a switch of profiles once every transition it started in the list
+  // has settled. `getAnimations` brings the page's styles up to date first, so
+  // the transitions of this draw are in the list. A switch whose bodies start
+  // no transition, such as one inserted at its end size or one under Reduce
+  // motion, ends at once, and a cancelled transition ends it too, so the menu
+  // never stays in the middle of a switch, with its rows unable to scroll.
+  // Another switch starts a new wait in place of this one.
+  useEffect(() => {
+    const list = listRef.current;
+    if (foldingProfile === null || list === null || onFoldEnd === undefined) return;
+    let waiting = true;
+    void Promise.allSettled(
+      list.getAnimations({ subtree: true }).map((animation) => animation.finished),
+    ).then(() => {
+      if (waiting) onFoldEnd();
+    });
+    return () => {
+      waiting = false;
+    };
+  }, [foldingProfile, onFoldEnd]);
 
   const renderMark = (providerId: string): JSX.Element => (
     <ProviderMark
@@ -313,8 +348,39 @@ export function ModelMenuList({
     );
   }
 
+  const pinsHeads =
+    menu.hasHeads && menu.profiles.filter((profile) => profile.unfolded).length === 1;
+
+  /**
+   * Draws the rows under the head of `profile`: its own when it is unfolded,
+   * the folding profile's while they fold away, else nothing.
+   */
+  const renderAccordionBody = (profile: ModelMenuProfile): JSX.Element | null => {
+    const body = profile.unfolded
+      ? profile
+      : foldingProfile?.profileId === profile.profileId
+        ? foldingProfile
+        : null;
+    if (body === null) return null;
+    const folding = body !== profile;
+    return (
+      <div
+        className={
+          folding
+            ? "ac-body is-folding"
+            : foldingProfile === null
+              ? "ac-body"
+              : "ac-body is-unfolding"
+        }
+        inert={folding}
+      >
+        {renderProfileBody(body)}
+      </div>
+    );
+  };
+
   return (
-    <div className="model-menu-list" ref={listRef}>
+    <div className={pinsHeads ? "model-menu-list pins-heads" : "model-menu-list"} ref={listRef}>
       {menu.empty !== null ? <p className="menu-note">{menu.empty}</p> : null}
       {menu.profiles.map((profile) =>
         menu.hasHeads ? (
@@ -334,7 +400,7 @@ export function ModelMenuList({
                 <ChevronRightIcon size={12} />
               </button>
             </div>
-            {profile.unfolded ? renderProfileBody(profile) : null}
+            {renderAccordionBody(profile)}
           </div>
         ) : (
           <Fragment key={profile.profileId}>{renderProfileBody(profile)}</Fragment>

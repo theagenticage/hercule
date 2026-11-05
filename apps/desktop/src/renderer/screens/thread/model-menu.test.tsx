@@ -2,12 +2,12 @@
  * Tests the model menu's content: on a Draft Thread, Recent and one lane per
  * account with the entries that cannot run dimmed with their reason and a
  * Sign in link; with several Model Profiles, the heads of the accordion; on a
- * thread that has started, the flat list and its note; and the choice each
- * row makes.
+ * thread that has started, the flat list and its note; the choice each row
+ * makes; and the arrow keys.
  */
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   readThreadConfig,
@@ -263,6 +263,25 @@ const WORK: ModelProfile = buildModelProfile(
   { id: "profile-work", name: "Work" },
 );
 
+/**
+ * Makes the next switch of profiles start one transition, as the fold does in
+ * a browser, and returns a function that ends it. jsdom runs no transitions.
+ */
+const holdFold = (): (() => Promise<void>) => {
+  let end = (): void => {};
+  const finished = new Promise<Animation>((resolve) => {
+    end = () => {
+      resolve({} as Animation);
+    };
+  });
+  vi.spyOn(Element.prototype, "getAnimations").mockReturnValue([{ finished } as Animation]);
+  return async () => {
+    end();
+    await act(() => finished);
+    vi.restoreAllMocks();
+  };
+};
+
 /** Returns the heads of the accordion, in order. */
 const readHeads = (): readonly HTMLElement[] => [
   ...document.querySelectorAll<HTMLElement>("button[aria-expanded]"),
@@ -295,6 +314,7 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
     const user = userEvent.setup();
     const { onChoose, rememberOpenProfile } = renderMenu({ profiles: [MAIN, WORK] });
 
+    const endFold = holdFold();
     await user.click(screen.getByRole("button", { name: /^Work/ }));
 
     expect(readHeads().map((head) => head.getAttribute("aria-expanded"))).toEqual([
@@ -302,9 +322,46 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
       "true",
     ]);
     expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
+    // Main's rows fold away first, and cannot be picked or focused meanwhile.
+    expect(screen.getByText("Claude Opus 5").closest("[inert]")).not.toBeNull();
+    await endFold();
     expect(screen.queryByText("Claude Opus 5")).toBeNull();
     expect(rememberOpenProfile.mock.calls).toEqual([["profile-work"]]);
     expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("ends a switch at once when it starts no transition, as when a switch is undone before it draws", async () => {
+    const user = userEvent.setup();
+    renderMenu({ profiles: [MAIN, WORK] });
+
+    await user.click(screen.getByRole("button", { name: /^Work/ }));
+
+    expect(screen.queryByText("Claude Opus 5")).toBeNull();
+    expect(document.querySelector(".is-unfolding")).toBeNull();
+  });
+
+  it("switches profiles at once under Reduce motion, where no fold runs to its end", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query) => ({ matches: query === "(prefers-reduced-motion: reduce)" }) as MediaQueryList,
+    );
+    const user = userEvent.setup();
+    renderMenu({ profiles: [MAIN, WORK] });
+
+    await user.click(screen.getByRole("button", { name: /^Work/ }));
+
+    expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
+    expect(screen.queryByText("Claude Opus 5")).toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it("opens scrolled to the row of the current entry", () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    renderMenu({ profiles: [MAIN, WORK] });
+
+    expect(scrollIntoView.mock.contexts).toEqual([
+      screen.getByRole("button", { name: /Claude Sonnet 5/, current: true }),
+    ]);
+    vi.restoreAllMocks();
   });
 
   it("opens on the profile open last when the current entry is in neither", () => {
@@ -384,6 +441,41 @@ describe("the model menu of a Draft Thread with several Model Profiles", () => {
     await user.keyboard("{Enter}");
     expect(document.activeElement?.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
+  });
+
+  it("moves through the filter, the heads and the rows with the arrow keys, past rows that fold away", async () => {
+    const user = userEvent.setup();
+    const many = ["1", "2", "3", "4", "5", "6", "7", "8"].map((version) =>
+      claudeEntry(`claude-haiku-${version}`, `Claude Haiku ${version}`),
+    );
+    const big = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, many)], {
+      id: "profile-big",
+      name: "Big",
+    });
+    renderMenu({ profiles: [MAIN, big] });
+    const filter = screen.getByRole("textbox", { name: "Filter models" });
+    expect(document.activeElement).toBe(filter);
+
+    // Main's third entry cannot run, so it is no stop; its Sign in is not either.
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Main\s?3$/ }));
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Big\s?8$/ }));
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Claude Opus 5/ }));
+
+    // Unfolding Big leaves Main's rows folding away. The arrows pass over
+    // them: up from Big's head is Main's head, not Main's last row.
+    const endFold = holdFold();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByText("Claude Opus 5").closest("[inert]")).not.toBeNull();
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Claude Haiku 1" }));
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Main\s?3$/ }));
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(filter);
+    await endFold();
   });
 });
 

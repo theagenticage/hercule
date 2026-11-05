@@ -78,6 +78,14 @@ window.scrollTo = () => {};
 Element.prototype.scrollIntoView = () => {};
 
 /**
+ * jsdom has no `Element.getAnimations`, and runs no CSS transitions. The
+ * model menu waits for the transitions of a switch of profiles to settle, so
+ * each test that switches would fail without it. The stub returns no
+ * animation, as a page whose styles start no transition does.
+ */
+Element.prototype.getAnimations = () => [];
+
+/**
  * jsdom has no `document.fonts`. A screen waits for `document.fonts.ready`
  * before it reports itself to main (see `app/presented-frame.ts`), so without
  * this stub each test that shows the "connecting" screen logs an error. The

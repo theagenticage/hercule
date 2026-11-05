@@ -1,7 +1,8 @@
-import { useState, type JSX } from "react";
+import { useLayoutEffect, useRef, useState, type JSX, type KeyboardEvent } from "react";
 import {
   buildModelMenu,
   readErrorMessage,
+  type ModelMenuProfile,
   type ModelProfileSave,
   type NewModelRow,
   type PluginIdentity,
@@ -23,6 +24,43 @@ const formatNewModelKey = (profileId: string, row: NewModelRow): string =>
   `${profileId}:${row.providerAccountId}:${row.model}`;
 
 /**
+ * The controls the arrow keys move between: the filter, the profiles' heads and
+ * the rows that pick a model. Rows that fold away are inert and left out.
+ */
+const ARROW_STOPS = ".menu-filter, .ac-head > button, button.line";
+
+/**
+ * Moves the focus, on ArrowDown or ArrowUp, to the next or the previous
+ * control of the menu that the arrow keys stop at (`ARROW_STOPS`), counted
+ * from the focused element. Other keys are left alone. The focus stays put at
+ * either end of the list.
+ */
+const moveFocusByArrow = (event: KeyboardEvent<HTMLElement>): void => {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  // In the filter, the arrows would move the caret to the start or the end.
+  event.preventDefault();
+  const stops = [...event.currentTarget.querySelectorAll<HTMLElement>(ARROW_STOPS)].filter(
+    (stop) => stop.closest("[inert]") === null,
+  );
+  // The focused element may be no stop, such as the Add button of a "New" row.
+  const focused = document.activeElement ?? document.body;
+  const target =
+    event.key === "ArrowDown"
+      ? stops.find(
+          (stop) =>
+            (focused.compareDocumentPosition(stop) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+        )
+      : stops.findLast(
+          (stop) =>
+            (focused.compareDocumentPosition(stop) & Node.DOCUMENT_POSITION_PRECEDING) !== 0,
+        );
+  target?.focus();
+};
+
+/** Returns whether the user asked the system to reduce motion. */
+const prefersReducedMotion = (): boolean => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
  * Renders the content of a thread's model menu, as `buildModelMenu` builds
  * it from the user's Model Profiles: a filter when the profiles hold more
  * than eight entries, and under it the list `ModelMenuList` draws.
@@ -33,7 +71,14 @@ const formatNewModelKey = (profileId: string, row: NewModelRow): string =>
  * - the filter's text;
  * - the profile whose head the user clicked, which stays unfolded in place of
  *   the one the menu opened on, and is remembered on this device as the
- *   profile open last. Opening a head never changes the thread's model.
+ *   profile open last. Opening a head never changes the thread's model;
+ * - the profile that folds away while another unfolds, kept until its fold
+ *   is over (see `ModelMenuList`). Under Reduce motion nothing folds, and the
+ *   switch is at once.
+ *
+ * The menu opens scrolled to the row of the current entry. The up and down
+ * arrows move the focus through the filter, the heads and the rows, and Enter
+ * picks the focused row.
  *
  * `readRecent` returns the Recent list as the app stores it, and
  * `readLastOpenProfileId` the profile open last, or `null`. Both are read
@@ -90,6 +135,14 @@ export function ModelMenu({
   const [now] = useState(() => new Date());
   const [savingKeys, setSavingKeys] = useState<ReadonlySet<string>>(new Set());
   const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(new Map());
+  const [foldingProfile, setFoldingProfile] = useState<ModelMenuProfile | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Runs once, when the menu opens, before it is painted, so the list never
+  // shows its top first and then jumps.
+  useLayoutEffect(() => {
+    rootRef.current?.querySelector(".line[aria-current]")?.scrollIntoView({ block: "nearest" });
+  }, []);
 
   /**
    * Saves what `edit` does to the profile `profileId` for a "New" row, with
@@ -156,7 +209,7 @@ export function ModelMenu({
   });
 
   return (
-    <div className="model-menu">
+    <div className="model-menu" ref={rootRef} onKeyDown={moveFocusByArrow}>
       {menu.filterable ? (
         <div className="pop-sec">
           <input
@@ -169,6 +222,7 @@ export function ModelMenu({
             value={filter}
             onChange={(event) => {
               setFilter(event.target.value);
+              setFoldingProfile(null);
             }}
           />
         </div>
@@ -178,7 +232,20 @@ export function ModelMenu({
         providers={catalogs.providers}
         plugins={plugins}
         onChoose={onChoose}
+        foldingProfile={foldingProfile}
+        onFoldEnd={() => {
+          setFoldingProfile(null);
+        }}
         onOpenProfile={(profileId) => {
+          // While the filter holds text, every profile with a match is
+          // unfolded, so a click on a head folds nothing away.
+          const unfolded =
+            menu.kind === "draft" && filter === ""
+              ? menu.profiles.find((profile) => profile.unfolded)
+              : undefined;
+          if (unfolded !== undefined && unfolded.profileId !== profileId) {
+            setFoldingProfile(prefersReducedMotion() ? null : unfolded);
+          }
           setOpenedProfileId(profileId);
           rememberOpenProfile(profileId);
         }}
