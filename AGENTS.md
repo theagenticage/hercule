@@ -163,7 +163,7 @@ The desktop pair works the same way, on macOS or on Linux. `pnpm test:desktop` l
 **A desktop PR needs these checks on one platform, Linux or Mac, never both** (Rogier, 2026-11-04, ADR 0051). Use the one you have. A headless Linux machine is enough. CI covers the other:
 
 - macOS runs `pnpm build:desktop`, `pnpm compare:bureau` and the end-to-end files that do not depend on a screen, timing or focus. `compare:bureau` runs only there, and nobody needs a Mac to run it.
-- Linux runs the whole end-to-end suite in the container, installs the `.deb` on a real Ubuntu 24.04 host and starts it with the sandbox on, and runs `ui:metrics`.
+- Linux runs the whole end-to-end suite in the container (it runs on every change but does not block the `edge` release yet, while some tests are stabilised; it becomes blocking again under #1017), installs the `.deb` on a real Ubuntu 24.04 host and starts it with the sandbox on, and runs `ui:metrics`.
 - On `main`, `edge-build` also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease.
 
 ```

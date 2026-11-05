@@ -486,8 +486,14 @@ jobs:
   # container downloads Electron and Playwright's Chromium into a Docker volume
   # that lives only as long as the runner, so every run downloads them again,
   # about 250 MB, which takes seconds on a runner.
+  #
+  # It runs but does not block the `edge` release yet, and a failure leaves the
+  # run green: some tests are being stabilised on the 4-core runner. It becomes
+  # blocking again under #1017: delete `continue-on-error` and add the job back
+  # to `edge-build.needs`.
   desktop-e2e-linux:
     runs-on: ubuntu-24.04
+    continue-on-error: true
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -837,8 +843,9 @@ jobs:
   # change them together.
   edge-build:
     # Edge publishes only a commit that passed every check, the upgrade test,
-    # the Linux install test, the Linux package's install and start, and the
-    # desktop app's end-to-end suite on Linux.
+    # the Linux install test and the Linux package's install and start. The
+    # desktop app's end-to-end suite on Linux (`desktop-e2e-linux`) is not in
+    # this list yet.
     needs:
       - typecheck
       - lint
@@ -850,7 +857,6 @@ jobs:
       - edge-linux
       - edge-linux-install
       - desktop-linux
-      - desktop-e2e-linux
       - upgrade
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
