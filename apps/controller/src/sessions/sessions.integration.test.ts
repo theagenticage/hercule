@@ -1521,6 +1521,28 @@ describe("what a runner reports", () => {
   });
 });
 
+describe("a runner that leaves", () => {
+  it("has the session exit it reported just before its goodbye handled, though the close is read first", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+
+      // A leaving runner reports its sessions' exits, says goodbye and closes.
+      // The reports before the exit keep the controller busy, so the close is
+      // read while the exit is still queued. An exit dropped there would
+      // leave the session `busy` until the runner reconnects.
+      for (let report = 0; report < 300; report++) {
+        arranged.wire.send({ _tag: "factsReport", facts: FACTS });
+      }
+      reportExited(arranged.wire, session.id, 2);
+      arranged.wire.send({ _tag: "goodbye" });
+      arranged.wire.close();
+
+      const ended = await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      expect(ended.status).toBe("exited");
+    });
+  });
+});
+
 describe("session.input", () => {
   it("leaves the input queued, with a reason, when an idle session's runner has disconnected", async () => {
     await withFleet(async (arranged) => {

@@ -3642,6 +3642,28 @@ describe("a runner connection during a promotion", () => {
     });
   });
 
+  it("stops handling a held hello when its connection closes, instead of waiting for the thaw", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderAccount(harness);
+      const joined = await enlist(harness);
+      const promotionToken = await freezeController(harness.base, token);
+
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
+      await sendAndAwaitHeld(harness, "the hello", () => wire.send(buildHello()));
+      wire.close();
+
+      // The frames still queued on a closed connection are handled before the
+      // connection ends, but only after a hello was answered. This hello was
+      // not, and waiting for it would hold a closed connection until the
+      // thaw, which is the freeze's whole length.
+      await awaitHeldWorkToEnd(harness, "a hello of a connection that had closed");
+      await thaw(harness.base, promotionToken);
+      // The runner that closed is never greeted by the hello that was held.
+      expect(await readConnectivityFromDatabase(harness, joined.runnerId)).not.toBe("online");
+      expect(await readStateTransitions(harness)).toEqual([]);
+    }, QUIET_LOOP_TIMINGS);
+  });
+
   it("keeps a runner online that disconnects and connects again while frozen", async () => {
     await withServer(async (harness) => {
       const token = await completeSetupWithNoProviderAccount(harness);
