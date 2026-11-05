@@ -21,6 +21,15 @@ appId: sh.hercule.desktop
 directories:
   output: dist/release
 
+# This build never publishes. The `edge` release is made by the jobs in
+# .github/workflows/ci.yml. Without this, electron-builder publishes on its own
+# in CI: `repository` in package.json names a GitHub repository, and a build on
+# a CI runner that is not for a pull request then starts a GitHub upload and
+# fails for lack of a token. It also writes `latest-linux.yml` and
+# `app-update.yml` for an updater that does not exist; with no publish
+# configuration it writes neither.
+publish: null
+
 # Main, the preload and the renderer are bundled into `out/`, so the app needs
 # nothing else: no node_modules, no source. The rest of `out/` holds what the
 # design checks write, such as `compare:bureau`'s and `capture:first-run`'s

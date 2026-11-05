@@ -822,8 +822,9 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      # Only the two packages. The build also writes `latest-linux.yml` for an
-      # updater that does not exist. One day is enough for `edge-build`.
+      # Only the two packages. The build publishes nothing and writes no update
+      # file (`publish: null` in electron-builder.yml). One day is enough for
+      # `edge-build`.
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
