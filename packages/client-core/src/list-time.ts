@@ -57,8 +57,8 @@ const findClockMidnight = (instant: Date, timezone: string): Date | undefined =>
  * 1. Find the moment the clock read 00:00 on that date (`findClockMidnight`).
  *    On a date whose clock skips 00:00, this is the date's first moment.
  * 2. Look at the minute before it. When that minute falls on the same date,
- *    the clock went back across midnight, as it does in Havana when daylight
- *    saving time ends at 01:00, and read 00:00 once before. Find that earlier
+ *    the clock went back across midnight, as it does in the Azores when summer
+ *    time ends at 01:00, and read 00:00 once before. Find that earlier
  *    00:00 from the minute before, and look again.
  * 3. Once the minute before falls on the date before, the date starts here.
  */
