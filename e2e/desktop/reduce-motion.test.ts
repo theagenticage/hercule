@@ -9,13 +9,16 @@
  * `pnpm build:desktop` first.
  */
 import { expect, it } from "vitest";
-import { launchForTest } from "./harness";
+import { keepWindowOnTop, launchForTest } from "./harness";
 
 /** The page's global, with the list of the properties whose transition has started. */
 type TransitionLog = typeof globalThis & { transitionsRun?: string[] };
 
 it("starts no transition when a control is hovered with Reduce motion on, and one with it off", async () => {
-  const { page } = await launchForTest();
+  const { app, page } = await launchForTest();
+  // The hover below comes from the pointer, which another app of the suite
+  // can take away by covering or unfocusing this window.
+  await keepWindowOnTop(app);
   // The button is off while the welcome looks for Hercule on this Mac, and a
   // button that is off does not change on hover.
   const button = page.getByRole("button", { name: "Open the office", disabled: false });

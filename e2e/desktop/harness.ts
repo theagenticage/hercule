@@ -186,7 +186,31 @@ export async function launchForTest(
 
   const page = await app.firstWindow();
   await prepareFirstWindow?.(app, page);
-  await page.waitForLoadState("load");
+  try {
+    await page.waitForLoadState("load");
+  } catch (error) {
+    // The page's `load` waits for every file it asked for. When it never
+    // comes, how far the page got and main's output say where it stopped.
+    const progress = await page
+      .evaluate(() => {
+        const [navigation] = performance.getEntriesByType(
+          "navigation",
+        ) as PerformanceNavigationTiming[];
+        return {
+          readyState: document.readyState,
+          domContentLoadedEventEnd: navigation?.domContentLoadedEventEnd,
+          loadEventStart: navigation?.loadEventStart,
+          scripts: document.scripts.length,
+          stylesheets: document.styleSheets.length,
+          resourcesLoaded: performance.getEntriesByType("resource").length,
+        };
+      })
+      .catch((evaluateError: unknown) => String(evaluateError));
+    throw new Error(
+      `the page did not finish loading: ${JSON.stringify(progress)}\nmain's output:\n${mainOutput}`,
+      { cause: error },
+    );
+  }
   await expect.poll(() => isWindowVisible(app), { message: "the window did not show" }).toBe(true);
   await sleep(200);
   return { app, page, userDataDir, readMainOutput: () => mainOutput, close };

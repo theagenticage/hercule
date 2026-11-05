@@ -9,7 +9,13 @@
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { readSettings } from "../../apps/desktop/scripts/packaged-app";
-import { arrangeFleet, chooseMenuItem, launchForTest, openSignedIn } from "./harness";
+import {
+  arrangeFleet,
+  chooseMenuItem,
+  keepWindowOnTop,
+  launchForTest,
+  openSignedIn,
+} from "./harness";
 
 /** Returns the sidebar's drawn width, and whether the shell shows it, as the page lays them out. */
 const readSidebar = (page: Page) =>
@@ -21,15 +27,31 @@ const readSidebar = (page: Page) =>
     };
   });
 
-/** Drags the sidebar's edge from where it is by `dx` pixels, in steps, as a hand does. */
+/**
+ * Drags the sidebar's edge from where it is by `dx` pixels, in steps, as a hand does.
+ *
+ * It waits until the page has taken hold of the edge before it moves, which a
+ * hand does without thinking. The page handles a press some time after the
+ * press is sent, and on a busy machine that is long enough for the whole drag
+ * to be sent first. The page then asks for the pointer after the button is
+ * up, is refused, and the drag changes nothing.
+ */
 const dragEdge = async (page: Page, dx: number): Promise<void> => {
   const box = (await page.getByRole("separator", { name: "Resize the sidebar" }).boundingBox())!;
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
+  await page.waitForFunction(
+    () => document.querySelector<HTMLElement>(".app")!.dataset["resizing"] !== undefined,
+  );
   await page.mouse.move(x + dx, y, { steps: 8 });
   await page.mouse.up();
+  // The page ends the drag, and stores the new layout, some time after the
+  // button is released. The next drag starts from the stored layout.
+  await page.waitForFunction(
+    () => document.querySelector<HTMLElement>(".app")!.dataset["resizing"] === undefined,
+  );
 };
 
 describe("the sidebar's layout", () => {
@@ -37,6 +59,10 @@ describe("the sidebar's layout", () => {
     const { url } = await arrangeFleet();
     const first = await openSignedIn(url);
     const { app, page } = first;
+    // Other apps of the suite share the screen. One that takes the focus in
+    // the middle of a drag makes the window lose the pointer, and the drag
+    // changes nothing.
+    await keepWindowOnTop(app);
     await expect.poll(() => readSettings(first.userDataDir)["token"]).toBeTypeOf("string");
     expect(await readSidebar(page)).toEqual({ state: "open", width: 272 });
 
@@ -51,18 +77,22 @@ describe("the sidebar's layout", () => {
       ),
     ).toBe("no-drag");
 
+    // Each drag starts from where the edge is, so the next one waits until
+    // the page has laid the sidebar out at its new width. A drag that starts
+    // before then misses the edge.
     await dragEdge(page, 60);
-    expect(await readSidebar(page)).toEqual({ state: "open", width: 332 });
+    await expect.poll(() => readSidebar(page)).toEqual({ state: "open", width: 332 });
     // Past the widest width, the sidebar stops at it.
     await dragEdge(page, 400);
-    expect(await readSidebar(page)).toEqual({ state: "open", width: 420 });
+    await expect.poll(() => readSidebar(page)).toEqual({ state: "open", width: 420 });
 
     await handle.dblclick();
-    expect(await readSidebar(page)).toEqual({ state: "open", width: 272 });
+    await expect.poll(() => readSidebar(page)).toEqual({ state: "open", width: 272 });
 
     // Let go far enough left, the sidebar hides, and opens again at the
     // width it had before the drag.
     await dragEdge(page, 40);
+    await expect.poll(() => readSidebar(page)).toEqual({ state: "open", width: 312 });
     await dragEdge(page, -200);
     await expect.poll(() => readSidebar(page)).toEqual({ state: "closed", width: 0 });
     const show = page.getByRole("button", { name: "Show the sidebar ⌘B" });
