@@ -26,7 +26,7 @@ Linux itself needs no new technology. Electron, the compiled `hercule` binary, t
   - A `.deb` comes first because electron-builder's install script puts an AppArmor profile in place on Ubuntu 24 and sets the SUID bit on Chromium's sandbox helper only where user namespaces do not work. The app refuses `--no-sandbox`, so it needs one of those two to start.
 - **One platform per pull request.** Rogier's rule, in his words: "In the future, no instructions should require testing on both platforms as a blocker for successfully shipping a PR. Of course CI still runs tests on mac too."
   - `pnpm test:desktop` runs on either platform. A headless Linux machine is enough: `pnpm test:desktop:container` runs the suite on a virtual screen in a container.
-  - CI covers the other platform. A Mac runner builds the app, runs `pnpm compare:bureau` and a subset of the end-to-end suite. Linux runners run the whole suite, install the `.deb` on a real Ubuntu 24.04 host, and compare the goldens. (Rogier, 2026-11-05: for now the job that runs the whole suite does not block the `edge` release, while some tests are stabilised on the 4-core runner. It becomes blocking again under #1017.)
+  - CI covers the other platform. A Mac runner builds the app, runs `pnpm compare:bureau` and a subset of the end-to-end suite. Linux runners run the whole suite, install the `.deb` on a real Ubuntu 24.04 host, and compare the goldens.
 - **Budgets work across platforms by what they measure** (spec 17 §Performance):
   - Budgets measured on a Mac stay as they are and are judged only on a Mac. A Linux reading is never compared with them.
   - Budgets that are counts are judged on both platforms: processes, bundle bytes, work per streamed token, and no idle timers.
