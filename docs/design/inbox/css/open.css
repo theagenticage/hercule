@@ -71,11 +71,13 @@
 .o-parts span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .o-parts small { color: var(--muted); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
 
-.o-ledger { display: flex; flex-direction: column; margin-top: 2px; padding: 6px 6px 0; border-top: 1px solid var(--divider); }
+/* The rows share one grid, so the first column is as wide as the longest name on this card and no wider, and every name stays on one line. */
+.o-ledger { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; margin-top: 2px; padding: 6px 6px 0; border-top: 1px solid var(--divider); }
 
 .o-row {
   display: grid;
-  grid-template-columns: minmax(0, 176px) minmax(0, 1fr) auto;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   column-gap: 12px;
   align-items: center;
   min-height: 40px;
@@ -89,7 +91,7 @@
 .o-row:hover, .o-row:focus-visible { background: var(--hover); }
 .o-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
-.o-label { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: var(--w-medium); font-size: var(--t-13); }
+.o-label { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: var(--w-medium); font-size: var(--t-13); white-space: nowrap; }
 .o-says { min-width: 0; color: var(--muted); font-size: var(--t-12); line-height: 16px; }
 
 .o-row--quiet .o-label { color: var(--muted); padding-left: 28px; }

@@ -302,6 +302,23 @@ await check("the same arrival never lands twice", async () => {
   return p;
 });
 
+await check("every move of an open card stays on one line", async () => {
+  const p = await open("");
+  const wrapped = await p.evaluate(() => {
+    const out = [];
+    App.state.entities.concat(App.state.clusters).forEach((e) => {
+      if (!App.els()[e.id] && e.kind !== "hercule/cluster") return;
+      if (App.els()[e.id] && !App.els()[e.id]._plan) return;
+      Open.show(e.id);
+      document.querySelectorAll("#open .o-label, #open .o-says").forEach((el) => { if (el.getClientRects().length > 1 || el.scrollHeight > 34 || (el.matches(".o-says") && el.offsetHeight > 17)) out.push(e.id + ": " + el.textContent); });
+      Open.hide(true);
+    });
+    return out;
+  });
+  assert(!wrapped.length, `wrapped: ${wrapped.join(" | ")}`);
+  return p;
+});
+
 await browser.close();
 if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }
 console.log("\nall good");

@@ -69,7 +69,7 @@ window.Pages = (function () {
     var pill = document.getElementById('pill');
     var hadFocus = document.activeElement && document.activeElement.dataset.view;
     pill.innerHTML = name === 'work'
-      ? '<h1 class="pill-title">Overview</h1><button class="ptab">' + Crew.icon('office', 14) + 'Office</button><button class="ptab is-on">' + Crew.icon('tasks', 14) + 'Work</button>'
+      ? '<h1 class="pill-title">Overview</h1><button class="ptab">Office</button><button class="ptab is-on">Work</button>'
       : '<h1 class="pill-title">Inbox</h1><button class="ptab' + (name === 'intake' ? '' : ' is-on') + '" data-view="cards"' + (name === 'intake' ? '' : ' aria-current="page"') + '>Cards</button><button class="ptab' + (name === 'intake' ? ' is-on' : '') + '" data-view="intake"' + (name === 'intake' ? ' aria-current="page"' : '') + '>Intake</button>';
     var again = hadFocus && pill.querySelector('[data-view="' + hadFocus + '"]');
     if (again) again.focus();
