@@ -212,8 +212,8 @@ html[data-motion="off"] .cr * {
 .side-text { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.3; }
 .side-name { font-weight: var(--w-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .side-ask { font-size: var(--t-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--you-ink); }
-.count { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: var(--r-pill); background: var(--you); color: var(--face-ink); font-size: var(--t-11); font-weight: var(--w-bold); font-variant-numeric: tabular-nums; }
-.count--plain { background: color-mix(in oklab, var(--ink) 9%, transparent); color: var(--muted); }
+.count { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: var(--r-pill); color: var(--muted); background: color-mix(in oklab, var(--ink) 7%, transparent); font-size: var(--t-11); font-weight: var(--w-bold); font-variant-numeric: tabular-nums; }
+.count--you { color: var(--face-ink); background: var(--you); }
 .side-foot { display: flex; flex-direction: column; gap: 6px; flex: none; margin: 0 -12px; padding: 9px 16px 10px; border-top: 1px solid var(--divider); }
 .side-sum { color: var(--faint); font-size: var(--t-12); white-space: nowrap; }
 .side-sum b { color: var(--muted); font-weight: var(--w-bold); font-variant-numeric: tabular-nums; }

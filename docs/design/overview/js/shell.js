@@ -27,11 +27,11 @@ window.Shell = (function () {
       '<div class="side-actions"><a class="nav-row" href="#">' + I("compose") + "<span>New thread</span><kbd>⌘N</kbd></a>" +
       '<button class="icon-btn" title="Search">' + I("search") + '</button><button class="icon-btn" title="Home">' + I("office") + "</button></div>" +
       '<div class="side-scroll">' +
-      (waiting.length ? '<section class="side-sec"><h3 class="side-h"><span>Waiting on you</span><span class="count">' + waiting.length + "</span></h3>" +
+      (waiting.length ? '<section class="side-sec"><h3 class="side-h"><span>Waiting on you</span><span class="count count--you">' + waiting.length + "</span></h3>" +
         waiting.map(function (w) { return waitingRow(w[0], w[1], w[2]); }).join("") + "</section>" : "") +
       '<section class="side-sec"><h3 class="side-h"><span>Work</span></h3>' +
       navRow("overview", "Overview", "office", selected) +
-      navRow("inbox", "Inbox", "intake", selected, opts.inboxCount ? '<b class="count count--plain">' + opts.inboxCount + "</b>" : "") +
+      navRow("inbox", "Inbox", "intake", selected, opts.inboxCount ? '<b class="count">' + opts.inboxCount + "</b>" : "") +
       navRow("workflows", "Workflows", "workflows", selected) +
       navRow("discussions", "Discussions", "discussions", selected) +
       navRow("wiki", "Wiki", "wiki", selected) +
