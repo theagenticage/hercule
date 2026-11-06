@@ -3,7 +3,7 @@
 window.Tray = (function () {
   var host, scrim, source = null, current = [], closing = false;
   function drawTitle(el) {
-    if (el.dataset.foot) return App.STACKS[el.dataset.foot].title + ': with someone else';
+    if (el.dataset.foot) return 'Moved on from ' + App.STACKS[el.dataset.foot].title;
     var t = el.querySelector('.c-title').textContent;
     return t === 'more' ? 'Newer cards' : t;
   }
@@ -95,20 +95,25 @@ window.Tray = (function () {
   function hide() {
     if (!host || host.hidden || closing) return;
     closing = true;
-    host.style.overflow = 'visible';
     var r = source.getBoundingClientRect();
+    // The pile may have run out while the tray was open. Then the cards have nowhere to fold to, and the tray only fades.
+    var hasHome = r.width > 0;
     scrim.classList.remove('is-on');
-    readVisibleCells().forEach(function (cell) {
-      var c = cell.getBoundingClientRect();
-      Motion.body(cell).to({ x: r.left - c.left, y: r.top - c.top, s: 0.9 }, 'travel');
-    });
+    if (hasHome) {
+      host.style.overflow = 'visible';
+      readVisibleCells().forEach(function (cell) {
+        var c = cell.getBoundingClientRect();
+        Motion.body(cell).to({ x: r.left - c.left, y: r.top - c.top, s: 0.9 }, 'travel');
+      });
+    }
     Motion.body(host).to({ o: 0 }, 'travel', { delay: 150, done: function () {
       host.hidden = true;
       closing = false;
       Motion.body(host).clear();
       if (!Open.isOpen()) scrim.hidden = true;
     } });
-    if (source.focus) source.focus({ preventScroll: true });
+    if (hasHome && source.focus) source.focus({ preventScroll: true });
+    else document.getElementById('main').focus({ preventScroll: true });
   }
 
   function isOpen() { return !!host && !host.hidden && !closing; }

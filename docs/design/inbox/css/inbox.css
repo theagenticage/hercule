@@ -149,4 +149,4 @@
 .skip:focus { top: 8px; box-shadow: var(--h-hover); }
 .ib-page[data-cols="1"] .noticed, .ib-page[data-cols="2"] .noticed { display: flex; }
 .ib-page[data-cols="1"] .plaque, .ib-page[data-cols="2"] .plaque { flex: 1 1 0; }
-.ib-page[data-cols="1"] .plaque:not([data-slot="0"]) { display: none; }
+.ib-page[data-cols="1"] .plaque ~ .plaque { display: none; }

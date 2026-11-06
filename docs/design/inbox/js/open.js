@@ -268,6 +268,14 @@ window.Open = (function () {
     openId = null;
     App.state.open = null;
     hideVeil();
+    // The card may have left the page while the sheet was open. Then there is nowhere to fold to, and the sheet only fades.
+    var hasHome = src && src.isConnected && src.getClientRects().length > 0;
+    if (!hasHome && !instant && !Motion.isReduced()) {
+      var fading = motion;
+      host.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: 'ease-out' }).finished.then(function () { if (motion === fading) finish(); if (then) then(); });
+      refocus(src, id, wasKeyed);
+      return;
+    }
     if (instant || Motion.isReduced() || !progress) {
       if (motion) motion.then = then || null;
       finish();

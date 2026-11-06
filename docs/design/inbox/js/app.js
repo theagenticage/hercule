@@ -14,7 +14,7 @@ window.App = (function () {
   var LAYOUTS = { 3: [['review'], ['answer', 'finish'], ['shelf']], 2: [['review'], ['answer', 'finish', 'shelf']], 1: [['review', 'answer', 'finish', 'shelf']] };
   function readColumns() {
     var w = document.getElementById('main').clientWidth;
-    return LAYOUTS[w >= 900 ? 3 : w >= 620 ? 2 : 1];
+    return LAYOUTS[w >= 820 ? 3 : w >= 620 ? 2 : 1];
   }
   var COLUMNS = LAYOUTS[3];
   var HEAD = 56;       // a stack's heading, with the space under it
@@ -170,16 +170,19 @@ window.App = (function () {
   /** Gives each noticed thing a column of the plate. It keeps that column, so one leaving never moves the others. */
   function assignSlots() {
     var used = {};
-    state.clusters.forEach(function (c) { if (c.slot !== undefined) used[c.slot] = true; });
+    state.clusters.forEach(function (c) {
+      if (c.slot === undefined) return;
+      if (used[c.slot]) c.slot = undefined; else used[c.slot] = true;
+    });
     state.clusters.forEach(function (c) {
       if (c.slot !== undefined) return;
+      // With all three columns taken, a thing waits for one to come free.
       for (var i = 0; i < 3; i++) if (!used[i]) { c.slot = i; used[i] = true; return; }
-      c.slot = 2;
     });
     // A thing also takes the free columns after it, so a lone reason is never cut beside an empty plate.
     state.clusters.forEach(function (c) {
       c.span = 1;
-      while (c.slot + c.span < 3 && !used[c.slot + c.span]) c.span++;
+      while (c.slot !== undefined && c.slot + c.span < 3 && !used[c.slot + c.span]) c.span++;
     });
   }
 
@@ -187,7 +190,7 @@ window.App = (function () {
     var host = document.getElementById('noticed');
     host.setAttribute('aria-label', 'Hercule noticed');
     assignSlots();
-    host.innerHTML = '<div class="plate-crest" title="Hercule noticed" aria-hidden="true">' + Crew.logo(30, { mono: true }) + '</div>' + state.clusters.slice(0, 3).map(Card.drawPlaque).join('');
+    host.innerHTML = '<div class="plate-crest" title="Hercule noticed" aria-hidden="true">' + Crew.logo(30, { mono: true }) + '</div>' + state.clusters.filter(function (c) { return c.slot !== undefined; }).map(Card.drawPlaque).join('');
     host.hidden = !state.clusters.length;
     document.querySelector('.ib-page').classList.toggle('no-noticed', !state.clusters.length);
     var was = Keys.current();
@@ -205,6 +208,7 @@ window.App = (function () {
     Motion.flip(moving.concat([].slice.call(page.querySelectorAll('.stack-h, .stack-foot:not([hidden])'))), placeStacks, { spring: 'hand', stagger: stagger });
     flushOffstage(true);
     dealFromPiles(stagger);
+    if (state.dim) applyDim();
   }
 
   /**
@@ -235,10 +239,13 @@ window.App = (function () {
     c.classList.remove('is-hover', 'is-focus');
     var isPile = c.classList.contains('is-pile');
     var pile = !isPile && host.querySelector('.card.is-pile:not(.is-folding)');
+    var e = findEntity(c.dataset.id);
     var finish = function () { c.classList.remove('is-folding'); c.style.display = 'none'; Motion.body(c).clear(); };
     if (Motion.isReduced()) { finish(); return; }
     c.classList.add('is-folding');
     if (isPile) { c._wasY = wasY; Motion.body(c).to({ o: 0 }, 'hand', { done: finish }); return; }
+    // A card that settled goes down to the foot line, never into the pile of what still waits.
+    if (e && e.settled) { Motion.body(c).to({ y: 8, o: 0 }, 'travel', { done: finish }); return; }
     if (pile && pile._plan) {
       c.style.zIndex = Number(pile.style.zIndex) - 1;
       Motion.body(c).to({ y: pile._plan.y - wasY }, 'hand', { done: finish });
@@ -267,7 +274,8 @@ window.App = (function () {
     var shown = readStackEntities(name).lying.filter(function (e) { return els[e.id] && els[e.id]._plan; });
     if (shown.some(function (e) { return !e.task; })) return false;
     shown.forEach(function (e) { e.settled = true; });
-    layOut();
+    // The held cards go first, and the pile deals into the room they leave.
+    layOut(false, function () { return 140; });
     return true;
   }
 
@@ -364,6 +372,8 @@ window.App = (function () {
           var p = plan.items[i];
           var el = it.el;
           if (!p) { el.style.display = 'none'; el._plan = null; return; }
+          // A card coming back from a pile is dealt like a new one.
+          if (el.style.display === 'none' && !it.tab && !it.pile) el.classList.add('is-new');
           el.style.display = '';
           if (it.tab) lastMark = null;
           var next = b.items[i + 1];
@@ -379,7 +389,7 @@ window.App = (function () {
           // A shelf row has no sheet at rest, so nothing may hide behind the row after it.
           if (it.pile || (b.name === 'shelf' && p.level !== 'full')) el._rest = p.show;
           el._full = it.full;
-          if (!el.classList.contains('is-peek')) el.style.height = el._rest + 'px';
+          if (!el.classList.contains('is-peek') && !el.classList.contains('is-dealing')) el.style.height = el._rest + 'px';
           var becomesWhole = p.level === 'full' && !el.classList.contains('is-whole') && hasDrawn;
           el.classList.toggle('is-whole', p.level === 'full');
           el.dataset.level = p.level;
@@ -445,7 +455,7 @@ window.App = (function () {
     });
     var words = Object.keys(groups).map(function (g) { return '<span><b>' + groups[g] + '</b> ' + g + '</span>'; });
     foot.hidden = !words.length;
-    foot.innerHTML = words.join('<i>·</i>');
+    rollText(foot, words.join('<i>·</i>'));
     foot._members = b.parts.settled;
   }
 

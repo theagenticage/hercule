@@ -3,10 +3,11 @@
 window.Keys = (function () {
   var current = null, usingKeys = false, marked = null;
 
-  /** Returns the cards of the page as columns of ids, in the order the eye reads them. */
-  function readGrid() {
+  /** Returns the cards of the page as columns of ids, in the order the eye reads them, with or without the plate on top. */
+  function readGrid(withPlate) {
     var columns = App.readColumns();
     var cols = columns.map(function () { return []; });
+    if (withPlate) readPlaques().forEach(function (p) { cols[Math.min(Number(p.dataset.slot), cols.length - 1)].push(p.dataset.id); });
     columns.forEach(function (names, c) {
       names.forEach(function (n) {
         var host = document.querySelector('[data-stack="' + n + '"]');
@@ -19,9 +20,14 @@ window.Keys = (function () {
     return cols;
   }
 
+  /** Returns the parts of the plate that can be seen. */
+  function readPlaques() {
+    return [].filter.call(document.querySelectorAll('.plaque'), function (p) { return p.offsetParent !== null; });
+  }
+
   /** Returns the whole page in reading order: what Hercule noticed, then the stacks, column by column. */
   function readFlat() {
-    var plaques = [].map.call(document.querySelectorAll('.plaque'), function (p) { return p.dataset.id; });
+    var plaques = readPlaques().map(function (p) { return p.dataset.id; });
     return plaques.concat([].concat.apply([], readGrid()));
   }
 
@@ -37,26 +43,41 @@ window.Keys = (function () {
   function readEl(id) { return App.els()[id] || document.querySelector('.plaque[data-id="' + id + '"]'); }
 
   /**
-   * Returns the next thing that still waits on the person, by order, never by what is under the pointer. Work runs down a stack,
-   * then on to the next stack, and never from a stack onto the plate.
+   * Returns what still waits after this card, nearest first, by order, never by what is under the pointer: the rest of its stack,
+   * then the stacks after it. It is read before a move, because a move can take the card off the page.
    */
-  function readNextWaiting(id) {
+  function readWaitingOrder(id) {
     var e = App.findEntity(id);
-    if (!e) return null;
+    if (!e) return { here: [], elsewhere: [], stack: null };
     var isWaiting = function (x) { return x !== e && !x.task; };
+    var ids = function (list) { return list.map(function (x) { return x.id; }); };
+    var names = [].concat.apply([], App.readColumns());
     if (e.kind === 'hercule/cluster') {
-      var plaques = App.state.clusters.filter(isWaiting);
-      return plaques[0] ? plaques[0].id : null;
+      var rest = names.map(function (n) { return App.readStackEntities(n).lying.filter(isWaiting); });
+      return { here: ids(App.state.clusters.filter(isWaiting)), elsewhere: ids([].concat.apply([], rest)), stack: null };
     }
-    var names = [].concat.apply([], App.readColumns()), at = names.indexOf(App.readStack(e));
-    var lying = App.readStackEntities(names[at]).lying, i = lying.indexOf(e);
-    var here = lying.slice(i + 1).filter(isWaiting)[0] || lying.slice(0, Math.max(0, i)).reverse().filter(isWaiting)[0];
-    if (here) return here.id;
-    for (var n = 1; n < names.length; n++) {
-      var more = App.readStackEntities(names[(at + n) % names.length]).lying.filter(isWaiting)[0];
-      if (more) return more.id;
-    }
-    return null;
+    var name = App.readStack(e), at = names.indexOf(name);
+    var lying = App.readStackEntities(name).lying, i = lying.indexOf(e);
+    var others = [];
+    for (var n = 1; n < names.length; n++) others = others.concat(App.readStackEntities(names[(at + n) % names.length]).lying.filter(isWaiting));
+    return { here: ids(lying.slice(i + 1).filter(isWaiting).concat(lying.slice(0, Math.max(0, i)).reverse().filter(isWaiting))), elsewhere: ids(others), stack: name };
+  }
+
+  /** Returns whether a card or a part of the plate can be seen on the page. */
+  function isInView(id) {
+    var el = readEl(id);
+    return !!(el && (el._plan || el.classList.contains('plaque')));
+  }
+
+  /**
+   * Returns the card to move on to after a move: the nearest in view in this stack. If what waits here lies in the pile, it
+   * returns nothing, because the stack is about to turn over and deal it.
+   */
+  function pickNext(order) {
+    var here = order.here.filter(isInView)[0];
+    if (here) return here;
+    if (order.here.length && order.stack) return null;
+    return order.elsewhere.filter(isInView)[0] || null;
   }
 
   /** Makes a card the current card. By keyboard it also takes focus, shows the ring and shows its whole face. */
@@ -73,7 +94,7 @@ window.Keys = (function () {
     usingKeys = true;
     Pointer.noteKeys();
     var el = id && readEl(id);
-    if (!el) { Pointer.unpeek(); return; }
+    if (!el || !(el._plan || el.classList.contains('plaque'))) { current = null; Pointer.unpeek(); return; }
     bringIntoView(el);
     Pointer.clearHover();
     marked = id;
@@ -95,7 +116,7 @@ window.Keys = (function () {
   }
 
   function move(dx, dy) {
-    var cols = readGrid();
+    var cols = readGrid(true);
     if (!current || !readEl(current)) { focus(readFlat()[0]); return; }
     var c = 0, r = 0;
     cols.forEach(function (col, ci) { var i = col.indexOf(current); if (i >= 0) { c = ci; r = i; } });
@@ -118,11 +139,11 @@ window.Keys = (function () {
     var el = id && readEl(id);
     if (!el) return;
     if (el.classList.contains('is-pile')) { Moves.showToast('A pile opens with Enter.'); return; }
-    var next = readNextWaiting(id);
+    var order = readWaitingOrder(id);
     var anchor = el.querySelector('[data-act="hand"]') || el;
     var moveOn = function () {
-      var there = next && readEl(next);
-      if (there && (there._plan || there.classList.contains('plaque'))) focus(next); else setCurrent(null, 'keys');
+      var next = pickNext(order);
+      if (next) focus(next); else setCurrent(null, 'keys');
     };
     var severalFit = name === 'hand' && Card.readWorkflows(App.findEntity(id)).length > 1;
     if (!Moves.perform(name, id, anchor, moveOn)) return;
@@ -162,6 +183,8 @@ window.Keys = (function () {
     if ((k === 'Enter' || k === ' ') && ev.target.closest('button, a, [role="menuitem"]')) return;
     // A held key must never run through the stack.
     if (ev.repeat && 'hteg'.indexOf(k) >= 0) return;
+    // A key pressed for the next card while the stack is about to turn over turns it now, so no key is ever lost.
+    if ('hte'.indexOf(k) >= 0 && !current) Moves.flushTurn();
     var handled = true;
     if (k === 'ArrowDown') move(0, 1);
     else if (k === 'ArrowUp') move(0, -1);
@@ -209,11 +232,10 @@ window.Keys = (function () {
     if (name === 'hand' && n > flows.length) return;
     var pick = name === 'hand' ? flows[n >= 1 ? n - 1 : 0] : null;
     if (name === 'go') { Open.hide(true); Moves.perform('go', id); return; }
-    var next = !inTray && readNextWaiting(id);
-    var there = next && readEl(next);
+    var next = !inTray && pickNext(readWaitingOrder(id));
     // The next card opens in the same place, and the move plays on the card behind it.
-    if (there && (there._plan || there.classList.contains('plaque'))) { Open.walk(next); current = next; }
-    else Open.hide(true);
+    if (next) { Open.walk(next); current = next; }
+    else { Open.hide(true); current = null; }
     if (name === 'hand') Moves.hand(e, pick); else Moves.perform(name, id);
   }
 

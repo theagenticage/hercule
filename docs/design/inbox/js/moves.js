@@ -3,6 +3,7 @@ window.Moves = (function () {
   var K = Kinds.KINDS;
   var history = [];     // every move of this visit, newest last, so Undo goes as far back as the person likes
   var toastTimer = 0;
+  var turns = {};       // stacks waiting to turn over, by name
 
   /** Returns what Undo needs to put everything back exactly: the order of the page, and how each touched thing stood. */
   function takeSnapshot(touched) {
@@ -17,7 +18,7 @@ window.Moves = (function () {
   function restoreSnapshot(snap) {
     var since = App.state.entities.filter(function (e) { return snap.order.indexOf(e) < 0; });
     App.state.entities = snap.order.concat(since);
-    App.state.clusters = snap.clusters;
+    App.state.clusters = snap.clusters.concat(App.state.clusters.filter(function (c) { return snap.clusters.indexOf(c) < 0; }));
     snap.touched.forEach(function (t) { t.e.task = t.task; t.e.settled = t.settled; });
   }
 
@@ -57,9 +58,9 @@ window.Moves = (function () {
     var undoWord = by === 'you' ? 'Undo' : 'Undo, stop the run';
     placeToast(el);
     if (e.kind === 'hercule/cluster') { assignPlaque(e, by); return; }
-    if (!el || !el._plan) {
-      // A card from a tray has no place in a stack: it says what happened where it is seen.
-      var seen = document.querySelector('#tray .card[data-id="' + e.id + '"]');
+    var seen = document.querySelector('#tray:not([hidden]) .card[data-id="' + e.id + '"]');
+    if (!el || !el._plan || seen) {
+      // A card from a tray says what happened where it is seen.
       if (seen) Card.redrawBody(seen, e, { now: App.state.now, usual: null });
       // A card held from inside a pile was never on the page, so it goes straight to the foot line.
       e.settled = true;
@@ -90,11 +91,29 @@ window.Moves = (function () {
       App.layOut();
       showToast(said, undoWord);
       noteLast();
-      var stack = App.readStack(e);
-      setTimeout(function () {
-        if (App.turnOver(stack) && Keys.isUsingKeys() && !Keys.current()) setTimeout(function () { Keys.focusFirstIn(stack); }, 380);
-      }, 900);
+      planTurn(App.readStack(e));
     }, reduced ? 0 : 170);
+  }
+
+  /** Waits for the last hand-off of a run, then turns the stack over. One timer per stack, so a run of moves turns it once. */
+  function planTurn(stack) {
+    clearTimeout(turns[stack]);
+    turns[stack] = setTimeout(function () { runTurn(stack); }, 620);
+  }
+
+  function runTurn(stack) {
+    delete turns[stack];
+    if (!App.turnOver(stack)) return false;
+    if (Keys.isUsingKeys() && !Keys.current()) Keys.focusFirstIn(stack);
+    else setTimeout(Pointer.reread, 420);
+    return true;
+  }
+
+  /** Runs a turn that is still waiting, because a key was pressed for the next card. Returns whether there was one. */
+  function flushTurn() {
+    var names = Object.keys(turns);
+    names.forEach(function (n) { clearTimeout(turns[n]); runTurn(n); });
+    return names.length > 0;
   }
 
   /** Lets the sunrise follow the last card handed on, once the chain has played out and the pointer has left the card. */
@@ -218,7 +237,9 @@ window.Moves = (function () {
       if (back) { back.classList.remove('is-new'); Motion.body(back).set({ x: 14, o: 0 }).to({ x: 0, o: 1 }, 'travel'); }
     }
     Nav.setCount('inbox', App.countOverdue());
-    if (u.e && Keys.isUsingKeys()) Keys.focus(u.e.id);
+    var backEl = u.e && App.els()[u.e.id];
+    if (u.e && Keys.isUsingKeys()) { if (backEl && backEl._plan) Keys.focus(u.e.id); else if (u.e.kind !== 'hercule/cluster') Keys.focusFirstIn(App.readStack(u.e)); }
+    else if (u.type === 'dismiss' && backEl && backEl._plan) Pointer.takeBack(backEl);
     if (history.length) showToast('Undone', 'Undo'); else hideToast();
   }
 
@@ -307,7 +328,7 @@ window.Moves = (function () {
     document.getElementById('toast').addEventListener('focusout', function () { toastTimer = setTimeout(hideToast, 2000); });
   }
 
-  return { perform: perform, refuse: refuse, hand: hand, take: take, dismiss: dismiss, undo: undo, assign: assign, handAll: handAll, dismissAll: dismissAll, reset: reset, showToast: showToast, hideToast: hideToast, start: start };
+  return { perform: perform, flushTurn: flushTurn, refuse: refuse, hand: hand, take: take, dismiss: dismiss, undo: undo, assign: assign, handAll: handAll, dismissAll: dismissAll, reset: reset, showToast: showToast, hideToast: hideToast, start: start };
 })();
 
 // The small menu of workflows, when more than one fits.

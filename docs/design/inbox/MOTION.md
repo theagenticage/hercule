@@ -75,7 +75,7 @@ This is the page's main rhythm, so it must feel like a stack of cards being work
 | A strip steps up to lead | It rises into place while its title grows from 13 to 15px by transform, on `hand`, and the foot row comes up 6px and fades in, 240ms from 100ms |
 | A card goes back to the pile, on Undo | The same, backwards: it sinks behind the pile on `hand`, and only then leaves the page |
 | The pile runs out | Its sheets and body fade on `hand`, and what it held rises from behind it |
-| A stack turns over | When nothing in view waits, 900ms after the last hand-off the held cards settle down 8px and fade to the foot line on `travel`, and the pile deals the next few |
+| A stack turns over | When nothing in view waits, 620ms after the last hand-off of a run the held cards settle down 8px and fade to the foot line on `travel`, its count rolls, and 140ms later the pile deals the next few. A key pressed in that gap turns the stack at once, so none is lost |
 
 ### Dismiss and undo
 

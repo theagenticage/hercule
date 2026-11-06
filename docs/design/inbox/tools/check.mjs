@@ -199,6 +199,41 @@ await check("a new card held back is never lost", async () => {
   assert((await p.evaluate(() => App.state.mode)) === "stacks", "the sunrise came with a card waiting");
   return p;
 });
+await check("a stack turns over: held cards settle, nothing is lost, keys carry on", async () => {
+  const p = await open("");
+  await p.evaluate(() => Keys.focus("pr-6204"));
+  for (let i = 0; i < 4; i++) { await p.keyboard.press("t"); await p.waitForTimeout(90); }
+  await p.keyboard.press("t"); await p.waitForTimeout(400);
+  const taken = await p.evaluate(() => App.state.entities.filter((e) => App.readStack(e) === "review" && e.task && e.signals.length >= 0 && !["pr-6199"].includes(e.id)).length);
+  assert(taken === 5, `a key was lost: ${taken} of 5 taken`);
+  await p.waitForTimeout(900);
+  const held = await p.evaluate(() => [].slice.call(document.querySelectorAll('[data-stack="review"] .card.is-folding')).length);
+  assert(held === 0, "held cards are still on their way");
+  return p;
+});
+await check("a slow second click at the same spot dismisses the next card", async () => {
+  const p = await open("");
+  await hover(p, "pr-6209"); await p.waitForTimeout(80);
+  const x = await p.evaluate(() => { const r = document.querySelector('[data-id="pr-6209"] [data-act="dismiss"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await p.mouse.move(x.x, x.y, { steps: 3 }); await p.waitForTimeout(700);
+  const before = await count(p);
+  await p.mouse.click(x.x, x.y); await p.waitForTimeout(800); await p.mouse.click(x.x, x.y); await p.waitForTimeout(300);
+  assert((await count(p)) === before - 2, `dismissed ${before - (await count(p))} of 2`);
+  assert(!(await p.evaluate(() => Open.isOpen())), "the second click opened a card");
+  return p;
+});
+await check("undo keeps what Hercule noticed since", async () => {
+  const p = await open("");
+  await p.evaluate(() => { Keys.focus("c-coupons"); });
+  await p.keyboard.press("e"); await p.waitForTimeout(300);
+  await p.evaluate(() => Live.next()); await p.waitForTimeout(300);
+  await p.keyboard.press("Control+z"); await p.waitForTimeout(400);
+  const ids = await p.evaluate(() => App.state.clusters.map((c) => c.id));
+  assert(ids.includes("c-scanners") && ids.includes("c-coupons"), `the plate holds ${ids}`);
+  const slots = await p.evaluate(() => [].map.call(document.querySelectorAll(".plaque"), (e) => e.dataset.slot));
+  assert(new Set(slots).size === slots.length, "two things share a column of the plate");
+  return p;
+});
 await check("a carry raises the rail", async () => {
   const p = await open("");
   const a = await point(p, "pr-6213");

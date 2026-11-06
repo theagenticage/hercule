@@ -224,7 +224,7 @@
 /* A move says its name only when the pointer is on it. At rest the actions stay small, at the far right, so a click on a title can never hit one. */
 .c-act-word { max-width: 0; overflow: hidden; white-space: nowrap; color: var(--ink); font-size: var(--t-12); font-weight: var(--w-medium); opacity: 0; transition: max-width var(--m-base) var(--m-ease), opacity var(--m-quick) var(--m-ease), margin var(--m-base) var(--m-ease); }
 .c-act:hover .c-act-word, .c-act:focus-visible .c-act-word, .c-act--hand .c-act-word { max-width: 170px; margin: 0 5px 0 4px; opacity: 1; }
-.c-act--go { padding: 0 8px; gap: 5px; font-size: var(--t-12); font-weight: var(--w-medium); }
+.c-act--go { flex: none; white-space: nowrap; padding: 0 8px; gap: 5px; font-size: var(--t-12); font-weight: var(--w-medium); }
 
 .c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; display: none; }
 .card.is-peek .c-hit { display: block; pointer-events: auto; }

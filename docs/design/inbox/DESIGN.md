@@ -32,7 +32,7 @@ The Inbox builds on the primitives shared with Work: `SHARED.md` and `system/pri
   1 on Work         13 with reviewers                  the foot row: what settled, and Undo
 ```
 
-Three equal columns, 24px apart, 32px from the window's edges, and what the plate holds lies on the same columns, so one grid runs from the plate to the foot. A heading's count sits in a 44px slot, as wide as a card's mark and gutter with its padding, so labels, titles, tabs and foot lines all start on one line. Under 900px of main width the columns become two, and under 620px one; in a very small window the page scrolls, and no card is ever out of reach. The fixed heights: bar 56, plate 60 + 22, stack heading 46 + 10, foot row 26.
+Three equal columns, 24px apart, 32px from the window's edges, and what the plate holds lies on the same columns, so one grid runs from the plate to the foot. A heading's count sits in a 44px slot, as wide as a card's mark and gutter with its padding, so labels, titles, tabs and foot lines all start on one line. Under 820px of main width the columns become two, and under 620px one; in a very small window the page scrolls, and no card is ever out of reach. The fixed heights: bar 56, plate 60 + 22, stack heading 46 + 10, foot row 26.
 
 | Was | Now | Where | Behaviour |
 |---|---|---|---|
@@ -155,7 +155,7 @@ Customization grows by adding to these sets, never by a kind drawing itself. The
 |---|---|---|---|
 | Hand to an agent | The faces on hover; the rail while carrying | H, then 1 to 3 with several | One workflow: at once. Several: a small menu, each with a face, a name and a line. The card lies flat, the head rises behind its top edge, the sentence rolls to "Agent review has it", a token flies to Overview |
 | Take it on myself | Your monogram | T | Creates a Task with no run. The marigold tab stands behind the top edge |
-| Dismiss | The close | E | The card steps aside and the next rises into its place, so the same click at the same spot dismisses the next. Plugins are not told |
+| Dismiss | The close | E | The card steps aside and the next rises into its place, so the same click at the same spot dismisses the next, for as long as the pointer stays there. Plugins are not told |
 | Undo | The undo line, in the foot of the column where you acted | ⌘Z | As far back as you like, from any view. A hand-off plays backwards, and the line says the run stops |
 | Open | Click | Space, Enter | Opens where it lies. Esc folds it back. Focus goes to the sheet, not to a move, so Enter never starts an agent. J and K walk to the next card in the same place |
 | See its Task | On Work | G | Goes through to the Task on Work |
