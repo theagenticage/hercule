@@ -49,10 +49,10 @@
 
 /* In the dark themes the stock is lighter than --faint was set for, so words on a card take a step more ink. */
 [data-theme="orient-express"], [data-theme="nile"], [data-theme="end-house"], [data-theme="blue-train"] { --faint-on-stock: color-mix(in oklab, var(--muted) 45%, var(--faint)); }
-[data-theme="orient-express"] .card, [data-theme="orient-express"] .open,
-[data-theme="nile"] .card, [data-theme="nile"] .open,
-[data-theme="end-house"] .card, [data-theme="end-house"] .open,
-[data-theme="blue-train"] .card, [data-theme="blue-train"] .open { --faint: var(--faint-on-stock); }
+[data-theme="orient-express"] .block, [data-theme="orient-express"] .noticed, [data-theme="orient-express"] .open,
+[data-theme="nile"] .block, [data-theme="nile"] .noticed, [data-theme="nile"] .open,
+[data-theme="end-house"] .block, [data-theme="end-house"] .noticed, [data-theme="end-house"] .open,
+[data-theme="blue-train"] .block, [data-theme="blue-train"] .noticed, [data-theme="blue-train"] .open { --faint: var(--faint-on-stock); }
 [data-theme="blue-train"] .card, [data-theme="blue-train"] .block, [data-theme="blue-train"] .open { --fail-ink: oklch(0.82 0.11 30); }
 
 /* With reduced motion the durations collapse, so no CSS movement is left behind. JS moves have their own designed fades. */
