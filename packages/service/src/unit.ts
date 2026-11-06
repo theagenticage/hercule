@@ -8,8 +8,7 @@
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
-  BOOTSTRAP_KEYS,
-  buildEnvName,
+  BOOTSTRAP_ENV_VARIABLES,
   locateProcessLogFile,
   locateStderrLogFile,
   type DaemonRole,
@@ -198,7 +197,7 @@ export const renderSystemdUnit = (unit: ServiceUnit): string =>
     `ExecStart=${quoteCommandWord(unit.program)} ${unit.role}`,
     `Environment=${quoteAssignment("PATH", unit.path)}`,
     `Environment=${quoteAssignment("HERCULE_HOME", unit.home)}`,
-    `UnsetEnvironment=${BOOTSTRAP_KEYS.map(buildEnvName).join(" ")}`,
+    `UnsetEnvironment=${BOOTSTRAP_ENV_VARIABLES.map((variable) => variable.name).join(" ")}`,
     "Restart=always",
     "RestartSec=10",
     "StandardOutput=null",

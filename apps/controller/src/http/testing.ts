@@ -275,6 +275,7 @@ const buildServices = (
           bindHost: "127.0.0.1",
           bindPort: 0,
           logLevel: "debug",
+          otlpEndpoint: undefined,
         }),
       ),
     ),

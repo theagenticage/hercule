@@ -66,6 +66,7 @@ describe("the config layer", () => {
       bindHost: "127.0.0.1",
       bindPort: 4937,
       logLevel: "info",
+      otlpEndpoint: undefined,
     });
     // Relative, so the file holds no absolute path and a home that moves keeps
     // working (spec 04, Relocatable Data Root).
