@@ -6,7 +6,7 @@ window.Actions = (function () {
   function animateLeaving(id, how) {
     var el = document.querySelector('.card[data-id="' + id + '"]');
     if (!el) return;
-    var ghost = Motion.ghost(el, document.getElementById("flight"));
+    var ghost = Motion.ghost(el, document.getElementById("carry"));
     ghost.classList.remove("is-away");
     ghost.classList.add(how === "Done" ? "is-done" : "is-dropped");
     var goal = how === "Done" ? { x: 26, y: -14, s: 1.02, r: 0, o: 0 } : { x: 0, y: 12, s: 0.97, r: -1.6, o: 0 };
@@ -34,8 +34,16 @@ window.Actions = (function () {
       if (!quiet) Toast.show(how + ". " + t.name + " has left the board.", true);
       if (next && next.isConnected && next.classList.contains("card")) Keys.focusCard(next);
     };
-    if (Pane.currentId() === id) Pane.hide(finish);
-    else finish();
+    // In the middle of a walk the details stay open and move on: Done is an answer too.
+    if (Pane.currentId() === id && Pane.isWalking()) {
+      Walk.notePlace(id);
+      finish();
+      Walk.afterAnswer();
+    } else if (Pane.currentId() === id) {
+      Pane.hide(finish);
+    } else {
+      finish();
+    }
   }
 
   /** Ends several Tasks as one gesture: one Undo brings them all back. */
@@ -50,7 +58,7 @@ window.Actions = (function () {
   function reportMove(to) {
     var stage = NW.STAGES.filter(function (s) { return s.id === to.stage; })[0].name;
     var offline = document.getElementById("work").classList.contains("is-offline");
-    Toast.show(offline ? "Moved to " + stage + ". It will sync when you are back." : "Moved to " + stage + ".", !offline);
+    Toast.show(offline ? "Moved to " + stage + ". It will sync when you are back." : "Moved to " + stage + ".", true);
     if (Store.failNext) {
       Store.failNext = false;
       setTimeout(function () {
@@ -79,7 +87,7 @@ window.Actions = (function () {
   function answer(id, words) {
     Walk.notePlace(id);
     Board.change(function () { Store.answerTask(id, words); });
-    Toast.show("Sent: " + words, true);
+    Toast.show((Store.state.offline ? "Sends when you are back: " : "Sent: ") + words, true);
     handOff(id);
     Walk.afterAnswer(id);
   }

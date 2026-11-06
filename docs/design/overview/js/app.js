@@ -137,6 +137,13 @@
     blockerTimer = setTimeout(function () { Blocker.show(card); }, 240);
   });
 
+  window.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n" && scene === "first" && !Store.state.tasks.length) {
+      e.preventDefault();
+      Welcome.startFirst();
+    }
+  });
+
   var display = document.getElementById("display");
   document.getElementById("display-btn").addEventListener("click", function (e) {
     e.stopPropagation();

@@ -347,11 +347,11 @@ window.Board = (function () {
     }
     var line = "";
     var scene = document.getElementById("work").dataset.scene;
-    if (scene === "first") {
+    if (scene === "first" && !st.tasks.length) {
       setHTML(leadEl, '<h2>Nothing on the desk yet.</h2><p class="lead-sub">Work you take on lands here, by stage. Start a thread, and its Task appears by itself.</p>');
       return;
     }
-    if (scene === "empty") {
+    if (scene === "empty" && !st.tasks.length) {
       setHTML(leadEl, '<h2>The desk is clear.</h2><p class="lead-sub"><span><b>12</b> things landed this week.</span></p>');
       return;
     }
@@ -448,9 +448,21 @@ window.Board = (function () {
       before[el.dataset.id] = { el: el, rect: el.getBoundingClientRect() };
     });
     var active = document.activeElement;
+    // The lane at the top of the view stays exactly where it is, however much changes around it.
+    var view = scrollEl.getBoundingClientRect();
+    var lanes = lanesEl.querySelectorAll(".lane");
+    var anchor = null;
+    for (var i = 0; i < lanes.length; i++) {
+      if (lanes[i].getBoundingClientRect().bottom > view.top + 120) {
+        anchor = lanes[i];
+        break;
+      }
+    }
+    var anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
     Motion.flip(movables(), function () {
       if (mutate) mutate();
       draw();
+      if (anchor && anchor.isConnected && !opts.noAnchor) scrollEl.scrollTop += Motion.layoutRect(anchor).top - anchorTop;
     }, opts);
     // Moving a card in the page drops its focus. Whoever was on it stays on it.
     if (active && active !== document.activeElement && active.isConnected) active.focus({ preventScroll: true });

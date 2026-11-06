@@ -72,7 +72,18 @@ window.Live = (function () {
       sig.textContent = words;
       card.appendChild(sig);
       Motion.body(sig).set({ y: 6, o: 0 }).to({ y: 0, o: 1 }, "hand");
-      setTimeout(function () {
+      function move() {
+        // The hand may have arrived during the hold. A card in the hand is not moved by anything.
+        if (Drag.isActive()) return setTimeout(move, 300);
+        var inCell = card.parentElement && card.parentElement.classList.contains("cell");
+        if (!inCell) {
+          sig.remove();
+          card.classList.remove("has-signal");
+          Board.change(function () { Store.moveByFact(id, toStage, apply); }, { spring: "self" });
+          Pane.refresh();
+          note(words);
+          return;
+        }
         var dent = document.createElement("div");
         dent.className = "slot dent";
         card.parentElement.insertBefore(dent, card);
@@ -80,6 +91,7 @@ window.Live = (function () {
         var lane = cell.closest(".lane");
         Board.holdOpen(cell, Array.prototype.indexOf.call(cell.children, dent), dent);
         Board.change(function () { Store.moveByFact(id, toStage, apply); }, { spring: "self" });
+        Pane.refresh();
         // Cards moved by a fact fly on the slow spring, and stay above what they pass.
         card.classList.add("is-landing");
         setTimeout(function () {
@@ -95,7 +107,8 @@ window.Live = (function () {
           }, 1500);
         });
         note(words);
-      }, Motion.isReduced() ? 80 : 760);
+      }
+      setTimeout(move, Motion.isReduced() ? 80 : 760);
     }
     whenStill(function () { return el ? el.getBoundingClientRect() : null; }, run);
   }

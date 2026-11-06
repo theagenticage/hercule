@@ -23,6 +23,7 @@ window.Toast = (function () {
 
   /** Puts the last change back: the board plays the same motion in reverse. */
   function doUndo() {
+    if (Fan.isOpen()) Fan.hide(true);
     var next = Store.peekUndo();
     var hint = next && next.hint;
     var origin = hint && hint.from ? Board.locate(hint.from) : null;

@@ -16,7 +16,7 @@ window.Drag = (function () {
   function layer() { return document.getElementById("carry"); }
   function work() { return document.getElementById("work"); }
   function scroller() { return document.getElementById("scroll"); }
-  function isActive() { return !!carry; }
+  function isActive() { return !!carry || (!!bead && bead.moved); }
 
   /** Lists every place a card can land, top to bottom. */
   function readDropZones() {
@@ -68,20 +68,25 @@ window.Drag = (function () {
     var kids = cell.querySelectorAll(".card[data-id]");
     for (var i = 0; i < kids.length; i++) {
       var r = kids[i].getBoundingClientRect();
-      if (x > r.left + r.width * 0.1 && x < r.right - r.width * 0.1 && y > r.top + r.height * 0.3 && y < r.bottom - r.height * 0.3) return kids[i];
+      if (x > r.left && x < r.right && y > r.top + r.height * 0.3 && y < r.bottom - r.height * 0.3) return kids[i];
     }
     return null;
   }
 
   /** Puts the slot at the row the pointer is over. Everything below moves aside, and nothing jumps. */
-  function moveSlot(cell, y) {
+  function moveSlot(cell, y, middle) {
     var kids = Array.prototype.filter.call(cell.children, function (c) { return !c.classList.contains("slot"); });
     var before = null;
-    for (var i = 0; i < kids.length; i++) {
-      var r = kids[i].getBoundingClientRect();
-      if (y < r.top + r.height / 2) {
-        before = kids[i];
-        break;
+    // Arriving on a card's middle, the slot opens after it, so the card stays under the pointer.
+    if (middle) {
+      before = middle.nextElementSibling === carry.slot ? carry.slot.nextElementSibling : middle.nextElementSibling;
+    } else {
+      for (var i = 0; i < kids.length; i++) {
+        var r = kids[i].getBoundingClientRect();
+        if (y < r.top + r.height / 2) {
+          before = kids[i];
+          break;
+        }
       }
     }
     var slot = carry.slot;
@@ -189,6 +194,7 @@ window.Drag = (function () {
       }
     }
     if (!middle) moveSlot(cell, y);
+    else if (c.slot.parentElement !== cell) moveSlot(cell, y, middle);
   }
 
   function begin(e) {
@@ -293,7 +299,11 @@ window.Drag = (function () {
     else if (b !== null) rank = b - 0.5;
     var owner = cell.dataset.owner;
     var row = Array.prototype.indexOf.call(cell.children, slot);
-    return { cell: cell, row: row, stage: cell.dataset.stage, project: owner.indexOf("lane-") === 0 ? owner.slice(5) : carry.task.project, before: rank };
+    // Where it lands decides what it belongs to: a lane's cells hold loose work, a band its plan's.
+    var inLane = owner.indexOf("lane-") === 0;
+    var plan = inLane ? "" : owner.slice(5);
+    var project = inLane ? owner.slice(5) : Store.state.plans.filter(function (p) { return p.id === plan; })[0].project;
+    return { cell: cell, row: row, stage: cell.dataset.stage, project: project, plan: plan, before: rank };
   }
 
   /** Ends the carry. Keeps how the card looks right now, because the landing starts from there. */
@@ -366,12 +376,18 @@ window.Drag = (function () {
     var stage = carry.stage.id;
     var key = zone.key;
     var c = finish();
-    releaseFollowers(c);
-    settleFollowers(c);
     var to = { stage: stage };
     if (key.indexOf("lane-") === 0) to.project = key.slice(5);
     if (key.indexOf("plan-") === 0) to.plan = key.slice(5);
-    settle(c, "travel", function () { Store.moveTask(c.id, to); });
+    settle(c, "travel", function () {
+      Store.group(c.task.name, function () {
+        Store.moveTask(c.id, to);
+        releaseFollowers(c, to);
+      });
+      Store.state.selected = {};
+      Select.drawBar();
+    });
+    settleFollowers(c);
     var bead = document.querySelector('.bead[data-id="' + c.id + '"]');
     if (bead) Motion.body(bead).set({ s: 0.2 }).to({ s: 1 }, "hand", { delay: 220 });
     Toast.show("Moved, and folded away.", true);
@@ -384,13 +400,18 @@ window.Drag = (function () {
     var landing = readLanding();
     var c = finish();
     if (!landing) return settle(c, "travel", function () { releaseFollowers(c); });
-    var moved = landing.stage !== c.task.stage || landing.project !== c.task.project;
+    var moved = landing.stage !== c.task.stage || landing.project !== c.task.project || landing.plan !== (c.task.initiative || "");
     // Put back where it was picked up, a drop changes nothing at all.
     if (!moved && landing.cell === c.fromCell && landing.row === c.fromRow && !c.followers.length) return settle(c, "hand");
     settle(c, "hand", function () {
-      Store.moveTask(c.id, landing);
+      Store.group(c.task.name, function () {
+        Store.moveTask(c.id, landing);
+        c.followers.forEach(function (f, i) {
+          f.src.classList.remove("is-away");
+          Store.moveTask(f.id, { stage: landing.stage, project: landing.project, plan: landing.plan, row: landing.row + i + 1 });
+        });
+      });
       if (c.followers.length) {
-        releaseFollowers(c, { stage: landing.stage, project: landing.project });
         Store.state.selected = {};
         Select.drawBar();
       }
@@ -424,7 +445,7 @@ window.Drag = (function () {
     // The carried card slides in under its new home, which then settles with a soft bump.
     var r1 = target.getBoundingClientRect();
     var b = Motion.body(ghost);
-    b.to({ x: b.value.x + r1.left - at.left, y: b.value.y + r1.top - at.top, s: 0.97, o: 0.4 }, "hand", {
+    b.to({ x: b.value.x + r1.left - at.left, y: b.value.y + r1.top - at.top, s: 0.97, o: 0 }, "hand", {
       done: function () { ghost.remove(); },
     });
     setTimeout(function () { target.classList.remove("has-merged"); }, 620);
@@ -433,6 +454,14 @@ window.Drag = (function () {
   }
 
   function cancel() {
+    if (bead) {
+      var held = bead;
+      bead = null;
+      document.querySelectorAll("#rule .stage.is-target").forEach(function (s) { s.classList.remove("is-target"); });
+      held.el.classList.remove("is-held");
+      Motion.body(held.el).to({ x: 0, s: 1 }, "travel");
+      return;
+    }
     if (!carry) return;
     if (carry.merge) setMerge(null);
     var c = finish();

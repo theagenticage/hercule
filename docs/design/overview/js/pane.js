@@ -7,7 +7,9 @@ window.Pane = (function () {
   var drive = null;
   var pane, sheet, clip, inner, ghost;
   var awayEl = null;
+  var closingId = null;
   var trail = [];
+  var lastChange = 0;
   var openId = null;
   var from = null;
   var to = null;
@@ -140,6 +142,16 @@ window.Pane = (function () {
       return;
     }
     if (openId === id) return;
+    // Caught mid-close by a different card: the sheet stops closing and shows the new one.
+    if (closingId && closingId !== id && drive.get() > 0.02) {
+      openId = closingId;
+      closingId = null;
+      swap(id);
+      drive.to(1, "travel");
+      document.getElementById("work").classList.add("has-pane");
+      return;
+    }
+    closingId = null;
     openId = id;
     awayEl = el;
     pane.hidden = false;
@@ -164,6 +176,7 @@ window.Pane = (function () {
     }
     paint(drive.get());
     drive.to(1, "travel");
+    lastChange = performance.now();
     document.getElementById("work").classList.add("has-pane");
     pane.querySelector(".pn-title").focus({ preventScroll: true });
   }
@@ -189,6 +202,7 @@ window.Pane = (function () {
     }
     var place = el || Board.locate(id);
     if (place) from = cardRect(place);
+    lastChange = performance.now();
     Motion.body(inner).set({ o: 0, y: 8 });
     inner.innerHTML = drawInner(t);
     drawHolderOnSheet(t);
@@ -215,7 +229,12 @@ window.Pane = (function () {
   /** Shows where the morning's walk stands, in the head of the details. */
   function setWalk(at, of) {
     var el = pane.querySelector("#pn-walk");
-    if (el) el.innerHTML = at + " of " + of + '<kbd title="Next (N)">N</kbd>';
+    if (!el) return;
+    var spot = Board.locate(openId);
+    var title = spot && spot.classList.contains("pile") ? spot.querySelector(".pile-text b") : null;
+    var folded = spot && spot.classList.contains("bead");
+    var where = title ? "in " + esc(title.textContent) + ", " : folded ? "folded, " : "";
+    el.innerHTML = where + at + " of " + of + '<kbd title="Next (N)">N</kbd>';
   }
 
   /** Asks what the new thread should do, on one line at the foot of the details. */
@@ -243,6 +262,8 @@ window.Pane = (function () {
 
   /** Sends the suggested answer: what Return does while the details are open. */
   function acceptSuggested() {
+    // Return in the first moment after a card changes could be meant for the card before.
+    if (performance.now() - lastChange < 250) return;
     var chip = pane.querySelector(".pn-answer.is-suggested");
     if (chip) return chip.click();
     var reply = pane.querySelector(".pn-reply input");
@@ -256,6 +277,7 @@ window.Pane = (function () {
       return;
     }
     var closing = openId;
+    closingId = closing;
     openId = null;
     trail = [];
     document.querySelectorAll(".is-called").forEach(function (c) { c.classList.remove("is-called"); });
@@ -269,6 +291,7 @@ window.Pane = (function () {
       ghost = null;
       if (awayEl) awayEl.classList.remove("is-away");
       awayEl = null;
+      closingId = null;
       if (done) done();
     });
   }
@@ -314,5 +337,5 @@ window.Pane = (function () {
     });
   }
 
-  return { mount: mount, show: show, hide: hide, back: back, acceptSuggested: acceptSuggested, refresh: refresh, setWalk: setWalk, askThread: askThread, currentId: currentId };
+  return { mount: mount, show: show, hide: hide, back: back, isWalking: function () { var el = pane.querySelector("#pn-walk"); return !!(el && el.textContent); }, acceptSuggested: acceptSuggested, refresh: refresh, setWalk: setWalk, askThread: askThread, currentId: currentId };
 })();

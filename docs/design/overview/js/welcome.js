@@ -16,9 +16,9 @@ window.Welcome = (function () {
     var ghost = document.querySelector(".welcome-card");
     var name = "Fix the basket total rounding";
     var host = document.getElementById("welcome");
-    if (ghost) Motion.body(ghost).to({ s: 0.98, o: 0 }, "back");
+    if (ghost) Motion.body(ghost).to({ s: 0.98, o: 0 }, "travel");
     var btn = document.querySelector(".welcome");
-    if (btn) Motion.body(btn).to({ o: 0, y: 6 }, "back");
+    if (btn) Motion.body(btn).to({ o: 0, y: 6 }, "travel");
     setTimeout(function () {
       host.innerHTML = "";
       Tray.arriveNext();

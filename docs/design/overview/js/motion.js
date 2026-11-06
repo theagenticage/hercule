@@ -281,7 +281,8 @@ window.Motion = (function () {
         if (b.value.x !== 0 || b.value.y !== 0) b.to({ x: 0, y: 0 }, opts.spring || "hand");
         return;
       }
-      if (isReduced()) {
+      // A move of more than a screen is a jump in place, not a journey anyone could follow.
+      if (isReduced() || Math.abs(dy) > 1400) {
         b.set({ x: 0, y: 0 });
         return;
       }

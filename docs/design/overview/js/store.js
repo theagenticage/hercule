@@ -233,7 +233,7 @@ window.Store = (function () {
   }
 
   function snapshot(t) {
-    return { stage: t.stage, project: t.project, rank: t.rank, initiative: t.initiative, movedBy: t.movedBy, held: t.held, heldRow: t.heldRow, age: t.age, stalled: t.stalled };
+    return { stage: t.stage, project: t.project, rank: t.rank, initiative: t.initiative, movedBy: t.movedBy, held: t.held, heldRow: t.heldRow, age: t.age, stalled: t.stalled, pendingSync: t.pendingSync };
   }
 
   /** Moves a Task to a stage and a row of a project, and remembers that a person did it. */
@@ -243,12 +243,16 @@ window.Store = (function () {
     remember(t.name, function () { Object.assign(t, was); });
     var changedStage = t.stage !== to.stage;
     t.stage = to.stage;
-    if (to.project) t.project = to.project;
+    if (to.project !== undefined) t.project = to.project;
     if (to.before !== undefined) t.rank = to.before;
     if (to.plan !== undefined) t.initiative = to.plan;
     t.movedBy = "you";
     t.held = true;
     t.heldRow = to.row === undefined ? 0 : to.row;
+    // Cards put down earlier in this cell keep their places below the new one.
+    state.tasks.forEach(function (o) {
+      if (o !== t && o.held && o.stage === t.stage && o.project === t.project && o.initiative === t.initiative && o.heldRow >= t.heldRow) o.heldRow++;
+    });
     // A new stage is real activity. Tidying a column is not, so a reorder leaves the age alone.
     if (changedStage) {
       t.age = 0;

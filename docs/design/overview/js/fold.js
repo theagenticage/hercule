@@ -4,7 +4,8 @@
 window.Fold = (function () {
   "use strict";
 
-  function flight() { return document.getElementById("flight"); }
+  // Copies fly in the fixed layer, so a scroll caused by the fold itself cannot carry them off.
+  function flight() { return document.getElementById("carry"); }
 
   /** Returns the cards and piles under an element, each with the Task ids it stands for. */
   function collectItems(root) {
@@ -105,6 +106,7 @@ window.Fold = (function () {
 
   /** Folds these roots with one change of the board. */
   function fold(roots, mutate) {
+    if (Fan.isOpen()) Fan.hide(true);
     var groups = launch(roots);
     Board.change(mutate, { spring: "travel", quietExits: true, stagger: function () { return 70; } });
     // A wire is new on the page. It starts where its lane's name starts, and travels with it.
@@ -120,6 +122,7 @@ window.Fold = (function () {
 
   /** Opens these roots with one change of the board. */
   function open(roots, mutate, after) {
+    if (Fan.isOpen()) Fan.hide(true);
     var origins = roots.map(recordOrigins);
     Board.change(mutate, { spring: "travel", quietExits: true });
     roots.forEach(function (root, i) { growFrom(root, origins[i]); });

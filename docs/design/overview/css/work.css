@@ -213,8 +213,8 @@
 /* ---------- The toast ---------- */
 .toast:not(.is-on) { visibility: hidden; transition-delay: 0s, 0s, var(--m-slow); }
 .toast { position: absolute; z-index: 40; left: 50%; bottom: 18px; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 6px 0 14px; border-radius: var(--r-md); background: var(--glass-fill-raised); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2); white-space: nowrap; transform: translate(-50%, 10px); opacity: 0; pointer-events: none; transition: transform var(--m-slow) var(--m-ease), opacity var(--m-base) var(--m-ease); }
-.toast.is-on { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
-.has-pane .toast { left: calc((100% - 496px) / 2); }
+.toast.is-on { transform: translate(calc(-50% + var(--toast-x, 0px)), 0); opacity: 1; pointer-events: auto; }
+.has-pane .toast { --toast-x: -248px; }
 .toast-undo { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 7px; font-weight: var(--w-medium); }
 .toast-undo:hover { background: var(--hover); }
 

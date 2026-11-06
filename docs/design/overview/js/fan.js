@@ -118,14 +118,18 @@ window.Fan = (function () {
     var cx = from.left + from.width / 2;
     var cy = from.top + from.height / 2;
     Motion.body(o.fan.querySelector(".fan-head")).to({ o: 0 }, "travel");
-    var left = inFan.length;
-    var half = (inFan.length - 1) / 2;
-    inFan.forEach(function (el, i) {
+    if (!o.pileEl.isConnected) return cleanUp();
+    // Only cards in view take the trip. A fan of a thousand closes as fast as a fan of ten.
+    var view = o.fan.getBoundingClientRect();
+    var flying = inFan.filter(function (el) { return Motion.layoutRect(el).top < view.bottom; });
+    var left = flying.length;
+    var half = (flying.length - 1) / 2;
+    flying.forEach(function (el, i) {
       var r = Motion.layoutRect(el);
       var spread = half ? (i - half) / half : 0;
       el.classList.add("is-flying");
       Motion.body(el).to({ x: cx - (r.left + r.width / 2), y: cy - (r.top + r.height / 2), s: 0.94, r: spread * 5, o: 0 }, "travel", {
-        delay: Math.min((inFan.length - 1 - i) * 8, 70),
+        delay: Math.min((flying.length - 1 - i) * 8, 70),
         done: function () {
           el.classList.remove("is-flying");
           left--;
@@ -133,7 +137,7 @@ window.Fan = (function () {
         },
       });
     });
-    if (!inFan.length) cleanUp();
+    if (!flying.length) cleanUp();
   }
 
   /** Takes a card that ended out of the open fan, and closes the gap. */

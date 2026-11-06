@@ -72,9 +72,7 @@ window.Keys = (function () {
     var lanes = Array.prototype.slice.call(document.querySelectorAll("#lanes .lane"));
     var here = focused ? lanes.indexOf(focused.closest(".lane")) : -1;
     var i = Math.max(0, Math.min(lanes.length - 1, here + by));
-    var card = lanes[i].querySelector(".card");
-    var head = lanes[i].querySelector(".lane-head");
-    focusCard(card || head);
+    focusCard(lanes[i].querySelector(".card") || lanes[i].querySelector(".lane-btn"));
   }
 
   function currentCardId() {
@@ -102,6 +100,11 @@ window.Keys = (function () {
       return;
     }
     var key = e.key;
+    // While carrying, the card is in the hand: only Esc means anything.
+    if (Drag.isActive()) {
+      if (key === "Escape") Drag.cancel();
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && key.toLowerCase() === "z") {
       e.preventDefault();
       Toast.undo();
@@ -152,7 +155,9 @@ window.Keys = (function () {
     if (key === "Enter" || key === " ") {
       if (Pane.currentId()) {
         e.preventDefault();
-        return Pane.acceptSuggested();
+        // A held key must never send a string of answers.
+        if (!e.repeat) Pane.acceptSuggested();
+        return;
       }
       if (!focused) return;
       e.preventDefault();
@@ -164,13 +169,14 @@ window.Keys = (function () {
     if (key === "N") return Walk.step(-1);
     if (key === "[") return jumpLane(-1);
     if (key === "]") return jumpLane(1);
+    if ((key === "f" || key === "F") && Fan.isOpen()) return;
     if (key === "f" && focused) {
       var lane = focused.closest(".lane");
       var plan = focused.closest(".plan");
       if (plan) Fold.togglePlan(plan.dataset.plan);
       else if (lane) Fold.toggleLane(lane.dataset.lane);
-      // The card may have folded away. Focus stays on the lane, so a second F opens it again.
-      if (lane && !focused.isConnected) focusCard(lane.querySelector(".lane-btn"));
+      // The card may have folded away. Focus stays on its plan or lane, so a second F opens it again.
+      if (!focused.isConnected) focusCard(plan ? plan.querySelector(".plan-head") : lane.querySelector(".lane-btn"));
       return;
     }
     if (key === "F") return Fold.toggleAll();
@@ -200,7 +206,6 @@ window.Keys = (function () {
 
   /** Esc steps back one thing at a time, from whatever is on top. */
   function stepBack() {
-    if (Drag.isActive()) return Drag.cancel();
     var help = document.getElementById("help");
     if (help.classList.contains("is-on")) return help.classList.remove("is-on");
     var menu = document.getElementById("display");
