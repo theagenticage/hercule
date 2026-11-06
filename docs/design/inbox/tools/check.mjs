@@ -59,7 +59,8 @@ await check("the same spot dismisses card after card", async () => {
   const p = await open("");
   await hover(p, "pr-6209");
   const before = await count(p);
-  const x = await point(p, "pr-6209", "close");
+  await p.waitForTimeout(80);
+  const x = await p.evaluate(() => { const r = document.querySelector('[data-id="pr-6209"] [data-act="dismiss"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await p.mouse.move(x.x, x.y, { steps: 3 }); await p.waitForTimeout(60);
   for (let i = 0; i < 4; i++) { await p.mouse.click(x.x, x.y); await p.waitForTimeout(180); }
   assert((await count(p)) === before - 4, `dismissed ${before - (await count(p))} of 4`);
@@ -156,6 +157,49 @@ await check("a card can be carried, dropped and cancelled", async () => {
   await p.mouse.move(b.x, b.y); await p.mouse.down(); await p.mouse.move(b.x + 30, b.y + 60, { steps: 4 }); await p.keyboard.press("Escape"); await p.mouse.up(); await p.waitForTimeout(600);
   assert(!(await p.evaluate(() => Open.isOpen())), "a cancelled drag opened the card");
   assert(!(await p.evaluate(() => App.findEntity("pr-6252").task)), "a cancelled drag handed the card on");
+  return p;
+});
+
+await check("a stack can be worked through to its end by keys, and a card comes out of the pile", async () => {
+  const p = await open("");
+  await p.evaluate(() => Keys.focus("pr-6204"));
+  const n = () => p.evaluate(() => App.state.entities.filter((e) => App.readStack(e) === "review" && !e.task && !e.settled).length);
+  const before = await n();
+  for (let i = 0; i < before; i++) { await p.keyboard.press("t"); await p.waitForTimeout(i % 6 === 5 ? 1700 : 260); if ((await n()) === 0) break; }
+  assert((await n()) === 0, `${await n()} cards left in To review`);
+  return p;
+});
+await check("stacks never cover each other, at any height", async () => {
+  for (const [w, h] of [[1440, 900], [1280, 800], [1280, 720], [1000, 700]]) {
+    const p = await open("", w, h);
+    const bad = await p.evaluate(() => {
+      const wraps = [].slice.call(document.querySelectorAll('[data-wrap="answer"], [data-wrap="finish"]'));
+      const a = wraps[0].querySelector('.stack'), b = wraps[1].querySelector('.stack-h');
+      const last = Math.max.apply(null, [].map.call(a.querySelectorAll('.card'), (c) => c._plan ? c.getBoundingClientRect().bottom : 0));
+      return last > b.getBoundingClientRect().top + 2;
+    });
+    assert(!bad, `${w}x${h}: To answer runs into To finish`);
+    await p.context().close();
+  }
+});
+await check("a new card held back is never lost", async () => {
+  const p = await open("scene=light");
+  await p.evaluate(() => { App.state.entities.filter((e) => e.id !== "pr-6204").forEach((e) => { e.settled = true; e.task = { by: "you" }; }); App.state.clusters.length = 0; App.drawNoticed(); App.layOut(true); });
+  await hover(p, "pr-6204");
+  await p.evaluate(() => App.arrive({ id: "pr-6270", kind: "github/pull-request", concern: "reviewRequested", title: "New", since: World.hoursAgo(0.02), fields: { number: 6270, repo: "storefront-web", author: "ines-carvalho", state: "running", diff: [1, 1], files: 1 }, signals: [World.signal("reviewRequested", 0.02, "ines-carvalho")], task: null, project: "storefront-web" }));
+  await p.evaluate(() => Moves.dismiss(App.findEntity("pr-6204")));
+  await p.waitForTimeout(800);
+  assert(await has(p, "pr-6270"), "the card that waited was lost");
+  assert((await p.evaluate(() => App.state.mode)) === "stacks", "the sunrise came with a card waiting");
+  return p;
+});
+await check("a carry raises the rail", async () => {
+  const p = await open("");
+  const a = await point(p, "pr-6241");
+  await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x + 30, a.y + 40, { steps: 4 }); await p.waitForTimeout(450);
+  const o = await p.evaluate(() => getComputedStyle(document.getElementById("rail")).opacity);
+  assert(Number(o) > 0.9, `the rail is at opacity ${o}`);
+  await p.mouse.up();
   return p;
 });
 

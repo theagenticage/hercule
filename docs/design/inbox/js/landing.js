@@ -17,13 +17,14 @@ window.Landing = (function () {
     clip.style.top = line.offsetTop + 'px';
     clip.style.width = line.offsetWidth + 'px';
     clip.style.height = line.offsetHeight + 'px';
-    [].forEach.call(old.querySelectorAll('.c-fresh'), function (d) { d.remove(); });
+    [].forEach.call(old.querySelectorAll('.c-fresh'), function (d) { d.style.visibility = 'hidden'; });
     old.style.margin = '0';
     clip.appendChild(old);
     el.appendChild(clip);
     var curve = Motion.curve('hand');
+    line.style.overflow = 'hidden';
     Motion.animate(old, [{ transform: 'none' }, { transform: 'translateY(-16px)' }], { duration: curve.ms, easing: curve.ease }).then(function () { clip.remove(); });
-    Motion.animate(roll, [{ transform: 'translateY(16px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: curve.ms, easing: curve.ease });
+    Motion.animate(roll, [{ transform: 'translateY(16px)' }, { transform: 'none' }], { duration: curve.ms, easing: curve.ease }).then(function () { line.style.overflow = ''; });
   }
 
   /** Tells a screen reader what just happened, without taking focus. */
@@ -60,6 +61,7 @@ window.Landing = (function () {
       // A card folded in a pile cannot be shown, so the pile takes the knock.
       e.signals.push(s);
       e.fresh = true;
+      if (s.state) e.fields.state = s.state;
       var pile = [].filter.call(document.querySelectorAll('.card.is-pile'), function (p) { return (p._members || []).indexOf(e) >= 0; })[0];
       if (pile) Motion.knock(pile, 145);
       return;
@@ -71,17 +73,19 @@ window.Landing = (function () {
     var drop = document.createElement('i');
     drop.className = 'drop drop--' + tone;
     document.body.appendChild(drop);
-    var x = line.left + 3, y = (line.height ? line.top + line.height / 2 : r.top + 22);
-    // It falls long enough to be seen, stretching as it goes, and flattens on contact.
+    // A one-line row has its news at the end of the line, so the drop falls there.
+    var isRow = el.dataset.level === 'one';
+    var x = isRow ? r.right - 24 : line.left + 3, y = isRow ? r.top + 17 : line.top + line.height / 2;
+    // It falls long enough to be seen, stretching as it goes, and flattens on contact. The card reacts at the moment of contact.
+    var from = r.top - 24;
     drop.animate([
-      { transform: 'translate3d(' + x + 'px,' + (y - 60) + 'px,0) scale(.7,1)', opacity: 0 },
-      { transform: 'translate3d(' + x + 'px,' + (y - 46) + 'px,0) scale(.85,1.2)', opacity: 1, offset: 0.25 },
-      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(.85,1.3)', opacity: 1, offset: 0.9 },
-      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(1.25,.7)', opacity: 1 },
-    ], { duration: 280, easing: 'cubic-bezier(.4,0,.9,.8)' }).finished.then(function () {
-      drop.remove();
-      apply(e, s, el);
-    });
+      { transform: 'translate3d(' + x + 'px,' + from + 'px,0) scale(.7,1)', opacity: 0 },
+      { transform: 'translate3d(' + x + 'px,' + (from + 12) + 'px,0) scale(.85,1.2)', opacity: 1, offset: 0.2 },
+      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(.85,1.35)', opacity: 1, offset: 0.78, easing: 'linear' },
+      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(1.5,.55)', opacity: 1, offset: 0.84 },
+      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(1.5,.55)', opacity: 0 },
+    ], { duration: 360, easing: 'cubic-bezier(.4,0,.9,.8)' }).finished.then(function () { drop.remove(); });
+    setTimeout(function () { apply(e, s, el); }, 281);
   }
 
   /** Brings a new card down into its place, with the rim every arrival gets. */

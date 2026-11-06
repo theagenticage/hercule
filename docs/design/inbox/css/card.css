@@ -77,6 +77,7 @@
 .c-pace[data-ramp="recent"] { color: var(--wait-recent); }
 .c-pace[data-ramp="stale"] { color: var(--wait-due); }
 .c-pace[data-ramp="overdue"] { color: var(--wait-over); font-weight: var(--w-bold); }
+.card.is-repeat:not(.is-hover):not(.is-peek):not(.is-focus) .c-mark .mark { opacity: 0.42; }
 
 .c-line {
   grid-column: 2;
@@ -97,7 +98,6 @@
 .c-status { grid-column: 3; grid-row: 2; justify-self: end; height: 16px; margin-top: 3px; display: flex; align-items: center; }
 /* The usual state of a kind says nothing at rest. */
 .c-status.is-norm { display: none; }
-.card.is-peek .c-status.is-norm { display: flex; }
 
 .shape { display: inline-grid; place-items: center; }
 .shape.tone-quiet { color: var(--faint); }
@@ -170,26 +170,36 @@
 
 /* Hover: the actions take the place of the figures. */
 .c-acts {
-  position: absolute;
-  top: 5px;
-  right: 7px;
+  grid-column: 3;
+  grid-row: 2;
+  position: relative;
   z-index: 3;
+  justify-self: end;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
+  width: 0;
+  height: 16px;
+  margin-top: 3px;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--m-quick) var(--m-ease);
 }
 .card.is-hover .c-acts,
 .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
-.card.is-hover .c-pace,
-.card.is-focus .c-pace,
-.card.pace-slow.is-hover .c-pace,
-.card.pace-slow.is-focus .c-pace { display: none; }
-/* The title gives way to the actions with an ellipsis, so no word is cut in half. */
-.stack .card.is-hover:not(.is-whole):not(.is-peek) .c-title,
-.stack .card.is-focus:not(.is-whole):not(.is-peek) .c-title { margin-right: var(--acts-w, 90px); }
+/* The actions take the end of the second line, where the status was. The title and the wait never move. */
+.card.is-hover .c-status,
+.card.is-focus .c-status { visibility: hidden; }
+.card.is-whole.density-open .c-acts { margin-top: 5px; }
+.card.density-tight .c-acts { margin-top: 1px; }
+/* On a one-line row there is no second line, so the actions stand at its end. */
+.card[data-level="one"]:not(.is-peek) .c-acts { grid-row: 1; height: 18px; margin-top: 0; }
+.card[data-level="one"].is-hover:not(.is-peek) .c-title,
+.card[data-level="one"].is-focus:not(.is-peek) .c-title { margin-right: var(--acts-w, 90px); }
+.card[data-level="one"].is-hover:not(.is-peek) .c-pace,
+.card[data-level="one"].is-focus:not(.is-peek) .c-pace { visibility: hidden; }
+.card.is-closing .c-foot { opacity: 0; transition: opacity 100ms linear; }
 .c-act {
   display: inline-flex;
   align-items: center;
@@ -202,7 +212,7 @@
   color: var(--muted);
   transition: background var(--m-quick), color var(--m-quick), transform var(--m-press);
 }
-.c-act:hover { background: var(--hover); color: var(--ink); }
+.c-act:hover { background: color-mix(in oklab, var(--ink) 6%, var(--stock)); color: var(--ink); }
 .c-act:active { transform: scale(0.94); }
 .c-act--hand .cr + .cr { margin-left: -13px; }
 /* A move says its name only when the pointer is on it. At rest the actions stay small, at the far right, so a click on a title can never hit one. */
@@ -212,22 +222,19 @@
 
 .c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; display: none; }
 .card.is-peek .c-hit { display: block; pointer-events: auto; }
-.card.is-under .c-line, .card.is-under .c-status { visibility: hidden; }
-/* In a peek, and on a whole card with its actions out, the title reads in full: the actions take the end of its first line. */
-.stack .card.is-peek .c-title,
-.stack .card.is-whole.is-hover .c-title,
-.stack .card.is-whole.is-focus .c-title { display: block; grid-column: 2 / -1; margin-right: 0; max-height: 63px; overflow: hidden; white-space: normal; }
-.stack .card.is-peek .c-title::before,
-.stack .card.is-whole.is-hover .c-title::before,
-.stack .card.is-whole.is-focus .c-title::before { content: ""; float: right; width: var(--acts-w, 90px); height: 18px; }
+.card.is-under .c-line, .card.is-under .c-status, .card.is-under .c-title, .card.is-under .c-mark, .card.is-under .c-pace, .card.is-under .c-holder { visibility: hidden; }
+/* In a peek the title reads in full, up to three lines. */
+.stack .card.is-peek .c-title { -webkit-line-clamp: 3; }
 .stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
 .stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); background: color-mix(in oklab, var(--stock) 40%, var(--stock-carry)); }
 .card.is-peek .c-acts { z-index: 4; }
 .stack .card.is-hover:not(.is-peek) > .card-stock { box-shadow: var(--h-hover); }
 .stack .card.is-focus > .card-stock,
 .card:focus-visible > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
-.card.is-dim, .plaque.is-dim { opacity: 0.66; }
-.card.is-dim .mark, .plaque.is-dim .pl-marks { opacity: 0.45; }
+/* A filter dims the paper and the logo, and leaves the words readable: a dimmed card can still be clicked. */
+.card.is-dim > .card-stock { opacity: 0.5; }
+.card.is-dim .mark, .plaque.is-dim .pl-marks { opacity: 0.4; }
+.card.is-dim .c-title { font-weight: var(--w-regular); }
 
 /* Someone holds it now: the card lies flat, and what holds it stands behind its top edge. */
 .stack .card[data-height="flat"] > .card-stock { box-shadow: inset 0 0 0 1px var(--stock-rim); background: var(--stock-flat); }
@@ -237,34 +244,36 @@
 .card[data-height="flat"] .c-pace { display: none; }
 
 /* Who holds a card now stands where the wait was. */
-.c-holder { grid-column: 3; grid-row: 1; justify-self: end; align-self: start; width: 26px; height: 26px; margin-top: -4px; overflow: hidden; }
+.c-holder { position: absolute; top: 8px; right: 12px; width: 22px; height: 22px; overflow: hidden; }
 .c-holder-in { display: block; line-height: 0; }
-.c-holder .person { margin: 3px 0 0 6px; }
+.c-holder .cr { filter: saturate(0.8); }
+.c-holder .person { margin: 2px 0 0 2px; }
 
 /* The shelf lies flat. A slow thing is filed, not waiting: a row of words on the desk until the pointer stands it up. */
 .stack-wrap[data-slow="true"] .card:not(.is-whole):not(.is-pile):not(.is-peek):not(.is-focus):not(.is-hover) > .card-stock { background: transparent; box-shadow: none; }
 .stack-wrap[data-slow="true"] .card:not(.is-peek):not(.is-focus):not(.is-hover) .c-title { color: color-mix(in oklab, var(--ink) 78%, var(--muted)); font-weight: var(--w-regular); }
-.c-key { color: var(--recede); font: var(--type-meta); font-variant-numeric: tabular-nums; letter-spacing: 0; }
-.card.pace-slow .c-pace { display: inline-flex; align-items: center; gap: 6px; }
-.card.is-whole.pace-slow .c-key, .card.is-peek.pace-slow .c-key { display: none; }
+.card.pace-slow .c-pace { display: inline-flex; align-items: center; gap: 6px; max-width: 200px; min-width: 0; font: var(--type-summary); }
+.c-news { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .card.pace-slow .shape svg { width: 14px; height: 14px; }
 
 .noticed, .open--plaque { --focus: var(--plate-ink); }
 
 /* The plate: one band across the page, Hercule's own. It is the one object opposite the page: lacquer on a light desk, and
-   brass-bright on a dark one. What Hercule noticed runs along it like a line of engraving. */
+   brass on a dark one. What Hercule noticed lies on it in the page's own columns, so one grid runs from the plate to the foot. */
 .noticed {
   grid-column: 1 / -1;
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: stretch;
-  gap: 8px;
-  height: 58px;
-  margin-bottom: 20px;
-  padding-right: 8px;
+  height: 60px;
+  margin-bottom: 22px;
   border-radius: var(--card-r);
-  background: linear-gradient(180deg, color-mix(in oklab, var(--plate-lit) 62%, transparent), transparent 70%), var(--plate);
-  box-shadow: inset 0 0 0 1px var(--plate-rim), var(--plate-shadow);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--plate-lit) 46%, transparent) 0, transparent 22%),
+    linear-gradient(180deg, transparent 60%, color-mix(in oklab, var(--plate-ink) 12%, transparent) 100%),
+    var(--plate);
+  box-shadow: inset 0 0 0 1px var(--plate-rim), inset 0 1px 0 color-mix(in oklab, var(--plate-lit) 90%, transparent), var(--plate-shadow);
   color: var(--plate-ink);
 }
 .noticed[hidden] { display: none; }
@@ -273,26 +282,23 @@
 .noticed.is-glint::after { animation: plate-glint 1200ms cubic-bezier(0.4, 0, 0.2, 1); }
 @keyframes plate-glint { 0% { background-position: 130% 0; opacity: 1; } 100% { background-position: -40% 0; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .noticed.is-glint::after { animation: none; } }
-.plate-crest { flex: none; display: grid; place-items: center; width: 58px; color: var(--plate-ink); }
+.plate-crest { position: absolute; left: 12px; top: 0; bottom: 0; display: grid; place-items: center; width: 34px; color: var(--plate-ink); }
 .plate-crest .logo g { fill: var(--plate); }
 .plaque {
   position: relative;
-  flex: 0 1 auto;
   min-width: 0;
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   column-gap: 10px;
   align-content: center;
-  padding: 0 28px 0 12px;
-  border-radius: 9px;
-  margin: 5px 0;
+  padding: 0 12px;
   color: var(--plate-ink);
   cursor: default;
   outline: none;
   transition: background var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease);
 }
-.plaque.is-hover { background: color-mix(in oklab, var(--plate-ink) 8%, transparent); }
-.plaque.is-hover .pl-why { color: var(--plate-ink); }
+.plaque[data-slot="0"] { padding-left: 54px; }
+.plaque.is-hover { background: color-mix(in oklab, var(--plate-ink) 7%, transparent); }
 .pl-marks { position: relative; grid-row: 1 / 3; align-self: center; width: 22px; height: 20px; color: var(--plate-ink); }
 .pl-mark { display: block; line-height: 0; }
 .pl-badge { position: absolute; right: -3px; bottom: -4px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--plate); box-shadow: 0 0 0 1px var(--plate-rim); }
@@ -304,7 +310,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.plaque:first-of-type .pl-title { font-size: var(--t-14); line-height: 20px; }
 .pl-why {
   color: var(--plate-sub);
   font: var(--type-summary);
@@ -312,11 +317,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.plaque .pl-acts { top: 50%; right: 6px; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(90deg, transparent, var(--plate) 14px); }
+.plaque .pl-acts { position: absolute; top: 50%; right: 6px; width: auto; height: auto; margin: 0; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(90deg, transparent, var(--plate) 14px); }
 .plaque.is-hover .pl-acts, .plaque.is-focus .pl-acts { opacity: 1; pointer-events: auto; }
 .plaque .c-act { color: var(--plate-sub); }
 .plaque .c-act-word { color: var(--plate-ink); }
-.plaque .c-act:hover { background: color-mix(in oklab, var(--plate-ink) 12%, transparent); color: var(--plate-ink); }
+.plaque .c-act:hover { background: color-mix(in oklab, var(--plate-ink) 12%, var(--plate)); color: var(--plate-ink); }
 .plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--plate-ink); border-radius: 6px; }
 
 /* The lift: a sheet rising towards the pointer, on the same spring as its scale. */

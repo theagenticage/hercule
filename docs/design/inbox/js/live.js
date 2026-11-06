@@ -36,7 +36,7 @@ window.Live = (function () {
       var e = step.arrive();
       if (App.findEntity(e.id)) return false;
       // Something new while you are elsewhere: one small dot on the Inbox row, and nothing louder.
-      if (away) { App.state.entities.push(e); Nav.setNew(true); Nav.setCount('inbox', App.countOverdue()); return true; }
+      if (away) { App.state.entities.push(e); Nav.setNew(true); Nav.setCount('inbox', App.countOverdue()); Landing.announce('New in your Inbox: ' + e.title); return true; }
       if (!App.arrive(e)) return true;
       Landing.settleArrival(App.els()[e.id]);
       return true;

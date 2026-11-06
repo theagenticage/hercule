@@ -46,7 +46,7 @@
   function sayWait(since, now) {
     var h = (now - since) / 36e5;
     if (h < 1) return Math.max(1, Math.round(h * 60)) + 'm';
-    if (h < 48) return Math.round(h) + 'h';
+    if (h < 24) return Math.round(h) + 'h';
     return Math.round(h / 24) + 'd';
   }
 
@@ -100,7 +100,7 @@
     if (!latest) return { lead: '', text: '', tone: 'plain', more: 0 };
     var reason = sayReason(kind, latest);
     var who = latest.who || (kind.person && f[kind.person] !== 'you' ? f[kind.person] : null);
-    var usual = latest.key === usualReason;
+    var usual = latest.key === (usualReason === 'concern' ? e.concern : usualReason);
     var text = reason.text;
     if (usual && who) text = W.PEOPLE[who].name;
     if (usual && !who) text = [fill(kind.identifier, f), fill(kind.context, f)].filter(Boolean).join(' · ');
@@ -114,8 +114,8 @@
     var status = kind.status && kind.status[f.state];
     var shape = status && !status.norm ? drawShape(status) : '';
     var pace = kind.pace === 'fast' && !e.task ? sayWait(e.since, ctx.now) : '';
-    // A slow kind has no clock. Its key takes the place of the wait, with its status beside it when the status has news.
-    if (kind.pace === 'slow' && !e.task) pace = shape + '<span class="c-key">' + esc(fill(kind.identifier, f)) + '</span>';
+    // A slow kind has no clock. Its status takes the place of the wait, when the status has news.
+    if (kind.pace === 'slow' && !e.task) pace = (line.tone === 'usual' ? '' : '<span class="c-news">' + esc(line.text) + '</span>') + shape;
     var flows = readWorkflows(e);
     var hand = flows.length
       ? '<button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + ' (H)" aria-label="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + '"' + (flows.length > 1 ? ' aria-haspopup="menu"' : '') + '>' +
@@ -139,7 +139,7 @@
   /** Returns who holds the card now, for the place the wait had: once someone has it, the wait stops mattering to you. */
   function drawHolder(e) {
     if (!e.task) return '';
-    var who = e.task.by === 'you' ? drawPerson('you', 20) : Crew.face(e.task.by, { pose: 'working', size: 26 });
+    var who = e.task.by === 'you' ? drawPerson('you', 18) : Crew.face(e.task.by, { pose: 'working', size: 22 });
     return '<span class="c-holder" title="' + esc(e.task.by === 'you' ? 'You have it' : e.task.by + ' has it') + '"><span class="c-holder-in">' + who + '</span></span>';
   }
 
@@ -193,13 +193,15 @@
   function drawPlaque(c) {
     var flows = readWorkflows(c);
     var why = c.task ? (c.task.by === 'you' ? 'You took it on' : c.task.by + ' has it') : c.why;
-    return '<div class="plaque' + (c.task ? ' is-handed' : '') + '" role="listitem" data-id="' + c.id + '" tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(why) + '">' +
+    return '<div class="plaque' + (c.task ? ' is-handed' : '') + '" role="listitem" data-id="' + c.id + '" data-slot="' + c.slot + '" style="grid-column:' + (c.slot + 1) + '" tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(why) + '">' +
       '<div class="pl-marks">' + drawSources(c.sources) + '</div>' +
       '<h3 class="pl-title">' + esc(c.title) + '</h3>' +
       '<div class="pl-why">' + esc(why) + '</div>' +
-      '<div class="c-acts pl-acts"><button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="Hand to an agent (H)" aria-label="Hand to an agent">' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>' +
-      '<button class="c-act" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
-      '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Back to Intake (E)" aria-label="Back to Intake">' + Crew.icon('close', 14) + '</button></div>' +
+      '<div class="c-acts pl-acts">' + (c.task
+        ? '<button class="c-act c-act--go" tabindex="-1" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>'
+        : '<button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="Hand to an agent (H)" aria-label="Hand to an agent"><span class="c-act-word">Hand to…</span>' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>' +
+          '<button class="c-act" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself"><span class="c-act-word">Take it</span>' + drawPerson('you', 20) + '</button>' +
+          '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Back to Intake (E)" aria-label="Back to Intake">' + Crew.icon('close', 14) + '</button>') + '</div>' +
       '</div>';
   }
 

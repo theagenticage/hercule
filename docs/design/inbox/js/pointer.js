@@ -5,25 +5,20 @@ window.Pointer = (function () {
   var HAND_OVER = 70;    // ms of rest before a showing peek moves to another card
   var LEAVE_DELAY = 140; // ms before a peek closes when the pointer has left the stack
   var hover = null, peeked = null, timer = 0, leaveTimer = 0;
-  var speed = 0, lastX = 0, lastY = 0, lastT = 0, overWrap = null, settledAt = 0, lastAct = null;
+  var speed = 0, lastX = 0, lastY = 0, lastT = 0, overWrap = null, settledAt = 0, lastAct = null, keysAtX = 0, keysAtY = 0;
 
   /** Returns how tall a card stands in a peek: its whole face at strip size, kept inside the window. */
   function measurePeek(el) {
     var was = el.style.height;
     el.style.transition = 'none';
     el.style.height = 'auto';
-    var whole = el.offsetHeight + 10;
+    var whole = el.offsetHeight + 8;
     var room = innerHeight - el.getBoundingClientRect().top - 8;
     el.style.height = was;
-    // A peek ends on the edge of a strip, so no strip is cut in half under it.
-    var edge = Infinity;
-    [].forEach.call(el.parentNode.children, function (c) {
-      if (c._plan && c !== el && c._plan.y >= el._plan.y + whole && c._plan.y < edge) edge = c._plan.y;
-    });
-    return Math.min(edge === Infinity ? whole : edge - el._plan.y, room);
+    return Math.min(whole, room);
   }
 
-  /** Hides the second line of the strip a peek ends on, so no sliver of a hidden card shows under it. */
+  /** Hides the words of the strip a peek ends on, so no sliced line of a hidden card shows under it. */
   function markUnder(el, host, height) {
     var bottom = el._plan.y + height;
     [].forEach.call(host.children, function (c) {
@@ -53,14 +48,26 @@ window.Pointer = (function () {
     if (!el) return;
     peeked = null;
     if (el._plan) {
+      el.classList.add('is-closing');
       el.style.height = el._plan.show + 'px';
       [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
     }
     setTimeout(function () {
+      el.classList.remove('is-closing');
       if (el === peeked) return;
       el.classList.remove('is-peek');
       if (el._rest) el.style.height = el._rest + 'px';
     }, Motion.isReduced() ? 0 : 230);
+  }
+
+  /** Notes where the pointer rests when the keys take over. */
+  function noteKeys() { keysAtX = lastX; keysAtY = lastY; }
+
+  /** Lets go of a card without closing its peek, because the card itself is leaving. */
+  function forget(el) {
+    if (peeked !== el) { unpeek(); return; }
+    peeked = null;
+    [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
   }
 
   /** Tells a card how wide its actions are, so its title can end before them. */
@@ -120,6 +127,8 @@ window.Pointer = (function () {
       if (document.documentElement.dataset.dragging) return;
       speed = Math.hypot(ev.clientX - lastX, ev.clientY - lastY) / Math.max(1, ev.timeStamp - lastT);
       lastX = ev.clientX; lastY = ev.clientY; lastT = ev.timeStamp;
+      // A pointer resting on the page must not take over from the keys for a nudge of the desk: only real travel does.
+      if (Keys.isUsingKeys() && Math.hypot(lastX - keysAtX, lastY - keysAtY) < 12) return;
       // While a stack closes up, what is under the pointer is a moving target, so the card handed over stays current.
       if (performance.now() < settledAt) return;
       var plaque = ev.target.closest('.plaque');
@@ -149,5 +158,5 @@ window.Pointer = (function () {
     });
   }
 
-  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, clearHover: clearHover, handOver: handOver, measureActs: measureActs, stackUnderPointer: function () { return overWrap && overWrap.dataset.wrap; } };
+  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, clearHover: clearHover, handOver: handOver, forget: forget, noteKeys: noteKeys, measureActs: measureActs, stackUnderPointer: function () { return overWrap && overWrap.dataset.wrap; } };
 })();

@@ -1,19 +1,36 @@
 // The stack: the one rule behind the page. A stack shows the oldest few, and everything else waits in a pile under them. More
 // volume makes the pile thicker, not the page busier, so the page looks the same at 30 cards and at 300.
 (function () {
-  // A strip's height, by density. An open strip shows a title and a line; a tight strip shows a title, and a line only when it has news.
+  // A strip's height, by density. An open strip shows a title and a line. A tight strip is one line, with any news at its end.
   var METRICS = {
     open: { strip: 52, gap: 12 },
-    tight: { strip: 34, news: 50, gap: 8 },
+    tight: { strip: 34, gap: 8 },
   };
   var LEAD_GAP = 12;  // the air under a stack's first card, which stands apart from the strips behind it
-  var PILE = 70;      // a pile, with its sheets
+  var PILE = 56;      // a pile, with its sheets
   var TAB = 28;       // a group's heading on the shelf
 
-  /** Returns how many strips a stack on the clock may show under its first card, at this depth. */
-  function countStrips(depth, sharesColumn, leadHeight) {
-    var room = Math.floor((depth - leadHeight - LEAD_GAP - PILE) / METRICS.open.strip);
-    return Math.max(1, Math.min(sharesColumn ? 3 : 5, room));
+  /**
+   * Returns how many cards each stack of a column may show, so that together they fit the depth. A stack's depth is a hard limit,
+   * and the pile is the only thing that gives: the tallest stack gives up a strip until all of them fit.
+   */
+  function planBudgets(stacks, depth) {
+    var plans = stacks.map(function (s) { return { s: s, strips: Math.min(s.cap, Math.max(0, s.count - 1)) }; });
+    var readRest = function (p) { return p.s.count - 1 - p.strips; };
+    var height = function (p) {
+      if (!p.s.count) return 30 + p.s.foot;
+      var rest = readRest(p);
+      // A pile of one is only a card in disguise, so it stands as a strip.
+      return p.s.lead + LEAD_GAP + (p.strips + (rest === 1 ? 1 : 0)) * METRICS.open.strip + (rest > 1 ? PILE : 0) + p.s.foot;
+    };
+    var total = function () { return plans.reduce(function (a, p) { return a + height(p); }, 0); };
+    while (total() > depth) {
+      var tallest = null;
+      plans.forEach(function (p) { if (p.strips > 0 && (!tallest || height(p) > height(tallest))) tallest = p; });
+      if (!tallest) break;
+      tallest.strips--;
+    }
+    return plans.map(function (p) { return 1 + p.strips + (readRest(p) === 1 ? 1 : 0); });
   }
 
   /**
@@ -53,5 +70,5 @@
     return needs.map(function (n) { return Math.floor((depth * n.asks) / total); });
   }
 
-  window.Stacks = { METRICS: METRICS, LEAD_GAP: LEAD_GAP, PILE: PILE, TAB: TAB, countStrips: countStrips, layOut: layOut, shareDepth: shareDepth };
+  window.Stacks = { METRICS: METRICS, LEAD_GAP: LEAD_GAP, PILE: PILE, TAB: TAB, planBudgets: planBudgets, layOut: layOut, shareDepth: shareDepth };
 })();

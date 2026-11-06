@@ -97,7 +97,7 @@ window.Scenes = (function () {
       return '<div class="fr-card">' + Card.drawMark({ name: name, mark: mark, hue: hue, solid: mark === 'github' }, 22) + '<div><b>' + name + '</b><small>' + line + '</small></div><button class="btn btn--sm">Connect</button></div>';
     };
     var next = '<i class="fr-next"></i><i class="fr-next"></i><i class="fr-next"></i><i class="fr-next"></i>';
-    var head = function (t) { return '<h2 class="stack-h"><span class="stack-n">0</span><span>' + t + '</span></h2>'; };
+    var head = function (t) { return '<h2 class="stack-h"><span class="stack-n"></span><span class="stack-t">' + t + '</span></h2>'; };
     page.innerHTML = '<div class="noticed"><div class="plate-crest">' + Crew.logo(30, { mono: true }) + '</div><div class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></div></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To review') + connect('github', 'GitHub', null, 'Pull requests and reviews') + next + '</section></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To answer') + connect('gmail', 'Gmail', 25, 'Threads that ask something of you') + next + '</section></div>' +

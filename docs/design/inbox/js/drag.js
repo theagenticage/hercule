@@ -49,6 +49,7 @@ window.Drag = (function () {
     rail.style.transform = '';
     void rail.offsetWidth;
     rail.style.transition = '';
+    rail.classList.add('is-on');
   }
 
   /** Puts the ghost under the pointer this frame, one to one. Only its scale and its lean ride a spring. */
@@ -103,15 +104,26 @@ window.Drag = (function () {
     // A card dropped on Dismiss leaves from the rail. Going home first would be the gesture backwards.
     if (chosen && t.el.dataset.target === 'dismiss') {
       body.to({ s: 0.3, o: 0 }, 'hand', { done: function () { g.remove(); } });
-      s.style.transition = 'none';
       s.classList.remove('is-lifted');
-      s.style.transition = '';
-      Moves.perform('dismiss', e.id);
+      Moves.dismiss(e, true);
       return;
     }
     // One object, one place: the card goes home, and what was chosen comes to it there.
     g.style.height = (s._plan ? s._plan.show : home.height) + 'px';
     var land = function () {
+      // The real card takes over from the ghost in mid-air, so the chain plays on something that can be seen.
+      var box = g.getBoundingClientRect(), b = Motion.body(g);
+      g.remove();
+      s.style.transition = 'none';
+      s.classList.remove('is-lifted');
+      var rest = s.getBoundingClientRect();
+      var card = Motion.body(s);
+      card.set({ x: box.left - rest.left, y: box.top - rest.top, s: b.value.s });
+      card.speed.x = b.speed.x;
+      card.speed.y = b.speed.y;
+      var z = s.style.zIndex;
+      s.style.zIndex = 400;
+      card.to({ x: 0, y: 0, s: 1 }, 'travel', { done: function () { s.style.zIndex = z; s.style.transition = ''; } });
       var what = t.el.dataset.target;
       if (what === 'hand') Moves.hand(e, Card.readWorkflows(e)[Number(t.el.dataset.i)]);
       else Moves.perform(what, e.id);
@@ -122,6 +134,7 @@ window.Drag = (function () {
     body.speed.y = fling.y;
     clearTimeout(rest);
     body.to({ x: home.left, y: home.top, s: 1, r: 0, l: 0 }, 'travel', { done: function () {
+      if (chosen) return;
       g.remove();
       s.style.transition = 'none';
       s.classList.remove('is-lifted');

@@ -61,7 +61,10 @@ window.Moves = (function () {
       // A card from a tray has no place in a stack: it says what happened where it is seen.
       var seen = document.querySelector('#tray .card[data-id="' + e.id + '"]');
       if (seen) Card.redrawBody(seen, e, { now: App.state.now, usual: null });
+      // A card held from inside a pile was never on the page, so it goes straight to the foot line.
+      e.settled = true;
       App.layOut();
+      Tray.refresh();
       showToast(said, undoWord);
       return;
     }
@@ -87,6 +90,10 @@ window.Moves = (function () {
       App.layOut();
       showToast(said, undoWord);
       noteLast();
+      var stack = App.readStack(e);
+      setTimeout(function () {
+        if (App.turnOver(stack) && Keys.isUsingKeys() && !Keys.current()) setTimeout(function () { Keys.focusFirstIn(stack); }, 380);
+      }, 900);
     }, reduced ? 0 : 170);
   }
 
@@ -120,25 +127,30 @@ window.Moves = (function () {
    * tab under the pointer: the same click at the same spot dismisses the next one. The next card is chosen by order, never by
    * what happens to be under the pointer while things move.
    */
-  function dismiss(e) {
+  function dismiss(e, atTheRail) {
     var el = App.els()[e.id];
     placeToast(el);
-    var next = el && el._plan ? Keys.readBelow(e.id) : null;
+    var stack = App.readStackEntities(App.readStack(e)).lying;
+    var nextCard = stack[stack.indexOf(e) + 1];
     var wasHover = el && el.classList.contains('is-hover');
     var index = App.state.entities.indexOf(e);
     history.push({ type: 'dismiss', e: e, snap: takeSnapshot([e]) });
     App.state.entities.splice(index, 1);
     Tray.remove(e.id);
-    Pointer.unpeek();
     if (el && el._plan) {
       var first = Number(el.style.zIndex);
-      el.classList.remove('is-hover', 'is-focus', 'is-peek');
+      // A card dismissed from a peek leaves with its whole face, and the stack closes under it.
+      Pointer.forget(el);
+      el.classList.remove('is-hover', 'is-focus');
       el.classList.add('is-leaving');
       App.forgetEl(e.id);
-      Motion.body(el).to(Motion.isReduced() ? { o: 0 } : { x: 14, o: 0 }, 'travel', { done: function () { el.remove(); } });
+      if (atTheRail) el.remove();
+      else Motion.body(el).to(Motion.isReduced() ? { o: 0 } : { x: 14, o: 0 }, 'travel', { done: function () { el.remove(); } });
       App.layOut(false, function (c) { return Math.min(120, Math.max(0, Number(c.style.zIndex) - first) * 14); });
-      if (wasHover) Pointer.handOver(next && App.els()[next]);
-    } else App.layOut();
+      // The card that rises into this place takes over: from under it, or dealt from the pile.
+      if (wasHover) Pointer.handOver(nextCard && App.els()[nextCard.id]);
+    } else { Pointer.unpeek(); App.layOut(); }
+    App.noteStackEmptied(App.readStack(e));
     showToast('Dismissed', 'Undo', 'Dismissed: ' + e.title);
     if (!App.countLeft()) setTimeout(function () { if (!App.countLeft()) App.checkZero(); }, 320);
   }
@@ -156,8 +168,9 @@ window.Moves = (function () {
   /** Plays a hand-off backwards: the mark flies home from Overview, the card stands up, and the colleague sinks away. */
   function playUnassign(e) {
     var el = App.els()[e.id];
+    if (!el || !el._plan) { App.layOut(); el = App.els()[e.id]; }
     var stand = function () {
-      if (!el) { App.layOut(); return; }
+      if (!el) { Nav.hold(false); App.layOut(); return; }
       var who = el.querySelector('.c-holder');
       var line = el.querySelector('.c-line');
       var old = line && line.cloneNode(true);
@@ -252,6 +265,8 @@ window.Moves = (function () {
 
   function showToast(text, undoWord, said) {
     var t = document.getElementById('toast');
+    // A refusal never takes Undo away.
+    if (!undoWord && history.length) undoWord = 'Undo';
     t.innerHTML = '<span>' + Card.esc(text) + '</span>' + (undoWord ? '<button data-undo>' + Card.esc(undoWord) + ' <kbd>⌘Z</kbd></button>' : '');
     Landing.announce(said || text);
     var wasHidden = t.hidden, wasGoing = t.classList.contains('is-gone');

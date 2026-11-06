@@ -38,12 +38,12 @@ window.Pages = (function () {
   function drawIntake() {
     var page = document.getElementById('page');
     page.dataset.mode = 'intake';
-    page.innerHTML = '<div class="in-wrap"><h2 class="in-head"><b>214 signals</b> about 61 things. Nine rose to your Inbox.</h2>' +
-      '<p class="in-sub">Everything that arrived, one line per thing, with how many signals it sent.</p>' +
+    page.innerHTML = '<div class="in-wrap"><h2 class="in-head"><b>214</b><span>Signals about 61 things</span></h2>' +
       '<ul class="in-list">' + ROWS.map(drawRow).join('') + '</ul><div class="in-more">49 more things, all quiet</div></div>';
   }
 
   function setView(name, keepState) {
+    if (name === current && !keepState) return;
     if (Open.isOpen()) Open.hide(true);
     Menu.hide();
     Keys.clear();
@@ -89,6 +89,8 @@ window.Pages = (function () {
     });
     App.state.entities.push(Scenes.raisedEntity(r));
     row.querySelector('.in-raise').outerHTML = '<span class="in-state">In your Inbox</span>';
+    row.focus({ preventScroll: true });
+    Landing.announce('In your Inbox: ' + r.title);
     row.classList.remove('is-quiet');
     Nav.setCount('inbox', App.countOverdue());
   }
@@ -118,7 +120,9 @@ window.Pages = (function () {
   /** The keys of Intake: J and K move, Enter opens a row, R raises it, Esc goes back to the cards. */
   function onKey(ev) {
     var rows = document.querySelectorAll('.in-row'), k = ev.key;
-    if (k === 'Escape') { ev.preventDefault(); setView('inbox'); return; }
+    if (k === 'Escape') { ev.preventDefault(); setView('inbox'); document.querySelector('[data-view="cards"]').focus(); return; }
+    var here = ev.target.closest && ev.target.closest('.in-row');
+    if (here) at = [].indexOf.call(rows, here);
     if (k === 'j' || k === 'ArrowDown') at = Math.min(rows.length - 1, at + 1);
     else if (k === 'k' || k === 'ArrowUp') at = Math.max(0, at - 1);
     else if (k === 'Enter' && rows[at] && !ev.target.closest('button')) rows[at].setAttribute('aria-expanded', rows[at].classList.toggle('is-open'));

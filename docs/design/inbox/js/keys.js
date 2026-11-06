@@ -36,16 +36,27 @@ window.Keys = (function () {
 
   function readEl(id) { return App.els()[id] || document.querySelector('.plaque[data-id="' + id + '"]'); }
 
-  /** Returns the next card after this one that still waits on the person. Work runs down a stack and never onto the plate. */
+  /**
+   * Returns the next thing that still waits on the person, by order, never by what is under the pointer. Work runs down a stack,
+   * then on to the next stack, and never from a stack onto the plate.
+   */
   function readNextWaiting(id) {
-    var grid = readGrid(), col = grid.filter(function (c) { return c.indexOf(id) >= 0; })[0];
-    var isWaiting = function (x) { var e = App.findEntity(x); return x !== id && e && !e.task; };
-    if (!col) {
-      var plaques = readFlat().filter(function (x) { var e = App.findEntity(x); return e && e.kind === 'hercule/cluster' && !e.task && x !== id; });
-      return plaques[0] || null;
+    var e = App.findEntity(id);
+    if (!e) return null;
+    var isWaiting = function (x) { return x !== e && !x.task; };
+    if (e.kind === 'hercule/cluster') {
+      var plaques = App.state.clusters.filter(isWaiting);
+      return plaques[0] ? plaques[0].id : null;
     }
-    var at = col.indexOf(id);
-    return col.slice(at + 1).filter(isWaiting)[0] || col.slice(0, at).reverse().filter(isWaiting)[0] || null;
+    var names = [].concat.apply([], App.readColumns()), at = names.indexOf(App.readStack(e));
+    var lying = App.readStackEntities(names[at]).lying, i = lying.indexOf(e);
+    var here = lying.slice(i + 1).filter(isWaiting)[0] || lying.slice(0, Math.max(0, i)).reverse().filter(isWaiting)[0];
+    if (here) return here.id;
+    for (var n = 1; n < names.length; n++) {
+      var more = App.readStackEntities(names[(at + n) % names.length]).lying.filter(isWaiting)[0];
+      if (more) return more.id;
+    }
+    return null;
   }
 
   /** Makes a card the current card. By keyboard it also takes focus, shows the ring and shows its whole face. */
@@ -60,8 +71,10 @@ window.Keys = (function () {
     current = id;
     if (how === 'pointer') { usingKeys = false; return; }
     usingKeys = true;
+    Pointer.noteKeys();
     var el = id && readEl(id);
     if (!el) { Pointer.unpeek(); return; }
+    bringIntoView(el);
     Pointer.clearHover();
     marked = id;
     el.classList.add('is-focus');
@@ -72,6 +85,14 @@ window.Keys = (function () {
   }
 
   function focus(id) { setCurrent(id, 'keys'); }
+
+  /** Scrolls a small window so the current card can be seen. It sets the page's scroll, so a page around a frame stays put. */
+  function bringIntoView(el) {
+    var page = document.getElementById('page');
+    var r = el.getBoundingClientRect(), box = page.getBoundingClientRect();
+    if (r.top < box.top) page.scrollTop -= box.top - r.top + 44;
+    else if (r.bottom > box.bottom) page.scrollTop += r.bottom - box.bottom + 56;
+  }
 
   function move(dx, dy) {
     var cols = readGrid();
@@ -99,7 +120,10 @@ window.Keys = (function () {
     if (el.classList.contains('is-pile')) { Moves.showToast('A pile opens with Enter.'); return; }
     var next = readNextWaiting(id);
     var anchor = el.querySelector('[data-act="hand"]') || el;
-    var moveOn = function () { if (next && readEl(next)) focus(next); else setCurrent(null, 'keys'); };
+    var moveOn = function () {
+      var there = next && readEl(next);
+      if (there && (there._plan || there.classList.contains('plaque'))) focus(next); else setCurrent(null, 'keys');
+    };
     var severalFit = name === 'hand' && Card.readWorkflows(App.findEntity(id)).length > 1;
     if (!Moves.perform(name, id, anchor, moveOn)) return;
     if (name !== 'go' && !severalFit) moveOn();
@@ -116,7 +140,10 @@ window.Keys = (function () {
   }
 
   function onKey(ev) {
-    if (ev.target.matches('input, textarea, select')) { if (ev.key === 'Escape') ev.target.blur(); return; }
+    if (ev.target.matches('input, textarea, select')) {
+      if (Tray.isOpen()) Tray.onKey(ev); else if (ev.key === 'Escape') ev.target.blur();
+      return;
+    }
     if (Menu.key(ev)) { ev.preventDefault(); return; }
     var k = ev.key;
     if ((ev.metaKey || ev.ctrlKey) && k === 'z') { ev.preventDefault(); Moves.undo(); return; }
@@ -124,10 +151,13 @@ window.Keys = (function () {
     if (Help.isOpen() && (k === 'Escape' || k === '?')) { ev.preventDefault(); Help.toggle(); return; }
     if (Tray.isOpen() && !Open.isOpen()) { Tray.onKey(ev); return; }
     if (Open.isOpen()) { onKeyInOpenCard(ev, k); return; }
-    if (Pages.current() === 'intake') { Pages.onKey(ev); return; }
-    if (Pages.current() !== 'inbox') return;
     // The page's keys belong to the page. A control elsewhere, such as the sidebar, keeps its own.
     if (ev.target !== document.body && !ev.target.closest('#page, #main')) return;
+    if (Pages.current() === 'intake') { Pages.onKey(ev); return; }
+    if (Pages.current() !== 'inbox') return;
+    // The letters act on a card, so only with focus on a card, or nowhere in particular.
+    var isFree = ev.target === document.body || ev.target.id === 'main' || ev.target.closest('.card, .plaque');
+    if ('hteg'.indexOf(k) >= 0 && !isFree) return;
     // A real control keeps its own keys.
     if ((k === 'Enter' || k === ' ') && ev.target.closest('button, a, [role="menuitem"]')) return;
     // A held key must never run through the stack.
@@ -165,7 +195,7 @@ window.Keys = (function () {
     if (k === 'j' || k === 'k') {
       ev.preventDefault();
       var to = !inTray && flat[i + (k === 'j' ? 1 : -1)];
-      if (to) { Open.walk(to); current = to; }
+      if (to) { Open.walk(to); current = to; marked = null; }
       return;
     }
     var e = App.findEntity(id), flows = Card.readWorkflows(e), n = Number(k);
@@ -180,8 +210,9 @@ window.Keys = (function () {
     var pick = name === 'hand' ? flows[n >= 1 ? n - 1 : 0] : null;
     if (name === 'go') { Open.hide(true); Moves.perform('go', id); return; }
     var next = !inTray && readNextWaiting(id);
+    var there = next && readEl(next);
     // The next card opens in the same place, and the move plays on the card behind it.
-    if (next && App.findEntity(next)) { Open.walk(next); current = next; }
+    if (there && (there._plan || there.classList.contains('plaque'))) { Open.walk(next); current = next; }
     else Open.hide(true);
     if (name === 'hand') Moves.hand(e, pick); else Moves.perform(name, id);
   }
@@ -205,6 +236,14 @@ window.Keys = (function () {
   }
   var usingKeyboardFocus = false;
 
+  /** Moves to the first card of a stack that still waits. */
+  function focusFirstIn(name) {
+    var host = document.querySelector('[data-stack="' + name + '"]');
+    var cards = [].slice.call(host.querySelectorAll('.card')).filter(function (el) { var e = App.findEntity(el.dataset.id); return el._plan && e && !e.task; });
+    cards.sort(function (a, b) { return a._plan.y - b._plan.y; });
+    if (cards[0]) focus(cards[0].dataset.id);
+  }
+
   /** Forgets the current card, when the page it lay on has gone. */
   function clear() { current = null; marked = null; usingKeys = false; }
 
@@ -216,7 +255,7 @@ window.Keys = (function () {
     usingKeyboardFocus = was;
   }
 
-  return { start: start, focus: focus, focusQuietly: focusQuietly, clear: clear, setCurrent: setCurrent, readBelow: readBelow, current: function () { return current; }, isUsingKeys: function () { return usingKeys; } };
+  return { start: start, focus: focus, focusFirstIn: focusFirstIn, focusQuietly: focusQuietly, clear: clear, setCurrent: setCurrent, readBelow: readBelow, current: function () { return current; }, isUsingKeys: function () { return usingKeys; } };
 })();
 
 // The sheet of keys, on ?.
@@ -225,7 +264,7 @@ window.Help = (function () {
   var KEYS = [['↑ ↓ ← →', 'Move through the page'], ['J K', 'Next, previous'], ['Space ↩', 'Open the card, or fan a pile'], ['H', 'Hand to an agent'], ['1 2 3', 'Pick a workflow'], ['T', 'Take it on myself'], ['E', 'Dismiss'], ['G', 'See its Task on Work'], ['⌘Z', 'Undo, as far back as you like'], ['Esc', 'Close, or let go']];
   function toggle() {
     if (!el) {
-      el = document.createElement('aside');
+      el = document.createElement('div');
       el.className = 'keys';
       el.setAttribute('role', 'dialog');
       el.setAttribute('aria-label', 'Keys');

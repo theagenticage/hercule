@@ -4,6 +4,7 @@ window.Open = (function () {
   var K = Kinds.KINDS, W = World;
   var host, inner, scrim, openId = null, sourceEl = null, keyed = false;
   var motion = null, progress = null, generation = 0;
+  var REST = '.o-meta, .o-signal:not(.is-latest), .o-note, .o-parts, .o-facts, .o-ledger, .o-row';
 
   function saySince(d, now) {
     var h = (now - d) / 36e5;
@@ -56,6 +57,7 @@ window.Open = (function () {
 
   function drawOpenPlaque(c) {
     var flows = K['hercule/cluster'].workflows.noticed;
+    var head = c.task ? drawLedger(c) : null;
     return '<div class="o-head o-head--plaque">' +
       '<div class="c-mark">' + Crew.logo(24, { mono: true }) + '</div>' +
       '<h2 class="o-title">' + Card.esc(c.title) + '</h2>' +
@@ -63,11 +65,11 @@ window.Open = (function () {
       '<div class="o-meta"><span>Noticed by Hercule</span><i>·</i><span>' + Card.esc(c.figures) + '</span></div></div>' +
       '<p class="o-note">' + Card.esc(c.detail) + '</p>' +
       '<ol class="o-parts">' + c.parts.map(function (p) { return '<li>' + Card.drawMark(p.plugin, 15) + '<span>' + Card.esc(p.title) + '</span><small>' + Card.esc(p.fact) + '</small></li>'; }).join('') + '</ol>' +
-      '<div class="o-ledger">' + flows.map(function (w, i) {
+      (head || '<div class="o-ledger">' + flows.map(function (w, i) {
         return '<button class="o-row' + (i === 0 ? ' is-first' : '') + '" data-act="hand-to" data-i="' + i + '"><span class="o-label">' + Crew.face(w.name, { pose: 'idle', size: 22 }) + Card.esc(w.name) + '</span><span class="o-says">' + Card.esc(w.says) + '</span><kbd>' + (i + 1) + '</kbd></button>';
       }).join('') +
       '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it on myself</span><span class="o-says">Creates a Task with no run.</span><kbd>T</kbd></button>' +
-      '<button class="o-row o-row--quiet" data-act="dismiss"><span class="o-label">Back to Intake</span><span class="o-says">Hercule should not have raised this.</span><kbd>E</kbd></button></div>';
+      '<button class="o-row o-row--quiet" data-act="dismiss"><span class="o-label">Back to Intake</span><span class="o-says">Hercule should not have raised this.</span><kbd>E</kbd></button></div>');
   }
 
   /** Fades the veil in. It starts from nothing, so it always arrives rather than cuts. */
@@ -139,6 +141,7 @@ window.Open = (function () {
       host.classList.remove('is-closing');
       showVeil();
       progress.to(1, 'travel');
+      [].forEach.call(inner.querySelectorAll(REST), function (el) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: 'ease-out' }); });
       return;
     }
     if (openId || motion) finish();
@@ -179,8 +182,9 @@ window.Open = (function () {
     var gen = motion.gen;
     progress = Motion.value(0, function (t) { if (motion && motion.gen === gen) drawFrame(t); });
     progress.to(1, 'travel');
-    [].forEach.call(inner.querySelectorAll('.o-meta, .o-sec, .o-note, .o-parts, .o-facts, .o-ledger, .o-row'), function (el, i) {
-      el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 30 + i * 20, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
+    // What is not the same object arrives once the title and the line have passed, so nothing prints over them.
+    [].forEach.call(inner.querySelectorAll(REST), function (el, i) {
+      el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 140 + i * 18, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
     });
     host.focus({ preventScroll: true });
   }
@@ -209,6 +213,7 @@ window.Open = (function () {
     if (!e || !openId) return;
     var plaque = e.kind === 'hercule/cluster';
     if (sourceEl) restoreSource();
+    keyed = true;
     sourceEl = plaque ? document.querySelector('.plaque[data-id="' + id + '"]') : App.els()[id];
     sourceEl.classList.add('is-source');
     var down = readOrder(id) > readOrder(openId);
@@ -274,8 +279,10 @@ window.Open = (function () {
     // The card may have moved since the sheet opened, so it folds back to where the card lies now.
     if (src && src.isConnected) { motion.from = readFrom(src); motion.parts = measureParts(src); }
     host.classList.remove('is-walking');
+    // Only the arrivals are cancelled, before the class is set, so the fade of the rest can run.
+    host.getAnimations({ subtree: true }).forEach(function (a) { if (!(a instanceof CSSTransition)) a.cancel(); });
+    void host.offsetWidth;
     host.classList.add('is-closing');
-    host.getAnimations({ subtree: true }).forEach(function (a) { a.cancel(); });
     var gen = motion.gen;
     progress.to(0, 'travel', function () { if (motion && motion.gen === gen) finish(); });
     refocus(src, id, wasKeyed);
@@ -283,7 +290,8 @@ window.Open = (function () {
 
   /** Gives focus back to the card. The ring and the peek come back only for someone working by keyboard. */
   function refocus(src, id, wasKeyed) {
-    if (wasKeyed && App.findEntity(id)) Keys.focus(id);
+    if (src && src.isConnected && src.closest('#tray')) src.focus({ preventScroll: true });
+    else if (wasKeyed && App.findEntity(id)) Keys.focus(id);
     else if (src && src.isConnected) Keys.focusQuietly(src);
   }
 
@@ -296,7 +304,10 @@ window.Open = (function () {
     inner.scrollTop = top;
     var h = inner.offsetHeight;
     motion.to.height = h;
+    motion.to.top = Math.max(document.getElementById('main').getBoundingClientRect().top + 12, Math.min(motion.to.top, innerHeight - h - 16));
+    host.style.top = motion.to.top + 'px';
     host.style.height = h + 'px';
+    host.focus({ preventScroll: true });
   }
 
   function isFromTray() { return !!(sourceEl && sourceEl.closest && sourceEl.closest('#tray')); }

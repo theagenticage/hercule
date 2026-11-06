@@ -9,7 +9,7 @@ window.Nav = (function () {
     { id: 'wiki', label: 'Wiki', icon: 'wiki' },
   ];
   function drawRow(r) {
-    return '<a class="nav-row' + (r.id === 'inbox' ? ' is-on' : '') + '" href="#" data-nav="' + r.id + '"' + (r.id === 'inbox' ? ' aria-current="page"' : '') + '>' + Crew.icon(r.icon, 16) + '<span>' + r.label + '</span>' + (r.id === 'inbox' ? '<i class="nav-new" hidden></i><b class="count" data-nav-count="inbox"></b>' : '') + '</a>';
+    return '<a class="nav-row' + (r.id === 'inbox' ? ' is-on' : '') + '" href="#" data-nav="' + r.id + '"' + (r.id === 'inbox' ? ' aria-current="page"' : '') + '>' + Crew.icon(r.icon, 16) + '<span>' + r.label + '</span>' + (r.id === 'inbox' ? '<i class="nav-new" hidden><span class="sr">New cards</span></i><b class="count" data-nav-count="inbox"></b>' : '') + '</a>';
   }
   function draw() {
     document.getElementById('side').innerHTML =
