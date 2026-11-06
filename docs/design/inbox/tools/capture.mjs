@@ -34,6 +34,7 @@ const STATES = {
   "15-github-failing": { q: "scene=error" },
   "16-inbox-zero": { q: "scene=zero", wait: 1800 },
   "17-first-run": { q: "scene=firstrun" },
+  "19-clock-clear": { q: "scene=light", wait: 900, run: async (p) => { await p.evaluate(() => { App.state.clusters.splice(0); App.reflowNoticed(); App.state.entities.filter((e) => App.readStack(e) !== "shelf").forEach((e) => { e.settled = true; e.task = { by: "Agent review" }; }); App.layOut(true); App.checkZero(); }); await p.waitForTimeout(1900); } },
   "18-intake": { q: "", run: async (p) => { await p.click('[data-view="intake"]'); await p.waitForTimeout(400); } },
 };
 const only = pos[2] ? pos[2].split(",") : null;

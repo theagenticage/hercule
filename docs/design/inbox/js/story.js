@@ -85,7 +85,7 @@
     }).join('');
   }
 
-  var STATES = [['02-peek', 'Peek'], ['03-open', 'Open card'], ['04-open-noticed', 'What Hercule noticed, open'], ['05-menu', 'Several workflows fit'], ['06-handed', 'Handed and taken'], ['08-carrying', 'Carrying a card to a colleague'], ['09-light-day', 'A light day'], ['10-300-cards', '300 cards'], ['11-tray', 'A pile fanned open'], ['12-long-and-huge', 'A very long title'], ['13-loading', 'Loading'], ['14-offline', 'Offline'], ['15-github-failing', 'GitHub failing'], ['16-inbox-zero', 'Inbox zero'], ['17-first-run', 'First run']];
+  var STATES = [['02-peek', 'Peek'], ['03-open', 'Open card'], ['04-open-noticed', 'What Hercule noticed, open'], ['05-menu', 'Several workflows fit'], ['06-handed', 'Handed and taken'], ['08-carrying', 'Carrying a card to a colleague'], ['09-light-day', 'A light day'], ['10-300-cards', '300 cards'], ['11-tray', 'A pile fanned open'], ['12-long-and-huge', 'A very long title'], ['13-loading', 'Loading'], ['14-offline', 'Offline'], ['15-github-failing', 'GitHub failing'], ['16-inbox-zero', 'Inbox zero'], ['19-clock-clear', 'The clock cleared, the shelf still there'], ['17-first-run', 'First run']];
 
   function drawGallery() {
     document.getElementById('gal').innerHTML = STATES.map(function (s) {

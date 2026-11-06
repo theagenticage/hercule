@@ -42,7 +42,9 @@
   column-gap: 24px;
   flex: 1;
   min-height: 0;
-  padding: 0 32px 14px;
+  /* The page starts 10px under the bar's edge, so Hercule's head over the top card is not clipped. */
+  margin-top: -10px;
+  padding: 10px 32px 14px;
 }
 
 .col { display: flex; flex-direction: column; min-height: 0; gap: 14px; }
@@ -89,8 +91,6 @@
   color: var(--count-ink);
   white-space: nowrap;
 }
-.stack-n:empty { display: none; }
-.stack-h:has(.stack-n:empty) { grid-template-columns: minmax(0, 1fr); }
 .stack-n:not(:empty) + .stack-t { padding-bottom: 2px; }
 .stack-t { padding-bottom: 2px; padding-left: 0; }
 /* Past two digits the count takes the room it needs, and the label moves over. */
@@ -118,7 +118,7 @@
 .stack-foot { opacity: 0; transition: opacity var(--m-base) var(--m-ease); }
 .stack-wrap:hover .stack-foot, .stack-wrap:has(.is-focus) .stack-foot, .stack-foot:focus-visible { opacity: 1; }
 .stack-foot:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
-.stack-empty { margin: 8px 2px; color: var(--faint); font-size: var(--t-13); }
+.stack-empty { margin: 8px 0; color: var(--faint); font-size: var(--t-13); }
 .pile { position: absolute; top: 0; left: 0; right: 0; height: 36px; color: var(--muted); }
 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -145,6 +145,10 @@
 .ib-page[data-cols="1"] .noticed, .ib-page[data-cols="2"] .noticed { display: flex; }
 .ib-page[data-cols="1"] .plaque, .ib-page[data-cols="2"] .plaque { flex: 1 1 0; }
 .ib-page[data-cols="1"] .plaque ~ .plaque { display: none; }
+
+/* In a narrow column the actions give up what they can, so the sentence beside them keeps its words. */
+.ib-page[data-fit] .c-act--hand .cr { display: none; }
+.ib-page[data-fit="least"] .c-act--take { display: none; }
 
 /* The shared styles give these a display of their own, which would otherwise show an empty count and section. */
 .count[hidden], .side-sec[hidden] { display: none; }

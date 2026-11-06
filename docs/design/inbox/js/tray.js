@@ -3,7 +3,7 @@
 window.Tray = (function () {
   var host, scrim, source = null, current = [], closing = false;
   function drawTitle(el) {
-    if (el.dataset.foot) return 'Moved on from ' + App.STACKS[el.dataset.foot].title;
+    if (el.dataset.foot) return el.textContent.trim();
     var t = el.querySelector('.c-title').textContent;
     return t === 'more' ? 'Newer cards' : t;
   }
@@ -42,6 +42,13 @@ window.Tray = (function () {
     var h = Math.min(host.offsetHeight, innerHeight - 80);
     var left = isGrid ? cols[1].getBoundingClientRect().left - 14 : Math.max(main.left + 24, Math.min(r.left, main.right - w - 24));
     var top = Math.max(document.querySelector('.ib-page').getBoundingClientRect().top + 80, Math.min(r.top - h + 40, innerHeight - h - 24));
+    // A project's tray opens above the shelf, on its own side of the page, so it never cuts through the shelf's words.
+    var shelf = el.closest && el.closest('.col--shelf');
+    if (shelf) {
+      var box = shelf.getBoundingClientRect(), above = box.top - h - 8;
+      top = above >= main.top + 12 ? above : Math.max(main.top + 12, Math.min(box.bottom + 8 - h, innerHeight - h - 24));
+      if (r.left < cols[1].getBoundingClientRect().left) left = cols[0].getBoundingClientRect().left - 14;
+    }
     // The tray's top edge never cuts through a stack's heading: it rises to cover the whole numeral.
     [].forEach.call(document.querySelectorAll('.stack-h'), function (heading) {
       var b = heading.getBoundingClientRect();

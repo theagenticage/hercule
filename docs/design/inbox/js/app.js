@@ -12,15 +12,17 @@ window.App = (function () {
   };
   // The three stacks on the clock stand side by side, so their counts read as one line that adds up to the sidebar's number, and
   // the shelf lies across the page under them. In a narrow window the stacks fall to two columns, then one, and share their depth.
-  var LAYOUTS = { 3: [['review'], ['answer'], ['finish'], ['shelf']], 2: [['review'], ['answer', 'finish', 'shelf']], 1: [['review', 'answer', 'finish', 'shelf']] };
+  var LAYOUTS = { 3: [['review'], ['answer'], ['finish'], ['shelf']], 2: [['review', 'shelf'], ['answer', 'finish']], 1: [['review', 'answer', 'finish', 'shelf']] };
   function readColumns() {
     var w = document.getElementById('main').clientWidth;
-    return LAYOUTS[w >= 820 ? 3 : w >= 620 ? 2 : 1];
+    return LAYOUTS[w >= 900 ? 3 : w >= 620 ? 2 : 1];
   }
   var COLUMNS = LAYOUTS[3];
   var HERCULE = { hue: 'lime', shape: 'egg', acc: 'tache' };
   var HEAD = 64;       // a stack's heading, with the space under it, which a colleague's head rises into without touching the rule
   var CLOCK_DEPTH = 360; // how deep the stacks on the clock may go: three whole cards, the most a light day shows
+  var visitDepth = 0;  // how deep they go on this visit: the deepest stack when the page was drawn, so the shelf sits close under it and stays
+  var clockUsed = 0;   // the height of the deepest stack on the clock, as last laid out
   var SHELF_GAP = 20;  // the space above the shelf's heading
   var NOTICED_AIR = 32; // the margins of the noticed card, so the big counts under it have room
   var BETWEEN = 14;    // the space between two stacks of one column
@@ -69,7 +71,8 @@ window.App = (function () {
     var news = null;
     list.forEach(function (e) {
       var latest = e.signals[e.signals.length - 1];
-      if (latest && latest.key !== e.concern && (!news || latest.at > news.at)) news = { at: latest.at, text: Card.sayReason(K[e.kind], latest).text };
+      // "Omar commented" says nothing without its subject, so news from a person shows what it is about.
+      if (latest && latest.key !== e.concern && (!news || latest.at > news.at)) news = { at: latest.at, text: latest.who ? e.title : Card.sayReason(K[e.kind], latest).text };
     });
     return news ? news.text : list[0].title;
   }
@@ -212,7 +215,14 @@ window.App = (function () {
    */
   function layOut(still, stagger) {
     if (state.mode !== 'stacks' || document.getElementById('main').classList.contains('is-holding')) return;
-    if (still || !hasDrawn) { placeStacks(); flushOffstage(false); hasDrawn = true; return; }
+    if (still || !hasDrawn) {
+      placeStacks();
+      // The first drawing of a visit measures the deepest stack, and the shelf comes up under it for the rest of the visit.
+      if (!visitDepth && COLUMNS.length === 4) { visitDepth = clockUsed + 12; placeStacks(); }
+      flushOffstage(false);
+      hasDrawn = true;
+      return;
+    }
     // A card being dealt is already on its own way, and must keep what it does on arrival.
     var moving = [].slice.call(page.querySelectorAll('.stack .card:not(.is-leaving):not(.is-dealing)')).filter(function (el) { return el._plan; });
     Motion.flip(moving.concat([].slice.call(page.querySelectorAll('.stack-h, .stack-foot:not([hidden])'))), placeStacks, { spring: 'hand', stagger: stagger });
@@ -290,17 +300,21 @@ window.App = (function () {
   }
 
   function placeStacks() {
+    clockUsed = 0;
+    // In a narrow column the actions shed their faces, then Take it, so a sentence is never reduced to a letter or two.
+    var column = page.querySelector('.col').clientWidth;
+    if (column < 270) page.dataset.fit = 'least'; else if (column < 340) page.dataset.fit = 'less'; else delete page.dataset.fit;
     COLUMNS.forEach(function (names, ci) {
       var col = page.querySelectorAll('.col')[ci];
       // The last row of every column is kept for the foot line and the undo line, so neither ever covers a card.
       // Never less than a card and a pile per stack: in a very small window the page scrolls, and no card is ever out of reach.
       var noticed = document.getElementById('noticed');
-      var room = page.clientHeight - 14 - (noticed ? noticed.offsetHeight + NOTICED_AIR : 0);
+      var room = page.clientHeight - 24 - (noticed ? noticed.offsetHeight + NOTICED_AIR : 0);
       var depth = Math.max(room - names.length * HEAD - (names.length - 1) * BETWEEN - FOOT, names.length * 220);
       // With the shelf across the page, the stacks keep one depth whatever they hold, so the shelf never moves on its own.
       if (COLUMNS.length === 4) {
         var projects = buildItems('shelf', readStackEntities('shelf').lying).length;
-        depth = Math.max(220, Math.min(CLOCK_DEPTH, depth - HEAD - Stacks.measureShelfRows(projects) - SHELF_GAP - FOOT));
+        depth = Math.max(220, Math.min(visitDepth || CLOCK_DEPTH, depth - HEAD - Stacks.measureShelfRows(projects) - SHELF_GAP - FOOT));
         page.style.setProperty('--clock-row', depth + HEAD + FOOT + 'px');
       }
       var clock = names.filter(function (n) { return n !== 'shelf'; });
@@ -367,6 +381,7 @@ window.App = (function () {
         var used = plan.used;
         // A stack closes up on what it holds, so its foot line stays with it. Its depth for a peek is all the room below.
         var height = Math.max(used, b.parts.lying.length ? 0 : 30);
+        if (b.hasLead) clockUsed = Math.max(clockUsed, height);
         leftover += d - height;
         b.host.parentNode.style.height = height + HEAD + (isLast ? FOOT : b.foot) + 'px';
         b.host.dataset.depth = height + (isLast ? leftover : 0);
@@ -416,6 +431,12 @@ window.App = (function () {
       });
     });
     drawBar();
+    // Anything back on the clock takes the sunrise away again.
+    if (page.classList.contains('is-clock-clear') && countOnClock()) {
+      page.classList.remove('is-clock-clear');
+      var sun = page.querySelector('.zero--clock');
+      if (sun) sun.remove();
+    }
     // One stop for Tab: from there the arrow keys move through the page.
     var entry = page.querySelector('.plaque, .stack .card');
     if (entry) entry.tabIndex = 0;
@@ -519,7 +540,7 @@ window.App = (function () {
 
   /** Draws the page again from state, after another view held it. */
   function redraw() {
-    els = {}; measured = {}; hasDrawn = false;
+    els = {}; measured = {}; hasDrawn = false; visitDepth = 0;
     page.dataset.mode = 'stacks';
     drawFrame();
     drawNoticed();
@@ -551,11 +572,21 @@ window.App = (function () {
     return waiting.length + state.entities.filter(function (e) { return !e.settled && !e.task; }).length + state.clusters.filter(function (c) { return !c.task; }).length;
   }
 
-  /** Shows the empty Inbox once the last card has gone. */
+  /** Returns how many things want the person now: what waits on the clock, and what Hercule noticed. The shelf has no clock, so it does not count. */
+  function countOnClock() {
+    var onClock = function (e) { return readStack(e) !== 'shelf'; };
+    return waiting.filter(onClock).length + state.entities.filter(function (e) { return !e.settled && !e.task && onClock(e); }).length + state.clusters.filter(function (c) { return !c.task; }).length;
+  }
+
+  /**
+   * Shows the empty Inbox once nothing wants the person any more. With everything gone the page is the sunrise. With things still on
+   * the shelf the sunrise stands over them, because clearing the clock is the moment worth marking, and the shelf is seldom empty.
+   */
   function checkZero() {
-    if (countLeft() || state.mode !== 'stacks') return false;
+    if (countOnClock() || state.mode !== 'stacks') return false;
     settle();
-    Scenes.showZero();
+    if (!countLeft()) { Scenes.showZero(); return true; }
+    if (COLUMNS.length === 4 && !page.classList.contains('is-clock-clear')) { layOut(true); Scenes.showClockClear(page); }
     return true;
   }
 
@@ -670,7 +701,7 @@ window.App = (function () {
     state.dim = null;
     state.mode = scene.mode || 'stacks';
     state.notice = scene.notice || null;
-    els = {}; measured = {}; hasDrawn = false;
+    els = {}; measured = {}; hasDrawn = false; visitDepth = 0;
     page.dataset.scene = scene.name;
     page.dataset.mode = state.mode;
     if (scene.draw) { scene.draw(page); drawBar(); return; }
@@ -692,6 +723,7 @@ window.App = (function () {
     page = document.getElementById('page');
     var timer;
     window.addEventListener('resize', function () {
+      visitDepth = 0;
       clearTimeout(timer);
       timer = setTimeout(function () {
         measured = {};
@@ -709,6 +741,6 @@ window.App = (function () {
 
   return {
     state: state, HERCULE: HERCULE, els: function () { return els; }, STACKS: STACKS, readColumns: function () { return COLUMNS; }, findEntity: findEntity, readStack: readStack, readStackEntities: readStackEntities, layOut: layOut, redrawCard: redrawCard, drawNoticed: drawNoticed, drawBar: drawBar,
-    forgetMeasures: function () { measured = {}; }, turnOver: turnOver, noteStackEmptied: noteStackEmptied, load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, reflowNoticed: reflowNoticed, checkZero: checkZero, countLeft: countLeft, countOverdue: countOverdue, start: start, measured: function () { return measured; }, forgetEl: function (id) { delete els[id]; }, arrive: arrive, releaseArrivals: releaseArrivals,
+    forgetMeasures: function () { measured = {}; }, turnOver: turnOver, noteStackEmptied: noteStackEmptied, load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, reflowNoticed: reflowNoticed, checkZero: checkZero, countLeft: countLeft, countOnClock: countOnClock, countOverdue: countOverdue, start: start, measured: function () { return measured; }, forgetEl: function (id) { delete els[id]; }, arrive: arrive, releaseArrivals: releaseArrivals,
   };
 })();

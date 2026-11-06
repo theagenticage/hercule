@@ -70,15 +70,25 @@ window.Scenes = (function () {
     return out;
   }
 
-  function drawZero(page) {
+  /** Returns the sunrise and the words under it, saying where the things that left have gone. */
+  function drawSunrise(className) {
     var rest = App.state.entities;
     var handed = rest.filter(function (e) { return e.task && e.task.by !== 'you'; }).length;
     var mine = rest.filter(function (e) { return e.task && e.task.by === 'you'; }).length;
     var line = handed || mine
       ? [handed ? handed + ' with agents' : '', mine ? mine + ' with you' : ''].filter(Boolean).join(' · ') + '. Their Tasks are on Work.'
       : 'Anything from outside that concerns you will land here.';
-    page.innerHTML = '<div class="zero"><svg class="zero-sun" viewBox="0 0 720 262" aria-hidden="true">' + drawRays() + '<line class="ray-h" x1="60" y1="250" x2="660" y2="250"/></svg>' +
+    return '<div class="' + className + '"><svg class="zero-sun" viewBox="0 0 720 262" aria-hidden="true">' + drawRays() + '<line class="ray-h" x1="60" y1="250" x2="660" y2="250"/></svg>' +
       '<div class="zero-n" aria-hidden="true">' + Crew.logo(92, { mono: true }) + '</div><h2 class="zero-t">All clear.</h2><p class="zero-s">' + line + '</p></div>';
+  }
+
+  function drawZero(page) { page.innerHTML = drawSunrise('zero'); }
+
+  /** Raises the sunrise where the stacks were, over what still rests on the shelf. */
+  function showClockClear(page) {
+    page.insertAdjacentHTML('afterbegin', drawSunrise('zero zero--clock'));
+    page.classList.add('is-clock-clear');
+    Landing.announce('All clear. Nothing on the clock needs you.');
   }
 
   /** Lets the page go quiet, then brings up the sunrise. */
@@ -107,7 +117,8 @@ window.Scenes = (function () {
     page.innerHTML = '<div class="noticed">' + '<span class="card-holder"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34, look: App.HERCULE }) + '</span></span><span class="card-paws" style="--hue:var(--hue-' + App.HERCULE.hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + '<div class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></div></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To review') + connect('github', 'GitHub', null, 'Pull requests and reviews') + next + '</section></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To answer') + connect('gmail', 'Gmail', 25, 'Threads that ask something of you') + next + '</section></div>' +
-      '<div class="col"><section class="stack-wrap">' + head('On the shelf') + connect('linear', 'Linear', 277, 'Issues assigned to you') + next + '</section></div>';
+      '<div class="col"><section class="stack-wrap">' + head('To finish') + '<p class="fr-note">Your own work, once GitHub is connected.</p>' + next + '</section></div>' +
+      '<div class="col col--shelf"><section class="stack-wrap">' + head('On the shelf') + '<div class="fr-row">' + connect('linear', 'Linear', 277, 'Issues assigned to you') + '</div></section></div>';
   }
 
   /** Returns the card of something raised from Intake. */
@@ -129,5 +140,5 @@ window.Scenes = (function () {
     App.load((defs[name] || defs.morning)());
     if (name === 'loading') Skeleton.run();
   }
-  return { play: play, defs: defs, list: list, showZero: showZero, raisedEntity: raisedEntity };
+  return { play: play, defs: defs, list: list, showZero: showZero, showClockClear: showClockClear, raisedEntity: raisedEntity };
 })();

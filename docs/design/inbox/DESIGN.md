@@ -33,7 +33,7 @@ The Inbox builds on the primitives shared with Work: `SHARED.md` and `system/pri
   Returns 4     Shop 5     Platform 1     Depots 2      one card per project, side by side
 ```
 
-Three equal columns, 24px apart, 32px from the window's edges, and what Hercule noticed lies on the same columns, so one grid runs down the page. The three stacks on the clock stand side by side, so their three counts read as one line and add up to the number in the sidebar. They share one depth of at most 360px, whatever they hold, so the shelf under them lies at the same height all day and never moves on its own. Up to three projects keep to the page's columns; four stand four across; more share out over rows of nearly equal length. A heading's count sits in a 44px slot, as wide as a card's mark and gutter with its padding, so labels, titles, tabs and foot lines all start on one line. Under 820px of main width the columns become two, and under 620px one; in a very small window the page scrolls, and no card is ever out of reach. The fixed heights: bar 56, the noticed card 14 + 60 + 18, stack heading 46 + 18, foot row 26. The 18px under a heading is what a colleague's head rises into, so it never touches the rule.
+Three equal columns, 24px apart, 32px from the window's edges, and what Hercule noticed lies on the same columns, so one grid runs down the page. The three stacks on the clock stand side by side, so their three counts read as one line and add up to the number in the sidebar. The deepest stack when a visit starts sets one depth for all three, at most 360px, so the shelf comes up close under them and stays there for the rest of the visit, whatever they hold. Up to three projects keep to the page's columns; four stand four across; more share out over rows of nearly equal length. A heading's count sits in a 44px slot, as wide as a card's mark and gutter with its padding, so labels, titles, tabs and foot lines all start on one line. Under 820px of main width the columns become two, and under 620px one; in a very small window the page scrolls, and no card is ever out of reach. The fixed heights: bar 56, the noticed card 14 + 60 + 18, stack heading 46 + 18, foot row 26. The 18px under a heading is what a colleague's head rises into, so it never touches the rule.
 
 | Was | Now | Where | Behaviour |
 |---|---|---|---|
@@ -155,7 +155,7 @@ Customization grows by adding to these sets, never by a kind drawing itself. The
 | Move | Pointer | Key | What happens |
 |---|---|---|---|
 | Hand to an agent | The workflow by name on hover; the rail while carrying | H, then 1 to 3 with several | One workflow: at once. Several: a small menu, each with a face, a name and a line. The colleague rises over the top edge, the card lies flat, the sentence rolls to "Agent review has it", and its mark flies to Overview |
-| Take it on myself | Your monogram | T | Creates a Task with no run. The marigold tab stands behind the top edge |
+| Take it on myself | `Take it` | T | Creates a Task with no run. The marigold tab stands behind the top edge |
 | Dismiss | The close | E | The card steps aside and the next rises into its place, so the same click at the same spot dismisses the next, for as long as the pointer stays there. Plugins are not told |
 | Undo | The undo line, at the foot of the window under the column where you acted | ⌘Z | As far back as you like, from any view. A hand-off plays backwards, and the line says the run stops |
 | Open | Click | Space, Enter | Opens where it lies. Esc folds it back. Focus goes to the sheet, not to a move, so Enter never starts an agent. J and K walk to the next card in the same place |
@@ -172,8 +172,8 @@ A card with a Task stays where it is for the rest of the visit. On the next visi
 
 | State | Design |
 |---|---|
-| First run | The page itself, no dialog. Hercule hands you one line saying what this place is, each stack's first card asks to be connected, with one etched place under it, and the sidebar is empty: nothing running, nothing waiting |
-| Inbox zero | A small sunrise, 440px wide. Hercule's head comes up over a brass horizon, and the rays draw outward when the last card leaves. "All clear." |
+| First run | The real page, no dialog. Hercule hands you one line saying what this place is. To review and To answer each ask for their source with one etched place under them, To finish says it fills once GitHub is connected, Linear asks on the shelf, and the sidebar is empty: nothing running, nothing waiting |
+| Inbox zero | A small sunrise, 440px wide. Hercule's head comes up over a brass horizon, and the rays draw outward when the last card on the clock leaves. "All clear." The shelf has no clock and is seldom empty, so what rests there stays under the sunrise, on the same line it held all visit |
 | An empty stack | One quiet line in its place. The column stays, as a landmark |
 | Loading | The real cards with their words held back, from what the last visit knew. Nothing shifts when words arrive |
 | Offline | One line in the bar saying what you see and that moves wait |
@@ -181,7 +181,7 @@ A card with a Task stays where it is for the rest of the visit. On the next visi
 | No person, no status | The slot closes up. Sentry has no person, Gmail has no status |
 | Very long title | One line in a strip, two when whole, all of it when open |
 | Huge counts | Grouped digits with tabular figures |
-| 300 cards | The same page with larger numbers: a thicker pile at the foot of each stack on the clock, and the same one card per project on the shelf, three to a row |
+| 300 cards | The same page with larger numbers: a thicker pile at the foot of To review, where the volume landed, and the same one card per project on the shelf, three to a row |
 
 ## Where it lives
 

@@ -140,8 +140,8 @@ window.Moves = (function () {
 
   /** Lets the sunrise follow the last card handed on, once the chain has played out and the pointer has left the card. */
   function noteLast() {
-    if (App.countLeft()) return;
-    setTimeout(function () { if (!App.countLeft() && !Open.isOpen()) App.checkZero(); }, 1500);
+    if (App.countOnClock()) return;
+    setTimeout(function () { if (!App.countOnClock() && !Open.isOpen()) App.checkZero(); }, 1500);
   }
 
   /** Hands on what Hercule noticed. Its part of the noticed card steps back, and leaves at the next visit. */
@@ -193,7 +193,7 @@ window.Moves = (function () {
     } else { Pointer.unpeek(); App.layOut(); }
     App.noteStackEmptied(App.readStack(e));
     showToast('Dismissed', 'Undo', 'Dismissed: ' + e.title);
-    if (!App.countLeft()) setTimeout(function () { if (!App.countLeft()) App.checkZero(); }, 320);
+    if (!App.countOnClock()) setTimeout(function () { if (!App.countOnClock()) App.checkZero(); }, 320);
   }
 
   /** Sends something Hercule noticed back to Intake. */
@@ -292,7 +292,7 @@ window.Moves = (function () {
     Tray.hide();
     App.layOut();
     showToast('Dismissed ' + members.length, 'Undo');
-    if (!App.countLeft()) setTimeout(function () { App.checkZero(); }, 320);
+    if (!App.countOnClock()) setTimeout(function () { App.checkZero(); }, 320);
   }
 
   /** Forgets every move, when the world is replaced by another scene. */

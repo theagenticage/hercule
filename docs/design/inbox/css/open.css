@@ -227,7 +227,7 @@
 .tray-find { width: 150px; height: 26px; padding: 0 8px; border: 0; border-radius: var(--r-xs); background: var(--field); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--ink); font: var(--type-summary); }
 .tray .card:hover .c-acts { opacity: 1; pointer-events: auto; }
 .tray .card:hover .c-foot--facts { visibility: hidden; }
-.tray .card:hover .c-foot { padding-right: var(--acts-w, 190px); }
+.tray .card:hover .c-ctx { visibility: hidden; }
 .tray-cell[hidden], .tray-none[hidden], .tray-all[hidden] { display: none; }
 .tray-none { margin: 8px 2px; color: var(--muted); font: var(--type-summary); }
 
@@ -254,7 +254,7 @@
 .card.is-pile .c-title { color: var(--muted); font: var(--type-summary); }
 .pile-facts { grid-column: 3; display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font: var(--type-summary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pile-worst { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); font-weight: var(--w-medium); }
-.pile-sheet { position: absolute; z-index: -2; top: 0; left: 0; right: 0; bottom: 12px; border-radius: var(--card-r); background: var(--stock); box-shadow: inset 0 0 0 1px var(--stock-rim), 0 1px 2px oklch(0 0 0 / 0.14); transform: translateY(calc(var(--n) * 4px)) scaleX(calc(1 - var(--n) * 0.03)); transition: transform var(--m-base) var(--m-ease); }
+.pile-sheet { position: absolute; z-index: -2; top: 0; left: 0; right: 0; bottom: 12px; border-radius: var(--card-r); background: color-mix(in oklab, var(--stock), var(--desk) calc(var(--n) * 16%)); box-shadow: inset 0 0 0 1px var(--stock-rim), 0 1px 2px oklch(0 0 0 / 0.14); transform: translateY(calc(var(--n) * 4px)) scaleX(calc(1 - var(--n) * 0.03)); transition: transform var(--m-base) var(--m-ease); }
 .card.is-pile:hover .pile-sheet { transform: translateY(calc(var(--n) * 5.5px)) scaleX(calc(1 - var(--n) * 0.02)); }
 .card.is-pile[data-depth="0"] .pile-sheet { display: none; }
 .card.is-pile[data-depth="1"] .pile-sheet[style*="--n:3"], .card.is-pile[data-depth="1"] .pile-sheet[style*="--n:2"], .card.is-pile[data-depth="2"] .pile-sheet[style*="--n:3"] { display: none; }

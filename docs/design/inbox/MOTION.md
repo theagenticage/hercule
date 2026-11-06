@@ -128,6 +128,8 @@ A new thing takes a free column of the noticed card, and Hercule looks up over t
 
 ### The empty Inbox
 
+The shelf has no clock, so the sunrise answers the last thing on the clock, not the last thing anywhere. With projects still on the shelf it rises where the stacks were, and the shelf stays where it lies. Anything coming back to the clock, by Undo or by arrival, takes it away at once.
+
 When the last card leaves: the horizon draws outward over 700ms, Hercule's head rises through it from below, cut off by the horizon, over 1400ms on `cubic-bezier(.3,0,.2,1)`, the rays draw from the middle outward from 420ms, 26ms apart, and the words fade up at 900ms. It plays once. If the last card was handed on, the page waits 1.5 seconds for the chain to play out, and then settles.
 
 ### Loading

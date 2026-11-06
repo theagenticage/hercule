@@ -25,6 +25,10 @@
 /* The empty Inbox: a sunrise, and the numeral as its sun. */
 .ib-page[data-mode="zero"] { display: block; padding: 0; }
 .zero { position: relative; display: flex; flex-direction: column; align-items: center; padding-top: 17vh; }
+/* The clock cleared with things still on the shelf: the sunrise stands over the shelf, where the stacks were. */
+.ib-page.is-clock-clear { position: relative; }
+.zero.zero--clock { position: absolute; left: 32px; right: 32px; top: 26px; padding-top: 0; }
+.ib-page.is-clock-clear .col:not(.col--shelf), .ib-page.is-clock-clear .noticed { visibility: hidden; }
 .zero-sun { position: relative; width: 440px; max-width: 70%; height: auto; overflow: visible; }
 .zero-sun .ray { stroke: var(--brass); stroke-width: 1.6; stroke-linecap: round; opacity: 0.8; stroke-dasharray: 1; stroke-dashoffset: 0; }
 .zero-sun .ray-h { stroke: var(--brass); stroke-width: 1.5; opacity: 0.85; }
@@ -52,10 +56,15 @@
 .fr-card b { display: block; font: var(--type-card); font-size: 15px; line-height: 21px; }
 .fr-card small { color: var(--muted); font: var(--type-summary); }
 .fr-next { display: block; height: 52px; margin-top: -1px; border-radius: var(--card-r); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--rim) 70%, transparent); }
-.fr-card + .fr-next { margin-top: 12px; }
+.fr-card + .fr-next, .fr-note + .fr-next { margin-top: 12px; }
+.ib-page[data-mode="firstrun"] { grid-template-rows: auto auto auto; }
 .ib-page[data-mode="firstrun"] .noticed { align-items: center; padding-left: 0; }
+.ib-page[data-mode="firstrun"] .stack-n { display: none; }
+.ib-page[data-mode="firstrun"] .stack-h { grid-template-columns: minmax(0, 1fr); }
+.fr-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 24px; }
+.fr-note { display: flex; align-items: center; min-height: 84px; margin: 0; padding: 0 12px; color: var(--muted); font: var(--type-summary); }
 .fr-welcome { font: var(--type-card); font-size: var(--t-14); }
-.fr-welcome { grid-column: 1 / -1; align-self: center; padding: 0 56px 0 44px; color: var(--ink); }
+.fr-welcome { grid-column: 1 / -1; align-self: center; padding: 0 56px 0 16px; color: var(--ink); }
 .fr-welcome small { display: block; color: var(--muted); font: var(--type-summary); }
 
 /* Intake, grouped by entity: the noisy layer, kept plain, and still not a table. */
