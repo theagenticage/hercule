@@ -34,9 +34,10 @@
     <div class="toast" id="toast" role="status" hidden></div>
   </main>
 </div>
-<section class="open" id="open" hidden aria-label="Open card"></section>
-<div class="menu" id="menu" hidden></div>
-<section class="tray" id="tray" hidden aria-label="Folded cards"></section>
+<section class="open" id="open" role="dialog" aria-modal="true" aria-label="Open card" hidden></section>
+<div class="menu" id="menu" role="menu" aria-label="Hand to" hidden></div>
+<section class="tray" id="tray" role="dialog" aria-modal="true" aria-label="Folded cards" hidden></section>
+<div class="sr" id="announcer" role="status" aria-live="polite"></div>
 <script src="vendor/brands.js"></script>
 <script src="vendor/faces.js"></script>
 <script src="js/logo.js"></script>

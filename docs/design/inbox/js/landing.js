@@ -14,27 +14,52 @@ window.Landing = (function () {
     Motion.animate(line, [{ transform: 'translateY(14px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('glide').ms, delay: 80, fill: 'backwards', easing: Motion.curve('glide').ease });
   }
 
-  /** Lands a signal on an entity. The kind's phrase becomes the card's line; the older signal joins the quiet count. */
-  function land(e, s) {
-    var el = App.els()[e.id];
-    var old = el && el.querySelector('.c-line') ? el.querySelector('.c-line').cloneNode(true) : null;
+  /** Tells a screen reader what just happened, without taking focus. */
+  function announce(text) { document.getElementById('announcer').textContent = text; }
+
+  /** Applies a signal to its card: the line rolls, the count ticks, the rim lights, and the card takes the knock. */
+  function apply(e, s, el) {
+    var old = el.querySelector('.c-line') ? el.querySelector('.c-line').cloneNode(true) : null;
     e.signals.push(s);
+    e.fresh = true;
     if (s.state) e.fields.state = s.state;
-    if (!el) { App.layOut(); return; }
     App.redrawCard(e);
     if (old) rollLine(el, old);
-    var tone = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
-    el.dataset.landed = tone;
+    el.dataset.landed = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
     el.classList.remove('is-landed');
     void el.offsetWidth;
     el.classList.add('is-landed');
-    setTimeout(function () { el.classList.remove('is-landed'); }, 1500);
+    setTimeout(function () { el.classList.remove('is-landed'); }, 1300);
     Motion.body(el).to({ y: 2, s: 0.996 }, 'bump', { done: function () { Motion.body(el).to({ y: 0, s: 1 }, 'bump'); } });
     var n = el.querySelector('.c-more');
     if (n && !n.hidden) Motion.animate(n, [{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, delay: 160, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
-    delete App.measured()[e.id];
     App.layOut();
   }
 
-  return { rollLine: rollLine, land: land };
+  /**
+   * Lands a signal on an entity. What caused the change shows first: a small drop falls onto the card, and only then does the
+   * card react. The card never changes place.
+   */
+  function land(e, s) {
+    var el = App.els()[e.id];
+    announce(K[e.kind].noun + ' ' + Card.fill(K[e.kind].identifier, e.fields) + ': ' + Card.sayReason(K[e.kind], s).text);
+    if (!el || !el._plan) { e.signals.push(s); App.layOut(); return; }
+    if (Motion.isReduced()) { apply(e, s, el); return; }
+    var r = el.getBoundingClientRect();
+    var tone = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
+    var drop = document.createElement('i');
+    drop.className = 'drop drop--' + tone;
+    document.body.appendChild(drop);
+    var x = r.left + 46, y = r.top + 22;
+    drop.animate([
+      { transform: 'translate3d(' + x + 'px,' + (y - 40) + 'px,0) scale(.6)', opacity: 0 },
+      { transform: 'translate3d(' + x + 'px,' + (y - 26) + 'px,0) scale(.9)', opacity: 1, offset: 0.35 },
+      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(1.05,.8)', opacity: 1 },
+    ], { duration: 210, easing: 'cubic-bezier(.55,0,.85,.5)' }).finished.then(function () {
+      drop.remove();
+      apply(e, s, el);
+    });
+  }
+
+  return { rollLine: rollLine, land: land, announce: announce };
 })();

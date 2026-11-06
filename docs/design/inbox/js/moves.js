@@ -176,7 +176,7 @@ window.Menu = (function () {
   var host, onPick, flows, active = 0, opener = null;
   function draw() {
     host.innerHTML = '<div class="menu-h">Hand to</div>' + flows.map(function (w, i) {
-      return '<button class="menu-row' + (i === active ? ' is-on' : '') + '" data-i="' + i + '">' + Crew.face(w.name, { pose: 'idle', size: 28 }) + '<span class="menu-t"><b>' + Card.esc(w.name) + '</b><small>' + Card.esc(w.says) + '</small></span><kbd>' + (i + 1) + '</kbd></button>';
+      return '<button class="menu-row' + (i === active ? ' is-on' : '') + '" role="menuitem" data-i="' + i + '">' + Crew.face(w.name, { pose: 'idle', size: 28 }) + '<span class="menu-t"><b>' + Card.esc(w.name) + '</b><small>' + Card.esc(w.says) + '</small></span><kbd>' + (i + 1) + '</kbd></button>';
     }).join('');
   }
   function show(anchor, list, pick) {

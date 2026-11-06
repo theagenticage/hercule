@@ -160,6 +160,10 @@
 .token { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--raised); box-shadow: var(--h-hover); }
 
 /* Landing and leaving. */
+.drop { position: fixed; left: 0; top: 0; z-index: 90; width: 7px; height: 7px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--you); pointer-events: none; }
+.drop--bad { background: var(--fail); }
+.drop--good { background: var(--ok); }
+.c-fresh { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
 .card.is-source { opacity: 0; }
 .card.is-landed::after {
   content: "";

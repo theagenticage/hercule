@@ -122,7 +122,7 @@
       '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 18 : 20) + '</div>' +
       '<h3 class="c-title">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
       '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '">' + pace + '</div>' +
-      '<div class="c-line tone-' + line.tone + '"><span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
+      '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"></i>' : '') + '<span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
       '<div class="c-status' + (status && (status.norm || isSaid) ? ' is-norm' : '') + '">' + (status ? drawShape(status) : '') + '</div>' +
       '<div class="c-foot">' + (line.isIdentity ? '' : '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span>') + '<span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
       '<div class="c-hit"></div>' +
@@ -145,6 +145,13 @@
     return c.join(' ');
   }
 
+  /** Returns what a screen reader says for a card: the kind, the title, why it is here, and how long it has waited. */
+  function sayCard(e) {
+    var kind = K.KINDS[e.kind], line = describeLine(e, null);
+    var status = kind.status && kind.status[e.fields.state];
+    return [kind.noun, fill(kind.identifier, e.fields), e.title, line.text, status ? status.word : '', kind.pace === 'fast' && !e.task ? 'waiting ' + sayWait(e.since, W.NOW) : '', line.more ? line.more + ' earlier signals' : ''].filter(Boolean).join(', ');
+  }
+
   /** Returns a new card element for an entity. */
   function createCard(e, ctx) {
     var el = document.createElement('article');
@@ -152,7 +159,8 @@
     if (e.task || e.quiet) el.dataset.height = 'flat';
     el.dataset.id = e.id;
     el.tabIndex = -1;
-    el.setAttribute('aria-label', K.KINDS[e.kind].noun + ': ' + e.title);
+    el.setAttribute('role', 'listitem');
+    el.setAttribute('aria-label', sayCard(e));
     el.innerHTML = drawCardBody(e, ctx);
     return el;
   }
@@ -177,7 +185,7 @@
   }
 
   window.Card = {
-    createCard: createCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
+    createCard: createCard, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
     describeLine: describeLine, sayReason: sayReason, sayWait: sayWait, rampWait: rampWait, readWorkflows: readWorkflows, fill: fill, esc: esc, drawFacts: drawFacts,
   };
 })();

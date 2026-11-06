@@ -39,6 +39,12 @@ window.Pointer = (function () {
     setTimeout(done, Motion.isReduced() ? 0 : 170);
   }
 
+  /** Takes away a card's new mark, once the person has seen what landed on it. */
+  function clearFresh(el) {
+    var e = App.findEntity(el.dataset.id);
+    if (e && e.fresh) { e.fresh = false; var dot = el.querySelector('.c-fresh'); if (dot) dot.remove(); }
+  }
+
   function setHover(el) {
     if (el === hover) return;
     if (hover) hover.classList.remove('is-hover');
@@ -47,6 +53,7 @@ window.Pointer = (function () {
     if (!el) { leaveTimer = setTimeout(unpeek, LEAVE_DELAY); return; }
     clearTimeout(leaveTimer);
     el.classList.add('is-hover');
+    clearFresh(el);
     if (peeked) peek(el);
     else timer = setTimeout(function () { if (hover === el) peek(el); }, PEEK_DELAY);
   }

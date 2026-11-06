@@ -16,13 +16,14 @@
     var n = items.length, out = [], y = 0, i;
     if (!n) return { items: out, folded: 0, used: 0 };
     var whole = items.reduce(function (a, m) { return a + (m.tab ? m.tab : m.full + m.gap); }, 0);
-    if (whole <= depth) {
+    var hasPile = items.some(function (m) { return m.isPile; });
+    if (whole <= depth && !hasPile) {
       for (i = 0; i < n; i++) {
         var w = items[i];
         out.push({ y: y, show: w.tab || w.full, level: w.tab ? 'tab' : 'full' });
         y += w.tab ? w.tab : w.full + w.gap;
       }
-      return { items: out, folded: 0, used: y };
+      return { items: out, folded: 0, used: y - (items[n - 1].gap || 0) };
     }
     // A stack on the clock leads with what has waited longest. The shelf has no clock, so nothing there leads.
     var firstCard = noLead ? -1 : items[0].tab ? 1 : 0;

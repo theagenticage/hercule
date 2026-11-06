@@ -136,7 +136,7 @@ window.App = (function () {
         return '<div class="col">' + names.map(function (n) {
           return '<section class="stack-wrap" data-wrap="' + n + '" aria-label="' + STACKS[n].title + '">' +
             '<h2 class="stack-h"><span>' + STACKS[n].title + '</span><span class="stack-n" data-count="' + n + '"></span></h2>' +
-            '<div class="stack" data-stack="' + n + '"></div>' +
+            '<div class="stack" data-stack="' + n + '" role="list" aria-label="' + STACKS[n].title + '"></div>' +
             '<button class="stack-foot" data-foot="' + n + '" hidden></button></section>';
         }).join('') + '</div>';
       }).join('');
@@ -144,6 +144,7 @@ window.App = (function () {
 
   function drawNoticed() {
     var host = document.getElementById('noticed');
+    host.setAttribute('aria-label', 'Hercule noticed');
     host.innerHTML = '<div class="plate-crest" title="Hercule noticed">' + Crew.logo(24, { mono: true }) + '</div>' + state.clusters.slice(0, 3).map(Card.drawPlaque).join('');
     host.hidden = !state.clusters.length;
     document.querySelector('.ib-page').classList.toggle('no-noticed', !state.clusters.length);
@@ -186,7 +187,7 @@ window.App = (function () {
             pe.dataset.depth = it.pile.members.length > 40 ? 3 : it.pile.members.length > 8 ? 2 : 1;
             pe.querySelector('.c-roll').textContent = it.pile.note;
             pe._members = it.pile.members;
-            it.el = pe; it.full = 62; it.two = 62; it.one = 62; it.gap = 8; it.most = 62;
+            it.el = pe; it.full = 62; it.two = 62; it.one = 62; it.gap = 8; it.most = 62; it.isPile = true;
             return;
           }
           var e = it.e, el = els[e.id];
@@ -221,10 +222,11 @@ window.App = (function () {
         // A stack that is not the last of its column closes up on what follows; the last takes what is left.
         var isLast = bi === built.length - 1;
         var used = plan.used;
-        var height = isLast ? d + leftover : Math.min(d, used);
-        if (!isLast) leftover += d - height;
+        // A stack closes up on what it holds, so its foot line stays with it. Its depth for a peek is all the room below.
+        var height = Math.min(d, used);
+        leftover += d - height;
         b.host.parentNode.style.height = height + HEAD + b.foot + 'px';
-        b.host.dataset.depth = height;
+        b.host.dataset.depth = height + (isLast ? leftover : 0);
         var shown = plan.items.length;
         b.items.forEach(function (it, i) {
           var p = plan.items[i];
@@ -233,11 +235,14 @@ window.App = (function () {
           el.style.display = '';
           var next = b.items[i + 1];
           var endOfRun = i === shown - 1 || (next && next.tab);
+          // A card hides behind those in front of it, and must never show past the last of them.
+          var runEnd = plan.used;
+          for (var j = i + 1; j < shown; j++) if (b.items[j].tab) { runEnd = plan.items[j].y; break; }
           el._plan = p;
           el.style.zIndex = i + 1;
           el.style.top = p.y + 'px';
           if (it.tab) return;
-          el._rest = p.level === 'full' || !endOfRun ? it.full : p.show;
+          el._rest = p.level === 'full' ? it.full : Math.min(it.full, runEnd - p.y);
           el._full = it.full;
           if (!el.classList.contains('is-peek')) el.style.height = el._rest + 'px';
           el.classList.toggle('is-whole', p.level === 'full');
@@ -299,6 +304,7 @@ window.App = (function () {
     keep.forEach(function (c) { el.classList.add(c); });
     if (e.task || e.quiet) el.dataset.height = 'flat'; else delete el.dataset.height;
     el.innerHTML = Card.drawCardBody(e, readCtx(readStack(e)));
+    el.setAttribute('aria-label', Card.sayCard(e));
     delete measured[e.id];
   }
 

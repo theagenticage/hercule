@@ -88,7 +88,27 @@ window.Keys = (function () {
     if (handled) ev.preventDefault();
   }
 
-  function start() { document.addEventListener('keydown', onKey); }
+  /** Keeps Tab inside the open card or the tray, and hands focus to the page's keys when a card takes it. */
+  function trap(ev, host) {
+    var stops = [].slice.call(host.querySelectorAll('button, a[data-source]'));
+    if (!stops.length) return;
+    var i = stops.indexOf(document.activeElement);
+    ev.preventDefault();
+    stops[(i + (ev.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
+  }
+
+  function start() {
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Tab') return;
+      if (Open.isOpen()) trap(ev, document.getElementById('open'));
+      else if (Tray.isOpen()) trap(ev, document.getElementById('tray'));
+    });
+    document.addEventListener('keydown', onKey);
+    document.getElementById('page').addEventListener('focusin', function (ev) {
+      var c = ev.target.closest('.card[data-id], .plaque');
+      if (c && c.dataset.id !== focused) focus(c.dataset.id);
+    });
+  }
   return { start: start, focus: focus, focused: function () { return focused; } };
 })();
 
