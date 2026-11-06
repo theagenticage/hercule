@@ -313,6 +313,9 @@ window.Board = (function () {
   function drawLead() {
     var c = Store.countAttention();
     var st = Store.state;
+    // One sentence uses one kind of number: words while they stay short, digits when one is large.
+    var digits = c.quick > 12 || c.think > 12;
+    function say2(n, lower) { return digits ? String(n) : say(n, lower); }
     function lens(key, html) {
       return '<button class="lens' + (st.lens === key ? " is-on" : "") + '" data-lens="' + key + '">' + html + "</button>";
     }
@@ -326,7 +329,7 @@ window.Board = (function () {
       setHTML(leadEl, '<h2>The desk is clear.</h2><p class="lead-sub"><span><b>12</b> things landed this week.</span></p>');
       return;
     }
-    if (c.quick && c.think) line = lens("quick", '<span class="lens-n">' + say(c.quick) + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ", " + lens("think", '<span class="lens-n">' + say(c.think, true) + "</span> that need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
+    if (c.quick && c.think) line = lens("quick",  '<span class="lens-n">' + say2(c.quick) + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ", " + lens("think", '<span class="lens-n">' + say2(c.think, true) + "</span> that need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
     else if (c.quick) line = lens("quick", '<span class="lens-n">' + say(c.quick) + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ".";
     else if (c.think) line = lens("think", '<span class="lens-n">' + say(c.think) + "</span> need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
     else line = "Nothing wants you right now.";
@@ -357,7 +360,7 @@ window.Board = (function () {
 
   /** Lists the moving parts currently on the page, for FLIP. */
   function movables() {
-    return Array.prototype.slice.call(lanesEl.querySelectorAll(".card:not(.is-carried), .lane-head, .plan-head, .wire, .plan-band"));
+    return Array.prototype.slice.call(lanesEl.querySelectorAll(".card:not(.is-carried), .lane-head, .plan-head, .wire, .plan-band, .bead:not(.is-held)"));
   }
 
   /** Changes something and animates the board from what was on screen to what is now true. */
@@ -377,5 +380,23 @@ window.Board = (function () {
     draw();
   }
 
-  return { mount: mount, draw: draw, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
+  /**
+   * Finds what stands for a Task on the page right now: its card, the pile that holds it, or its
+   * bead. Returns null when it has no place on screen.
+   */
+  function locate(id) {
+    var card = lanesEl.querySelector('.card[data-id="' + id + '"]');
+    if (card) return card;
+    var bead = lanesEl.querySelector('.bead[data-id="' + id + '"]');
+    if (bead) return bead;
+    var found = null;
+    lanesEl.querySelectorAll(".cell").forEach(function (cell) {
+      (cell._piles || []).forEach(function (p) {
+        if (p.tasks.some(function (t) { return t.id === id; })) found = cell.querySelector('[data-pile="' + p.key + '"]');
+      });
+    });
+    return found;
+  }
+
+  return { mount: mount, locate: locate, draw: draw, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
 })();

@@ -8,8 +8,8 @@ window.Shell = (function () {
     return '<a class="nav-row' + (selected === key ? " is-on" : "") + '" data-nav="' + key + '" href="#">' + I(icon) + "<span>" + label + "</span>" + (end || "") + "</a>";
   }
 
-  function waitingRow(name, ask, pose) {
-    return '<div class="side-row">' + Crew.face(name, { pose: pose || "waiting", size: 24 }) + '<span class="side-text"><span class="side-name">' + name + '</span><span class="side-ask">' + ask + "</span></span></div>";
+  function waitingRow(name, ask, id) {
+    return '<div class="side-row" data-task="' + (id || "") + '">' + Crew.face(name, { pose: "waiting", size: 24 }) + '<span class="side-text"><span class="side-name">' + name + '</span><span class="side-ask">' + ask + "</span></span></div>";
   }
 
   /** Draws the Hercule face of the sidebar into el. opts: selected row key, and the waiting rows. */
@@ -17,8 +17,8 @@ window.Shell = (function () {
     opts = opts || {};
     var selected = opts.selected || "overview";
     var waiting = opts.waiting || [
-      ["Cut over the invoice export", "Approve the cutover for Monday?"],
-      ["Restore a basket after sign-in", "Highest quantity, or add them?"],
+      ["Cut over the invoice export", "Approve the cutover for Monday?", "sched-cutover"],
+      ["Restore a basket after sign-in", "Highest quantity, or add them?", "basket-restore"],
     ];
     el.classList.add("side");
     el.innerHTML =
@@ -28,7 +28,7 @@ window.Shell = (function () {
       '<button class="icon-btn" title="Search">' + I("search") + '</button><button class="icon-btn" title="Home">' + I("office") + "</button></div>" +
       '<div class="side-scroll">' +
       (waiting.length ? '<section class="side-sec"><h3 class="side-h"><span>Waiting on you</span><span class="count">' + waiting.length + "</span></h3>" +
-        waiting.map(function (w) { return waitingRow(w[0], w[1]); }).join("") + "</section>" : "") +
+        waiting.map(function (w) { return waitingRow(w[0], w[1], w[2]); }).join("") + "</section>" : "") +
       '<section class="side-sec"><h3 class="side-h"><span>Work</span></h3>' +
       navRow("overview", "Overview", "office", selected) +
       navRow("inbox", "Inbox", "intake", selected, opts.inboxCount ? '<span class="count">' + opts.inboxCount + "</span>" : "") +

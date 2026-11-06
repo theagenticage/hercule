@@ -118,6 +118,20 @@ window.Live = (function () {
         else fact(s.id, s.to, s.note, s.apply);
       }, 300 + i * 1500);
     });
+    setTimeout(summarizeNight, 300 + steps.length * 1500 + 1800);
+  }
+
+  /** Leaves one quiet line behind once the replay ends, with a way to see it again. */
+  function summarizeNight() {
+    var el = document.getElementById("since-line");
+    if (!el) return;
+    el.innerHTML = '<span class="since-item">Since last night: one landed, one picked up, one new</span><button class="since-replay" title="Replay the night">' + Crew.icon("undo", 12) + "</button>";
+    Motion.body(el.firstChild).set({ o: 0 }).to({ o: 1 }, "back");
+    el.querySelector(".since-replay").addEventListener("click", function () {
+      var q = new URLSearchParams(location.search);
+      q.delete("replay");
+      location.search = q.toString();
+    });
   }
 
   /** Sets the board to how it looked last night, for the replay to start from. */

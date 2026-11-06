@@ -20,11 +20,11 @@ window.Keys = (function () {
     focused = null;
   }
 
-  /** Moves the keyboard's focus to a card, and scrolls it into view. */
-  function focusCard(el) {
+  /** Moves focus to a card and scrolls it into view. Only the keyboard shows the ring. */
+  function focusCard(el, byPointer) {
     clearFocus();
     focused = el;
-    el.classList.add("is-focus");
+    if (!byPointer) el.classList.add("is-focus");
     el.tabIndex = 0;
     el.focus({ preventScroll: true });
     var s = document.getElementById("scroll");
@@ -137,6 +137,7 @@ window.Keys = (function () {
       return;
     }
     if (key === "F") return Fold.toggleAll();
+    if (key === "o" && Overview.current() === "work") return Overview.show("office");
     if (key === "/") {
       e.preventDefault();
       return Find.open();

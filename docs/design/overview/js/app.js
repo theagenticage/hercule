@@ -61,7 +61,7 @@
     var card = e.target.closest(".card[data-id]");
     if (card) {
       if (MergePick.isActive()) return MergePick.finish(card.dataset.id);
-      Keys.focusCard(card);
+      Keys.focusCard(card, true);
       Pane.show(card.dataset.id);
       return;
     }
@@ -74,6 +74,41 @@
     if (lens) Lens.preview(lens.dataset.lens);
   });
   lead.addEventListener("pointerleave", function () { Lens.preview(null); });
+
+  // A bead shows what it is on approach, and a waiting row in the sidebar points at its card.
+  var peek = document.getElementById("peek");
+  var peekTimer = 0;
+  document.getElementById("lanes").addEventListener("pointerover", function (e) {
+    var bead = e.target.closest(".bead[data-id]");
+    clearTimeout(peekTimer);
+    if (!bead) {
+      peek.classList.remove("is-on");
+      return;
+    }
+    peekTimer = setTimeout(function () {
+      var t = Store.task(bead.dataset.id);
+      if (!t) return;
+      peek.innerHTML = "<b>" + Board.esc(t.name) + "</b><span>" + Board.esc(t.now || "") + "</span><small>" + Board.esc(Store.describeNeed(t)) + "</small>";
+      var r = bead.getBoundingClientRect();
+      peek.style.left = Math.min(innerWidth - 262, Math.max(280, r.left - 20)) + "px";
+      peek.style.top = r.top - peek.offsetHeight - 10 + "px";
+      peek.classList.add("is-on");
+    }, 140);
+  });
+  document.querySelector("[data-side]").addEventListener("pointerover", function (e) {
+    document.querySelectorAll(".is-called").forEach(function (c) { c.classList.remove("is-called"); });
+    var row = e.target.closest("[data-task]");
+    if (!row || !row.dataset.task) return;
+    var el = Board.locate(row.dataset.task);
+    if (el) el.classList.add("is-called");
+  });
+  document.querySelector("[data-side]").addEventListener("pointerleave", function () {
+    document.querySelectorAll(".is-called").forEach(function (c) { c.classList.remove("is-called"); });
+  });
+  document.querySelector("[data-side]").addEventListener("click", function (e) {
+    var row = e.target.closest("[data-task]");
+    if (row && row.dataset.task) Pane.show(row.dataset.task);
+  });
 
   var display = document.getElementById("display");
   document.getElementById("display-btn").addEventListener("click", function (e) {

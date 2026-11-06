@@ -25,6 +25,12 @@ window.Drag = (function () {
       var key = grid.dataset.key.replace("grid:", "");
       zones.push({ key: key, grid: grid, top: r.top, bottom: Math.max(r.bottom, r.top + 96) });
     });
+    // A folded lane or plan is a target too: the card shrinks into a bead on its wire.
+    document.querySelectorAll("#lanes .wire").forEach(function (wire) {
+      var r = wire.getBoundingClientRect();
+      var key = wire.dataset.key.replace("wire:", "");
+      zones.push({ key: key, wire: wire, top: r.top - 22, bottom: r.bottom + 6 });
+    });
     return zones;
   }
 
@@ -122,6 +128,12 @@ window.Drag = (function () {
     }
   }
 
+  function setWireTarget(zone, stage) {
+    document.querySelectorAll(".wire.is-target").forEach(function (w) { w.classList.remove("is-target"); });
+    if (zone) zone.wire.classList.add("is-target");
+    carry.el.classList.toggle("is-over-wire", !!zone);
+  }
+
   /** Follows the pointer: moves the card, then decides where it would land. */
   function track(x, y) {
     var c = carry;
@@ -152,6 +164,17 @@ window.Drag = (function () {
     var stage = pickStage(x);
     setTargetStage(stage);
     var zone = pickZone(y);
+    setWireTarget(zone.wire ? zone : null, stage);
+    if (zone.wire) {
+      setMerge(null);
+      c.hoverCard = null;
+      c.zone = zone;
+      if (c.slot.parentElement) {
+        var left = Array.prototype.slice.call(c.slot.parentElement.children).filter(function (k) { return !k.classList.contains("slot"); });
+        Motion.flip(left, function () { c.slot.remove(); }, { spring: "glide" });
+      }
+      return;
+    }
     var cell = cellIn(zone, stage.id);
     if (!cell) return;
     var target = findMergeTarget(x, y, cell);
@@ -287,15 +310,60 @@ window.Drag = (function () {
     });
   }
 
+  /** Puts the carried card on a wire: it shrinks into its new bead. */
+  function dropOnWire() {
+    var zone = carry.zone;
+    var stage = carry.stage.id;
+    var key = zone.key;
+    var c = finish();
+    document.querySelectorAll(".wire.is-target").forEach(function (w) { w.classList.remove("is-target"); });
+    var r0 = c.el.getBoundingClientRect();
+    var ghost = Motion.ghost(c.el, layer());
+    ghost.style.position = "fixed";
+    ghost.style.left = r0.left + "px";
+    ghost.style.top = r0.top + "px";
+    Motion.body(c.el).clear();
+    c.el.remove();
+    var to = { stage: stage };
+    if (key.indexOf("lane-") === 0) to.project = key.slice(5);
+    if (key.indexOf("plan-") === 0) to.plan = key.slice(5);
+    Board.change(function () { Store.moveTask(c.id, to); }, { spring: "glide" });
+    var bead = document.querySelector('.bead[data-id="' + c.id + '"]');
+    if (bead) {
+      var b = bead.getBoundingClientRect();
+      Motion.body(ghost).to({ x: b.left + b.width / 2 - (r0.left + r0.width / 2), y: b.top + b.height / 2 - (r0.top + r0.height / 2), s: 0.06, r: 0, o: 0 }, "fold", {
+        done: function () { ghost.remove(); },
+      });
+      Motion.body(bead).set({ s: 0.2 }).to({ s: 1 }, "drop", { delay: 160 });
+    } else {
+      ghost.remove();
+    }
+    Toast.show("Moved. It is folded away in " + key.slice(5) + ".", true);
+  }
+
   function drop() {
     var c = carry;
     if (c.merge) return mergeNow();
+    if (c.zone && c.zone.wire) return dropOnWire();
     var landing = readLanding();
     var done = finish();
     if (!landing) return settle(done, "back");
     var moved = landing.stage !== done.task.stage || landing.project !== done.task.project;
     settle(done, "drop", function () { Store.moveTask(done.id, landing); });
-    if (moved) Toast.show(describeMove(done.task, landing), true);
+    if (moved) {
+      Toast.show(describeMove(done.task, landing), true);
+      if (landing.stage === "landed") {
+        done.el.classList.add("just-landed");
+        setTimeout(function () { done.el.classList.remove("just-landed"); }, 900);
+      }
+      if (Store.failNext) {
+        Store.failNext = false;
+        setTimeout(function () {
+          Board.change(function () { Store.undo(); }, { spring: "back" });
+          Toast.show("That move did not save, so the card went back. Check the connection and try again.", false);
+        }, 900);
+      }
+    }
   }
 
   function describeMove(t, to) {
@@ -341,14 +409,66 @@ window.Drag = (function () {
     settle(c, "back");
   }
 
+  /* ---------- Sliding a bead along its wire ---------- */
+
+  var bead = null;
+
+  function beginBead(e, el) {
+    var r = el.getBoundingClientRect();
+    bead = { el: el, id: el.dataset.id, x: e.clientX, home: r.left, moved: false, stages: readStages() };
+  }
+
+  function moveBead(e) {
+    var dx = e.clientX - bead.x;
+    if (!bead.moved && Math.abs(dx) < 4) return;
+    bead.moved = true;
+    bead.el.classList.add("is-held");
+    var x = bead.home + dx;
+    // The bead is drawn to the start of a stage as it nears one, like a bead on a wire finding a notch.
+    var pull = 0;
+    bead.stages.forEach(function (s) {
+      var d = s.left - x;
+      if (Math.abs(d) < 26) pull = d * 0.45;
+    });
+    Motion.body(bead.el).to({ x: dx + pull, s: 1.5 }, "carry");
+    bead.target = pickStageAt(bead.stages, e.clientX);
+    document.querySelectorAll("#rule .stage").forEach(function (s) { s.classList.toggle("is-target", s.dataset.stage === bead.target.id); });
+  }
+
+  function pickStageAt(stages, x) {
+    var pick = stages[0];
+    stages.forEach(function (s) { if (x >= s.left - 7) pick = s; });
+    return pick;
+  }
+
+  function endBead() {
+    var b = bead;
+    bead = null;
+    document.querySelectorAll("#rule .stage.is-target").forEach(function (s) { s.classList.remove("is-target"); });
+    if (!b.moved) return false;
+    suppressClick();
+    b.el.classList.remove("is-held");
+    var t = Store.task(b.id);
+    var changed = b.target && b.target.id !== t.stage;
+    Board.change(function () {
+      if (changed) Store.moveTask(b.id, { stage: b.target.id });
+    }, { spring: "drop" });
+    Motion.body(b.el).to({ s: 1 }, "drop");
+    if (changed) Toast.show(describeMove(t, { stage: b.target.id }), true);
+    return true;
+  }
+
   function onDown(e) {
     if (e.button !== 0) return;
+    var beadEl = e.target.closest(".bead[data-id]");
+    if (beadEl) return beginBead(e, beadEl);
     var el = e.target.closest(".card[data-id]");
     if (!el || el.classList.contains("is-ghost")) return;
     press = { el: el, id: el.dataset.id, x: e.clientX, y: e.clientY };
   }
 
   function onMove(e) {
+    if (bead) return moveBead(e);
     if (press) {
       if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < START_DISTANCE) return;
       begin(e);
@@ -383,6 +503,7 @@ window.Drag = (function () {
   }
 
   function onUp(e) {
+    if (bead) return endBead();
     if (press) {
       var p = press;
       press = null;

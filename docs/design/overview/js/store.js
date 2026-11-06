@@ -113,12 +113,23 @@ window.Store = (function () {
       var tickets = tasks.filter(function (t) { return t.kind === "ticket"; });
       if (tickets.length >= 3) fold("tickets", "Tickets", tickets);
     }
+    // A card you just put down stays a card, wherever it was: it never vanishes into a pile
+    // under your hand. It joins the rest on the next visit.
+    var held = tasks.filter(function (t) { return t.held; });
+    held.forEach(function (t) {
+      piles.forEach(function (p) {
+        p.tasks = p.tasks.filter(function (x) { return x !== t; });
+      });
+      used[t.id] = false;
+    });
+    piles = piles.filter(function (p) { return p.tasks.length > 1 || p.kind === "landed"; });
     var cards = tasks.filter(function (t) { return !used[t.id]; });
-    var room = Math.max(0, MOST_ROWS - piles.length);
-    if (cards.length > room) {
-      var over = cards.slice(Math.max(0, room - 1));
-      cards = cards.slice(0, Math.max(0, room - 1));
+    var loose = cards.filter(function (t) { return !t.held; });
+    var room = Math.max(0, MOST_ROWS - piles.length - held.length);
+    if (loose.length > room) {
+      var over = loose.slice(Math.max(0, room - 1));
       over.forEach(function (t) { used[t.id] = true; });
+      cards = cards.filter(function (t) { return !used[t.id]; });
       piles.push({ key: owner + "/" + stage + "/more", kind: "more", title: over.length + " more", tasks: over });
     }
     return { cards: cards, piles: piles };
@@ -183,7 +194,9 @@ window.Store = (function () {
     t.stage = to.stage;
     if (to.project) t.project = to.project;
     if (to.before !== undefined) t.rank = to.before;
+    if (to.plan !== undefined) t.initiative = to.plan;
     t.movedBy = "you";
+    t.held = true;
     if (t.stage === "landed") {
       t.agent = "";
       t.move = "nobody";

@@ -236,3 +236,28 @@
 .lead-offline { color: var(--ink); }
 
 .proj--none { background: none; box-shadow: inset 0 0 0 1.5px var(--faint); }
+
+/* ---------- Beads, up close ---------- */
+.wire { cursor: default; }
+.wire.is-target::after { content: ""; position: absolute; left: -8px; right: -8px; top: -4px; bottom: -4px; border-radius: 9px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 55%, transparent); pointer-events: none; }
+.bead { position: relative; transition: scale var(--m-quick) var(--m-ease); }
+.bead:hover { scale: 1.45; }
+.bead.is-held { z-index: 4; cursor: grabbing; }
+.bead::after { content: ""; position: absolute; inset: -6px -2px; }
+.peek { position: fixed; z-index: 55; width: 248px; padding: 9px 12px 10px; border-radius: var(--r-sm); background: var(--stock); box-shadow: var(--h-carry); pointer-events: none; opacity: 0; transform: translateY(4px); transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
+.peek.is-on { opacity: 1; transform: none; }
+.peek b { display: block; font: var(--type-card); }
+.peek span { display: block; margin-top: 2px; color: var(--muted); font: var(--type-summary); }
+.peek small { display: block; margin-top: 4px; color: var(--faint); font: var(--type-meta); }
+
+/* A sidebar row, pointing at the card it means. */
+.card.is-called .card-stock { box-shadow: var(--h-hover), 0 0 0 1.5px var(--you); }
+.bead.is-called { scale: 1.8; }
+
+/* ---------- Landing ---------- */
+.card.just-landed .card-stock { animation: landed var(--m-long) var(--m-ease); }
+@keyframes landed { 0% { box-shadow: var(--h-etch), 0 0 0 1.5px var(--brass); } 100% { box-shadow: var(--h-etch), 0 0 0 0 transparent; } }
+
+.since { display: flex; align-items: center; gap: 6px; }
+.since-replay { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--faint); }
+.since-replay:hover { background: var(--hover); color: var(--ink); }

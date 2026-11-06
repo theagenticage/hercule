@@ -165,6 +165,19 @@ window.Overview = (function () {
 
   function mount() {
     drawSwitcher();
+    // The Office is heavy. Hovering its tab is a good sign it is wanted, so start building it then.
+    document.getElementById("switcher").addEventListener("pointerover", function (e) {
+      var tab = e.target.closest('.switch-tab[data-view="office"]');
+      if (!tab) return;
+      var host = document.getElementById("office");
+      if (host.hidden) {
+        host.style.visibility = "hidden";
+        host.hidden = false;
+        Office.ensure(host);
+        host.hidden = true;
+        host.style.visibility = "";
+      }
+    });
     document.getElementById("switcher").addEventListener("click", function (e) {
       var tab = e.target.closest(".switch-tab");
       if (tab) show(tab.dataset.view);
