@@ -4,6 +4,7 @@
 .pn-sheet { position: absolute; isolation: isolate; display: flex; flex-direction: column; pointer-events: auto; --pn-r: 12px; }
 .pn-sheet::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: var(--pn-r); background: var(--stock); box-shadow: var(--h-carry); }
 .pn-sheet > .card-holder { z-index: -2; right: 22px; }
+.pn-sheet > .card-paws { right: 25px; }
 .pn-clip { position: absolute; inset: 0; overflow: hidden; border-radius: var(--pn-r); }
 /* The words are laid out once at the sheet's final size, and the growing sheet reveals them, so a
    paragraph never rewraps during the opening. */
@@ -31,10 +32,10 @@
 .pn-initial { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in oklab, var(--faint) 40%, var(--stock)); color: var(--ink); font-size: var(--t-11); font-weight: var(--w-bold); }
 .pn-ask { margin: 10px 0 0; font-size: 17px; line-height: 24px; font-weight: var(--w-bold); letter-spacing: -0.008em; color: var(--ink); }
 .pn-answers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.pn-answer { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border-radius: var(--r-btn); box-shadow: inset 0 0 0 1px var(--rim); font-weight: var(--w-medium); transition: background var(--m-quick); }
+.pn-answer { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border-radius: var(--r-btn); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent); font-weight: var(--w-medium); transition: background var(--m-quick); }
 .pn-answer:hover { background: var(--hover); }
-.pn-answer.is-suggested { background: var(--accent); color: var(--accent-fg); box-shadow: none; }
-.pn-answer.is-suggested:hover { background: color-mix(in oklab, var(--accent) 88%, var(--ink)); }
+.pn-answer.is-suggested { background: var(--answer); color: var(--answer-fg); box-shadow: none; }
+.pn-answer.is-suggested:hover { background: color-mix(in oklab, var(--answer) 88%, var(--ink)); }
 .pn-left { margin: 0; line-height: 19px; color: var(--ink); }
 .pn-row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 32px; margin: 0 -8px; padding: 4px 8px; width: calc(100% + 16px); border-radius: var(--r-sm); text-align: left; transition: background var(--m-quick); }
 .pn-row:hover { background: var(--hover); }

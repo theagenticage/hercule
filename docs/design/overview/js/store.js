@@ -113,6 +113,12 @@ window.Store = (function () {
       if (prs.length >= 3) fold("prs", "Pull requests", prs);
       var tickets = tasks.filter(function (t) { return t.kind === "ticket"; });
       if (tickets.length >= 3) fold("tickets", "Tickets", tickets);
+      // Two streams beside two or more cards would need a fourth row, so they share one pile.
+      var loose = tasks.filter(function (t) { return !used[t.id]; }).length;
+      if (piles.length >= 2 && loose + piles.length > MOST_ROWS) {
+        var shared = piles.reduce(function (all, p) { return all.concat(p.tasks); }, []);
+        piles = [{ key: owner + "/" + stage + "/streams", kind: "streams", title: "Reviews and PRs", tasks: shared }];
+      }
     }
     // A card you just put down stays a card, on the row you chose. It takes no room from the others,
     // and joins the rest on the next visit.
@@ -141,9 +147,8 @@ window.Store = (function () {
     var mine = p.tasks.filter(function (t) { return t.move === "you" && !t.agent && !isBlocked(t); }).length;
     var agents = p.tasks.filter(function (t) { return t.agent && t.move !== "you"; }).length;
     if (p.kind === "landed") return "This week";
-    if (mine && agents) return mine + (mine === 1 ? " wants" : " want") + " you, " + agents + " with agents";
+    if (agents) return agents === 1 ? "1 with an agent" : agents + " with agents";
     if (mine) return mine + (mine === 1 ? " wants" : " want") + " you";
-    if (agents) return agents === 1 ? "With an agent" : agents + " with agents";
     return "With others";
   }
 

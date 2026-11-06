@@ -45,12 +45,21 @@ window.Board = (function () {
 
   /* ---------- Cards ---------- */
 
+  /** Draws a colleague behind a top edge: the head, and the paws on the edge in front of the sheet. */
+  function drawHead(name, pose) {
+    var hue = Crew.lookFor(name).hue;
+    var delay = -((Crew.hash(name) % 340) / 100).toFixed(2);
+    return {
+      head: '<span class="card-head" data-pose="' + pose + '">' + Crew.peek(name, { pose: pose, size: 30, crop: 34 }) + "</span>",
+      paws: '<span class="card-paws" data-pose="' + pose + '" style="--hue:var(--hue-' + hue + ";--paw-delay:" + delay + 's"><i></i><i></i></span>',
+    };
+  }
+
   function drawHolder(h) {
     if (h.kind === "you") return '<span class="card-holder"><i class="card-tab" data-need="' + h.need + '"></i></span>';
     if (h.kind === "agent") {
-      var hue = Crew.lookFor(h.name).hue;
-      var delay = -((Crew.hash(h.name) % 340) / 100).toFixed(2);
-      return '<span class="card-holder"><span class="card-head" data-pose="' + h.pose + '">' + Crew.peek(h.name, { pose: h.pose, size: 30, crop: 34 }) + '</span></span><span class="card-paws" data-pose="' + h.pose + '" style="--hue:var(--hue-' + hue + ";--paw-delay:" + delay + 's"><i></i><i></i></span>';
+      var drawn = drawHead(h.name, h.pose);
+      return '<span class="card-holder">' + drawn.head + "</span>" + drawn.paws;
     }
     if (h.kind === "person") return '<span class="card-holder"><i class="card-tab card-tab--person" title="' + esc(h.name) + '">' + esc(h.name.charAt(0).toUpperCase()) + "</i></span>";
     return "";
@@ -131,9 +140,14 @@ window.Board = (function () {
     var mine = p.tasks.filter(function (t) { return t.move === "you" && !t.agent && !Store.isBlocked(t) && t.stage !== "landed"; }).length;
     var agent = p.tasks.filter(function (t) { return t.agent && t.move !== "you"; })[0];
     var out = "";
-    if (agent) out += '<span class="card-head">' + Crew.peek(agent.agent, { pose: "working", size: 30, crop: 34 }) + "</span>";
+    var paws = "";
     if (mine) out += '<i class="card-tab card-tab--count">' + mine + "</i>";
-    return out ? '<span class="card-holder">' + out + "</span>" : "";
+    if (agent) {
+      var drawn = drawHead(agent.agent, "working");
+      out += drawn.head;
+      paws = drawn.paws;
+    }
+    return out ? '<span class="card-holder">' + out + "</span>" + paws : "";
   }
 
   function drawPile(p) {
@@ -149,13 +163,9 @@ window.Board = (function () {
     var hits = Store.isFiltering() ? p.tasks.filter(Store.matches).length : n;
     el.classList.toggle("is-off", Store.isFiltering() && hits === 0);
     var line = Store.isFiltering() && hits ? hits + " of " + n + " match" : p.kind === "landed" ? "" : Store.describePile(p);
-    var sources = {};
-    p.tasks.forEach(function (t) { if (t.source) sources[t.source] = true; });
-    var marks = Object.keys(sources).slice(0, 2).map(function (x) { return '<span class="card-src">' + Crew.brand(x, 11) + "</span>"; }).join("");
-    var fresh = p.tasks.reduce(function (m, t) { return Math.min(m, t.age); }, 1e4);
     var html = drawPileHolder(p);
     for (var i = sheets; i >= 1; i--) html += '<i class="pile-sheet" style="--n:' + i + '"></i>';
-    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + "</span>" + (p.kind === "landed" ? "" : '<span class="card-meta pile-meta">' + marks + "<time>" + NW.formatAge(fresh) + "</time></span>");
+    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + "</span>";
     setHTML(el, html);
     return el;
   }
@@ -236,9 +246,6 @@ window.Board = (function () {
       place(c, sorted.map(drawBead));
       return c;
     });
-    if (lastStage >= 0) {
-      reach.style.gridColumn = first + 1 + " / " + (lastStage + 2);
-    }
     reach.hidden = lastStage < 0;
     place(wire, [reach].concat(cells));
     return wire;
@@ -373,11 +380,30 @@ window.Board = (function () {
       return p.id !== "" || Store.state.tasks.some(function (t) { return t.project === ""; });
     }).map(drawLane));
     markLongTitles();
+    drawReaches();
     work.dataset.lens = Store.state.lens || "";
     work.classList.toggle("is-filtering", Store.isFiltering());
     var status = document.getElementById("board-status");
     if (status) status.textContent = Store.isFiltering() ? Store.state.tasks.filter(Store.matches).length + " of " + Store.state.tasks.length + " match" : "";
     work.classList.toggle("has-wear", Store.state.wear);
+  }
+
+  /** Draws the darker part of each wire, from its first bead to its last. */
+  function drawReaches() {
+    var reads = [];
+    lanesEl.querySelectorAll(".wire").forEach(function (w) {
+      var beads = w.querySelectorAll(".bead");
+      if (!beads.length) return;
+      var a = beads[0];
+      var b = beads[beads.length - 1];
+      var left = a.offsetLeft;
+      var right = b.offsetLeft + b.offsetWidth;
+      reads.push([w.querySelector(".wire-reach"), left, right - left]);
+    });
+    reads.forEach(function (r) {
+      r[0].style.left = r[1] + "px";
+      r[0].style.width = r[2] + "px";
+    });
   }
 
   /** Marks each card whose title takes two lines, so its summary gets one line and an ellipsis. */
@@ -435,15 +461,20 @@ window.Board = (function () {
       var target = locate(id);
       if (target) flyInto(b, target, opts.spring === "self" ? "self" : "travel");
     });
+    var known = opts.known || [];
     lanesEl.querySelectorAll(".card[data-id]").forEach(function (el) {
-      if (before[el.dataset.id] || !Store.task(el.dataset.id)) return;
+      if (before[el.dataset.id] || known.indexOf(el.dataset.id) >= 0 || !Store.task(el.dataset.id)) return;
       Motion.body(el).set({ o: 0 }).to({ o: 1 }, "travel");
     });
   }
 
   function mount() {
-    window.addEventListener("resize", markLongTitles);
-    document.fonts.ready.then(markLongTitles);
+    function measure() {
+      markLongTitles();
+      drawReaches();
+    }
+    window.addEventListener("resize", measure);
+    document.fonts.ready.then(measure);
     lanesEl = document.getElementById("lanes");
     ruleEl = document.getElementById("rule");
     leadEl = document.getElementById("lead");
@@ -470,5 +501,5 @@ window.Board = (function () {
     return found;
   }
 
-  return { mount: mount, locate: locate, draw: draw, markLongTitles: markLongTitles, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
+  return { mount: mount, locate: locate, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
 })();

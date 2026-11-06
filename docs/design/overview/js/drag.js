@@ -115,6 +115,8 @@ window.Drag = (function () {
     carry.merge = target;
     carry.slot.classList.toggle("is-shut", !!target);
     if (target) {
+      var name = Store.task(target.dataset.id).name;
+      target.dataset.mergeLabel = "Merge into " + (name.length > 22 ? name.slice(0, 21) + "…" : name);
       target.classList.add("is-merge-target");
       Motion.body(target).to({ s: 1.02 }, "hand");
     }
@@ -333,7 +335,7 @@ window.Drag = (function () {
     Board.change(function () {
       c.slot.remove();
       if (mutate) mutate();
-    }, { spring: "hand" });
+    }, { spring: "hand", known: [c.id] });
     if (!el.isConnected) {
       // It belongs to a pile or a folded lane: it is seen going there.
       var target = Board.locate(c.id);

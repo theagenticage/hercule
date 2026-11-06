@@ -88,7 +88,7 @@
 /* ---------- The wire and its beads ---------- */
 .wire { position: relative; display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); align-items: center; height: 16px; }
 .wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: color-mix(in oklab, var(--ink) 8%, transparent); }
-.wire-reach { grid-row: 1; height: 1px; background: color-mix(in oklab, var(--ink) 32%, transparent); }
+.wire-reach { position: absolute; top: 50%; height: 1px; background: color-mix(in oklab, var(--ink) 32%, transparent); }
 .wire-cell { grid-row: 1; display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px; }
 .wire-cell:nth-of-type(1) { grid-column: 1; }
 .wire-cell:nth-of-type(2) { grid-column: 2; }
@@ -110,8 +110,10 @@
 /* ---------- Cards on the desk ---------- */
 .card { cursor: default; outline: none; color: var(--muted); }
 .card { transition: opacity var(--m-base) var(--m-ease); }
-.card.is-off .card-stock, .card.is-off .card-holder, .card.is-off .pile-sheet, .card.is-off .card-paws { opacity: 0.28; }
-.card.is-off .card-words--rest, .card.is-off .pile-text, .card.is-off .pile-line, .card.is-off .pile-meta { opacity: 0.42; }
+.card:not(.pile).is-off .card-stock, .card:not(.pile).is-off .card-holder, .card:not(.pile).is-off .card-paws { opacity: 0.28; }
+.card:not(.pile).is-off .card-words--rest { opacity: 0.42; }
+/* A pile fades as one thing, so its sheets never show through each other. */
+.pile.is-off { opacity: 0.3; }
 .plan.is-off .wire { opacity: 0.4; }
 .card-stock, .card-holder { transition: opacity var(--m-base) var(--m-ease); }
 .bead.is-off { opacity: 0.2; }
@@ -136,11 +138,12 @@
 .card:focus-visible .card-stock, .card.is-focus .card-stock { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* ---------- Piles ---------- */
-.pile { display: flex; flex-direction: column; text-align: left; }
+.pile { display: flex; flex-direction: column; justify-content: center; text-align: left; }
 .pile-text { display: flex; align-items: baseline; gap: 8px; font: var(--type-card); color: var(--ink); }
 .pile-text b { font-weight: var(--w-medium); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pile-text em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: var(--w-regular); }
 .pile-line { font: var(--type-summary); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pile[data-height="etch"] { justify-content: flex-start; }
 .pile[data-height="etch"] .pile-text { color: var(--muted); }
 .pile[data-height="etch"] .pile-sheet { display: none; }
 .pile-sheet { position: absolute; z-index: -2; top: 0; left: 0; right: 0; bottom: 0; border-radius: var(--card-r); background: var(--stock); box-shadow: inset 0 0 0 1px var(--stock-rim), 0 1px 2px oklch(0 0 0 / 0.1); transform: translateY(calc(var(--n) * 3px)) scaleX(calc(1 - var(--n) * 0.026)); transition: transform var(--m-base) var(--m-ease); }
@@ -150,7 +153,8 @@
 .card-tab--count { display: grid; place-items: start center; min-width: 20px; width: auto; height: 15px; padding: 1px 5px 0; color: var(--face-ink); font-size: 10px; font-weight: var(--w-bold); line-height: 11px; font-variant-numeric: tabular-nums; }
 
 /* ---------- Wear ---------- */
-.has-wear .card[data-height="stand"] .card-stock, .has-wear .card[data-height="flat"] .card-stock { background: color-mix(in oklab, var(--stock) calc(100% - var(--wear) * 18%), oklch(0.72 0.07 80)); }
+.has-wear .card:not(.pile)[data-height="stand"] .card-stock { background: color-mix(in oklab, var(--stock) calc(100% - var(--wear) * 18%), var(--paper)); }
+.has-wear .card:not(.pile)[data-height="flat"] .card-stock { background: color-mix(in oklab, var(--stock-flat) calc(100% - var(--wear) * 18%), var(--paper)); }
 .has-wear .card .card-title { opacity: calc(1 - var(--wear) * 0.2); }
 
 /* The pieces in flight are copies; only the original takes the pointer. */
@@ -160,7 +164,7 @@
 
 /* ---------- The fan ---------- */
 .fan-layer { position: absolute; inset: 0; z-index: 24; pointer-events: none; }
-.fan-layer::before { content: ""; position: absolute; inset: 0; background: color-mix(in oklab, var(--desk) 93%, transparent); opacity: 0; transition: opacity var(--m-base) var(--m-ease); }
+.fan-layer::before { content: ""; position: absolute; inset: 0; background: color-mix(in oklab, var(--desk) 98%, transparent); opacity: 0; transition: opacity var(--m-base) var(--m-ease); }
 .fan-layer.is-open { pointer-events: auto; }
 .fan-layer.is-open::before { opacity: 1; }
 .fan { position: absolute; display: flex; flex-direction: column; }
@@ -201,7 +205,7 @@
 /* Merging: the target opens up to receive. */
 .card.is-merge-target { z-index: 5; }
 .card.is-merge-target .card-stock { box-shadow: var(--h-hover), 0 0 0 2px var(--focus); }
-.card.is-merge-target::after { content: "Merge"; position: absolute; z-index: 6; left: 50%; top: -11px; transform: translateX(-50%); padding: 1px 8px; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-fg); font: var(--type-meta); font-weight: var(--w-medium); }
+.card.is-merge-target::after { content: attr(data-merge-label); position: absolute; z-index: 6; left: 50%; top: -12px; transform: translateX(-50%); max-width: 100%; white-space: nowrap; padding: 1px 8px; border-radius: var(--r-pill); background: var(--answer); color: var(--answer-fg); font: var(--type-meta); font-weight: var(--w-medium); }
 .card.has-merged { z-index: 25; }
 .card.has-merged .card-stock { animation: merged var(--m-long) var(--m-ease); }
 @keyframes merged { 0% { box-shadow: var(--h-hover), 0 0 0 2px var(--brass); } 100% { box-shadow: var(--h-stand), 0 0 0 0 transparent; } }

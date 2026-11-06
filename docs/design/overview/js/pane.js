@@ -87,17 +87,17 @@ window.Pane = (function () {
       drawNextMove(t) +
       (t.left && !/^(nothing|everything)$/i.test(t.left) ? '<section class="pn-sec"><h4>What is left</h4><p class="pn-left">' + esc(t.left) + "</p></section>" : "") +
       drawBlockers(t) + drawThreads(t) + drawLinks(t) + "</div>" +
-      '<footer class="pn-foot"><button class="pn-btn" data-act="done">' + Crew.icon("check", 14) + 'Done<kbd>D</kbd></button><button class="pn-btn" data-act="thread">' + Crew.icon("compose", 14) + 'Start a thread<kbd>T</kbd></button><button class="pn-btn" data-act="merge">Merge<kbd>M</kbd></button><button class="pn-btn pn-btn--end" data-act="drop">Drop<kbd>⌫</kbd></button></footer>';
+      '<footer class="pn-foot"><button class="pn-btn" data-act="done">' + Crew.icon("check", 14) + 'Done<kbd>D</kbd></button><button class="pn-btn" data-act="thread">' + Crew.icon("compose", 14) + 'Start a thread<kbd>T</kbd></button><button class="pn-btn" data-act="merge">' + Crew.icon("overlap", 14) + 'Merge<kbd>M</kbd></button><button class="pn-btn pn-btn--end" data-act="drop">Drop<kbd>⌫</kbd></button></footer>';
   }
 
   function drawHolderOnSheet(t) {
     var h = Store.decideHolder(t);
-    var el = sheet.querySelector(".card-holder");
-    if (el) el.remove();
+    sheet.querySelectorAll(":scope > .card-holder, :scope > .card-paws").forEach(function (old) { old.remove(); });
     if (h.kind === "none") return;
     var tmp = document.createElement("div");
-    tmp.innerHTML = '<span class="card-holder">' + (h.kind === "you" ? '<i class="card-tab" data-need="' + h.need + '"></i>' : h.kind === "agent" ? '<span class="card-head">' + Crew.peek(h.name, { pose: h.pose, size: 30, crop: 33 }) + "</span>" : '<i class="card-tab card-tab--person">' + esc(h.name.charAt(0)) + "</i>") + "</span>";
-    sheet.insertBefore(tmp.firstChild, sheet.firstChild);
+    var drawn = h.kind === "agent" ? Board.drawHead(h.name, h.pose) : null;
+    tmp.innerHTML = '<span class="card-holder">' + (h.kind === "you" ? '<i class="card-tab" data-need="' + h.need + '"></i>' : drawn ? drawn.head : '<i class="card-tab card-tab--person">' + esc(h.name.charAt(0)) + "</i>") + "</span>" + (drawn ? drawn.paws : "");
+    while (tmp.lastChild) sheet.insertBefore(tmp.lastChild, sheet.firstChild);
   }
 
   function paint(p) {
