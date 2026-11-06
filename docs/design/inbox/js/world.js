@@ -268,5 +268,11 @@
     return list;
   }
 
-  window.World = { NOW: NOW, hoursAgo: hoursAgo, PEOPLE: PEOPLE, signal: signal, buildEntities: buildEntities, buildVolume: buildVolume, CLUSTERS: CLUSTERS, readContexts: function () { return contexts; }, readRelations: function () { return relations; } };
+  /** Returns the thing behind a row of Intake, when a person raises it to the Inbox. */
+  function raise(row) {
+    if (row.mark === 'slack') return { id: 'raised-' + row.id, kind: 'slack/thread', concern: 'mentioned', title: row.title, since: hoursAgo(3), fields: { from: 'kofi-mensah', channel: row.ref, replies: row.n }, signals: [signal('mentioned', 3, 'kofi-mensah')], task: null };
+    return { id: 'raised-' + row.id, kind: 'sentry/issue', concern: 'assigned', title: row.title, since: hoursAgo(1), fields: { key: row.ref, assignee: 'you', state: 'unresolved', events: row.n, users: 3 }, signals: [signal('assigned', 1)], task: null };
+  }
+
+  window.World = { NOW: NOW, hoursAgo: hoursAgo, PEOPLE: PEOPLE, signal: signal, buildEntities: buildEntities, buildVolume: buildVolume, CLUSTERS: CLUSTERS, FAILING_KIND: 'github/pull-request', raise: raise, readContexts: function () { return contexts; }, readRelations: function () { return relations; } };
 })();

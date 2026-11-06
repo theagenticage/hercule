@@ -16,7 +16,7 @@
 
   /* A wait, measured against the patience of its kind. */
   /* A status that wants watching. Plugins reach this, and never the colour kept for the person. */
-  --attention-ink: var(--you-ink);
+  --attention-ink: color-mix(in oklab, var(--you-ink) 72%, var(--ink));
 
   --wait-fresh: var(--faint);
   --wait-recent: var(--faint);

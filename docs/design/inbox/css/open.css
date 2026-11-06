@@ -185,14 +185,6 @@
 }
 @keyframes land-fade { from { opacity: 1; } to { opacity: 0; } }
 
-/* Where a thing sits: every place above it, under the name its kind gives that level. */
-.o-places { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; margin: 2px 0 8px; padding: 0 16px 0 45px; font: var(--type-summary); }
-.o-places dt { color: var(--faint); }
-.o-places dd { margin: 0; color: var(--muted); }
-.o-places dd i { margin: 0 6px; font-style: normal; color: var(--faint); }
-.o-places small { margin-left: 5px; color: var(--faint); font: inherit; }
-.o-place { color: var(--ink); text-align: left; font: inherit; }
-.o-place:hover { text-decoration: underline; text-underline-offset: 2px; }
 .o-progress { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 0 16px 0 45px; color: var(--faint); font: var(--type-summary); }
 .o-signal.is-linked { color: var(--muted); }
 .o-from { position: absolute; left: -18px; top: 6px; display: grid; place-items: center; width: 13px; height: 13px; background: var(--stock); }
@@ -221,7 +213,6 @@ button.o-link-go:hover { background: var(--hover); }
 .o-find::placeholder { color: var(--faint); }
 .o-found { margin-top: 4px !important; }
 .o-found[hidden] { display: none; }
-.o-place { color: var(--ink); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--ink) 25%, transparent); text-underline-offset: 2px; }
 .o-text small { color: var(--faint); font: var(--type-meta); }
 .o-back { display: flex; align-items: center; gap: 6px; max-width: 100%; margin: -4px 16px 6px 42px; color: var(--muted); font: var(--type-summary); text-align: left; }
 .o-back .ic { flex: none; transform: rotate(180deg); }

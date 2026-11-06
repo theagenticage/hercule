@@ -41,7 +41,8 @@ window.Scenes = (function () {
     error: function () {
       var s = morning();
       s.name = 'error';
-      s.notice = Crew.brand('github', 13) + ' <b>GitHub stopped answering 12 minutes ago.</b> Its cards may be out of date. <button class="ib-fix" data-reconnect>Reconnect</button>';
+      var failing = K[W.FAILING_KIND].plugin;
+      s.notice = Card.drawMark(failing, 13) + ' <b>' + failing.name + ' stopped answering 12 minutes ago.</b> Its cards may be out of date. <button class="ib-fix" data-reconnect>Reconnect</button>';
       return s;
     },
   };
@@ -54,7 +55,7 @@ window.Scenes = (function () {
     return s;
   };
 
-  var list = [['morning', 'A morning'], ['light', 'A light day'], ['volume', '300 cards'], ['handed', 'Some handed on'], ['edge', 'Long and huge'], ['loading', 'Loading'], ['offline', 'Offline'], ['error', 'GitHub failing'], ['zero', 'Inbox zero'], ['firstrun', 'First run']];
+  var list = [['morning', 'A morning'], ['light', 'A light day'], ['volume', '300 cards'], ['handed', 'Some handed on'], ['edge', 'Long and huge'], ['loading', 'Loading'], ['offline', 'Offline'], ['error', 'A failing source'], ['zero', 'Inbox zero'], ['firstrun', 'First run']];
 
   /** Returns the rays of the sunrise behind the empty Inbox's numeral. */
   function drawRays() {
@@ -100,25 +101,20 @@ window.Scenes = (function () {
 
   /** Draws the first run on the page itself: the stacks stand ready, and each first card asks to be connected. */
   function drawFirstRun(page) {
-    var connect = function (mark, name, hue, line) {
-      return '<button class="fr-card">' + Card.drawMark({ name: name, mark: mark, hue: hue, solid: mark === 'github' }, 20) + '<div><b>' + name + '</b><small>' + line + '</small></div><span class="fr-go">Connect ' + Crew.icon('arrow', 12) + '</span></button>';
+    var connect = function (kind) {
+      return '<button class="fr-card">' + Card.drawMark(kind.plugin, 20) + '<div><b>' + Card.esc(kind.plugin.name) + '</b><small>' + Card.esc(kind.connect) + '</small></div><span class="fr-go">Connect ' + Crew.icon('arrow', 12) + '</span></button>';
     };
+    // Each kind asks to be connected on the side where its cards will lie.
+    var offered = Object.keys(K).map(function (id) { return K[id]; }).filter(function (k) { return k.connect; });
+    var ofShape = function (card) { return offered.filter(function (k) { return k.card === card; }).map(connect).join(''); };
     // On a first run nothing has happened yet, so the sidebar says so too.
     var waitingNow = document.querySelector('.side-scroll .side-sec');
     if (waitingNow) waitingNow.hidden = true;
     document.querySelector('.side-sum').textContent = 'Nothing running';
     page.innerHTML = '<div class="ib-wide"><div class="noticed"><span class="card-holder"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34 }) + '</span></span><span class="card-paws" style="--hue:var(--hue-' + Crew.lookFor('Hercule').hue + ')"><i></i><i></i></span><i class="card-stock"></i>' +
       '<p class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></p></div>' +
-      '<header class="sec"><h2>Ongoing</h2></header><div class="fr-grid">' + connect('linear', 'Linear', 277, 'Tickets, with their projects and milestones') + connect('sentry', 'Sentry', 300, 'Errors assigned to you') + '</div></div>' +
-      '<aside class="ib-narrow"><header class="sec"><h2>Requests</h2></header><div class="fr-list">' + connect('github', 'GitHub', null, 'Reviews people ask of you') + connect('gmail', 'Gmail', 25, 'Mail') + '</div></aside>';
-  }
-
-  /** Returns the card of something raised from Intake. */
-  function raisedEntity(r) {
-    var kinds = { sentry: 'sentry/issue', slack: 'slack/thread' };
-    var kind = kinds[r.mark] || 'sentry/issue';
-    if (kind === 'slack/thread') return { id: 'raised-' + r.id, kind: kind, concern: 'mentioned', title: r.title, since: W.hoursAgo(3), fields: { from: 'kofi-mensah', channel: r.ref, replies: r.n }, signals: [W.signal('mentioned', 3, 'kofi-mensah')], task: null, project: null };
-    return { id: 'raised-' + r.id, kind: kind, concern: 'assigned', title: r.title, since: W.hoursAgo(1), fields: { key: r.ref, assignee: 'you', state: 'unresolved', events: r.n, users: 3 }, signals: [W.signal('assigned', 1)], task: null, project: 'checkout-api' };
+      '<header class="sec"><h2>Ongoing</h2></header><div class="fr-grid">' + ofShape('rich') + '</div></div>' +
+      '<aside class="ib-narrow"><header class="sec"><h2>Requests</h2></header><div class="fr-list">' + ofShape('compact') + '</div></aside>';
   }
 
   function play(name) {
@@ -132,5 +128,5 @@ window.Scenes = (function () {
     App.load((defs[name] || defs.morning)());
     if (name === 'loading') Skeleton.run();
   }
-  return { play: play, defs: defs, list: list, showZero: showZero, drawSunrise: drawSunrise, raisedEntity: raisedEntity };
+  return { play: play, defs: defs, list: list, showZero: showZero, drawSunrise: drawSunrise };
 })();

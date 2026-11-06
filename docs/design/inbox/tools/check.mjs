@@ -48,7 +48,7 @@ await check("the display font is nowhere on the page, and no rule is doubled", a
 });
 await check("no view knows a system by name", async () => {
   const { readFileSync } = await import("node:fs");
-  for (const f of ["app.js", "card.js", "relations.js", "open.js", "pointer.js", "keys.js", "moves.js", "landing.js", "drag.js"]) {
+  for (const f of ["app.js", "card.js", "relations.js", "open.js", "pointer.js", "keys.js", "moves.js", "landing.js", "drag.js", "toolbar.js", "scenes.js"]) {
     const code = readFileSync(resolve(root, "js", f), "utf8").replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "").replace(/\blinear'/g, "").replace(/\d+ms linear/g, "");
     const hit = code.match(/\b(github|linear|sentry|gmail|slack|quayside)\b/i);
     assert(!hit, `${f} says ${hit && hit[0]}`);

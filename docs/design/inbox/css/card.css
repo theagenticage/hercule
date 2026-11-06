@@ -15,7 +15,7 @@
 .c-status > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .card--rich .c-title { margin: 0; font: var(--w-medium) var(--t-14) / 20px var(--font-ui); letter-spacing: -0.005em; text-wrap: pretty; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .c-context { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; margin-top: 2px; color: var(--muted); font: var(--type-summary); }
-.c-context > span + span::before { content: "·"; margin-right: 10px; color: var(--faint); }
+.c-context > span:not(:last-child)::after { content: "·"; margin-left: 10px; color: var(--faint); }
 .c-news small { color: var(--faint); font: inherit; font-variant-numeric: tabular-nums; }
 .c-news.tone-bad { color: var(--fail-ink); }
 .c-news.tone-good { color: var(--ok); }
@@ -218,6 +218,10 @@
   font: var(--type-card);
   letter-spacing: -0.003em;
   text-wrap: pretty;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .pl-why {
   color: var(--muted);

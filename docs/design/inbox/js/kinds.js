@@ -30,6 +30,7 @@
 
   var KINDS = {
     'github/pull-request': {
+      connect: 'Reviews people ask of you',
       card: 'compact',
       noun: 'Pull request',
       plugin: { name: 'GitHub', mark: 'github', hue: null, solid: true },
@@ -73,6 +74,7 @@
     },
 
     'linear/issue': {
+      connect: 'Tickets, with their projects and milestones',
       card: 'rich',
       noun: 'Issue',
       plugin: { name: 'Linear', mark: 'linear', hue: 277 },
@@ -105,6 +107,7 @@
     },
 
     'gmail/thread': {
+      connect: 'Mail that needs an answer',
       card: 'compact',
       noun: 'Mail thread',
       reference: 'title',
@@ -142,6 +145,7 @@
     },
 
     'sentry/issue': {
+      connect: 'Errors assigned to you',
       card: 'rich',
       noun: 'Error',
       plugin: { name: 'Sentry', mark: 'sentry', hue: 300 },
@@ -170,6 +174,7 @@
 
     // An invented plugin. It ships this table and a mark, and no code: its cards are drawn by the same renderer.
     'quayside/purchase-order': {
+      connect: 'Orders waiting for your sign-off',
       card: 'rich',
       noun: 'Purchase order',
       plugin: { name: 'Quayside', mark: 'quayside', hue: 205 },
