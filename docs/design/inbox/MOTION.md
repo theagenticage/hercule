@@ -25,9 +25,9 @@ Durations, from `vendor/primitives.css`: `--m-press` 80ms, `--m-quick` 140ms, `-
 
 | Part | Trigger | Motion |
 |---|---|---|
-| Actions | Pointer enters a card | Fade in over `--m-quick`, in the place of the wait. The title gives way with an ellipsis, so no word is cut |
+| Actions | Pointer enters a card | Fade in over `--m-quick`, at the end of the second line. The sentence ends with an ellipsis 6px before them, so no word is cut |
 | Height | The same | The sheet's shadow goes to `--h-hover` over `--m-quick`. Nothing moves |
-| Peek | 260ms of rest on a strip | The card rises above those in front of it and its height grows from its strip to its whole face over `--m-base`, ending on the edge of a strip. Its shadow goes to `--h-carry` |
+| Peek | 260ms of rest on a strip | The card rises above those in front of it and its height grows from its strip to its whole face over `--m-base`. Its shadow goes to `--h-carry`. The foot row waits 170ms for the sheet to grow round it. A strip the edge would reach hides its words, so no line is cut and none reads as the peek's own |
 | Hand-over | A peek is showing and the pointer reaches another card | The peek moves after 70ms of rest, or 220ms if the pointer is still moving fast, so a quick exit does not ripple through the stack |
 | Peek ends | Pointer leaves the stack, after 140ms | The height closes over `--m-base`, then the card returns to its place in the order |
 
@@ -44,7 +44,7 @@ A signal is the one moment the Inbox lets itself be noticed, with the card's cha
 | 280ms | The rim | A 1.5px inner rim in the tone of the news, on the strip that can be seen, at the card's own corner, in at 14% of 1100ms and fading out, so the whole moment ends at about 1400ms |
 | After | The new mark | A 6px marigold dot stays before the sentence until the pointer or the keyboard reaches the card, so news that arrived unseen can still be found |
 
-The card never changes place, and its neighbours do not move. A signal on a card folded in a pile knocks the pile instead, which keeps a dot and shows the worst inside until it is opened.
+The card never changes place, and its neighbours do not move. A signal on a card folded in a pile plays the same moment on the pile: the drop falls on its facts, and at contact the pile takes the knock, its facts roll and its rim lights. It keeps a dot, and shows the worst inside, until it is opened. In an open tray nothing falls across the cards: the card there changes its words and lights its rim.
 
 ### Handing off: the colleague takes the card's weight
 
@@ -61,7 +61,7 @@ One click, one chain: hand, weight, flight, receipt. The cause always comes befo
 
 Taking it on yourself is the same with the marigold tab on a whole card, and your monogram on a strip.
 
-**Undo plays it backwards.** The mark flies home from Overview, growing back to its size. On arrival the card stands up with an upward impulse, the sentence rolls back, the colleague sinks away on `travel`, and the count ticks.
+**Undo plays it backwards.** The mark flies home from Overview in 240ms, growing back to its size, so the page answers at once. On arrival the card stands up with an upward impulse, the sentence rolls back, the colleague sinks away on `travel`, and the count ticks.
 
 **From the open card, by pointer,** the card folds home first, and the chain starts as it lands, so the move plays on the card where it lies. **By keys,** the sheet walks on to the next card and the chain plays behind it: the keys are for rhythm.
 
@@ -75,7 +75,7 @@ This is the page's main rhythm, so it must feel like a stack of cards being work
 | A strip steps up to lead | It rises into place while its title grows from 13 to 15px by transform, on `hand`, and the foot row comes up 6px and fades in, 240ms from 100ms |
 | A card goes back to the pile, on Undo | The same, backwards: it sinks behind the pile on `hand`, and only then leaves the page |
 | The pile runs out | Its sheets and body fade on `hand`, and what it held rises from behind it |
-| A stack turns over | When nothing in view waits, 620ms after the last hand-off of a run the held cards settle down 8px and fade to the foot line on `travel`, its count rolls, and 140ms later the pile deals the next few. A key pressed in that gap turns the stack at once, so none is lost |
+| A stack turns over | When nothing in view waits, 620ms after the last hand-off of a run the held cards settle down 8px and fade on `hand`, its count rolls, and 240ms later, once they have gone, the pile deals the next few. The ring comes back only when the dealt card has landed. A key pressed in that gap turns the stack at once, so none is lost |
 
 ### Dismiss and undo
 
@@ -94,11 +94,13 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 |---|---|
 | The sheet | Grows from the visible part of the card with its shadow, its corner staying put, its radius going from 12 to 14. A sheet changing shape is the one thing a transform cannot do, so its size is set per frame |
 | The title, mark and latest line | The same objects: they grow from where they lay, by transform, on the same number |
-| The rest | Meta, facts and rows rise 6px and fade in, 240ms, 18ms apart from 140ms |
-| Older signals | Fade in over 200ms from 300ms, once the latest line has gone past them, so no words cross |
+| The rest | Meta, facts and rows rise 6px and fade in, 240ms, 18ms apart, once the sheet's number passes 0.8, so they follow the spring and not a clock, and nothing prints over the title or the latest line wherever the card lay |
+| Older signals | Fade in over 200ms at the same moment |
+| A title that wraps | When the title takes more lines in the sheet than on the card, the latest line waits until 0.2 and fades in by 0.45, because the title starts over it |
+| The moves | Take no pointer for the first 420ms, so the second click of a double click never starts an agent |
 | The veil | A flat veil, no blur. Fades over `--m-slow`, and is taken away when it has gone |
 | Walking | J and K keep the sheet where it stands. The words change with a 160ms rise of 8px in the direction of travel, and the height follows |
-| Closing | The same number going home, from wherever it is. Asked to open again on the way, it turns round with its speed. The rest fades in 100ms. Near home the card comes back under the sheet, and the sheet dissolves into it over 80ms. Focus returns to the card; the ring returns only for the keyboard |
+| Closing | The same number going home, from wherever it is. Asked to open again on the way, it turns round with its speed. The rest goes at once, so the latest line crosses nothing. At 0.02 the card comes back under the sheet, and the sheet dissolves into it over 80ms. Focus returns to the card; the ring returns only for the keyboard |
 
 ### Carrying a card
 
@@ -116,13 +118,13 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 | Moment | Motion |
 |---|---|
 | A new card | Joins at the end of its stack: comes down 20px and fades in on `self`, because nothing you did caused it, and the rim lights 200ms in, once it can be seen. Neighbours make room on `hand`. Into a pile, it lands on the pile: the knock, the count, the rim. While the pointer is in that column it waits at the heading as "1 new", and arrives the same way when the pointer leaves |
-| A tray opens | The pile takes a knock, and the visible cards travel out of it, solid, to their cells on `travel`, 18ms apart, capped at 180ms |
-| A tray closes | The same cards travel back into the pile, and the panel fades from 150ms |
+| A tray opens | The veil goes first. The pile takes a knock, and the visible cards travel out of it, solid, to their cells on `travel`, 18ms apart, capped at 180ms, unclipped by the panel, which fades up from 80ms |
+| A tray closes | The panel goes first, over `--m-quick`, and the same cards travel back into the pile |
 | A pile on hover | Its edges part a little over `--m-base`, and it rises to `--h-hover` |
 
 ### Hercule notices something
 
-A new thing takes a free column of the noticed card, the stacks glide on `travel` if it was empty, and Hercule looks up over the edge, an impulse of -130 on `hand`. It is the only time he moves. When the last thing leaves, the card fades over 300ms as the columns rise into its place.
+A new thing takes a free column of the noticed card, and Hercule looks up over the edge, an impulse of -130 on `hand`. It is the only time he moves. The card's row stays when nothing is noticed, so nothing shifts under a resting pointer: when the last thing leaves, the card fades over 300ms and the page holds still, and when something comes back it fades up over 220ms.
 
 ### The empty Inbox
 

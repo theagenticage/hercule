@@ -37,7 +37,7 @@ Three equal columns, 24px apart, 32px from the window's edges, and what Hercule 
 
 | Was | Now | Where | Behaviour |
 |---|---|---|---|
-| Triage | **Noticed** | One wide card across the top | Hercule's own. One short reason each, and the logo of what each combines, with a second as a badge. Up to three, each on its column of the page. A thing keeps its column, so one leaving never moves the others. The card reaches only as far as the last thing on it, so one thing on a light day is one column wide, not a long empty band |
+| Triage | **Noticed** | One card across the top, in a row that stays even when nothing is noticed, so the page never shifts | Hercule's own. One short reason each, and the logo of what each combines, with a second as a badge. Up to three, each on its column of the page. A thing keeps its column, so one leaving never moves the others. The card reaches only as far as the last thing on it, so one thing on a light day is one column wide, not a long empty band |
 | Fast | **On the clock**: To review, To answer, To finish | One column each | Oldest first. The wait leads. Named for your next move |
 | Slow | **On the shelf** | Across the page, under the stacks | No clock. One card per project, at any volume, one step lower than a card that wants you |
 
@@ -98,7 +98,7 @@ People are words on a card. A monogram is kept for you, and faces are for collea
 | State | Shows |
 |---|---|
 | At rest | Mark, title, wait, reason, count; a shape only if it is not usual |
-| Hover | The same, and the actions take the end of the second line, each with its name: `[face] Agent review`, `Take it`, a close. With several workflows, `Hand to…`. The title and the wait never move, and a click on a title can never hit an action. The sentence ends before them. A pointer on the actions never starts a peek. After 260ms elsewhere on the card, it peeks |
+| Hover | The same, and the actions take the end of the second line, each with its name: `[face] Agent review`, `Take it`, a close. With several workflows, `Hand to…`. The title and the wait never move, and a click on a title can never hit an action. The sentence ends before them. A pointer on the actions never starts a peek. After 260ms elsewhere on the card, it peeks. Double clicks are safe: the moves of a new sheet take no pointer for 420ms, and On Work takes none for 400ms after Take it |
 | Peek or keyboard focus | The whole face, up to three lines of title, over the cards in front of it. Its lower part takes no pointer, so the strips under it stay reachable |
 | Open | Everything: the signals in order, the facts, the moves |
 
