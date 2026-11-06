@@ -134,6 +134,16 @@ window.Live = (function () {
     });
   }
 
+  /** Shows the morning at once, for a person who asked for no movement. The line still tells it. */
+  function skipToMorning() {
+    Scenes.OVERNIGHT.forEach(function (s) {
+      if (s.kind === "arrive") Store.addTask(JSON.parse(JSON.stringify(s.task)));
+      else if (s.from !== s.to) Store.moveByFact(s.id, s.to, s.apply);
+    });
+    Board.draw();
+    summarizeNight();
+  }
+
   /** Sets the board to how it looked last night, for the replay to start from. */
   function rewindToLastNight() {
     Scenes.OVERNIGHT.forEach(function (s) {
@@ -151,7 +161,7 @@ window.Live = (function () {
     }, { passive: true });
   }
 
-  return { mount: mount, arrive: arrive, fact: fact, replayMorning: replayMorning, rewindToLastNight: rewindToLastNight, note: note };
+  return { mount: mount, arrive: arrive, fact: fact, replayMorning: replayMorning, skipToMorning: skipToMorning, rewindToLastNight: rewindToLastNight, note: note };
 })();
 
 // PROTOTYPE - the line from a blocked card to what holds it, drawn on while the pointer rests there.

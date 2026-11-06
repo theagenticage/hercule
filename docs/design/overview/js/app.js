@@ -148,5 +148,8 @@
   }
 
   if (scene === "loading") Welcome.playLoading();
-  if (replay) setTimeout(Live.replayMorning, 900);
+  if (replay) {
+    if (Motion.isReduced()) Live.skipToMorning();
+    else setTimeout(Live.replayMorning, 900);
+  }
 })();

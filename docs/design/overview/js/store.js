@@ -198,6 +198,7 @@ window.Store = (function () {
     if (to.plan !== undefined) t.initiative = to.plan;
     t.movedBy = "you";
     t.held = true;
+    t.age = 0;
     if (t.stage === "landed") {
       t.agent = "";
       t.move = "nobody";
