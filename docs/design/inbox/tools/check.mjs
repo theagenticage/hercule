@@ -148,15 +148,15 @@ await check("views can be left and clicks still work", async () => {
 });
 await check("a card can be carried, dropped and cancelled", async () => {
   const p = await open("");
-  const a = await point(p, "pr-6241");
+  const a = await point(p, "pr-6213");
   await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x + 30, a.y + 40, { steps: 4 });
   const t = await p.evaluate(() => { const r = document.querySelector('.rail-t[data-target="take"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await p.mouse.move(t.x, t.y, { steps: 10 }); await p.waitForTimeout(120); await p.mouse.up(); await p.waitForTimeout(900);
-  assert(await p.evaluate(() => !!App.findEntity("pr-6241").task), "the drop did nothing");
-  const b = await point(p, "pr-6252");
+  assert(await p.evaluate(() => !!App.findEntity("pr-6213").task), "the drop did nothing");
+  const b = await point(p, "pr-6238");
   await p.mouse.move(b.x, b.y); await p.mouse.down(); await p.mouse.move(b.x + 30, b.y + 60, { steps: 4 }); await p.keyboard.press("Escape"); await p.mouse.up(); await p.waitForTimeout(600);
   assert(!(await p.evaluate(() => Open.isOpen())), "a cancelled drag opened the card");
-  assert(!(await p.evaluate(() => App.findEntity("pr-6252").task)), "a cancelled drag handed the card on");
+  assert(!(await p.evaluate(() => App.findEntity("pr-6238").task)), "a cancelled drag handed the card on");
   return p;
 });
 
@@ -165,7 +165,13 @@ await check("a stack can be worked through to its end by keys, and a card comes 
   await p.evaluate(() => Keys.focus("pr-6204"));
   const n = () => p.evaluate(() => App.state.entities.filter((e) => App.readStack(e) === "review" && !e.task && !e.settled).length);
   const before = await n();
-  for (let i = 0; i < before; i++) { await p.keyboard.press("t"); await p.waitForTimeout(i % 6 === 5 ? 1700 : 260); if ((await n()) === 0) break; }
+  for (let i = 0; i < before; i++) {
+    await p.keyboard.press("t");
+    await p.waitForTimeout(260);
+    // When the last card in view is taken, the stack turns over and the keys move on to what it deals.
+    if (!(await p.evaluate(() => Keys.current()))) await p.waitForTimeout(1600);
+    if ((await n()) === 0) break;
+  }
   assert((await n()) === 0, `${await n()} cards left in To review`);
   return p;
 });
@@ -195,7 +201,7 @@ await check("a new card held back is never lost", async () => {
 });
 await check("a carry raises the rail", async () => {
   const p = await open("");
-  const a = await point(p, "pr-6241");
+  const a = await point(p, "pr-6213");
   await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x + 30, a.y + 40, { steps: 4 }); await p.waitForTimeout(450);
   const o = await p.evaluate(() => getComputedStyle(document.getElementById("rail")).opacity);
   assert(Number(o) > 0.9, `the rail is at opacity ${o}`);
