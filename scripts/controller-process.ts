@@ -38,15 +38,16 @@ const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
 
 /**
  * Builds the environment a spawned Hercule sees: this process's environment,
- * without any `HERCULE_` variable. A developer with `HERCULE_HOME` or
- * `HERCULE_TOKEN` set in their shell must not change what a test or a
- * measurement exercises.
+ * without any `HERCULE_` or `OTEL_` variable. A developer with `HERCULE_HOME`
+ * or `HERCULE_TOKEN` set in their shell must not change what a test or a
+ * measurement exercises, and one with `OTEL_EXPORTER_OTLP_ENDPOINT` set must
+ * not receive a test controller's traces in their own collector.
  */
 export function buildCleanEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>
-        entry[1] !== undefined && !entry[0].startsWith("HERCULE_"),
+        entry[1] !== undefined && !entry[0].startsWith("HERCULE_") && !entry[0].startsWith("OTEL_"),
     ),
   );
 }

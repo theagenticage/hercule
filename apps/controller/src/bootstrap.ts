@@ -124,6 +124,7 @@ import {
   ProviderKeyRequestsLayer,
 } from "./provider-accounts";
 import { seed } from "./seed";
+import { makeTelemetryLayer } from "./telemetry";
 import { readSetupComplete } from "./setup";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
@@ -574,7 +575,8 @@ export const bootWith = <A, E>(
   // `<home>/logs/controller.log` too. A failure after that point is logged
   // there as well as printed, because a service unit keeps only the log; a
   // failure before it, such as a `config.toml` that does not parse, reaches
-  // only stderr.
+  // only stderr. The telemetry layer is installed at the same point, for the
+  // same reason: the migrations and the boot are traced too.
   const sequenceWithProcessLog = Effect.gen(function* () {
     const paths = yield* HerculeHome;
     const bootstrap = yield* BootstrapConfig;
@@ -582,7 +584,10 @@ export const bootWith = <A, E>(
       sequence.pipe(
         Effect.tapCause((cause) => Effect.logError("The controller stopped on a failure", cause)),
       ),
-      makeProcessLogLayer({ home: paths.home, role: "controller", level: bootstrap.logLevel }),
+      Layer.mergeAll(
+        makeProcessLogLayer({ home: paths.home, role: "controller", level: bootstrap.logLevel }),
+        makeTelemetryLayer(bootstrap.otlpEndpoint),
+      ),
     );
   });
 

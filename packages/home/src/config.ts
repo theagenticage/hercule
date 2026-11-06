@@ -1,7 +1,7 @@
 /**
- * The bootstrap config in `config.toml`: the four keys every role may need
+ * The bootstrap config in `config.toml`: the five keys every role may need
  * before anything else starts (spec 15 section 6). The controller reads all
- * four, and the runner reads `log.level`. `hercule service` reads `data.dir`
+ * five, and the runner reads `log.level`. `hercule service` reads `data.dir`
  * to find the controller database, and `bind.host` and `bind.port` to report
  * the address the controller is opened at.
  */
@@ -46,11 +46,28 @@ export class BootstrapConfig extends Context.Service<
     readonly bindHost: string;
     readonly bindPort: number;
     readonly logLevel: LogLevel;
+    /**
+     * Where to send traces over OTLP/HTTP, as the collector's base URL, such as
+     * `http://127.0.0.1:4318`; traces go to `<base>/v1/traces`. Undefined when
+     * telemetry is off, which is the default.
+     */
+    readonly otlpEndpoint: string | undefined;
   }
 >()("hercule/home/BootstrapConfig") {}
 
-/** The four bootstrap keys, in dotted TOML form. Nothing else may be added (spec 15 section 6). */
-export const BOOTSTRAP_KEYS = ["data.dir", "bind.host", "bind.port", "log.level"] as const;
+/**
+ * The five bootstrap keys, in dotted TOML form. Nothing may be added unless a
+ * role needs it before the database opens (spec 15 section 6).
+ * `telemetry.otlp_endpoint` meets that test: tracing has to start before the
+ * database opens, so that the boot and the migrations are traced too.
+ */
+export const BOOTSTRAP_KEYS = [
+  "data.dir",
+  "bind.host",
+  "bind.port",
+  "log.level",
+  "telemetry.otlp_endpoint",
+] as const;
 
 type BootstrapKey = (typeof BOOTSTRAP_KEYS)[number];
 
@@ -63,16 +80,50 @@ export function buildEnvName(key: BootstrapKey): string {
 }
 
 /**
+ * The OpenTelemetry standard's environment variable for a bootstrap key, when
+ * the standard has one. It is read after every Hercule source, so a value set
+ * the Hercule way wins. An empty value counts as unset, as the OpenTelemetry
+ * specification says.
+ */
+const STANDARD_ENV_NAMES: Partial<Record<BootstrapKey, string>> = {
+  "telemetry.otlp_endpoint": "OTEL_EXPORTER_OTLP_ENDPOINT",
+};
+
+/**
+ * Every environment variable that sets a bootstrap key, with the key it sets:
+ * the `HERCULE_` variable of each key, and the OpenTelemetry standard's
+ * variable where there is one. `emptyIsUnset` is true for the standard's,
+ * whose empty value counts as unset. A service unit runs with none of them,
+ * so `hercule service` refuses each one that is set and the systemd unit
+ * unsets them all.
+ */
+export const BOOTSTRAP_ENV_VARIABLES: ReadonlyArray<{
+  readonly key: BootstrapKey;
+  readonly name: string;
+  readonly emptyIsUnset: boolean;
+}> = BOOTSTRAP_KEYS.flatMap((key) => {
+  const standard = STANDARD_ENV_NAMES[key];
+  return [
+    { key, name: buildEnvName(key), emptyIsUnset: false },
+    ...(standard === undefined ? [] : [{ key, name: standard, emptyIsUnset: true }]),
+  ];
+});
+
+/**
  * The values a first run writes into `config.toml`, with their TOML types.
  * `data.dir` is relative on purpose: the file must not be tied to the home it
- * was written in.
+ * was written in. `telemetry.otlp_endpoint` has no default: telemetry is off
+ * until a user turns it on, so the file is written without it.
  */
-const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
+const DEFAULTS = {
   "data.dir": "data",
   "bind.host": "127.0.0.1",
   "bind.port": 4937,
   "log.level": "info",
-};
+} as const satisfies Partial<Record<BootstrapKey, TomlScalar>>;
+
+/** A bootstrap key that has a default, so it always has a value. */
+type DefaultedKey = keyof typeof DEFAULTS;
 
 /**
  * Checks that a bind host is only a host: no scheme, no port, no path, no user.
@@ -101,6 +152,24 @@ const isBindHost = (host: string): boolean => {
   }
 };
 
+/**
+ * Checks that an OTLP endpoint is an `http` or `https` URL with nothing after
+ * its path: the traces path is appended to it, so a query or a fragment would
+ * end up in the wrong place.
+ */
+const isOtlpEndpoint = (endpoint: string): boolean => {
+  try {
+    const url = new URL(endpoint);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+};
+
 /** The schema of each key's value, applied to the string chosen from the sources. */
 const SCHEMAS = {
   "data.dir": Schema.NonEmptyString,
@@ -116,6 +185,13 @@ const SCHEMAS = {
     Schema.isBetween({ minimum: 1, maximum: 65535 }),
   ),
   "log.level": Schema.Literals(LOG_LEVELS),
+  "telemetry.otlp_endpoint": Schema.NonEmptyString.check(
+    Schema.makeFilter(
+      (endpoint: string) =>
+        isOtlpEndpoint(endpoint) ||
+        "an OTLP endpoint is the collector's http or https URL, such as http://127.0.0.1:4318, with no query",
+    ),
+  ),
 } as const;
 
 type Value<K extends BootstrapKey> = Schema.Schema.Type<(typeof SCHEMAS)[K]>;
@@ -179,7 +255,9 @@ const readConfigFile = Effect.fn("readConfigFile")(function* (configFile: string
 /**
  * Chooses the value of every bootstrap key, then validates it, and returns the
  * `BootstrapConfig`. A `-c` flag beats an environment variable, which beats the
- * file, which beats the default (spec 15 section 6).
+ * file, which beats the OpenTelemetry standard's variable for the key, if it
+ * has one, which beats the default (spec 15 section 6). A key with no value
+ * from any source and no default, `telemetry.otlp_endpoint`, is undefined.
  *
  * Fails with `ConfigValueError` when:
  *
@@ -203,8 +281,13 @@ const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
     flags[key] = value;
   }
 
-  /** Returns a key's value and its source, so an error about the value can include the source. */
-  const chooseValue = (key: BootstrapKey): { readonly value: string; readonly source: string } => {
+  /**
+   * Returns the value a source sets for a key, with the source, so an error
+   * about the value can name it. Returns undefined when no source sets it.
+   */
+  const chooseSetValue = (
+    key: BootstrapKey,
+  ): { readonly value: string; readonly source: string } | undefined => {
     const flag = flags[key];
     if (flag !== undefined) return { value: flag, source: `-c ${key}` };
     const fromEnv = options.env[buildEnvName(key)];
@@ -212,11 +295,18 @@ const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
     const fromFile = options.file[key];
     if (fromFile !== undefined)
       return { value: fromFile, source: `${key} in ${options.configFile}` };
-    return { value: String(DEFAULTS[key]), source: `the default for ${key}` };
+    const standard = STANDARD_ENV_NAMES[key];
+    const fromStandard = standard === undefined ? undefined : options.env[standard];
+    if (standard !== undefined && fromStandard !== undefined && fromStandard !== "")
+      return { value: fromStandard, source: standard };
+    return undefined;
   };
 
-  const decode = <K extends BootstrapKey>(key: K): Effect.Effect<Value<K>, ConfigValueError> => {
-    const { value, source } = chooseValue(key);
+  /** Decodes a value chosen for `key`, naming its source when the value is invalid. */
+  const decodeChosen = <K extends BootstrapKey>(
+    key: K,
+    { value, source }: { readonly value: string; readonly source: string },
+  ): Effect.Effect<Value<K>, ConfigValueError> => {
     const schema = SCHEMAS[key] as unknown as Schema.Codec<Value<K>, string>;
     return Schema.decodeUnknownEffect(schema)(value).pipe(
       Effect.mapError(
@@ -228,11 +318,27 @@ const resolveConfig = Effect.fn("resolveConfig")(function* (options: {
     );
   };
 
+  /** Decodes a key that has a default, so it always has a value. */
+  const decode = <K extends DefaultedKey>(key: K): Effect.Effect<Value<K>, ConfigValueError> =>
+    decodeChosen(
+      key,
+      chooseSetValue(key) ?? { value: String(DEFAULTS[key]), source: `the default for ${key}` },
+    );
+
+  /** Decodes a key with no default. Returns undefined when no source sets it. */
+  const decodeOptional = <K extends BootstrapKey>(
+    key: K,
+  ): Effect.Effect<Value<K> | undefined, ConfigValueError> => {
+    const chosen = chooseSetValue(key);
+    return chosen === undefined ? Effect.succeed(undefined) : decodeChosen(key, chosen);
+  };
+
   return BootstrapConfig.of({
     dataDir: yield* decode("data.dir"),
     bindHost: yield* decode("bind.host"),
     bindPort: yield* decode("bind.port"),
     logLevel: yield* decode("log.level"),
+    otlpEndpoint: yield* decodeOptional("telemetry.otlp_endpoint"),
   });
 });
 

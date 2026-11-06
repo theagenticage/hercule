@@ -109,7 +109,7 @@ The desktop app runs these commands and reads this output without linking `@herc
 **One unit per machine.** `install` refuses when the installed unit names another Home, and says what to run to move it. It also refuses:
 
 - when it runs from a checkout rather than a compiled binary, because the unit would point at a Bun binary and a source file;
-- when `-c key=value` is given, or a `HERCULE_<key>` variable for a bootstrap key is set (section 6). The unit reads only `config.toml`, so an override would hold for this command and not for the service; the message names the key and the config file to put it in. `HERCULE_HOME` is not a bootstrap key, and is honoured. Every other verb refuses `-c` as well, for the same reason;
+- when `-c key=value` is given, or a `HERCULE_<key>` variable for a bootstrap key is set (section 6), or `OTEL_EXPORTER_OTLP_ENDPOINT`, which sets `telemetry.otlp_endpoint` *(amended 2026-11-06, [#1041](https://github.com/theagenticage/hercule/issues/1041))*. The unit reads only `config.toml`, so an override would hold for this command and not for the service; the message names the key and the config file to put it in. `HERCULE_HOME` is not a bootstrap key, and is honoured. Every other verb refuses `-c` as well, for the same reason;
 - when the binary's path, the Home or a folder on the `PATH` holds a control character, which a unit file cannot hold;
 - when Hercule cannot read the Home's `config.toml`, or the file holds a value Hercule cannot use, with that file's error, because the unit's process would stop at the same error at every start *(added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313))*;
 - when the binary, its folder, or a folder on the `PATH` the unit would carry, can be written by every user on the machine, because anyone could then replace a program the service runs;
@@ -273,7 +273,7 @@ Retention defaults (resolved 2026-09-01, [#44](https://github.com/theagenticage/
 
 Override mechanics: there are no curated per-key flags. Any bootstrap key is reachable with a generic `-c key=value` flag and with a `HERCULE_*` environment variable. Precedence is flag > env > file > default. `--home` is the only dedicated flag because it locates the config file itself.
 
-The complete bootstrap key list is **four keys** (resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)), dotted TOML names:
+The complete bootstrap key list is ~~**four keys**~~ **five keys** (resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44); the fifth added 2026-11-06, [#1041](https://github.com/theagenticage/hercule/issues/1041)), dotted TOML names:
 
 | Key | Default |
 |---|---|
@@ -281,6 +281,22 @@ The complete bootstrap key list is **four keys** (resolved 2026-09-01, [#44](htt
 | `bind.host` | `127.0.0.1` |
 | `bind.port` | `4937` |
 | `log.level` | `info` |
+| `telemetry.otlp_endpoint` *(added 2026-11-06, [#1041](https://github.com/theagenticage/hercule/issues/1041))* | none: telemetry is off |
+
+*(Amended 2026-11-06, [#1041](https://github.com/theagenticage/hercule/issues/1041); decided by Rogier, [#1039](https://github.com/theagenticage/hercule/issues/1039).)* **A fifth key: `telemetry.otlp_endpoint`.** It is the base URL of an OpenTelemetry collector that receives OTLP over HTTP, such as `http://127.0.0.1:4318`. When it is set, the controller exports its traces to `<endpoint>/v1/traces`. When it is not, nothing is exported and no exporter runs. It meets the tier-1 test because tracing has to start before the database opens, so that the boot and the migrations are traced too.
+- **Sources.** It is set like the other four, by the file, `-c` or `HERCULE_TELEMETRY_OTLP_ENDPOINT`. For compliance with the OpenTelemetry standard, the controller also reads `OTEL_EXPORTER_OTLP_ENDPOINT`, after every Hercule source and before the default, so a value set the Hercule way wins. An empty `OTEL_EXPORTER_OTLP_ENDPOINT` counts as unset, as the OpenTelemetry specification says.
+- **Values.** The value is an `http` or `https` URL with no query and no fragment. Anything else is refused at boot, naming the source, like an invalid `bind.port`.
+- **Service units.** A service unit runs with none of these variables. `hercule service install` refuses a non-empty `OTEL_EXPORTER_OTLP_ENDPOINT` as it refuses the `HERCULE_` variables (section 4, One unit per machine), and the systemd unit unsets it. A service that should export puts the key in `config.toml`.
+- **What leaves the machine.**
+  - Span names, durations, ids, outcomes, the route a request took (`http.route`), and SQL text with placeholders, never bound values.
+  - No text a client chose: no URL path or query, and no request header, `User-Agent` included.
+  - A failed span carries its error's message, as the process log does.
+  - No bearer token, password or secret value is exported, in a request that succeeds or one that fails. An end-to-end test checks this (`e2e/telemetry.test.ts`).
+- **A collector that is down, slow or hung** cannot slow or stop the controller.
+  - An export request has a deadline of 5 seconds, body included.
+  - At most four wait at once. A failed export is tried three more times, about a second apart, then dropped, and export pauses for a minute.
+  - At shutdown the exporter flushes for at most 3 seconds.
+- Runners do not read the key yet. Tracing the rest of the application is [#1039](https://github.com/theagenticage/hercule/issues/1039).
 
 `bind.host` defaults to loopback - the safe default; LAN and tailnet users set it explicitly, and the perimeter warning ([./13](./13-security.md)) covers the rest. Port 4937 is "HYDR" on a phone keypad. The env mapping rule is mechanical: uppercase, dots become underscores, prefix `HERCULE_` - `bind.port` -> `HERCULE_BIND_PORT`, `data.dir` -> `HERCULE_DATA_DIR`. `HERCULE_HOME` is the one special (it locates the file itself). Nothing else may be added to this list without meeting the tier-1 test.
 

@@ -47,4 +47,45 @@ describe("loadBootstrapConfig", () => {
     expect(config.logLevel).toBe("warn");
     expect(config.dataDir).toBe("from-env");
   });
+
+  it("reads the OTLP endpoint from Hercule's sources first, then from OTEL_EXPORTER_OTLP_ENDPOINT", async () => {
+    const readEndpoint = (
+      env: Record<string, string>,
+      overrides: ReadonlyArray<readonly [string, string]> = [],
+    ) =>
+      Effect.runPromise(
+        Effect.map(loadBootstrapConfig({ home, overrides, env }), (config) => config.otlpEndpoint),
+      );
+    const standard = "http://standard:4318";
+
+    expect(await readEndpoint({})).toBeUndefined();
+    expect(await readEndpoint({ OTEL_EXPORTER_OTLP_ENDPOINT: "" })).toBeUndefined();
+    expect(await readEndpoint({ OTEL_EXPORTER_OTLP_ENDPOINT: standard })).toBe(standard);
+
+    writeFileSync(locateConfigFile(home), 'telemetry.otlp_endpoint = "http://file:4318"\n');
+    expect(await readEndpoint({ OTEL_EXPORTER_OTLP_ENDPOINT: standard })).toBe("http://file:4318");
+    expect(
+      await readEndpoint({
+        OTEL_EXPORTER_OTLP_ENDPOINT: standard,
+        HERCULE_TELEMETRY_OTLP_ENDPOINT: "https://env:4318/otlp",
+      }),
+    ).toBe("https://env:4318/otlp");
+    expect(
+      await readEndpoint({ OTEL_EXPORTER_OTLP_ENDPOINT: standard }, [
+        ["telemetry.otlp_endpoint", "http://flag:4318"],
+      ]),
+    ).toBe("http://flag:4318");
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        loadBootstrapConfig({
+          home,
+          overrides: [],
+          env: { HERCULE_TELEMETRY_OTLP_ENDPOINT: "collector:4318?x=1" },
+        }),
+      ),
+    );
+    expect(refused.message).toContain("HERCULE_TELEMETRY_OTLP_ENDPOINT");
+    expect(refused.message).toContain("http or https URL");
+  });
 });
