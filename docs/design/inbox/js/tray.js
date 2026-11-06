@@ -42,6 +42,11 @@ window.Tray = (function () {
     var h = Math.min(host.offsetHeight, innerHeight - 80);
     var left = isGrid ? cols[1].getBoundingClientRect().left - 14 : Math.max(main.left + 24, Math.min(r.left, main.right - w - 24));
     var top = Math.max(document.querySelector('.ib-page').getBoundingClientRect().top + 80, Math.min(r.top - h + 40, innerHeight - h - 24));
+    // The tray's top edge never cuts through a stack's heading: it rises to cover the whole numeral.
+    [].forEach.call(document.querySelectorAll('.stack-h'), function (heading) {
+      var b = heading.getBoundingClientRect();
+      if (b.right > left && top > b.top - 8 && top < b.bottom + 12) top = b.top - 8;
+    });
     h = Math.min(h, innerHeight - top - 24);
     host.style.left = left + 'px';
     host.style.top = top + 'px';

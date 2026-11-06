@@ -21,7 +21,7 @@ window.Nav = (function () {
       '<div class="side-row">' + Crew.face('Restore a basket after sign-in', { pose: 'waiting', size: 24 }) + '<span class="side-text"><span class="side-name">Restore a basket after sign-in</span><span class="side-ask">Highest quantity, or add them?</span></span></div></section>' +
       '<section class="side-sec"><h3 class="side-h"><span>Work</span></h3>' + rows.map(drawRow).join('') + '</section>' +
       '<section class="side-sec"><h3 class="side-h"><span>System</span></h3><a class="nav-row" href="#">' + Crew.icon('fleet', 16) + '<span>Fleet</span></a><a class="nav-row" href="#">' + Crew.icon('connections', 16) + '<span>Connections</span></a></section></div>' +
-      '<div class="side-foot"><div class="side-sum"><b>3</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle</div><div class="side-me">' + Card.drawPerson('you', 24) + '<span class="side-name">Noa</span><button class="icon-btn icon-btn--sm" title="Settings">' + Crew.icon('sliders', 14) + '</button></div></div>';
+      '<div class="side-foot"><div class="side-sum"><b>16</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle</div><div class="side-me">' + Card.drawPerson('you', 24) + '<span class="side-name">Noa</span><button class="icon-btn icon-btn--sm" title="Settings">' + Crew.icon('sliders', 14) + '</button></div></div>';
   }
   function setCount(id, n) {
     if (held && n !== undefined && held !== 'release') { pending = n; return; }

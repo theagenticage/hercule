@@ -74,7 +74,7 @@
 
 .o-row {
   display: grid;
-  grid-template-columns: minmax(0, 240px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 176px) minmax(0, 1fr) auto;
   column-gap: 12px;
   align-items: center;
   min-height: 40px;
@@ -212,7 +212,8 @@
 .tray-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
 .tray-cell { position: relative; min-height: 80px; }
 .tray-cell .c-foot--facts { margin-top: 3px; }
-.tray-cell .card { position: relative; top: auto; height: auto; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 8px; }
+.tray-cell .c-foot { align-self: end; }
+.tray-cell .card { position: relative; top: auto; height: 100%; display: grid; grid-template-rows: auto 1fr; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 8px; }
 
 .tray-h { gap: 10px; }
 .tray-h h2 { margin-right: auto; }
@@ -221,6 +222,7 @@
 .tray-find { width: 150px; height: 26px; padding: 0 8px; border: 0; border-radius: var(--r-xs); background: var(--field); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--ink); font: var(--type-summary); }
 .tray .card:hover .c-acts { opacity: 1; pointer-events: auto; }
 .tray .card:hover .c-foot--facts { visibility: hidden; }
+.tray .card:hover .c-foot { padding-right: var(--acts-w, 190px); }
 .tray-cell[hidden], .tray-none[hidden], .tray-all[hidden] { display: none; }
 .tray-none { margin: 8px 2px; color: var(--muted); font: var(--type-summary); }
 
@@ -243,7 +245,7 @@
 .stack .card.is-pile:hover > .card-stock { box-shadow: var(--h-hover); }
 .stack .card.is-pile.is-focus > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-hover); }
 .card.is-pile .c-mark { height: auto; justify-content: center; }
-.pile-n { font-family: var(--font-deco); font-feature-settings: normal; font-size: 20px; line-height: 22px; color: var(--count-ink); white-space: nowrap; }
+.pile-n { -webkit-text-stroke: 0.25px currentColor; font-family: var(--font-deco); font-feature-settings: normal; font-size: 20px; line-height: 22px; color: var(--count-ink); white-space: nowrap; }
 .card.is-pile .c-title { color: var(--muted); font: var(--type-summary); }
 .pile-facts { grid-column: 3; display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font: var(--type-summary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pile-worst { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); font-weight: var(--w-medium); }

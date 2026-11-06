@@ -14,7 +14,6 @@
 .is-loading .pl-why { width: 52%; height: 10px; color: transparent !important; background: color-mix(in oklab, var(--ink) 6%, transparent); }
 .is-loading .pl-marks, .is-loading .pile-facts, .is-loading .pile-count { visibility: hidden; }
 .is-loading .c-pace,
-.is-loading .c-status,
 .is-loading .card .c-foot,
 .is-loading .card.is-whole .c-foot,
 .is-loading .mark,

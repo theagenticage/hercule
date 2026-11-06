@@ -187,9 +187,7 @@
 }
 .card.is-hover .c-acts,
 .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
-/* The actions take the end of the second line, where the status was. The title and the wait never move. */
-.card.is-hover .c-status,
-.card.is-focus /* The sentence ends before the actions, so nothing prints over it. */
+/* The actions take the end of the second line. The title and the wait never move, and the sentence ends before them. */
 .stack .card.is-hover .c-line, .stack .card.is-focus .c-line { margin-right: var(--acts-w, 90px); }
 .stack .card.is-hover .c-more, .stack .card.is-focus .c-more { display: none; }
 .card.is-whole.density-open .c-acts { margin-top: 5px; }
@@ -228,7 +226,8 @@
 .stack .card.is-dealing { transition: none; }
 /* The edge of a peek never slices a line of words: a line it would cut is hidden, and the rest of the strip stays. */
 .card.is-under-top .c-title, .card.is-under-top .c-mark, .card.is-under-top .c-pace, .card.is-under-top .c-holder { visibility: hidden; }
-.card.is-under-line .c-line, .card.is-under-line /* In a peek the title reads in full, up to three lines. */
+.card.is-under-line .c-line { visibility: hidden; }
+/* In a peek the title reads in full, up to three lines. */
 .stack .card.is-peek .c-title { -webkit-line-clamp: 3; }
 .stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
 .stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); background: color-mix(in oklab, var(--stock) 40%, var(--stock-carry)); }
@@ -252,6 +251,7 @@
 .stack .card:not(.is-whole) > .card-holder, .stack .card:not(.is-whole) > .card-paws, .tray .card > .card-holder, .tray .card > .card-paws, .work-card > .c-holder { display: none; }
 .stack .card.is-whole > .c-holder { display: none; }
 .c-holder { position: absolute; top: 8px; right: 12px; width: 22px; height: 22px; overflow: hidden; }
+.stack .card:not(.is-whole):has(> .c-holder) .c-title { margin-right: 28px; }
 .c-holder-in { display: block; line-height: 0; }
 .c-holder .cr { filter: saturate(0.8); }
 .c-holder .person { margin: 2px 0 0 2px; }
