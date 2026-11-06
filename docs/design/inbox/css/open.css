@@ -230,3 +230,5 @@ button.o-link-go:hover { background: var(--hover); }
 .o-inner-t { min-width: 0; flex: 1; color: var(--ink); font-weight: var(--w-medium); }
 .o-inner-n { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
 .o-inner ul { margin-left: 8px; }
+/* The toolbar's menus lie in the window, so they are placed by what opened them. */
+#toolmenu { position: fixed; z-index: 60; }

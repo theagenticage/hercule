@@ -91,8 +91,8 @@ await check("progress shows only where the source reports it", async () => {
 await check("every grouping draws, and the sidebar's number never moves", async () => {
   const p = await open("");
   const before = await p.evaluate(() => App.countOverdue());
-  const options = await p.evaluate(() => [...document.querySelector("[data-grouping]").options].map((o) => o.value));
-  for (const o of options) { await p.selectOption("[data-grouping]", o); await p.waitForTimeout(250); }
+  const options = await p.evaluate(() => App.readGroupings().map((g) => g[0]));
+  for (const o of options) { await p.click('[data-tool="group"]'); await p.click(`[data-group="${o}"]`); await p.waitForTimeout(250); }
   assert((await p.evaluate(() => App.countOverdue())) === before, "a grouping changed the count");
   return p;
 });

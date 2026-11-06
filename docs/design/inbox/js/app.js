@@ -5,7 +5,7 @@ window.App = (function () {
   var K = Kinds.KINDS, W = World;
   var params = new URLSearchParams(location.search);
 
-  var state = { scene: 'morning', now: W.NOW, entities: [], clusters: [], open: null, page: 'inbox', mode: 'cards', stale: null, grouping: 'home', order: 'oldest', showParked: false };
+  var state = { scene: 'morning', now: W.NOW, entities: [], clusters: [], open: null, page: 'inbox', mode: 'cards', stale: null, grouping: 'home', order: 'oldest', showParked: false, filters: [] };
   var els = {};        // card elements by entity id
   var blocks = {};     // the block of each place by id, kept so a place keeps its element through a redraw
   var page;
@@ -70,9 +70,21 @@ window.App = (function () {
     return host;
   }
 
+  /** Returns whether a bundle passes the filters. A bundle shows when its lead or a part does, so a thing is never torn from what it rides on. */
+  function passesFilters(b) {
+    var things = [b.lead].concat(b.parts.filter(function (p) { return p.e; }).map(function (p) { return p.e; }));
+    return state.filters.every(function (f) {
+      return things.some(function (e) {
+        if (f.facet === 'owner') return Card.isMine(e) === (f.value === 'mine');
+        return Relations.readAncestors(e).some(function (p) { return p.id === f.value; });
+      });
+    });
+  }
+
   /** Returns the groupings the wide side offers: the usual homes, every kind of place above what lies there, and status. */
-  function readGroupings(list) {
+  function readGroupings() {
     var kinds = {}, homes = {};
+    var list = readLying().filter(isRich);
     list.forEach(function (e) {
       homes[K[K[e.kind].home].noun] = true;
       Relations.readAncestors(e).forEach(function (p) { kinds[p.kind] = true; });
@@ -203,7 +215,7 @@ window.App = (function () {
 
   /** Draws both sides from state, and removes what no longer lies on the page. */
   function placeCards() {
-    var bundles = Relations.buildBundles(readLying());
+    var bundles = Relations.buildBundles(readLying()).filter(passesFilters);
     var work = bundles.filter(function (b) { return isRich(b.lead); });
     var requests = bundles.filter(function (b) { return !isRich(b.lead); });
     var wanted = {};
@@ -218,7 +230,7 @@ window.App = (function () {
     drawWork(work);
     drawRequests(requests);
     drawParked();
-    drawGrouping(work);
+    Toolbar.draw();
     drawClear(work, requests);
     Nav.setCount('inbox', countOverdue());
     var riding = countOverdue() - requests.filter(function (b) { return !b.lead.task; }).length;
@@ -227,14 +239,6 @@ window.App = (function () {
     page.dataset.by = state.grouping;
     var entry = page.querySelector('.plaque, .card');
     if (entry) entry.tabIndex = 0;
-  }
-
-  /** Writes the menu of groupings for what lies on the wide side. */
-  function drawGrouping(work) {
-    var pick = page.querySelector('[data-grouping]');
-    var list = readGroupings(work.map(function (b) { return b.lead; }));
-    pick.innerHTML = list.map(function (g) { return '<option value="' + g[0] + '">' + Card.esc(g[1]) + '</option>'; }).join('');
-    pick.value = state.grouping;
   }
 
   /** Raises a small sunrise in the column once no request is left, so finishing them is marked even though lasting work never ends. */
@@ -254,7 +258,7 @@ window.App = (function () {
     page.innerHTML =
       '<div class="ib-wide">' +
         '<header class="sec sec--noticed"><h2>Hercule noticed</h2></header><div class="noticed" id="noticed" role="list"></div>' +
-        '<header class="sec"><h2>Ongoing</h2><span class="sec-n" data-count="work"></span><label class="sec-pick"><span>Group by</span><select data-grouping aria-label="Group by"></select></label></header>' +
+        '<header class="sec"><h2>Ongoing</h2><span class="sec-n" data-count="work"></span></header>' +
         '<div id="work"></div><p class="work-empty" hidden>Nothing ongoing concerns you.</p>' +
       '</div>' +
       '<aside class="ib-narrow" aria-label="Requests">' +
@@ -348,6 +352,7 @@ window.App = (function () {
     state.mode = scene.mode || 'cards';
     state.notice = scene.notice || null;
     state.grouping = 'home';
+    state.filters = [];
     state.order = 'oldest';
     state.showParked = false;
     Relations.load(state.entities, W.readContexts(), W.readRelations());
@@ -371,7 +376,6 @@ window.App = (function () {
   function start() {
     page = document.getElementById('page');
     document.addEventListener('change', function (ev) {
-      if (ev.target.matches('[data-grouping]')) { state.grouping = ev.target.value; layOut(); }
       if (ev.target.matches('[data-order]')) { state.order = ev.target.value; layOut(); }
     });
     document.addEventListener('click', function (ev) {
@@ -381,7 +385,7 @@ window.App = (function () {
   }
 
   return {
-    state: state, els: function () { return els; }, findEntity: findEntity, isRich: isRich, readLying: readLying, countOverdue: countOverdue, countOnClock: countOnClock, countLeft: countLeft,
+    state: state, readGroupings: readGroupings, els: function () { return els; }, findEntity: findEntity, isRich: isRich, readLying: readLying, countOverdue: countOverdue, countOnClock: countOnClock, countLeft: countLeft,
     layOut: layOut, redraw: redraw, redrawCard: redrawCard, drawNoticed: drawNoticed, reflowNoticed: reflowNoticed, checkZero: checkZero, arrive: arrive, load: load, settle: settle, drawNotice: drawNotice,
     forgetEl: function (id) { delete els[id]; }, start: start,
   };

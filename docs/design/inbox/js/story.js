@@ -50,34 +50,6 @@
     if (target) target.contentWindow.postMessage(JSON.parse(b.dataset.send), '*');
   });
 
-  /** Draws one real card with numbered pins on its slots. */
-  function drawAnatomy() {
-    var host = document.getElementById('anat');
-    var e = World.buildEntities().filter(function (x) { return x.id === 'pr-6238'; })[0];
-    var card = Frames.drawLooseCard(e);
-    host.appendChild(card);
-    // Each pin sits beside its slot, in the card's own margins, so it covers no word.
-    var pins = [['.c-mark', 'top'], ['.c-title', 'top'], ['.c-pace', 'top'], ['.c-shape', 'left'], ['.c-more', 'right'], ['.c-id', 'left'], ['.c-facts', 'bottom']];
-    var base = card.getBoundingClientRect();
-    var zoom = base.width / card.offsetWidth;
-    pins.forEach(function (p, i) {
-      var el = card.querySelector(p[0]);
-      if (!el) return;
-      var r = el.getBoundingClientRect();
-      var x = (r.left - base.left + r.width / 2) / zoom, y = (r.top - base.top + r.height / 2) / zoom;
-      if (p[1] === 'top') y = -2;
-      if (p[1] === 'bottom') y = base.height / zoom + 2;
-      if (p[1] === 'left') x = (r.left - base.left) / zoom - 12;
-      if (p[1] === 'right') x = (r.right - base.left) / zoom + 12;
-      var pin = document.createElement('i');
-      pin.className = 'anat-pin';
-      pin.textContent = i + 1;
-      pin.style.left = x + 'px';
-      pin.style.top = y + 'px';
-      host.appendChild(pin);
-    });
-  }
-
   function drawShapes() {
     var words = { ring: 'Open, not started', dashed: 'Not real yet: draft, backlog, triage', quarter: 'Started', half: 'Half way', most: 'Nearly there', fork: 'A proposed change', join: 'Merged', check: 'Finished well', cross: 'Failed or refused', hold: 'Waits for a change', alert: 'Burning' };
     document.getElementById('shapes').innerHTML = Object.keys(Kinds.SHAPES).map(function (k) {
@@ -85,7 +57,7 @@
     }).join('');
   }
 
-  var STATES = [['02-peek', 'Peek'], ['03-open', 'Open card'], ['04-open-noticed', 'What Hercule noticed, open'], ['05-menu', 'Several workflows fit'], ['06-handed', 'Handed and taken'], ['08-carrying', 'Carrying a card to a colleague'], ['09-light-day', 'A light day'], ['10-300-cards', '300 cards'], ['11-tray', 'A pile fanned open'], ['12-long-and-huge', 'A very long title'], ['13-loading', 'Loading'], ['14-offline', 'Offline'], ['15-github-failing', 'GitHub failing'], ['16-inbox-zero', 'Inbox zero'], ['19-clock-clear', 'The clock cleared, the shelf still there'], ['17-first-run', 'First run']];
+  var STATES = [['02-hover', 'A request, reached for'], ['03-open', 'A ticket, open'], ['11-open-project', 'A project, open'], ['04-open-noticed', 'What Hercule noticed, open'], ['20-link-hint', 'A hint, waiting to be confirmed'], ['21-by-initiative', 'Grouped by initiative'], ['05-menu', 'Several workflows fit'], ['06-handed', 'Handed and taken'], ['07-signal-landing', 'A signal on a linked row'], ['08-carrying', 'Carrying a card'], ['09-light-day', 'A light day'], ['10-300-cards', '300 cards'], ['12-long-and-huge', 'A very long title'], ['13-loading', 'Loading'], ['14-offline', 'Offline'], ['15-github-failing', 'A failing source'], ['19-requests-clear', 'No requests left'], ['16-inbox-zero', 'Inbox zero'], ['17-first-run', 'First run'], ['18-intake', 'Intake']];
 
   function drawGallery() {
     document.getElementById('gal').innerHTML = STATES.map(function (s) {
@@ -94,7 +66,6 @@
     }).join('');
   }
 
-  drawAnatomy();
   Frames.drawKinds(document.getElementById('kinds'));
   drawShapes();
   drawGallery();

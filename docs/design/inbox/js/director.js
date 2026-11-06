@@ -3,6 +3,7 @@ window.Director = (function () {
   var THEMES = [['whitehaven', 'Whitehaven'], ['styles', 'Styles'], ['orient-express', 'Orient Express'], ['nile', 'Nile'], ['end-house', 'End House'], ['blue-train', 'Blue Train']];
   // What the story page's buttons can ask of a framed window.
   var SIGNALS = {
+    partComment: ['pr-6238', function () { return World.signal('commented', 0.02, 'omar-haddad', null, 'Should the retry wait for the gateway?'); }],
     comment: ['pr-6213', function () { return World.signal('commented', 0.02, 'omar-haddad', null, 'Should the unit price round before tax?'); }],
     fail: ['pr-6266', function () { var s = World.signal('checksFailed', 0.01); s.state = 'failing'; return s; }],
     mail: ['mail-1', function () { return World.signal('replied', 0.01, 'felix-marsh', null, 'Thursday works for the depots.'); }],
@@ -13,6 +14,7 @@ window.Director = (function () {
       if (m.land) Landing.land(App.findEntity(SIGNALS[m.land][0]), SIGNALS[m.land][1]());
       if (m.hand) Moves.hand(App.findEntity(m.hand));
       if (m.take) Moves.take(App.findEntity(m.take));
+      if (m.link) Moves.link(App.findEntity(m.link[0]), App.findEntity(m.link[1]));
       if (m.undo) Moves.undo();
     });
   }

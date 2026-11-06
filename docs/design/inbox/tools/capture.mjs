@@ -38,7 +38,7 @@ const STATES = {
   "17-first-run": { q: "scene=firstrun" },
   "19-requests-clear": { q: "scene=light", run: async (p) => { await p.evaluate(() => { App.state.entities.filter((e) => !App.isRich(e) && !["pr-6238"].includes(e.id)).forEach((e) => { e.settled = true; }); App.layOut(true); }); await p.waitForTimeout(1900); } },
   "20-link-hint": { q: "", run: async (p) => { await clickOn(p, '.card[data-id="pr-6263"]'); await p.waitForTimeout(800); } },
-  "21-by-initiative": { q: "", run: async (p) => { await p.selectOption("[data-grouping]", "linear/initiative"); await p.waitForTimeout(700); } },
+  "21-by-initiative": { q: "", run: async (p) => { await p.click('[data-tool="group"]'); await p.click('[data-group="linear/initiative"]'); await p.waitForTimeout(700); } },
   "18-intake": { q: "", run: async (p) => { await p.click('[data-view="intake"]'); await p.waitForTimeout(400); } },
 };
 const only = pos[2] ? pos[2].split(",") : null;

@@ -2,11 +2,10 @@
 window.Frames = (function () {
   var K = Kinds.KINDS, W = World;
 
-  /** Returns a card element laid out as a whole card, for a frame outside a stack. */
-  function drawLooseCard(e, usual) {
-    var card = Card.createCard(e, { now: W.NOW, usual: usual || null });
-    card.classList.add('is-whole', 'card--loose');
-    card.dataset.level = 'full';
+  /** Returns a card laid out on its own, for a frame outside the page. */
+  function drawLooseCard(e) {
+    var card = Card.createCard(e, { now: W.NOW });
+    card.classList.add('card--loose');
     return card;
   }
 
@@ -17,22 +16,23 @@ window.Frames = (function () {
     var push = function (key, value) { lines.push('<span class="t-k">' + key + '</span> <span class="t-v">' + Card.esc(value) + '</span>'); };
     push('noun', k.noun);
     push('mark', k.plugin.mark + (k.plugin.hue == null ? '' : ', hue ' + k.plugin.hue));
-    push('stock', k.paper);
-    push('density', k.density);
+    push('card', k.card);
     push('pace', k.pace + ', patience ' + k.patience + 'h');
     push('identifier', k.identifier);
-    push('context', k.context);
     push('person', k.person || 'none');
+    push('owner', k.owner || 'none');
     push('status', k.status ? Object.keys(k.status).length + ' states' : 'none');
     push('facts', k.facts.map(function (f) { return f.field + ' as ' + f.form; }).join(', ') || 'none');
-    push('group by', k.group || 'none');
+    push('home', k.home ? K[k.home].noun : 'none');
+    if (k.section) push('section', K[k.section].noun);
     return lines.join('<br>');
   }
 
   /** Draws one card of each kind, each beside the table that made it. */
   function drawKinds(host) {
     var all = W.buildEntities();
-    var pick = ['pr-6213', 'ln-SHOP-360', 'mail-1', 'qs-2', 'se-1', 'sl-1'];
+    Relations.load(all, W.readContexts(), W.readRelations());
+    var pick = ['pr-6213', 'ln-OPS-41', 'se-2', 'qs-2'];
     host.innerHTML = '';
     pick.forEach(function (id) {
       var e = all.filter(function (x) { return x.id === id; })[0];

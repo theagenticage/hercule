@@ -127,6 +127,7 @@ window.Scenes = (function () {
     if (window.Pages && Pages.current() !== 'inbox') Pages.setView('inbox', true);
     Open.hide(true);
     Menu.hide();
+    Toolbar.close();
     Keys.clear();
     App.load((defs[name] || defs.morning)());
     if (name === 'loading') Skeleton.run();

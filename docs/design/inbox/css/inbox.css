@@ -20,6 +20,7 @@
   flex: none;
   padding: 0 14px;
 }
+.tools-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ib-end { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 .ib-end[hidden] { display: none; }
 .ib-notice { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; background: color-mix(in oklab, var(--you) 18%, transparent); color: var(--ink); font: var(--type-summary); }
