@@ -130,7 +130,7 @@
       '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '"' + (pace ? ' aria-label="Waiting ' + sayWaitInWords(e.since, ctx.now) + '"' : '') + '>' + pace + '</div>' +
       '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') + '<span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
       '<div class="c-status' + (status && (status.norm || isSaid) ? ' is-norm' : '') + '">' + (status ? drawShape(status) : '') + '</div>' +
-      '<div class="c-foot">' + (line.isIdentity ? '' : '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span>') + '<span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
+      '<div class="c-foot' + (line.isIdentity ? ' c-foot--facts' : '') + '">' + (line.isIdentity ? '' : '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span>') + '<span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
       '<div class="c-hit"></div>' +
       '<div class="c-acts">' + acts + '</div>';
   }

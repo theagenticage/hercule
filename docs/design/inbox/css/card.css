@@ -146,6 +146,8 @@
 }
 .card.is-whole .c-foot,
 .card.is-peek .c-foot { visibility: visible; }
+/* When the second line already says who and what, the facts sit at its end and need no row of their own. */
+.c-foot--facts { grid-column: 3; grid-row: 2; margin-top: 1px; }
 .c-id { color: var(--muted); font-variant-numeric: tabular-nums; }
 .c-ctx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .c-facts { margin-left: auto; display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
