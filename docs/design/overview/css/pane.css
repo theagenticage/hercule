@@ -82,3 +82,6 @@
 .find-row small { display: block; color: var(--muted); font: var(--type-meta); }
 .find-none, .find-more { margin: 0; padding: 6px 8px; color: var(--muted); font: var(--type-summary); }
 .find-more { color: var(--faint); }
+
+/* A failed run: the card's words, in the question's voice. */
+.pn-failed .failed-mark { width: 18px; height: 18px; vertical-align: -3px; margin-right: 5px; }

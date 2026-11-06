@@ -378,3 +378,16 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 
 .lane:not(.has-more) .lane-total { display: none; }
 .lane:not(.has-more) .lane-btn { pointer-events: none; }
+
+/* ---------- A failed run ---------- */
+/* The one tomato on the page, at word scale. The words beside it are ink: they carry the meaning. */
+.failed-mark { display: inline-block; vertical-align: -3px; margin-right: 3px; color: var(--fail-ink); }
+.card-now.card-failed { color: var(--ink); }
+.card:has(.card-failed) .card-title { -webkit-line-clamp: 1; }
+.card.has-long-title .card-words--rest .card-now.card-failed { -webkit-line-clamp: 2; }
+.card.is-off .card-now.card-failed { color: var(--faint); }
+.card.is-off .failed-mark { opacity: 0.4; }
+/* The colleague has stopped, so its paws are off the edge. */
+.card-paws[data-pose="failed"] { display: none; }
+.count-failed { color: var(--ink); font: var(--type-summary); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
+.bead[data-kind="failed"], .wire-cell.is-dense .bead[data-kind="failed"] { width: 12px; height: 12px; border-radius: 0; box-shadow: none; background: var(--fail-ink); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4'/%3E%3C/svg%3E") center / contain no-repeat; }

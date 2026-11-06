@@ -108,6 +108,8 @@ Rules: motion explains cause. Everything is interruptible, because every change 
 
 **The colleague.** A whole card keeps head and paws behind the top edge, at the right. An Inbox strip has no free edge, so there the colleague stands where the wait was, in the working pose. Use `Crew.peek`, `.card-head` and `.card-paws`, so a hand-off in the Inbox and a head on Work are the same object.
 
+**A failed run.** Failed runs reach you on Work, but the sidebar is shared, so both pages draw the same dot: 7px, `--failed-dot` (`--you` mixed 45% into `--you-ink`, which reaches 3:1 on every sidebar), no number, at the end of the Overview row, and on the Hercule segment in the Threads face. One click opens Work with the failed lens on. The failed mark is the Inbox's `cross` shape in its `bad` tone (`--fail-ink`), so the two pages say failed the same way. The words beside it are ink. DESIGN.md has the rest, under A failed run.
+
 **Ages and waits.** On Work ages are neutral, because a Task's age is not the point of the card: the oldest go to ink at medium weight, with no colour. In the Inbox an overdue wait goes to full ink and bold, with no colour: the wait is the point there, and colour is the status shape's job. The two pages are never on screen together.
 
 **Inbox page.** Three clock stacks stand side by side, each a lead, two strips and a pile, with the shelf in a row under them, one card per project. The gap under a stage heading is 18px there, so a colleague's head clears the rule. The top bar's right end sits 14px from the window on both pages, so its button never jumps between them.

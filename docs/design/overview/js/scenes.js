@@ -99,6 +99,12 @@ window.Scenes = (function () {
     { kind: "move", id: "pr-fake-clock", from: "reviewing", to: "landed", note: "PR #3331 merged", apply: function (t) { t.move = "nobody"; t.person = ""; t.now = "Merged last night."; } },
   ];
 
+  // A review handed to the workflow, on the Storefront lane, that stopped overnight.
+  var FAILED_RUN = {
+    id: "rv-6252",
+    failure: { action: "Review PR", cause: "the branch changed mid-run", where: "The review stopped before it left any comments on #6252." },
+  };
+
   return {
     build: function (name) {
       if (name === "many") return buildMany();
@@ -108,5 +114,6 @@ window.Scenes = (function () {
       return NW.buildToday();
     },
     OVERNIGHT: OVERNIGHT,
+    FAILED_RUN: FAILED_RUN,
   };
 })();

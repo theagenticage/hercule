@@ -65,3 +65,25 @@ input:focus-visible + .switch-track { outline: 2px solid var(--focus); outline-o
 .tray-swatch { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--rim); }
 .tray-swatch i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
 .tray-swatch.is-on { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* ---------- The sidebar's failed dot, and the Threads face ---------- */
+/* Marigold, because the next move is yours. No number: the sentence holds the count. It is the only
+   signal in the sidebar, so it sits between --you and --you-ink, which reaches 3:1 in all six themes. */
+[data-side] { --failed-dot: color-mix(in oklab, var(--you) 45%, var(--you-ink)); }
+.nav-dot { flex: none; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--failed-dot); }
+.seg.seg--side { position: relative; }
+.seg.seg--side .seg-dot { position: absolute; top: 2px; right: 2px; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; }
+.seg-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--failed-dot); }
+.seg.seg--side .seg-dot:hover { background: var(--hover); }
+.seg-dot:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.thread-h { display: flex; align-items: center; gap: 9px; height: 26px; margin: 0; padding: 0 12px 0 11px; color: var(--muted); font-size: var(--t-12); font-weight: var(--w-medium); }
+.thread-h span { flex: 1; }
+.thread-h em { color: var(--you-ink); font-style: normal; }
+.thread-row { display: flex; flex-direction: column; gap: 2px; min-height: 48px; justify-content: center; padding: 3px 10px; border-radius: var(--r-sm); }
+.thread-row:hover { background: var(--hover); }
+.thread-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.thread-line .side-name { flex: 1; min-width: 0; }
+.thread-state { flex: none; color: var(--ok); font-size: var(--t-12); font-weight: var(--w-medium); }
+.thread-state.is-you, .thread-sub.is-you { color: var(--you-ink); }
+.thread-sub { color: var(--muted); font-size: var(--t-12); }
+.thread-sub span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

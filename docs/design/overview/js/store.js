@@ -79,12 +79,14 @@ window.Store = (function () {
 
   /**
    * Decides a card's height above the desk:
+   * - stand: a run on it failed, whatever else is true of it
    * - etch: it has landed
    * - press: another Task holds it back
    * - stand: it wants you
    * - flat: someone else holds it
    */
   function decideHeight(t) {
+    if (t.failed) return "stand";
     if (t.stage === "landed") return "etch";
     if (isBlocked(t)) return "press";
     if (t.move === "you") return "stand";
@@ -93,6 +95,7 @@ window.Store = (function () {
 
   /** Decides what stands behind a card's top edge: who has the next move. */
   function decideHolder(t) {
+    if (t.failed) return t.agent ? { kind: "agent", name: t.agent, pose: "failed", need: "quick" } : { kind: "you", need: "quick" };
     if (t.stage === "landed" || isBlocked(t)) return { kind: "none" };
     if (t.agent) return { kind: "agent", name: t.agent, pose: t.move === "you" ? "waiting" : "working" };
     if (t.move === "you") return { kind: "you", need: t.need };
@@ -113,11 +116,16 @@ window.Store = (function () {
     return "";
   }
 
+  /** Returns what a failed run says, in the same words on the card and in the details. */
+  function describeFailure(t) {
+    return t.failed.action + " failed" + (t.failed.cause ? ": " + t.failed.cause : "") + ".";
+  }
+
   // What each cell showed first this visit. A pile keeps its identity and its place until the next
   // visit: a card leaving can only take something away, never rebuild the column.
   var cellMemo = {};
 
-  function wantsYou(t) { return t.move === "you" && !isBlocked(t) && t.stage !== "landed"; }
+  function wantsYou(t) { return !!t.failed || (t.move === "you" && !isBlocked(t) && t.stage !== "landed"); }
 
   /**
    * Picks the card that lies on top of a stack: the oldest that wants you, then an agent's, then a
@@ -241,6 +249,20 @@ window.Store = (function () {
     return { cards: cards, piles: piles, behind: [], held: held };
   }
 
+  /**
+   * Puts failed Tasks on top of an arranged cell, so a failure never waits in a stack or a pile. A
+   * cell at rest keeps its number of rows: failures past that lie first in the stack. Under another
+   * lens they give way, because a lens must not light an empty row.
+   */
+  function leadWithFailed(arranged, failed, rows) {
+    if (!failed.length) return arranged;
+    var first = isFiltering() ? failed.filter(matches) : failed;
+    var cards = first.concat(arranged.cards, failed.filter(function (t) { return first.indexOf(t) < 0; }));
+    if (!rows) return Object.assign({}, arranged, { cards: cards });
+    var room = Math.max(1, rows - arranged.held.length);
+    return Object.assign({}, arranged, { cards: cards.slice(0, room), behind: cards.slice(room).concat(arranged.behind) });
+  }
+
   /** Splits one cell into what lies on the desk and what waits behind it or in piles. */
   function arrangeCell(tasks, stage, owner, rows) {
     // A card you just put down stays a card, on the row you chose, until the next visit. It takes no
@@ -249,8 +271,9 @@ window.Store = (function () {
     var lifting = !!lifted && tasks.some(function (t) { return t.id === lifted; });
     tasks = tasks.filter(function (t) { return t.id !== lifted; });
     var held = tasks.filter(function (t) { return t.held; }).sort(function (a, b) { return (a.heldRow || 0) - (b.heldRow || 0); });
-    var rest = tasks.filter(function (t) { return !t.held; });
-    return rows ? arrangeRows(rest, stage, owner, held, lifting, rows) : arrangeFullCell(rest, stage, owner, held);
+    var rest = tasks.filter(function (t) { return !t.held && !t.failed; });
+    var failed = tasks.filter(function (t) { return !t.held && t.failed; });
+    return leadWithFailed(rows ? arrangeRows(rest, stage, owner, held, lifting, rows) : arrangeFullCell(rest, stage, owner, held), failed, rows);
   }
 
   /** Returns the line under a pile's title: what it holds that needs you, or how it stands. */
@@ -269,7 +292,9 @@ window.Store = (function () {
     var open = state.tasks.filter(function (t) { return t.stage !== "landed"; });
     function count(fn) { return open.filter(fn).length; }
     return {
-      quick: count(function (t) { return t.move === "you" && t.need === "quick" && !isBlocked(t); }),
+      // A failed Task can sit in Landed too, and the sentence names it once, as failed.
+      failed: state.tasks.filter(function (t) { return t.failed; }).length,
+      quick: count(function (t) { return t.move === "you" && t.need === "quick" && !isBlocked(t) && !t.failed; }),
       think: count(function (t) { return t.move === "you" && t.need === "think" && !isBlocked(t); }),
       stalled: count(function (t) { return t.stalled; }),
       agents: count(function (t) { return t.agent && t.move !== "you"; }),
@@ -282,10 +307,13 @@ window.Store = (function () {
   function readSearchText(t) {
     var project = state.projects.filter(function (p) { return p.id === t.project; })[0];
     var links = (t.links || []).map(function (l) { return l.label; }).join(" ");
-    return [t.name, t.now, t.where, t.ask, t.ref, t.agent, t.person, project && project.name, links].join(" ").toLowerCase();
+    return [t.name, t.now, t.where, t.ask, t.ref, t.agent, t.person, project && project.name, links, t.failed ? describeFailure(t) : ""].join(" ").toLowerCase();
   }
 
-  /** Lists the Tasks that want you, in reading order: lane by lane, its loose work, then its plans. */
+  /**
+   * Lists the Tasks that want you: what failed first, as the sentence says it, then the rest in
+   * reading order, lane by lane, its loose work, then its plans.
+   */
   function listWanting() {
     var out = [];
     function take(project, plan) {
@@ -299,14 +327,15 @@ window.Store = (function () {
       take(p.id, "");
       state.plans.filter(function (i) { return i.project === p.id; }).forEach(function (i) { take(p.id, i.id); });
     });
-    return out;
+    return out.filter(function (t) { return t.failed; }).concat(out.filter(function (t) { return !t.failed; }));
   }
 
   /** Checks whether a Task passes the lens and the find words. */
   function matches(t) {
     var lens = state.lens;
     var ok = true;
-    if (lens === "quick") ok = t.move === "you" && t.need === "quick" && !isBlocked(t) && t.stage !== "landed";
+    if (lens === "failed") ok = !!t.failed;
+    else if (lens === "quick") ok = t.move === "you" && t.need === "quick" && !isBlocked(t) && t.stage !== "landed" && !t.failed;
     else if (lens === "think") ok = t.move === "you" && t.need === "think" && !isBlocked(t) && t.stage !== "landed";
     else if (lens === "stalled") ok = t.stalled && t.stage !== "landed";
     else if (lens === "agents") ok = !!t.agent && t.move !== "you";
@@ -384,18 +413,27 @@ window.Store = (function () {
   function mergeTasks(fromId, intoId) {
     var a = task(fromId);
     var b = task(intoId);
-    var was = { threads: b.threads, links: b.links, merged: b.mergedCount };
+    var was = { threads: b.threads, links: b.links, merged: b.mergedCount, failed: b.failed, move: b.move, need: b.need };
     var blocks = state.tasks.map(function (t) { return { t: t, by: t.blockedBy }; });
     remember(a.name, function () {
       state.tasks.push(a);
       b.threads = was.threads;
       b.links = was.links;
       b.mergedCount = was.merged;
+      b.failed = was.failed;
+      b.move = was.move;
+      b.need = was.need;
       blocks.forEach(function (x) { x.t.blockedBy = x.by; });
     }, { id: fromId, from: intoId });
     b.threads = b.threads.concat(a.threads);
     b.links = b.links.concat(a.links);
     b.mergedCount = (b.mergedCount || 0) + 1 + (a.mergedCount || 0);
+    // A failure goes with its thread. Merging must not make one disappear.
+    if (a.failed && !b.failed) {
+      b.failed = a.failed;
+      b.move = "you";
+      b.need = "quick";
+    }
     state.tasks = state.tasks.filter(function (t) { return t !== a; });
     state.tasks.forEach(function (t) {
       t.blockedBy = t.blockedBy.map(function (x) { return x === fromId ? intoId : x; }).filter(function (x) { return x !== t.id; });
@@ -428,14 +466,44 @@ window.Store = (function () {
     if (state.offline) t.pendingSync = true;
   }
 
-  /** Starts a thread on a Task: its colleague takes the card. */
+  /**
+   * Records a run that stopped with an error. The next move becomes yours and the card stands. A
+   * failure is a fact, not your gesture, so it has no Undo.
+   */
+  function failRun(id, failure) {
+    var t = task(id);
+    t.failed = failure;
+    t.move = "you";
+    t.need = "quick";
+    t.age = 0;
+    t.held = false;
+    t.where = failure.where || "The run stopped before it finished.";
+  }
+
+  /** Starts a failed run again: its colleague takes the card, which lies down on the row it holds. */
+  function retryRun(id) {
+    var t = task(id);
+    var was = { failed: t.failed, move: t.move, need: t.need, agent: t.agent, now: t.now, where: t.where, held: t.held, heldRow: t.heldRow };
+    remember(t.name, function () { Object.assign(t, was); }, { id: id, reopen: true });
+    t.agent = t.agent || t.failed.action;
+    t.failed = null;
+    t.move = "agent";
+    t.need = "look";
+    t.now = "Trying again.";
+    t.where = "Trying again, from the start.";
+    t.held = true;
+    t.heldRow = 0;
+  }
+
+  /** Starts a thread on a Task: its colleague takes the card. A failure ends here too, because the Task has a new next move. */
   function startThread(id, prompt) {
     var t = task(id);
-    var was = { move: t.move, agent: t.agent, now: t.now, threads: t.threads, need: t.need };
+    var was = { move: t.move, agent: t.agent, now: t.now, threads: t.threads, need: t.need, failed: t.failed };
     remember(t.name, function () { Object.assign(t, was); });
     var title = prompt || "Thread on " + t.name;
     t.threads = t.threads.concat([{ title: title, id: "n" + Date.now() }]);
     t.agent = title;
+    t.failed = null;
     t.move = "agent";
     t.need = "look";
     t.now = "A thread just started.";
@@ -472,6 +540,7 @@ window.Store = (function () {
     decideHeight: decideHeight,
     decideHolder: decideHolder,
     describeNeed: describeNeed,
+    describeFailure: describeFailure,
     arrangeCell: arrangeCell,
     describePile: describePile,
     countAttention: countAttention,
@@ -486,6 +555,8 @@ window.Store = (function () {
     addTask: addTask,
     moveByFact: moveByFact,
     answerTask: answerTask,
+    failRun: failRun,
+    retryRun: retryRun,
     startThread: startThread,
     group: group,
     undo: undo,

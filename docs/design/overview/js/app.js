@@ -21,7 +21,7 @@
   }
 
   var replay = scene === "today" && q.get("replay") !== "off";
-  if (scene === "today") {
+  if (scene === "today" || scene === "failed") {
     // Scenes hold the morning's end state; arrivals have not happened until the replay plays them.
     Live.rewindToLastNight();
     if (!replay) {
@@ -31,6 +31,8 @@
       });
     }
   }
+
+  if (scene === "failed") Store.failRun(Scenes.FAILED_RUN.id, Scenes.FAILED_RUN.failure);
 
   Board.mount();
   Drag.mount();
@@ -136,6 +138,15 @@
     document.querySelectorAll(".is-called").forEach(function (c) { c.classList.remove("is-called"); });
   });
   function openFromRow(e) {
+    var face = e.target.closest("[data-face]");
+    if (face) return Shell.showFace(face.dataset.face);
+    // The dot on the Hercule segment is its own small button, so the word still only changes the face.
+    var door = e.target.closest("[data-failed-door]");
+    if (door || (e.target.closest('[data-nav="overview"]') && Store.countAttention().failed)) {
+      e.preventDefault();
+      Shell.showFace("hercule");
+      return Lens.showFailed();
+    }
     var row = e.target.closest("[data-task]");
     if (!row || !row.dataset.task) return;
     if (Overview.current() !== "work") Overview.show("work");

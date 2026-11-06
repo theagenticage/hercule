@@ -69,11 +69,13 @@ A first visit opens every lane: a short scroll, and every project shows proper c
 
 It counts what wants you, and each phrase is a lens. A hover of 140ms lights what it counts; pressing keeps it. `Q` quick calls, `R` real thinking, `S` stalled, `A` agents, Esc clears. Blocked work is counted but is not a lens, because there is nothing to act on.
 
+When a run has failed, the sentence opens with it: "1 failed, 22 quick calls, 11 that need real thinking." That phrase is a lens like the others, on `!`. See A failed run.
+
 The three counts a person sees mean different things, on purpose. The sidebar's Waiting on you counts sessions with an open question, right now. The Inbox counts outside things that concern you. The sentence counts Tasks whose next move is yours.
 
 ### The morning's walk
 
-`N`, or the small keycap after the sentence, opens the first thing that wants you and walks on with the details open: "4 of 23" in the pane's head. It is one pass down the board, lane by lane: loose work, then each plan. It goes through stacks and wires, and says so ("in a stack, 5 of 33", "in One price engine, 10 of 33"). At the end it stops and says "That was all 33." It does not start again by itself. Answering moves on by itself. A lens narrows the walk: press `R`, then `N`, and you walk only what needs real thinking. This is the path for a person sitting down with coffee: read, answer, next.
+`N`, or the small keycap after the sentence, opens the first thing that wants you and walks on with the details open: "4 of 23" in the pane's head. It is one pass down the board, lane by lane: loose work, then each plan. What failed comes before that pass, as it does in the sentence. It goes through stacks and wires, and says so ("in a stack, 5 of 33", "in One price engine, 10 of 33"). At the end it stops and says "That was all 33." It does not start again by itself. Answering moves on by itself. A lens narrows the walk: press `R`, then `N`, and you walk only what needs real thinking. This is the path for a person sitting down with coffee: read, answer, next.
 
 ### The card
 
@@ -115,8 +117,39 @@ Words at the card's hover: after 160ms the summary becomes the need and the ques
 | Blocked, on hover | stays down; a thin brass line draws to the blocker through the gaps, and the blocker lights |
 | Running agent | a head behind the top edge, paws on the edge, typing in short bursts. Heads rest at 62% saturation, so they never outshout a tab |
 | Agent asks you | the head with a raised marigold palm; the card stands |
+| Failed | stands and leads its cell, with the head in its plaster beside a short tab, and the failed mark and "Review PR failed: cause" in ink where the summary was. Hover changes nothing. See A failed run |
 | Summary pending | "Writing a summary", in `--faint` |
 | Offline | tabs, heads and beads lose colour; a line under the sentence says since when; moved cards show a clock until they sync |
+
+### A failed run
+
+With Tracking gone, this is how a failed agent run reaches you. `?scene=failed` draws one, and "A run fails" in the Prototype tray makes one happen while you watch.
+
+The words are always the step and the cause, in ink: "Review PR failed: the branch changed mid-run." With no known cause they stop at "Review PR failed." Nothing replaces them on the card: not hover, and not a new summary. The summary stays readable in the details.
+
+| Place | What shows |
+|---|---|
+| Sidebar, Hercule face | A 7px marigold dot at the end of the Overview row, with no number, because the sentence holds the count. One click on the row opens Work with the failed lens on, and brings the first failed Task into view |
+| Sidebar, Threads face | The same dot on the Hercule segment, as a small button of its own with a 26px target. One click on it does the same. A click on the word still only changes the face, so nobody leaves a thread just to glance at the other face |
+| The sentence | Opens with "1 failed", which is a lens, on `!`. A failed Task is not counted again as a quick call |
+| The card | Stands and leads its cell. The colleague's head wears its plaster, with no paws on the edge, beside a short tab: the move is yours and takes a moment. The failed mark and the words take the summary's place. A title keeps one line, so the words always get two |
+| The lane | "1 failed", in ink, before "17 want you", folded or not |
+| A plan | Its head says "1 failed" too, because a Task in a closed plan has no card |
+| A wire | The bead is the failed mark at 12px, first in its cell, even among tally marks |
+| The details | The same words under Next move. See The details pane |
+
+Why these colours: marigold is the dot because the next move is yours. Tomato is the mark because something got hurt, as in the book. It is the Inbox's `cross` shape in its `bad` tone, so a failure looks the same on both pages.
+
+The rules:
+
+- **It stays until it ends.** Looking at it clears nothing. Try again, Start a thread, Done and Drop end it. Moving the card does not, because a drag does not repair a run. Merging carries the failure to the Task it joins, so a merge can never hide one.
+- **It outranks everything else about a card.** A failed card stands even in Landed, where it lies above the "N this week" line, and even while blocked, because the run needs you either way.
+- **A cell keeps its rows.** More failures than rows lie first in the stack, the tab counts them and the lane says "3 failed". Under another lens failures give way, so that lens never lights an empty row.
+- **Folded stays folded.** Nothing unfolds by itself. The lens lights the bead, the walk goes to it, and a click opens it.
+- **The lens lifts itself.** When the last failure ends the failed lens goes, because a dim desk with nothing lit says nothing. A walk under it stops there.
+- **Waiting on you does not list it.** That section counts sessions with an open question, and a stopped run has none.
+
+Try again keeps the card on its row. It lies down, its colleague starts again, and Undo puts the failure back.
 
 ### The top edge
 
@@ -148,13 +181,13 @@ The name row: a chevron on hover, the name, a bullet graph, "7 of 12 landed" on 
 
 **The bullet graph** is 40 by 4: landed in `--muted`, in motion at 42% of that, the rest empty. "7 of 12 landed" shows on hover.
 
-**Beads** have three forms, nothing to decode: ink round for a quick call, ink long for real thinking, and one faint ring for everything else. They are not marigold at rest, so marigold stays rare; under a lens the matching beads take a marigold ring. Past ten in a cell they condense into tally marks, 3 by 10. Click one to open it, or drag it along its wire to change its stage. Clicking the wire itself opens the plan.
+**Beads** have three forms, nothing to decode: ink round for a quick call, ink long for real thinking, and one faint ring for everything else. A failed Task's bead is the failed mark, the one exception. They are not marigold at rest, so marigold stays rare; under a lens the matching beads take a marigold ring. Past ten in a cell they condense into tally marks, 3 by 10. Click one to open it, or drag it along its wire to change its stage. Clicking the wire itself opens the plan.
 
 Opened, the plan's wire becomes a band of cards, on a faint inlay between two hairlines, with the same cells and piles as a lane.
 
 ### Lanes
 
-Lanes keep their order. A folded lane is a name row and a wire holding all its Tasks. Nothing auto-unfolds. A lane with no project is named "No project" and sits last.
+Lanes keep their order. A folded lane is a name row and a wire holding all its Tasks. Nothing auto-unfolds. A lane with no project is named "No project" and sits last. When a run has failed, the head says "1 failed" in ink before what wants you, folded or not.
 
 ### Piles
 
@@ -175,6 +208,8 @@ Clicking a pile fans it open on the desk's own stage columns, on a desk dimmed 9
 A sheet 468px wide, 14px from the right, from 66px down to 14px from the bottom. 16px corner, `--h-carry`, floating over the board rather than splitting it: a split would squeeze five columns and move every card.
 
 From the top: crumbs (project, plan) with "4 of 23" during a walk, title at 20/26, the stage path (click a stage to move there), where it stands at 14/21, Next move (who, the question in `--you-ink`, answers with the suggested one rimmed in `--accent`, and a line to say something else), What is left, Blocked by and Blocks, Threads, Linked. The foot holds Done, Start a thread and Merge on the left, and Drop alone at the right, far from Done.
+
+A failed Task's Next move shows its colleague with the plaster, then the card's words with the failed mark, in the question's voice, then Try again, filled, and Open the run. Return tries again. Done and Drop stay in the foot, where they are on every Task, so the order down the sheet is Try again, Open the run, Done, Drop.
 
 Answering sends it: the card lies down, a line offers Undo, and a walk moves on. Start a thread asks what the thread should do, on one line, before anything starts. Inside the pane, Esc goes back to the Task you came from, then closes. The question is the page's second voice, at 17/24 bold in ink. Answers are compact chips: the suggested one filled in `--answer`, the rest rimmed. The chips come from the question itself where they can, and a Task that needs real thinking offers a thread instead. `--answer` is each theme's `--accent`, except Nile, whose accent is cream: there it stays green, so "the one suggested answer" means the same in every theme.
 
@@ -198,7 +233,7 @@ Answering sends it: the card lies down, a line offers Undo, and a walk moves on.
 | X | select |
 | E | fan out what lies behind a card |
 | F, ⇧F | more or fewer rows in this lane, fold everything to the score |
-| Q R S A | lenses |
+| ! Q R S A | lenses |
 | / | find |
 | W | Wear |
 | ⌘Z | undo: one gesture at a time, and only yours, never a fact that arrived |
@@ -214,6 +249,7 @@ Measured in all six themes.
 - Text passes 4.5:1 everywhere, including pressed and dimmed cards. The tab reaches 8:1 or more on dark desks. On light desks it is about 2:1, a known miss, which we accepted because an outline looked worse, the tab is never the only signal (the card also stands, and its name says so), and a number on it reads at full contrast.
 - The sheets themselves are not 3:1 against the desk, on purpose: a card is identified by its words, and height is a second channel, not the only one.
 - A card's name reads in the order a person needs: title, who holds it, stage, summary, question, age.
+- A failure never rests on colour: it has a shape, the word "failed", and a card name that starts with the failure. The sidebar's dot names itself to a screen reader.
 - One tab stop leads onto the board, and from there the arrows walk it. A wire is one tab stop too.
 - The fan is a dialog, and the board is inert behind it. The details are a dialog named by the Task, not modal, because you can keep working beside it.
 - Reduced motion swaps movement for fades. A Still colleagues switch in Display stops paws and blinks for anyone, without touching the system setting.
@@ -231,6 +267,7 @@ Measured in all six themes.
 | Partial data | A card with no summary yet says so. A missing age shows nothing |
 | Offline | A line says since when. Moves still work, marked with a clock until they sync. Answers say they will send when you are back |
 | A move fails | The card goes back, and the line at the foot says why and what to do |
+| A run failed | A marigold dot in the sidebar, "1 failed" opening the sentence, the card standing at the top of its cell, and Try again in the details. See A failed run |
 | Stale | Ages keep counting. Nothing else changes |
 | Long titles | Two lines, then an ellipsis. The full title is in the details |
 | Huge counts | Numbers stay in their place; a pile of 1,204 is a pile |
@@ -241,12 +278,12 @@ Measured in all six themes.
 
 **New tokens**, in `system/primitives.css`: `--desk`, `--lamp`, `--numeral`, `--underline`, `--tab-fill`, `--paper`, `--count-ink`, `--rule-ink`, `--stock-sheen`, `--answer`, `--answer-fg`, `--word-flat`, `--word-flat-2`, `--word-press`, `--stock`, `--stock-carry`, `--stock-flat`, `--stock-rim`, `--stock-rim-flat`, `--stock-lit`, `--stock-press`, `--h-stand`, `--h-hover`, `--h-carry`, `--h-flat`, `--h-press`, `--h-etch`, the `--type-*` roles, `--card-*`, the `--m-*` motion tokens.
 
-**New components:** card, top edge (tab, head and paws, monogram), stack, wire and bead, pile, lens sentence, stage rule, the walk, the sunrise.
+**New components:** card, top edge (tab, head and paws, monogram), stack, wire and bead, pile, lens sentence, stage rule, the walk, the sunrise, the failed mark, the sidebar's failed dot.
 
 **Doctrine changes:**
 
 1. *"Brass is ornament only, never text."* Amended: stage and stack counts are brass that can be read, in the Deco face (`--count-ink`), with the double rule under them. Brass still means nothing. Nowhere else.
 2. *"Depth is a hairline and a crisp shallow shadow."* Amended for cards on the desk: height carries meaning.
 3. *"Motion: interface moves fast and plainly; only characters get a little spring."* Amended: the interface now has three named springs, chosen by who caused the change.
-4. *"Color appears only at word and dot scale."* Holds. Marigold on this page is only on tabs and the underline of the sentence's numbers. Ages and lane counts are neutral.
+4. *"Color appears only at word and dot scale."* Holds. Marigold on this page is only on tabs and the underline of the sentence's numbers. Ages and lane counts are neutral. The failed mark is the one tomato, at word scale, and only while a run has failed.
 5. *The split* still holds for Intake and the thread. The details pane on Work is an overlay, because a board must not reflow.

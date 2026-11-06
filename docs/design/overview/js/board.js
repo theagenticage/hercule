@@ -4,6 +4,9 @@
 window.Board = (function () {
   "use strict";
 
+  // The Inbox's `cross` status shape in its `bad` tone, so a failure reads the same on both pages.
+  var FAILED_MARK = '<svg class="failed-mark" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.6"/><path d="M6 6l4 4M10 6l-4 4"/></svg>';
+
   var nodes = new Map();
   var lanesEl, ruleEl, leadEl, scrollEl, flightEl;
 
@@ -56,10 +59,10 @@ window.Board = (function () {
   }
 
   function drawHolder(h, stack) {
-    var wants = (h.kind === "you" ? 1 : 0) + (stack ? stack.wants : 0);
+    var wants = (h.need ? 1 : 0) + (stack ? stack.wants : 0);
     // One tab per card. Its number counts everything here that wants you. A stack with agents on it
     // shows one of them beside the tab.
-    var need = h.kind === "you" ? h.need : stack && stack.need;
+    var need = h.need || (stack && stack.need);
     var tab = wants ? '<i class="card-tab' + (wants > 1 ? " card-tab--count" : "") + '" data-need="' + need + '">' + (wants > 1 ? wants : "") + "</i>" : "";
     if (h.kind !== "agent" && stack && stack.agent) {
       var one = drawHead(stack.agent, "working");
@@ -96,6 +99,7 @@ window.Board = (function () {
 
   /** Returns the line that says where a Task stands: what the summary writer wrote, or what holds it. */
   function describeNow(t) {
+    if (t.failed) return FAILED_MARK + esc(Store.describeFailure(t));
     if (t.summaryPending) return '<span class="card-pending">Writing a summary</span>';
     if (Store.isBlocked(t)) return esc(Store.describeNeed(t)) + ".";
     return esc(t.now || "");
@@ -107,17 +111,18 @@ window.Board = (function () {
     var sync = t.pendingSync ? '<span class="card-sync" title="Waits to sync">' + Crew.icon("clock", 11) + "</span>" : "";
     var more = stack && stack.count ? '<button class="card-more" tabindex="-1" title="' + stack.count + " more here" + (stack.wants ? ", " + stack.wants + (stack.wants === 1 ? " wants" : " want") + " you" : "") + ' (E)">+' + stack.count + "</button>" : "";
     var meta = '<span class="card-meta">' + sync + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time>" + more + "</span>";
-    var ask = t.ask && t.move === "you" && !Store.isBlocked(t) ? '<div class="card-words card-words--ask" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
+    // A failed card keeps its failure on hover: the words that say what broke are never replaced.
+    var ask = t.ask && t.move === "you" && !Store.isBlocked(t) && !t.failed ? '<div class="card-words card-words--ask" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
     return drawHolder(holder, stack) + '<i class="card-check">' + Crew.icon("check", 12) + "</i>" +
-      '<div class="card-words card-words--rest" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + meta + ask;
+      '<div class="card-words card-words--rest" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now' + (t.failed ? " card-failed" : "") + '">' + describeNow(t) + "</p></div>" + meta + ask;
   }
 
   /** Returns a card in words, in the order a person needs them, for a screen reader. */
   function describeCard(t) {
     var stage = NW.STAGES.filter(function (s) { return s.id === t.stage; })[0].name;
     var h = Store.decideHolder(t);
-    var who = h.kind === "you" ? "Wants you, " + (t.need === "think" ? "real thinking" : "a quick call") : h.kind === "agent" ? (h.pose === "waiting" ? "An agent asks you" : "An agent is working on it") : h.kind === "person" ? "With " + h.name : Store.isBlocked(t) ? Store.describeNeed(t) : "Nobody has the next move";
-    return [t.name, who, stage, t.summaryPending ? "Summary being written" : t.now, t.move === "you" ? t.ask : "", (t.stalled ? "Stalled, " : "") + NW.sayAge(t.age)].filter(Boolean).map(function (part) { return part.replace(/[.?]$/, ""); }).join(". ") + ".";
+    var who = t.failed ? Store.describeFailure(t) + " It wants you" : h.kind === "you" ? "Wants you, " + (t.need === "think" ? "real thinking" : "a quick call") : h.kind === "agent" ? (h.pose === "waiting" ? "An agent asks you" : "An agent is working on it") : h.kind === "person" ? "With " + h.name : Store.isBlocked(t) ? Store.describeNeed(t) : "Nobody has the next move";
+    return [t.name, who, stage, t.summaryPending ? "Summary being written" : t.failed ? "" : t.now, t.move === "you" && !t.failed ? t.ask : "", (t.stalled ? "Stalled, " : "") + NW.sayAge(t.age)].filter(Boolean).map(function (part) { return part.replace(/[.?]$/, ""); }).join(". ") + ".";
   }
 
   /** Draws or updates one Task's card and returns its element. */
@@ -274,6 +279,7 @@ window.Board = (function () {
   /* ---------- Beads on a wire ---------- */
 
   function decideBeadKind(t) {
+    if (t.failed) return "failed";
     if (t.stage === "landed") return "done";
     if (Store.isBlocked(t)) return "held";
     if (t.agent && t.move !== "you") return "agent";
@@ -306,7 +312,7 @@ window.Board = (function () {
       }
       // People's marks come first and each group stays in its own order, so a bead only moves
       // along the wire when its need changes, and a busy cell still reads as a short count.
-      var order = { quick: 0, think: 1, agent: 2, other: 3, held: 4, done: 5 };
+      var order = { failed: -1, quick: 0, think: 1, agent: 2, other: 3, held: 4, done: 5 };
       var sorted = inCell.slice().sort(function (a, b) { return order[decideBeadKind(a)] - order[decideBeadKind(b)]; });
       c.classList.toggle("is-dense", sorted.length > 10);
       place(c, sorted.map(drawBead));
@@ -333,6 +339,12 @@ window.Board = (function () {
     return '<span class="bullet" aria-hidden="true"><i class="bullet-done" style="width:' + (done * 100).toFixed(1) + '%"></i><i class="bullet-moving" style="left:' + (done * 100).toFixed(1) + "%;width:" + (moving * 100).toFixed(1) + '%"></i></span><small class="bullet-words">' + plan.done + " of " + plan.total + "</small>";
   }
 
+  /** Draws "1 failed" for a lane or a plan's head, or nothing when no run failed there. */
+  function drawFailedCount(tasks) {
+    var failed = tasks.filter(function (t) { return t.failed; }).length;
+    return failed ? '<span class="count-failed">' + failed + " failed</span>" : "";
+  }
+
   function drawPlan(plan) {
     var tasks = Store.tasksIn(function (t) { return t.initiative === plan.id; });
     var open = !!Store.state.openPlans[plan.id];
@@ -343,7 +355,7 @@ window.Board = (function () {
     var head = node("planhead:" + plan.id, "button", "plan-head");
     head.dataset.foldPlan = plan.id;
     head.setAttribute("aria-expanded", open);
-    setHTML(head, '<span class="chev">' + Crew.icon("chev-r", 12) + '</span><b class="plan-name">' + esc(plan.name) + "</b>" + drawBullet(plan, tasks) + (open && plan.intent ? '<span class="plan-intent">' + esc(plan.intent) + "</span>" : ""));
+    setHTML(head, '<span class="chev">' + Crew.icon("chev-r", 12) + '</span><b class="plan-name">' + esc(plan.name) + "</b>" + drawFailedCount(tasks) + drawBullet(plan, tasks) + (open && plan.intent ? '<span class="plan-intent">' + esc(plan.intent) + "</span>" : ""));
     var kids = [head];
     if (open) {
       var band = node("band:" + plan.id, "div", "plan-band");
@@ -368,12 +380,12 @@ window.Board = (function () {
     var all = Store.tasksIn(function (t) { return t.project === p.id; });
     var loose = all.filter(function (t) { return !t.initiative; });
     var plans = st.plans.filter(function (i) { return i.project === p.id; });
-    var mine = all.filter(Store.wantsYou).length;
+    var mine = all.filter(function (t) { return Store.wantsYou(t) && !t.failed; }).length;
     var full = !!st.full[p.id];
     lane.classList.toggle("is-full", full);
     var hasMore = all.length > 0;
     var head = node("lanehead:" + p.id, "h3", "lane-head");
-    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + (folded ? "Open" : full ? "Fewer rows" : "More rows") + "</small>" + "</button>");
+    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + drawFailedCount(all) + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + (folded ? "Open" : full ? "Fewer rows" : "More rows") + "</small>" + "</button>");
     var kids = [head];
     if (folded) {
       kids.push(drawWire("lane-" + p.id, all));
@@ -442,17 +454,20 @@ window.Board = (function () {
     if (c.quick && c.think) line = lens("quick",  '<span class="lens-n">' + c.quick + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ", " + lens("think", '<span class="lens-n">' + c.think + "</span> that need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
     else if (c.quick) line = lens("quick", '<span class="lens-n">' + c.quick + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ".";
     else if (c.think) line = lens("think", '<span class="lens-n">' + c.think + "</span> need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
-    else line = "Nothing wants you right now.";
+    else if (!c.failed) line = "Nothing wants you right now.";
+    // What failed opens the sentence, because it is the one thing that stopped by itself.
+    var failed = c.failed ? lens("failed", '<span class="lens-n">' + c.failed + "</span> failed") : "";
+    if (failed) line = line ? failed + ", " + line : failed + ".";
     var sub = [];
     if (c.agents) sub.push(lens("agents", "<b>" + c.agents + "</b> with agents"));
     if (c.stalled) sub.push(lens("stalled", "<b>" + c.stalled + "</b> stalled"));
     if (c.blocked) sub.push("<span><b>" + c.blocked + "</b> blocked</span>");
     if (scene === "offline") sub.unshift('<span class="lead-offline">Offline since 09:12. Moves wait until you are back.</span>');
     if (leadHeld) return;
-    var door = c.quick + c.think ? '<button class="lead-door" data-walk title="Walk through what wants you (N)"><span>Start</span><kbd>N</kbd></button>' : "";
+    var door = c.failed + c.quick + c.think ? '<button class="lead-door" data-walk title="Walk through what wants you (N)"><span>Start</span><kbd>N</kbd></button>' : "";
     setHTML(leadEl, "<h2>" + line + door + '</h2><p class="lead-sub">' + sub.join('<i class="sep"></i>') + "</p>");
     // A number that went down rolls, because the sentence getting shorter is the reward.
-    ["quick", "think"].forEach(function (key) {
+    ["failed", "quick", "think"].forEach(function (key) {
       var n = leadEl.querySelector('.lens[data-lens="' + key + '"] .lens-n');
       if (n && lastCounts[key] !== undefined && c[key] < lastCounts[key]) n.classList.add("is-rolling");
       lastCounts[key] = c[key];
@@ -622,5 +637,5 @@ window.Board = (function () {
     return card._stack || null;
   }
 
-  return { mount: mount, locate: locate, readStack: readStack, holdLead: holdLead, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
+  return { FAILED_MARK: FAILED_MARK, mount: mount, locate: locate, readStack: readStack, holdLead: holdLead, draw: draw, drawHead: drawHead, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
 })();

@@ -52,6 +52,17 @@ window.Live = (function () {
     });
   }
 
+  /** A run stopping by itself. Once the hand has left, the card stands and takes the top of its cell. */
+  function fail(id, failure) {
+    whenStill(function () {
+      var el = cardEl(id);
+      return el ? el.getBoundingClientRect() : null;
+    }, function () {
+      Board.change(function () { Store.failRun(id, failure); }, { spring: "self" });
+      note(failure.action + " failed");
+    });
+  }
+
   /**
    * Shows an arrival landing on a stack: it rises on top for a moment, so it is seen, then slides in
    * underneath. Nothing moves, and only the count beside the age changes.
@@ -208,7 +219,7 @@ window.Live = (function () {
     }, { passive: true });
   }
 
-  return { mount: mount, arrive: arrive, fact: fact, replayMorning: replayMorning, skipToMorning: skipToMorning, rewindToLastNight: rewindToLastNight, note: note };
+  return { mount: mount, arrive: arrive, fail: fail, fact: fact, replayMorning: replayMorning, skipToMorning: skipToMorning, rewindToLastNight: rewindToLastNight, note: note };
 })();
 
 // PROTOTYPE - the line from a blocked card to what holds it, drawn on while the pointer rests there.

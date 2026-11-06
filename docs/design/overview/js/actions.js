@@ -48,7 +48,7 @@ window.Actions = (function () {
     var t = Store.task(id);
     if (!t) return;
     var next = pickNeighbour(id);
-    var need = Store.wantsYou(t) ? t.need : null;
+    var need = t.failed ? "failed" : Store.wantsYou(t) ? t.need : null;
     var finish = function () {
       animateLeaving(id, how, need);
       Board.change(function () { Store.endTask(id, how); }, { spring: "hand" });
@@ -61,10 +61,15 @@ window.Actions = (function () {
       Walk.notePlace(id);
       finish();
       Walk.afterAnswer();
+      Lens.settle();
     } else if (Pane.currentId() === id) {
-      Pane.hide(finish);
+      Pane.hide(function () {
+        finish();
+        Lens.settle();
+      });
     } else {
       finish();
+      Lens.settle();
     }
   }
 
@@ -137,7 +142,25 @@ window.Actions = (function () {
     setTimeout(function () { card.dataset.height = settled; }, 130);
   }
 
+  /** Starts a failed run again. In a walk the next thing comes up; otherwise the sheet closes, and the card lies down. */
+  function retry(id) {
+    var walking = Pane.isWalking();
+    if (walking) Walk.notePlace(id);
+    Board.change(function () { Store.retryRun(id); });
+    Toast.show(Store.state.offline ? "This run starts again when you are back." : "Trying again.", true);
+    if (walking) {
+      handOff(id);
+      Walk.afterAnswer(id);
+    } else {
+      Pane.hide(function () { handOff(id); });
+    }
+    // After the walk has moved on: a walk under this lens ends with its last failure.
+    Lens.settle();
+  }
+
   function run(act, id) {
+    if (act === "retry") return retry(id);
+    if (act === "run") return Toast.show("Opens the run in Workflows, at the step that failed.", false);
     if (act === "done") return end(id, "Done");
     if (act === "drop") return end(id, "Dropped");
     if (act === "merge") return Pane.hide(function () { MergePick.start(id); });
@@ -222,7 +245,7 @@ window.Walk = (function () {
     go(Math.min(index, list.length - 1));
   }
 
-  return { step: step, resume: resume, notePlace: notePlace, afterAnswer: afterAnswer };
+  return { step: step, resume: resume, reveal: point, notePlace: notePlace, afterAnswer: afterAnswer };
 })();
 
 // PROTOTYPE - merging without a pointer: pick the card to merge into with the arrows and Return.

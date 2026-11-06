@@ -131,6 +131,12 @@ A fact arrives, such as a pull request merging.
 
 If the card sits in a pile or a folded lane, only its bead and the counts change.
 
+### A run failing
+
+A failure is a fact, so it follows the same rule: it waits until the hand has left the area, or eight seconds at most. Then the card rises to the top of its cell on `self`, and the card that held the top slides behind it. If the card was already on top it only stands. The colleague's paws leave the edge, and the line beside the sentence says "Review PR failed". The sidebar's dot simply appears. It never pulses, because a moving dot would pull the eye all day.
+
+Try again plays as a hand-off on the row the card already holds: the head comes up, the paws reach the edge, the card lies down, and nothing around it moves. Done shrinks into the number of "1 failed", and the phrase leaves the sentence.
+
 ### The morning replay
 
 On opening, the board starts from how you left it and plays each change in turn, 1.5 seconds apart, by the rules above. It takes about six seconds and stops for nobody: you can act while it plays. After it ends, one quiet line stays, with a button to see it again.

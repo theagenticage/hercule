@@ -213,6 +213,7 @@ window.Keys = (function () {
       return Find.open();
     }
     if (key === "?") return Help.toggle();
+    if (key === "!" && Store.countAttention().failed) return Lens.toggle("failed");
     if (key === "q") return Lens.toggle("quick");
     if (key === "r") return Lens.toggle("think");
     if (key === "s") return Lens.toggle("stalled");
@@ -296,6 +297,18 @@ window.Lens = (function () {
     toggle: function (key) {
       pinned = pinned === key ? null : key;
       set(pinned);
+    },
+    /** Opens Work with the failed lens on, and brings the first failed Task into view. */
+    showFailed: function () {
+      if (Overview.current() !== "work") Overview.show("work");
+      pinned = "failed";
+      set("failed");
+      var first = Store.listWanting()[0];
+      if (first) Walk.reveal(first.id);
+    },
+    /** Lifts the failed lens once nothing has failed, so the desk does not stay dim with nothing lit. */
+    settle: function () {
+      if (pinned === "failed" && !Store.countAttention().failed) Lens.clear();
     },
     clear: function () {
       pinned = null;
@@ -460,7 +473,7 @@ window.Select = (function () {
 // PROTOTYPE - the keys, shown on request.
 window.Help = (function () {
   "use strict";
-  var ROWS = [["N", "Next thing that wants you"], ["↑ ↓ ← →", "Walk the desk"], ["[ ]", "Previous and next lane"], ["Return", "Open a card"], ["⇧← ⇧→", "Move a card a stage"], ["1 to 5", "Move a card to a stage"], ["E", "Fan out what lies behind a card"], ["X", "Select a card"], ["D", "Done"], ["⌫", "Drop"], ["M", "Merge into another card"], ["T", "Start a thread"], ["F", "More or fewer rows in this lane"], ["⇧F", "Fold everything to a score"], ["Q R S A", "Lens: quick, real thinking, stalled, agents"], ["/", "Find"], ["⌘Z", "Undo"]];
+  var ROWS = [["N", "Next thing that wants you"], ["↑ ↓ ← →", "Walk the desk"], ["[ ]", "Previous and next lane"], ["Return", "Open a card"], ["⇧← ⇧→", "Move a card a stage"], ["1 to 5", "Move a card to a stage"], ["E", "Fan out what lies behind a card"], ["X", "Select a card"], ["D", "Done"], ["⌫", "Drop"], ["M", "Merge into another card"], ["T", "Start a thread"], ["F", "More or fewer rows in this lane"], ["⇧F", "Fold everything to a score"], ["! Q R S A", "Lens: failed, quick, real thinking, stalled, agents"], ["/", "Find"], ["⌘Z", "Undo"]];
   function toggle() {
     var el = document.getElementById("help");
     if (!el.firstChild) el.innerHTML = "<h3>Keys</h3>" + ROWS.map(function (r) { return "<div><kbd>" + r[0] + "</kbd><span>" + r[1] + "</span></div>"; }).join("");

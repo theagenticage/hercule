@@ -3,8 +3,8 @@
 window.Tray = (function () {
   "use strict";
   var THEMES = [["whitehaven", "Whitehaven"], ["styles", "Styles"], ["orient-express", "Orient Express"], ["nile", "Nile"], ["end-house", "End House"], ["blue-train", "Blue Train"]];
-  var SCENES = [["today", "This morning"], ["many", "300 cards"], ["one", "One card"], ["first", "First run"], ["empty", "Desk clear"], ["loading", "Loading"], ["offline", "Offline"], ["awkward", "Awkward data"]];
-  var EVENTS = [["thread", "A thread starts"], ["merge", "A pull request merges"], ["fail", "The next move fails"], ["replay", "Replay the morning"]];
+  var SCENES = [["today", "This morning"], ["many", "300 cards"], ["one", "One card"], ["first", "First run"], ["empty", "Desk clear"], ["loading", "Loading"], ["offline", "Offline"], ["failed", "A run failed"], ["awkward", "Awkward data"]];
+  var EVENTS = [["thread", "A thread starts"], ["merge", "A pull request merges"], ["fail", "The next move fails"], ["run-fails", "A run fails"], ["replay", "Replay the morning"]];
 
   function link(key, value) {
     var q = new URLSearchParams(location.search);
@@ -32,6 +32,7 @@ window.Tray = (function () {
       if (name === "thread") Tray.arriveNext();
       if (name === "merge") Tray.mergeNext();
       if (name === "fail") { Store.failNext = true; Toast.show("The next move will fail.", false); }
+      if (name === "run-fails") Tray.failNextRun();
       if (name === "replay") location.href = link("scene", "today");
       if (name === "reduced") { document.documentElement.dataset.motion = document.documentElement.dataset.motion ? "" : "reduced"; Toast.show("Reduced motion " + (document.documentElement.dataset.motion ? "on." : "off."), false); }
     });
@@ -51,5 +52,14 @@ window.Tray = (function () {
     Live.fact(pick.id, "landed", "PR merged", function (t) { t.move = "nobody"; t.agent = ""; t.person = ""; t.now = "Merged just now."; });
   }
 
-  return { mount: mount, arriveNext: arriveNext, mergeNext: mergeNext };
+  var causes = ["the job ran out of time", "the runner went offline", "a check would not start"];
+
+  function failNextRun() {
+    var pick = Store.state.tasks.filter(function (t) { return t.agent && t.move === "agent"; })[0];
+    if (!pick) return Toast.show("No run to fail right now.", false);
+    n++;
+    Live.fail(pick.id, { action: "Run the plan", cause: causes[n % causes.length] });
+  }
+
+  return { mount: mount, arriveNext: arriveNext, mergeNext: mergeNext, failNextRun: failNextRun };
 })();

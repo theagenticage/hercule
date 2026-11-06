@@ -31,7 +31,19 @@ window.Pane = (function () {
     }).join("") + "</ol>";
   }
 
+  /**
+   * Draws the next move of a failed Task: the same words as its card, then the two moves only a
+   * failure has. Done and Drop stay in the foot, where they are on every Task.
+   */
+  function drawFailedMove(t) {
+    var holder = Store.decideHolder(t);
+    var who = holder.kind === "agent" ? Crew.face(holder.name, { pose: "failed", size: 22 }) + "<span><b>" + esc(NW.sayAgent(holder.name)) + "</b> stopped. Your move.</span>" : "<span><b>Your move.</b> The run stopped.</span>";
+    return '<section class="pn-sec pn-next"><h4>Next move</h4><p class="pn-who">' + who + '</p><p class="pn-ask pn-failed">' + Board.FAILED_MARK + esc(Store.describeFailure(t)) + '</p>' +
+      '<div class="pn-answers"><button class="pn-answer is-suggested" data-act="retry">Try again</button><button class="pn-answer" data-act="run">Open the run</button></div></section>';
+  }
+
   function drawNextMove(t) {
+    if (t.failed) return drawFailedMove(t);
     var holder = Store.decideHolder(t);
     var who = "";
     var blocked = Store.isBlocked(t);
@@ -59,7 +71,8 @@ window.Pane = (function () {
     if (!t.threads.length) return "";
     return '<section class="pn-sec"><h4>Threads <span>' + t.threads.length + "</span></h4>" + t.threads.map(function (th, i) {
       var live = t.agent && i === t.threads.length - 1;
-      return '<a class="pn-row" href="#">' + Crew.face(th.title + th.id, { pose: live ? "working" : "idle", size: 20 }) + '<span class="pn-row-text">' + esc(NW.sayAgent(th.title)) + "</span><small>" + (live ? "Working" : NW.formatAge(t.age)) + "</small></a>";
+      var broke = live && t.failed;
+      return '<a class="pn-row" href="#">' + Crew.face(th.title + th.id, { pose: broke ? "failed" : live ? "working" : "idle", size: 20 }) + '<span class="pn-row-text">' + esc(NW.sayAgent(th.title)) + "</span><small>" + (broke ? "Failed" : live ? "Working" : NW.formatAge(t.age)) + "</small></a>";
     }).join("") + "</section>";
   }
 

@@ -45,6 +45,11 @@ const STATES = {
   offline: { q: "scene=offline" },
   awkward: { q: "scene=awkward" },
   office: { q: "replay=off", wait: 1800, run: async (p) => { await p.click('.switch-tab[data-view="office"]'); await p.waitForTimeout(3500); } },
+  failed: { q: "scene=failed" },
+  "failed-lens": { q: "scene=failed", run: async (p) => { await p.click('.nav-row[data-nav="overview"]'); await p.mouse.move(700, 890); await p.waitForTimeout(900); } },
+  "failed-pane": { q: "scene=failed", run: async (p) => { await p.click('.card[data-id="rv-6252"]'); await p.mouse.move(400, 880); await p.waitForTimeout(1200); } },
+  "failed-folded": { q: "scene=failed", run: async (p) => { await p.keyboard.press("Shift+F"); await p.waitForTimeout(1200); } },
+  "failed-threads": { q: "scene=failed", run: async (p) => { await p.click('[data-face="threads"]'); await p.mouse.move(700, 890); await p.waitForTimeout(400); } },
   later: { q: "replay=off&later=1", run: async (p) => { await p.click('.switch-tab[data-view="list"]'); await p.waitForTimeout(500); } },
 };
 
