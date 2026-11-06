@@ -2,7 +2,8 @@
 // the card unfolds across its neighbours. Nothing behind it moves.
 window.Open = (function () {
   var K = Kinds.KINDS, W = World;
-  var host, scrim, openId = null, sourceEl = null;
+  var host, inner, scrim, openId = null, sourceEl = null, keyed = false;
+  var motion = null, progress = null;
 
   function saySince(d, now) {
     var h = (now - d) / 36e5;
@@ -69,90 +70,173 @@ window.Open = (function () {
       '<button class="o-row o-row--quiet" data-act="dismiss"><span class="o-label">Back to Intake</span><span class="o-says">Hercule should not have raised this.</span><kbd>E</kbd></button></div>';
   }
 
-  /** Opens a card where it lies. */
-  function show(id, anchor) {
+  /** Fades the veil in. It starts from nothing, so it always arrives rather than cuts. */
+  function showVeil() {
+    scrim.hidden = false;
+    void scrim.offsetWidth;
+    scrim.classList.add('is-on');
+  }
+
+  /** Fades the veil out, and takes it away once it has gone. */
+  function hideVeil() {
+    scrim.classList.remove('is-on');
+    var gone = function () { if (!scrim.classList.contains('is-on')) scrim.hidden = true; };
+    if (Motion.isReduced()) gone(); else setTimeout(gone, 370);
+  }
+
+  /** Returns where the sheet starts: the part of the card that can be seen where it lies. */
+  function readFrom(el) {
+    var r = el.getBoundingClientRect();
+    var shown = el._plan ? el._plan.show : r.height;
+    return { left: r.left, top: r.top, width: r.width, height: Math.min(r.height, shown) };
+  }
+
+  /** Draws one frame of the sheet, at `t` from where the card lies (0) to where it stands open (1). */
+  function drawFrame(t) {
+    var f = motion.from, to = motion.to, u = 1 - t;
+    var left = f.left + (to.left - f.left) * t, top = f.top + (to.top - f.top) * t;
+    host.style.left = left + 'px';
+    host.style.top = top + 'px';
+    host.style.width = f.width + (to.width - f.width) * t + 'px';
+    host.style.height = f.height + (to.height - f.height) * t + 'px';
+    inner.style.transform = 'translate(' + (to.left - left) + 'px,' + (to.top - top) + 'px)';
+    motion.parts.forEach(function (p) {
+      p.el.style.transform = 'translate(' + p.dx * u + 'px,' + p.dy * u + 'px) scale(' + (1 + (p.scale - 1) * u) + ')';
+    });
+    // Near home the card itself comes back under the sheet, so the last frames dissolve into it rather than cut.
+    if (motion.closing && t < 0.16 && !motion.isHome) {
+      motion.isHome = true;
+      restoreSource();
+      host.style.transition = 'opacity 80ms linear';
+      host.style.opacity = '0';
+      if (motion.then) { var then = motion.then; motion.then = null; then(); }
+    }
+  }
+
+  /** Puts the card back in its place at once, with no fade of its own. */
+  function restoreSource() {
+    if (!sourceEl) return;
+    var el = sourceEl;
+    el.style.transition = 'none';
+    el.classList.remove('is-source');
+    void el.offsetWidth;
+    el.style.transition = '';
+  }
+
+  /** Opens a card where it lies. Its corner stays put, and the title and mark grow from where they are. */
+  function show(id, anchor, byKeyboard) {
     var e = App.findEntity(id);
     if (!e) return;
-    if (openId) hide(true);
+    if (openId || motion) finish();
     Pointer.setHover(null);
     Pointer.unpeek();
     var plaque = e.kind === 'hercule/cluster';
     sourceEl = anchor || (plaque ? document.querySelector('.plaque[data-id="' + id + '"]') : App.els()[id]);
     openId = id;
-    var r = sourceEl.getBoundingClientRect();
+    keyed = !!byKeyboard;
+    var from = readFrom(sourceEl);
     var main = document.getElementById('main').getBoundingClientRect();
     host.className = 'open' + (plaque ? ' open--plaque' : ' paper-' + K[e.kind].paper);
-    host.innerHTML = plaque ? drawOpenPlaque(e) : drawOpen(e);
+    host.innerHTML = '<div class="open-in">' + (plaque ? drawOpenPlaque(e) : drawOpen(e)) + '</div>';
+    inner = host.firstChild;
     host.hidden = false;
-    host.style.width = '';
-    var w = Math.max(520, Math.round(r.width));
-    host.style.width = w + 'px';
-    var h = host.offsetHeight;
-    var left = Math.max(main.left + 16, Math.min(r.left - 1, main.right - w - 16));
-    var top = Math.min(r.top, innerHeight - h - 16);
-    top = Math.max(main.top + 12, top);
-    host.style.left = left + 'px';
-    host.style.top = top + 'px';
-    scrim.hidden = false;
-    scrim.classList.add('is-on');
+    host.style.cssText = 'left:0;top:0;width:auto;height:auto';
+    var w = Math.max(520, Math.round(from.width));
+    inner.style.width = w + 'px';
+    var h = inner.offsetHeight;
+    var left = Math.max(main.left + 16, Math.min(from.left - 1, main.right - w - 16));
+    var top = Math.max(main.top + 12, Math.min(from.top, innerHeight - h - 16));
+    var to = { left: left, top: top, width: w, height: h };
+    host.setAttribute('aria-label', K[e.kind].noun + ': ' + e.title);
+    showVeil();
     sourceEl.classList.add('is-source');
     App.state.open = id;
-    if (!Motion.isReduced()) {
-      var ease = Motion.curve('travel').ease, ms = Math.min(Motion.curve('travel').ms, 520);
-      var clipFrom = 'inset(' + Math.max(0, r.top - top) + 'px ' + Math.max(0, w - (r.left - left) - r.width) + 'px ' + Math.max(0, top + h - r.top - Math.min(r.height, 64)) + 'px ' + Math.max(0, r.left - left) + 'px round 12px)';
-      host.animate([{ clipPath: clipFrom }, { clipPath: 'inset(-40px -40px -60px -40px round 14px)' }], { duration: ms, easing: ease });
-      // The title is the same object in both places: it grows from where it lay, so the eye never loses it.
-      var from = sourceEl.querySelector('.c-title, .pl-title'), to = host.querySelector('.o-title');
-      if (from && to) {
-        var a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
-        var scale = parseFloat(getComputedStyle(from).fontSize) / parseFloat(getComputedStyle(to).fontSize);
-        to.style.transformOrigin = '0 0';
-        to.animate([{ transform: 'translate(' + (a.left - b.left) + 'px,' + (a.top - b.top) + 'px) scale(' + scale + ')' }, { transform: 'none' }], { duration: ms, easing: ease });
-      }
-      [].forEach.call(host.querySelectorAll('.o-sec, .o-note, .o-parts, .o-facts, .o-row'), function (el, i) {
-        el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 60 + i * 22, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
-      });
-    }
+    motion = { from: from, to: to, parts: [], closing: false, isHome: false, then: null };
+    // The title and the mark are the same objects in both places: measure each where it ends, then start it where it lay.
+    host.style.left = to.left + 'px';
+    host.style.top = to.top + 'px';
+    host.style.width = to.width + 'px';
+    host.style.height = to.height + 'px';
+    [['.c-title, .pl-title', '.o-title'], ['.c-mark', '.c-mark']].forEach(function (pair) {
+      var a = sourceEl.querySelector(pair[0]), b = inner.querySelector(pair[1]);
+      if (!a || !b) return;
+      var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      var scale = pair[1] === '.o-title' ? parseFloat(getComputedStyle(a).fontSize) / parseFloat(getComputedStyle(b).fontSize) : 1;
+      b.style.transformOrigin = '0 0';
+      motion.parts.push({ el: b, dx: ra.left - rb.left, dy: ra.top - rb.top, scale: scale });
+    });
     var first = host.querySelector('.o-row');
+    if (Motion.isReduced()) { drawFrame(1); if (first) first.focus({ preventScroll: true }); return; }
+    drawFrame(0);
+    progress = Motion.value(0, drawFrame);
+    progress.to(1, 'travel');
+    [].forEach.call(inner.querySelectorAll('.o-meta, .o-sec, .o-note, .o-parts, .o-facts, .o-ledger, .o-row'), function (el, i) {
+      el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 70 + i * 20, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
+    });
     if (first) first.focus({ preventScroll: true });
   }
 
-  function hide(instant) {
-    if (!openId) return;
-    var src = sourceEl, id = openId;
+  /** Ends whatever the sheet is doing, at once. */
+  function finish() {
+    if (progress) progress.set(motion ? (motion.closing ? 0 : 1) : 1);
+    host.hidden = true;
+    host.style.opacity = '';
+    host.style.transition = '';
+    restoreSource();
+    if (motion && motion.then) motion.then();
+    motion = null;
+    progress = null;
     openId = null;
     App.state.open = null;
-    scrim.classList.remove('is-on');
-    var finish = function () {
-      host.hidden = true;
-      if (!openId) scrim.hidden = true;
-      if (src) src.classList.remove('is-source');
-    };
-    if (instant || Motion.isReduced() || !src) { finish(); return; }
-    var r = src.getBoundingClientRect(), b = host.getBoundingClientRect();
-    var clipTo = 'inset(' + Math.max(0, r.top - b.top) + 'px ' + Math.max(0, b.right - r.right) + 'px ' + Math.max(0, b.bottom - r.top - Math.min(r.height, 64)) + 'px ' + Math.max(0, r.left - b.left) + 'px round 12px)';
-    host.animate([{ clipPath: 'inset(-40px -40px -60px -40px round 14px)', opacity: 1 }, { clipPath: clipTo, opacity: 0.4 }], { duration: 200, easing: 'cubic-bezier(.5,0,.3,1)' }).finished.then(finish, finish);
-    Keys.focus(id);
+  }
+
+  /**
+   * Folds the card back into its place. It is the opening played backwards, from wherever it is. `then` runs as the card
+   * reaches home, so a move made from the open card plays on the card itself.
+   */
+  function hide(instant, then) {
+    if (!openId) return;
+    var src = sourceEl, id = openId, wasKeyed = keyed;
+    openId = null;
+    App.state.open = null;
+    hideVeil();
+    if (instant || Motion.isReduced() || !progress) {
+      if (motion) motion.then = then || null;
+      finish();
+      refocus(src, id, wasKeyed);
+      return;
+    }
+    motion.closing = true;
+    motion.then = then || null;
+    host.classList.add('is-closing');
+    progress.to(0, 'travel', function () { finish(); });
+    refocus(src, id, wasKeyed);
+  }
+
+  /** Gives focus back to the card. The ring and the peek come back only for someone working by keyboard. */
+  function refocus(src, id, wasKeyed) {
+    if (wasKeyed) Keys.focus(id);
+    else if (src) src.focus({ preventScroll: true });
   }
 
   function isOpen() { return !!openId; }
   function current() { return openId; }
 
+  /** Runs a move from the open card: the card folds home first, and the move plays on the card where it lies. */
   function act(btn) {
     var id = openId;
     var e = App.findEntity(id);
     var a = btn.dataset.act;
-    hide(true);
-    if (a === 'hand-to') {
-      var flows = Card.readWorkflows(e);
-      Moves.hand(e, flows[Number(btn.dataset.i)]);
-    } else Moves.perform(a, id, btn);
+    hide(false, function () {
+      if (a === 'hand-to') Moves.hand(e, Card.readWorkflows(e)[Number(btn.dataset.i)]);
+      else Moves.perform(a, id, btn);
+    });
   }
 
   function start() {
     host = document.getElementById('open');
     scrim = document.getElementById('scrim');
-    scrim.addEventListener('click', function () { hide(); });
+    scrim.addEventListener('click', function () { if (openId) hide(); });
     host.addEventListener('click', function (ev) {
       if (ev.target.closest('[data-close]')) { hide(); return; }
       var b = ev.target.closest('[data-act]');

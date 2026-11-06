@@ -79,6 +79,7 @@ window.App = (function () {
     if (kept >= folded.length) return folded.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
     var head = folded.slice(0, Math.max(1, kept - 1));
     var rest = [].concat.apply([], folded.slice(head.length).map(function (e) { return e.members || [e]; }));
+    if (!rest.length) return head.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
     var byGroup = {};
     rest.forEach(function (e) { var g = readGroup(e); byGroup[g] = (byGroup[g] || 0) + 1; });
     var most = Object.keys(byGroup).sort(function (a, b) { return byGroup[b] - byGroup[a]; })[0];
@@ -154,9 +155,10 @@ window.App = (function () {
    * Lays every stack out again. Each card's `top` says where it lies, and the motion kernel carries it there from wherever it
    * is on screen, so a change that comes in the middle of another simply bends the path.
    */
-  function layOut(still) {
+  function layOut(still, stagger) {
+    if (state.mode !== 'stacks') return;
     if (still || !hasDrawn) { placeStacks(); hasDrawn = true; return; }
-    Motion.flip([].slice.call(page.querySelectorAll('.stack .card, .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'hand' });
+    Motion.flip([].slice.call(page.querySelectorAll('.stack .card, .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'hand', stagger: stagger });
   }
 
   function placeStacks() {
@@ -256,6 +258,9 @@ window.App = (function () {
       });
     });
     drawBar();
+    // One stop for Tab: from there the arrow keys move through the page.
+    var entry = page.querySelector('.plaque, .stack .card[data-id]');
+    if (entry) entry.tabIndex = 0;
     requestAnimationFrame(function () {
       page.querySelectorAll('.card.is-new').forEach(function (c) { c.classList.remove('is-new'); });
     });
@@ -302,8 +307,7 @@ window.App = (function () {
     var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end'].filter(function (c) { return el.classList.contains(c); });
     el.className = Card.cardClasses(e);
     keep.forEach(function (c) { el.classList.add(c); });
-    if (e.task || e.quiet) el.dataset.height = 'flat'; else delete el.dataset.height;
-    el.innerHTML = Card.drawCardBody(e, readCtx(readStack(e)));
+    Card.redrawBody(el, e, readCtx(readStack(e)));
     el.setAttribute('aria-label', Card.sayCard(e));
     delete measured[e.id];
   }
@@ -325,10 +329,15 @@ window.App = (function () {
     checkZero();
   }
 
+  /** Returns how many things still wait on the person: cards nobody holds, and what Hercule noticed. */
+  function countLeft() {
+    return state.entities.filter(function (e) { return !e.settled && !e.task && !e.leaving; }).length + state.clusters.filter(function (c) { return !c.task; }).length;
+  }
+
   /** Shows the empty Inbox once the last card has gone. */
   function checkZero() {
-    var left = state.entities.filter(function (e) { return !e.settled && !e.task && !e.leaving; }).length + state.clusters.length;
-    if (left || state.mode !== 'stacks') return false;
+    if (countLeft() || state.mode !== 'stacks') return false;
+    settle();
     Scenes.showZero();
     return true;
   }
@@ -392,6 +401,6 @@ window.App = (function () {
 
   return {
     state: state, els: function () { return els; }, STACKS: STACKS, COLUMNS: COLUMNS, findEntity: findEntity, readStack: readStack, readStackEntities: readStackEntities, layOut: layOut, redrawCard: redrawCard, drawNoticed: drawNoticed, drawBar: drawBar,
-    load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, checkZero: checkZero, countOverdue: countOverdue, start: start, measured: function () { return measured; }, removeEl: function (id) { if (els[id]) { els[id].remove(); delete els[id]; } },
+    load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, checkZero: checkZero, countLeft: countLeft, countOverdue: countOverdue, start: start, measured: function () { return measured; }, removeEl: function (id) { if (els[id]) { els[id].remove(); delete els[id]; } },
   };
 })();

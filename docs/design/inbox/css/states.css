@@ -1,6 +1,7 @@
 /* The states around the page: loading, the empty Inbox, first run, Intake, the stand-in for Work, and the rail of a drag. */
 
 /* Loading: the real cards, with their words held back. */
+.main.is-arriving .c-title, .main.is-arriving .c-line, .main.is-arriving .pl-title, .main.is-arriving .pl-why { transition: background 120ms linear; }
 .main.is-loading .card .c-title,
 .main.is-loading .card .c-line,
 .main.is-loading .pl-title,
@@ -31,14 +32,14 @@
 .zero-t { margin: 30px 0 6px; font-size: var(--t-20); font-weight: var(--w-bold); letter-spacing: -0.008em; }
 .zero-s { margin: 0; color: var(--muted); font-size: var(--t-14); }
 @media (prefers-reduced-motion: no-preference) {
-  .zero-sun .ray { animation: ray-draw 900ms var(--m-ease) var(--d) backwards; }
+  .zero-sun .ray { animation: ray-draw 700ms var(--m-ease) calc(420ms + var(--d)) backwards; }
   .zero-sun .ray-h { animation: rule-draw 700ms var(--m-ease) backwards; transform-origin: center; }
-  .zero-n { animation: sun-rise 1100ms var(--m-ease) backwards; }
-  .zero-t, .zero-s { animation: fade-up 500ms var(--m-ease) 620ms backwards; }
+  .zero-n { animation: sun-rise 1400ms cubic-bezier(0.3, 0, 0.2, 1) backwards; }
+  .zero-t, .zero-s { animation: fade-up 500ms var(--m-ease) 900ms backwards; }
 }
 @keyframes ray-draw { from { stroke-dashoffset: 160; opacity: 0; } }
 @keyframes rule-draw { from { transform: scaleX(0); opacity: 0; } }
-@keyframes sun-rise { from { transform: translateY(26px); opacity: 0; clip-path: inset(0 0 26px 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes sun-rise { from { transform: translateY(86px); clip-path: inset(0 0 86px 0); } to { transform: none; clip-path: inset(0 0 0 0); } }
 @keyframes fade-up { from { transform: translateY(6px); opacity: 0; } }
 
 /* First run: the page itself, with the first cards inviting you to connect. No dialog. */
@@ -102,13 +103,14 @@
 .rail[hidden] { display: none; }
 .rail-t { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 96px; padding: 6px 8px 4px; border-radius: 12px; color: var(--muted); font: var(--type-summary); transition: background var(--m-quick), color var(--m-quick); }
 .rail-t > :first-child { transition: transform var(--m-base) var(--spring-hand, var(--m-ease)); }
+.rail.is-on .rail-t { animation: fade-up var(--m-base) var(--m-ease) calc(var(--i, 0) * 28ms) backwards; }
 .rail-t.is-near { background: var(--hover); color: var(--ink); }
 .rail-t.is-near > :first-child { transform: scale(1.16); }
 .rail-rule { width: 1px; height: 44px; background: var(--divider); margin: 0 4px; }
 .rail-x { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--rim); color: var(--muted); }
 .rail .person { font-size: 16px; }
 
-.card.ghost { position: fixed; pointer-events: none; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 0; will-change: transform; }
+.card.ghost { transition: height var(--m-base) var(--m-ease); position: fixed; pointer-events: none; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 0; will-change: transform; }
 .card.ghost > .card-stock { box-shadow: var(--h-carry); }
 .card.ghost .c-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .card.ghost .c-foot { visibility: visible; }

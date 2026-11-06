@@ -29,8 +29,10 @@ window.Drag = (function () {
     ghost.classList.add('ghost', 'is-whole');
     ghost.classList.remove('is-hover', 'is-focus', 'is-peek');
     ghost.dataset.level = 'full';
-    ghost.style.cssText = 'width:' + r.width + 'px;height:' + whole + 'px;left:0;top:0;right:auto;z-index:80';
+    ghost.style.cssText = 'width:' + r.width + 'px;height:' + (card._plan ? card._plan.show : r.height) + 'px;left:0;top:0;right:auto;z-index:80';
     document.body.appendChild(ghost);
+    void ghost.offsetHeight;
+    ghost.style.height = whole + 'px';
     grip = { x: pressed.x - r.left, y: pressed.y - r.top };
     last = r.left;
     Motion.body(ghost).set({ x: r.left, y: r.top, s: 1 });
@@ -43,7 +45,9 @@ window.Drag = (function () {
     void rail.offsetWidth;
     rail.classList.add('is-on');
     targets.forEach(function (t, i) { t.el.style.setProperty('--i', i); });
-    setTimeout(function () { targets.forEach(function (t) { t.r = t.el.getBoundingClientRect(); }); }, 40);
+    ghost.classList.add('is-rising');
+    // The rail is measured at rest, because it rises as it appears.
+    setTimeout(function () { targets.forEach(function (t) { t.r = t.el.getBoundingClientRect(); }); }, 380);
   }
 
   /** Puts the ghost under the pointer this frame, one to one, and leans it by its speed. Only scale and lean ride a spring. */
@@ -80,25 +84,25 @@ window.Drag = (function () {
     delete document.documentElement.dataset.dragging;
     var g = ghost, s = source, e = entity, t = active;
     ghost = null; source = null; entity = null; active = null; pressed = null;
-    rail.classList.remove('is-on');
-    setTimeout(function () { if (!rail.classList.contains('is-on')) rail.hidden = true; }, 260);
+    var chosen = t && !cancel;
+    // The rail stays long enough for the card to be seen to arrive, and only then goes.
+    setTimeout(function () { rail.classList.remove('is-on'); }, chosen ? 340 : 0);
+    setTimeout(function () { if (!rail.classList.contains('is-on')) rail.hidden = true; }, chosen ? 720 : 380);
     var body = Motion.body(g);
-    if (t && !cancel) {
-      var r = t.el.getBoundingClientRect(), w = g.offsetWidth, h = g.offsetHeight;
-      body.to({ x: r.left + r.width / 2 - w / 2, y: r.top + r.height / 2 - h / 2, s: 0.12, o: 0, r: 0 }, 'hand', { done: function () {
-        g.remove();
-        s.classList.remove('is-lifted');
-        var what = t.el.dataset.target;
-        if (what === 'hand') Moves.hand(e, Card.readWorkflows(e)[Number(t.el.dataset.i)]);
-        else Moves.perform(what, e.id);
-      } });
-      Motion.animate(t.el.firstElementChild, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: 420, delay: 170 });
-      return;
-    }
     var home = s.getBoundingClientRect();
+    if (chosen) Motion.animate(t.el.firstElementChild, [{ transform: 'scale(1.16)' }, { transform: 'scale(1.26)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: 340, easing: 'ease-out' });
+    // One object, one place: the card goes home, and what was chosen comes to it there.
+    g.style.height = (s._plan ? s._plan.show : home.height) + 'px';
     body.to({ x: home.left, y: home.top, s: 1, r: 0 }, 'travel', { done: function () {
       g.remove();
+      s.style.transition = 'none';
       s.classList.remove('is-lifted');
+      void s.offsetWidth;
+      s.style.transition = '';
+      if (!chosen) return;
+      var what = t.el.dataset.target;
+      if (what === 'hand') Moves.hand(e, Card.readWorkflows(e)[Number(t.el.dataset.i)]);
+      else Moves.perform(what, e.id);
     } });
   }
 

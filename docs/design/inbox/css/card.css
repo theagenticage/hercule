@@ -229,6 +229,9 @@
 .card[data-height="flat"] .mark { opacity: 0.6; }
 .card[data-height="flat"] .c-line { color: var(--muted); }
 
+/* In a stack the paws type a few strokes and rest: the Inbox is still at rest. */
+.stack .card-paws[data-pose="working"] i { animation-iteration-count: 6; }
+
 /* In a stack the head stands at the left, over the empty gutter of the card behind it, so it covers no words. */
 .stack .card .card-holder { right: auto; left: 8px; }
 .stack .card .card-paws { right: auto; left: 12px; }

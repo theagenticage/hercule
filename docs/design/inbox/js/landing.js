@@ -8,10 +8,13 @@ window.Landing = (function () {
     var line = el.querySelector('.c-line');
     if (!line || Motion.isReduced()) return;
     old.classList.add('c-line--old');
-    old.style.gridRow = window.getComputedStyle(line).gridRowStart;
-    line.parentNode.insertBefore(old, line);
-    Motion.animate(old, [{ transform: 'none', opacity: 1 }, { transform: 'translateY(-14px)', opacity: 0 }], { duration: 240, easing: 'cubic-bezier(.5,0,.8,.4)' }).then(function () { old.remove(); });
-    Motion.animate(line, [{ transform: 'translateY(14px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('hand').ms, delay: 80, fill: 'backwards', easing: Motion.curve('hand').ease });
+    old.style.gridArea = 'auto';
+    old.style.left = line.offsetLeft + 'px';
+    old.style.top = line.offsetTop + 'px';
+    old.style.width = line.offsetWidth + 'px';
+    el.appendChild(old);
+    Motion.animate(old, [{ transform: 'none', opacity: 1 }, { transform: 'translateY(-12px)', opacity: 0 }], { duration: 160, easing: 'cubic-bezier(.5,0,.8,.4)' }).then(function () { old.remove(); });
+    Motion.animate(line, [{ transform: 'translateY(12px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('hand').ms, delay: 40, fill: 'backwards', easing: Motion.curve('hand').ease });
   }
 
   /** Tells a screen reader what just happened, without taking focus. */
@@ -30,7 +33,7 @@ window.Landing = (function () {
     void el.offsetWidth;
     el.classList.add('is-landed');
     setTimeout(function () { el.classList.remove('is-landed'); }, 1300);
-    Motion.body(el).to({ y: 2, s: 0.996 }, 'hand', { done: function () { Motion.body(el).to({ y: 0, s: 1 }, 'hand'); } });
+    Motion.body(el).to({ y: 2 }, 'hand', { done: function () { Motion.body(el).to({ y: 0 }, 'hand'); } });
     var n = el.querySelector('.c-more');
     if (n && !n.hidden) Motion.animate(n, [{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, delay: 160, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
     App.layOut();
@@ -43,14 +46,22 @@ window.Landing = (function () {
   function land(e, s) {
     var el = App.els()[e.id];
     announce(K[e.kind].noun + ' ' + Card.fill(K[e.kind].identifier, e.fields) + ': ' + Card.sayReason(K[e.kind], s).text);
-    if (!el || !el._plan) { e.signals.push(s); App.layOut(); return; }
+    if (!el || !el._plan) {
+      // A card folded in a pile cannot be shown, so the pile takes the knock.
+      e.signals.push(s);
+      e.fresh = true;
+      var pile = [].filter.call(document.querySelectorAll('.card.is-pile'), function (p) { return (p._members || []).indexOf(e) >= 0; })[0];
+      if (pile) Motion.body(pile).to({ y: 2 }, 'hand', { done: function () { Motion.body(pile).to({ y: 0 }, 'hand'); } });
+      return;
+    }
     if (Motion.isReduced()) { apply(e, s, el); return; }
+    var line = el.querySelector('.c-line').getBoundingClientRect();
     var r = el.getBoundingClientRect();
     var tone = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
     var drop = document.createElement('i');
     drop.className = 'drop drop--' + tone;
     document.body.appendChild(drop);
-    var x = r.left + 46, y = r.top + 22;
+    var x = line.left + 3, y = (line.height ? line.top + line.height / 2 : r.top + 22);
     drop.animate([
       { transform: 'translate3d(' + x + 'px,' + (y - 40) + 'px,0) scale(.6)', opacity: 0 },
       { transform: 'translate3d(' + x + 'px,' + (y - 26) + 'px,0) scale(.9)', opacity: 1, offset: 0.35 },

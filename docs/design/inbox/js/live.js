@@ -29,7 +29,10 @@ window.Live = (function () {
       var el = App.els()[e.id];
       if (el) {
         el.classList.remove('is-new');
-        Motion.body(el).set({ y: 18, o: 0 }).to({ y: 0, o: 1 }, 'self');
+        Motion.body(el).set({ y: -20, o: 0 }).to({ y: 0, o: 1 }, 'self');
+        el.dataset.landed = 'plain';
+        el.classList.add('is-landed');
+        setTimeout(function () { el.classList.remove('is-landed'); }, 1300);
       }
       return true;
     }

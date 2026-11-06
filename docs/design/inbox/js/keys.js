@@ -1,7 +1,7 @@
 // The keyboard. Every action has a key, and arrows move through the page the way it is laid out.
 window.Keys = (function () {
   var K = Kinds.KINDS;
-  var focused = null;
+  var focused = null, usingKeys = false;
 
   /** Returns the cards of the page as columns of ids, in the order the eye reads them. */
   function readGrid() {
@@ -59,10 +59,14 @@ window.Keys = (function () {
     var k = ev.key;
     if ((ev.metaKey || ev.ctrlKey) && k === 'z') { ev.preventDefault(); Moves.undo(); return; }
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (Tray.isOpen() && !Open.isOpen()) {
+      if (k === 'Escape') { ev.preventDefault(); Tray.hide(); }
+      return;
+    }
     if (Open.isOpen()) {
       if (k === 'Escape') { ev.preventDefault(); Open.hide(); return; }
       var id = Open.current();
-      if (k === 'j' || k === 'k') { ev.preventDefault(); var flat = [].concat.apply([], readGrid()); var i = flat.indexOf(id); var next = flat[i + (k === 'j' ? 1 : -1)]; if (next) { Open.hide(true); Open.show(next); focused = next; } return; }
+      if (k === 'j' || k === 'k') { ev.preventDefault(); var flat = [].concat.apply([], readGrid()); var i = flat.indexOf(id); var next = flat[i + (k === 'j' ? 1 : -1)]; if (next) { Open.hide(true); Open.show(next, null, true); focused = next; } return; }
       var map = { h: '[data-act="hand-to"]', t: '[data-act="take"]', e: '[data-act="dismiss"]', g: '[data-act="go"]' };
       var n = Number(k);
       var sel = n >= 1 ? '[data-act="hand-to"][data-i="' + (n - 1) + '"]' : map[k];
@@ -78,7 +82,7 @@ window.Keys = (function () {
     else if (k === 'ArrowRight') move(1, 0);
     else if (k === 'j') walk(1);
     else if (k === 'k') walk(-1);
-    else if ((k === 'Enter' || k === ' ') && focused) Open.show(focused);
+    else if ((k === 'Enter' || k === ' ') && focused) Open.show(focused, null, true);
     else if (k === 'Escape') { if (focused) { var el = readEl(focused); if (el) el.classList.remove('is-focus'); Pointer.unpeek(); focused = null; } }
     else if (k === 'h' && focused) Moves.perform('hand', focused, readEl(focused).querySelector('[data-act="hand"]') || readEl(focused));
     else if (k === 't' && focused) Moves.perform('take', focused);
@@ -105,9 +109,12 @@ window.Keys = (function () {
       else if (Tray.isOpen()) trap(ev, document.getElementById('tray'));
     });
     document.addEventListener('keydown', onKey);
+    // The ring and the peek are for someone working by keyboard. A click that moves focus draws neither.
+    document.addEventListener('pointerdown', function () { usingKeys = false; }, true);
+    document.addEventListener('keydown', function () { usingKeys = true; }, true);
     document.getElementById('page').addEventListener('focusin', function (ev) {
       var c = ev.target.closest('.card[data-id], .plaque');
-      if (c && c.dataset.id !== focused) focus(c.dataset.id);
+      if (usingKeys && c && c.dataset.id !== focused) focus(c.dataset.id);
     });
   }
   return { start: start, focus: focus, focused: function () { return focused; } };

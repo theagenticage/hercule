@@ -118,8 +118,7 @@
       : hand +
         '<button class="c-act" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
         '<button class="c-act c-act--plain" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
-    return drawHolder(e) + '<i class="card-stock"></i>' +
-      '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 18 : 20) + '</div>' +
+    return '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 18 : 20) + '</div>' +
       '<h3 class="c-title">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
       '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '">' + pace + '</div>' +
       '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"></i>' : '') + '<span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
@@ -152,6 +151,19 @@
     return [kind.noun, fill(kind.identifier, e.fields), e.title, line.text, status ? status.word : '', kind.pace === 'fast' && !e.task ? 'waiting ' + sayWait(e.since, W.NOW) : '', line.more ? line.more + ' earlier signals' : ''].filter(Boolean).join(', ');
   }
 
+  /**
+   * Redraws a card's words in place. The sheet and whatever stands behind it stay, so their own transitions can run,
+   * and so a colleague who has already risen is not drawn again.
+   */
+  function redrawBody(el, e, ctx) {
+    [].slice.call(el.children).forEach(function (c) {
+      if (!c.matches('.card-stock, .card-holder, .card-paws')) c.remove();
+    });
+    el.insertAdjacentHTML('beforeend', drawCardBody(e, ctx));
+    if (!e.task) [].forEach.call(el.querySelectorAll('.card-holder, .card-paws'), function (c) { c.remove(); });
+    if (e.task || e.quiet) el.dataset.height = 'flat'; else delete el.dataset.height;
+  }
+
   /** Returns a new card element for an entity. */
   function createCard(e, ctx) {
     var el = document.createElement('article');
@@ -161,7 +173,7 @@
     el.tabIndex = -1;
     el.setAttribute('role', 'listitem');
     el.setAttribute('aria-label', sayCard(e));
-    el.innerHTML = drawCardBody(e, ctx);
+    el.innerHTML = drawHolder(e) + '<i class="card-stock"></i>' + drawCardBody(e, ctx);
     return el;
   }
 
@@ -185,7 +197,7 @@
   }
 
   window.Card = {
-    createCard: createCard, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
+    createCard: createCard, redrawBody: redrawBody, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
     describeLine: describeLine, sayReason: sayReason, sayWait: sayWait, rampWait: rampWait, readWorkflows: readWorkflows, fill: fill, esc: esc, drawFacts: drawFacts,
   };
 })();

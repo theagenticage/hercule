@@ -118,3 +118,4 @@
 .nav-new[hidden] { display: none; }
 .ib-sum[hidden] { display: none; }
 .ib-end[hidden] { display: none; }
+.nav-row { position: relative; }

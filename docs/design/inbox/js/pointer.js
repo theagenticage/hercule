@@ -3,7 +3,9 @@
 window.Pointer = (function () {
   var PEEK_DELAY = 260;  // ms of rest before the first peek
   var LEAVE_DELAY = 140; // ms before a peek closes when the pointer has left the stack
+  var HAND_OVER = 70;    // ms of rest before a showing peek moves to another card
   var hover = null, peeked = null, timer = 0, leaveTimer = 0;
+  var speed = 0, lastX = 0, lastY = 0, lastT = 0;
 
   /** Shows the whole face of a card. Its lower part takes no pointer, so the cards under it can still be reached. */
   function peek(el) {
@@ -56,7 +58,7 @@ window.Pointer = (function () {
       el.classList.remove('is-peek');
       if (el._rest) el.style.height = el._rest + 'px';
     };
-    setTimeout(done, Motion.isReduced() ? 0 : 170);
+    setTimeout(done, Motion.isReduced() ? 0 : 230);
   }
 
   /** Tells a card how wide its actions are, so its title can end before them. */
@@ -81,14 +83,16 @@ window.Pointer = (function () {
     el.classList.add('is-hover');
     measureActs(el);
     clearFresh(el);
-    if (peeked) peek(el);
-    else timer = setTimeout(function () { if (hover === el) peek(el); }, PEEK_DELAY);
+    // A peek hands over at once only to a pointer that has slowed down, so a quick exit does not ripple through the stack.
+    timer = setTimeout(function () { if (hover === el) peek(el); }, peeked ? (speed > 0.8 ? 220 : HAND_OVER) : PEEK_DELAY);
   }
 
   function start() {
     var page = document.getElementById('page');
     page.addEventListener('pointermove', function (ev) {
       if (document.documentElement.dataset.dragging) return;
+      speed = Math.hypot(ev.clientX - lastX, ev.clientY - lastY) / Math.max(1, ev.timeStamp - lastT);
+      lastX = ev.clientX; lastY = ev.clientY; lastT = ev.timeStamp;
       setHover(ev.target.closest('.card:not(.is-pile)'));
       var plaque = ev.target.closest('.plaque');
       document.querySelectorAll('.plaque.is-hover').forEach(function (p) { if (p !== plaque) p.classList.remove('is-hover'); });

@@ -33,28 +33,45 @@ window.Tray = (function () {
     host.style.top = top + 'px';
     host.style.maxHeight = h + 'px';
     scrim.hidden = false;
+    void scrim.offsetWidth;
     scrim.classList.add('is-on');
-    if (!Motion.isReduced()) {
-      var ox = r.left + r.width / 2 - left, oy = r.top - top;
-      host.style.transformOrigin = ox + 'px ' + oy + 'px';
-      host.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: Motion.curve('travel').ms * 0.7, easing: Motion.curve('travel').ease });
-      [].forEach.call(host.querySelectorAll('.tray-cell'), function (cell, i) {
-        if (i > 12) return;
-        cell.animate([{ opacity: 0, transform: 'translateY(' + (oy > 80 ? 22 : -22) + 'px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: Motion.curve('travel').ms * 0.8, delay: i * 18, fill: 'backwards', easing: Motion.curve('travel').ease });
-      });
-    }
+    Motion.body(el).to({ y: 2 }, 'hand', { done: function () { Motion.body(el).to({ y: 0 }, 'hand'); } });
+    Motion.body(host).set({ o: 0 }).to({ o: 1 }, 'hand');
+    readVisibleCells().forEach(function (cell, i) {
+      var c = cell.getBoundingClientRect();
+      Motion.body(cell).set({ x: r.left - c.left, y: r.top - c.top, s: 0.9, o: 0 }).to({ x: 0, y: 0, s: 1, o: 1 }, 'travel', { delay: Math.min(i * 18, 180) });
+    });
   }
+
+  /** Returns the cells that can be seen, because only they need to travel. */
+  function readVisibleCells() {
+    var box = host.getBoundingClientRect();
+    return [].filter.call(host.querySelectorAll('.tray-cell'), function (c) {
+      return c.getBoundingClientRect().top < box.bottom;
+    });
+  }
+
+  /** Folds the cards back into the pile they came from. */
   function hide() {
     if (host.hidden) return;
-    host.hidden = true;
+    var r = source.getBoundingClientRect();
     scrim.classList.remove('is-on');
-    if (!Open.isOpen()) scrim.hidden = true;
+    readVisibleCells().forEach(function (cell) {
+      var c = cell.getBoundingClientRect();
+      Motion.body(cell).to({ x: r.left - c.left, y: r.top - c.top, s: 0.9, o: 0 }, 'travel');
+    });
+    Motion.body(host).to({ o: 0 }, 'travel', { done: function () {
+      host.hidden = true;
+      Motion.body(host).clear();
+      if (!Open.isOpen()) scrim.hidden = true;
+    } });
   }
+
   function isOpen() { return !host.hidden; }
   function start() {
     host = document.getElementById('tray');
     scrim = document.getElementById('scrim');
-    scrim.addEventListener('click', hide);
+    scrim.addEventListener('click', function () { if (isOpen() && !Open.isOpen()) hide(); });
     host.addEventListener('click', function (ev) {
       if (ev.target.closest('[data-close]')) { hide(); return; }
       var card = ev.target.closest('.card');
