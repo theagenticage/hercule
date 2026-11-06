@@ -8,12 +8,6 @@ window.Fan = (function () {
 
   function layer() { return document.getElementById("fan-layer"); }
 
-  /** Picks how many columns a fan of n cards gets, by the room the window has. */
-  function pickColumns(n, room, cardWidth) {
-    var fit = Math.max(1, Math.floor((room + 12) / (cardWidth + 12)));
-    return Math.min(fit, n, Math.max(2, Math.ceil(Math.sqrt(n * 1.6))));
-  }
-
   /** Opens the pile drawn by this element. */
   function show(pileEl) {
     var cell = pileEl.parentElement;
@@ -25,28 +19,29 @@ window.Fan = (function () {
     var host = layer();
     var main = document.getElementById("work").getBoundingClientRect();
     var from = pileEl.getBoundingClientRect();
-    var cardWidth = Math.max(200, cell.getBoundingClientRect().width);
-    var cols = pickColumns(pile.tasks.length, main.width - 80, cardWidth);
+    // A fan lays its cards on the stage columns, so it reads as part of the board's own grid.
+    var stages = Array.prototype.map.call(document.querySelectorAll("#rule .stage"), function (s) { return s.getBoundingClientRect(); });
+    var left = stages[0].left;
+    var right = stages[3].right;
+    var cols = Math.min(4, pile.tasks.length);
+    var gapY = 16, head = 40;
     var rows = Math.ceil(pile.tasks.length / cols);
-    var gapX = 12, gapY = 16, head = 34;
-    var w = cols * cardWidth + (cols - 1) * gapX;
-    var hFull = rows * 96 + (rows - 1) * gapY + head + 8;
-    var maxH = main.height - 96;
-    var h = Math.min(hFull, maxH);
-    // The fan opens around the pile, then moves only as far as it must to stay in the window.
-    var left = Math.max(main.left + 24, Math.min(from.left + from.width / 2 - w / 2, main.right - 24 - w));
-    var top = Math.max(main.top + 60, Math.min(from.top - 28, main.bottom - 24 - h));
+    var hFull = rows * 88 + (rows - 1) * gapY + head + 8;
+    var h = Math.min(hFull, main.height - 96);
+    var top = Math.max(main.top + 64, Math.min(from.top - 44, main.bottom - 24 - h));
 
     var fan = document.createElement("div");
     fan.className = "fan";
     fan.style.left = left - main.left + "px";
     fan.style.top = top - main.top + "px";
-    fan.style.width = w + "px";
+    fan.style.width = (stages[cols - 1].right - left) + "px";
     fan.style.height = h + "px";
     fan.style.setProperty("--fan-cols", cols);
     fan.innerHTML = '<header class="fan-head"><b>' + Board.esc(pile.title) + "</b><span>" + pile.tasks.length + "</span><small>" + Board.esc(Store.describePile(pile)) + '</small><span class="fan-keys"><kbd>Esc</kbd> fold</span></header><div class="fan-cards"></div>';
     var grid = fan.querySelector(".fan-cards");
-    var cards = pile.tasks.map(function (t) {
+    var wants = function (t) { return t.move === "you" && !Store.isBlocked(t) ? 0 : 1; };
+    var ordered = pile.tasks.slice().sort(function (a, b) { return wants(a) - wants(b) || a.rank - b.rank; });
+    var cards = ordered.map(function (t) {
       var el = Board.drawCard(t);
       grid.appendChild(el);
       return el;

@@ -6,14 +6,14 @@ window.Welcome = (function () {
   /** Returns the markup under the rule for an empty world, or an empty string. */
   function drawEmpty(scene) {
     if (scene === "first") {
-      return '<div class="grid welcome-grid"><div class="cell"><article class="card card--ghost" data-height="etch"><span class="card-holder"><span class="card-head">' + Crew.peek("Hercule", { pose: "idle", size: 30, crop: 34 }) + '</span></span><i class="card-stock"></i><div class="card-text"><span class="card-title">Your first Task lands here</span><br>Every thread you start joins one by itself.</div></article></div></div>' +
+      return '<div class="grid welcome-grid"><div class="cell"><article class="card welcome-card" data-height="stand"><span class="card-holder"><span class="card-head">' + Crew.peek("Hercule", { pose: "idle", size: 30, crop: 34 }) + '</span></span><i class="card-stock"></i><div class="card-words"><p class="card-title">Start your first thread</p><p class="card-now">Its Task will land here by itself, and you can drag it along as it grows.</p></div></article></div></div>' +
         '<div class="welcome"><button class="welcome-btn" data-first-thread>' + Crew.icon("compose", 14) + 'Start a thread<kbd>⌘N</kbd></button></div>';
     }
     return '<div class="welcome welcome--clear">' + Crew.face("Hercule", { pose: "idle", size: 84 }) + '<p class="welcome-line">Nothing wants you. The crew is at rest.</p></div>';
   }
 
   function startFirst() {
-    var ghost = document.querySelector(".card--ghost");
+    var ghost = document.querySelector(".welcome-card");
     var name = "Fix the basket total rounding";
     var host = document.getElementById("welcome");
     if (ghost) Motion.body(ghost).to({ s: 0.98, o: 0 }, "back");

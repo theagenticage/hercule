@@ -95,7 +95,7 @@ window.Scenes = (function () {
 
   // What happened since the person last looked. The replay starts from `was` and plays forward.
   var OVERNIGHT = [
-    { kind: "move", id: "t-cancelled", from: "planned", to: "building", note: "An agent picked it up", apply: function (t) { t.agent = "Fix order history for cancelled items"; t.move = "agent"; t.now = "Reading the order history code."; t.age = 0; t.need = "look"; } },
+    { kind: "move", id: "t-cancelled", from: "planned", to: "building", note: "An agent picked it up", apply: function (t) { t.agent = "Fix order history for cancelled items"; t.move = "agent"; t.now = "Reading the order history code."; t.where = "An agent picked this up overnight and is reading the order history code."; t.left = "Show cancelled items in the list"; t.age = 0; t.need = "look"; } },
     { kind: "move", id: "pr-fake-clock", from: "reviewing", to: "landed", note: "PR #3331 merged", apply: function (t) { t.move = "nobody"; t.person = ""; t.now = "Merged last night."; } },
     { kind: "arrive", task: { id: "refund-currency", name: "Refund emails show the wrong currency", project: "storefront", initiative: "", stage: "exploring", move: "agent", need: "look", agent: "Find why refund emails use the wrong currency", now: "Started from a support ticket.", where: "A thread started last night from a support ticket. It is tracing where the currency is set.", left: "Find the cause", ask: "", kind: "thread", source: "", ref: "", age: 0, stalled: false, person: "", options: [], context: [], links: [], threads: [{ title: "Find why refund emails use the wrong currency", id: "a1" }] } },
     { kind: "move", id: "flake-seeds", from: "planned", to: "planned", note: "", apply: function () {} },

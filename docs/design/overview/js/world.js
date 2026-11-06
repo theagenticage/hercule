@@ -114,11 +114,27 @@ window.NW = (function () {
     return Math.round(days / 7) + "w";
   }
 
+  // Answers written for the cards a reader is most likely to open. Others show no answers.
+  var ANSWERS = {
+    substitutions: ["Riverside depot", "Northgate depot", "Not yet"],
+    "basket-restore": ["Highest quantity", "Add them together"],
+    "price-rounding": ["Round per line", "Round per basket"],
+    "sched-cutover": ["Approve for Monday", "Wait a week"],
+    "slot-rush": ["Five minutes is fine", "Keep it shorter"],
+    "image-sizes": ["Keep the originals", "Drop after a month"],
+    "search-latency": ["Drop images first", "Shrink them"],
+    "guest-checkout": ["An email link is enough", "Ask for an account"],
+    "flake-quarantine": ["Merge together", "One at a time"],
+    "coupons-stack": ["Bring both sides together", "Decide it myself"],
+    "cost-logs": ["30 days", "90 days", "Ask legal"],
+  };
+
   /** Returns a fresh copy of every Task, with its summary and holder merged in. */
   function buildTasks() {
     return WORK.map(function (w) {
       var e = ENRICH[w.id] || {};
       var t = Object.assign({}, w, e);
+      t.options = ANSWERS[w.id] || [];
       t.age = daysSince(w.lastActivityAt);
       t.ref = (/#\d+/.exec(w.where) || [""])[0];
       if (w.kind === "review" || w.kind === "mention") t.ref = "#" + w.id.split("-")[1];

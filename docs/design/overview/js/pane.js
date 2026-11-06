@@ -114,7 +114,7 @@ window.Pane = (function () {
   function measureTarget() {
     var host = pane.getBoundingClientRect();
     var w = Math.min(468, host.width - 40);
-    return { left: host.width - w - 14, top: 54, width: w, height: host.height - 54 - 14 };
+    return { left: host.width - w - 14, top: 66, width: w, height: host.height - 66 - 14 };
   }
 
   function cardRect(el) {

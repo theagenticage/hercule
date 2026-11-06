@@ -49,7 +49,8 @@ window.Board = (function () {
     if (h.kind === "you") return '<span class="card-holder"><i class="card-tab" data-need="' + h.need + '"></i></span>';
     if (h.kind === "agent") {
       var hue = Crew.lookFor(h.name).hue;
-      return '<span class="card-holder"><span class="card-head" data-pose="' + h.pose + '">' + Crew.peek(h.name, { pose: h.pose, size: 30, crop: 34 }) + '</span></span><span class="card-paws" data-pose="' + h.pose + '" style="--hue:var(--hue-' + hue + ')"><i></i><i></i></span>';
+      var delay = -((Crew.hash(h.name) % 340) / 100).toFixed(2);
+      return '<span class="card-holder"><span class="card-head" data-pose="' + h.pose + '">' + Crew.peek(h.name, { pose: h.pose, size: 30, crop: 34 }) + '</span></span><span class="card-paws" data-pose="' + h.pose + '" style="--hue:var(--hue-' + hue + ";--paw-delay:" + delay + 's"><i></i><i></i></span>';
     }
     if (h.kind === "person") return '<span class="card-holder"><i class="card-tab card-tab--person" title="' + esc(h.name) + '">' + esc(h.name.charAt(0).toUpperCase()) + "</i></span>";
     return "";
@@ -69,14 +70,20 @@ window.Board = (function () {
     return Math.max(0, Math.min(1, (t.age - 6) / 24));
   }
 
+  /** Returns the line that says where a Task stands: what the summary writer wrote, or what holds it. */
+  function describeNow(t) {
+    if (t.summaryPending) return '<span class="card-pending">Writing a summary</span>';
+    if (Store.isBlocked(t)) return esc(Store.describeNeed(t)) + ".";
+    return esc(t.now || "");
+  }
+
   function drawCardInner(t) {
     var holder = Store.decideHolder(t);
-    var need = Store.describeNeed(t);
-    var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 12) + "</span>" : "";
-    var ask = t.ask && t.move === "you" ? '<div class="card-text card-text--ask"><span class="card-title">' + esc(t.name) + '</span><br><span class="card-ask">' + esc(t.ask) + "</span></div>" : "";
+    var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 11) + "</span>" : "";
+    var meta = '<span class="card-meta">' + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></span>";
+    var ask = t.ask && t.move === "you" ? '<div class="card-words card-words--ask">' + meta + '<p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
     return drawHolder(holder) + '<i class="card-stock"></i><i class="card-check">' + Crew.icon("check", 12) + "</i>" +
-      '<div class="card-text card-text--rest"><span class="card-title">' + esc(t.name) + "</span><br>" + (t.summaryPending ? '<span class="card-pending">Writing a summary</span>' : esc(t.now || "")) + "</div>" + ask +
-      '<footer class="card-foot"><span class="card-need">' + esc(need) + "</span>" + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></footer>";
+      '<div class="card-words card-words--rest">' + meta + '<p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + ask;
   }
 
   /** Draws or updates one Task's card and returns its element. */
@@ -101,25 +108,17 @@ window.Board = (function () {
 
   /* ---------- Piles ---------- */
 
-  /** Draws the flags that stick out of a pile: one per Task in it that wants you, up to six. */
-  function drawFlags(p) {
-    var mine = p.tasks.filter(function (t) { return t.move === "you" && !Store.isBlocked(t) && t.stage !== "landed"; });
+  /**
+   * Draws what stands behind a pile's top edge, by the same rule as a card: one tab counting what
+   * wants you, and one head if agents are on it.
+   */
+  function drawPileHolder(p) {
+    var mine = p.tasks.filter(function (t) { return t.move === "you" && !t.agent && !Store.isBlocked(t) && t.stage !== "landed"; }).length;
+    var agent = p.tasks.filter(function (t) { return t.agent && t.move !== "you"; })[0];
     var out = "";
-    mine.slice(0, 6).forEach(function (t) {
-      out += '<i class="card-tab" data-need="' + t.need + '"></i>';
-    });
-    return out ? '<span class="card-holder pile-flags">' + out + "</span>" : "";
-  }
-
-  /** Draws the foot of a pile: the colleagues inside it, and how old its newest Task is. */
-  function drawPileFoot(p) {
-    var faces = p.tasks.filter(function (t) { return t.agent; }).slice(0, 4).map(function (t) {
-      return '<span class="pile-face">' + Crew.face(t.agent, { pose: "working", size: 16 }) + "</span>";
-    }).join("");
-    var sources = {};
-    p.tasks.forEach(function (t) { if (t.source) sources[t.source] = true; });
-    var mark = Object.keys(sources).slice(0, 2).map(function (s) { return '<span class="card-src">' + Crew.brand(s, 12) + "</span>"; }).join("");
-    return '<span class="pile-faces">' + faces + "</span>" + (faces ? "" : mark);
+    if (agent) out += '<span class="card-head">' + Crew.peek(agent.agent, { pose: "working", size: 30, crop: 34 }) + "</span>";
+    if (mine) out += '<i class="card-tab card-tab--count">' + mine + "</i>";
+    return out ? '<span class="card-holder">' + out + "</span>" : "";
   }
 
   function drawPile(p) {
@@ -132,12 +131,16 @@ window.Board = (function () {
     el.style.setProperty("--sheets", sheets);
     var title = p.kind === "more" ? n + " more" : p.title;
     var count = p.kind === "more" ? "" : '<em>' + n + "</em>";
-    var hidden = Store.isFiltering() ? p.tasks.filter(Store.matches).length : n;
-    el.classList.toggle("is-off", Store.isFiltering() && hidden === 0);
-    var line = Store.isFiltering() && hidden ? hidden + " of " + n + " match" : Store.describePile(p);
-    var html = drawFlags(p);
+    var hits = Store.isFiltering() ? p.tasks.filter(Store.matches).length : n;
+    el.classList.toggle("is-off", Store.isFiltering() && hits === 0);
+    var line = Store.isFiltering() && hits ? hits + " of " + n + " match" : Store.describePile(p);
+    var sources = {};
+    p.tasks.forEach(function (t) { if (t.source) sources[t.source] = true; });
+    var marks = Object.keys(sources).slice(0, 2).map(function (x) { return '<span class="card-src">' + Crew.brand(x, 11) + "</span>"; }).join("");
+    var fresh = p.tasks.reduce(function (m, t) { return Math.min(m, t.age); }, 1e4);
+    var html = drawPileHolder(p);
     for (var i = sheets; i >= 1; i--) html += '<i class="pile-sheet" style="--n:' + i + '"></i>';
-    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-row"><span class="pile-line">' + esc(line) + "</span>" + drawPileFoot(p) + "</span>";
+    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + '</span><span class="card-meta pile-meta">' + marks + "<time>" + NW.formatAge(fresh) + "</time></span>";
     setHTML(el, html);
     return el;
   }
@@ -270,13 +273,17 @@ window.Board = (function () {
     var head = node("lanehead:" + p.id, "button", "lane-head");
     head.dataset.foldLane = p.id;
     head.setAttribute("aria-expanded", !folded);
-    setHTML(head, '<i class="proj proj--' + p.tint + '"></i><h3>' + esc(p.name) + "</h3><small>" + all.length + "</small>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<span class="chev">' + Crew.icon("chev-d", 12) + "</span>");
+    setHTML(head, "<h3>" + esc(p.name) + "</h3>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + all.length + " in all</small>" + '<span class="chev">' + Crew.icon("chev-d", 12) + "</span>");
     var kids = [head];
     if (folded) {
       kids.push(drawWire("lane-" + p.id, all));
     } else {
-      plans.forEach(function (i) { kids.push(drawPlan(i)); });
       kids.push(drawGrid("lane-" + p.id, loose));
+      if (plans.length) {
+        var box = node("plans:" + p.id, "div", "plans");
+        place(box, plans.map(drawPlan));
+        kids.push(box);
+      }
     }
     place(lane, kids);
     return lane;
@@ -295,6 +302,7 @@ window.Board = (function () {
       el._n = n;
       if (!el.firstChild) el.innerHTML = '<span class="stage-name">' + s.name + '</span><span class="stage-count"></span>';
       var slot = el.lastChild;
+      el.classList.toggle("is-zero", n === 0);
       if (prev !== undefined && prev !== n) {
         var up = n > prev;
         slot.innerHTML = '<span class="roll roll--out' + (up ? " is-up" : "") + '">' + prev + '</span><span class="roll roll--in' + (up ? " is-up" : "") + '">' + n + "</span>";
@@ -305,18 +313,9 @@ window.Board = (function () {
     }));
   }
 
-  var WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
-  function say(n, lower) {
-    var w = n < WORDS.length ? WORDS[n] : String(n);
-    return lower ? w.toLowerCase() : w;
-  }
-
   function drawLead() {
     var c = Store.countAttention();
     var st = Store.state;
-    // One sentence uses one kind of number: words while they stay short, digits when one is large.
-    var digits = c.quick > 12 || c.think > 12;
-    function say2(n, lower) { return digits ? String(n) : say(n, lower); }
     function lens(key, html) {
       return '<button class="lens' + (st.lens === key ? " is-on" : "") + '" data-lens="' + key + '">' + html + "</button>";
     }
@@ -330,9 +329,9 @@ window.Board = (function () {
       setHTML(leadEl, '<h2>The desk is clear.</h2><p class="lead-sub"><span><b>12</b> things landed this week.</span></p>');
       return;
     }
-    if (c.quick && c.think) line = lens("quick",  '<span class="lens-n">' + say2(c.quick) + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ", " + lens("think", '<span class="lens-n">' + say2(c.think, true) + "</span> that need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
-    else if (c.quick) line = lens("quick", '<span class="lens-n">' + say(c.quick) + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ".";
-    else if (c.think) line = lens("think", '<span class="lens-n">' + say(c.think) + "</span> need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
+    if (c.quick && c.think) line = lens("quick",  '<span class="lens-n">' + c.quick + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ", " + lens("think", '<span class="lens-n">' + c.think + "</span> that need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
+    else if (c.quick) line = lens("quick", '<span class="lens-n">' + c.quick + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ".";
+    else if (c.think) line = lens("think", '<span class="lens-n">' + c.think + "</span> need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
     else line = "Nothing wants you right now.";
     var sub = [];
     if (c.agents) sub.push(lens("agents", "<b>" + c.agents + "</b> with agents"));

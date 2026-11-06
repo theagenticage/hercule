@@ -141,7 +141,11 @@ window.Drag = (function () {
     c.lastX = x;
     c.lastY = y;
     c.pointerSpeed = dx;
-    var lean = Math.max(-2.6, Math.min(2.6, dx * 0.2));
+    var lean = Math.max(-1.2, Math.min(1.2, dx * 0.1));
+    clearTimeout(c.upright);
+    c.upright = setTimeout(function () {
+      if (carry === c && !c.merge) Motion.body(c.el).to({ r: 0 }, "glide");
+    }, 70);
     var goalX = x - c.grabX;
     var goalY = y - c.grabY;
     var scale = 1.035;

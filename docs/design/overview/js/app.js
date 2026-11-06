@@ -11,7 +11,7 @@
   Shell.drawSidebar(document.querySelector("[data-side]"), {
     inboxCount: scene === "first" || scene === "empty" ? 0 : 6,
     waiting: scene === "first" || scene === "empty" ? [] : undefined,
-    sum: scene === "first" ? "Nothing running yet" : undefined,
+    sum: scene === "first" || scene === "empty" ? "Nothing running" : undefined,
   });
   Store.loadWorld(Scenes.build(scene));
   work.dataset.scene = scene;
