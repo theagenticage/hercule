@@ -7,7 +7,7 @@
 window.Drag = (function () {
   "use strict";
 
-  var MERGE_DWELL = 340; // how long a card must rest over another before they are drawn together
+  var MERGE_DWELL = 600; // how long a card must rest over another before they are drawn together
   var START_DISTANCE = 5;
   var press = null;
   var carry = null;
@@ -68,7 +68,7 @@ window.Drag = (function () {
     var kids = cell.querySelectorAll(".card[data-id]");
     for (var i = 0; i < kids.length; i++) {
       var r = kids[i].getBoundingClientRect();
-      if (x > r.left + r.width * 0.1 && x < r.right - r.width * 0.1 && y > r.top + r.height * 0.28 && y < r.bottom - r.height * 0.28) return kids[i];
+      if (x > r.left + r.width * 0.1 && x < r.right - r.width * 0.1 && y > r.top + r.height * 0.3 && y < r.bottom - r.height * 0.3) return kids[i];
     }
     return null;
   }
@@ -371,10 +371,6 @@ window.Drag = (function () {
     Toast.show("Moved, and folded away.", true);
   }
 
-  function describeMove(to) {
-    return "Moved to " + NW.STAGES.filter(function (s) { return s.id === to.stage; })[0].name + ".";
-  }
-
   function drop() {
     var c0 = carry;
     if (c0.merge) return mergeNow();
@@ -393,17 +389,10 @@ window.Drag = (function () {
     });
     settleFollowers(c);
     if (!moved) return;
-    Toast.show(describeMove(landing), true);
+    Actions.reportMove(landing);
     if (landing.stage === "landed") {
       c.el.classList.add("just-landed");
       setTimeout(function () { c.el.classList.remove("just-landed"); }, 900);
-    }
-    if (Store.failNext) {
-      Store.failNext = false;
-      setTimeout(function () {
-        Board.change(function () { Store.undo(); }, { spring: "travel" });
-        Toast.show("That move did not save, so the card went back. Check the connection and try again.", false);
-      }, 900);
     }
   }
 
@@ -483,7 +472,7 @@ window.Drag = (function () {
       if (changed) Store.moveTask(b.id, { stage: b.target.id });
     }, { spring: "hand" });
     Motion.body(b.el).to({ s: 1 }, "hand");
-    if (changed) Toast.show(describeMove({ stage: b.target.id }), true);
+    if (changed) Actions.reportMove({ stage: b.target.id });
   }
 
   /* ---------- Pointer events ---------- */
@@ -508,25 +497,27 @@ window.Drag = (function () {
     if (carry) {
       e.preventDefault();
       track(e.clientX, e.clientY);
-      autoScroll(e.clientY);
+      autoScroll();
     }
   }
 
-  /** Scrolls the board while the card is held near its top or bottom edge. */
-  function autoScroll(y) {
-    var s = scroller();
-    var r = s.getBoundingClientRect();
-    var speed = 0;
-    if (y < r.top + 130) speed = -(r.top + 130 - y) / 6;
-    if (y > r.bottom - 70) speed = (y - (r.bottom - 70)) / 6;
-    if (!speed || scrollFrame) return;
-    scrollFrame = requestAnimationFrame(function () {
+  /** Keeps the board scrolling for as long as the card is held near its top or bottom edge. */
+  function autoScroll() {
+    if (scrollFrame) return;
+    function step() {
       scrollFrame = 0;
       if (!carry) return;
+      var s = scroller();
+      var r = s.getBoundingClientRect();
+      var y = carry.lastY;
+      var speed = 0;
+      if (y < r.top + 130) speed = -(r.top + 130 - y) / 6;
+      if (y > r.bottom - 70) speed = (y - (r.bottom - 70)) / 6;
+      if (!speed) return;
       s.scrollTop += speed;
-      carry.zones = readDropZones();
-      track(carry.lastX, carry.lastY);
-    });
+      scrollFrame = requestAnimationFrame(step);
+    }
+    scrollFrame = requestAnimationFrame(step);
   }
 
   function onUp(e) {
@@ -553,6 +544,13 @@ window.Drag = (function () {
   }
 
   function mount() {
+    // The page can scroll under a carried card, by wheel or at the edges. The card stays in the hand,
+    // and what lies under it is read again.
+    scroller().addEventListener("scroll", function () {
+      if (!carry) return;
+      carry.zones = readDropZones();
+      track(carry.lastX, carry.lastY);
+    }, { passive: true });
     work().addEventListener("pointerdown", onDown);
     window.addEventListener("pointermove", onMove, { passive: false });
     window.addEventListener("pointerup", onUp);

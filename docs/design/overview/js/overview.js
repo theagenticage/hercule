@@ -25,7 +25,7 @@ window.Overview = (function () {
       allViews().map(function (v, i) {
         return '<button class="ptab switch-tab' + (v.id === current ? " is-on" : "") + '" role="tab" aria-selected="' + (v.id === current) + '" data-view="' + v.id + '" title="' + v.name + " (⌘" + (i + 1) + ')">' + Crew.icon(v.icon, 14) + v.name + "</button>";
       }).join("") + "</div>";
-    puck = document.getElementById("hand");
+    puck = document.getElementById("puck");
     puckBody = null;
     placePuck(false);
   }
@@ -68,7 +68,7 @@ window.Overview = (function () {
     el.innerHTML = Crew.face(t.agent, { pose: t.move === "you" ? "waiting" : "working", size: 26 });
     el.style.left = x - 13 + "px";
     el.style.top = y - 13 + "px";
-    document.getElementById("hand").appendChild(el);
+    document.getElementById("carry").appendChild(el);
     return el;
   }
 

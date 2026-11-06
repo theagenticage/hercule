@@ -20,6 +20,7 @@
       <div class="top-end">
         <label class="find" id="find" title="Find (/)"><span id="find-icon"></span><input placeholder="Find on the board" aria-label="Find on the board"></label>
         <button class="icon-pill" id="display-btn" title="Display"></button>
+        <div class="find-list" id="find-list"></div>
       </div>
       <div class="menu" id="display">
         <label class="menu-row menu-row--switch" data-display="wear"><span><b>Wear</b><small>Neglected work ages, slowly.</small></span><input type="checkbox" id="wear-switch"><i class="switch-track"></i></label>
@@ -32,7 +33,7 @@
     <section class="view work" id="work">
       <div class="work-scroll" id="scroll">
         <div class="work-canvas" id="canvas">
-          <header class="lead-row"><div class="lead" id="lead"></div><div class="since" id="since-line"></div></header>
+          <header class="lead-row"><div class="lead" id="lead"></div><div class="since" id="since-line" role="status"></div><span class="sr" id="board-status" role="status"></span></header>
           <div class="rule-wrap"><div class="rule" id="rule"></div><i class="rule-mark" id="rule-mark"></i></div>
           <div id="welcome"></div>
           <div id="lanes"></div>
@@ -40,7 +41,7 @@
         </div>
       </div>
       <div class="fan-layer" id="fan-layer"></div>
-      <div class="pane" id="pane" hidden><div class="pn-sheet" role="dialog" aria-label="Task details"><div class="pn-clip"><div class="pn-inner"></div></div></div></div>
+      <div class="pane" id="pane" hidden><div class="pn-sheet" role="dialog" aria-labelledby="pn-title"><div class="pn-clip"><div class="pn-inner"></div></div></div></div>
       <div class="toast" id="toast" role="status"></div>
       <div class="select-bar" id="select-bar"></div>
       <div class="help" id="help"></div>

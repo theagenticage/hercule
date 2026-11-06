@@ -135,7 +135,23 @@ window.Fan = (function () {
     if (!inFan.length) cleanUp();
   }
 
+  /** Takes a card that ended out of the open fan, and closes the gap. */
+  function dropCard(id) {
+    if (!open) return;
+    var i = open.cards.findIndex(function (c) { return c.dataset.id === id; });
+    if (i < 0) return;
+    var gone = open.cards[i];
+    open.cards.splice(i, 1);
+    open.pile.tasks = open.pile.tasks.filter(function (t) { return t.id !== id; });
+    Motion.flip(open.cards, function () { gone.remove(); }, { spring: "hand" });
+    var count = open.fan.querySelector(".fan-head span");
+    if (count) count.textContent = open.cards.length;
+    if (!open.cards.length) hide();
+  }
+
   return {
+    dropCard: dropCard,
+    pileEl: function () { return open ? open.pileEl : null; },
     show: show,
     hide: hide,
     isOpen: function () { return !!open; },

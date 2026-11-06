@@ -126,9 +126,11 @@ window.Store = (function () {
     piles = piles.filter(function (p) { return p.tasks.length > 1 || p.kind === "landed"; });
     var cards = tasks.filter(function (t) { return !used[t.id]; });
     var loose = cards.filter(function (t) { return !t.held; });
+    // The cards already showing stay. What does not fit waits in a pile on the row after them, so
+    // an arrival can never swallow the card you are looking at.
     var room = Math.max(0, MOST_ROWS - piles.length - held.length);
     if (loose.length > room) {
-      var over = loose.slice(Math.max(0, room - 1));
+      var over = loose.slice(room);
       over.forEach(function (t) { used[t.id] = true; });
       cards = cards.filter(function (t) { return !used[t.id]; });
       piles.push({ key: owner + "/" + stage + "/more", kind: "more", title: over.length + " more", tasks: over });
@@ -161,6 +163,26 @@ window.Store = (function () {
     };
   }
 
+  /** Returns everything about a Task that a person might type to find it. */
+  function readSearchText(t) {
+    var project = state.projects.filter(function (p) { return p.id === t.project; })[0];
+    var links = (t.links || []).map(function (l) { return l.label; }).join(" ");
+    return [t.name, t.now, t.where, t.ask, t.ref, t.agent, t.person, project && project.name, links].join(" ").toLowerCase();
+  }
+
+  /** Lists the Tasks that want you, in reading order: lane by lane, stage by stage. */
+  function listWanting() {
+    var out = [];
+    state.projects.forEach(function (p) {
+      STAGE_IDS.forEach(function (s) {
+        tasksIn(function (t) { return t.project === p.id && t.stage === s && t.stage !== "landed" && t.move === "you" && !isBlocked(t); }).forEach(function (t) {
+          if (matches(t)) out.push(t);
+        });
+      });
+    });
+    return out;
+  }
+
   /** Checks whether a Task passes the lens and the find words. */
   function matches(t) {
     var lens = state.lens;
@@ -169,29 +191,50 @@ window.Store = (function () {
     else if (lens === "think") ok = t.move === "you" && t.need === "think" && !isBlocked(t) && t.stage !== "landed";
     else if (lens === "stalled") ok = t.stalled && t.stage !== "landed";
     else if (lens === "agents") ok = !!t.agent && t.move !== "you";
-    if (ok && state.query) ok = (t.name + " " + (t.now || "") + " " + (t.ref || "")).toLowerCase().indexOf(state.query.toLowerCase()) >= 0;
+    if (ok && state.query) ok = readSearchText(t).indexOf(state.query.toLowerCase()) >= 0;
     return ok;
   }
 
   function isFiltering() { return !!(state.lens || state.query); }
 
-  function remember(label) {
-    undoStack.push({ label: label, tasks: clone(state.tasks) });
+  var batch = null;
+
+  /** Keeps one way back. Inside a batch, all the ways back become one undo. */
+  function remember(label, restore) {
+    if (batch) {
+      batch.steps.unshift(restore);
+      return;
+    }
+    undoStack.push({ label: label, restore: restore });
     if (undoStack.length > 50) undoStack.shift();
   }
 
-  /** Puts the last change back. Returns its label, or null when there is nothing to undo. */
+  /** Runs several changes as one gesture: one Undo puts them all back. */
+  function group(label, fn) {
+    batch = { steps: [] };
+    fn();
+    var steps = batch.steps;
+    batch = null;
+    if (steps.length) undoStack.push({ label: label, restore: function () { steps.forEach(function (r) { r(); }); } });
+  }
+
+  /** Puts the last change back, and only that change. Returns its label, or null when there is none. */
   function undo() {
     var last = undoStack.pop();
     if (!last) return null;
-    state.tasks = last.tasks;
+    last.restore();
     return last.label;
+  }
+
+  function snapshot(t) {
+    return { stage: t.stage, project: t.project, rank: t.rank, initiative: t.initiative, movedBy: t.movedBy, held: t.held, age: t.age };
   }
 
   /** Moves a Task to a stage and a row of a project, and remembers that a person did it. */
   function moveTask(id, to) {
     var t = task(id);
-    remember("Moved " + t.name);
+    var was = snapshot(t);
+    remember(t.name, function () { Object.assign(t, was); });
     t.stage = to.stage;
     if (to.project) t.project = to.project;
     if (to.before !== undefined) t.rank = to.before;
@@ -199,17 +242,22 @@ window.Store = (function () {
     t.movedBy = "you";
     t.held = true;
     t.age = 0;
-    if (t.stage === "landed") {
-      t.agent = "";
-      t.move = "nobody";
-    }
+    if (state.offline) t.pendingSync = true;
   }
 
   /** Merges one Task into another: its threads and links join, and it leaves the board. */
   function mergeTasks(fromId, intoId) {
     var a = task(fromId);
     var b = task(intoId);
-    remember("Merged " + a.name);
+    var was = { threads: b.threads, links: b.links, merged: b.mergedCount };
+    var blocks = state.tasks.map(function (t) { return { t: t, by: t.blockedBy }; });
+    remember(a.name, function () {
+      state.tasks.push(a);
+      b.threads = was.threads;
+      b.links = was.links;
+      b.mergedCount = was.merged;
+      blocks.forEach(function (x) { x.t.blockedBy = x.by; });
+    });
     b.threads = b.threads.concat(a.threads);
     b.links = b.links.concat(a.links);
     b.mergedCount = (b.mergedCount || 0) + 1 + (a.mergedCount || 0);
@@ -223,9 +271,38 @@ window.Store = (function () {
   /** Ends a Task as Done or Dropped: it leaves the board. */
   function endTask(id, how) {
     var t = task(id);
-    remember(how + " " + t.name);
+    remember(t.name, function () {
+      t.ended = "";
+      state.tasks.push(t);
+    });
     t.ended = how;
     state.tasks = state.tasks.filter(function (x) { return x !== t; });
+  }
+
+  /** Records your answer: the agent carries on with it, and the card lies down. */
+  function answerTask(id, answer) {
+    var t = task(id);
+    var was = { move: t.move, agent: t.agent, now: t.now, ask: t.ask, need: t.need, age: t.age };
+    remember(t.name, function () { Object.assign(t, was); });
+    t.move = "agent";
+    t.agent = t.agent || "Carry on with " + t.name;
+    t.now = "You said: " + answer + ".";
+    t.ask = "";
+    t.need = "look";
+    t.age = 0;
+  }
+
+  /** Starts a thread on a Task: its colleague takes the card. */
+  function startThread(id, prompt) {
+    var t = task(id);
+    var was = { move: t.move, agent: t.agent, now: t.now, threads: t.threads, need: t.need };
+    remember(t.name, function () { Object.assign(t, was); });
+    var title = prompt || "Thread on " + t.name;
+    t.threads = t.threads.concat([{ title: title, id: "n" + Date.now() }]);
+    t.agent = title;
+    t.move = "agent";
+    t.need = "look";
+    t.now = "A thread just started.";
   }
 
   /** Moves a Task because a fact arrived. A person's drag holds until then; a fact overrides it. */
@@ -263,11 +340,15 @@ window.Store = (function () {
     countAttention: countAttention,
     matches: matches,
     isFiltering: isFiltering,
+    listWanting: listWanting,
     moveTask: moveTask,
     mergeTasks: mergeTasks,
     endTask: endTask,
     addTask: addTask,
     moveByFact: moveByFact,
+    answerTask: answerTask,
+    startThread: startThread,
+    group: group,
     undo: undo,
     canUndo: function () { return undoStack.length > 0; },
   };

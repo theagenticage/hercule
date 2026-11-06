@@ -6,6 +6,8 @@ window.Pane = (function () {
 
   var drive = null;
   var pane, sheet, clip, inner, ghost;
+  var awayEl = null;
+  var trail = [];
   var openId = null;
   var from = null;
   var to = null;
@@ -21,7 +23,7 @@ window.Pane = (function () {
     var reached = true;
     return '<ol class="pn-path">' + NW.STAGES.map(function (s) {
       var here = s.id === t.stage;
-      var html = '<li class="' + (here ? "is-here" : reached ? "is-past" : "") + '"><button data-stage-to="' + s.id + '" title="Move to ' + s.name + '">' + s.name + "</button></li>";
+      var html = '<li class="' + (here ? "is-here" : reached ? "is-past" : "") + '"><button tabindex="-1" data-stage-to="' + s.id + '" title="Move it to ' + s.name + '">' + s.name + "</button></li>";
       if (here) reached = false;
       return html;
     }).join("") + "</ol>";
@@ -42,9 +44,10 @@ window.Pane = (function () {
     var ask = t.ask ? '<p class="pn-ask">' + esc(t.ask) + "</p>" : "";
     var opts = (t.options || []).map(function (o, i) {
       var label = typeof o === "string" ? o : o.label || "";
-      return '<button class="pn-answer' + (i === 0 ? " is-suggested" : "") + '" data-answer="' + i + '">' + esc(label) + "</button>";
+      return '<button class="pn-answer' + (i === 0 ? " is-suggested" : "") + '" data-answer="' + esc(label) + '">' + esc(label) + "</button>";
     }).join("");
-    return '<section class="pn-sec pn-next"><h4>Next move</h4><p class="pn-who">' + who + "</p>" + ask + (opts ? '<div class="pn-answers">' + opts + "</div>" : "") + "</section>";
+    var reply = holder.kind === "you" || (holder.kind === "agent" && holder.pose === "waiting") ? '<form class="pn-reply" data-reply><input placeholder="Or say something else…" aria-label="Your answer"></form>' : "";
+    return '<section class="pn-sec pn-next"><h4>Next move</h4><p class="pn-who">' + who + "</p>" + ask + (opts ? '<div class="pn-answers">' + opts + "</div>" : "") + reply + "</section>";
   }
 
   function drawThreads(t) {
@@ -77,8 +80,8 @@ window.Pane = (function () {
   function drawInner(t) {
     var project = Store.state.projects.filter(function (p) { return p.id === t.project; })[0];
     var plan = Store.state.plans.filter(function (p) { return p.id === t.initiative; })[0];
-    return '<div class="pn-scroll"><header class="pn-head"><p class="pn-crumb"><i class="proj proj--' + project.tint + '"></i>' + esc(project.name) + (plan ? '<span class="sep"></span>' + esc(plan.name) : "") + "</p>" +
-      '<h2 class="pn-title">' + esc(t.name) + "</h2>" + drawPath(t) + "</header>" +
+    return '<div class="pn-scroll"><header class="pn-head"><p class="pn-crumb">' + esc(project.name) + (plan ? '<span class="sep"></span>' + esc(plan.name) : "") + '<span class="pn-walk" id="pn-walk"></span></p>' +
+      '<h2 class="pn-title" id="pn-title" tabindex="-1">' + esc(t.name) + "</h2>" + drawPath(t) + "</header>" +
       '<p class="pn-where">' + esc(t.where || t.now) + "</p>" +
       drawNextMove(t) +
       (t.left && !/^(nothing|everything)$/i.test(t.left) ? '<section class="pn-sec"><h4>What is left</h4><p class="pn-left">' + esc(t.left) + "</p></section>" : "") +
@@ -128,12 +131,14 @@ window.Pane = (function () {
   function show(id) {
     var t = Store.task(id);
     if (!t) return;
-    var el = document.querySelector('.card[data-id="' + id + '"]');
+    var el = document.querySelector('#lanes .card[data-id="' + id + '"], .fan .card[data-id="' + id + '"]');
     if (openId && openId !== id) {
       swap(id);
       return;
     }
+    if (openId === id) return;
     openId = id;
+    awayEl = el;
     pane.hidden = false;
     pane.classList.add("is-on");
     inner.innerHTML = drawInner(t);
@@ -155,15 +160,17 @@ window.Pane = (function () {
     paint(drive.get());
     drive.to(1, "travel");
     document.getElementById("work").classList.add("has-pane");
+    pane.querySelector(".pn-title").focus({ preventScroll: true });
   }
 
   /** Changes what the open sheet shows, when another card is chosen. */
   function swap(id) {
     var t = Store.task(id);
-    var old = document.querySelector('.card[data-id="' + openId + '"]');
-    if (old) old.classList.remove("is-away");
-    var el = document.querySelector('.card[data-id="' + id + '"]');
+    if (awayEl) awayEl.classList.remove("is-away");
+    var el = document.querySelector('#lanes .card[data-id="' + id + '"], .fan .card[data-id="' + id + '"]');
     if (el) el.classList.add("is-away");
+    awayEl = el;
+    trail.push(openId);
     openId = id;
     if (el) {
       from = cardRect(el);
@@ -184,14 +191,61 @@ window.Pane = (function () {
     inner.style.opacity = "";
     var a = inner.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: Motion.isReduced() ? 120 : 200, easing: "cubic-bezier(.2,.8,.2,1)" });
     a.onfinish = function () { inner.style.opacity = "1"; };
+    pane.querySelector(".pn-title").focus({ preventScroll: true });
+  }
+
+  /** Redraws the open details after a change, in place. */
+  function refresh() {
+    if (!openId) return;
+    var t = Store.task(openId);
+    if (!t) return hide();
+    var keep = pane.querySelector("#pn-walk");
+    var walk = keep ? keep.innerHTML : "";
+    inner.innerHTML = drawInner(t);
+    drawHolderOnSheet(t);
+    var fresh = pane.querySelector("#pn-walk");
+    if (fresh) fresh.innerHTML = walk;
+  }
+
+  /** Shows where the morning's walk stands, in the head of the details. */
+  function setWalk(at, of) {
+    var el = pane.querySelector("#pn-walk");
+    if (el) el.innerHTML = at + " of " + of + '<kbd title="Next (N)">N</kbd>';
+  }
+
+  /** Asks what the new thread should do, on one line at the foot of the details. */
+  function askThread(id) {
+    if (openId !== id) show(id);
+    var foot = pane.querySelector(".pn-foot");
+    if (!foot) return;
+    foot.innerHTML = '<form class="pn-thread" data-thread><input placeholder="What should this thread do?" aria-label="What should this thread do?"><kbd>↩</kbd></form>';
+    foot.querySelector("input").focus();
+  }
+
+  /** Goes back to the Task you came from, or closes when there is none. Esc does this. */
+  function back(done) {
+    var prev = trail.pop();
+    if (prev && Store.task(prev)) {
+      swapBack(prev);
+      return;
+    }
+    hide(done);
+  }
+
+  function swapBack(id) {
+    swap(id);
+    trail.pop();
   }
 
   /** Closes the details: the sheet folds back into its dent on the board. */
   function hide(done) {
-    if (!openId) return;
-    var id = openId;
+    if (!openId) {
+      if (done) done();
+      return;
+    }
     openId = null;
-    var el = document.querySelector('.card[data-id="' + id + '"]');
+    trail = [];
+    var el = awayEl && awayEl.isConnected ? awayEl : null;
     if (el) from = cardRect(el);
     document.getElementById("work").classList.remove("has-pane");
     drive.to(0, "travel", function () {
@@ -199,7 +253,8 @@ window.Pane = (function () {
       pane.classList.remove("is-on");
       if (ghost) ghost.remove();
       ghost = null;
-      if (el) el.classList.remove("is-away");
+      if (awayEl) awayEl.classList.remove("is-away");
+      awayEl = null;
       if (done) done();
     });
   }
@@ -212,17 +267,28 @@ window.Pane = (function () {
     clip = pane.querySelector(".pn-clip");
     inner = pane.querySelector(".pn-inner");
     drive = Motion.value(0, paint);
+    pane.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var input = e.target.querySelector("input");
+      var words = input.value.trim();
+      if (!words) return;
+      if (e.target.hasAttribute("data-reply")) Actions.answer(openId, words);
+      if (e.target.hasAttribute("data-thread")) {
+        var id = openId;
+        hide(function () { Actions.startThread(id, words); });
+      }
+    });
     pane.addEventListener("click", function (e) {
+      // Everything inside the sheet stays inside it: a click here must never close it.
+      if (e.target.closest(".pn-sheet")) e.stopPropagation();
+      var answer = e.target.closest("[data-answer]");
+      if (answer) return Actions.answer(openId, answer.dataset.answer);
       var act = e.target.closest("[data-act]");
       if (act) return Actions.run(act.dataset.act, openId);
       var open = e.target.closest("[data-open]");
       if (open) return show(open.dataset.open);
       var stage = e.target.closest("[data-stage-to]");
-      if (stage) {
-        var t = Store.task(openId);
-        Actions.moveToStage(openId, stage.dataset.stageTo);
-        inner.innerHTML = drawInner(t);
-      }
+      if (stage) Actions.moveToStage(openId, stage.dataset.stageTo);
     });
     window.addEventListener("resize", function () {
       if (openId) {
@@ -234,5 +300,5 @@ window.Pane = (function () {
     });
   }
 
-  return { mount: mount, show: show, hide: hide, currentId: currentId };
+  return { mount: mount, show: show, hide: hide, back: back, refresh: refresh, setWalk: setWalk, askThread: askThread, currentId: currentId };
 })();

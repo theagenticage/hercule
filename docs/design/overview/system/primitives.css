@@ -70,6 +70,7 @@
   --stock-carry: var(--raised);
   --lamp: oklch(1 0 0 / 0.5);
   --numeral: color-mix(in oklab, var(--brass) 52%, var(--ink));
+  --tab-ring: inset 0 0 0 1px var(--you-ink);
   --stock-flat: color-mix(in oklab, var(--raised) 46%, var(--desk));
   --stock-rim: color-mix(in oklab, var(--rim) 40%, transparent);
   --stock-rim-flat: color-mix(in oklab, var(--rim) 88%, transparent);
@@ -134,9 +135,9 @@
   gap: 4px;
   pointer-events: none;
 }
-.card-tab { font-style: normal; display: block; width: 14px; height: 9px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.28); }
+.card-tab { font-style: normal; display: block; width: 14px; height: 9px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: var(--tab-ring, inset 0 1px 0 oklch(1 0 0 / 0.28)); }
 .card-tab[data-need="think"] { width: 30px; }
-.card-tab--person { display: grid; place-items: start center; width: 17px; height: 15px; padding-top: 1px; background: color-mix(in oklab, var(--faint) 46%, var(--desk)); box-shadow: none; color: var(--ink); font-size: 9px; font-weight: var(--w-bold); line-height: 11px; }
+.card-tab--person { display: grid; place-items: start center; width: 18px; height: 16px; padding-top: 1px; background: color-mix(in oklab, var(--faint) 72%, var(--desk)); box-shadow: none; color: var(--desk); font-size: 11px; font-weight: var(--w-bold); line-height: 12px; }
 /* A colleague behind the card: the head clears the edge to just under the eyes, and two paws rest
    on the edge in front of the sheet. While it works, the paws type on the card itself. */
 .card-head { display: block; width: 30px; height: 23px; line-height: 0; overflow: hidden; filter: saturate(0.62); transition: filter var(--m-base); }

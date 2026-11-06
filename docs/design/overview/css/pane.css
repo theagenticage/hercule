@@ -44,7 +44,13 @@
 .pn-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border-radius: var(--r-btn); color: var(--muted); font-weight: var(--w-medium); white-space: nowrap; transition: background var(--m-quick), color var(--m-quick); }
 .pn-btn:hover { background: var(--hover); color: var(--ink); }
 .pn-btn kbd { background: none; color: var(--faint); padding: 0; min-width: 0; }
-.pn-btn:last-child { margin-left: auto; }
+.pn-btn--end { margin-left: auto; color: var(--faint); }
+.pn-walk { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.pn-title:focus { outline: none; }
+.pn-reply { margin-top: 10px; }
+.pn-reply input, .pn-thread input { width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-btn); outline: none; background: var(--field); box-shadow: inset 0 0 0 1px var(--rim); transition: box-shadow var(--m-quick); -webkit-user-select: text; user-select: text; }
+.pn-reply input:focus, .pn-thread input:focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
+.pn-thread { flex: 1; display: flex; align-items: center; gap: 8px; }
 .card.is-away > * { visibility: hidden; }
 .card.is-away .card-stock { outline: none; }
 .card.is-away > .card-stock { visibility: visible; background: transparent; box-shadow: var(--h-etch); }
@@ -54,7 +60,8 @@
 /* The top bar's right end. */
 .top-end { display: flex; align-items: center; gap: 8px; }
 .find { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 36px; width: 36px; padding: 0 10px; border-radius: var(--r-md); color: var(--muted); background: var(--glass-fill); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--glass-shadow); overflow: hidden; transition: width var(--m-base) var(--m-ease); }
-.find.is-on { width: 240px; }
+.find.is-on, .find:focus-within { width: 240px; }
+.find:focus-within { box-shadow: inset 0 0 0 1.5px var(--focus), var(--glass-shadow); }
 .find input { flex: 1; min-width: 0; border: 0; outline: none; background: none; }
 .icon-pill { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-md); color: var(--muted); background: var(--glass-fill); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--glass-shadow); }
 .icon-pill:hover { color: var(--ink); }
@@ -63,3 +70,12 @@
 .help h3 { margin: 0 0 8px; font: var(--type-lane); }
 .help div { display: grid; grid-template-columns: 76px 1fr; align-items: center; min-height: 24px; color: var(--muted); font: var(--type-summary); }
 .help kbd { justify-self: start; }
+
+.find-list { position: absolute; z-index: 46; right: 44px; top: 44px; width: 360px; padding: 6px; border-radius: var(--r-md); background: var(--glass-fill-raised); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
+.find-list.is-on { opacity: 1; transform: none; pointer-events: auto; }
+.find-row { display: block; width: 100%; padding: 6px 8px; border-radius: var(--r-xs); text-align: left; }
+.find-row.is-on, .find-row:hover { background: var(--hover); }
+.find-row b { display: block; font: var(--type-card); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.find-row small { display: block; color: var(--muted); font: var(--type-meta); }
+.find-none, .find-more { margin: 0; padding: 6px 8px; color: var(--muted); font: var(--type-summary); }
+.find-more { color: var(--faint); }

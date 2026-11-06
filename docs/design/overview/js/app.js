@@ -15,7 +15,10 @@
   });
   Store.loadWorld(Scenes.build(scene));
   work.dataset.scene = scene;
-  if (scene === "offline") work.classList.add("is-offline");
+  if (scene === "offline") {
+    work.classList.add("is-offline");
+    Store.state.offline = true;
+  }
 
   var replay = scene === "today" && q.get("replay") !== "off";
   if (scene === "today") {
@@ -59,6 +62,8 @@
     if (lens) return Lens.toggle(lens.dataset.lens);
     var bead = e.target.closest(".bead[data-id]");
     if (bead) return Pane.show(bead.dataset.id);
+    var wire = e.target.closest(".wire");
+    if (wire && wire.dataset.key.indexOf("wire:plan-") === 0) return Fold.togglePlan(wire.dataset.key.slice(10));
     var card = e.target.closest(".card[data-id]");
     if (card) {
       if (MergePick.isActive()) return MergePick.finish(card.dataset.id);
@@ -68,7 +73,7 @@
       return;
     }
     if (e.target.closest("[data-first-thread]")) return Welcome.startFirst();
-    if (Pane.currentId() && !e.target.closest(".pn-sheet")) Pane.hide();
+    if (Pane.currentId()) Pane.hide();
   });
   var lead = document.getElementById("lead");
   lead.addEventListener("pointerover", function (e) {
@@ -91,6 +96,7 @@
       var t = Store.task(bead.dataset.id);
       if (!t) return;
       peek.innerHTML = "<b>" + Board.esc(t.name) + "</b><span>" + Board.esc(t.now || "") + "</span><small>" + Board.esc(Store.describeNeed(t)) + "</small>";
+      peek.setAttribute("aria-hidden", "true");
       var r = bead.getBoundingClientRect();
       peek.style.left = Math.min(innerWidth - 262, Math.max(280, r.left - 20)) + "px";
       peek.style.top = r.top - peek.offsetHeight - 10 + "px";
@@ -107,9 +113,13 @@
   document.querySelector("[data-side]").addEventListener("pointerleave", function () {
     document.querySelectorAll(".is-called").forEach(function (c) { c.classList.remove("is-called"); });
   });
-  document.querySelector("[data-side]").addEventListener("click", function (e) {
+  function openFromRow(e) {
     var row = e.target.closest("[data-task]");
     if (row && row.dataset.task) Pane.show(row.dataset.task);
+  }
+  document.querySelector("[data-side]").addEventListener("click", openFromRow);
+  document.querySelector("[data-side]").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") openFromRow(e);
   });
 
   // A blocked card points at what holds it, while the pointer rests on it. The line is a passing
@@ -139,13 +149,20 @@
     if (act.dataset.display !== "wear") display.classList.remove("is-on");
   });
   document.getElementById("wear-switch").addEventListener("change", Display.toggleWear);
-  window.addEventListener("click", function () { display.classList.remove("is-on"); });
+  window.addEventListener("click", function (e) {
+    display.classList.remove("is-on");
+    if (!e.target.closest("#help")) document.getElementById("help").classList.remove("is-on");
+  });
 
   if (q.get("wear")) {
     Store.state.wear = true;
     document.getElementById("wear-switch").checked = true;
     Board.draw();
   }
+
+  // One tab stop leads onto the board; from there the arrows walk it.
+  var firstCard = document.querySelector("#lanes .card");
+  if (firstCard) firstCard.tabIndex = 0;
 
   if (scene === "loading") Welcome.playLoading();
   if (replay) {

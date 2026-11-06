@@ -80,10 +80,19 @@ window.Board = (function () {
   function drawCardInner(t) {
     var holder = Store.decideHolder(t);
     var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 11) + "</span>" : "";
-    var meta = '<span class="card-meta">' + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></span>";
-    var ask = t.ask && t.move === "you" ? '<div class="card-words card-words--ask">' + meta + '<p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
+    var sync = t.pendingSync ? '<span class="card-sync" title="Waits to sync">' + Crew.icon("clock", 11) + "</span>" : "";
+    var meta = '<span class="card-meta">' + sync + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></span>";
+    var ask = t.ask && t.move === "you" ? '<div class="card-words card-words--ask" aria-hidden="true">' + meta + '<p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
     return drawHolder(holder) + '<i class="card-stock"></i><i class="card-check">' + Crew.icon("check", 12) + "</i>" +
-      '<div class="card-words card-words--rest">' + meta + '<p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + ask;
+      '<div class="card-words card-words--rest" aria-hidden="true">' + meta + '<p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + ask;
+  }
+
+  /** Returns a card in words, in the order a person needs them, for a screen reader. */
+  function describeCard(t) {
+    var stage = NW.STAGES.filter(function (s) { return s.id === t.stage; })[0].name;
+    var h = Store.decideHolder(t);
+    var who = h.kind === "you" ? "Wants you, " + (t.need === "think" ? "real thinking" : "a quick call") : h.kind === "agent" ? (h.pose === "waiting" ? "An agent asks you" : "An agent is working on it") : h.kind === "person" ? "With " + h.name : Store.isBlocked(t) ? Store.describeNeed(t) : "Nobody has the next move";
+    return [t.name, who, stage, t.summaryPending ? "Summary being written" : t.now, t.move === "you" ? t.ask : "", (t.stalled ? "Stalled, " : "") + NW.formatAge(t.age) + " old"].filter(Boolean).join(". ") + ".";
   }
 
   /** Draws or updates one Task's card and returns its element. */
@@ -95,6 +104,7 @@ window.Board = (function () {
       el.setAttribute("role", "button");
     }
     setHTML(el, drawCardInner(t));
+    el.setAttribute("aria-label", describeCard(t));
     el.dataset.height = Store.decideHeight(t);
     el.dataset.stalled = t.stalled ? "1" : "";
     var wear = Store.state.wear ? decideWear(t) : 0;
@@ -160,6 +170,8 @@ window.Board = (function () {
     var cell = node("cell:" + key + ":" + stage, "div", "cell");
     cell.dataset.stage = stage;
     cell.dataset.owner = key;
+    cell.setAttribute("role", "group");
+    cell.setAttribute("aria-label", NW.STAGES.filter(function (s) { return s.id === stage; })[0].name + ", " + tasks.length + (tasks.length === 1 ? " card" : " cards"));
     var arranged = Store.arrangeCell(tasks, stage, key);
     var kids = arranged.cards.map(drawCard).concat(arranged.piles.map(drawPile));
     cell._piles = arranged.piles;
@@ -190,6 +202,8 @@ window.Board = (function () {
     var b = node("bead:" + t.id, "i", "bead");
     b.dataset.id = t.id;
     b.dataset.kind = decideBeadKind(t);
+    b.setAttribute("role", "button");
+    b.setAttribute("aria-label", describeCard(t));
     b.classList.toggle("is-off", Store.isFiltering() && !Store.matches(t));
     return b;
   }
@@ -231,7 +245,7 @@ window.Board = (function () {
     var done = plan.done / plan.total;
     var moving = tasks.filter(function (t) { return t.stage === "reviewing" || t.stage === "building"; }).length / plan.total;
     moving = Math.min(moving, 1 - done);
-    return '<span class="bullet" role="img" aria-label="' + plan.done + " of " + plan.total + '"><i class="bullet-done" style="width:' + (done * 100).toFixed(1) + '%"></i><i class="bullet-moving" style="left:' + (done * 100).toFixed(1) + "%;width:" + (moving * 100).toFixed(1) + '%"></i></span><small class="bullet-words">' + plan.done + " of " + plan.total + "</small>";
+    return '<span class="bullet" aria-hidden="true"><i class="bullet-done" style="width:' + (done * 100).toFixed(1) + '%"></i><i class="bullet-moving" style="left:' + (done * 100).toFixed(1) + "%;width:" + (moving * 100).toFixed(1) + '%"></i></span><small class="bullet-words">' + plan.done + " of " + plan.total + "</small>";
   }
 
   function drawPlan(plan) {
@@ -270,10 +284,8 @@ window.Board = (function () {
     var loose = all.filter(function (t) { return !t.initiative; });
     var plans = st.plans.filter(function (i) { return i.project === p.id; });
     var mine = all.filter(function (t) { return t.move === "you" && !Store.isBlocked(t) && t.stage !== "landed"; }).length;
-    var head = node("lanehead:" + p.id, "button", "lane-head");
-    head.dataset.foldLane = p.id;
-    head.setAttribute("aria-expanded", !folded);
-    setHTML(head, "<h3>" + esc(p.name) + "</h3>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + all.length + " in all</small>" + '<span class="chev">' + Crew.icon("chev-d", 12) + "</span>");
+    var head = node("lanehead:" + p.id, "h3", "lane-head");
+    setHTML(head, '<button class="lane-btn" data-fold-lane="' + esc(p.id) + '" aria-expanded="' + !folded + '"><span class="lane-name">' + esc(p.name) + "</span>" + (mine ? '<span class="lane-need">' + mine + " want" + (mine === 1 ? "s" : "") + " you</span>" : "") + '<small class="lane-total">' + all.length + " in all</small>" + '<span class="chev">' + Crew.icon("chev-d", 12) + "</span></button>");
     var kids = [head];
     if (folded) {
       kids.push(drawWire("lane-" + p.id, all));
@@ -317,7 +329,7 @@ window.Board = (function () {
     var c = Store.countAttention();
     var st = Store.state;
     function lens(key, html) {
-      return '<button class="lens' + (st.lens === key ? " is-on" : "") + '" data-lens="' + key + '">' + html + "</button>";
+      return '<button class="lens' + (st.lens === key ? " is-on" : "") + '" aria-pressed="' + (st.lens === key) + '" data-lens="' + key + '">' + html + "</button>";
     }
     var line = "";
     var scene = document.getElementById("work").dataset.scene;
@@ -355,6 +367,8 @@ window.Board = (function () {
     }).map(drawLane));
     work.dataset.lens = Store.state.lens || "";
     work.classList.toggle("is-filtering", Store.isFiltering());
+    var status = document.getElementById("board-status");
+    if (status) status.textContent = Store.isFiltering() ? Store.state.tasks.filter(Store.matches).length + " of " + Store.state.tasks.length + " match" : "";
     work.classList.toggle("has-wear", Store.state.wear);
   }
 
@@ -389,10 +403,13 @@ window.Board = (function () {
     lanesEl.querySelectorAll(".card[data-id]").forEach(function (el) {
       before[el.dataset.id] = { el: el, rect: el.getBoundingClientRect() };
     });
+    var active = document.activeElement;
     Motion.flip(movables(), function () {
       if (mutate) mutate();
       draw();
     }, opts);
+    // Moving a card in the page drops its focus. Whoever was on it stays on it.
+    if (active && active !== document.activeElement && active.isConnected) active.focus({ preventScroll: true });
     if (opts.quietExits) return;
     Object.keys(before).forEach(function (id) {
       var b = before[id];

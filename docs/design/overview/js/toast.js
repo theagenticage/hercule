@@ -24,8 +24,9 @@ window.Toast = (function () {
   /** Puts the last change back: the board plays the same motion in reverse. */
   function doUndo() {
     var label = null;
-    Board.change(function () { label = Store.undo(); }, { spring: "hand" });
-    hide();
+    Board.change(function () { label = Store.undo(); }, { spring: "travel" });
+    Pane.refresh();
+    show(label ? "Put back: " + label : "Nothing to undo.", false);
     return label;
   }
 

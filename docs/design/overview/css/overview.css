@@ -1,8 +1,9 @@
 /* PROTOTYPE - the Overview: its switcher, the Office beside Work, the later views, the tray. */
 .switch { position: relative; display: inline-flex; gap: 2px; }
-.puck { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 8px; background: var(--selected); pointer-events: none; }
+.puck { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 8px; background: var(--selected); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent); pointer-events: none; }
 .switch-tab.ptab { position: relative; gap: 6px; padding: 0 10px 0 8px; }
-.switch-tab.ptab.is-on { background: none; }
+.switch-tab.ptab.is-on { background: none; color: var(--ink); }
+.switch-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .switch-tab .ic { color: var(--faint); transition: color var(--m-quick); }
 .switch-tab.is-on .ic { color: var(--muted); }
 
@@ -34,6 +35,7 @@
 .later-track i { position: absolute; margin-left: 300px; height: 6px; border-radius: 3px; background: var(--muted); max-width: calc(100% - 300px); }
 
 /* ---------- The Display menu ---------- */
+.menu:not(.is-on) { visibility: hidden; }
 .menu { position: absolute; z-index: 45; right: 0; top: 44px; width: 264px; padding: 6px; border-radius: var(--r-md); background: var(--glass-fill-raised); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
 .menu.is-on { opacity: 1; transform: none; pointer-events: auto; }
 .menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 32px; padding: 6px 8px; border-radius: var(--r-xs); text-align: left; font-weight: var(--w-medium); }
@@ -42,7 +44,7 @@
 .menu-row small { display: block; color: var(--muted); font: var(--type-summary); }
 .menu-row b { font-weight: var(--w-medium); }
 .menu-row input { position: absolute; opacity: 0; }
-.switch-track { flex: none; position: relative; width: 30px; height: 18px; border-radius: 9px; background: color-mix(in oklab, var(--ink) 16%, transparent); transition: background var(--m-quick); }
+.switch-track { flex: none; position: relative; width: 30px; height: 18px; border-radius: 9px; background: color-mix(in oklab, var(--ink) 52%, transparent); transition: background var(--m-quick); }
 .switch-track::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--raised); box-shadow: var(--shadow-1); transition: transform var(--m-base) var(--m-settle); }
 input:checked + .switch-track { background: var(--accent); }
 input:checked + .switch-track::after { transform: translateX(12px); }

@@ -9,7 +9,7 @@ window.Shell = (function () {
   }
 
   function waitingRow(name, ask, id) {
-    return '<div class="side-row" data-task="' + (id || "") + '">' + Crew.face(name, { pose: "waiting", size: 24 }) + '<span class="side-text"><span class="side-name">' + name + '</span><span class="side-ask">' + ask + "</span></span></div>";
+    return '<div class="side-row" role="button" tabindex="0" data-task="' + (id || "") + '">' + Crew.face(name, { pose: "waiting", size: 24 }) + '<span class="side-text"><span class="side-name">' + name + '</span><span class="side-ask">' + ask + "</span></span></div>";
   }
 
   /** Draws the Hercule face of the sidebar into el. opts: selected row key, and the waiting rows. */
