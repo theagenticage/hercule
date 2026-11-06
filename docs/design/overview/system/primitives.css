@@ -134,7 +134,7 @@
   position: absolute;
   z-index: -2;
   right: 14px;
-  bottom: calc(100% - 4px);
+  bottom: calc(100% - 3px);
   display: flex;
   align-items: flex-end;
   gap: 4px;
@@ -143,5 +143,5 @@
 .card-tab { display: block; width: 14px; height: 9px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.28); }
 .card-tab[data-need="think"] { width: 30px; }
 .card-tab--person { display: grid; place-items: start center; width: 17px; height: 15px; padding-top: 1px; background: color-mix(in oklab, var(--faint) 46%, var(--desk)); box-shadow: none; color: var(--ink); font-size: 9px; font-weight: var(--w-bold); line-height: 11px; }
-.card-head { display: block; width: 26px; height: 18px; overflow: hidden; line-height: 0; }
-.card-head .cr { display: block; overflow: hidden; }
+.card-head { display: block; width: 26px; line-height: 0; margin-bottom: -2px; }
+.card-head .cr { display: block; overflow: visible; }

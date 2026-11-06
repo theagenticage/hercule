@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-theme="orient-express">
+<head>
+<meta charset="utf-8">
+<title>Hercule: Overview</title>
+<script src="../shared/page.js"></script>
+<link rel="stylesheet" href="system/tokens.css">
+<link rel="stylesheet" href="system/base.css">
+<link rel="stylesheet" href="system/primitives.css">
+<link rel="stylesheet" href="css/work.css">
+<link rel="stylesheet" href="css/pane.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside data-side></aside>
+  <main class="main">
+    <div class="top">
+      <div class="pill" id="switcher"></div>
+      <div class="top-end">
+        <label class="find" id="find" title="Find (/)"><span id="find-icon"></span><input placeholder="Find on the board" aria-label="Find on the board"></label>
+        <button class="icon-pill" id="keys-btn" title="Keys (?)"></button>
+      </div>
+    </div>
+    <section class="view work" id="work">
+      <div class="work-scroll" id="scroll">
+        <div class="work-canvas" id="canvas">
+          <header class="lead" id="lead"></header>
+          <div class="rule-wrap"><div class="rule" id="rule"></div><i class="rule-mark" id="rule-mark"></i></div>
+          <div id="lanes"></div>
+          <div class="flight" id="flight"></div>
+        </div>
+      </div>
+      <div class="fan-layer" id="fan-layer"></div>
+      <div class="pane" id="pane" hidden><div class="pn-sheet" role="dialog" aria-label="Task details"><div class="pn-inner"></div></div></div>
+      <div class="toast" id="toast" role="status"></div>
+      <div class="help" id="help"></div>
+    </section>
+  </main>
+</div>
+<div class="carry" id="carry"></div>
+<script src="system/brands.js"></script>
+<script src="system/faces.js"></script>
+<script src="../work-views/data.js"></script>
+<script src="js/world.js"></script>
+<script src="js/shell.js"></script>
+<script src="js/motion.js"></script>
+<script src="js/store.js"></script>
+<script src="js/board.js"></script>
+<script src="js/fold.js"></script>
+<script src="js/fan.js"></script>
+<script src="js/toast.js"></script>
+<script src="js/drag.js"></script>
+<script src="js/pane.js"></script>
+<script src="js/actions.js"></script>
+<script src="js/keys.js"></script>
+<script>
+  Shell.drawSidebar(document.querySelector("[data-side]"), { inboxCount: 6 });
+  document.getElementById("switcher").innerHTML = '<h1 class="pill-title">Overview</h1><button class="ptab">Office</button><button class="ptab is-on">Work</button>';
+  Store.loadWorld(NW.buildToday());
+  Board.mount();
+  Drag.mount();
+  Pane.mount();
+  Keys.mount();
+  Find.mount();
+  document.getElementById("find-icon").innerHTML = Crew.icon("search", 16);
+  document.getElementById("keys-btn").innerHTML = Crew.icon("question", 16);
+  document.getElementById("keys-btn").addEventListener("click", Help.toggle);
+  var scroll = document.getElementById("scroll");
+  scroll.addEventListener("scroll", function () {
+    document.querySelector(".rule-wrap").classList.toggle("is-stuck", scroll.scrollTop > 72);
+  }, { passive: true });
+  document.getElementById("work").addEventListener("click", function (e) {
+    var lane = e.target.closest("[data-fold-lane]");
+    if (lane) return Fold.toggleLane(lane.dataset.foldLane);
+    var plan = e.target.closest("[data-fold-plan]");
+    if (plan) return Fold.togglePlan(plan.dataset.foldPlan);
+    var pile = e.target.closest(".pile");
+    if (pile) return Fan.show(pile);
+    if (Fan.isOpen() && !e.target.closest(".card")) return Fan.hide();
+    var lens = e.target.closest(".lens[data-lens]");
+    if (lens) return Lens.toggle(lens.dataset.lens);
+    var card = e.target.closest(".card[data-id]");
+    if (card) {
+      if (MergePick.isActive()) return MergePick.finish(card.dataset.id);
+      Keys.focusCard(card);
+      Pane.show(card.dataset.id);
+      return;
+    }
+    if (Pane.currentId() && !e.target.closest(".pn-sheet")) Pane.hide();
+  });
+  document.getElementById("lead").addEventListener("pointerover", function (e) {
+    var lens = e.target.closest(".lens[data-lens]");
+    if (lens) Lens.preview(lens.dataset.lens);
+  });
+  document.getElementById("lead").addEventListener("pointerleave", function () { Lens.preview(null); });
+</script>
+</body>
+</html>

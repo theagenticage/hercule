@@ -127,5 +127,32 @@ window.NW = (function () {
     });
   }
 
-  return { PROJECTS: PROJECTS, STAGES: STAGES, buildTasks: buildTasks, formatAge: formatAge };
+  // The reviews handed to the review workflow: a stream of the same work, each with its own thread.
+  var REVIEWER = "Review workflow";
+  var HANDED = ["rv-6238", "rv-6241", "rv-6252", "rv-6255", "rv-6257", "rv-6258", "rv-6260", "rv-6263", "rv-6266"];
+
+  /** Returns today's world: every Task of the lo-fi, with its links and holders. */
+  function buildToday() {
+    var tasks = buildTasks();
+    var byId = {};
+    tasks.forEach(function (t) { byId[t.id] = t; });
+    HANDED.forEach(function (id) {
+      byId[id].agent = REVIEWER + " " + id;
+      byId[id].move = "agent";
+      byId[id].need = "look";
+    });
+    RELATIONS.forEach(function (r) {
+      if (r.kind !== "blockedBy" || !byId[r.from] || !byId[r.to]) return;
+      byId[r.from].blockedBy = (byId[r.from].blockedBy || []).concat([r.to]);
+    });
+    return {
+      projects: PROJECTS.slice(),
+      plans: INITIATIVES.map(function (i) { return Object.assign({}, i); }),
+      tasks: tasks,
+      folded: { "field-app": true, Insights: true },
+      openPlans: {},
+    };
+  }
+
+  return { PROJECTS: PROJECTS, STAGES: STAGES, buildTasks: buildTasks, buildToday: buildToday, formatAge: formatAge };
 })();
