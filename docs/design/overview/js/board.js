@@ -58,7 +58,7 @@ window.Board = (function () {
 
   /** Returns how the age reads: it darkens as a thing that wants you waits, and only then. */
   function decideAgeTone(t) {
-    if (t.move !== "you" || t.stage === "landed") return "";
+    if (t.move !== "you" || t.stage === "landed" || Store.isBlocked(t)) return "";
     if (t.age >= 14) return "old";
     if (t.age >= 7) return "stale";
     return "";
@@ -82,9 +82,9 @@ window.Board = (function () {
     var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 11) + "</span>" : "";
     var sync = t.pendingSync ? '<span class="card-sync" title="Waits to sync">' + Crew.icon("clock", 11) + "</span>" : "";
     var meta = '<span class="card-meta">' + sync + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></span>";
-    var ask = t.ask && t.move === "you" ? '<div class="card-words card-words--ask" aria-hidden="true">' + meta + '<p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
+    var ask = t.ask && t.move === "you" ? '<div class="card-words card-words--ask" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
     return drawHolder(holder) + '<i class="card-stock"></i><i class="card-check">' + Crew.icon("check", 12) + "</i>" +
-      '<div class="card-words card-words--rest" aria-hidden="true">' + meta + '<p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + ask;
+      '<div class="card-words card-words--rest" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + meta + ask;
   }
 
   /** Returns a card in words, in the order a person needs them, for a screen reader. */
@@ -139,18 +139,18 @@ window.Board = (function () {
     el.dataset.kind = p.kind;
     el.dataset.height = p.kind === "landed" ? "etch" : p.tasks.some(function (t) { return t.move === "you" && !Store.isBlocked(t); }) ? "stand" : "flat";
     el.style.setProperty("--sheets", sheets);
-    var title = p.kind === "more" ? n + " more" : p.title;
-    var count = p.kind === "more" ? "" : '<em>' + n + "</em>";
+    var title = p.kind === "more" ? n + " more" : p.kind === "landed" ? n + " this week" : p.title;
+    var count = p.kind === "more" || p.kind === "landed" ? "" : '<em>' + n + "</em>";
     var hits = Store.isFiltering() ? p.tasks.filter(Store.matches).length : n;
     el.classList.toggle("is-off", Store.isFiltering() && hits === 0);
-    var line = Store.isFiltering() && hits ? hits + " of " + n + " match" : Store.describePile(p);
+    var line = Store.isFiltering() && hits ? hits + " of " + n + " match" : p.kind === "landed" ? "" : Store.describePile(p);
     var sources = {};
     p.tasks.forEach(function (t) { if (t.source) sources[t.source] = true; });
     var marks = Object.keys(sources).slice(0, 2).map(function (x) { return '<span class="card-src">' + Crew.brand(x, 11) + "</span>"; }).join("");
     var fresh = p.tasks.reduce(function (m, t) { return Math.min(m, t.age); }, 1e4);
     var html = drawPileHolder(p);
     for (var i = sheets; i >= 1; i--) html += '<i class="pile-sheet" style="--n:' + i + '"></i>';
-    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + '</span><span class="card-meta pile-meta">' + marks + "<time>" + NW.formatAge(fresh) + "</time></span>";
+    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + "</span>" + (p.kind === "landed" ? "" : '<span class="card-meta pile-meta">' + marks + "<time>" + NW.formatAge(fresh) + "</time></span>");
     setHTML(el, html);
     return el;
   }
@@ -365,11 +365,22 @@ window.Board = (function () {
     place(lanesEl, emptyWorld ? [] : Store.state.projects.filter(function (p) {
       return p.id !== "" || Store.state.tasks.some(function (t) { return t.project === ""; });
     }).map(drawLane));
+    markLongTitles();
     work.dataset.lens = Store.state.lens || "";
     work.classList.toggle("is-filtering", Store.isFiltering());
     var status = document.getElementById("board-status");
     if (status) status.textContent = Store.isFiltering() ? Store.state.tasks.filter(Store.matches).length + " of " + Store.state.tasks.length + " match" : "";
     work.classList.toggle("has-wear", Store.state.wear);
+  }
+
+  /** Marks each card whose title takes two lines, so its summary gets one line and an ellipsis. */
+  function markLongTitles() {
+    var reads = [];
+    lanesEl.querySelectorAll(".card[data-id]").forEach(function (c) {
+      var title = c.querySelector(".card-words--rest .card-title");
+      if (title) reads.push([c, title.offsetHeight > 20]);
+    });
+    reads.forEach(function (r) { r[0].classList.toggle("has-long-title", r[1]); });
   }
 
   /** Lists the moving parts currently on the page, for FLIP. */
@@ -424,6 +435,8 @@ window.Board = (function () {
   }
 
   function mount() {
+    window.addEventListener("resize", markLongTitles);
+    document.fonts.ready.then(markLongTitles);
     lanesEl = document.getElementById("lanes");
     ruleEl = document.getElementById("rule");
     leadEl = document.getElementById("lead");
@@ -450,5 +463,5 @@ window.Board = (function () {
     return found;
   }
 
-  return { mount: mount, locate: locate, draw: draw, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
+  return { mount: mount, locate: locate, draw: draw, markLongTitles: markLongTitles, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
 })();

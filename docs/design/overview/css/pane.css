@@ -29,11 +29,12 @@
 .pn-who b { color: var(--ink); font-weight: var(--w-medium); }
 .pn-who .card-tab { border-radius: 3px; height: 8px; flex: none; }
 .pn-initial { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in oklab, var(--faint) 40%, var(--stock)); color: var(--ink); font-size: var(--t-11); font-weight: var(--w-bold); }
-.pn-ask { margin: 8px 0 0; font-size: var(--t-14); line-height: 21px; color: var(--you-ink); }
+.pn-ask { margin: 10px 0 0; font-size: 17px; line-height: 24px; font-weight: var(--w-bold); letter-spacing: -0.008em; color: var(--ink); }
 .pn-answers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .pn-answer { display: inline-flex; align-items: center; height: 30px; padding: 0 11px; border-radius: var(--r-btn); box-shadow: inset 0 0 0 1px var(--rim); font-weight: var(--w-medium); transition: background var(--m-quick); }
 .pn-answer:hover { background: var(--hover); }
-.pn-answer.is-suggested { box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent-ink); }
+.pn-answer.is-suggested { background: var(--accent); color: var(--accent-fg); box-shadow: none; }
+.pn-answer.is-suggested:hover { background: color-mix(in oklab, var(--accent) 88%, var(--ink)); }
 .pn-left { margin: 0; line-height: 19px; color: var(--ink); }
 .pn-row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 32px; margin: 0 -8px; padding: 4px 8px; width: calc(100% + 16px); border-radius: var(--r-sm); text-align: left; transition: background var(--m-quick); }
 .pn-row:hover { background: var(--hover); }

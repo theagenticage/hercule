@@ -18,20 +18,20 @@
   --numeral: var(--brass);
 
   /* ---- Card stock. --stock is the sheet itself; the rest are its edges. */
-  --stock: oklch(from var(--raised) calc(l + 0.034) c h);
-  --stock-carry: oklch(from var(--raised) calc(l + 0.07) c h);
+  --stock: oklch(from var(--raised) calc(l + 0.068) c h);
+  --stock-carry: oklch(from var(--raised) calc(l + 0.1) c h);
   --stock-flat: color-mix(in oklab, var(--raised) 26%, var(--desk));
   --stock-rim: color-mix(in oklab, var(--rim) 80%, transparent);
   --stock-rim-flat: color-mix(in oklab, var(--rim) 62%, transparent);
   --stock-lit: color-mix(in oklab, white 7%, transparent);
-  --stock-press: color-mix(in oklab, var(--sunken) 88%, var(--desk));
+  --stock-press: color-mix(in oklab, var(--sunken) 42%, var(--desk));
 
   /* ---- Heights: the box-shadow of each. Dark values; the light themes follow below. */
   --h-stand: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 3px 6px -2px oklch(0 0 0 / 0.28), 0 10px 20px -10px oklch(0 0 0 / 0.34);
   --h-hover: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 6px 10px -3px oklch(0 0 0 / 0.3), 0 16px 28px -12px oklch(0 0 0 / 0.42);
   --h-carry: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0 0 0 / 0.26), 0 14px 20px -6px oklch(0 0 0 / 0.36), 0 36px 56px -18px oklch(0 0 0 / 0.56);
   --h-flat: none;
-  --h-press: inset 0 1px 3px oklch(0 0 0 / 0.3);
+  --h-press: inset 0 1px 3px oklch(0 0 0 / 0.16);
   --h-etch: none;
 
   /* ---- Type roles, on the app's scale. */
@@ -47,7 +47,7 @@
   --card-pad-x: 12px;
   --card-pad-y: 10px;
   --card-h: 88px;
-  --card-gap: 16px;
+  --card-gap: 22px;
 
   /* ---- Motion. MOTION.md says where each is used. */
   --m-press: 80ms;
@@ -70,16 +70,16 @@
   --stock-carry: var(--raised);
   --lamp: oklch(1 0 0 / 0.5);
   --numeral: color-mix(in oklab, var(--brass) 52%, var(--ink));
-  --tab-ring: inset 0 0 0 1px var(--you-ink);
-  --stock-flat: color-mix(in oklab, var(--raised) 46%, var(--desk));
+  --tab-ring: inset 0 0 0 1px color-mix(in oklab, var(--you-ink) 42%, var(--you));
+  --stock-flat: color-mix(in oklab, var(--raised) 15%, var(--desk));
   --stock-rim: color-mix(in oklab, var(--rim) 40%, transparent);
   --stock-rim-flat: color-mix(in oklab, var(--rim) 88%, transparent);
   --stock-lit: oklch(1 0 0 / 0.9);
   --stock-press: color-mix(in oklab, var(--sunken) 80%, var(--desk));
-  --h-stand: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.06), 0 2px 5px -1px oklch(0.3 0.03 70 / 0.08), 0 8px 20px -6px oklch(0.3 0.03 70 / 0.18);
+  --h-stand: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.06), 0 2px 5px -1px oklch(0.3 0.03 70 / 0.09), 0 8px 20px -6px oklch(0.3 0.03 70 / 0.28);
   --h-hover: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.06), 0 5px 9px -2px oklch(0.3 0.03 70 / 0.1), 0 16px 28px -10px oklch(0.3 0.03 70 / 0.26);
   --h-carry: inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0.3 0.03 70 / 0.08), 0 14px 20px -6px oklch(0.3 0.03 70 / 0.16), 0 36px 56px -18px oklch(0.3 0.03 70 / 0.34);
-  --h-press: inset 0 1px 3px oklch(0.3 0.03 70 / 0.14);
+  --h-press: inset 0 1px 3px oklch(0.3 0.03 70 / 0.07);
 }
 
 /* ---------- The card ----------
@@ -108,17 +108,20 @@
 .card[data-height="press"] .card-stock { background: var(--stock-press); box-shadow: var(--h-press); }
 .card[data-height="etch"] .card-stock { background: transparent; box-shadow: var(--h-etch); }
 
-/* Words. The title takes up to two lines and the summary the rest, four lines in all. The age sits
-   at the bottom right, and the text flows around it, so there is no foot row taking a line. The
-   height never changes, so a new summary can never move a neighbour. */
-.card-words { position: relative; height: 68px; overflow: hidden; font: var(--type-summary); color: var(--muted); }
-.card-words::before { content: ""; float: right; width: 0; height: 52px; }
-.card-meta { float: right; clear: right; display: inline-flex; align-items: center; gap: 5px; height: 16px; margin-left: 8px; font: var(--type-meta); color: var(--faint); font-variant-numeric: tabular-nums; }
+/* Words. A title of up to two lines, then a summary of a few words, three lines in all. The age sits
+   on its own at the bottom right. The height never changes, so a new summary can never move a
+   neighbour. The summary writer is held to about six words, which is what makes this work. */
+.card-words { position: relative; height: 54px; overflow: hidden; font: var(--type-summary); color: var(--muted); }
+.card-meta { position: absolute; right: var(--card-pad-x); bottom: 8px; display: inline-flex; align-items: center; gap: 5px; height: 16px; font: var(--type-meta); color: var(--faint); font-variant-numeric: tabular-nums; }
 .card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; font: var(--type-card); color: var(--ink); letter-spacing: -0.003em; text-wrap: pretty; }
-.card-now { margin: 0; text-wrap: pretty; }
+.card-now { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 2px 0 0; text-wrap: pretty; }
+.card.has-long-title .card-words--rest .card-now { -webkit-line-clamp: 1; }
 .card[data-height="flat"] .card-title { color: color-mix(in oklab, var(--ink) 80%, var(--muted)); }
 .card[data-height="press"] .card-title { color: var(--muted); }
 .card[data-height="etch"] .card-title { color: var(--faint); font-weight: var(--w-regular); }
+/* A landed card has no sheet, so its words stand on the column's left edge, under its stage name. */
+.card[data-height="etch"] { padding-left: 0; padding-right: 0; }
+.card[data-height="etch"] .card-meta { right: 0; }
 
 /* ---------- Who holds it: the top edge ----------
    The top edge is one slot. What stands behind it says who has the next move, before a word is
@@ -135,12 +138,12 @@
   gap: 4px;
   pointer-events: none;
 }
-.card-tab { font-style: normal; display: block; width: 14px; height: 9px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: var(--tab-ring, inset 0 1px 0 oklch(1 0 0 / 0.28)); }
-.card-tab[data-need="think"] { width: 30px; }
+.card-tab { font-style: normal; display: block; width: 18px; height: 12px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: var(--tab-ring, inset 0 1px 0 oklch(1 0 0 / 0.28)); }
+.card-tab[data-need="think"] { width: 40px; }
 .card-tab--person { display: grid; place-items: start center; width: 18px; height: 16px; padding-top: 1px; background: color-mix(in oklab, var(--faint) 72%, var(--desk)); box-shadow: none; color: var(--desk); font-size: 11px; font-weight: var(--w-bold); line-height: 12px; }
 /* A colleague behind the card: the head clears the edge to just under the eyes, and two paws rest
    on the edge in front of the sheet. While it works, the paws type on the card itself. */
-.card-head { display: block; width: 30px; height: 23px; line-height: 0; overflow: hidden; filter: saturate(0.62); transition: filter var(--m-base); }
+.card-head { display: block; width: 30px; height: 23px; line-height: 0; margin-bottom: 1px; overflow: hidden; filter: saturate(0.62); transition: filter var(--m-base); }
 .card:hover .card-head, .card:focus-visible .card-head { filter: none; }
 .card-head .cr { display: block; overflow: visible; }
 .card-paws { position: absolute; z-index: 1; right: 17px; top: -2.5px; display: flex; gap: 10px; pointer-events: none; }

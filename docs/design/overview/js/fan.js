@@ -26,7 +26,7 @@ window.Fan = (function () {
     var left = stages[0].left;
     var right = stages[3].right;
     var cols = Math.min(4, pile.tasks.length);
-    var gapY = 16, head = 40;
+    var gapY = 22, head = 40;
     var rows = Math.ceil(pile.tasks.length / cols);
     var hFull = rows * 88 + (rows - 1) * gapY + head + 8;
     var h = Math.min(hFull, main.height - 96);

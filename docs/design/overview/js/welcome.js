@@ -9,7 +9,7 @@ window.Welcome = (function () {
       return '<div class="grid welcome-grid"><div class="cell"><article class="card welcome-card" data-height="stand"><span class="card-holder"><span class="card-head">' + Crew.peek("Hercule", { pose: "idle", size: 30, crop: 34 }) + '</span></span><i class="card-stock"></i><div class="card-words"><p class="card-title">Start your first thread</p><p class="card-now">Its Task will land here by itself, and you can drag it along as it grows.</p></div></article></div></div>' +
         '<div class="welcome"><button class="welcome-btn" data-first-thread>' + Crew.icon("compose", 14) + 'Start a thread<kbd>⌘N</kbd></button></div>';
     }
-    return '<div class="welcome welcome--clear">' + Crew.face("Hercule", { pose: "idle", size: 84 }) + '<p class="welcome-line">Nothing wants you. The crew is at rest.</p></div>';
+    return '<div class="welcome-landed"><span>12 this week</span></div><div class="welcome welcome--clear">' + Crew.face("Hercule", { pose: "idle", size: 84 }) + '<p class="welcome-line">Nothing wants you. The crew is at rest.</p></div>';
   }
 
   function startFirst() {
