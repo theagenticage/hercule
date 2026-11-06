@@ -124,20 +124,28 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* Under the name: mark (15px) and the gap (7px) over, to line up with it. */
-.pa-card-identity {
-  padding-left: 22px;
-  color: var(--faint);
-  font-size: var(--t-11);
-}
-.pa-card-reach {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding-left: 22px;
+/* Under the name, flush left with the gauge: who is signed in, then the plan,
+   each on a line of its own that ends in an ellipsis when it is too long. */
+.pa-card-line {
+  min-width: 0;
+  overflow: hidden;
   color: var(--faint);
   font-size: var(--t-11);
   white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The last line also holds where the account works, at its right end. The
+   text gives way to it first, and it never shrinks. */
+.pa-card-last {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pa-card-last-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The gauge: the prototype's number, then a 4px bar that takes the rest of
@@ -309,7 +317,9 @@
   line-height: 1.45;
 }
 
-/* The identity and the plan on one line. The identity gives way first. */
+/* The identity and the plan on one line. The identity gives way first. The
+   plan is cut short too, once the identity is down to six characters: it may
+   take the whole line less that much, and the identity takes what is left. */
 .pa-identity {
   display: flex;
   min-width: 0;
@@ -322,18 +332,31 @@
 }
 .pa-identity-plan {
   flex: none;
+  max-width: calc(100% - 6ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ---------- Pips: one per machine ---------- */
-.pa-pips {
+/* ---------- Where an account works: pips, a count, or "All" ---------- */
+.pa-reach {
   display: inline-flex;
   align-items: center;
   flex: none;
   gap: 3px;
-}
-.pa-pips > .ic {
-  margin-right: 2px;
   color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.pa-reach > .ic {
+  margin-right: 2px;
+}
+.pa-reach-all,
+.pa-reach-count {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.pa-reach-count.is-you {
+  color: var(--you-ink);
 }
 .pa-pip {
   display: inline-block;

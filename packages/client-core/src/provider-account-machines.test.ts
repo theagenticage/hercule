@@ -1,6 +1,7 @@
 /**
- * Tests `listProviderAccountMachines`: which runners an account lists, whether it is
- * signed in on each and as whom, and the action each machine offers.
+ * Tests `listProviderAccountMachines` and `decideProviderAccountReach`: which
+ * runners an account lists, whether it is signed in on each and as whom, the
+ * action each machine offers, and the three ways an account can reach machines.
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderAccount, Runner } from "@hercule/contract";
@@ -14,7 +15,10 @@ import {
   buildProviderAccount,
   buildSnapshot,
 } from "./providers.testing";
-import { listProviderAccountMachines } from "./provider-account-machines";
+import {
+  decideProviderAccountReach,
+  listProviderAccountMachines,
+} from "./provider-account-machines";
 
 const ATLAS = { ...WITH_CLAUDE, id: "runner-atlas", name: "atlas" };
 
@@ -151,5 +155,54 @@ describe("listProviderAccountMachines", () => {
     const keyed = buildProviderAccount(ZAI_IDENTITY, []);
 
     expect(listProviderAccountMachines(keyed, [WITH_CLAUDE], PROVIDERS, HARNESSES)).toBeNull();
+  });
+});
+
+describe("decideProviderAccountReach", () => {
+  const decideReachForAccount = (
+    account: ProviderAccount,
+    providers = PROVIDERS,
+    harnesses = HARNESSES,
+  ) => decideProviderAccountReach(account, [WITH_CLAUDE, ATLAS], providers, harnesses);
+
+  it("is per-machine, with the machines, for an account that signs in on each machine", () => {
+    const result = decideReachForAccount(SIGNED_IN_ON_MOSS);
+
+    expect(result.kind).toBe("per-machine");
+    expect(result.kind === "per-machine" && result.machines.map((each) => each.runnerName)).toEqual(
+      ["moss", "atlas"],
+    );
+  });
+
+  it("is per-machine with no machines when every runner is retired", () => {
+    const retired = { ...ATLAS, lifecycle: "retired" as const };
+
+    expect(decideProviderAccountReach(SIGNED_IN_ON_MOSS, [retired], PROVIDERS, HARNESSES)).toEqual({
+      kind: "per-machine",
+      machines: [],
+    });
+  });
+
+  it("is shared for an account whose key or token every machine uses", () => {
+    expect(decideReachForAccount(buildProviderAccount(ZAI_IDENTITY, []))).toEqual({
+      kind: "shared",
+    });
+  });
+
+  it("is unknown when the default harness is not registered, which says nothing about where the login lives", () => {
+    const account = {
+      ...buildProviderAccount(ANTHROPIC_IDENTITY, []),
+      defaultHarnessId: "gone/gone",
+    };
+    const keyed = { ...buildProviderAccount(ZAI_IDENTITY, []), defaultHarnessId: "gone/gone" };
+
+    expect(decideReachForAccount(account)).toEqual({ kind: "unknown" });
+    expect(decideReachForAccount(keyed)).toEqual({ kind: "unknown" });
+  });
+
+  it("is unknown when the provider no longer declares the account's kind", () => {
+    expect(decideReachForAccount(buildProviderAccount(ANTHROPIC_IDENTITY, []), [])).toEqual({
+      kind: "unknown",
+    });
   });
 });

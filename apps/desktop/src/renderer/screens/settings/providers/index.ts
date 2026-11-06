@@ -1,4 +1,4 @@
-export { ProviderAccountCard, type MachinePip } from "./provider-account-card";
+export { ProviderAccountCard } from "./provider-account-card";
 export { ProviderAccountNameField } from "./provider-account-name-field";
 export { ProviderAccountSheet, ProviderAccountSheetSection } from "./provider-account-sheet";
 export { HarnessChoiceList, type HarnessChoice } from "./harness-choice-list";

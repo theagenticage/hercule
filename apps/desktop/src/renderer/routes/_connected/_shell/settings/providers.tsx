@@ -42,8 +42,8 @@ interface FixingAccount {
 /**
  * Settings > Providers: the Accounts section, one card per Provider Account
  * in the order the accounts were added. A card shows the provider's mark, the
- * account's name, who is signed in and the plan, and either the machines the
- * account is signed in on or "Every machine", then its usage or, when it needs
+ * account's name, who is signed in and the plan, and where the account works
+ * (a pip per machine, a count, or "All"), then its usage or, when it needs
  * the user, its state and the button that fixes it. A click on a card opens the
  * account's sheet, and the header's Add an account opens the sheet that adds
  * one. With no account, one line says so in place of the cards. Under them is

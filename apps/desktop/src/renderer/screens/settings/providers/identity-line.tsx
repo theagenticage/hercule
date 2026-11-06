@@ -5,8 +5,11 @@ import "./providers.css";
 /**
  * Renders the line under an account's name on one line. The identity ends in
  * an ellipsis when the line is too narrow, and the plan after it stays whole:
- * "rogier@acme.com · Max" ends as "rogier@ac… · Max". The whole line is the
- * tooltip.
+ * "rogier@acme.com · Max" ends as "rogier@ac… · Max". When even that does not
+ * fit, the identity keeps about six characters and the plan ends in an
+ * ellipsis too, so a long plan never runs out of its box. The whole line is
+ * the tooltip. The account's card does not use it: the card gives the identity
+ * and the plan a line each.
  */
 export function IdentityLine({
   line,
