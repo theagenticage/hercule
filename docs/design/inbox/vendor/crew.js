@@ -318,9 +318,9 @@
   function you(size) {
     size = size || 28;
     return (
-      '<svg class="cr-you" viewBox="0 0 32 32" width="' + size + '" height="' + size + '" role="img" aria-label="Rogier">' +
+      '<svg class="cr-you" viewBox="0 0 32 32" width="' + size + '" height="' + size + '" role="img" aria-label="Noa">' +
       '<circle cx="16" cy="16" r="15" fill="var(--you)"/><circle cx="16" cy="16" r="15" fill="none" stroke="oklch(0 0 0 / .08)"/>' +
-      '<text x="16" y="21.2" text-anchor="middle" font-family="var(--font-ui)" font-size="15" font-weight="700" fill="var(--face-ink)">R</text></svg>'
+      '<text x="16" y="21.2" text-anchor="middle" font-family="var(--font-ui)" font-size="15" font-weight="700" fill="var(--face-ink)">N</text></svg>'
     );
   }
 
@@ -446,7 +446,7 @@
 
   /* ------------------------------------------------------------------ the world */
 
-  // Everything that waits on Rogier right now: two Threads and one Run.
+  // Everything that waits on Noa right now: two Threads and one Run.
   var WAITING = [
     { name: "Fix 3-D Secure checkout for EU cards", short: "Fix 3-D Secure checkout", ask: "Run git push?", href: "session-active.html" },
     { name: "Migrate ops dashboards", short: "Migrate ops dashboards", ask: "Keep the old Grafana folder?", href: "#" },
@@ -646,7 +646,7 @@
         : swarm
         ? "<b>78</b> working · <b class=\"you-ink\">30</b> waiting · <b>4</b> paused · <b>28</b> idle"
         : "<b>8</b> working · <b class=\"you-ink\">3</b> waiting · <b>1</b> paused · <b>4</b> idle") +
-      '</div><div class="side-me">' + you(24) + '<span class="side-name">Rogier</span>' +
+      '</div><div class="side-me">' + you(24) + '<span class="side-name">Noa</span>' +
       '<a class="icon-btn icon-btn--sm" href="settings-appearance.html" title="Settings">' + icon("sliders", 14) + "</a></div></div>";
     el.querySelectorAll("[data-tab]").forEach(function (b) {
       b.addEventListener("click", function () {
@@ -705,7 +705,7 @@
     settings: "settings-providers.html",
   };
 
-  /** Renders the web top bar: the mark, the places as tabs, what waits on you, search and Rogier. */
+  /** Renders the web top bar: the mark, the places as tabs, what waits on you, search and Noa. */
   function webbar(el) {
     var active = el.dataset.webbar;
     el.classList.add("webbar");

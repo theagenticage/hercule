@@ -2,7 +2,7 @@
 (function () {
   var P = {
     juno: ['Juno Park', 198], felix: ['Felix Marsh', 345], omar: ['Omar Haddad', 52], ines: ['Ines Carvalho', 282],
-    theo: ['Theo Brandt', 132], wren: ['Wren Adeyemi', 312], kofi: ['Kofi Mensah', 78], tessa: ['Tessa Lindqvist', 240], you: ['Rogier', 78],
+    theo: ['Theo Brandt', 132], wren: ['Wren Adeyemi', 312], kofi: ['Kofi Mensah', 78], tessa: ['Tessa Lindqvist', 240], you: ['Noa', 78],
   };
   function av(k, s) { var p = P[k]; var i = p[0].split(' ').map(function (w) { return w[0]; }).join(''); return '<span class="av" style="--avh:' + p[1] + ';width:' + (s || 20) + 'px;height:' + (s || 20) + 'px">' + i + '</span>'; }
   function br(n, s) { return Crew.brand(n, s || 18); }
@@ -63,7 +63,7 @@
     '<a class="nav-row">' + Crew.icon('discussions', 15) + '<span>Discussions</span></a>' +
     '<a class="nav-row">' + Crew.icon('wiki', 15) + '<span>Wiki</span></a></section>' +
     '<section class="side-sec"><h3 class="side-h"><span>System</span></h3><a class="nav-row">' + Crew.icon('fleet', 15) + '<span>Fleet</span></a><a class="nav-row">' + Crew.icon('connections', 15) + '<span>Connections</span></a></section>' +
-    '<div style="flex:1"></div><div class="side-foot"><div class="side-sum"><b>3</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle</div><div class="side-me">' + Crew.you(24) + '<span class="side-name">Rogier</span></div></div>';
+    '<div style="flex:1"></div><div class="side-foot"><div class="side-sum"><b>3</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle</div><div class="side-me">' + Crew.you(24) + '<span class="side-name">Noa</span></div></div>';
   document.addEventListener('DOMContentLoaded', function () {
     var el = document.querySelector('.side'); if (el) el.innerHTML = side;
   });

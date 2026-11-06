@@ -81,7 +81,7 @@
   --font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;
   /* Inter's tailed l and serifed I, so l, I and 1 never look alike. The slashed zero stays
      off: in UI times and counts it reads as code (the UI council's vote on #859, and
-     Rogier's call), and Inter's plain 0 is already narrower than its O. The page sets the
+     the founder's call), and Inter's plain 0 is already narrower than its O. The page sets the
      features once, and every child inherits them, so each rule that sets another face resets
      them: code and the Deco face with `font-feature-settings: normal` (JetBrains Mono and
      Limelight have their own glyphs behind these names), and UI text inside a code block with
