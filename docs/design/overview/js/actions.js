@@ -107,11 +107,17 @@ window.Actions = (function () {
 
   /** Answers a Task's question. The card lies down, and the walk moves on to the next thing. */
   function answer(id, words) {
-    Walk.notePlace(id);
+    var walking = Pane.isWalking();
+    if (walking) Walk.notePlace(id);
     Board.change(function () { Store.answerTask(id, words); });
     Toast.show((Store.state.offline ? "Sends when you are back: " : "Sent: ") + words, true);
-    handOff(id);
-    Walk.afterAnswer(id);
+    // In a walk the next thing comes up. Otherwise the sheet closes, so you see the card lie down.
+    if (walking) {
+      handOff(id);
+      Walk.afterAnswer(id);
+    } else {
+      Pane.hide(function () { handOff(id); });
+    }
   }
 
   /**

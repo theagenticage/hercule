@@ -343,7 +343,12 @@ window.Find = (function () {
     var q = Store.state.query;
     if (!q) return list.classList.remove("is-on");
     list.classList.add("is-on");
-    var all = Store.state.tasks.filter(Store.matches);
+    // What you most likely mean comes first: a match in the title, then what wants you. Landed last.
+    var needle = q.toLowerCase();
+    function score(t) {
+      return (t.name.toLowerCase().indexOf(needle) >= 0 ? 0 : 4) + (Store.wantsYou(t) ? 0 : 1) + (t.stage === "landed" ? 2 : 0);
+    }
+    var all = Store.state.tasks.filter(Store.matches).sort(function (a, b) { return score(a) - score(b); });
     hits = all.slice(0, 8);
     at = Math.min(at, Math.max(0, hits.length - 1));
     if (!hits.length) {

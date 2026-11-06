@@ -370,3 +370,6 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .is-carrying .cell { position: relative; }
 .slot.is-over { position: absolute; left: 0; right: 0; top: 0; background: none; box-shadow: none; pointer-events: none; }
 .card.is-under { translate: 0 6px; scale: 0.985; opacity: 0.6; transition: translate var(--m-base) var(--m-ease), scale var(--m-base) var(--m-ease), opacity var(--m-base) var(--m-ease); }
+
+.lane:not(.has-more) .lane-total { display: none; }
+.lane:not(.has-more) .lane-btn { pointer-events: none; }

@@ -40,11 +40,13 @@ window.Pane = (function () {
     }
     if (t.stage === "landed") return "";
     if (holder.kind === "you") who = '<i class="card-tab" data-need="' + t.need + '"></i><span><b>Your move.</b> ' + (t.need === "think" ? "This needs real thinking." : "A quick call.") + "</span>";
-    else if (holder.kind === "agent") who = Crew.face(holder.name, { pose: holder.pose, size: 22 }) + "<span><b>" + esc(holder.name) + "</b> " + (holder.pose === "waiting" ? "asks you." : "is working.") + "</span>";
+    else if (holder.kind === "agent") who = Crew.face(holder.name, { pose: holder.pose, size: 22 }) + "<span><b>" + esc(NW.sayAgent(holder.name)) + "</b> " + (holder.pose === "waiting" ? "asks you." : "is working.") + "</span>";
     else if (holder.kind === "person") who = '<span class="pn-initial">' + esc(holder.name.charAt(0)) + "</span><span><b>" + esc(holder.name) + "</b> has the next move.</span>";
     else who = "<span>Nobody has the next move.</span>";
-    var ask = t.ask ? '<p class="pn-ask">' + esc(t.ask) + "</p>" : "";
-    var opts = (t.options || []).map(function (o, i) {
+    // Only a question addressed to you is shown. A Task in an agent's hands asks you nothing.
+    var asked = holder.kind === "you" || (holder.kind === "agent" && holder.pose === "waiting");
+    var ask = asked && t.ask ? '<p class="pn-ask">' + esc(t.ask) + "</p>" : "";
+    var opts = (asked ? t.options || [] : []).map(function (o, i) {
       var label = typeof o === "string" ? o : o.label || "";
       return '<button class="pn-answer' + (i === 0 ? " is-suggested" : "") + '" data-answer="' + esc(label) + '">' + esc(label) + "</button>";
     }).join("");
@@ -57,7 +59,7 @@ window.Pane = (function () {
     if (!t.threads.length) return "";
     return '<section class="pn-sec"><h4>Threads <span>' + t.threads.length + "</span></h4>" + t.threads.map(function (th, i) {
       var live = t.agent && i === t.threads.length - 1;
-      return '<a class="pn-row" href="#">' + Crew.face(th.title + th.id, { pose: live ? "working" : "idle", size: 20 }) + '<span class="pn-row-text">' + esc(th.title) + "</span><small>" + (live ? "Working" : NW.formatAge(t.age)) + "</small></a>";
+      return '<a class="pn-row" href="#">' + Crew.face(th.title + th.id, { pose: live ? "working" : "idle", size: 20 }) + '<span class="pn-row-text">' + esc(NW.sayAgent(th.title)) + "</span><small>" + (live ? "Working" : NW.formatAge(t.age)) + "</small></a>";
     }).join("") + "</section>";
   }
 
@@ -83,7 +85,7 @@ window.Pane = (function () {
   function drawInner(t) {
     var project = Store.state.projects.filter(function (p) { return p.id === t.project; })[0];
     var plan = Store.state.plans.filter(function (p) { return p.id === t.initiative; })[0];
-    return '<div class="pn-scroll"><header class="pn-head"><p class="pn-crumb">' + esc(project.name) + (plan ? '<span class="sep"></span>' + esc(plan.name) : "") + '<span class="pn-walk" id="pn-walk"></span></p>' +
+    return '<div class="pn-scroll"><header class="pn-head"><p class="pn-crumb"><span class="pn-crumb-text">' + esc(project.name) + (plan ? " · " + esc(plan.name) : "") + '</span><span class="pn-walk" id="pn-walk"></span></p>' +
       '<h2 class="pn-title" id="pn-title" tabindex="-1">' + esc(t.name) + "</h2>" + drawPath(t) + "</header>" +
       '<p class="pn-where">' + esc(t.where || t.now) + "</p>" +
       drawNextMove(t) +
@@ -247,13 +249,7 @@ window.Pane = (function () {
   function setWalk(at, of) {
     var el = pane.querySelector("#pn-walk");
     if (!el) return;
-    var spot = Board.locate(openId);
-    var t = Store.task(openId);
-    var plan = Store.state.plans.filter(function (p) { return p.id === t.initiative; })[0];
-    var onBead = spot && spot.classList.contains("bead");
-    var behind = spot && spot.dataset.id && spot.dataset.id !== openId;
-    var where = onBead && plan ? "in " + esc(plan.name) + ", " : behind ? "in a stack, " : "";
-    el.innerHTML = where + at + " of " + of + '<kbd title="Next (N)">N</kbd>';
+    el.innerHTML = at + " of " + of + '<kbd title="Next (N)">N</kbd>';
   }
 
   /** Asks what the new thread should do, on one line at the foot of the details. */

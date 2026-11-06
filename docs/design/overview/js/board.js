@@ -241,7 +241,10 @@ window.Board = (function () {
       hidden = hidden.concat(rest.map(function (t) { return { task: t, card: el }; }));
       return el;
     }
-    arranged.cards.forEach(function (t, i) { kids.push(drawStack(t, i === arranged.cards.length - 1 ? arranged.behind : [])); });
+    // A card you just put down stays on the row you chose. What lies behind goes under the last row.
+    var rows = arranged.cards.slice();
+    arranged.held.forEach(function (t) { rows.splice(Math.min(t.heldRow || 0, rows.length), 0, t); });
+    rows.forEach(function (t, i) { kids.push(drawStack(t, i === rows.length - 1 ? arranged.behind : [])); });
     var landed = arranged.piles.filter(function (p) { return p.kind === "landed"; });
     arranged.piles.forEach(function (p) {
       if (p.kind === "landed") return;
@@ -249,11 +252,6 @@ window.Board = (function () {
       kids.push(drawStack(top, p.tasks.filter(function (t) { return t !== top; }), p));
     });
     kids = kids.concat(landed.map(drawPile));
-    // A card you just put down stays on the row you chose, and nothing is pushed out to make room.
-    arranged.held.forEach(function (t, i) {
-      var first = i === 0 && !arranged.cards.length;
-      kids.splice(Math.min(t.heldRow || 0, kids.length), 0, drawStack(t, first ? arranged.behind : []));
-    });
     cell._piles = landed;
     cell._behind = hidden;
     cell._stage = stage;
@@ -387,6 +385,7 @@ window.Board = (function () {
       }
     }
     place(lane, kids);
+    lane.classList.toggle("has-more", folded || full || !!lane.querySelector(".card-more"));
     return lane;
   }
 

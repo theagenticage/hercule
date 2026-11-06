@@ -154,6 +154,8 @@ window.Store = (function () {
     var shown = (cellMemo[memoKey] || []).map(function (id) { return byId[id]; }).filter(Boolean);
     var waiting = sortForDesk(tasks).filter(function (t) { return shown.indexOf(t) < 0; });
     while (shown.length < rows && waiting.length) shown.push(waiting.shift());
+    // Whatever arrives, a blocked card never holds the top while something else could.
+    shown = shown.filter(function (t) { return !isBlocked(t); }).concat(shown.filter(isBlocked));
     // While a card is in the hand the one under it shows, but it has not taken its place for good.
     if (!lifting) cellMemo[memoKey] = shown.map(function (t) { return t.id; });
     // A card you just put down takes a row, so a lane at rest never changes height.

@@ -145,12 +145,30 @@ window.NW = (function () {
       var e = ENRICH[w.id] || {};
       var t = Object.assign({}, w, e);
       t.options = ANSWERS[w.id] || deriveAnswers(w.ask);
+      t.where = humanize(t.where);
+      t.ask = humanize(t.ask);
       t.age = daysSince(w.lastActivityAt);
       t.ref = (/#\d+/.exec(w.where) || [""])[0];
       if (w.kind === "review" || w.kind === "mention") t.ref = "#" + w.id.split("-")[1];
       t.source = w.kind === "ticket" ? "linear" : w.kind === "errors" ? "sentry" : w.kind === "pr" || w.kind === "review" || w.kind === "mention" ? "github" : "";
       return t;
     });
+  }
+
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var HANDLES = { "juno-park": "Juno Park", "felix-marsh": "Felix Marsh", "ines-carvalho": "Ines Carvalho", "theo-brandt": "Theo Brandt", "wren-adeyemi": "Wren Adeyemi", "kofi-mensah": "Kofi Mensah", "tessa-lindqvist": "Tessa Lindqvist", "omar-haddad": "Omar Haddad" };
+
+  /** Returns text as a person would write it: "Oct 30", not a date stamp; a name, not a handle. */
+  function humanize(text) {
+    if (!text) return text;
+    return text.replace(/(\d{4})-(\d\d)-(\d\d)/g, function (m, y, mo, d) {
+      return MONTHS[Number(mo) - 1] + " " + Number(d);
+    }).replace(/[a-z]+-[a-z]+/g, function (h) { return HANDLES[h] || h; });
+  }
+
+  /** Returns an agent's name as shown: a stream's workflow reads as the workflow. */
+  function sayAgent(name) {
+    return name.replace(/ rv-\d+$/, "");
   }
 
   /** Returns a Task's age as it is said aloud. */
@@ -173,6 +191,7 @@ window.NW = (function () {
       byId[id].agent = REVIEWER + " " + id;
       byId[id].move = "agent";
       byId[id].need = "look";
+      byId[id].where = "With the review workflow, which is reading it now.";
     });
     RELATIONS.forEach(function (r) {
       if (r.kind !== "blockedBy" || !byId[r.from] || !byId[r.to]) return;
@@ -187,5 +206,5 @@ window.NW = (function () {
     };
   }
 
-  return { PROJECTS: PROJECTS, STAGES: STAGES, buildTasks: buildTasks, buildToday: buildToday, formatAge: formatAge, sayAge: sayAge };
+  return { PROJECTS: PROJECTS, STAGES: STAGES, buildTasks: buildTasks, buildToday: buildToday, formatAge: formatAge, sayAge: sayAge, sayAgent: sayAgent };
 })();
