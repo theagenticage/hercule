@@ -18,7 +18,6 @@ window.App = (function () {
     return LAYOUTS[w >= 900 ? 3 : w >= 620 ? 2 : 1];
   }
   var COLUMNS = LAYOUTS[3];
-  var HERCULE = { hue: 'lime', shape: 'egg', acc: 'tache' };
   var HEAD = 64;       // a stack's heading, with the space under it, which a colleague's head rises into without touching the rule
   var CLOCK_DEPTH = 360; // how deep the stacks on the clock may go: three whole cards, the most a light day shows
   var visitDepth = 0;  // how deep they go on this visit: the deepest stack when the page was drawn, so the shelf sits close under it and stays
@@ -196,8 +195,8 @@ window.App = (function () {
     host.setAttribute('aria-label', 'Hercule noticed');
     assignSlots();
     // Hercule stands behind the top edge, as a colleague does on Work: he is handing you something, not raising an alarm.
-    host.innerHTML = '<span class="card-holder" title="Hercule noticed"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34, look: HERCULE }) + '</span></span>' +
-      '<span class="card-paws" style="--hue:var(--hue-' + HERCULE.hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + state.clusters.filter(function (c) { return c.slot !== undefined; }).map(Card.drawPlaque).join('');
+    host.innerHTML = '<span class="card-holder" title="Hercule noticed"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34 }) + '</span></span>' +
+      '<span class="card-paws" style="--hue:var(--hue-' + Crew.lookFor('Hercule').hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + state.clusters.filter(function (c) { return c.slot !== undefined; }).map(Card.drawPlaque).join('');
     // The row stays when nothing is noticed, so the page never shifts under a resting pointer when something is.
     var wasEmpty = host.classList.contains('is-empty');
     host.classList.toggle('is-empty', !state.clusters.length);
@@ -740,7 +739,7 @@ window.App = (function () {
   }
 
   return {
-    state: state, HERCULE: HERCULE, els: function () { return els; }, STACKS: STACKS, readColumns: function () { return COLUMNS; }, findEntity: findEntity, readStack: readStack, readStackEntities: readStackEntities, layOut: layOut, redrawCard: redrawCard, drawNoticed: drawNoticed, drawBar: drawBar,
+    state: state, els: function () { return els; }, STACKS: STACKS, readColumns: function () { return COLUMNS; }, findEntity: findEntity, readStack: readStack, readStackEntities: readStackEntities, layOut: layOut, redrawCard: redrawCard, drawNoticed: drawNoticed, drawBar: drawBar,
     forgetMeasures: function () { measured = {}; }, turnOver: turnOver, noteStackEmptied: noteStackEmptied, load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, reflowNoticed: reflowNoticed, checkZero: checkZero, countLeft: countLeft, countOnClock: countOnClock, countOverdue: countOverdue, start: start, measured: function () { return measured; }, forgetEl: function (id) { delete els[id]; }, arrive: arrive, releaseArrivals: releaseArrivals,
   };
 })();

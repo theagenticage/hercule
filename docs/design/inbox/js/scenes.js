@@ -79,7 +79,7 @@ window.Scenes = (function () {
       ? [handed ? handed + ' with agents' : '', mine ? mine + ' with you' : ''].filter(Boolean).join(' · ') + '. Their Tasks are on Work.'
       : 'Anything from outside that concerns you will land here.';
     return '<div class="' + className + '"><svg class="zero-sun" viewBox="0 0 720 262" aria-hidden="true">' + drawRays() + '<line class="ray-h" x1="60" y1="250" x2="660" y2="250"/></svg>' +
-      '<div class="zero-n" aria-hidden="true">' + Crew.logo(92, { mono: true }) + '</div><h2 class="zero-t">All clear.</h2><p class="zero-s">' + line + '</p></div>';
+      '<div class="zero-n" aria-hidden="true">' + Crew.face('Hercule', { pose: 'idle', size: 96 }) + '</div><h2 class="zero-t">All clear.</h2><p class="zero-s">' + line + '</p></div>';
   }
 
   function drawZero(page) { page.innerHTML = drawSunrise('zero'); }
@@ -114,7 +114,7 @@ window.Scenes = (function () {
     var waitingNow = document.querySelector('.side-scroll .side-sec');
     if (waitingNow) waitingNow.hidden = true;
     document.querySelector('.side-sum').textContent = 'Nothing running';
-    page.innerHTML = '<div class="noticed">' + '<span class="card-holder"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34, look: App.HERCULE }) + '</span></span><span class="card-paws" style="--hue:var(--hue-' + App.HERCULE.hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + '<div class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></div></div>' +
+    page.innerHTML = '<div class="noticed">' + '<span class="card-holder"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34 }) + '</span></span><span class="card-paws" style="--hue:var(--hue-' + Crew.lookFor('Hercule').hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + '<div class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></div></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To review') + connect('github', 'GitHub', null, 'Pull requests and reviews') + next + '</section></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To answer') + connect('gmail', 'Gmail', 25, 'Threads that ask something of you') + next + '</section></div>' +
       '<div class="col"><section class="stack-wrap">' + head('To finish') + '<p class="fr-note">Your own work, once GitHub is connected.</p>' + next + '</section></div>' +

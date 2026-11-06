@@ -32,9 +32,8 @@
 .zero-sun { position: relative; width: 440px; max-width: 70%; height: auto; overflow: visible; }
 .zero-sun .ray { stroke: var(--brass); stroke-width: 1.6; stroke-linecap: round; opacity: 0.8; stroke-dasharray: 1; stroke-dashoffset: 0; }
 .zero-sun .ray-h { stroke: var(--brass); stroke-width: 1.5; opacity: 0.85; }
-.zero-n { position: relative; width: 92px; height: 71px; margin-top: -78px; margin-bottom: 7px; overflow: hidden; color: var(--brass); }
-.zero-n .logo { display: block; }
-.zero-n .logo g { fill: var(--desk); }
+.zero-n { position: relative; width: 96px; height: 76px; margin-top: -83px; margin-bottom: 7px; overflow: hidden; line-height: 0; }
+.zero-n .cr { display: block; }
 .zero-t { margin: 30px 0 6px; font-size: var(--t-20); font-weight: var(--w-bold); letter-spacing: -0.008em; }
 .zero-s { margin: 0; color: var(--muted); font-size: var(--t-14); }
 @media (prefers-reduced-motion: no-preference) {
@@ -45,7 +44,7 @@
 }
 @keyframes ray-draw { from { stroke-dashoffset: 1; } }
 @keyframes rule-draw { from { transform: scaleX(0); opacity: 0; } }
-@keyframes sun-rise { from { transform: translateY(71px); clip-path: inset(0 0 71px 0); } to { transform: none; clip-path: inset(0 0 0 0); } }
+@keyframes sun-rise { from { transform: translateY(76px); clip-path: inset(0 0 76px 0); } to { transform: none; clip-path: inset(0 0 0 0); } }
 @keyframes fade-up { from { transform: translateY(6px); opacity: 0; } }
 
 /* First run: the page itself, with the first cards inviting you to connect. No dialog. */

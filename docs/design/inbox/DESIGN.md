@@ -173,7 +173,7 @@ A card with a Task stays where it is for the rest of the visit. On the next visi
 | State | Design |
 |---|---|
 | First run | The real page, no dialog. Hercule hands you one line saying what this place is. To review and To answer each ask for their source with one etched place under them, To finish says it fills once GitHub is connected, Linear asks on the shelf, and the sidebar is empty: nothing running, nothing waiting |
-| Inbox zero | A small sunrise, 440px wide. Hercule's head comes up over a brass horizon, and the rays draw outward when the last card on the clock leaves. "All clear." The shelf has no clock and is seldom empty, so what rests there stays under the sunrise, on the same line it held all visit |
+| Inbox zero | A small sunrise, 440px wide. Hercule's head, the same one Work draws, comes up over a brass horizon, and the rays draw outward when the last card on the clock leaves. "All clear." The shelf has no clock and is seldom empty, so what rests there stays under the sunrise, on the same line it held all visit |
 | An empty stack | One quiet line in its place. The column stays, as a landmark |
 | Loading | The real cards with their words held back, from what the last visit knew. Nothing shifts when words arrive |
 | Offline | One line in the bar saying what you see and that moves wait |

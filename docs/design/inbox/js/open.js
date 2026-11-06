@@ -60,7 +60,7 @@ window.Open = (function () {
     var flows = K['hercule/cluster'].workflows.noticed;
     var head = c.task ? drawLedger(c) : null;
     return '<div class="o-head o-head--plaque">' +
-      '<div class="c-mark">' + Crew.face('Hercule', { pose: 'idle', size: 24, look: App.HERCULE }) + '</div>' +
+      '<div class="c-mark">' + Crew.face('Hercule', { pose: 'idle', size: 24 }) + '</div>' +
       '<h2 class="o-title">' + Card.esc(c.title) + '</h2>' +
       '<button class="icon-btn icon-btn--sm o-close" data-close title="Close (Esc)">' + Crew.icon('close', 13) + '</button>' +
       '<div class="o-meta"><span>Noticed by Hercule</span><i>·</i><span>' + Card.esc(c.figures) + '</span></div></div>' +
