@@ -364,7 +364,7 @@ window.Board = (function () {
   }
 
   /** Sends a copy of a card that just left the desk to the pile or bead that now holds it. */
-  function flyInto(card, target) {
+  function flyInto(card, target, spring) {
     var flight = document.getElementById("flight");
     var host = flight.getBoundingClientRect();
     var copy = card.el.cloneNode(true);
@@ -373,7 +373,7 @@ window.Board = (function () {
     copy.style.cssText = "position:absolute;margin:0;left:" + (card.rect.left - host.left) + "px;top:" + (card.rect.top - host.top) + "px;width:" + card.rect.width + "px;height:" + card.rect.height + "px";
     flight.appendChild(copy);
     var r = target.getBoundingClientRect();
-    Motion.body(copy).to({ x: r.left + r.width / 2 - (card.rect.left + card.rect.width / 2), y: r.top + r.height / 2 - (card.rect.top + card.rect.height / 2), s: target.classList.contains("bead") ? 0.1 : 0.94, o: 0 }, "travel", {
+    Motion.body(copy).to({ x: r.left + r.width / 2 - (card.rect.left + card.rect.width / 2), y: r.top + r.height / 2 - (card.rect.top + card.rect.height / 2), s: target.classList.contains("bead") ? 0.1 : 0.94, o: 0 }, spring || "travel", {
       done: function () { copy.remove(); },
     });
   }
@@ -398,7 +398,7 @@ window.Board = (function () {
       var b = before[id];
       if (b.el.isConnected || !Store.task(id)) return;
       var target = locate(id);
-      if (target) flyInto(b, target);
+      if (target) flyInto(b, target, opts.spring === "self" ? "self" : "travel");
     });
     lanesEl.querySelectorAll(".card[data-id]").forEach(function (el) {
       if (before[el.dataset.id] || !Store.task(el.dataset.id)) return;

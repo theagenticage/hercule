@@ -11,7 +11,7 @@ The engine is `js/motion.js`. It is about 300 lines with no dependencies. Everyt
 3. **Measure what is on screen.** A change always starts from where a thing looks right now, with the speed it has right now. Reversing halfway is therefore not a special case: it is one more change.
 4. **You are faster than the world.** Things you move answer in one frame and settle in about 300ms. Things that move by themselves are slow and unhurried, about one second, with no overshoot.
 5. **Weight is honest.** A carried card leans into its motion, and a press dents. Overshoot appears only where something lands. Nothing bounces for fun.
-6. **Quiet at rest.** Only one thing on the desk moves at rest: the paws of a working colleague. No shimmer, no pulsing, no looping attention.
+6. **Quiet at rest.** Only one thing on the desk moves at rest: the paws of a working colleague, in short bursts with long pauses, as a person types. No shimmer, no pulsing, no looping attention.
 7. **Reduced motion is a design, not a switch-off.** Movement becomes a short fade, in the same order, so the cause is still told.
 
 ## Tokens
@@ -32,20 +32,17 @@ The engine is `js/motion.js`. It is about 300 lines with no dependencies. Everyt
 
 ### Springs (`Motion.SPRINGS`, stiffness / damping at mass 1)
 
+Three, and the system is the point. Which one to use follows from one question: who caused this?
+
 | Name | k | c | Ratio | Settles in | Use |
 |---|---|---|---|---|---|
-| `carry` | 900 | 48 | 0.80 | about 200ms | following the pointer |
-| `glide` | 420 | 36 | 0.88 | about 330ms | neighbours moving aside |
-| `drop` | 520 | 30 | 0.66 | about 420ms | settling into a slot, with a slight overshoot |
-| `back` | 300 | 30 | 0.87 | about 420ms | going home after a cancel, no bounce |
-| `open` | 260 | 28 | 0.87 | about 470ms | a card opening into its details |
-| `fan` | 340 | 26 | 0.70 | about 520ms | a pile opening, cards growing out of beads |
-| `fold` | 300 | 32 | 0.92 | about 420ms | a lane or plan folding |
-| `bump` | 900 | 28 | 0.47 | about 340ms | a small acknowledgement |
-| `drift` | 90 | 19 | 1.00 | about 1000ms | something moving by itself |
-| `puck` | 620 | 40 | 0.80 | about 260ms | the switcher's selection |
+| `hand` | 632 | 43 | 0.86 | about 260ms | under your hand, or answering it at once: lift, landing, neighbours moving aside, the switcher's puck |
+| `travel` | 305 | 31 | 0.89 | about 430ms | crossing the screen because you asked: opening, folding, fanning, going home after a cancel |
+| `self` | 90 | 19 | 1.00 | about 1000ms | moving by itself: a card moved by a fact, an arrival |
 
-Stagger: 18ms per card when growing out of beads, capped at 150ms. 22ms per card in a fan, capped at 220ms. A long list never takes longer because it is long.
+Overshoot is never built in. It appears only where a thing lands with the speed of your hand, because the landing starts with the velocity the hand gave it.
+
+Stagger: never by count alone. A fan staggers by distance from the pile, 140ms in all. Cards growing out of beads go 16ms apart, capped at 130ms. A long list never takes longer because it is long.
 
 ## Every transition
 
@@ -63,37 +60,38 @@ The card scales to 0.992 at once. It is a dent, not an animation.
 
 ### Carrying a card (the star)
 
-1. **Lift.** Past 5px of movement the card leaves the page for the carry layer. It keeps its exact position. Scale goes to 1.035, shadow to `--h-carry`. All within the `carry` spring: there is no separate lift animation, so nothing delays the hand.
-2. **Follow.** The card's goal is the pointer, on `carry`, so it trails a hair behind and catches up when you stop. It leans by `dx * 0.2` degrees, clamped to ±2.6.
-3. **The stage answers.** A brass diamond runs along the stage rule to the target column on `carry`. The stage's name goes to ink. A faint aisle shows behind the column: at rest the stages are only alignment, so the grid appears only when it is needed.
-4. **The slot opens.** A hollow slot appears in the target row. Neighbours glide aside on `glide`. All of it is FLIP: the slot moves in the DOM, and neighbours spring from where they were.
-5. **Land.** On release the card returns to the page and springs to the slot on `drop`, keeping the velocity of your hand. Scale and tilt settle together. Its height changes by CSS in `--m-slow`, so it visibly comes down. The stage counts roll over.
-6. **Cancel.** Esc, or a pointer cancel, springs it home on `back`: same path, no bounce.
+1. **Lift.** Past 5px of movement the card leaves the page for the carry layer. It keeps its exact position. Scale goes to 1.03 on `hand`. Height rises on the same spring: a layer with `--h-carry` crossfades in, driven by the `l` (lift) channel, so the shadow visibly grows. There is no separate lift animation, so nothing delays the hand.
+2. **Follow.** Position is one to one: the card is exactly under your finger, with no lag at any speed. Only scale, height and lean ride a spring. It leans at most ±1.2 degrees, from smoothed speed, and stands straight 60ms after you stop, so text is never left tilted.
+3. **The stage answers.** A brass diamond runs along the stage rule to the target column on `hand`. The stage's name goes to ink. A faint aisle shows behind the column: at rest the stages are only alignment, so the grid appears only when it is needed.
+4. **The slot opens.** A hollow slot fades in, in `--m-quick`, at the target row. Everything below it moves aside on `hand`, including the lanes below. All of it is FLIP: the slot moves in the DOM, and everything springs from where it was, so nothing jumps. The top and bottom of a card move the slot; its middle means merge and moves nothing, so a card never runs away from the pointer.
+5. **Land.** On release the card returns to the page from exactly where it looks, and springs to the slot on `hand`, keeping the velocity of your hand. Scale, tilt and lift settle together, so it visibly comes down. The stage counts roll over.
+6. **Cancel.** Esc, or a pointer cancel, springs it home on `travel`: same path, no bounce.
 7. **Landing in Landed.** A brass rim fades over `--m-long`.
 
 A card you put down stays a card, even in a full cell: it never vanishes into a pile under your hand.
 
-Carrying several cards: the rest of the selection fly in behind the first as a fanned stack on `glide`, each 5px further and 1.1 degrees more tilted, with a count on top. They land with 40ms between them.
+Carrying several cards: the rest of the selection fly in behind the first as a stack on `travel`, each 5px further and 2% smaller, with a count on top. They land with 40ms between them.
 
 ### Merging
 
 1. Rest the carried card over the middle of another for 340ms.
-2. The target scales to 1.02 on `bump` and takes a focus ring and a "Merge" label.
+2. The target scales to 1.02 on `hand` and takes a focus ring and a "Merge" label on its top edge.
 3. The carried card docks on the target's corner, 10px across and 8px down. It shrinks to 0.96 and tilts 1.6 degrees. The slot closes. Moving away undoes all of it at once.
-4. On release, the carried card slides under the target and fades, on `drop`. The target bumps from 1.035 on `bump`, and a brass ring fades over `--m-long`.
+4. On release, the carried card slides under the target and fades, on `hand`. 60ms later the target settles from 1.03 to 1 on `hand`, and a brass ring fades over `--m-long`.
 5. A line at the foot offers Undo. Undo plays it backwards.
 
 ### Sliding a bead
 
-A bead follows the pointer along its wire on `carry`, at 1.5 scale. Near the start of a stage it is pulled toward it by 45% of the distance, like a bead finding a notch. On release it springs to its stage on `drop`.
+A bead follows the pointer along its wire on `hand`, at 1.5 scale. Near the start of a stage it is pulled toward it by 45% of the distance, like a bead finding a notch. On release it springs to its stage on `hand`.
 
 ### Opening a card
 
-One number from 0 to 1 on `open` drives everything, which is why Esc halfway simply reverses it.
+One number from 0 to 1 on `travel` drives everything, which is why Esc halfway simply reverses it.
 
 - The sheet interpolates its left, top, width and height from the card to the pane, and its corner from 12px to 16px. It is an empty box, so the layout cost is tiny. This is the only thing on the board not done by transform, because a scaled sheet would distort its corners and shadow.
-- The card's words ride on the sheet and fade out by 0.42.
-- The pane's words fade in from 0.38 to 0.88, rising 10px.
+- The card's words ride on the sheet and fade out by 0.55.
+- The pane's words fade in from 0.3 to 0.85, rising 10px. The two overlap, so there is never a blank sheet.
+- The pane's words are laid out once, at the final size. The growing sheet reveals them, so a paragraph never rewraps.
 - What stands behind the top edge is part of the sheet, so the tab or the head rides along.
 - The board dims 34% toward the desk. It never moves.
 - The card's place stays as a dent (`--h-etch`).
@@ -102,28 +100,28 @@ Choosing another card while the pane is open swaps the words in 200ms. The sheet
 
 ### Folding a lane or plan
 
-Folding: a copy of each card flies to its bead on `fold` and shrinks to 0.08, 14ms apart. Beads pop in on `drop` as the copies arrive. Lanes below glide up on `fold`.
+Folding: a copy of each card flies to its bead on `travel` and shrinks to 0.1, 12ms apart, staying solid until it is small. Each bead appears as its copy arrives, never before. Lanes below wait 70ms, then glide up on `travel`. Folding everything is one change, however many lanes.
 
-Opening: beads give way, and each card grows from its bead's position from scale 0.1 on `fan`, 18ms apart. Lanes below glide down.
+Opening: each card grows from its bead's position from scale 0.1 on `travel`, 16ms apart. Lanes below glide down. Reversing halfway starts each card from the copy still in flight.
 
 A plan's two states share beads: they are the same elements, so a plan's beads slide into a lane's wire when the lane folds.
 
 ### A pile fanning
 
-Cards leave the pile's centre, each tilted by its place in the hand, up to ±7 degrees, at 0.94 scale. They spring to a grid on `fan`, 22ms apart, tilts going to zero: a hand being spread, then laid flat. The desk dims 72%. The pile stays behind at 35%, so you can see where they belong. Closing plays it in reverse on `fold`.
+Cards leave the pile's centre, each tilted by its place in the hand, up to ±5 degrees, at 0.94 scale, as bare sheets. They spring to the stage columns on `travel`, nearest first, 140ms in all, tilts going to zero: a hand being spread, then laid flat. Their words fade in over the end of the trip. The desk dims 93%. The pile stays behind at 35%. Closing plays it in reverse, and reopening mid-close turns each card round from where it is.
 
 ### A Task arriving
 
-A thread starts, so a Task appears. It waits for a still hand. It rises at the end of its cell: from 12px down and 0.97 scale, with opacity from 0, on `drop`. 420ms later its colleague's head comes up from behind the edge on `drop`. A brass hairline around it fades over 3.2 seconds. Nothing already on the desk moves, except what sits below it in the same cell, on `drift`.
+A thread starts, so a Task appears. It waits for a still hand. It rises at the end of its cell: from 12px down and 0.97 scale, with opacity from 0, on `self`. 620ms later its colleague's head comes up from behind the edge on `travel`, and then the paws. A brass hairline around it fades over 3.2 seconds. Nothing already on the desk moves, except what sits below it in the same cell, on `self`.
 
 ### A card moving by itself
 
 A fact arrives, such as a pull request merging.
 
-1. It waits for a still hand: not while the pointer has moved within 280px in the last 1.4 seconds, not while dragging, and never longer than 8 seconds.
-2. **The cause lands first.** A small label ("PR #3331 merged") rises onto the card on `drop`. It holds for 760ms.
-3. The card crosses on `drift`, about one second, to the end of its new cell.
-4. **The dent stays.** Its old place stays open as an outline for 1.5 seconds, and closes only when the hand is elsewhere.
+1. It waits for a still hand: not while the pointer rests within 120px of it, however long it has been still, because a parked pointer means someone is reading. Not while the pointer is on the move within 280px. Not while dragging. Never longer than 8 seconds.
+2. **The cause lands first.** A small label ("PR #3331 merged") rises onto the card on `hand`. It holds for 760ms.
+3. The card crosses on `self`, about one second, to the end of its new cell, or into its pile, which it is seen entering.
+4. **The dent stays.** Its old place stays open for 1.5 seconds, and closes only when the hand is out of that lane.
 5. The stage counts roll over. The line at the right of the sentence says what happened.
 
 If the card sits in a pile or a folded lane, only its bead and the counts change.
@@ -134,12 +132,12 @@ On opening, the board starts from how you left it and plays each change in turn,
 
 ### Done and Dropped
 
-Done: the pane closes, then the card rises 14px and drifts 26px right as it fades, on `fold`: it has gone on. Dropped: it sinks 12px with a small tilt, on `back`: it has been let go. Neighbours close up on `glide`. Undo returns it.
+Done: the pane closes, then the card rises 14px and moves 26px right as it fades, on `travel`: it has gone on. Dropped: it sinks 12px with a small tilt, on `travel`: it has been let go. Neighbours close up on `hand`. Undo returns it.
 
 ### Switching views
 
-- The puck slides on `puck`, and its width changes on the same spring.
-- **Work to Office:** every head on a visible card that has a desk becomes a travelling face. It flies to its colleague's position in the 3D room on `open`, 50ms apart, growing to 1.5 scale and fading as it arrives. The desk fades and sinks to 0.985 while the room fades in from 1.025.
+- The puck slides on `hand`, and its width changes on the same spring.
+- **Work to Office:** every head on a visible card that has a desk becomes a travelling face. It flies to its colleague's position in the 3D room on `travel`, 50ms apart, growing to 1.5 scale and fading as it arrives. The desk fades and sinks to 0.985 while the room fades in from 1.025.
 - **Office to Work:** the reverse, in the same order.
 - The kit loads when the pointer enters the Office tab, so it is usually ready by the click.
 
@@ -151,7 +149,7 @@ The layout is known before the words are, because cards are one height. Each car
 
 `prefers-reduced-motion`, or `html[data-motion="reduced"]`, or the Prototype tray.
 
-- Springs jump to their end, except opacity, which fades on `back`.
+- Springs jump to their end, except opacity, which fades on `travel`.
 - A card moving by itself: the cause label still shows, then the card appears in place with a fade.
 - Heads stop typing. Blinks stop.
 - The morning replay does not play: the line at the right says what changed.
