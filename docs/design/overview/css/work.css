@@ -106,7 +106,7 @@
 .card { cursor: default; outline: none; color: var(--muted); }
 .card { transition: opacity var(--m-base) var(--m-ease); }
 .card.is-off .card-stock, .card.is-off .card-holder, .card.is-off .pile-sheet, .card.is-off .card-paws { opacity: 0.28; }
-.card.is-off .card-words, .card.is-off .pile-text, .card.is-off .pile-line, .card.is-off .pile-meta { opacity: 0.42; }
+.card.is-off .card-words--rest, .card.is-off .pile-text, .card.is-off .pile-line, .card.is-off .pile-meta { opacity: 0.42; }
 .plan.is-off .wire { opacity: 0.4; }
 .card-stock, .card-holder { transition: opacity var(--m-base) var(--m-ease); }
 .bead.is-off { opacity: 0.2; }
