@@ -100,7 +100,7 @@ Rules: motion explains cause. Everything is interruptible, because every change 
 
 **Open surfaces.** Title 20/26, corner 16, one key style. Work's opens over the board; the Inbox's docks in place. Both for good reasons.
 
-**Pile grammar.** Count, then what in it wants you. On Work a pile is a real card with sheets and `+3`, and one tab whose number counts what there wants you. In the Inbox the pile's face reads `8 more  ⊗ 3  newest 2h`.
+**Pile grammar.** Count, then what in it wants you, then how fresh. On Work a pile is a real card with sheets and `+3`, and one tab whose number counts what there wants you. In the Inbox the pile's face reads `8 more  ⊗ 2  newest 2h`, with a 20px Deco numeral and a dot while it holds news.
 
 **Keys.** The current card follows pointer and keys, on both. An arrow key takes over from a resting pointer until the pointer moves.
 
@@ -110,4 +110,4 @@ Rules: motion explains cause. Everything is interruptible, because every change 
 
 **Ages and waits.** On Work ages are neutral, because a Task's age is not the point of the card. In the Inbox an overdue wait stays marigold: the wait is the point there. The two pages are never on screen together.
 
-**Inbox tokens.** `--h-stack` and the stock variants stay in the Inbox's own tokens file.
+**Inbox tokens.** `--h-stack` and the stock variants stay in the Inbox's own tokens file. `js/motion-extras.js` on the Inbox adds `curve`, `animate`, `fly` and `knock` on top of the kernel, with no new springs.
