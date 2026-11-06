@@ -1,0 +1,147 @@
+/* PROTOTYPE - the shared primitives of Work and Inbox: desk, card stock, heights, type roles,
+   spacing and motion tokens. SHARED.md explains every value. Load after tokens.css.
+
+   The one idea: a card's height above the desk says something. A card that wants you stands up.
+   A card someone else holds lies flat. A card that cannot move is pressed in. A finished card
+   is only an outline. Nothing else on the desk has a shadow. */
+
+:root,
+[data-theme] {
+  /* ---- The desk: the ground under the cards. One tone below the app's --surface, so cards
+     read as objects lying on it. */
+  --desk: color-mix(in oklab, var(--bg) 70%, var(--surface));
+
+  /* ---- Card stock. --stock is the sheet itself; the rest are its edges. */
+  --stock: var(--raised);
+  --stock-flat: color-mix(in oklab, var(--raised) 42%, var(--desk));
+  --stock-rim: color-mix(in oklab, var(--rim) 80%, transparent);
+  --stock-rim-flat: color-mix(in oklab, var(--rim) 62%, transparent);
+  --stock-lit: color-mix(in oklab, white 7%, transparent);
+  --stock-press: color-mix(in oklab, var(--sunken) 88%, var(--desk));
+
+  /* ---- Heights: the box-shadow of each. Dark values; the light themes follow below. */
+  --h-stand: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 3px 6px -2px oklch(0 0 0 / 0.28), 0 10px 20px -10px oklch(0 0 0 / 0.34);
+  --h-hover: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0 0 0 / 0.22), 0 6px 10px -3px oklch(0 0 0 / 0.3), 0 16px 28px -12px oklch(0 0 0 / 0.42);
+  --h-carry: inset 0 1px 0 var(--stock-lit), inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0 0 0 / 0.26), 0 14px 20px -6px oklch(0 0 0 / 0.36), 0 36px 56px -18px oklch(0 0 0 / 0.56);
+  --h-flat: inset 0 0 0 1px var(--stock-rim-flat);
+  --h-press: inset 0 1px 2px oklch(0 0 0 / 0.26), inset 0 0 0 1px color-mix(in oklab, var(--rim) 46%, transparent);
+  --h-etch: inset 0 0 0 1px color-mix(in oklab, var(--rim) 42%, transparent);
+
+  /* ---- Type roles, on the app's scale. */
+  --type-lead: var(--w-bold) var(--t-18) / 24px var(--font-ui);
+  --type-lane: var(--w-bold) var(--t-14) / 20px var(--font-ui);
+  --type-card: var(--w-medium) var(--t-13) / 18px var(--font-ui);
+  --type-summary: var(--w-regular) var(--t-12) / 16px var(--font-ui);
+  --type-meta: var(--w-regular) var(--t-11) / 16px var(--font-ui);
+
+  /* ---- Space. */
+  --card-r: var(--r-md);
+  --card-r-inner: 8px;
+  --card-pad-x: 12px;
+  --card-pad-y: 10px;
+  --card-h: 96px;
+  --card-gap: 14px;
+
+  /* ---- Motion. MOTION.md says where each is used. */
+  --m-press: 80ms;
+  --m-quick: 140ms;
+  --m-base: 220ms;
+  --m-slow: 360ms;
+  --m-long: 560ms;
+  --m-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --m-ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --m-ease-both: cubic-bezier(0.6, 0, 0.2, 1);
+  /* A spring as a CSS curve, for transitions that need a touch of overshoot. */
+  --m-settle: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%, 1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%, 0.997 69.8%, 1.003 76.9%, 1);
+}
+
+[data-theme="whitehaven"],
+[data-theme="styles"],
+:root:not([data-theme]) {
+  --desk: var(--bg);
+  --stock-flat: color-mix(in oklab, var(--raised) 34%, var(--desk));
+  --stock-rim: color-mix(in oklab, var(--rim) 72%, transparent);
+  --stock-rim-flat: color-mix(in oklab, var(--rim) 88%, transparent);
+  --stock-lit: oklch(1 0 0 / 0.9);
+  --stock-press: color-mix(in oklab, var(--sunken) 80%, var(--desk));
+  --h-stand: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.05), 0 2px 5px -1px oklch(0.3 0.03 70 / 0.08), 0 10px 18px -10px oklch(0.3 0.03 70 / 0.16);
+  --h-hover: inset 0 0 0 1px var(--stock-rim), 0 1px 1px oklch(0.3 0.03 70 / 0.05), 0 5px 9px -2px oklch(0.3 0.03 70 / 0.1), 0 16px 26px -12px oklch(0.3 0.03 70 / 0.22);
+  --h-carry: inset 0 0 0 1px var(--stock-rim), 0 2px 3px oklch(0.3 0.03 70 / 0.08), 0 14px 20px -6px oklch(0.3 0.03 70 / 0.16), 0 36px 56px -18px oklch(0.3 0.03 70 / 0.34);
+  --h-press: inset 0 1px 2px oklch(0.3 0.03 70 / 0.1), inset 0 0 0 1px color-mix(in oklab, var(--rim) 70%, transparent);
+  --h-etch: inset 0 0 0 1px color-mix(in oklab, var(--rim) 62%, transparent);
+}
+
+/* ---------- The card ----------
+   Three layers in one stacking context, back to front: what stands behind the top edge (.card-holder),
+   the sheet itself (.card-stock), and the words. The sheet is its own element so it can hide the lower
+   part of a head standing behind it; a background on .card would paint under the holder. */
+.card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: var(--card-h);
+  padding: var(--card-pad-y) var(--card-pad-x) 8px;
+}
+.card-stock {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--card-r);
+  background: var(--stock);
+  box-shadow: var(--h-stand);
+  transition: box-shadow var(--m-base) var(--m-ease), background-color var(--m-base) var(--m-ease);
+}
+.card[data-height="flat"] .card-stock { background: var(--stock-flat); box-shadow: var(--h-flat); }
+.card[data-height="press"] .card-stock { background: var(--stock-press); box-shadow: var(--h-press); }
+.card[data-height="etch"] .card-stock { background: transparent; box-shadow: var(--h-etch); }
+
+/* Title and summary share one clamp of three lines, so a long title takes room from the summary
+   and every card keeps one height. A changed summary never moves a neighbour. */
+.card-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  flex: none;
+  height: 54px;
+  font: var(--type-summary);
+  color: var(--muted);
+}
+.card-title { font: var(--type-card); color: var(--ink); letter-spacing: -0.003em; }
+.card[data-height="flat"] .card-title { color: color-mix(in oklab, var(--ink) 74%, var(--muted)); }
+.card[data-height="press"] .card-title { color: var(--muted); }
+.card[data-height="etch"] .card-title { color: var(--faint); font-weight: var(--w-regular); }
+.card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 16px;
+  margin-top: auto;
+  font: var(--type-meta);
+  color: var(--faint);
+}
+.card-foot time { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* ---------- Who holds it: the top edge ----------
+   The top edge is one slot. What stands behind it says who has the next move, before a word is
+   read, the way a metal signal tab did on a card in a 1930s file: a marigold tab for you, short
+   for a quick call and long for real thinking; a colleague's head for an agent; a grey tab with
+   an initial for a person; nothing for nobody. The sheet cuts them all off along its edge. */
+.card-holder {
+  position: absolute;
+  z-index: -2;
+  right: 14px;
+  bottom: calc(100% - 4px);
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+}
+.card-tab { display: block; width: 14px; height: 9px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.28); }
+.card-tab[data-need="think"] { width: 30px; }
+.card-tab--person { display: grid; place-items: start center; width: 17px; height: 15px; padding-top: 1px; background: color-mix(in oklab, var(--faint) 46%, var(--desk)); box-shadow: none; color: var(--ink); font-size: 9px; font-weight: var(--w-bold); line-height: 11px; }
+.card-head { display: block; width: 26px; height: 18px; overflow: hidden; line-height: 0; }
+.card-head .cr { display: block; overflow: hidden; }
