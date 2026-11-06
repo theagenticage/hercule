@@ -580,7 +580,7 @@ window.Drag = (function () {
     var beadEl = e.target.closest(".bead[data-id]");
     if (beadEl) return beginBead(e, beadEl);
     var el = e.target.closest(".card[data-id]");
-    if (!el || e.target.closest(".card-more") || el.classList.contains("is-ghost") || el.classList.contains("is-away")) return;
+    if (!el || e.target.closest(".card-more, .card-fan") || el.classList.contains("is-ghost") || el.classList.contains("is-away")) return;
     press = { el: el, id: el.dataset.id, x: e.clientX, y: e.clientY };
   }
 

@@ -162,6 +162,8 @@
 .is-ghost .card-stock { outline: none !important; }
 .is-moving { will-change: transform; }
 .card.is-moving { z-index: 3; transition: none; }
+/* A card rising into a row passes over what stands behind the next card's top edge, not under it. */
+.card.is-rising { z-index: 6; }
 
 /* ---------- The fan ---------- */
 .fan-layer { position: absolute; inset: 0; z-index: 24; pointer-events: none; }
@@ -333,7 +335,10 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .card-more { min-width: 26px; height: 24px; padding: 0 4px; margin: -4px -6px -4px 0; border-radius: 6px; color: var(--muted); font: var(--type-meta); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; pointer-events: auto; transition: background var(--m-quick), color var(--m-quick); }
 .card-more:hover { background: var(--hover); color: var(--ink); }
 .card-meta { pointer-events: none; }
+/* The sheets under a card are a door too: they part on approach, and a click fans them out. */
 .card:hover .pile-sheet { transform: translateY(calc(var(--n) * 4.5px)) scaleX(calc(1 - var(--n) * 0.018)); }
+.card:has(.card-fan:hover) .pile-sheet { transform: translateY(calc(var(--n) * 6.5px)) scaleX(calc(1 - var(--n) * 0.012)); }
+.card-fan { position: absolute; left: 6px; right: 6px; top: calc(100% - 3px); height: 16px; pointer-events: auto; }
 .grid.is-empty { height: 0; }
 .grid.is-empty + .plans { margin-top: 0; }
 

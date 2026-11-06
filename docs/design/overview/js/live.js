@@ -155,7 +155,11 @@ window.Live = (function () {
     var steps = Scenes.OVERNIGHT.filter(function (s) { return s.kind === "arrive" || s.from !== s.to; });
     steps.forEach(function (s, i) {
       setTimeout(function () {
-        if (s.kind === "arrive") arrive(JSON.parse(JSON.stringify(s.task)), { quiet: true });
+        if (s.kind === "arrive") {
+          // This thread started in the night. It was already working: the replay only shows it landing.
+          Shell.adoptArrival();
+          arrive(JSON.parse(JSON.stringify(s.task)), { quiet: true });
+        }
         else fact(s.id, s.to, s.note, s.apply);
       }, 300 + i * 1500);
     });
@@ -178,8 +182,10 @@ window.Live = (function () {
   /** Shows the morning at once, for a person who asked for no movement. The line still tells it. */
   function skipToMorning() {
     Scenes.OVERNIGHT.forEach(function (s) {
-      if (s.kind === "arrive") Store.addTask(JSON.parse(JSON.stringify(s.task)));
-      else if (s.from !== s.to) Store.moveByFact(s.id, s.to, s.apply);
+      if (s.kind === "arrive") {
+        Shell.adoptArrival();
+        Store.addTask(JSON.parse(JSON.stringify(s.task)));
+      } else if (s.from !== s.to) Store.moveByFact(s.id, s.to, s.apply);
     });
     Board.draw();
     summarizeNight();

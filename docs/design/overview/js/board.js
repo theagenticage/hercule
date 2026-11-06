@@ -144,6 +144,7 @@ window.Board = (function () {
     var sheets = !stack || !stack.count ? 0 : stack.count >= 8 ? 3 : stack.count >= 3 ? 2 : 1;
     var html = "";
     for (var i = sheets; i >= 1; i--) html += '<i class="pile-sheet" style="--n:' + i + '"></i>';
+    if (sheets) html += '<button class="card-fan" tabindex="-1" aria-hidden="true" title="Open what lies behind (E)"></button>';
     setHTML(el._sheets, html);
     el.setAttribute("aria-label", describeCard(t));
     el.dataset.height = Store.decideHeight(t);
@@ -530,7 +531,10 @@ window.Board = (function () {
     copy.style.cssText = "position:absolute;margin:0;left:" + (card.rect.left - host.left) + "px;top:" + (card.rect.top - host.top) + "px;width:" + card.rect.width + "px;height:" + card.rect.height + "px";
     flight.appendChild(copy);
     var r = target.getBoundingClientRect();
-    Motion.body(copy).to({ x: r.left + r.width / 2 - (card.rect.left + card.rect.width / 2), y: r.top + r.height / 2 - (card.rect.top + card.rect.height / 2), s: target.classList.contains("bead") ? 0.1 : 0.94, o: 0 }, spring || "travel", {
+    // Landed is words, not a card: the copy fades out on its way there and stops short of them.
+    var words = target.classList.contains("pile") && target.dataset.kind === "landed";
+    var x = words ? r.left - 24 - (card.rect.left + card.rect.width) : r.left + r.width / 2 - (card.rect.left + card.rect.width / 2);
+    Motion.body(copy).to({ x: x, y: r.top + r.height / 2 - (card.rect.top + card.rect.height / 2), s: target.classList.contains("bead") ? 0.1 : 0.94, o: 0 }, spring || "travel", {
       done: function () { copy.remove(); },
     });
   }

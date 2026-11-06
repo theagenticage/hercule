@@ -121,7 +121,7 @@ window.Motion = (function () {
     this.write();
     if (settled) {
       active.delete(this);
-      this.el.classList.remove("is-moving");
+      this.el.classList.remove("is-moving", "is-rising");
       var done = this.onRest;
       this.onRest = null;
       if (done) done();
@@ -289,6 +289,7 @@ window.Motion = (function () {
       b.value.x = dx;
       b.value.y = dy;
       b.write();
+      if (dy > 0) el.classList.add("is-rising");
       var delay = opts.stagger ? opts.stagger(el, r0, r1) : 0;
       b.to({ x: 0, y: 0 }, opts.spring || "hand", { delay: delay });
     });

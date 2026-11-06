@@ -124,8 +124,8 @@ A thread starts, so a Task appears. It waits for a still hand. On a stack, it ri
 A fact arrives, such as a pull request merging.
 
 1. It waits for a still hand: not while the pointer rests within 120px of it, however long it has been still, because a parked pointer means someone is reading. Not while the pointer is on the move within 280px. Not while dragging. Never longer than 8 seconds.
-2. **The cause lands first.** A small label ("PR #3331 merged") rises onto the card on `hand`. It holds for 760ms.
-3. The card crosses on `self`, about one second, to the end of its new cell, or into its pile, which it is seen entering.
+2. **The cause lands first.** A small label ("PR #6221 merged") rises onto the card on `hand`. It holds for 760ms.
+3. The card crosses on `self`, about one second, to the end of its new cell, or into its stack, which it is seen entering. Heading for Landed, which is only words, it fades out on the way and stops 24px short of them. A card rising into the row it left passes over what stands behind the next card's top edge, never under it.
 4. **The dent stays.** Its old place stays open for 1.5 seconds, and closes only when the hand is out of that lane. On a stack there is no dent: the next card is already there underneath.
 5. The stage counts roll over. The line at the right of the sentence says what happened.
 

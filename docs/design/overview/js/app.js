@@ -53,7 +53,7 @@
   }, { passive: true });
 
   work.addEventListener("click", function (e) {
-    var more = e.target.closest(".card-more");
+    var more = e.target.closest(".card-more, .card-fan");
     if (more) {
       var host = more.closest(".card");
       var stack = Board.readStack(host);

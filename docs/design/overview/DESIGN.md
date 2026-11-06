@@ -135,7 +135,7 @@ Off by default. Display menu, or `W`. Neglected work ages from 6 days to 30: the
 At rest a lane shows one or two rows. Per stage, real cards lie on top, in this order: the oldest that want you, then agents', then people's, then the oldest, and blocked cards last. The same order holds when the lane shows all its rows, so the top card stays on top. What lies behind shows as sheets under the last card, with `+3` beside the age. The card has one tab: when more than one thing here wants you, the tab carries that number. A stack with agents on it shows one head beside the tab, so the crew is always on the board.
 
 - Who is on top stays the same for the visit. Under a lens, cards that match come to the top, so a lens never lights an empty row.
-- `+3`, or `E`, fans out what lies behind.
+- `+3`, the sheets under the card, or `E`, fan out what lies behind. The sheets part on approach, so the door shows itself. Clicking the card itself opens that card.
 - Clicking the lane's name shows more rows. Clicking again goes back. The cards come out from under the last card, and go back the same way.
 - A card dropped at rest lands on the row you chose. The card there slips down 6px to take it, and nothing else moves: a lane at rest never changes height.
 - Lifting a card shows the next one at once, already there underneath. A card leaving by itself does the same. There is no hole to hold.

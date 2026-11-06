@@ -74,5 +74,10 @@ window.Shell = (function () {
     else sum.innerHTML = "<b>" + working + '</b> working · <b class="you-ink">' + waiting + "</b> waiting · <b>2</b> idle";
   }
 
-  return { drawSidebar: drawSidebar, syncWithBoard: syncWithBoard };
+  /** Counts a thread that was already running as now being on the board: the total does not change. */
+  function adoptArrival() {
+    if (elsewhere > 0) elsewhere--;
+  }
+
+  return { drawSidebar: drawSidebar, syncWithBoard: syncWithBoard, adoptArrival: adoptArrival };
 })();

@@ -94,7 +94,7 @@ window.Scenes = (function () {
 
   // What happened since the person last looked. The replay starts from `was` and plays forward.
   var OVERNIGHT = [
-    { kind: "move", id: "slot-rush", from: "reviewing", to: "landed", note: "PR #6204 merged", apply: function (t) { t.move = "nobody"; t.person = ""; t.now = "Merged last night."; t.where = "The cache merged last night. Slot lookups dropped at the noon peak."; t.ask = ""; } },
+    { kind: "move", id: "slot-rush", from: "reviewing", to: "landed", note: "PR #6221 merged", apply: function (t) { t.move = "nobody"; t.person = ""; t.now = "Merged last night."; t.where = "The cache merged last night as #6221. Slot lookups dropped at the noon peak."; t.ask = ""; t.links = t.links.map(function (l) { return /^PR /.test(l.label) ? { label: "PR #6221", url: l.url, state: "merged" } : l; }); } },
     { kind: "arrive", task: { id: "refund-currency", name: "Refund emails show the wrong currency", project: "storefront", initiative: "", stage: "exploring", move: "agent", need: "look", agent: "Find why refund emails use the wrong currency", now: "From a support ticket.", where: "A thread started last night from a support ticket. It is tracing where the currency is set.", left: "Find the cause", ask: "", kind: "thread", source: "", ref: "", age: 0, stalled: false, person: "", options: [], context: [], links: [], threads: [{ title: "Find why refund emails use the wrong currency", id: "a1" }] } },
     { kind: "move", id: "pr-fake-clock", from: "reviewing", to: "landed", note: "PR #3331 merged", apply: function (t) { t.move = "nobody"; t.person = ""; t.now = "Merged last night."; } },
   ];
