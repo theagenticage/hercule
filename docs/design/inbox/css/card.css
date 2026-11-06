@@ -222,6 +222,7 @@
 
 .c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; display: none; }
 .card.is-peek .c-hit { display: block; pointer-events: auto; }
+.stack .card.is-dealing { transition: none; }
 .card.is-under .c-line, .card.is-under .c-status, .card.is-under .c-title, .card.is-under .c-mark, .card.is-under .c-pace, .card.is-under .c-holder { visibility: hidden; }
 /* In a peek the title reads in full, up to three lines. */
 .stack .card.is-peek .c-title { -webkit-line-clamp: 3; }

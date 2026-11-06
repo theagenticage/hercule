@@ -212,7 +212,13 @@ window.App = (function () {
       var from = pile && (pile._plan ? pile._plan.y : pile._wasY);
       if (from === undefined || from === null || !el._plan || Motion.isReduced()) return;
       el.classList.remove('is-new');
-      Motion.body(el).set({ y: from - el._plan.y }).to({ y: 0 }, 'hand', { delay: (stagger ? Math.min(120, stagger(el)) : 0) + i * 14 });
+      // While it is dealt it is only as tall as its strip, so it never shows below the pile it comes out of.
+      el.classList.add('is-dealing');
+      el.style.height = el._plan.show + 'px';
+      Motion.body(el).set({ y: from - el._plan.y }).to({ y: 0 }, 'hand', { delay: (stagger ? Math.min(120, stagger(el)) : 0) + i * 14, done: function () {
+        el.classList.remove('is-dealing');
+        if (el._rest && !el.classList.contains('is-peek')) el.style.height = el._rest + 'px';
+      } });
       if (pile._plan) Motion.knock(pile, -60);
     });
   }
