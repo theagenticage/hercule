@@ -12,15 +12,34 @@ window.Pointer = (function () {
     if (!el._plan || el.dataset.level === 'full') return;
     peeked = el;
     var host = el.parentNode;
-    var over = el._plan.y + el._full - Number(host.dataset.depth || 0) - 8;
-    el.style.transition = 'none';
-    el.style.height = el._plan.show + 'px';
     el.querySelector('.c-hit').style.height = el._plan.show + 'px';
     el.classList.add('is-peek');
+    var height = measurePeek(el);
+    var over = el._plan.y + height - Number(host.dataset.depth || 0) - 8;
+    markUnder(el, host, height);
+    el.style.height = el._plan.show + 'px';
     void el.offsetHeight;
     el.style.transition = '';
-    el.style.height = el._full + 'px';
+    el.style.height = height + 'px';
     if (over > 0) Motion.body(el).to({ y: -over }, 'glide');
+  }
+
+  /** Returns how tall a card stands in a peek: its whole face at strip size. */
+  function measurePeek(el) {
+    var was = el.style.height;
+    el.style.transition = 'none';
+    el.style.height = 'auto';
+    var whole = el.offsetHeight + 10;
+    el.style.height = was;
+    return whole;
+  }
+
+  /** Hides the second line of the strip a peek ends on, so no sliver of a hidden card shows under it. */
+  function markUnder(el, host, height) {
+    var bottom = el._plan.y + height;
+    [].forEach.call(host.children, function (c) {
+      c.classList.toggle('is-under', !!(c !== el && c._plan && c._plan.y < bottom && c._plan.y + c._plan.show > bottom));
+    });
   }
 
   function unpeek() {
@@ -30,6 +49,7 @@ window.Pointer = (function () {
     if (el._plan) {
       el.style.height = el._plan.show + 'px';
       Motion.body(el).to({ y: 0 }, 'glide');
+      [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
     }
     var done = function () {
       if (el === peeked) return;
@@ -37,6 +57,12 @@ window.Pointer = (function () {
       if (el._rest) el.style.height = el._rest + 'px';
     };
     setTimeout(done, Motion.isReduced() ? 0 : 170);
+  }
+
+  /** Tells a card how wide its actions are, so its title can end before them. */
+  function measureActs(el) {
+    var acts = el.querySelector('.c-acts');
+    if (acts) el.style.setProperty('--acts-w', acts.offsetWidth - 4 + 'px');
   }
 
   /** Takes away a card's new mark, once the person has seen what landed on it. */
@@ -53,6 +79,7 @@ window.Pointer = (function () {
     if (!el) { leaveTimer = setTimeout(unpeek, LEAVE_DELAY); return; }
     clearTimeout(leaveTimer);
     el.classList.add('is-hover');
+    measureActs(el);
     clearFresh(el);
     if (peeked) peek(el);
     else timer = setTimeout(function () { if (hover === el) peek(el); }, PEEK_DELAY);
@@ -83,5 +110,5 @@ window.Pointer = (function () {
     });
   }
 
-  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, peeked: function () { return peeked; } };
+  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, measureActs: measureActs, peeked: function () { return peeked; } };
 })();

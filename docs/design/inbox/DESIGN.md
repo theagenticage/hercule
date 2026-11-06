@@ -17,24 +17,25 @@ The Inbox builds on the primitives shared with Work: `SHARED.md` and `system/pri
 
 ```
 ┌ pill: Inbox  Cards  Intake 214 ┐  Juno has waited longest. ...          marks
-├──────────────┬──────────────┬──────────────┤
-│ plaque       │ plaque       │ plaque       │   Noticed: 72px, up to three
-├──────────────┼──────────────┼──────────────┤
-│ To review 12 │ To answer 4  │ On the shelf │
-│ whole card   │ whole card   │  Returns 4   │
-│ strip        │ strip        │  whole card  │
-│ strip        │ To finish 6  │  strip       │
-│ ...          │ whole card   │  Shop 5  ... │
-│              │ strip ...    │              │
-│ 1 on Work    │ 13 with rev. │              │   foot: what settled
-└──────────────┴──────────────┴──────────────┘
+┌────────────────────────────────────────────────┐
+│ crest │ noticed │ noticed │ noticed            │   the lacquer plate: 60px
+└────────────────────────────────────────────────┘
+  TO REVIEW 12     TO ANSWER 4      ON THE SHELF 12    Deco counts, brass rule
+  lead card        lead card        Returns 4
+                                    strip
+  strip            strip            strip
+  strip            strip            Shop 5
+  ...              TO FINISH 6      strip ...
+                   lead card
+                   strip ...
+  1 on Work        13 with reviewers                   foot: what settled
 ```
 
-Three equal columns, 20px apart, 32px from the window's edges. The plaques share the columns, so there is one vertical grid on the whole page. The page's fixed heights at 1440x900: bar 56, plaques 72 + 20, stack heading 30.
+Three columns at 1.1, 1.1 and 1, 24px apart, 32px from the window's edges. The shelf is narrower because it asks for less. The fixed heights: bar 56, plate 60 + 22, stack heading 26 + 10.
 
 | Was | Now | Where | Behaviour |
 |---|---|---|---|
-| Triage | **Noticed** | Plaques across the top | Hercule's own. Lacquer. One short reason. Three at most |
+| Triage | **Noticed** | One lacquer plate across the top | Hercule's own. One short reason each, and the logos of what each combines. Up to three segments. The one dark object on the page, so the eye goes there first |
 | Fast | **On the clock**: To review, To answer, To finish | Columns one and two | Oldest first. The wait leads. Named for your next move |
 | Slow | **On the shelf** | Column three | No clock. Grouped by project. Tighter |
 
@@ -46,21 +47,22 @@ A kind maps how an entity concerns you to a stack, in its `stacks` field: `revie
 
 | Level | Shows | Open kinds | Tight kinds |
 |---|---|---|---|
-| Whole | The whole card | Measured: 76 to 94 | Measured |
-| Two | Title, one line | 49 | 44 |
-| One | Title | 34 | 32 |
-| Pile | A strip with edges under it | 58 | 58 |
+| Whole | The whole card | Measured: about 104 | Measured |
+| Two | Title, one line | 50 to 58 | 46 to 50 |
+| One | Title | 36 | 32 |
+| Pile | A strip with edges under it, one to three by how many it holds | 62 | 62 |
 
-1. If every card fits whole, with a gap of 14 (8 when tight), each is whole.
-2. Otherwise the first card stays whole, and the rest get two lines, oldest first, until the depth runs out; the newest get one line.
-3. One-line strips are only for a small overflow, up to 30% more cards than fit at two lines. Past that a wall of titles is worse than a pile, so the newest fold into at most two piles, by what the kind groups by. The shelf folds whole projects: past what fits, a project is one pile.
-4. Like things from one stream, such as dependency updates, fold into one pile at the place of the oldest, at any volume.
+1. If every card fits whole, with a gap of 12 (8 when tight), each is whole.
+2. Otherwise the first card stands whole, 12px apart from the rest, because it has waited longest. The others get two lines, oldest first, and the newest get one line if the depth runs out. What depth is left is shared out, up to the `most` height, so a full stack ends at its foot.
+3. The shelf has no clock, so nothing there leads: every card is a strip.
+4. One-line strips are only for a small overflow, up to 30% more cards than fit at two lines. Past that a wall of titles is worse than a pile, so the newest fold into one pile. On the shelf, past what fits, a project is one pile.
+5. Like things from one stream, such as dependency updates, fold into one pile at the place of the oldest, at any volume.
 
 Cards in a stack stand like cards in a file drawer. Each later card lies over the one before it, so each card shows its top. `--h-stack` casts its shadow upward onto the card behind.
 
 ## Card anatomy
 
-Shared with Work: 12px corner, 8px nested corner, padding 10 top, 12 sides, 8 bottom, title 13/18 medium, summary 12/16, meta 11/16.
+Shared with Work: 12px corner, 8px nested corner, padding 10 top, 12 sides, 8 bottom, title 13/18 medium, summary 12/16, meta 11/16. One step on from Work: a whole card on the clock has a title of 15/21 and a wait of 14/21, because it is the focal point of its stack.
 
 ```
  10 ┌────────────────────────────────────────────────┐
@@ -74,13 +76,13 @@ Shared with Work: 12px corner, 8px nested corner, padding 10 top, 12 sides, 8 bo
 
 | Slot | Declared by | Rule |
 |---|---|---|
-| Mark | `plugin.mark`, `plugin.hue` | 20px, 17px when tight. In `--mark-ink`, or in the hue the plugin declares through `--mark-l` and `--mark-c`, which belong to the theme |
+| Mark | `plugin.mark`, `plugin.hue`, `plugin.solid` | 20px, 18px when tight, in a 22px rail. In `--mark-ink`, or in the hue the plugin declares through `--mark-l` and `--mark-c`, which belong to the theme. A solid mark is drawn at 90%, so a heavy logo and a line logo look the same size |
 | Title | The entity | One line in a strip, two when whole or peeking, all of it when open |
 | Pace | `pace`, `patience` | A fast kind shows its wait. The ramp is measured against patience, not against a fixed time: `--wait-fresh` under a quarter, `--wait-recent` under one, `--wait-due` under three, `--wait-over` past three. A slow kind has no clock, and its status takes this slot |
-| Person | `person`, or the signal's actor | 16px monogram. Faces are for colleagues |
-| Reason | `reasons` | The latest signal as one sentence. If it is the stack's usual reason, the line says only who |
+| Person | `person`, or the signal's actor | A 16px monogram on a whole card or a peek. A strip has only the name. Faces are for colleagues |
+| Reason | `reasons` | The latest signal as one sentence. If it is the stack's usual reason, the line says only who, in `--recede` |
 | The rest | The entity's signals | `+2` in `--faint` |
-| Status | `status` | One shape and a tone. `norm: true` marks the usual state, which draws nothing at rest |
+| Status | `status` | One shape and a tone. `norm: true` marks the usual state, which draws nothing at rest. A status the reason already said in the same tone is not drawn again at rest |
 | Identifier | `identifier` | Shown whole and on approach. `#{number}`, `{key}` |
 | Context | `context` | `{repo}`, `{team}`, `{supplier}` |
 | Facts | `facts` | At most three, each in a fixed form |
@@ -91,8 +93,8 @@ Shared with Work: 12px corner, 8px nested corner, padding 10 top, 12 sides, 8 bo
 | State | Shows |
 |---|---|
 | At rest | Mark, title, wait, reason, count; a shape only if it is not usual |
-| Hover | The same, and its actions take the place of the wait. After 260ms it peeks |
-| Peek or keyboard focus | The whole face, over the cards in front of it. Its lower part takes no pointer, so the strips under it stay reachable |
+| Hover | The same, and its actions take the place of the wait: the workflow by name, your monogram, a close. The title ends in an ellipsis before them. After 260ms it peeks |
+| Peek or keyboard focus | The whole face, over the cards in front of it, ending on the edge of a strip. Its lower part takes no pointer, so the strips under it stay reachable |
 | Open | Everything: the signals in order, the facts, the moves |
 
 ## The table a plugin declares
@@ -129,7 +131,7 @@ Shared with Work: 12px corner, 8px nested corner, padding 10 top, 12 sides, 8 bo
 |---|---|
 | Shape | `ring` open, `dashed` not real yet, `quarter` `half` `most` under way, `fork` a proposed change, `join` merged, `check` finished, `cross` failed or refused, `alert` burning |
 | Tone | `quiet`, `active`, `you`, `good`, `bad` |
-| Stock | `bond`, `ledger`, `manila`, `sage`. `lacquer` is Hercule's alone |
+| Stock | `bond`, `ledger` (a cool grey), `manila`, `sage`. `lacquer` is Hercule's alone |
 | Density | `open`, `tight` |
 | Fact form | `delta`, `count`, `word`, `date`, `money`, `bars` |
 | Reason tone | `plain`, `you`, `good`, `bad` |
@@ -155,8 +157,8 @@ A card with a Task stays where it is for the rest of the visit. On the next visi
 
 | State | Design |
 |---|---|
-| First run | A welcome over the etched shapes of the stacks, with the sources to connect |
-| Inbox zero | A sunrise. The numeral is the sun, in the Deco face; brass rays draw outward when the last card leaves |
+| First run | The page itself, no dialog. The plate says what this place is, and each stack's first card asks to be connected, with etched places behind it |
+| Inbox zero | A small sunrise, 440px wide. The numeral is the sun, in the Deco face; brass rays draw outward when the last card leaves. "All clear." |
 | An empty stack | One quiet line in its place. The column stays, as a landmark |
 | Loading | The real cards with their words held back, from what the last visit knew. Nothing shifts when words arrive |
 | Offline | One line in the bar saying what you see and that moves wait |
@@ -164,13 +166,13 @@ A card with a Task stays where it is for the rest of the visit. On the next visi
 | No person, no status | The slot closes up. Sentry has no person, Gmail has no status |
 | Very long title | One line in a strip, two when whole, all of it when open |
 | Huge counts | Grouped digits with tabular figures |
-| 300 cards | The same page: piles, one per project on the shelf |
+| 300 cards | The same page: one pile at the foot of each stack on the clock, one pile per project on the shelf |
 
 ## Where it lives
 
 Inbox takes Intake's row in the sidebar's Work section. Intake moves behind it, as Office sits behind Overview: the pill reads `Inbox | Cards | Intake`.
 
-The row shows a plain number, not a badge. It counts what has outlasted its patience, plus what Hercule noticed. A signal landing on a card you already have never raises it.
+The row shows a plain grey number, not a badge. It counts what has outlasted its patience, plus what Hercule noticed. A signal landing on a card you already have never raises it. Something new while you are elsewhere adds one 6px marigold dot, gone when you come back.
 
 ## New in the design system
 
@@ -179,12 +181,15 @@ The row shows a plain number, not a badge. It counts what has outlasted its pati
 | Stack | Fixed depth, shared by its cards | `js/stacks.js` |
 | Strip | A card seen through the ones in front of it | `css/card.css` |
 | Peek | A whole card raised over the others, inert below its strip | `js/pointer.js` |
-| Plaque | Hercule's own card | `css/card.css` |
+| The plate | One lacquer band with what Hercule noticed on it in segments | `css/card.css` |
 | Lacquer | `--lacquer`, `--lacquer-lit`, `--lacquer-ink`, `--lacquer-sub`, `--lacquer-rim`, `--lacquer-shadow`, per theme | `css/tokens.css` |
 | Stock with a hue | `--stock-manila`, `--stock-ledger`, `--stock-sage` | `css/tokens.css` |
 | Stacked height | `--h-stack`, `--h-stack-shade` | `css/tokens.css` |
 | Mark in a declared hue | `--mark-ink`, `--mark-l`, `--mark-c` | `css/tokens.css` |
 | Patience | A kind's sense of time, and the ramp `--wait-*` | `css/tokens.css` |
+| Receding text | `--recede`, for what a heading has already said | `css/tokens.css` |
+| The veil | `--veil`: paper in the light themes, the scrim in the dark | `css/tokens.css` |
+| The drop | What falls onto a card before it reacts to a signal | `js/landing.js` |
 | Kept hole | A dismissed card's place, kept while the pointer is near | `js/moves.js` |
 | The rail | Who can take a carried card | `js/drag.js` |
 | Tray | A pile fanned open, the one thing that scrolls | `js/tray.js` |

@@ -110,8 +110,8 @@
     var pace = kind.pace === 'fast' && !e.task ? sayWait(e.since, ctx.now) : '';
     var flows = readWorkflows(e);
     var hand = flows.length
-      ? '<button class="c-act c-act--hand" data-act="hand" title="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + ' (H)" aria-label="Hand to an agent">' +
-        flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>'
+      ? '<button class="c-act c-act--hand" data-act="hand" title="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + ' (H)" aria-label="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + '"' + (flows.length > 1 ? ' aria-haspopup="menu"' : '') + '>' +
+        flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 20 }); }).join('') + '<span>' + esc(flows.length === 1 ? flows[0].name : 'Hand to…') + '</span></button>'
       : '';
     var acts = e.task
       ? '<button class="c-act c-act--go" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>'

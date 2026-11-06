@@ -101,6 +101,14 @@ window.Open = (function () {
       var ease = Motion.curve('open').ease, ms = Math.min(Motion.curve('open').ms, 520);
       var clipFrom = 'inset(' + Math.max(0, r.top - top) + 'px ' + Math.max(0, w - (r.left - left) - r.width) + 'px ' + Math.max(0, top + h - r.top - Math.min(r.height, 64)) + 'px ' + Math.max(0, r.left - left) + 'px round 12px)';
       host.animate([{ clipPath: clipFrom }, { clipPath: 'inset(-40px -40px -60px -40px round 14px)' }], { duration: ms, easing: ease });
+      // The title is the same object in both places: it grows from where it lay, so the eye never loses it.
+      var from = sourceEl.querySelector('.c-title, .pl-title'), to = host.querySelector('.o-title');
+      if (from && to) {
+        var a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+        var scale = parseFloat(getComputedStyle(from).fontSize) / parseFloat(getComputedStyle(to).fontSize);
+        to.style.transformOrigin = '0 0';
+        to.animate([{ transform: 'translate(' + (a.left - b.left) + 'px,' + (a.top - b.top) + 'px) scale(' + scale + ')' }, { transform: 'none' }], { duration: ms, easing: ease });
+      }
       [].forEach.call(host.querySelectorAll('.o-sec, .o-note, .o-parts, .o-facts, .o-row'), function (el, i) {
         el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 60 + i * 22, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
       });

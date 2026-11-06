@@ -188,9 +188,10 @@
 .card.is-hover .c-acts,
 .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
 .card.is-hover .c-pace,
-.card.is-focus .c-pace { opacity: 0; }
+.card.is-focus .c-pace { display: none; }
+/* The title gives way to the actions with an ellipsis, so no word is cut in half. */
 .stack .card.is-hover .c-title,
-.stack .card.is-focus .c-title { margin-right: 56px; }
+.stack .card.is-focus .c-title { margin-right: var(--acts-w, 90px); }
 .c-act {
   display: inline-flex;
   align-items: center;
@@ -205,11 +206,16 @@
 }
 .c-act:hover { background: var(--hover); color: var(--ink); }
 .c-act:active { transform: scale(0.94); }
-.c-act--hand .cr + .cr { margin-left: -8px; }
+.c-act--hand { gap: 5px; padding: 0 7px 0 4px; color: var(--ink); font-size: var(--t-12); font-weight: var(--w-medium); white-space: nowrap; }
+.c-act--hand .cr + .cr { margin-left: -13px; }
 .c-act--go { padding: 0 8px; gap: 5px; font-size: var(--t-12); font-weight: var(--w-medium); }
 
 .c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; display: none; }
 .card.is-peek .c-hit { display: block; pointer-events: auto; }
+.card.is-under .c-line, .card.is-under .c-status { visibility: hidden; }
+/* In a peek the title reads in full: the actions take the end of its first line, and the rest wraps under them. */
+.stack .card.is-peek .c-title { display: block; grid-column: 2 / -1; margin-right: 0; max-height: 54px; overflow: hidden; white-space: normal; }
+.stack .card.is-peek .c-title::before { content: ""; float: right; width: var(--acts-w, 90px); height: 18px; }
 .stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
 .stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); }
 .card.is-peek .c-acts { z-index: 4; }

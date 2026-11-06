@@ -47,6 +47,7 @@ window.Pages = (function () {
     document.getElementById('main').dataset.view = name;
     if (name === 'intake') { drawIntake(); App.state.mode = 'intake'; return; }
     if (name === 'work') { Work.draw(); App.state.mode = 'work'; return; }
+    Nav.setNew(false);
     App.state.mode = 'stacks';
     page().dataset.mode = 'stacks';
     App.settle();

@@ -30,5 +30,10 @@ window.Nav = (function () {
     el.hidden = !n;
     if (was && String(n) !== was) Motion.animate(el, [{ transform: 'translateY(' + (n > Number(was) ? 4 : -4) + 'px)', opacity: 0.3 }, { transform: 'none', opacity: 1 }], { duration: 260, easing: 'cubic-bezier(.22,.9,.24,1)' });
   }
-  return { draw: draw, setCount: setCount };
+  /** Shows or hides the dot that says something new reached the Inbox since you were last there. */
+  function setNew(isNew) {
+    var dot = document.querySelector('.nav-new');
+    if (dot) dot.hidden = !isNew;
+  }
+  return { draw: draw, setCount: setCount, setNew: setNew };
 })();

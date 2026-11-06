@@ -28,6 +28,7 @@ window.Keys = (function () {
     var el = id && readEl(id);
     if (!el) return;
     el.classList.add('is-focus');
+    if (el.classList.contains('card')) Pointer.measureActs(el);
     el.focus({ preventScroll: true });
     if (el.classList.contains('card')) { if (el.dataset.level === 'full') Pointer.unpeek(); else Pointer.peek(el); }
     else Pointer.unpeek();

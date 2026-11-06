@@ -370,6 +370,7 @@ window.App = (function () {
     var n = document.getElementById('notice');
     n.hidden = !state.notice;
     n.innerHTML = state.notice || '';
+    sum.hidden = !!state.notice;
   }
 
   function start() {

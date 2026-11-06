@@ -1,10 +1,10 @@
 /* The states around the page: loading, the empty Inbox, first run, Intake, the stand-in for Work, and the rail of a drag. */
 
 /* Loading: the real cards, with their words held back. */
-.main.is-loading .c-title,
-.main.is-loading .c-line,
+.main.is-loading .card .c-title,
+.main.is-loading .card .c-line,
 .main.is-loading .pl-title,
-.main.is-loading .pl-why { color: transparent; border-radius: 4px; background: color-mix(in oklab, var(--ink) 7%, transparent); }
+.main.is-loading .pl-why { color: transparent !important; border-radius: 4px; background: color-mix(in oklab, var(--ink) 7%, transparent); }
 .main.is-loading .c-title { width: 72%; height: 12px; margin-top: 3px; }
 .main.is-loading .c-title { white-space: nowrap; -webkit-line-clamp: 1; }
 .main.is-loading .c-line { width: 38%; height: 10px; margin-top: 8px; }

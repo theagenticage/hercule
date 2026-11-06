@@ -14,13 +14,17 @@ window.Live = (function () {
 
   /** Plays the next signal of the script. Returns false once the script has run out. */
   function next() {
-    if (App.state.mode !== 'stacks' || App.state.scene !== 'morning') return false;
+    if (App.state.scene !== 'morning') return false;
+    var away = App.state.mode !== 'stacks';
     var step = script[i % script.length];
     i++;
+    if (away && !step.arrive) return false;
     if (step.arrive) {
       var e = step.arrive();
-      if (App.findEntity(e.id)) return next();
+      if (App.findEntity(e.id)) return false;
       App.state.entities.push(e);
+      // Something new while you are elsewhere: one small dot on the Inbox row, and nothing louder.
+      if (away) { Nav.setNew(true); Nav.setCount('inbox', App.countOverdue()); return true; }
       App.layOut();
       var el = App.els()[e.id];
       if (el) {

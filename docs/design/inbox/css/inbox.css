@@ -113,3 +113,7 @@
 .pile { position: absolute; top: 0; left: 0; right: 0; height: 36px; color: var(--muted); }
 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.nav-new { flex: none; width: 6px; height: 6px; margin-right: -2px; border-radius: 50%; background: var(--you); }
+.nav-new[hidden] { display: none; }
+.ib-sum[hidden] { display: none; }
