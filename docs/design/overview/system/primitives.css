@@ -17,8 +17,8 @@
   /* ---- Words follow height. On a dark desk a pale word on an unlit card would outshine a standing
      card, so what lies lower is written dimmer. */
   --word-flat: var(--faint);
-  --word-flat-2: color-mix(in oklab, var(--faint) 80%, var(--desk));
-  --word-press: color-mix(in oklab, var(--faint) 72%, var(--desk));
+  --word-flat-2: color-mix(in oklab, var(--faint) 86%, var(--desk));
+  --word-press: color-mix(in oklab, var(--faint) 80%, var(--desk));
   --paper: oklch(0.36 0.05 76);
   /* The one suggested answer. Each theme's --accent, except where --accent is not green. */
   --answer: var(--accent);
@@ -26,6 +26,7 @@
 
   /* ---- Brass that may be read: the stage counts. Brass itself is too pale on a light desk. */
   --numeral: var(--brass);
+  --underline: var(--you);
 
   /* ---- Card stock. --stock is the sheet itself; the rest are its edges. */
   --stock: oklch(from var(--raised) calc(l + 0.068) c h);
@@ -80,7 +81,8 @@
   --stock-carry: var(--raised);
   --lamp: oklch(1 0 0 / 0.5);
   --numeral: color-mix(in oklab, var(--brass) 52%, var(--ink));
-  --tab-ring: inset 0 0 0 1px color-mix(in oklab, var(--you-ink) 42%, var(--you));
+  --tab-ring: inset 0 0 0 1px var(--you-ink);
+  --underline: var(--you-ink);
   --stock-flat: color-mix(in oklab, var(--raised) 32%, var(--desk));
   --word-flat: color-mix(in oklab, var(--ink) 80%, var(--muted));
   --word-flat-2: var(--muted);
@@ -111,7 +113,7 @@
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: var(--card-h);
+  min-height: var(--card-h);
   padding: var(--card-pad-y) var(--card-pad-x);
 }
 .card-stock {
@@ -130,7 +132,7 @@
 /* Words. A title of up to two lines, then a summary of a few words, three lines in all. The age sits
    on its own at the bottom right. The height never changes, so a new summary can never move a
    neighbour. The summary writer is held to about six words, which is what makes this work. */
-.card-words { position: relative; height: 54px; overflow: hidden; font: var(--type-summary); color: var(--muted); }
+.card-words { position: relative; min-height: 54px; overflow: hidden; font: var(--type-summary); color: var(--muted); }
 .card-meta { position: absolute; right: var(--card-pad-x); bottom: 8px; display: inline-flex; align-items: center; gap: 5px; height: 16px; font: var(--type-meta); color: var(--faint); font-variant-numeric: tabular-nums; }
 .card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; font: var(--type-card); color: var(--ink); letter-spacing: -0.003em; text-wrap: pretty; }
 .card-now { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 2px 0 0; text-wrap: pretty; }
@@ -162,7 +164,7 @@
 }
 .card-tab { font-style: normal; display: block; width: 18px; height: 12px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: var(--tab-ring, inset 0 1px 0 oklch(1 0 0 / 0.28)); }
 .card-tab[data-need="think"] { width: 40px; }
-.card-tab--person { display: grid; place-items: start center; width: 18px; height: 16px; padding-top: 1px; background: color-mix(in oklab, var(--faint) 72%, var(--desk)); box-shadow: none; color: var(--desk); font-size: 11px; font-weight: var(--w-bold); line-height: 12px; }
+.card-tab--person { display: grid; place-items: start center; width: 18px; height: 16px; padding-top: 1px; background: var(--faint); box-shadow: none; color: var(--desk); font-size: 11px; font-weight: var(--w-bold); line-height: 12px; }
 /* A colleague behind the card: the head clears the edge to just under the eyes, and two paws rest
    on the edge in front of the sheet. While it works, the paws type on the card itself. */
 .card-head { display: block; width: 30px; height: 23px; line-height: 0; margin-bottom: 1px; overflow: hidden; filter: saturate(0.62); transition: filter var(--m-base); }

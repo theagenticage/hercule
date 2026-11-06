@@ -50,7 +50,7 @@
 .pn-walk { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .pn-title:focus { outline: none; }
 .pn-reply { margin-top: 10px; }
-.pn-reply input, .pn-thread input { width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-btn); outline: none; background: var(--field); box-shadow: inset 0 0 0 1px var(--rim); transition: box-shadow var(--m-quick); -webkit-user-select: text; user-select: text; }
+.pn-reply input, .pn-thread input { width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-btn); outline: none; background: var(--field); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 55%, transparent); transition: box-shadow var(--m-quick); -webkit-user-select: text; user-select: text; }
 .pn-reply input:focus, .pn-thread input:focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
 .pn-thread { flex: 1; display: flex; align-items: center; gap: 8px; }
 .card.is-away > * { visibility: hidden; }
@@ -73,6 +73,7 @@
 .help div { display: grid; grid-template-columns: 76px 1fr; align-items: center; min-height: 24px; color: var(--muted); font: var(--type-summary); }
 .help kbd { justify-self: start; }
 
+.find-list:not(.is-on) { visibility: hidden; }
 .find-list { position: absolute; z-index: 46; right: 44px; top: 44px; width: 360px; padding: 6px; border-radius: var(--r-md); background: var(--glass-fill-raised); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
 .find-list.is-on { opacity: 1; transform: none; pointer-events: auto; }
 .find-row { display: block; width: 100%; padding: 6px 8px; border-radius: var(--r-xs); text-align: left; }

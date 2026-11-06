@@ -18,20 +18,21 @@
     <div class="top">
       <div class="pill" id="switcher"></div>
       <div class="top-end">
-        <label class="find" id="find" title="Find (/)"><span id="find-icon"></span><input placeholder="Find on the board" aria-label="Find on the board"></label>
-        <button class="icon-pill" id="display-btn" title="Display"></button>
-        <div class="find-list" id="find-list"></div>
+        <label class="find" id="find" title="Find (/)"><span id="find-icon"></span><input placeholder="Find on the board" aria-label="Find on the board" role="combobox" aria-expanded="false" aria-controls="find-list"></label>
+        <button class="icon-pill" id="display-btn" title="Display" aria-label="Display" aria-expanded="false"></button>
+        <div class="find-list" id="find-list" role="listbox" aria-label="Matches"></div>
       </div>
       <div class="menu" id="display">
         <label class="menu-row menu-row--switch" data-display="wear"><span><b>Wear</b><small>Neglected work ages, slowly.</small></span><input type="checkbox" id="wear-switch"><i class="switch-track"></i></label>
         <label class="menu-row menu-row--switch" data-display="still"><span><b>Still colleagues</b><small>No typing paws, no blinking.</small></span><input type="checkbox" id="still-switch"><i class="switch-track"></i></label>
+        <label class="menu-row menu-row--switch" data-display="keys-toggle"><span><b>Single-key shortcuts</b><small>N, D, Q and the rest.</small></span><input type="checkbox" id="keys-switch" checked><i class="switch-track"></i></label>
         <button class="menu-row" data-display="fold">Fold everything<kbd>⇧F</kbd></button>
         <button class="menu-row" data-display="keys">Keys<kbd>?</kbd></button>
       </div>
     </div>
     <div class="office-view" id="office" hidden></div>
     <div class="later-view" id="later" hidden></div>
-    <section class="view work" id="work">
+    <section class="view work" id="work" role="tabpanel" aria-label="Work">
       <div class="work-scroll" id="scroll">
         <div class="work-canvas" id="canvas">
           <header class="lead-row"><div class="lead" id="lead"></div><div class="since" id="since-line" role="status"></div><span class="sr" id="board-status" role="status"></span></header>

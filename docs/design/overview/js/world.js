@@ -153,6 +153,13 @@ window.NW = (function () {
     });
   }
 
+  /** Returns a Task's age as it is said aloud. */
+  function sayAge(days) {
+    if (days < 1) return "today";
+    if (days < 14) return days + (days === 1 ? " day old" : " days old");
+    return Math.round(days / 7) + " weeks old";
+  }
+
   // The reviews handed to the review workflow: a stream of the same work, each with its own thread.
   var REVIEWER = "Review workflow";
   var HANDED = ["rv-6238", "rv-6241", "rv-6252", "rv-6255", "rv-6257", "rv-6258", "rv-6260", "rv-6263", "rv-6266"];
@@ -182,5 +189,5 @@ window.NW = (function () {
     };
   }
 
-  return { PROJECTS: PROJECTS, STAGES: STAGES, buildTasks: buildTasks, buildToday: buildToday, formatAge: formatAge };
+  return { PROJECTS: PROJECTS, STAGES: STAGES, buildTasks: buildTasks, buildToday: buildToday, formatAge: formatAge, sayAge: sayAge };
 })();

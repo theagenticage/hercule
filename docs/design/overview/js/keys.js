@@ -4,6 +4,7 @@ window.Keys = (function () {
   "use strict";
 
   var focused = null;
+  var singleKeys = true;
 
   function walkable() {
     var host = Fan.isOpen() ? document.querySelector(".fan-cards") : document.getElementById("lanes");
@@ -139,6 +140,25 @@ window.Keys = (function () {
       return;
     }
 
+    // On a wire, the arrows walk its beads, and Return opens one.
+    if (e.target.classList && e.target.classList.contains("bead")) {
+      if (key === "ArrowLeft" || key === "ArrowRight") {
+        e.preventDefault();
+        var beads = Array.prototype.slice.call(e.target.closest(".wire").querySelectorAll(".bead"));
+        var next0 = beads[beads.indexOf(e.target) + (key === "ArrowRight" ? 1 : -1)];
+        if (next0) {
+          e.target.tabIndex = -1;
+          next0.tabIndex = 0;
+          next0.focus();
+        }
+        return;
+      }
+      if (key === "Enter" || key === " ") {
+        e.preventDefault();
+        return Pane.show(e.target.dataset.id);
+      }
+    }
+    if (!singleKeys && key.length === 1 && key !== " ") return;
     var dirs = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", h: "left", l: "right", k: "up", j: "down" };
     if (dirs[key]) {
       var id2 = currentCardId();
@@ -153,6 +173,9 @@ window.Keys = (function () {
       return;
     }
     if (key === "Enter" || key === " ") {
+      // These two belong to whatever has focus. Only a card, or nothing at all, comes to the board.
+      var free = e.target === document.body || e.target.matches(".card, .pn-title");
+      if (!free) return;
       if (Pane.currentId()) {
         e.preventDefault();
         // A held key must never send a string of answers.
@@ -231,9 +254,14 @@ window.Keys = (function () {
 
   function mount() {
     window.addEventListener("keydown", onKey);
+    // Focus can reach a card by Tab too. The board always knows which card has it.
+    document.getElementById("work").addEventListener("focusin", function (e) {
+      var spot = e.target.closest(".card, .lane-btn, .plan-head");
+      if (spot) focused = spot;
+    });
   }
 
-  return { mount: mount, focusCard: focusCard, clearFocus: clearFocus };
+  return { mount: mount, focusCard: focusCard, clearFocus: clearFocus, setSingleKeys: function (on) { singleKeys = on; } };
 })();
 
 // PROTOTYPE - the sentence is the filter. Hovering a phrase lights what it counts; pressing keeps it.
@@ -309,8 +337,9 @@ window.Find = (function () {
     list.innerHTML = hits.map(function (t, i) {
       var stage = NW.STAGES.filter(function (s) { return s.id === t.stage; })[0].name;
       var project = Store.state.projects.filter(function (p) { return p.id === t.project; })[0];
-      return '<button class="find-row' + (i === at ? " is-on" : "") + '" data-open-task="' + t.id + '"><b>' + Board.esc(t.name) + "</b><small>" + Board.esc((project ? project.name : "") + ", " + stage) + "</small></button>";
+      return '<button class="find-row' + (i === at ? " is-on" : "") + '" role="option" id="find-' + i + '" aria-selected="' + (i === at) + '" tabindex="-1" data-open-task="' + t.id + '"><b>' + Board.esc(t.name) + "</b><small>" + Board.esc((project ? project.name : "") + ", " + stage) + "</small></button>";
     }).join("") + (all.length > hits.length ? '<p class="find-more">' + all.length + " in all</p>" : "");
+    box.querySelector("input").setAttribute("aria-activedescendant", "find-" + at);
   }
 
   /** Ends a search. A lens that was pinned stays pinned. */

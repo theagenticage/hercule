@@ -23,7 +23,7 @@ window.Overview = (function () {
     var el = document.getElementById("switcher");
     el.innerHTML = '<h1 class="pill-title">Overview</h1><div class="switch" role="tablist" aria-label="Views"><i class="puck" id="puck"></i>' +
       allViews().map(function (v, i) {
-        return '<button class="ptab switch-tab' + (v.id === current ? " is-on" : "") + '" role="tab" aria-selected="' + (v.id === current) + '" data-view="' + v.id + '" title="' + v.name + " (⌘" + (i + 1) + ')">' + Crew.icon(v.icon, 14) + v.name + "</button>";
+        return '<button class="ptab switch-tab' + (v.id === current ? " is-on" : "") + '" role="tab" aria-selected="' + (v.id === current) + '" tabindex="' + (v.id === current ? 0 : -1) + '" data-view="' + v.id + '" title="' + v.name + " (⌘" + (i + 1) + ')">' + Crew.icon(v.icon, 14) + v.name + "</button>";
       }).join("") + "</div>";
     puck = document.getElementById("puck");
     puckBody = null;
@@ -165,6 +165,7 @@ window.Overview = (function () {
       var on = b.dataset.view === id;
       b.classList.toggle("is-on", on);
       b.setAttribute("aria-selected", on);
+      b.tabIndex = on ? 0 : -1;
     });
     placePuck(true);
     document.getElementById("app").dataset.view = id;
@@ -204,6 +205,15 @@ window.Overview = (function () {
         e.preventDefault();
         show(v.id);
       }
+    });
+    document.getElementById("switcher").addEventListener("keydown", function (e) {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.stopPropagation();
+      var list = allViews();
+      var i = list.findIndex(function (v) { return v.id === current; }) + (e.key === "ArrowRight" ? 1 : -1);
+      if (!list[i]) return;
+      show(list[i].id);
+      document.querySelector('.switch-tab[data-view="' + list[i].id + '"]').focus();
     });
     document.fonts.ready.then(function () { placePuck(false); });
   }

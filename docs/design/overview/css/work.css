@@ -25,7 +25,7 @@
 .lead-sub b { color: var(--ink); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
 .sep { width: 2px; height: 2px; border-radius: 50%; background: var(--faint); }
 .lens { position: relative; font: inherit; color: inherit; letter-spacing: inherit; text-align: left; transition: color var(--m-quick); }
-.lens-n { font-variant-numeric: tabular-nums; text-decoration: underline; text-decoration-color: var(--you); text-decoration-thickness: 2px; text-underline-offset: 5px; text-decoration-skip-ink: none; }
+.lens-n { font-variant-numeric: tabular-nums; text-decoration: underline; text-decoration-color: var(--underline); text-decoration-thickness: 2px; text-underline-offset: 5px; text-decoration-skip-ink: none; }
 .lens::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 1px; background: currentColor; opacity: 0; transform: scaleX(0.6); transform-origin: left; transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
 .lens:hover::after, .lens.is-on::after { opacity: 0.5; transform: none; }
 
@@ -110,10 +110,10 @@
 /* ---------- Cards on the desk ---------- */
 .card { cursor: default; outline: none; color: var(--muted); }
 .card { transition: opacity var(--m-base) var(--m-ease); }
-.card:not(.pile).is-off .card-stock, .card:not(.pile).is-off .card-holder, .card:not(.pile).is-off .card-paws { opacity: 0.28; }
-.card:not(.pile).is-off .card-words--rest { opacity: 0.42; }
-/* A pile fades as one thing, so its sheets never show through each other. */
-.pile.is-off { opacity: 0.3; }
+/* What the lens leaves out loses its sheet and goes quiet, but stays readable. */
+.card.is-off .card-stock, .card.is-off .card-holder, .card.is-off .card-paws { opacity: 0.2; }
+.card.is-off .pile-sheet { opacity: 0; }
+.card.is-off .card-words--rest, .card.is-off .card-title, .card.is-off .pile-text, .card.is-off .pile-text em, .card.is-off .pile-line { color: var(--faint); font-weight: var(--w-regular); }
 .plan.is-off .wire { opacity: 0.4; }
 .card-stock, .card-holder { transition: opacity var(--m-base) var(--m-ease); }
 .bead.is-off { opacity: 0.2; }
@@ -211,6 +211,7 @@
 @keyframes merged { 0% { box-shadow: var(--h-hover), 0 0 0 2px var(--brass); } 100% { box-shadow: var(--h-stand), 0 0 0 0 transparent; } }
 
 /* ---------- The toast ---------- */
+.select-bar:not(.is-on) { visibility: hidden; }
 .toast:not(.is-on) { visibility: hidden; transition-delay: 0s, 0s, var(--m-slow); }
 .toast { position: absolute; z-index: 40; left: 50%; bottom: 18px; display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 6px 0 14px; border-radius: var(--r-md); background: var(--glass-fill-raised); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2); white-space: nowrap; transform: translate(-50%, 10px); opacity: 0; pointer-events: none; transition: transform var(--m-slow) var(--m-ease), opacity var(--m-base) var(--m-ease); }
 .toast.is-on { transform: translate(calc(-50% + var(--toast-x, 0px)), 0); opacity: 1; pointer-events: auto; }
@@ -264,7 +265,8 @@
 .wire { cursor: default; }
 .wire.is-target::after { content: ""; position: absolute; left: -8px; right: -8px; top: -4px; bottom: -4px; border-radius: 9px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 55%, transparent); pointer-events: none; }
 .bead { position: relative; transition: scale var(--m-quick) var(--m-ease); }
-.bead:hover { scale: 1.45; }
+.bead:hover, .bead:focus-visible { scale: 1.45; }
+.bead:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .bead.is-held { z-index: 4; cursor: grabbing; }
 .bead::after { content: ""; position: absolute; inset: -9px -3px; }
 .peek { position: fixed; z-index: 55; width: 248px; padding: 9px 12px 10px; border-radius: var(--r-sm); background: var(--stock); box-shadow: var(--h-carry); pointer-events: none; opacity: 0; transform: translateY(4px); transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
@@ -322,3 +324,6 @@ html[data-motion="reduced"] .roll, html[data-motion="reduced"] .card-paws i, htm
 html[data-still="1"] .card-paws i, html[data-still="1"] .cr * { animation: none !important; }
 
 .card-body { display: contents; }
+
+@media (prefers-reduced-motion: reduce) { .card.is-skeleton::after { animation: none; } }
+html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }

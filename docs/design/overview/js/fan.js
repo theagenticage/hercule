@@ -48,9 +48,17 @@ window.Fan = (function () {
       grid.appendChild(el);
       return el;
     });
+    fan.setAttribute("role", "dialog");
+    fan.setAttribute("aria-label", pile.title + ", " + pile.tasks.length + " Tasks");
     host.appendChild(fan);
     host.classList.add("is-open");
     pileEl.classList.add("is-fanned");
+    pileEl.setAttribute("aria-expanded", "true");
+    document.getElementById("scroll").inert = true;
+    if (cards[0]) {
+      cards[0].tabIndex = 0;
+      Keys.focusCard(cards[0]);
+    }
 
     var cx = from.left + from.width / 2;
     var cy = from.top + from.height / 2;
@@ -90,6 +98,8 @@ window.Fan = (function () {
     open = o;
     layer().classList.add("is-open");
     o.pileEl.classList.add("is-fanned");
+    o.pileEl.setAttribute("aria-expanded", "true");
+    document.getElementById("scroll").inert = true;
     o.cards.forEach(function (el) {
       if (el.classList.contains("is-carried")) return;
       el.classList.remove("is-flying");
@@ -105,6 +115,8 @@ window.Fan = (function () {
     open = null;
     layer().classList.remove("is-open");
     o.pileEl.classList.remove("is-fanned");
+    o.pileEl.setAttribute("aria-expanded", "false");
+    document.getElementById("scroll").inert = false;
     var grid = o.fan.querySelector(".fan-cards");
     var inFan = o.cards.filter(function (c) { return c.parentElement === grid; });
     function cleanUp() {

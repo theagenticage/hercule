@@ -25,7 +25,7 @@ window.Pane = (function () {
     var reached = true;
     return '<ol class="pn-path">' + NW.STAGES.map(function (s) {
       var here = s.id === t.stage;
-      var html = '<li class="' + (here ? "is-here" : reached ? "is-past" : "") + '"><button tabindex="-1" data-stage-to="' + s.id + '" title="Move it to ' + s.name + '">' + s.name + "</button></li>";
+      var html = '<li class="' + (here ? "is-here" : reached ? "is-past" : "") + '"' + (here ? ' aria-current="step"' : "") + '><button tabindex="-1" data-stage-to="' + s.id + '" title="Move it to ' + s.name + '">' + s.name + "</button></li>";
       if (here) reached = false;
       return html;
     }).join("") + "</ol>";
@@ -171,6 +171,8 @@ window.Pane = (function () {
       ghost.classList.add("pn-ghost");
       ghost.style.cssText = "";
       ghost.removeAttribute("tabindex");
+      ghost.setAttribute("aria-hidden", "true");
+      ghost.inert = true;
       clip.appendChild(ghost);
       el.classList.add("is-away");
     }
@@ -198,6 +200,8 @@ window.Pane = (function () {
       ghost.classList.remove("is-away");
       ghost.classList.add("pn-ghost");
       ghost.style.cssText = "opacity:0";
+      ghost.setAttribute("aria-hidden", "true");
+      ghost.inert = true;
       clip.appendChild(ghost);
     }
     var place = el || Board.locate(id);
@@ -208,7 +212,7 @@ window.Pane = (function () {
     drawHolderOnSheet(t);
     inner.style.transform = "";
     inner.style.opacity = "";
-    var a = inner.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: Motion.isReduced() ? 120 : 200, easing: "cubic-bezier(.2,.8,.2,1)" });
+    var a = inner.animate(Motion.isReduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: Motion.isReduced() ? 120 : 200, easing: "cubic-bezier(.2,.8,.2,1)" });
     a.onfinish = function () { inner.style.opacity = "1"; };
     pane.querySelector(".pn-title").focus({ preventScroll: true });
   }

@@ -101,12 +101,12 @@ window.Board = (function () {
     var stage = NW.STAGES.filter(function (s) { return s.id === t.stage; })[0].name;
     var h = Store.decideHolder(t);
     var who = h.kind === "you" ? "Wants you, " + (t.need === "think" ? "real thinking" : "a quick call") : h.kind === "agent" ? (h.pose === "waiting" ? "An agent asks you" : "An agent is working on it") : h.kind === "person" ? "With " + h.name : Store.isBlocked(t) ? Store.describeNeed(t) : "Nobody has the next move";
-    return [t.name, who, stage, t.summaryPending ? "Summary being written" : t.now, t.move === "you" ? t.ask : "", (t.stalled ? "Stalled, " : "") + NW.formatAge(t.age) + " old"].filter(Boolean).join(". ") + ".";
+    return [t.name, who, stage, t.summaryPending ? "Summary being written" : t.now, t.move === "you" ? t.ask : "", (t.stalled ? "Stalled, " : "") + NW.sayAge(t.age)].filter(Boolean).map(function (part) { return part.replace(/[.?]$/, ""); }).join(". ") + ".";
   }
 
   /** Draws or updates one Task's card and returns its element. */
   function drawCard(t) {
-    var el = node("card:" + t.id, "article", "card");
+    var el = node("card:" + t.id, "div", "card");
     if (!el.dataset.id) {
       el.dataset.id = t.id;
       el.tabIndex = -1;
@@ -127,6 +127,8 @@ window.Board = (function () {
     el.classList.toggle("is-off", Store.isFiltering() && !Store.matches(t));
     el.classList.toggle("is-hit", Store.isFiltering() && Store.matches(t));
     el.classList.toggle("is-selected", !!Store.state.selected[t.id]);
+    if (Object.keys(Store.state.selected).length) el.setAttribute("aria-pressed", !!Store.state.selected[t.id]);
+    else el.removeAttribute("aria-pressed");
     return el;
   }
 
@@ -162,7 +164,11 @@ window.Board = (function () {
     var count = p.kind === "more" || p.kind === "landed" ? "" : '<em>' + n + "</em>";
     var hits = Store.isFiltering() ? p.tasks.filter(Store.matches).length : n;
     el.classList.toggle("is-off", Store.isFiltering() && hits === 0);
+    el.setAttribute("aria-expanded", "false");
     var line = Store.isFiltering() && hits ? hits + " of " + n + " match" : p.kind === "landed" ? "" : Store.describePile(p);
+    var wants = p.tasks.filter(function (t) { return t.move === "you" && !t.agent && !Store.isBlocked(t) && t.stage !== "landed"; }).length;
+    el.setAttribute("aria-label", title + ", a pile of " + n + (wants ? ". " + wants + (wants === 1 ? " wants" : " want") + " you" : "") + ". Opens a fan.");
+    el.setAttribute("aria-haspopup", "dialog");
     var html = drawPileHolder(p);
     for (var i = sheets; i >= 1; i--) html += '<i class="pile-sheet" style="--n:' + i + '"></i>';
     html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + "</span>";
@@ -247,7 +253,12 @@ window.Board = (function () {
       return c;
     });
     reach.hidden = lastStage < 0;
+    // One tab stop per wire. The arrows walk its beads.
+    wire.setAttribute("role", "group");
+    wire.setAttribute("aria-label", tasks.length + (tasks.length === 1 ? " Task" : " Tasks") + ", folded");
     place(wire, [reach].concat(cells));
+    var beads = wire.querySelectorAll(".bead");
+    beads.forEach(function (b, i) { b.tabIndex = i === 0 ? 0 : -1; });
     return wire;
   }
 

@@ -148,14 +148,16 @@
   document.getElementById("display-btn").addEventListener("click", function (e) {
     e.stopPropagation();
     display.classList.toggle("is-on");
+    e.currentTarget.setAttribute("aria-expanded", display.classList.contains("is-on"));
   });
+  document.getElementById("keys-switch").addEventListener("change", function (e) { Keys.setSingleKeys(e.target.checked); });
   display.addEventListener("click", function (e) {
     e.stopPropagation();
     var act = e.target.closest("[data-display]");
     if (!act) return;
     if (act.dataset.display === "fold") Fold.toggleAll();
     if (act.dataset.display === "keys") Help.toggle();
-    if (act.dataset.display !== "wear" && act.dataset.display !== "still") display.classList.remove("is-on");
+    if (act.dataset.display === "fold" || act.dataset.display === "keys") display.classList.remove("is-on");
   });
   document.getElementById("wear-switch").addEventListener("change", Display.toggleWear);
   document.getElementById("still-switch").addEventListener("change", function (e) {
