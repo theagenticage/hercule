@@ -11,14 +11,14 @@ window.App = (function () {
     shelf: { title: 'On the shelf', usual: 'assigned', empty: 'The shelf is clear.' },
   };
   var COLUMNS = [['review'], ['answer', 'finish'], ['shelf']];
-  var HEAD = 30;       // a stack's heading, with the space under it
+  var HEAD = 36;       // a stack's heading, with the space under it
   var BETWEEN = 16;    // the space between two stacks of one column
   var FOOT = 26;       // the line under a stack that counts what settled
 
   var state = { scene: 'morning', now: W.NOW, entities: [], clusters: [], dim: null, open: null, page: 'inbox', offline: false, stale: null };
   var els = {};        // card elements by entity id
   var measured = {};   // whole heights by entity id, for the current width
-  var page, sum, navCount;
+  var page, sum, hasDrawn = false;
 
   function readStack(e) { return K[e.kind].stacks[e.concern]; }
   function findEntity(id) { return state.entities.filter(function (e) { return e.id === id; })[0] || state.clusters.filter(function (c) { return c.id === id; })[0]; }
@@ -75,24 +75,14 @@ window.App = (function () {
       return items;
     }
     var folded = foldStreams(lying);
-    var kept = Stacks.countKept(folded.length, depth, open, 90);
+    var kept = Stacks.countKept(folded.length, depth, open, 104);
     if (kept >= folded.length) return folded.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
-    var rest = folded.slice(Math.max(1, kept - 2));
-    var out = folded.slice(0, Math.max(1, kept - 2)).map(function (e) { return e.pile ? { pile: e } : { e: e }; });
-    var byGroup = {}, keys = [];
-    rest.forEach(function (e) {
-      (e.members || [e]).forEach(function (m) {
-        var g = readGroup(m);
-        if (!byGroup[g]) { byGroup[g] = []; keys.push(g); }
-        byGroup[g].push(m);
-      });
-    });
-    keys.sort(function (a, b) { return byGroup[b].length - byGroup[a].length; });
-    keys.slice(0, 2).forEach(function (g, i) {
-      var members = i === 1 ? [].concat.apply([], keys.slice(1).map(function (k) { return byGroup[k]; })) : byGroup[g];
-      out.push(buildPile('fold-' + name + '-' + i, i === 1 && keys.length > 2 ? 'The rest' : g, members, 'Newer than the cards above'));
-    });
-    return out;
+    var head = folded.slice(0, Math.max(1, kept - 1));
+    var rest = [].concat.apply([], folded.slice(head.length).map(function (e) { return e.members || [e]; }));
+    var byGroup = {};
+    rest.forEach(function (e) { var g = readGroup(e); byGroup[g] = (byGroup[g] || 0) + 1; });
+    var most = Object.keys(byGroup).sort(function (a, b) { return byGroup[b] - byGroup[a]; })[0];
+    return head.map(function (e) { return e.pile ? { pile: e } : { e: e }; }).concat(buildPile('fold-' + name, rest.length + ' newer', rest, 'Most in ' + most));
   }
 
   /** Returns the whole height of a card at the current column width. */
@@ -101,7 +91,7 @@ window.App = (function () {
     var had = el.classList.contains('is-whole'), h = el.style.height;
     el.classList.add('is-whole');
     el.style.height = 'auto';
-    var whole = el.offsetHeight + 9;
+    var whole = el.offsetHeight + 10;
     el.style.height = h;
     if (!had) el.classList.remove('is-whole');
     measured[e.id] = whole;
@@ -145,7 +135,7 @@ window.App = (function () {
       COLUMNS.map(function (names) {
         return '<div class="col">' + names.map(function (n) {
           return '<section class="stack-wrap" data-wrap="' + n + '" aria-label="' + STACKS[n].title + '">' +
-            '<h2 class="stack-h"><span>' + STACKS[n].title + '</span><small data-count="' + n + '"></small></h2>' +
+            '<h2 class="stack-h"><span>' + STACKS[n].title + '</span><span class="stack-n" data-count="' + n + '"></span></h2>' +
             '<div class="stack" data-stack="' + n + '"></div>' +
             '<button class="stack-foot" data-foot="' + n + '" hidden></button></section>';
         }).join('') + '</div>';
@@ -154,13 +144,21 @@ window.App = (function () {
 
   function drawNoticed() {
     var host = document.getElementById('noticed');
-    host.innerHTML = state.clusters.slice(0, 3).map(Card.drawPlaque).join('');
+    host.innerHTML = '<div class="plate-crest" title="Hercule noticed">' + Crew.logo(24, { mono: true }) + '</div>' + state.clusters.slice(0, 3).map(Card.drawPlaque).join('');
     host.hidden = !state.clusters.length;
     document.querySelector('.ib-page').classList.toggle('no-noticed', !state.clusters.length);
   }
 
-  /** Lays every stack out again. Cards move by their transform alone, so each one glides to its new place. */
-  function layOut() {
+  /**
+   * Lays every stack out again. Each card's `top` says where it lies, and the motion kernel carries it there from wherever it
+   * is on screen, so a change that comes in the middle of another simply bends the path.
+   */
+  function layOut(still) {
+    if (still || !hasDrawn) { placeStacks(); hasDrawn = true; return; }
+    Motion.flip([].slice.call(page.querySelectorAll('.stack .card, .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'glide' });
+  }
+
+  function placeStacks() {
     COLUMNS.forEach(function (names, ci) {
       var col = page.querySelectorAll('.col')[ci];
       var depth = col.clientHeight - names.length * HEAD - (names.length - 1) * BETWEEN;
@@ -169,6 +167,7 @@ window.App = (function () {
         var parts = readStackEntities(n);
         var items = buildItems(n, parts.lying, names.length === 1 ? depth : Math.floor(depth / 2));
         var kept = {};
+        host.parentNode.dataset.slow = n === 'shelf';
         var tabs = [].slice.call(host.querySelectorAll('.tab'));
         items.forEach(function (it) {
           if (it.tab) {
@@ -183,10 +182,11 @@ window.App = (function () {
             var pe = els[it.pile.id];
             if (!pe) { pe = els[it.pile.id] = drawStreamPile(it.pile); host.appendChild(pe); }
             pe.querySelector('.c-title').textContent = it.pile.title;
-            pe.querySelector('.pile-n').textContent = it.pile.members.length;
+            pe.querySelector('.pile-n').textContent = /newer$/.test(it.pile.title) ? '' : it.pile.members.length;
+            pe.dataset.depth = it.pile.members.length > 40 ? 3 : it.pile.members.length > 8 ? 2 : 1;
             pe.querySelector('.c-roll').textContent = it.pile.note;
             pe._members = it.pile.members;
-            it.el = pe; it.full = 58; it.two = 58; it.one = 58; it.gap = 8;
+            it.el = pe; it.full = 62; it.two = 62; it.one = 62; it.gap = 8; it.most = 62;
             return;
           }
           var e = it.e, el = els[e.id];
@@ -197,7 +197,7 @@ window.App = (function () {
           }
           if (el.parentNode !== host) host.appendChild(el);
           var m = Stacks.METRICS[K[e.kind].density];
-          it.el = el; it.full = measureWhole(el, e); it.two = m.two; it.one = m.one; it.gap = m.gap;
+          it.el = el; it.full = measureWhole(el, e); it.two = m.two; it.one = m.one; it.gap = m.gap; it.most = m.most;
         });
         tabs.forEach(function (t) { if (!kept[t.dataset.tab]) t.remove(); });
         var wanted = {};
@@ -207,16 +207,17 @@ window.App = (function () {
           if (!wanted[id]) { c.style.display = 'none'; c._plan = null; }
         });
         var whole = items.reduce(function (a, m) { return a + (m.tab ? m.tab : m.full + m.gap); }, 0);
-        var firstCard = items[0] && items[0].tab ? 1 : 0;
-        var least = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : j === firstCard ? m.full : m.one); }, 0);
+        var firstCard = n === 'shelf' ? -1 : items[0] && items[0].tab ? 1 : 0;
+        var least = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : j === firstCard ? m.full + 12 : m.one); }, 0);
+        var comfy = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : j === firstCard ? m.full + 12 : m.two); }, 0);
         var footNeeded = parts.settled.length ? FOOT : 0;
-        return { name: n, host: host, items: items, parts: parts, whole: whole + footNeeded, least: least + footNeeded, foot: footNeeded };
+        return { name: n, host: host, items: items, parts: parts, whole: whole + footNeeded, comfy: comfy + footNeeded, least: least + footNeeded, foot: footNeeded };
       });
       var depths = Stacks.shareDepth(built, depth);
       var leftover = depth - depths.reduce(function (a, b) { return a + b; }, 0);
       built.forEach(function (b, bi) {
         var d = depths[bi] - b.foot;
-        var plan = Stacks.layOut(b.items, d);
+        var plan = Stacks.layOut(b.items, d, b.name === 'shelf');
         // A stack that is not the last of its column closes up on what follows; the last takes what is left.
         var isLast = bi === built.length - 1;
         var used = plan.used;
@@ -234,7 +235,7 @@ window.App = (function () {
           var endOfRun = i === shown - 1 || (next && next.tab);
           el._plan = p;
           el.style.zIndex = i + 1;
-          el.style.transform = 'translate3d(0,' + p.y + 'px,0)';
+          el.style.top = p.y + 'px';
           if (it.tab) return;
           el._rest = p.level === 'full' || !endOfRun ? it.full : p.show;
           el._full = it.full;
@@ -308,7 +309,7 @@ window.App = (function () {
 
   /** Draws the page again from state, after another view held it. */
   function redraw() {
-    els = {}; measured = {};
+    els = {}; measured = {}; hasDrawn = false;
     page.dataset.mode = 'stacks';
     drawFrame();
     drawNoticed();
@@ -348,7 +349,7 @@ window.App = (function () {
     state.dim = null;
     state.mode = scene.mode || 'stacks';
     state.notice = scene.notice || null;
-    els = {}; measured = {};
+    els = {}; measured = {}; hasDrawn = false;
     page.dataset.scene = scene.name;
     page.dataset.mode = state.mode;
     if (scene.draw) { scene.draw(page); drawBar(); return; }
@@ -371,14 +372,14 @@ window.App = (function () {
     var timer;
     window.addEventListener('resize', function () {
       clearTimeout(timer);
-      timer = setTimeout(function () { measured = {}; if (state.mode === 'stacks') layOut(); }, 60);
+      timer = setTimeout(function () { measured = {}; if (state.mode === 'stacks') layOut(true); }, 60);
     });
     document.addEventListener('click', function (ev) {
       var d = ev.target.closest('[data-dim]');
       if (d) setDim(d.dataset.dim);
     });
     Scenes.play(params.get('scene') || 'morning');
-    document.fonts.ready.then(function () { measured = {}; if (state.mode === 'stacks') layOut(); });
+    document.fonts.ready.then(function () { measured = {}; if (state.mode === 'stacks') layOut(true); });
   }
 
   return {

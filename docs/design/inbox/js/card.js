@@ -13,6 +13,8 @@
   /** Returns a plugin's mark, drawn in the hue the plugin declares. Hercule's own kind draws Hercule's head. */
   function drawMark(plugin, size) {
     size = size || 20;
+    // A solid mark carries more weight than a line drawing, so it is drawn a little smaller to look the same size.
+    if (plugin.solid) size = Math.round(size * 0.9);
     var style = plugin.hue == null ? '' : ' style="--mark-hue:' + plugin.hue + '"';
     var svg = plugin.mark === 'hercule' ? Crew.logo(size, { mono: true }) : Crew.brand(plugin.mark, size);
     return '<span class="mark' + (plugin.hue == null ? '' : ' mark--hue') + '"' + style + ' role="img" aria-label="' + esc(plugin.name) + '">' + svg + '</span>';
@@ -95,7 +97,7 @@
     var text = reason.text;
     if (usual && who) text = W.PEOPLE[who].name;
     if (usual && !who) text = [fill(kind.identifier, f), fill(kind.context, f)].filter(Boolean).join(' · ');
-    return { lead: who ? drawPerson(who) : '', text: text, tone: reason.tone, more: rest };
+    return { lead: who ? drawPerson(who) : '', text: text, tone: usual ? 'usual' : reason.tone, more: rest, isIdentity: usual && !who };
   }
 
   /** Returns the HTML inside a card. `ctx` holds the world's clock and the reason the stack takes for granted. */
@@ -103,6 +105,8 @@
     var kind = K.KINDS[e.kind], f = e.fields;
     var line = describeLine(e, ctx.usual);
     var status = kind.status && kind.status[f.state];
+    // The reason already says it in words and colour, so the shape does not say it again at rest.
+    var isSaid = status && line.tone === 'bad' && status.tone === 'bad';
     var pace = kind.pace === 'fast' && !e.task ? sayWait(e.since, ctx.now) : '';
     var flows = readWorkflows(e);
     var hand = flows.length
@@ -115,12 +119,12 @@
         '<button class="c-act" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
         '<button class="c-act c-act--plain" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
     return drawHolder(e) + '<i class="card-stock"></i>' +
-      '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 17 : 20) + '</div>' +
+      '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 18 : 20) + '</div>' +
       '<h3 class="c-title">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
       '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '">' + pace + '</div>' +
       '<div class="c-line tone-' + line.tone + '"><span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
-      '<div class="c-status' + (status && status.norm ? ' is-norm' : '') + '">' + (status ? drawShape(status) : '') + '</div>' +
-      '<div class="c-foot"><span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span><span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
+      '<div class="c-status' + (status && (status.norm || isSaid) ? ' is-norm' : '') + '">' + (status ? drawShape(status) : '') + '</div>' +
+      '<div class="c-foot">' + (line.isIdentity ? '' : '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span>') + '<span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
       '<div class="c-hit"></div>' +
       '<div class="c-acts">' + acts + '</div>';
   }
@@ -129,7 +133,9 @@
   function drawHolder(e) {
     if (!e.task) return '';
     if (e.task.by === 'you') return '<span class="card-holder"><i class="card-tab" data-need="quick"></i></span>';
-    return '<span class="card-holder"><span class="card-head">' + Crew.face(e.task.by, { pose: 'working', size: 26 }) + '</span></span>';
+    var hue = Crew.lookFor(e.task.by).hue;
+    return '<span class="card-holder"><span class="card-head" data-pose="working">' + Crew.peek(e.task.by, { pose: 'working', size: 30, crop: 34 }) + '</span></span>' +
+      '<span class="card-paws" data-pose="working" style="--hue:var(--hue-' + hue + ')"><i></i><i></i></span>';
   }
 
   /** Returns the class list of a card for its kind and its state. */
@@ -151,12 +157,17 @@
     return el;
   }
 
-  /** Returns the HTML of a plaque: the lacquer card of what Hercule noticed. */
+  /** Returns the marks of what a plaque combines: the first in full, any second as a badge on its corner. */
+  function drawSources(sources) {
+    var first = '<span class="pl-mark">' + Crew.brand(sources[0], 22) + '</span>';
+    return first + (sources[1] ? '<span class="pl-badge">' + Crew.brand(sources[1], 10) + '</span>' : '');
+  }
+
+  /** Returns the HTML of a plaque: one thing Hercule noticed, on the lacquer plate. */
   function drawPlaque(c) {
-    var marks = c.sources.map(function (s) { return '<span class="pl-src">' + Crew.brand(s, 13) + '</span>'; }).join('');
     var flows = readWorkflows(c);
-    return '<article class="plaque" data-id="' + c.id + '" tabindex="-1" aria-label="Hercule noticed: ' + esc(c.title) + '">' +
-      '<div class="pl-marks">' + marks + '</div>' +
+    return '<article class="plaque" data-id="' + c.id + '" tabindex="-1" aria-label="Hercule noticed: ' + esc(c.title) + '. ' + esc(c.why) + '">' +
+      '<div class="pl-marks">' + drawSources(c.sources) + '</div>' +
       '<h3 class="pl-title">' + esc(c.title) + '</h3>' +
       '<div class="pl-why">' + esc(c.why) + '</div>' +
       '<div class="c-acts pl-acts"><button class="c-act c-act--hand" data-act="hand" title="Hand to an agent (H)" aria-label="Hand to an agent">' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>' +

@@ -1,9 +1,9 @@
 /* The open card and everything that floats. */
 .scrim {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 40;
-  background: var(--scrim);
+  background: var(--veil);
   opacity: 0;
   transition: opacity var(--m-slow) var(--m-ease);
 }
@@ -82,7 +82,7 @@
 .open--plaque .o-ledger { border-top-color: color-mix(in oklab, var(--lacquer-rim) 60%, transparent); }
 .o-row {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr) auto;
+  grid-template-columns: 236px minmax(0, 1fr) auto;
   column-gap: 12px;
   align-items: center;
   min-height: 40px;
@@ -99,6 +99,14 @@
 .o-says { min-width: 0; color: var(--muted); font-size: var(--t-12); line-height: 16px; }
 .open--plaque .o-says { color: var(--lacquer-sub); }
 .o-row--quiet .o-label { color: var(--muted); padding-left: 30px; }
+/* The suggested move: the one filled button of the card, as in Intake's ledger. */
+.o-row.is-first .o-label { height: 32px; padding: 0 12px 0 6px; border-radius: var(--r-btn); background: var(--accent); color: var(--accent-fg); font-weight: var(--w-bold); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 80%, black); }
+.o-row.is-first:hover .o-label, .o-row.is-first:focus-visible .o-label { background: color-mix(in oklab, var(--accent) 90%, var(--accent-fg)); }
+.o-row.is-first:hover, .o-row.is-first:focus-visible { background: none; }
+.open--plaque .o-row.is-first .o-label { box-shadow: inset 0 0 0 1px var(--lacquer-rim); }
+.open--plaque kbd { background: color-mix(in oklab, white 12%, transparent); color: var(--lacquer-sub); }
+.open--plaque .o-head .logo { color: var(--lacquer-ink); }
+.open--plaque .o-head .logo g { fill: var(--lacquer); }
 .open--plaque .o-row--quiet .o-label { color: var(--lacquer-sub); }
 .o-row kbd { justify-self: end; }
 

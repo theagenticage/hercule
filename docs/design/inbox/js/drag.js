@@ -101,12 +101,12 @@ window.Drag = (function () {
         if (what === 'hand') Moves.hand(e, Card.readWorkflows(e)[Number(t.el.dataset.i)]);
         else Moves.perform(what, e.id);
       });
-      Motion.animate(t.el.firstElementChild, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: Motion.SPRINGS.bump.ms + 120, delay: 170 });
+      Motion.animate(t.el.firstElementChild, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: Motion.curve('bump').ms + 120, delay: 170 });
       return;
     }
     var home = s.getBoundingClientRect();
-    if (Motion.reduced.matches) { g.remove(); s.classList.remove('is-lifted'); return; }
-    g.animate([{ transform: current }, { transform: 'translate3d(' + home.left + 'px,' + home.top + 'px,0) scale(1)' }], { duration: Motion.SPRINGS.return.ms, easing: Motion.SPRINGS.return.ease, fill: 'forwards' }).finished.then(function () {
+    if (Motion.isReduced()) { g.remove(); s.classList.remove('is-lifted'); return; }
+    g.animate([{ transform: current }, { transform: 'translate3d(' + home.left + 'px,' + home.top + 'px,0) scale(1)' }], { duration: Motion.curve('back').ms, easing: Motion.curve('back').ease, fill: 'forwards' }).finished.then(function () {
       g.remove();
       s.classList.remove('is-lifted');
     });

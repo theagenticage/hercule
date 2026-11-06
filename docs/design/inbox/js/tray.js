@@ -34,13 +34,13 @@ window.Tray = (function () {
     host.style.maxHeight = h + 'px';
     scrim.hidden = false;
     scrim.classList.add('is-on');
-    if (!Motion.reduced.matches) {
+    if (!Motion.isReduced()) {
       var ox = r.left + r.width / 2 - left, oy = r.top - top;
       host.style.transformOrigin = ox + 'px ' + oy + 'px';
-      host.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: Motion.SPRINGS.fan.ms * 0.7, easing: Motion.SPRINGS.fan.ease });
+      host.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: Motion.curve('fan').ms * 0.7, easing: Motion.curve('fan').ease });
       [].forEach.call(host.querySelectorAll('.tray-cell'), function (cell, i) {
         if (i > 12) return;
-        cell.animate([{ opacity: 0, transform: 'translateY(' + (oy > 80 ? 22 : -22) + 'px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: Motion.SPRINGS.fan.ms * 0.8, delay: i * 18, fill: 'backwards', easing: Motion.SPRINGS.fan.ease });
+        cell.animate([{ opacity: 0, transform: 'translateY(' + (oy > 80 ? 22 : -22) + 'px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: Motion.curve('fan').ms * 0.8, delay: i * 18, fill: 'backwards', easing: Motion.curve('fan').ease });
       });
     }
   }

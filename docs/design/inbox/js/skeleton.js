@@ -8,7 +8,7 @@ window.Skeleton = (function () {
     setTimeout(function () {
       var cards = [].slice.call(document.querySelectorAll('.plaque, .stack .card'));
       main.classList.remove('is-loading');
-      if (Motion.reduced.matches) return;
+      if (Motion.isReduced()) return;
       cards.forEach(function (c, i) {
         var words = c.querySelectorAll('.c-title, .c-line, .c-pace, .pl-title, .pl-why');
         [].forEach.call(words, function (w) {

@@ -9,7 +9,7 @@
   width: auto;
   height: auto;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   column-gap: 10px;
   align-content: start;
   padding: var(--card-pad-y) var(--card-pad-x) 0;
@@ -17,7 +17,6 @@
   cursor: default;
   outline: none;
   transition:
-    transform var(--m-slow) var(--spring-glide, var(--m-ease)),
     height var(--m-base) var(--m-ease),
     opacity var(--m-base) var(--m-ease);
 }
@@ -29,6 +28,14 @@
 .c-clip { display: contents; }
 .stack .card > .card-stock { transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-long) var(--m-ease); }
 .stack .card:not([data-level="full"]) > .card-stock { box-shadow: var(--h-stack); }
+
+/* The first card of a stack stands apart: it is what has waited longest. */
+.card.is-whole.density-open .c-title { font-size: 15px; line-height: 21px; letter-spacing: -0.008em; }
+.stack .card.is-whole.density-open { padding-top: 12px; }
+.card.is-whole.density-open .c-mark { height: 21px; }
+.card.is-whole.density-open .c-pace { font-size: var(--t-14); line-height: 21px; height: 21px; }
+.card.is-whole.density-open .c-line { margin-top: 5px; }
+.card.is-whole.density-open .c-status { margin-top: 5px; }
 
 .mark { display: inline-grid; place-items: center; color: var(--mark-ink); }
 .mark--hue { color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue)); }
@@ -65,6 +72,7 @@
   white-space: nowrap;
   transition: opacity var(--m-quick) var(--m-ease);
 }
+.c-pace:empty { display: none; }
 .c-pace[data-ramp="fresh"] { color: var(--wait-fresh); }
 .c-pace[data-ramp="recent"] { color: var(--wait-recent); }
 .c-pace[data-ramp="stale"] { color: var(--wait-due); }
@@ -82,17 +90,20 @@
   font: var(--type-summary);
   color: var(--muted);
 }
+.c-line.tone-usual { color: var(--recede); }
+.card.is-whole .c-line.tone-usual, .card.is-peek .c-line.tone-usual { color: var(--muted); }
 .c-line.tone-bad { color: var(--fail-ink); }
 .c-line.tone-good { color: var(--ok); }
 .c-line.tone-you { color: var(--you-ink); }
-.c-who { display: contents; }
+.c-who { display: none; }
+.card.is-whole .c-who, .card.is-peek .c-who { display: contents; }
 .c-roll { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .c-more { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
 .c-status { grid-column: 3; grid-row: 2; justify-self: end; height: 16px; margin-top: 3px; display: flex; align-items: center; }
 /* The usual state of a kind says nothing at rest. */
-.c-status.is-norm { visibility: hidden; }
+.c-status.is-norm { display: none; }
 .card.is-whole .c-status.is-norm,
-.card.is-peek .c-status.is-norm { visibility: visible; }
+.card.is-peek .c-status.is-norm { display: flex; }
 
 .shape { display: inline-grid; place-items: center; }
 .shape.tone-quiet { color: var(--faint); }
@@ -170,8 +181,6 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  padding-left: 22px;
-  background: linear-gradient(90deg, transparent, var(--stock) 18px);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--m-quick) var(--m-ease);
@@ -180,6 +189,8 @@
 .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
 .card.is-hover .c-pace,
 .card.is-focus .c-pace { opacity: 0; }
+.stack .card.is-hover .c-title,
+.stack .card.is-focus .c-title { margin-right: 56px; }
 .c-act {
   display: inline-flex;
   align-items: center;
@@ -212,44 +223,56 @@
 .card[data-height="flat"] .mark { opacity: 0.6; }
 .card[data-height="flat"] .c-line { color: var(--muted); }
 
-.stack .card .card-holder { right: 44px; }
+/* In a stack the head stands at the left, over the empty gutter of the card behind it, so it covers no words. */
+.stack .card .card-holder { right: auto; left: 8px; }
+.stack .card .card-paws { right: auto; left: 12px; }
 
-/* The plaque: Hercule's own, in lacquer. */
+/* The shelf is quieter than the clock: the same cards, a step back. */
+.stack-wrap[data-slow="true"] .card:not(.is-peek):not(.is-focus) .c-title { color: color-mix(in oklab, var(--ink) 72%, var(--muted)); }
+
+/* The plate: one lacquer band across the page, Hercule's own. What it noticed sits on it in segments. */
+.noticed {
+  grid-column: 1 / -1;
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 60px;
+  margin-bottom: 22px;
+  border-radius: var(--card-r);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--lacquer-lit) 62%, transparent), transparent 70%), var(--lacquer);
+  box-shadow: inset 0 0 0 1px var(--lacquer-rim), var(--lacquer-shadow);
+  color: var(--lacquer-ink);
+}
+.noticed[hidden] { display: none; }
+.plate-crest { flex: none; display: grid; place-items: center; width: 52px; color: var(--lacquer-sub); }
+.plate-crest { color: var(--lacquer-ink); }
+.plate-crest .logo g { fill: var(--lacquer); }
 .plaque {
   position: relative;
+  flex: 1 1 0;
+  min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 26px minmax(0, 1fr);
   column-gap: 12px;
   align-content: center;
-  height: 72px;
-  padding: 0 16px 0 14px;
-  border-radius: var(--card-r);
-  background:
-    linear-gradient(180deg, color-mix(in oklab, var(--lacquer-lit) 60%, transparent), transparent 60%),
-    var(--lacquer);
-  box-shadow: inset 0 0 0 1px var(--lacquer-rim), var(--lacquer-shadow);
+  padding: 0 14px;
   color: var(--lacquer-ink);
   cursor: default;
   outline: none;
-  transition: transform var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease);
+  transition: background var(--m-quick) var(--m-ease), opacity var(--m-base) var(--m-ease);
 }
-.pl-marks { grid-row: 1 / 3; align-self: center; display: flex; }
-.pl-src {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--lacquer);
-  box-shadow: inset 0 0 0 1px var(--lacquer-rim);
-  color: var(--lacquer-ink);
-}
-.pl-src + .pl-src { margin-left: -9px; }
+.plaque::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 1px; background: var(--lacquer-rim); }
+.plaque:last-child { border-radius: 0 var(--card-r) var(--card-r) 0; }
+.plaque.is-hover { background: color-mix(in oklab, white 6%, transparent); }
+.pl-marks { position: relative; grid-row: 1 / 3; align-self: center; width: 26px; height: 24px; color: var(--lacquer-ink); }
+.pl-mark { display: block; line-height: 0; }
+.pl-badge { position: absolute; right: -2px; bottom: -4px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--lacquer); box-shadow: 0 0 0 1px var(--lacquer-rim); }
 .pl-title {
   margin: 0;
   font: var(--type-card);
   font-size: var(--t-14);
   line-height: 20px;
+  letter-spacing: -0.003em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -257,14 +280,12 @@
 .pl-why {
   color: var(--lacquer-sub);
   font: var(--type-summary);
-  line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.plaque .pl-acts { background: linear-gradient(90deg, transparent, var(--lacquer) 18px); top: 50%; right: 10px; transform: translateY(-50%); }
+.plaque .pl-acts { top: 50%; right: 10px; transform: translateY(-50%); padding-left: 16px; background: linear-gradient(90deg, transparent, var(--lacquer) 14px); }
 .plaque.is-hover .pl-acts, .plaque.is-focus .pl-acts { opacity: 1; pointer-events: auto; }
 .plaque .c-act { color: var(--lacquer-sub); }
 .plaque .c-act:hover { background: color-mix(in oklab, white 12%, transparent); color: var(--lacquer-ink); }
-.plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--lacquer-ink), var(--lacquer-shadow); }
+.plaque.is-focus { box-shadow: inset 0 0 0 1.5px var(--lacquer-ink); border-radius: 6px; }

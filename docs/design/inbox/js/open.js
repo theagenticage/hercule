@@ -32,7 +32,7 @@ window.Open = (function () {
       return '<button class="o-row' + (i === 0 ? ' is-first' : '') + '" data-act="hand-to" data-i="' + i + '"><span class="o-label">' + Crew.face(w.name, { pose: 'idle', size: 22 }) + Card.esc(w.name) + '</span><span class="o-says">' + Card.esc(w.says) + '</span><kbd>' + (flows.length === 1 ? 'H' : i + 1) + '</kbd></button>';
     }).join('');
     return '<div class="o-ledger">' + rows +
-      '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it on myself</span><span class="o-says">Creates a Task with no run, for you to pick up.</span><kbd>T</kbd></button>' +
+      '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it on myself</span><span class="o-says">Creates a Task with no run.</span><kbd>T</kbd></button>' +
       '<button class="o-row o-row--quiet" data-act="dismiss"><span class="o-label">Dismiss</span><span class="o-says">Takes it off your Inbox. ' + Card.esc(K[e.kind].plugin.name) + ' is not told.</span><kbd>E</kbd></button>' +
       '</div>';
   }
@@ -65,8 +65,8 @@ window.Open = (function () {
       '<div class="o-ledger">' + flows.map(function (w, i) {
         return '<button class="o-row' + (i === 0 ? ' is-first' : '') + '" data-act="hand-to" data-i="' + i + '"><span class="o-label">' + Crew.face(w.name, { pose: 'idle', size: 22 }) + Card.esc(w.name) + '</span><span class="o-says">' + Card.esc(w.says) + '</span><kbd>' + (i + 1) + '</kbd></button>';
       }).join('') +
-      '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it on myself</span><span class="o-says">Creates a Task with no run, for you to pick up.</span><kbd>T</kbd></button>' +
-      '<button class="o-row o-row--quiet" data-act="dismiss"><span class="o-label">Back to Intake</span><span class="o-says">Hercule was wrong to raise this. It stays in Intake.</span><kbd>E</kbd></button></div>';
+      '<button class="o-row" data-act="take"><span class="o-label">' + Card.drawPerson('you', 22) + 'Take it on myself</span><span class="o-says">Creates a Task with no run.</span><kbd>T</kbd></button>' +
+      '<button class="o-row o-row--quiet" data-act="dismiss"><span class="o-label">Back to Intake</span><span class="o-says">Hercule should not have raised this.</span><kbd>E</kbd></button></div>';
   }
 
   /** Opens a card where it lies. */
@@ -97,8 +97,8 @@ window.Open = (function () {
     scrim.classList.add('is-on');
     sourceEl.classList.add('is-source');
     App.state.open = id;
-    if (!Motion.reduced.matches) {
-      var ease = Motion.SPRINGS.open.ease, ms = Math.min(Motion.SPRINGS.open.ms, 520);
+    if (!Motion.isReduced()) {
+      var ease = Motion.curve('open').ease, ms = Math.min(Motion.curve('open').ms, 520);
       var clipFrom = 'inset(' + Math.max(0, r.top - top) + 'px ' + Math.max(0, w - (r.left - left) - r.width) + 'px ' + Math.max(0, top + h - r.top - Math.min(r.height, 64)) + 'px ' + Math.max(0, r.left - left) + 'px round 12px)';
       host.animate([{ clipPath: clipFrom }, { clipPath: 'inset(-40px -40px -60px -40px round 14px)' }], { duration: ms, easing: ease });
       [].forEach.call(host.querySelectorAll('.o-sec, .o-note, .o-parts, .o-facts, .o-row'), function (el, i) {
@@ -120,7 +120,7 @@ window.Open = (function () {
       if (!openId) scrim.hidden = true;
       if (src) src.classList.remove('is-source');
     };
-    if (instant || Motion.reduced.matches || !src) { finish(); return; }
+    if (instant || Motion.isReduced() || !src) { finish(); return; }
     var r = src.getBoundingClientRect(), b = host.getBoundingClientRect();
     var clipTo = 'inset(' + Math.max(0, r.top - b.top) + 'px ' + Math.max(0, b.right - r.right) + 'px ' + Math.max(0, b.bottom - r.top - Math.min(r.height, 64)) + 'px ' + Math.max(0, r.left - b.left) + 'px round 12px)';
     host.animate([{ clipPath: 'inset(-40px -40px -60px -40px round 14px)', opacity: 1 }, { clipPath: clipTo, opacity: 0.4 }], { duration: 200, easing: 'cubic-bezier(.5,0,.3,1)' }).finished.then(finish, finish);

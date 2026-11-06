@@ -20,17 +20,17 @@
   // The fixed set of tones. Each maps to one reserved colour of the design system.
   var TONES = ['quiet', 'active', 'you', 'good', 'bad'];
 
-  var AGENT_REVIEW = { name: 'Agent review', says: 'Reads the change and writes a review for you to send.' };
-  var REPAIR = { name: 'Repair the build', says: 'Finds why the checks failed and pushes a fix.' };
-  var DRAFT = { name: 'Draft a change', says: 'Writes a first version and opens a draft pull request.' };
-  var SECOND = { name: 'Build it with a second opinion', says: 'Builds it, then has another agent review the work.' };
-  var REPLY = { name: 'Draft a reply', says: 'Reads the thread and writes a reply for you to send.' };
-  var INVESTIGATE = { name: 'Find the cause', says: 'Follows the error to the commit that caused it.' };
+  var AGENT_REVIEW = { name: 'Agent review', says: 'Writes a review for you to send.' };
+  var REPAIR = { name: 'Repair the build', says: 'Finds why checks failed and pushes a fix.' };
+  var DRAFT = { name: 'Draft a change', says: 'Opens a draft pull request.' };
+  var SECOND = { name: 'Build it with a second opinion', says: 'Builds it, then another agent reviews it.' };
+  var REPLY = { name: 'Draft a reply', says: 'Writes a reply for you to send.' };
+  var INVESTIGATE = { name: 'Find the cause', says: 'Follows the error to the commit behind it.' };
 
   var KINDS = {
     'github/pull-request': {
       noun: 'Pull request',
-      plugin: { name: 'GitHub', mark: 'github', hue: null },
+      plugin: { name: 'GitHub', mark: 'github', hue: null, solid: true },
       paper: 'bond',
       density: 'open',
       pace: 'fast',
@@ -87,7 +87,7 @@
       group: 'project',
       person: 'assignee',
       status: {
-        triage: { shape: 'dashed', tone: 'you', word: 'Triage' },
+        triage: { shape: 'dashed', tone: 'quiet', word: 'Triage', norm: true },
         backlog: { shape: 'dashed', tone: 'quiet', word: 'Backlog' },
         todo: { shape: 'ring', tone: 'quiet', word: 'Todo' },
         started: { shape: 'half', tone: 'active', word: 'In Progress' },
@@ -130,7 +130,7 @@
 
     'slack/thread': {
       noun: 'Slack thread',
-      plugin: { name: 'Slack', mark: 'slack', hue: 330 },
+      plugin: { name: 'Slack', mark: 'slack', hue: 330, solid: true },
       paper: 'bond',
       density: 'open',
       pace: 'fast',
@@ -190,7 +190,7 @@
       group: 'site',
       person: null,
       status: {
-        waiting: { shape: 'ring', tone: 'you', word: 'Waiting for your sign-off' },
+        waiting: { shape: 'ring', tone: 'quiet', word: 'Waiting for your sign-off', norm: true },
         held: { shape: 'dashed', tone: 'quiet', word: 'Held at the quay' },
       },
       facts: [

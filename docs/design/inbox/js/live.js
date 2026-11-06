@@ -23,10 +23,9 @@ window.Live = (function () {
       App.state.entities.push(e);
       App.layOut();
       var el = App.els()[e.id];
-      if (el && !Motion.reduced.matches) {
-        var t = el.style.transform;
+      if (el) {
         el.classList.remove('is-new');
-        el.animate([{ transform: t + ' translateY(18px)', opacity: 0 }, { transform: t, opacity: 1 }], { duration: Motion.SPRINGS.drop.ms, easing: Motion.SPRINGS.drop.ease });
+        Motion.body(el).set({ y: 18, o: 0 }).to({ y: 0, o: 1 }, 'drop');
       }
       return true;
     }

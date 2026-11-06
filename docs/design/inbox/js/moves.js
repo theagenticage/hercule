@@ -36,8 +36,11 @@ window.Moves = (function () {
     App.redrawCard(e);
     el.classList.add('is-handing');
     Landing.rollLine(el, old);
-    var who = el.querySelector('.card-holder > *');
-    if (who) Motion.animate(who, [{ transform: 'translateY(20px)' }, { transform: 'none' }], { duration: Motion.SPRINGS.drop.ms, delay: 120, fill: 'backwards', easing: Motion.SPRINGS.drop.ease });
+    // The colleague comes up from behind the card, then puts its paws on the edge.
+    var who = el.querySelector('.card-holder');
+    if (who) Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'drop', { delay: 90 });
+    var paws = el.querySelector('.card-paws');
+    if (paws) Motion.body(paws).set({ o: 0, y: 3 }).to({ o: 1, y: 0 }, 'bump', { delay: 300 });
     setTimeout(function () { el.classList.remove('is-handing'); }, 700);
     setTimeout(function () { flyToWork(el, e); }, 120);
     App.layOut();
@@ -59,7 +62,7 @@ window.Moves = (function () {
   function hand(e, workflow, anchor) {
     var flows = Card.readWorkflows(e);
     if (workflow) return assign(e, workflow.name);
-    if (!flows.length) return take(e);
+    if (!flows.length) { showToast('No workflow takes a ' + K[e.kind].noun.toLowerCase() + ' yet', false); return; }
     if (flows.length === 1) return assign(e, flows[0].name);
     Menu.show(anchor || App.els()[e.id], flows, function (w) { assign(e, w.name); });
   }

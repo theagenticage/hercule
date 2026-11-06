@@ -3,7 +3,7 @@
 import { chromium } from "/tmp/ovtools/node_modules/playwright-core/index.mjs";
 import { resolve, dirname } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 const argv = process.argv.slice(2);
 const flag = (name, fallback) => { const i = argv.indexOf("--" + name); return i < 0 ? fallback : argv[i + 1]; };
 const pos = argv.filter((a, i) => !a.startsWith("--") && !(argv[i - 1] || "").startsWith("--"));
@@ -41,6 +41,24 @@ const only = pos[2] ? pos[2].split(",") : null;
 const browser = await chromium.launch({ executablePath: process.env.HOME + "/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome", args: ["--no-sandbox", "--headless=new"], env: { ...process.env, LD_LIBRARY_PATH: "/tmp/ovtools/root/usr/lib/x86_64-linux-gnu" } });
 const ctx = await browser.newContext({ viewport: { width: W, height: H } });
 const errors = [];
+// With --webp, every screen is re-encoded by Chromium itself at quality 0.86: a fifth of the size, with no visible loss.
+const webp = argv.includes("--webp");
+const encoder = webp ? await ctx.newPage() : null;
+async function save(page, path) {
+  if (!webp) { await page.screenshot({ path: path + ".png" }); return; }
+  const png = (await page.screenshot()).toString("base64");
+  const out = await encoder.evaluate(async (b64) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    c.getContext("2d").drawImage(bmp, 0, 0);
+    const buf = new Uint8Array(await (await c.convertToBlob({ type: "image/webp", quality: 0.86 })).arrayBuffer());
+    let s = "";
+    for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return btoa(s);
+  }, png);
+  writeFileSync(path + ".webp", Buffer.from(out, "base64"));
+}
 for (const theme of THEMES) {
   mkdirSync(`${out}/${theme}`, { recursive: true });
   for (const [name, s] of Object.entries(STATES)) {
@@ -50,7 +68,7 @@ for (const theme of THEMES) {
     await page.goto(pathToFileURL(resolve(root, "desktop.html")).href + `?theme=${theme}&live=0&dock=0&${s.q}`, { waitUntil: "load" });
     await page.waitForTimeout(s.wait || 800);
     if (s.run) await s.run(page);
-    await page.screenshot({ path: `${out}/${theme}/${name}.png` });
+    await save(page, `${out}/${theme}/${name}`);
     await page.close();
   }
 }

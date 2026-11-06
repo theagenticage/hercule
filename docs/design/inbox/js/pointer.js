@@ -20,7 +20,7 @@ window.Pointer = (function () {
     void el.offsetHeight;
     el.style.transition = '';
     el.style.height = el._full + 'px';
-    if (over > 0) el.style.transform = 'translate3d(0,' + (el._plan.y - over) + 'px,0)';
+    if (over > 0) Motion.body(el).to({ y: -over }, 'glide');
   }
 
   function unpeek() {
@@ -29,14 +29,14 @@ window.Pointer = (function () {
     peeked = null;
     if (el._plan) {
       el.style.height = el._plan.show + 'px';
-      el.style.transform = 'translate3d(0,' + el._plan.y + 'px,0)';
+      Motion.body(el).to({ y: 0 }, 'glide');
     }
     var done = function () {
       if (el === peeked) return;
       el.classList.remove('is-peek');
       if (el._rest) el.style.height = el._rest + 'px';
     };
-    setTimeout(done, Motion.reduced.matches ? 0 : 170);
+    setTimeout(done, Motion.isReduced() ? 0 : 170);
   }
 
   function setHover(el) {

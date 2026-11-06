@@ -25,9 +25,8 @@ window.Pages = (function () {
     return '<li class="in-row' + (r.state === 'quiet' ? ' is-quiet' : '') + '" data-row="' + r.id + '">' +
       '<span class="in-mark">' + Crew.brand(r.mark, 16) + '</span>' +
       '<span class="in-t"><b>' + Card.esc(r.title) + '</b><small>' + Card.esc(r.ref) + '</small></span>' +
-      '<span class="in-n">' + r.n + '<small> signal' + (r.n === 1 ? '' : 's') + '</small></span>' +
-      '<span class="in-last">' + r.last + '</span>' +
-      '<span class="in-state">' + (r.can && !raised[r.id] ? '<button class="btn btn--sm" data-raise="' + r.id + '">Raise to Inbox</button>' : raised[r.id] ? 'In your Inbox' : said) + '</span>' +
+      '<span class="in-end">' + (r.can && !raised[r.id] ? '<button class="btn btn--sm in-raise" data-raise="' + r.id + '">Raise to Inbox</button>' : '<span class="in-state">' + (raised[r.id] ? 'In your Inbox' : said) + '</span>') +
+      '<span class="in-n">' + r.n + '</span><span>' + r.last + '</span></span>' +
       (r.signals ? '<ol class="in-signals">' + r.signals.map(function (s) { return '<li>' + Card.esc(s) + '</li>'; }).join('') + '</ol>' : '') +
       '</li>';
   }
@@ -35,8 +34,8 @@ window.Pages = (function () {
   function drawIntake() {
     var page = document.getElementById('page');
     page.dataset.mode = 'intake';
-    page.innerHTML = '<div class="in-wrap"><h2 class="in-head"><b>214</b> signals about <b>61</b> things. Nine rose to your Inbox.</h2>' +
-      '<p class="in-sub">Intake is everything that arrived. It is grouped by the thing it is about, so one error with 200 events is one line.</p>' +
+    page.innerHTML = '<div class="in-wrap"><h2 class="in-head"><b>214 signals</b> about 61 things. Nine rose to your Inbox.</h2>' +
+      '<p class="in-sub">Everything that arrived, one line per thing, with how many signals it sent.</p>' +
       '<ul class="in-list">' + ROWS.map(drawRow).join('') + '</ul></div>';
   }
 
@@ -67,7 +66,7 @@ window.Pages = (function () {
       Motion.animate(document.querySelector('[data-view="cards"]'), [{ background: 'color-mix(in oklab, var(--accent) 22%, transparent)' }, { background: 'transparent' }], { duration: 700, easing: 'ease-out' });
     });
     App.state.entities.push(Scenes.raisedEntity(r));
-    row.querySelector('.in-state').textContent = 'In your Inbox';
+    row.querySelector('.in-raise').outerHTML = '<span class="in-state">In your Inbox</span>';
     row.classList.remove('is-quiet');
     Nav.setCount('inbox', App.countOverdue());
   }
@@ -116,11 +115,11 @@ window.Work = (function () {
   }
   function reveal(e, from) {
     var el = document.querySelector('[data-task="' + e.id + '"]');
-    if (!el || Motion.reduced.matches) return;
+    if (!el || Motion.isReduced()) return;
     var to = el.getBoundingClientRect();
     if (from) {
       var dx = from.left - to.left, dy = from.top - to.top;
-      el.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)', opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: Motion.SPRINGS.open.ms, easing: Motion.SPRINGS.open.ease });
+      el.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)', opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('open').ms, easing: Motion.curve('open').ease });
     }
     el.animate([{ boxShadow: '0 0 0 0 transparent' }, { boxShadow: '0 0 0 3px color-mix(in oklab, var(--accent) 30%, transparent)', offset: 0.2 }, { boxShadow: '0 0 0 0 transparent' }], { duration: 1400, delay: 200 });
   }
