@@ -186,8 +186,8 @@
 .card.is-hover .c-pace,
 .card.is-focus .c-pace { display: none; }
 /* The title gives way to the actions with an ellipsis, so no word is cut in half. */
-.stack .card.is-hover:not(.is-whole) .c-title,
-.stack .card.is-focus:not(.is-whole) .c-title { margin-right: var(--acts-w, 90px); }
+.stack .card.is-hover:not(.is-whole):not(.is-peek) .c-title,
+.stack .card.is-focus:not(.is-whole):not(.is-peek) .c-title { margin-right: var(--acts-w, 90px); }
 .c-act {
   display: inline-flex;
   align-items: center;
@@ -222,9 +222,10 @@
 .stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); background: color-mix(in oklab, var(--stock) 40%, var(--stock-carry)); }
 .card.is-peek .c-acts { z-index: 4; }
 .stack .card.is-hover:not(.is-peek) > .card-stock { box-shadow: var(--h-hover); }
-.stack .card.is-focus > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
-.card.is-dim, .plaque.is-dim { opacity: 0.5; }
-.card.is-dim .mark, .plaque.is-dim .pl-marks { opacity: 0.5; }
+.stack .card.is-focus > .card-stock,
+.card:focus-visible > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
+.card.is-dim, .plaque.is-dim { opacity: 0.66; }
+.card.is-dim .mark, .plaque.is-dim .pl-marks { opacity: 0.45; }
 
 /* Someone holds it now: the card lies flat, and what holds it stands behind its top edge. */
 .stack .card[data-height="flat"] > .card-stock { box-shadow: inset 0 0 0 1px var(--stock-rim); background: var(--stock-flat); }

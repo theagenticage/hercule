@@ -3,18 +3,27 @@
 window.Landing = (function () {
   var K = Kinds.KINDS;
 
-  /** Rolls a card's second line from the old sentence to the one now drawn. `old` is a copy of the old line. */
+  /**
+   * Rolls a card's second line from the old sentence to the one now drawn. Both move together on one curve, 16px apart, and the
+   * line clips them, so the two sentences never show at once. `old` is a copy of the old line.
+   */
   function rollLine(el, old) {
     var line = el.querySelector('.c-line');
-    if (!line || Motion.isReduced()) return;
-    old.classList.add('c-line--old');
-    old.style.gridArea = 'auto';
-    old.style.left = line.offsetLeft + 'px';
-    old.style.top = line.offsetTop + 'px';
-    old.style.width = line.offsetWidth + 'px';
-    el.appendChild(old);
-    Motion.animate(old, [{ transform: 'none', opacity: 1 }, { transform: 'translateY(-12px)', opacity: 0 }], { duration: 160, easing: 'cubic-bezier(.5,0,.8,.4)' }).then(function () { old.remove(); });
-    Motion.animate(line, [{ transform: 'translateY(12px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('hand').ms, delay: 40, fill: 'backwards', easing: Motion.curve('hand').ease });
+    var roll = line && line.querySelector('.c-roll');
+    if (!roll || Motion.isReduced()) return;
+    var clip = document.createElement('div');
+    clip.className = 'c-line-clip';
+    clip.style.left = line.offsetLeft + 'px';
+    clip.style.top = line.offsetTop + 'px';
+    clip.style.width = line.offsetWidth + 'px';
+    clip.style.height = line.offsetHeight + 'px';
+    [].forEach.call(old.querySelectorAll('.c-fresh'), function (d) { d.remove(); });
+    old.style.margin = '0';
+    clip.appendChild(old);
+    el.appendChild(clip);
+    var curve = Motion.curve('hand');
+    Motion.animate(old, [{ transform: 'none' }, { transform: 'translateY(-16px)' }], { duration: curve.ms, easing: curve.ease }).then(function () { clip.remove(); });
+    Motion.animate(roll, [{ transform: 'translateY(16px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: curve.ms, easing: curve.ease });
   }
 
   /** Tells a screen reader what just happened, without taking focus. */
@@ -27,13 +36,14 @@ window.Landing = (function () {
     e.fresh = true;
     if (s.state) e.fields.state = s.state;
     App.redrawCard(e);
+    if (Open.current() === e.id) Open.refresh();
     if (old) rollLine(el, old);
     el.dataset.landed = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
     el.classList.remove('is-landed');
     void el.offsetWidth;
     el.classList.add('is-landed');
     setTimeout(function () { el.classList.remove('is-landed'); }, 1300);
-    Motion.body(el).to({ y: 2 }, 'hand', { done: function () { Motion.body(el).to({ y: 0 }, 'hand'); } });
+    Motion.knock(el, 145);
     var n = el.querySelector('.c-more');
     if (n && !n.hidden) Motion.animate(n, [{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, delay: 160, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
     App.layOut();
@@ -51,7 +61,7 @@ window.Landing = (function () {
       e.signals.push(s);
       e.fresh = true;
       var pile = [].filter.call(document.querySelectorAll('.card.is-pile'), function (p) { return (p._members || []).indexOf(e) >= 0; })[0];
-      if (pile) Motion.body(pile).to({ y: 2 }, 'hand', { done: function () { Motion.body(pile).to({ y: 0 }, 'hand'); } });
+      if (pile) Motion.knock(pile, 145);
       return;
     }
     if (Motion.isReduced()) { apply(e, s, el); return; }
@@ -62,15 +72,30 @@ window.Landing = (function () {
     drop.className = 'drop drop--' + tone;
     document.body.appendChild(drop);
     var x = line.left + 3, y = (line.height ? line.top + line.height / 2 : r.top + 22);
+    // It falls long enough to be seen, stretching as it goes, and flattens on contact.
     drop.animate([
-      { transform: 'translate3d(' + x + 'px,' + (y - 40) + 'px,0) scale(.6)', opacity: 0 },
-      { transform: 'translate3d(' + x + 'px,' + (y - 26) + 'px,0) scale(.9)', opacity: 1, offset: 0.35 },
-      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(1.05,.8)', opacity: 1 },
-    ], { duration: 210, easing: 'cubic-bezier(.55,0,.85,.5)' }).finished.then(function () {
+      { transform: 'translate3d(' + x + 'px,' + (y - 60) + 'px,0) scale(.7,1)', opacity: 0 },
+      { transform: 'translate3d(' + x + 'px,' + (y - 46) + 'px,0) scale(.85,1.2)', opacity: 1, offset: 0.25 },
+      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(.85,1.3)', opacity: 1, offset: 0.9 },
+      { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(1.25,.7)', opacity: 1 },
+    ], { duration: 280, easing: 'cubic-bezier(.4,0,.9,.8)' }).finished.then(function () {
       drop.remove();
       apply(e, s, el);
     });
   }
 
-  return { rollLine: rollLine, land: land, announce: announce };
+  /** Brings a new card down into its place, with the rim every arrival gets. */
+  function settleArrival(el) {
+    if (!el) return;
+    el.classList.remove('is-new');
+    Motion.body(el).set({ y: -20, o: 0 }).to({ y: 0, o: 1 }, 'self');
+    // The rim waits until the card can be seen.
+    setTimeout(function () {
+      el.dataset.landed = 'plain';
+      el.classList.add('is-landed');
+      setTimeout(function () { el.classList.remove('is-landed'); }, 1300);
+    }, 200);
+  }
+
+  return { rollLine: rollLine, land: land, announce: announce, settleArrival: settleArrival };
 })();

@@ -128,7 +128,7 @@
         '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
     return '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 18 : 20) + '</div>' +
       '<h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
-      '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '"' + (pace ? ' aria-label="Waiting ' + sayWaitInWords(e.since, ctx.now) + '"' : '') + '>' + pace + '</div>' +
+      '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '">' + (kind.pace === 'fast' && pace ? '<span aria-hidden="true">' + pace + '</span><span class="sr">Waiting ' + sayWaitInWords(e.since, ctx.now) + '</span>' : pace) + '</div>' +
       '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') + '<span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
       '<div class="c-status' + (status && status.norm ? ' is-norm' : '') + '">' + (status && kind.pace !== 'slow' ? drawShape(status) : '') + '</div>' +
       '<div class="c-foot' + (line.isIdentity ? ' c-foot--facts' : '') + '">' + (line.isIdentity ? '' : '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span>') + '<span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
@@ -192,10 +192,11 @@
   /** Returns the HTML of a plaque: one thing Hercule noticed, on the lacquer plate. */
   function drawPlaque(c) {
     var flows = readWorkflows(c);
-    return '<div class="plaque" role="listitem" data-id="' + c.id + '" tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(c.why) + '">' +
+    var why = c.task ? (c.task.by === 'you' ? 'You took it on' : c.task.by + ' has it') : c.why;
+    return '<div class="plaque' + (c.task ? ' is-handed' : '') + '" role="listitem" data-id="' + c.id + '" tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(why) + '">' +
       '<div class="pl-marks">' + drawSources(c.sources) + '</div>' +
       '<h3 class="pl-title">' + esc(c.title) + '</h3>' +
-      '<div class="pl-why">' + esc(c.why) + '</div>' +
+      '<div class="pl-why">' + esc(why) + '</div>' +
       '<div class="c-acts pl-acts"><button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="Hand to an agent (H)" aria-label="Hand to an agent">' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>' +
       '<button class="c-act" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
       '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Back to Intake (E)" aria-label="Back to Intake">' + Crew.icon('close', 14) + '</button></div>' +

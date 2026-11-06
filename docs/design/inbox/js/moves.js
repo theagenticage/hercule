@@ -4,13 +4,30 @@ window.Moves = (function () {
   var history = [];     // every move of this visit, newest last, so Undo goes as far back as the person likes
   var toastTimer = 0;
 
+  /** Returns what Undo needs to put everything back exactly: the order of the page, and how each touched thing stood. */
+  function takeSnapshot(touched) {
+    return {
+      order: App.state.entities.slice(),
+      clusters: App.state.clusters.slice(),
+      touched: touched.map(function (e) { return { e: e, task: e.task, settled: e.settled }; }),
+    };
+  }
+
+  /** Puts a snapshot back. Anything that arrived since keeps its place at the end. */
+  function restoreSnapshot(snap) {
+    var since = App.state.entities.filter(function (e) { return snap.order.indexOf(e) < 0; });
+    App.state.entities = snap.order.concat(since);
+    App.state.clusters = snap.clusters;
+    snap.touched.forEach(function (t) { t.e.task = t.task; t.e.settled = t.settled; });
+  }
+
   /** Finds the sidebar row a Task flies to. */
   function readWorkRow() { return document.querySelector('[data-nav="overview"]'); }
 
   /** Marks the Overview row as having received something: its icon dips and a wash of the accent fades. */
   function receive(row) {
     var icon = row.querySelector('.ic');
-    if (icon) Motion.body(icon).set({ y: 1.5 }).to({ y: 0 }, 'hand');
+    if (icon) Motion.knock(icon, 110);
     var wash = document.createElement('i');
     wash.className = 'nav-wash';
     row.appendChild(wash);
@@ -34,7 +51,7 @@ window.Moves = (function () {
    */
   function assign(e, by) {
     var el = App.els()[e.id];
-    history.push({ type: 'assign', e: e });
+    history.push({ type: 'assign', e: e, snap: takeSnapshot([e]) });
     e.task = { by: by, startedAt: App.state.now };
     var said = by === 'you' ? 'You took it on' : 'Handed to ' + by;
     var undoWord = by === 'you' ? 'Undo' : 'Undo, stop the run';
@@ -48,22 +65,24 @@ window.Moves = (function () {
       showToast(said, undoWord);
       return;
     }
-    Pointer.setHover(null);
     Pointer.unpeek();
     Nav.setCount('inbox', App.countOverdue());
     // The wait gives way, and whoever takes the card comes up into its place.
     var wait = el.querySelector('.c-pace');
-    if (wait) wait.style.visibility = 'hidden';
+    if (wait) Motion.animate(wait, [{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' });
     el.insertAdjacentHTML('beforeend', Card.drawHolder(e));
     var who = el.querySelector('.c-holder-in');
     var reduced = Motion.isReduced();
     if (!reduced) Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'hand');
     setTimeout(function () {
+      if (!e.task) return;
       var line = el.querySelector('.c-line');
       var old = line && line.cloneNode(true);
       App.redrawCard(e);
       if (old) Landing.rollLine(el, old);
-      if (!reduced) Motion.body(el).to({ y: 1.5 }, 'hand', { done: function () { Motion.body(el).to({ y: 0 }, 'hand'); } });
+      // The colleague takes the weight: on one frame the card sinks under the handing over, and whoever took it dips and recovers.
+      Motion.knock(el, 110);
+      Motion.knock(who, 150);
       flyToWork(el);
       App.layOut();
       showToast(said, undoWord);
@@ -80,70 +99,65 @@ window.Moves = (function () {
   /** Hands on what Hercule noticed. Its segment of the plate steps back, and leaves at the next visit. */
   function assignPlaque(e, by) {
     var el = document.querySelector('.plaque[data-id="' + e.id + '"]');
-    el.classList.add('is-handed');
-    el.querySelector('.pl-why').textContent = by === 'you' ? 'You took it on' : by + ' has it';
+    App.drawNoticed();
+    el = document.querySelector('.plaque[data-id="' + e.id + '"]');
     flyToWork(el);
     showToast(by === 'you' ? 'You took it on' : 'Handed to ' + by, by === 'you' ? 'Undo' : 'Undo, stop the run');
     App.drawBar();
     noteLast();
   }
 
-  function hand(e, workflow, anchor) {
+  function hand(e, workflow, anchor, then) {
     var flows = Card.readWorkflows(e);
     if (workflow) return assign(e, workflow.name);
-    if (!flows.length) { showToast('No workflow takes a ' + K[e.kind].noun.toLowerCase() + ' yet'); return false; }
     if (flows.length === 1) return assign(e, flows[0].name);
-    Menu.show(anchor || App.els()[e.id], flows, function (w) { assign(e, w.name); });
+    Menu.show(anchor || App.els()[e.id], flows, function (w) { assign(e, w.name); if (then) then(); });
   }
   function take(e) { assign(e, 'you'); }
 
   /**
    * Dismisses a card. It steps aside, and the next card rises into its place at once, the way closing a tab brings the next
-   * tab under the pointer: the same click at the same spot dismisses the next one.
+   * tab under the pointer: the same click at the same spot dismisses the next one. The next card is chosen by order, never by
+   * what happens to be under the pointer while things move.
    */
   function dismiss(e) {
     var el = App.els()[e.id];
     placeToast(el);
+    var next = el && el._plan ? Keys.readBelow(e.id) : null;
+    var wasHover = el && el.classList.contains('is-hover');
     var index = App.state.entities.indexOf(e);
-    history.push({ type: 'dismiss', e: e, index: index });
+    history.push({ type: 'dismiss', e: e, snap: takeSnapshot([e]) });
     App.state.entities.splice(index, 1);
-    Pointer.clearHover();
+    Tray.remove(e.id);
     Pointer.unpeek();
-    if (el) {
+    if (el && el._plan) {
       var first = Number(el.style.zIndex);
       el.classList.remove('is-hover', 'is-focus', 'is-peek');
       el.classList.add('is-leaving');
       App.forgetEl(e.id);
-      Motion.body(el).to({ x: 14, o: 0 }, 'travel', { done: function () { el.remove(); } });
+      Motion.body(el).to(Motion.isReduced() ? { o: 0 } : { x: 14, o: 0 }, 'travel', { done: function () { el.remove(); } });
       App.layOut(false, function (c) { return Math.min(120, Math.max(0, Number(c.style.zIndex) - first) * 14); });
-      setTimeout(Pointer.refresh, 40);
+      if (wasHover) Pointer.handOver(next && App.els()[next]);
     } else App.layOut();
-    showToast('Dismissed', 'Undo');
+    showToast('Dismissed', 'Undo', 'Dismissed: ' + e.title);
     if (!App.countLeft()) setTimeout(function () { if (!App.countLeft()) App.checkZero(); }, 320);
   }
 
   /** Sends something Hercule noticed back to Intake. */
   function sendBack(e) {
-    var i = App.state.clusters.indexOf(e);
-    history.push({ type: 'noticed', e: e, index: i });
-    App.state.clusters.splice(i, 1);
+    history.push({ type: 'noticed', e: e, snap: takeSnapshot([e]) });
     var plaque = document.querySelector('.plaque[data-id="' + e.id + '"]');
+    App.state.clusters.splice(App.state.clusters.indexOf(e), 1);
     showToast('Back in Intake', 'Undo');
     if (!plaque) { App.drawNoticed(); return; }
-    Motion.animate(plaque, [{ opacity: 1 }, { opacity: 0 }], { duration: 180, easing: 'ease-in' }).then(function () { App.drawNoticed(); App.layOut(true); App.checkZero(); });
+    Motion.animate(plaque, [{ opacity: 1 }, { opacity: 0 }], { duration: 180, easing: 'ease-in' }).then(function () { App.reflowNoticed(); App.checkZero(); });
   }
 
   /** Plays a hand-off backwards: the mark flies home from Overview, the card stands up, and the colleague sinks away. */
-  function undoAssign(e) {
-    e.task = null;
-    e.settled = false;
-    if (e.kind === 'hercule/cluster') { App.drawNoticed(); App.drawBar(); return; }
-    var seen = document.querySelector('#tray .card[data-id="' + e.id + '"]');
-    if (seen) Card.redrawBody(seen, e, { now: App.state.now, usual: null });
-    App.layOut();
+  function playUnassign(e) {
     var el = App.els()[e.id];
     var stand = function () {
-      if (!el) return;
+      if (!el) { App.layOut(); return; }
       var who = el.querySelector('.c-holder');
       var line = el.querySelector('.c-line');
       var old = line && line.cloneNode(true);
@@ -154,60 +168,77 @@ window.Moves = (function () {
         Motion.body(who.firstChild).to({ y: 26 }, 'travel', { done: function () { who.remove(); } });
       }
       if (old) Landing.rollLine(el, old);
-      Nav.setCount('inbox', App.countOverdue());
+      Motion.knock(el, -90);
+      Nav.hold(false);
       App.layOut();
-      if (Keys.isUsingKeys()) Keys.focus(e.id);
     };
     var row = readWorkRow(), mark = el && el.querySelector('.c-mark .mark');
     if (!el || !row || !mark || Motion.isReduced()) { stand(); return; }
-    Motion.fly('<span class="token">' + mark.outerHTML + '</span>', row.querySelector('.ic').getBoundingClientRect(), mark.getBoundingClientRect(), { ms: 420 }).then(stand);
+    Motion.fly('<span class="token">' + mark.outerHTML + '</span>', row.querySelector('.ic').getBoundingClientRect(), mark.getBoundingClientRect(), { ms: 420, grow: true }).then(stand);
   }
 
-  /** Undoes the last move, wherever you are, and takes you back to the Inbox to see it undone. */
+  /**
+   * Undoes the last move, from anywhere. The move is reversed in the data first, then the page is brought to it, so a page that
+   * was empty comes back with the card on it.
+   */
   function undo() {
     var u = history.pop();
     if (!u) return;
-    hideToast();
-    if (Pages.current() !== 'inbox') Pages.setView('inbox');
-    if (App.state.mode !== 'stacks') { App.state.mode = 'stacks'; App.redraw(); }
-    if (u.type === 'assign') { undoAssign(u.e); return; }
-    if (u.type === 'batch') {
-      u.items.forEach(function (e) { e.task = null; e.settled = false; if (u.gone) App.state.entities.push(e); });
-      Tray.hide();
+    if (Open.isOpen()) Open.hide(true);
+    if (Tray.isOpen()) Tray.hide();
+    var wasElsewhere = Pages.current() !== 'inbox' || App.state.mode !== 'stacks';
+    restoreSnapshot(u.snap);
+    if (wasElsewhere || u.type === 'batch') {
+      Pages.setView('inbox', true);
+      App.state.mode = 'stacks';
       App.redraw();
-      return;
+    } else if (u.type === 'assign' && u.e.kind !== 'hercule/cluster') {
+      Nav.hold(true);
+      playUnassign(u.e);
+    } else if (u.type === 'noticed' || u.e && u.e.kind === 'hercule/cluster') {
+      App.reflowNoticed();
+    } else {
+      // If the card is still stepping aside, its copy gives way to the card coming back.
+      document.querySelectorAll('.card.is-leaving[data-id="' + u.e.id + '"]').forEach(function (c) { c.remove(); });
+      App.layOut();
+      var back = u.e && App.els()[u.e.id];
+      if (back) { back.classList.remove('is-new'); Motion.body(back).set({ x: 14, o: 0 }).to({ x: 0, o: 1 }, 'travel'); }
     }
-    if (u.type === 'noticed') {
-      App.state.clusters.splice(u.index, 0, u.e);
-      App.drawNoticed();
-      App.layOut(true);
-      return;
-    }
-    App.state.entities.splice(Math.min(u.index, App.state.entities.length), 0, u.e);
-    App.layOut();
-    var el = App.els()[u.e.id];
-    if (el) {
-      el.classList.remove('is-new');
-      Motion.body(el).set({ x: 14, o: 0 }).to({ x: 0, o: 1 }, 'travel');
-      if (Keys.isUsingKeys()) Keys.focus(u.e.id);
-    }
+    Nav.setCount('inbox', App.countOverdue());
+    if (u.e && Keys.isUsingKeys()) Keys.focus(u.e.id);
+    if (history.length) showToast('Undone', 'Undo'); else hideToast();
   }
 
-  /** Hands a whole pile to one colleague, or dismisses it, as one move with one Undo. */
+  /** Hands a whole pile to one colleague as one move with one Undo. */
   function handAll(members, workflow) {
     var open = members.filter(function (e) { return !e.task; });
+    history.push({ type: 'batch', snap: takeSnapshot(open) });
     open.forEach(function (e) { e.task = { by: workflow, startedAt: App.state.now }; e.settled = true; });
-    history.push({ type: 'batch', items: open });
     Tray.hide();
     App.layOut();
     showToast('Handed ' + open.length + ' to ' + workflow, 'Undo, stop the runs');
+    noteLast();
   }
+
+  /** Dismisses a whole pile as one move with one Undo. */
   function dismissAll(members) {
-    members.forEach(function (e) { var i = App.state.entities.indexOf(e); if (i >= 0) App.state.entities.splice(i, 1); });
-    history.push({ type: 'batch', items: members, gone: true });
+    history.push({ type: 'batch', snap: takeSnapshot(members) });
+    App.state.entities = App.state.entities.filter(function (e) { return members.indexOf(e) < 0; });
     Tray.hide();
     App.layOut();
     showToast('Dismissed ' + members.length, 'Undo');
+    if (!App.countLeft()) setTimeout(function () { App.checkZero(); }, 320);
+  }
+
+  /** Forgets every move, when the world is replaced by another scene. */
+  function reset() { history = []; hideToast(); }
+
+  /** Returns why a move cannot be made on this thing, or nothing when it can. */
+  function refuse(act, e) {
+    if (act === 'go') return e.task ? '' : 'No Task yet. Hand it on or take it first.';
+    if (e.task) return (e.task.by === 'you' ? 'You already have this.' : e.task.by + ' already has this.') + ' G goes to its Task.';
+    if (act === 'hand' && !Card.readWorkflows(e).length) return 'No workflow takes a ' + K[e.kind].noun.toLowerCase() + ' yet';
+    return '';
   }
 
   /** Puts the undo line in the foot of the column where the move was made, so it is near the hand and covers no card. */
@@ -219,14 +250,15 @@ window.Moves = (function () {
     t.style.left = col.getBoundingClientRect().left - main.left + 'px';
   }
 
-  function showToast(text, undoWord) {
+  function showToast(text, undoWord, said) {
     var t = document.getElementById('toast');
     t.innerHTML = '<span>' + Card.esc(text) + '</span>' + (undoWord ? '<button data-undo>' + Card.esc(undoWord) + ' <kbd>⌘Z</kbd></button>' : '');
-    Landing.announce(text);
-    var wasHidden = t.hidden;
+    Landing.announce(said || text);
+    var wasHidden = t.hidden, wasGoing = t.classList.contains('is-gone');
     t.hidden = false;
     t.classList.remove('is-gone');
     if (wasHidden) Motion.body(t).set({ y: 6, o: 0 }).to({ y: 0, o: 1 }, 'hand');
+    else if (wasGoing) Motion.body(t).to({ y: 0, o: 1 }, 'hand');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(hideToast, 5000);
   }
@@ -238,21 +270,15 @@ window.Moves = (function () {
   }
 
   /** Runs a move on a card. Returns false when the move does not apply, after saying why. */
-  function perform(act, id, anchor) {
+  function perform(act, id, anchor, then) {
     var e = App.findEntity(id);
     if (!e) return false;
     Menu.hide();
-    if (act === 'go') {
-      if (!e.task) { showToast('No Task yet. Hand it on or take it first.'); return false; }
-      Pages.goToWork(e);
-      return true;
-    }
-    if (e.task) {
-      showToast((e.task.by === 'you' ? 'You already have this.' : e.task.by + ' already has this.') + ' G goes to its Task.');
-      return false;
-    }
+    var why = refuse(act, e);
+    if (why) { showToast(why); return false; }
+    if (act === 'go') { Pages.goToWork(e); return true; }
     if (e.kind === 'hercule/cluster' && act === 'dismiss') { sendBack(e); return true; }
-    if (act === 'hand') return hand(e, null, anchor) !== false;
+    if (act === 'hand') { hand(e, null, anchor, then); return true; }
     if (act === 'take') { take(e); return true; }
     if (act === 'dismiss') { dismiss(e); return true; }
     return false;
@@ -262,9 +288,11 @@ window.Moves = (function () {
     document.getElementById('toast').addEventListener('click', function (ev) { if (ev.target.closest('[data-undo]')) undo(); });
     document.getElementById('toast').addEventListener('pointerenter', function () { clearTimeout(toastTimer); });
     document.getElementById('toast').addEventListener('pointerleave', function () { toastTimer = setTimeout(hideToast, 2000); });
+    document.getElementById('toast').addEventListener('focusin', function () { clearTimeout(toastTimer); });
+    document.getElementById('toast').addEventListener('focusout', function () { toastTimer = setTimeout(hideToast, 2000); });
   }
 
-  return { perform: perform, hand: hand, take: take, dismiss: dismiss, undo: undo, assign: assign, handAll: handAll, dismissAll: dismissAll, showToast: showToast, hideToast: hideToast, start: start };
+  return { perform: perform, refuse: refuse, hand: hand, take: take, dismiss: dismiss, undo: undo, assign: assign, handAll: handAll, dismissAll: dismissAll, reset: reset, showToast: showToast, hideToast: hideToast, start: start };
 })();
 
 // The small menu of workflows, when more than one fits.

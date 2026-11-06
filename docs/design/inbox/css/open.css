@@ -8,6 +8,7 @@
   transition: opacity var(--m-slow) var(--m-ease);
 }
 .scrim.is-on { opacity: 1; }
+.scrim:not(.is-on), .open.is-closing { pointer-events: none; }
 [data-theme] .scrim { -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 .scrim[hidden] { display: none; }
 
@@ -21,6 +22,8 @@
   color: var(--ink);
 }
 .open[hidden] { display: none; }
+.open.is-walking { transition: height var(--m-base) var(--m-ease), top var(--m-base) var(--m-ease); }
+.open kbd { color: var(--muted); }
 .open-in { display: flex; flex-direction: column; max-height: calc(100vh - 32px); overflow: auto; padding: 12px 0 8px; will-change: transform; }
 .open.is-closing .o-meta, .open.is-closing .o-sec, .open.is-closing .o-note, .open.is-closing .o-parts, .open.is-closing .o-facts, .open.is-closing .o-ledger, .open.is-closing .o-close { opacity: 0; transition: opacity 100ms linear; }
 .open.paper-manila { --stock: var(--stock-manila); }
@@ -66,7 +69,7 @@
 
 .o-facts { display: flex; align-items: center; gap: 12px; min-height: 26px; padding: 8px 14px 8px 42px; color: var(--muted); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
 .o-status { display: inline-flex; align-items: center; gap: 5px; }
-.o-source { margin-left: auto; font-size: inherit; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-weight: var(--w-medium); }
+.o-source { margin-left: auto; min-height: 24px; font-size: inherit; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-weight: var(--w-medium); }
 .o-source:hover { color: var(--ink); }
 
 .o-note { margin: 10px 16px 6px 42px; color: var(--plate-sub); font-size: var(--t-13); line-height: 20px; }
@@ -80,7 +83,7 @@
 .open--plaque .o-ledger { border-top-color: color-mix(in oklab, var(--plate-rim) 60%, transparent); }
 .o-row {
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 210px) minmax(0, 1fr) auto;
   column-gap: 12px;
   align-items: center;
   min-height: 40px;
@@ -135,7 +138,7 @@
   position: absolute;
   left: 32px;
   bottom: 13px;
-  z-index: 35;
+  z-index: 65;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -159,7 +162,7 @@
 .flight .mark--hue { color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue)); }
 
 /* Landing and leaving. */
-.drop { position: fixed; left: 0; top: 0; z-index: 90; width: 7px; height: 7px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--you); pointer-events: none; }
+.drop { position: fixed; left: 0; top: 0; z-index: 90; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--you-ink); pointer-events: none; }
 .drop--bad { background: var(--fail); }
 .drop--good { background: var(--ok); }
 .c-fresh { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you-ink); }
@@ -179,11 +182,17 @@
 @keyframes land-rim { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
 .card.is-leaving { pointer-events: none; }
 .nav-wash { position: absolute; inset: 0; border-radius: inherit; background: color-mix(in oklab, var(--accent) 16%, transparent); pointer-events: none; }
-.c-line--old { position: absolute; margin: 0; pointer-events: none; }
+.c-line-clip { position: absolute; overflow: hidden; pointer-events: none; }
+.c-line--old { margin: 0; }
 .card.is-moving { transition: height var(--m-base) var(--m-ease); }
 .card.is-new { opacity: 0; }
+@media (forced-colors: active) {
+  .card-stock { border: 1px solid CanvasText; }
+  .card.is-focus, .plaque.is-focus, .o-row:focus-visible { outline: 2px solid Highlight; }
+}
 @media (prefers-reduced-motion: reduce) {
   .stack .card { transition: none !important; }
+  .scrim, .rail { transition: opacity 200ms linear !important; }
   .card.is-landed::after { animation: land-fade 900ms linear forwards; }
   .rail, .rail.is-on { transform: translate(-50%, 0); transition: opacity var(--m-base) linear; }
 }
@@ -214,6 +223,7 @@
 .tray-h { gap: 10px; }
 .tray-h h2 { margin-right: auto; }
 .tray-all { display: inline-flex; gap: 4px; }
+.tray-find::placeholder { color: var(--faint); }
 .tray-find { width: 150px; height: 26px; padding: 0 8px; border: 0; border-radius: var(--r-xs); background: var(--field); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--ink); font: var(--type-summary); }
 .tray .card:hover .c-acts { opacity: 1; pointer-events: auto; }
 .tray-cell[hidden] { display: none; }

@@ -65,7 +65,7 @@ window.Scenes = (function () {
       var r0 = 136, r1 = long ? 236 : 192;
       var x0 = cx - Math.cos(a) * r0, y0 = cy - Math.sin(a) * r0, x1 = cx - Math.cos(a) * r1, y1 = cy - Math.sin(a) * r1;
       var d = Math.abs(i - (n - 1) / 2);
-      out += '<line class="ray" style="--d:' + (d * 26) + 'ms" x1="' + x0.toFixed(1) + '" y1="' + y0.toFixed(1) + '" x2="' + x1.toFixed(1) + '" y2="' + y1.toFixed(1) + '"/>';
+      out += '<line class="ray" pathLength="1" style="--d:' + (d * 26) + 'ms" x1="' + x0.toFixed(1) + '" y1="' + y0.toFixed(1) + '" x2="' + x1.toFixed(1) + '" y2="' + y1.toFixed(1) + '"/>';
     }
     return out;
   }
@@ -81,9 +81,14 @@ window.Scenes = (function () {
       '<div class="zero-n" aria-hidden="true">' + Crew.logo(92, { mono: true }) + '</div><h2 class="zero-t">All clear.</h2><p class="zero-s">' + line + '</p></div>';
   }
 
+  /** Lets the page go quiet, then brings up the sunrise. */
   function showZero() {
-    var entities = App.state.entities;
-    App.load({ name: 'zero', entities: entities, clusters: [], mode: 'zero', draw: drawZero });
+    var page = document.getElementById('page');
+    Motion.animate(page, [{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-out' }).then(function () {
+      App.load({ name: 'zero', entities: App.state.entities, clusters: [], mode: 'zero', draw: drawZero });
+      Landing.announce('All clear. Nothing from outside needs you.');
+      document.getElementById('main').focus({ preventScroll: true });
+    });
   }
 
   /** Draws the first run on the page itself: the stacks stand ready, and each first card asks to be connected. */
@@ -108,6 +113,12 @@ window.Scenes = (function () {
   }
 
   function play(name) {
+    Moves.reset();
+    if (window.Pages && Pages.current() !== 'inbox') Pages.setView('inbox', true);
+    Open.hide(true);
+    Tray.hide();
+    Menu.hide();
+    Keys.clear();
     App.load((defs[name] || defs.morning)());
     if (name === 'loading') Skeleton.run();
   }

@@ -1,5 +1,6 @@
 // The real sidebar, Hercule face, with the Inbox where Intake was.
 window.Nav = (function () {
+  var held = false, pending = null;
   var rows = [
     { id: 'overview', label: 'Overview', icon: 'office' },
     { id: 'inbox', label: 'Inbox', icon: 'intake' },
@@ -23,6 +24,7 @@ window.Nav = (function () {
       '<div class="side-foot"><div class="side-sum"><b>3</b> working · <b class="you-ink">2</b> waiting · <b>2</b> idle</div><div class="side-me">' + Card.drawPerson('you', 24) + '<span class="side-name">Noa</span><button class="icon-btn icon-btn--sm" title="Settings">' + Crew.icon('sliders', 14) + '</button></div></div>';
   }
   function setCount(id, n) {
+    if (held && n !== undefined && held !== 'release') { pending = n; return; }
     var el = document.querySelector('[data-nav-count="' + id + '"]');
     if (!el) return;
     var was = el.textContent;
@@ -30,10 +32,16 @@ window.Nav = (function () {
     el.hidden = !n;
     if (was && String(n) !== was) Motion.animate(el, [{ transform: 'translateY(' + (n > Number(was) ? 4 : -4) + 'px)', opacity: 0.3 }, { transform: 'none', opacity: 1 }], { duration: 260, easing: 'cubic-bezier(.22,.9,.24,1)' });
   }
+  /** Holds the number back while something is on its way, so it changes when the thing arrives. */
+  function hold(on) {
+    held = on;
+    if (!on && pending !== null) { var n = pending; pending = null; setCount('inbox', n); }
+  }
+
   /** Shows or hides the dot that says something new reached the Inbox since you were last there. */
   function setNew(isNew) {
     var dot = document.querySelector('.nav-new');
     if (dot) dot.hidden = !isNew;
   }
-  return { draw: draw, setCount: setCount, setNew: setNew };
+  return { draw: draw, setCount: setCount, setNew: setNew, hold: hold };
 })();

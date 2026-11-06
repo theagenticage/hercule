@@ -122,9 +122,9 @@ window.App = (function () {
   /** Returns how many cards are past the patience their kind declares. It is the number the sidebar shows. */
   function countOverdue() {
     var over = state.entities.filter(function (e) {
-      return !e.settled && !e.task && !e.leaving && K[e.kind].pace === 'fast' && (state.now - e.since) / 36e5 >= K[e.kind].patience;
+      return !e.settled && !e.task && K[e.kind].pace === 'fast' && (state.now - e.since) / 36e5 >= K[e.kind].patience;
     }).length;
-    return over + state.clusters.length;
+    return over + state.clusters.filter(function (c) { return !c.task; }).length;
   }
 
   /** Changes a figure or a line with a small roll, in the direction it moved, so a change on the page can be seen to happen. */
@@ -139,9 +139,21 @@ window.App = (function () {
     var seen = {};
     state.entities.forEach(function (e) { if (!e.settled) seen[K[e.kind].plugin.mark] = K[e.kind].plugin; });
     var marks = Object.keys(seen);
-    document.getElementById('sources').innerHTML = marks.map(function (m) {
-      return '<button class="ib-src' + (state.dim === m ? ' is-on' : '') + '" data-dim="' + m + '" title="Show only ' + seen[m].name + '" aria-pressed="' + (state.dim === m) + '">' + Card.drawMark(seen[m], 15) + '</button>';
-    }).join('');
+    // A filter on a source with nothing left would leave the page dim with no way out.
+    if (state.dim && marks.indexOf(state.dim) < 0) { state.dim = null; applyDim(); }
+    var host = document.getElementById('sources');
+    // Only a change of sources redraws the buttons, so a pressed filter keeps its focus.
+    if (host.dataset.marks !== marks.join()) {
+      host.dataset.marks = marks.join();
+      host.innerHTML = marks.map(function (m) {
+        return '<button class="ib-src" data-dim="' + m + '" title="Show only ' + seen[m].name + '" aria-pressed="false">' + Card.drawMark(seen[m], 15) + '</button>';
+      }).join('');
+    }
+    [].forEach.call(host.children, function (b) {
+      var on = state.dim === b.dataset.dim;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', on);
+    });
     Nav.setCount('inbox', countOverdue());
   }
 
@@ -163,7 +175,7 @@ window.App = (function () {
   function drawNoticed() {
     var host = document.getElementById('noticed');
     host.setAttribute('aria-label', 'Hercule noticed');
-    host.innerHTML = '<div class="plate-crest" title="Hercule noticed">' + Crew.logo(30, { mono: true }) + '</div>' + state.clusters.slice(0, 3).map(Card.drawPlaque).join('');
+    host.innerHTML = '<div class="plate-crest" title="Hercule noticed" aria-hidden="true">' + Crew.logo(30, { mono: true }) + '</div>' + state.clusters.slice(0, 3).map(Card.drawPlaque).join('');
     host.hidden = !state.clusters.length;
     document.querySelector('.ib-page').classList.toggle('no-noticed', !state.clusters.length);
   }
@@ -175,14 +187,16 @@ window.App = (function () {
   function layOut(still, stagger) {
     if (state.mode !== 'stacks' || document.getElementById('main').classList.contains('is-loading')) return;
     if (still || !hasDrawn) { placeStacks(); hasDrawn = true; return; }
-    Motion.flip([].slice.call(page.querySelectorAll('.stack .card:not(.is-leaving), .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'hand', stagger: stagger });
+    var moving = [].slice.call(page.querySelectorAll('.stack .card:not(.is-leaving), .stack .tab')).filter(function (el) { return el._plan; });
+    Motion.flip(moving.concat([].slice.call(page.querySelectorAll('.stack-h, .stack-foot:not([hidden])'))), placeStacks, { spring: 'hand', stagger: stagger });
   }
 
   function placeStacks() {
     COLUMNS.forEach(function (names, ci) {
       var col = page.querySelectorAll('.col')[ci];
       // The last row of every column is kept for the foot line and the undo line, so neither ever covers a card.
-      var depth = col.clientHeight - names.length * HEAD - (names.length - 1) * BETWEEN - FOOT;
+      // Never less than a card and a pile per stack: in a very small window the page scrolls, and no card is ever out of reach.
+      var depth = Math.max(col.clientHeight - names.length * HEAD - (names.length - 1) * BETWEEN - FOOT, names.length * 200);
       var built = names.map(function (n) {
         var host = page.querySelector('[data-stack="' + n + '"]');
         var parts = readStackEntities(n);
@@ -332,7 +346,7 @@ window.App = (function () {
   function redrawCard(e) {
     var el = els[e.id];
     if (!el) return;
-    var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end'].filter(function (c) { return el.classList.contains(c); });
+    var keep = ['is-whole', 'is-peek', 'is-hover', 'is-focus', 'is-run-end', 'is-source', 'is-lifted', 'is-dim', 'is-under', 'is-landed'].filter(function (c) { return el.classList.contains(c); });
     el.className = Card.cardClasses(e);
     keep.forEach(function (c) { el.classList.add(c); });
     Card.redrawBody(el, e, readCtx(readStack(e)));
@@ -354,12 +368,20 @@ window.App = (function () {
     drawNoticed();
     layOut();
     drawNotice();
+    applyDim();
     checkZero();
+  }
+
+  /** Redraws the plate after it changed, and lets the stacks glide to where the page now puts them. */
+  function reflowNoticed() {
+    var cols = [].slice.call(page.querySelectorAll('.col'));
+    Motion.flip(cols, function () { drawNoticed(); placeStacks(); }, { spring: 'travel' });
+    drawBar();
   }
 
   /** Returns how many things still wait on the person: cards nobody holds, and what Hercule noticed. */
   function countLeft() {
-    return state.entities.filter(function (e) { return !e.settled && !e.task && !e.leaving; }).length + state.clusters.filter(function (c) { return !c.task; }).length;
+    return state.entities.filter(function (e) { return !e.settled && !e.task; }).length + state.clusters.filter(function (c) { return !c.task; }).length;
   }
 
   /** Shows the empty Inbox once the last card has gone. */
@@ -373,6 +395,11 @@ window.App = (function () {
   /** Dims every card that does not come from the given plugin. Nothing moves, so the page keeps its shape. */
   function setDim(mark) {
     state.dim = state.dim === mark ? null : mark;
+    applyDim();
+    drawBar();
+  }
+
+  function applyDim() {
     Object.keys(els).forEach(function (id) {
       var e = findEntity(id);
       els[id].classList.toggle('is-dim', !!(e && state.dim && K[e.kind].plugin.mark !== state.dim));
@@ -381,7 +408,6 @@ window.App = (function () {
       var c = findEntity(p.dataset.id);
       p.classList.toggle('is-dim', !!(state.dim && c.sources.indexOf(state.dim) < 0));
     });
-    drawBar();
   }
 
   /**
@@ -390,7 +416,13 @@ window.App = (function () {
    */
   function arrive(e) {
     var name = readStack(e);
-    if (Pointer.stackUnderPointer() === name) {
+    if (state.mode !== 'stacks') {
+      state.entities.push(e);
+      if (state.mode === 'zero') { state.mode = 'stacks'; redraw(); }
+      return true;
+    }
+    // A column shares its depth, so the card waits while the pointer is anywhere in that column. Keys take no notice of a resting pointer.
+    if (isPointerInColumnOf(name) && !Keys.isUsingKeys()) {
       waiting.push(e);
       drawWaiting(name);
       return false;
@@ -398,6 +430,11 @@ window.App = (function () {
     state.entities.push(e);
     layOut();
     return true;
+  }
+
+  function isPointerInColumnOf(name) {
+    var over = Pointer.stackUnderPointer();
+    return !!over && COLUMNS.some(function (names) { return names.indexOf(over) >= 0 && names.indexOf(name) >= 0; });
   }
 
   function drawWaiting(name) {
@@ -416,22 +453,24 @@ window.App = (function () {
     var names = {};
     waiting.forEach(function (e) {
       var name = readStack(e);
-      if (name === stillOver) { keep.push(e); return; }
+      if (stillOver && COLUMNS.some(function (c) { return c.indexOf(stillOver) >= 0 && c.indexOf(name) >= 0; })) { keep.push(e); return; }
       state.entities.push(e);
-      names[name] = true;
+      names[name] = e;
     });
     if (!Object.keys(names).length) return;
     waiting = keep;
     layOut();
-    Object.keys(names).forEach(drawWaiting);
+    Object.keys(names).forEach(function (n) { drawWaiting(n); Landing.settleArrival(els[names[n].id]); });
   }
 
   /** Clears the page and draws a scene from scratch. */
   function load(scene) {
+    waiting = [];
     state.entities = scene.entities;
     state.clusters = scene.clusters;
     state.now = scene.now || W.NOW;
     state.scene = scene.name;
+    state.isLive = scene.name === 'morning' || (scene.name === 'zero' && state.isLive);
     state.dim = null;
     state.mode = scene.mode || 'stacks';
     state.notice = scene.notice || null;
@@ -474,6 +513,6 @@ window.App = (function () {
 
   return {
     state: state, els: function () { return els; }, STACKS: STACKS, readColumns: function () { return COLUMNS; }, findEntity: findEntity, readStack: readStack, readStackEntities: readStackEntities, layOut: layOut, redrawCard: redrawCard, drawNoticed: drawNoticed, drawBar: drawBar,
-    load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, checkZero: checkZero, countLeft: countLeft, countOverdue: countOverdue, start: start, measured: function () { return measured; }, forgetEl: function (id) { delete els[id]; }, arrive: arrive, releaseArrivals: releaseArrivals,
+    forgetMeasures: function () { measured = {}; }, load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, reflowNoticed: reflowNoticed, checkZero: checkZero, countLeft: countLeft, countOverdue: countOverdue, start: start, measured: function () { return measured; }, forgetEl: function (id) { delete els[id]; }, arrive: arrive, releaseArrivals: releaseArrivals,
   };
 })();

@@ -14,8 +14,8 @@ window.Live = (function () {
 
   /** Plays the next signal of the script. Returns false once the script has run out. */
   function next() {
-    if (App.state.scene !== 'morning') return false;
-    var away = App.state.mode !== 'stacks';
+    if (!App.state.isLive) return false;
+    var away = App.state.mode !== 'stacks' && App.state.mode !== 'zero';
     var step = script[i % script.length];
     i++;
     if (away && !step.arrive) return false;
@@ -25,18 +25,11 @@ window.Live = (function () {
       // Something new while you are elsewhere: one small dot on the Inbox row, and nothing louder.
       if (away) { App.state.entities.push(e); Nav.setNew(true); Nav.setCount('inbox', App.countOverdue()); return true; }
       if (!App.arrive(e)) return true;
-      var el = App.els()[e.id];
-      if (el) {
-        el.classList.remove('is-new');
-        Motion.body(el).set({ y: -20, o: 0 }).to({ y: 0, o: 1 }, 'self');
-        el.dataset.landed = 'plain';
-        el.classList.add('is-landed');
-        setTimeout(function () { el.classList.remove('is-landed'); }, 1300);
-      }
+      Landing.settleArrival(App.els()[e.id]);
       return true;
     }
     var target = App.findEntity(step.to);
-    if (!target || target.leaving || target.settled) return next();
+    if (!target || target.settled) return next();
     Landing.land(target, step.s());
     return true;
   }

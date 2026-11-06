@@ -26,7 +26,7 @@
 .ib-help { display: inline-grid; place-items: center; width: 28px; height: 28px; margin: 0 -8px 0 4px; border-radius: var(--r-sm); color: var(--faint); font-size: var(--t-13); font-weight: var(--w-medium); }
 .ib-help:hover { background: var(--hover); color: var(--ink); }
 .ib-fix { margin-left: 4px; text-decoration: underline; color: inherit; font: inherit; }
-.ptab.is-on { box-shadow: inset 0 0 0 1px var(--rim); }
+.ptab.is-on { box-shadow: inset 0 0 0 1px var(--rim); font-weight: var(--w-bold); }
 
 .ib-page {
   display: grid;
@@ -127,3 +127,13 @@
 .ib-page[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
 .icon-btn--sm { width: 24px; height: 24px; }
 .stack-new { margin-left: auto; color: var(--you-ink); font-size: var(--t-11); letter-spacing: 0; text-transform: none; font-weight: var(--w-medium); }
+
+/* In a very small window, or at high zoom, the page scrolls: no card is ever out of reach. */
+.ib-page { overflow-y: auto; scrollbar-width: none; }
+.col { overflow: visible; min-height: max-content; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .side { display: none; }
+}
+.skip { position: absolute; left: 12px; top: -40px; z-index: 100; padding: 6px 10px; border-radius: var(--r-xs); background: var(--raised); box-shadow: var(--h-hover); color: var(--ink); font-size: var(--t-13); }
+.skip:focus { top: 8px; }

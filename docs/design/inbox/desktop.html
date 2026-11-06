@@ -19,9 +19,10 @@
 <link rel="stylesheet" href="css/states.css">
 </head>
 <body>
+<a class="skip" href="#page" data-skip>Skip to the cards</a>
 <div class="app">
   <aside class="side" id="side"></aside>
-  <main class="main" id="main">
+  <main class="main" id="main" tabindex="-1">
     <div class="ib-bar">
       <div class="pill" id="pill"><h1 class="pill-title">Inbox</h1><button class="ptab is-on" data-view="cards" aria-current="page">Cards</button><button class="ptab" data-view="intake">Intake <small>214</small></button></div>
       <div class="ib-notice" id="notice" role="status" hidden></div>
@@ -30,7 +31,7 @@
     <div class="ib-page" id="page"></div>
     <div class="rail" id="rail" hidden></div>
     <div class="scrim" id="scrim" hidden></div>
-    <div class="toast" id="toast" role="status" hidden></div>
+    <div class="toast" id="toast" hidden></div>
   </main>
 </div>
 <section class="open" id="open" role="dialog" aria-modal="true" aria-label="Open card" hidden></section>

@@ -64,7 +64,7 @@
   --h-stack-shade: oklch(0 0 0 / 0.34);
   --mark-l: 0.8;
   --mark-c: 0.14;
-  --recede: oklch(0.67 0.016 70);
+  --recede: oklch(0.74 0.016 70);
   --veil: var(--scrim);
 }
 
@@ -77,7 +77,7 @@
   --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="nile"] {
-  --recede: oklch(0.7 0.018 130);
+  --recede: oklch(0.75 0.018 130);
   --plate: oklch(0.78 0.08 96);
   --plate-lit: oklch(0.85 0.075 98);
   --plate-ink: oklch(0.21 0.03 120);
@@ -86,7 +86,7 @@
   --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="end-house"] {
-  --recede: oklch(0.7 0.02 10);
+  --recede: oklch(0.75 0.02 10);
   --plate: oklch(0.76 0.075 62);
   --plate-lit: oklch(0.83 0.07 66);
   --plate-ink: oklch(0.21 0.035 350);
@@ -95,7 +95,7 @@
   --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
 [data-theme="blue-train"] {
-  --recede: oklch(0.76 0.014 250);
+  --recede: oklch(0.8 0.014 250);
   --plate: oklch(0.76 0.075 86);
   --plate-lit: oklch(0.83 0.07 88);
   --plate-ink: oklch(0.22 0.03 250);
@@ -103,6 +103,12 @@
   --plate-rim: oklch(0.85 0.06 90 / 0.8);
   --plate-shadow: 0 1px 2px oklch(0 0 0 / 0.45), 0 16px 34px -16px oklch(0 0 0 / 0.75);
 }
+
+/* In the dark themes the stock is lighter than --faint was set for, so words on a card take a step more ink. */
+[data-theme="orient-express"] .card,
+[data-theme="nile"] .card,
+[data-theme="end-house"] .card,
+[data-theme="blue-train"] .card { --faint: color-mix(in oklab, var(--muted) 70%, var(--faint)); }
 
 /* With reduced motion the durations collapse, so no CSS movement is left behind. JS moves have their own designed fades. */
 @media (prefers-reduced-motion: reduce) {

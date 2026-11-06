@@ -9,6 +9,9 @@ window.Skeleton = (function () {
     setTimeout(function () {
       main.classList.add('is-arriving');
       main.classList.remove('is-loading');
+      // Fonts may have arrived while the words were held back, so the cards are measured once more, before they show.
+      App.forgetMeasures();
+      App.layOut(true);
       setTimeout(function () { main.classList.remove('is-arriving'); }, 120);
       if (Motion.isReduced()) return;
       var stacks = [].slice.call(document.querySelectorAll('.noticed, .stack'));

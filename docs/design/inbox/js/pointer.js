@@ -5,7 +5,7 @@ window.Pointer = (function () {
   var HAND_OVER = 70;    // ms of rest before a showing peek moves to another card
   var LEAVE_DELAY = 140; // ms before a peek closes when the pointer has left the stack
   var hover = null, peeked = null, timer = 0, leaveTimer = 0;
-  var speed = 0, lastX = 0, lastY = 0, lastT = 0, overWrap = null;
+  var speed = 0, lastX = 0, lastY = 0, lastT = 0, overWrap = null, settledAt = 0, lastAct = null;
 
   /** Returns how tall a card stands in a peek: its whole face at strip size, kept inside the window. */
   function measurePeek(el) {
@@ -85,6 +85,7 @@ window.Pointer = (function () {
       Keys.setCurrent(null, 'pointer');
       return;
     }
+    if (el.classList.contains('is-source')) return;
     clearTimeout(leaveTimer);
     el.classList.add('is-hover');
     measureActs(el);
@@ -101,11 +102,16 @@ window.Pointer = (function () {
     hover = null;
   }
 
-  /** Reads what is under the pointer again, after a move changed the page beneath it. */
-  function refresh() {
-    var el = document.elementFromPoint(lastX, lastY);
-    if (!el || !lastT) return;
-    setHover(el.closest('.stack .card:not(.is-pile):not(.is-leaving)'));
+  /** Hands the pointer's card over to the one that takes its place. Hit tests wait until the page has stopped moving. */
+  function handOver(el) {
+    settledAt = performance.now() + 320;
+    clearTimeout(timer);
+    if (hover) hover.classList.remove('is-hover');
+    hover = el || null;
+    if (!el) { Keys.setCurrent(null, 'pointer'); return; }
+    el.classList.add('is-hover');
+    measureActs(el);
+    Keys.setCurrent(el.dataset.id, 'pointer');
   }
 
   function start() {
@@ -114,12 +120,15 @@ window.Pointer = (function () {
       if (document.documentElement.dataset.dragging) return;
       speed = Math.hypot(ev.clientX - lastX, ev.clientY - lastY) / Math.max(1, ev.timeStamp - lastT);
       lastX = ev.clientX; lastY = ev.clientY; lastT = ev.timeStamp;
-      setHover(ev.target.closest('.card:not(.is-pile):not(.is-leaving)'));
+      // While a stack closes up, what is under the pointer is a moving target, so the card handed over stays current.
+      if (performance.now() < settledAt) return;
       var plaque = ev.target.closest('.plaque');
+      setHover(ev.target.closest('.card:not(.is-pile):not(.is-leaving)'));
       document.querySelectorAll('.plaque.is-hover').forEach(function (p) { if (p !== plaque) p.classList.remove('is-hover'); });
       if (plaque) { plaque.classList.add('is-hover'); Keys.setCurrent(plaque.dataset.id, 'pointer'); }
       var wrap = ev.target.closest('[data-wrap]');
       if (wrap !== overWrap) { overWrap = wrap; App.releaseArrivals(wrap && wrap.dataset.wrap); }
+      if (!plaque && !ev.target.closest('.card')) Keys.setCurrent(null, 'pointer');
     });
     page.addEventListener('pointerleave', function () {
       setHover(null);
@@ -128,15 +137,17 @@ window.Pointer = (function () {
       document.querySelectorAll('.plaque.is-hover').forEach(function (p) { p.classList.remove('is-hover'); });
     });
     page.addEventListener('click', function (ev) {
+      // A second click while the stack closes up means the same move, on the card now in that place.
+      if (performance.now() < settledAt && lastAct && hover) { Moves.perform(lastAct, hover.dataset.id); return; }
       var folded = ev.target.closest('.card.is-pile, .stack-foot');
       if (folded) { Tray.show(folded); return; }
       var act = ev.target.closest('[data-act]');
       var card = ev.target.closest('.card, .plaque');
       if (!card) return;
-      if (act) { ev.stopPropagation(); Moves.perform(act.dataset.act, card.dataset.id, act); return; }
+      if (act) { lastAct = act.dataset.act === 'dismiss' ? 'dismiss' : null; ev.stopPropagation(); Moves.perform(act.dataset.act, card.dataset.id, act); return; }
       Open.show(card.dataset.id);
     });
   }
 
-  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, clearHover: clearHover, refresh: refresh, measureActs: measureActs, stackUnderPointer: function () { return overWrap && overWrap.dataset.wrap; } };
+  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, clearHover: clearHover, handOver: handOver, measureActs: measureActs, stackUnderPointer: function () { return overWrap && overWrap.dataset.wrap; } };
 })();

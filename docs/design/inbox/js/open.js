@@ -3,7 +3,7 @@
 window.Open = (function () {
   var K = Kinds.KINDS, W = World;
   var host, inner, scrim, openId = null, sourceEl = null, keyed = false;
-  var motion = null, progress = null;
+  var motion = null, progress = null, generation = 0;
 
   function saySince(d, now) {
     var h = (now - d) / 36e5;
@@ -79,6 +79,7 @@ window.Open = (function () {
 
   /** Fades the veil out, and takes it away once it has gone. */
   function hideVeil() {
+    if (Tray.isOpen()) return;
     scrim.classList.remove('is-on');
     var gone = function () { if (!scrim.classList.contains('is-on')) scrim.hidden = true; };
     if (Motion.isReduced()) gone(); else setTimeout(gone, 370);
@@ -93,18 +94,20 @@ window.Open = (function () {
 
   /** Draws one frame of the sheet, at `t` from where the card lies (0) to where it stands open (1). */
   function drawFrame(t) {
+    if (!motion) return;
     var f = motion.from, to = motion.to, u = 1 - t;
     var left = f.left + (to.left - f.left) * t, top = f.top + (to.top - f.top) * t;
     host.style.left = left + 'px';
     host.style.top = top + 'px';
     host.style.width = f.width + (to.width - f.width) * t + 'px';
     host.style.height = f.height + (to.height - f.height) * t + 'px';
+    host.style.borderRadius = 12 + 2 * t + 'px';
     inner.style.transform = 'translate(' + (to.left - left) + 'px,' + (to.top - top) + 'px)';
     motion.parts.forEach(function (p) {
       p.el.style.transform = 'translate(' + p.dx * u + 'px,' + p.dy * u + 'px) scale(' + (1 + (p.scale - 1) * u) + ')';
     });
     // Near home the card itself comes back under the sheet, so the last frames dissolve into it rather than cut.
-    if (motion.closing && t < 0.16 && !motion.isHome) {
+    if (motion.closing && t < 0.05 && !motion.isHome) {
       motion.isHome = true;
       restoreSource();
       host.style.transition = 'opacity 80ms linear';
@@ -127,6 +130,17 @@ window.Open = (function () {
   function show(id, anchor, byKeyboard) {
     var e = App.findEntity(id);
     if (!e) return;
+    // Asked to open the card that is folding home: it turns round from where it is, keeping its speed.
+    if (motion && motion.closing && motion.id === id && !motion.isHome) {
+      motion.closing = false;
+      motion.then = null;
+      openId = id;
+      App.state.open = id;
+      host.classList.remove('is-closing');
+      showVeil();
+      progress.to(1, 'travel');
+      return;
+    }
     if (openId || motion) finish();
     Pointer.setHover(null);
     Pointer.unpeek();
@@ -141,7 +155,7 @@ window.Open = (function () {
     inner = host.firstChild;
     host.hidden = false;
     host.style.cssText = 'left:0;top:0;width:auto;height:auto';
-    var w = Math.max(520, Math.round(from.width));
+    var w = Math.min(Math.max(520, Math.round(from.width)), innerWidth - 32);
     inner.style.width = w + 'px';
     var h = inner.offsetHeight;
     var left = Math.max(main.left + 16, Math.min(from.left - 1, main.right - w - 16));
@@ -151,30 +165,39 @@ window.Open = (function () {
     showVeil();
     sourceEl.classList.add('is-source');
     App.state.open = id;
-    motion = { from: from, to: to, parts: [], closing: false, isHome: false, then: null };
-    // The title and the mark are the same objects in both places: measure each where it ends, then start it where it lay.
+    motion = { id: id, gen: ++generation, from: from, to: to, parts: [], closing: false, isHome: false, then: null };
     host.style.left = to.left + 'px';
     host.style.top = to.top + 'px';
     host.style.width = to.width + 'px';
     host.style.height = to.height + 'px';
-    [['.c-title, .pl-title', '.o-title'], ['.c-mark', '.c-mark']].forEach(function (pair) {
-      var a = sourceEl.querySelector(pair[0]), b = inner.querySelector(pair[1]);
-      if (!a || !b) return;
-      var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-      var scale = pair[1] === '.o-title' ? parseFloat(getComputedStyle(a).fontSize) / parseFloat(getComputedStyle(b).fontSize) : 1;
-      b.style.transformOrigin = '0 0';
-      motion.parts.push({ el: b, dx: ra.left - rb.left, dy: ra.top - rb.top, scale: scale });
-    });
+    motion.parts = measureParts(sourceEl);
     // Focus goes to the sheet, not to a move: Enter must never start an agent by accident.
     host.tabIndex = -1;
     if (Motion.isReduced()) { drawFrame(1); host.focus({ preventScroll: true }); return; }
     drawFrame(0);
-    progress = Motion.value(0, drawFrame);
+    // Each opening has its own spring. One left over from an earlier opening must never touch this sheet.
+    var gen = motion.gen;
+    progress = Motion.value(0, function (t) { if (motion && motion.gen === gen) drawFrame(t); });
     progress.to(1, 'travel');
     [].forEach.call(inner.querySelectorAll('.o-meta, .o-sec, .o-note, .o-parts, .o-facts, .o-ledger, .o-row'), function (el, i) {
-      el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 70 + i * 20, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
+      el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 30 + i * 20, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
     });
     host.focus({ preventScroll: true });
+  }
+
+  /** Returns the parts of the sheet that are the same objects as parts of the card: the title, the mark and the latest line. */
+  function measureParts(source) {
+    var parts = [];
+    [['.c-title, .pl-title', '.o-title'], ['.c-mark, .pl-marks', '.c-mark'], ['.c-line', '.o-signal.is-latest']].forEach(function (pair) {
+      var a = source.querySelector(pair[0]), b = inner.querySelector(pair[1]);
+      if (!a || !b || !a.getClientRects().length) return;
+      b.style.transform = '';
+      var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      var scale = pair[1] === '.o-title' ? parseFloat(getComputedStyle(a).fontSize) / parseFloat(getComputedStyle(b).fontSize) : 1;
+      b.style.transformOrigin = '0 0';
+      parts.push({ el: b, dx: ra.left - rb.left, dy: ra.top - rb.top, scale: scale });
+    });
+    return parts;
   }
 
   /**
@@ -195,11 +218,17 @@ window.Open = (function () {
     inner.innerHTML = plaque ? drawOpenPlaque(e) : drawOpen(e);
     var h = inner.offsetHeight;
     motion.to.height = h;
-    motion.parts = [];
     motion.from = readFrom(sourceEl);
+    // A walk holds its place, unless a taller card would run off the window. The sheet's new size follows on a transition.
+    motion.to.top = Math.max(document.getElementById('main').getBoundingClientRect().top + 12, Math.min(motion.to.top, innerHeight - h - 16));
+    host.classList.add('is-walking');
+    host.style.top = motion.to.top + 'px';
     host.style.height = h + 'px';
     host.setAttribute('aria-label', K[e.kind].noun + ': ' + e.title);
+    motion.id = id;
+    motion.parts = measureParts(sourceEl);
     Motion.animate(inner, [{ opacity: 0.2, transform: 'translateY(' + (down ? 8 : -8) + 'px)' }, { opacity: 1, transform: 'none' }], { duration: 160, easing: 'cubic-bezier(.22,.9,.24,1)' });
+    Landing.announce(Card.sayCard(e));
     host.focus({ preventScroll: true });
   }
 
@@ -213,7 +242,6 @@ window.Open = (function () {
 
   /** Ends whatever the sheet is doing, at once. */
   function finish() {
-    if (progress) progress.set(motion ? (motion.closing ? 0 : 1) : 1);
     host.hidden = true;
     host.style.opacity = '';
     host.style.transition = '';
@@ -243,16 +271,35 @@ window.Open = (function () {
     }
     motion.closing = true;
     motion.then = then || null;
+    // The card may have moved since the sheet opened, so it folds back to where the card lies now.
+    if (src && src.isConnected) { motion.from = readFrom(src); motion.parts = measureParts(src); }
+    host.classList.remove('is-walking');
     host.classList.add('is-closing');
-    progress.to(0, 'travel', function () { finish(); });
+    host.getAnimations({ subtree: true }).forEach(function (a) { a.cancel(); });
+    var gen = motion.gen;
+    progress.to(0, 'travel', function () { if (motion && motion.gen === gen) finish(); });
     refocus(src, id, wasKeyed);
   }
 
   /** Gives focus back to the card. The ring and the peek come back only for someone working by keyboard. */
   function refocus(src, id, wasKeyed) {
     if (wasKeyed && App.findEntity(id)) Keys.focus(id);
-    else if (src && src.isConnected) src.focus({ preventScroll: true });
+    else if (src && src.isConnected) Keys.focusQuietly(src);
   }
+
+  /** Draws the open card again when something lands on it. */
+  function refresh() {
+    var e = openId && App.findEntity(openId);
+    if (!e || e.kind === 'hercule/cluster') return;
+    var top = inner.scrollTop;
+    inner.innerHTML = drawOpen(e);
+    inner.scrollTop = top;
+    var h = inner.offsetHeight;
+    motion.to.height = h;
+    host.style.height = h + 'px';
+  }
+
+  function isFromTray() { return !!(sourceEl && sourceEl.closest && sourceEl.closest('#tray')); }
 
   function isOpen() { return !!openId; }
   function current() { return openId; }
@@ -279,5 +326,5 @@ window.Open = (function () {
     });
   }
 
-  return { show: show, hide: hide, walk: walk, focusFirstMove: focusFirstMove, isOpen: isOpen, current: current, act: act, start: start };
+  return { show: show, hide: hide, walk: walk, refresh: refresh, isFromTray: isFromTray, focusFirstMove: focusFirstMove, isOpen: isOpen, current: current, act: act, start: start };
 })();

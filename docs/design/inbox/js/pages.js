@@ -26,7 +26,7 @@ window.Pages = (function () {
 
   function drawRow(r) {
     var said = { noticed: 'Noticed', inbox: 'In your Inbox', quiet: '' }[r.state];
-    return '<li class="in-row' + (r.state === 'quiet' ? ' is-quiet' : '') + '" data-row="' + r.id + '">' +
+    return '<li class="in-row' + (r.state === 'quiet' ? ' is-quiet' : '') + '" data-row="' + r.id + '" tabindex="0"' + (r.signals ? ' aria-expanded="false"' : '') + '>' +
       '<span class="in-mark">' + Card.drawMark(MARKS[r.mark], 16) + '</span>' +
       '<span class="in-t"><b>' + Card.esc(r.title) + '</b><small>' + Card.esc(r.ref) + '</small></span>' +
       '<span class="in-end">' + (r.can && !raised[r.id] ? '<button class="btn btn--sm in-raise" data-raise="' + r.id + '">Raise</button>' : '<span class="in-state">' + (raised[r.id] ? 'In your Inbox' : said) + '</span>') +
@@ -43,8 +43,11 @@ window.Pages = (function () {
       '<ul class="in-list">' + ROWS.map(drawRow).join('') + '</ul><div class="in-more">49 more things, all quiet</div></div>';
   }
 
-  function setView(name) {
+  function setView(name, keepState) {
     if (Open.isOpen()) Open.hide(true);
+    Menu.hide();
+    Keys.clear();
+    Pointer.unpeek();
     current = name;
     document.querySelectorAll('[data-nav]').forEach(function (r) { r.classList.toggle('is-on', r.dataset.nav === (name === 'work' ? 'overview' : 'inbox')); });
     document.getElementById('main').dataset.page = name;
@@ -55,6 +58,7 @@ window.Pages = (function () {
     Nav.setNew(false);
     App.state.mode = 'stacks';
     page().dataset.mode = 'stacks';
+    if (keepState) return;
     App.settle();
     App.redraw();
   }
@@ -63,9 +67,12 @@ window.Pages = (function () {
   /** Sets the pill for the place on screen: the Inbox's own, or the one Overview draws. */
   function drawPill(name) {
     var pill = document.getElementById('pill');
+    var hadFocus = document.activeElement && document.activeElement.dataset.view;
     pill.innerHTML = name === 'work'
       ? '<h1 class="pill-title">Overview</h1><button class="ptab">' + Crew.icon('office', 14) + 'Office</button><button class="ptab is-on">' + Crew.icon('tasks', 14) + 'Work</button>'
       : '<h1 class="pill-title">Inbox</h1><button class="ptab' + (name === 'intake' ? '' : ' is-on') + '" data-view="cards"' + (name === 'intake' ? '' : ' aria-current="page"') + '>Cards</button><button class="ptab' + (name === 'intake' ? ' is-on' : '') + '" data-view="intake"' + (name === 'intake' ? ' aria-current="page"' : '') + '>Intake <small>214</small></button>';
+    var again = hadFocus && pill.querySelector('[data-view="' + hadFocus + '"]');
+    if (again) again.focus();
     document.querySelector('.ib-end').hidden = name !== 'inbox';
   }
 
@@ -104,7 +111,7 @@ window.Pages = (function () {
       var b = ev.target.closest('[data-raise]');
       if (b) { raise(b.dataset.raise); return; }
       var row = ev.target.closest('.in-row');
-      if (row) { row.classList.toggle('is-open'); at = [].indexOf.call(row.parentNode.children, row); }
+      if (row) { row.setAttribute('aria-expanded', row.classList.toggle('is-open')); at = [].indexOf.call(row.parentNode.children, row); }
     });
   }
 
@@ -114,11 +121,12 @@ window.Pages = (function () {
     if (k === 'Escape') { ev.preventDefault(); setView('inbox'); return; }
     if (k === 'j' || k === 'ArrowDown') at = Math.min(rows.length - 1, at + 1);
     else if (k === 'k' || k === 'ArrowUp') at = Math.max(0, at - 1);
-    else if (k === 'Enter' && rows[at] && !ev.target.closest('button')) rows[at].classList.toggle('is-open');
+    else if (k === 'Enter' && rows[at] && !ev.target.closest('button')) rows[at].setAttribute('aria-expanded', rows[at].classList.toggle('is-open'));
     else if (k === 'r' && rows[at]) { var b = rows[at].querySelector('[data-raise]'); if (b) raise(b.dataset.raise); }
     else return;
     ev.preventDefault();
     [].forEach.call(rows, function (r, i) { r.classList.toggle('is-at', i === at); });
+    if (rows[at]) rows[at].focus({ preventScroll: false });
   }
 
   return { current: function () { return current; }, goToWork: goToWork, setView: setView, onKey: onKey, start: start };

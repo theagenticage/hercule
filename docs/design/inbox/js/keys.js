@@ -7,7 +7,6 @@ window.Keys = (function () {
   function readGrid() {
     var columns = App.readColumns();
     var cols = columns.map(function () { return []; });
-    document.querySelectorAll('.plaque').forEach(function (p, i) { cols[Math.min(i, cols.length - 1)].push(p.dataset.id); });
     columns.forEach(function (names, c) {
       names.forEach(function (n) {
         var host = document.querySelector('[data-stack="' + n + '"]');
@@ -20,19 +19,41 @@ window.Keys = (function () {
     return cols;
   }
 
-  function readFlat() { return [].concat.apply([], readGrid()); }
+  /** Returns the whole page in reading order: what Hercule noticed, then the stacks, column by column. */
+  function readFlat() {
+    var plaques = [].map.call(document.querySelectorAll('.plaque'), function (p) { return p.dataset.id; });
+    return plaques.concat([].concat.apply([], readGrid()));
+  }
+
+  /** Returns the card lying just under this one in its stack, by order. */
+  function readBelow(id) {
+    var el = readEl(id);
+    var cards = [].slice.call(el.parentNode.querySelectorAll('.card')).filter(function (c) { return c._plan && !c.classList.contains('is-pile') && !c.classList.contains('is-leaving'); });
+    cards.sort(function (a, b) { return a._plan.y - b._plan.y; });
+    var next = cards[cards.indexOf(el) + 1];
+    return next ? next.dataset.id : null;
+  }
+
   function readEl(id) { return App.els()[id] || document.querySelector('.plaque[data-id="' + id + '"]'); }
 
-  /** Returns the next card after this one that still waits on the person, or the one before it at the end of the page. */
+  /** Returns the next card after this one that still waits on the person. Work runs down a stack and never onto the plate. */
   function readNextWaiting(id) {
-    var flat = readFlat(), at = flat.indexOf(id);
-    var isWaiting = function (x) { var e = App.findEntity(x); return x !== id && (!e || (!e.task && !e.leaving)); };
-    return flat.slice(at + 1).filter(isWaiting)[0] || flat.slice(0, Math.max(0, at)).reverse().filter(isWaiting)[0] || null;
+    var grid = readGrid(), col = grid.filter(function (c) { return c.indexOf(id) >= 0; })[0];
+    var isWaiting = function (x) { var e = App.findEntity(x); return x !== id && e && !e.task; };
+    if (!col) {
+      var plaques = readFlat().filter(function (x) { var e = App.findEntity(x); return e && e.kind === 'hercule/cluster' && !e.task && x !== id; });
+      return plaques[0] || null;
+    }
+    var at = col.indexOf(id);
+    return col.slice(at + 1).filter(isWaiting)[0] || col.slice(0, at).reverse().filter(isWaiting)[0] || null;
   }
 
   /** Makes a card the current card. By keyboard it also takes focus, shows the ring and shows its whole face. */
   function setCurrent(id, how) {
-    if (how === 'pointer' && usingKeys && id === null) return;
+    if (how === 'pointer' && usingKeys) {
+      // The pointer takes over only by reaching a card. Passing over empty desk leaves the keys where they are.
+      if (id === null) return;
+    }
     var was = marked && readEl(marked);
     if (was) was.classList.remove('is-focus');
     marked = null;
@@ -70,25 +91,28 @@ window.Keys = (function () {
     focus(flat[Math.max(0, Math.min(flat.length - 1, i + step))]);
   }
 
-  /** Runs a move on the current card, and moves on to the next card that waits. */
+  /** Runs a move on the current card, and moves on to the next card that waits. A key always takes over from the pointer. */
   function act(name) {
     var id = current;
     var el = id && readEl(id);
-    if (!el || (el.classList && el.classList.contains('is-pile'))) return;
+    if (!el) return;
+    if (el.classList.contains('is-pile')) { Moves.showToast('A pile opens with Enter.'); return; }
     var next = readNextWaiting(id);
     var anchor = el.querySelector('[data-act="hand"]') || el;
-    var isMenu = name === 'hand' && Card.readWorkflows(App.findEntity(id)).length > 1;
-    if (!Moves.perform(name, id, anchor)) return;
-    if (usingKeys && !isMenu && name !== 'go') setTimeout(function () { if (next) focus(next); }, name === 'dismiss' ? 0 : 240);
+    var moveOn = function () { if (next && readEl(next)) focus(next); else setCurrent(null, 'keys'); };
+    var severalFit = name === 'hand' && Card.readWorkflows(App.findEntity(id)).length > 1;
+    if (!Moves.perform(name, id, anchor, moveOn)) return;
+    if (name !== 'go' && !severalFit) moveOn();
   }
 
   /** Keeps Tab inside the open card or the tray. */
   function trap(ev, host) {
-    var stops = [].slice.call(host.querySelectorAll('button:not([tabindex="-1"]), a[href], [tabindex="0"]'));
+    var stops = [].slice.call(host.querySelectorAll('button:not([tabindex="-1"]), a[href], input, [tabindex="0"]'));
     if (!stops.length) return;
+    stops = stops.filter(function (el) { return el.offsetParent !== null; });
     var i = stops.indexOf(document.activeElement);
     ev.preventDefault();
-    stops[(i + (ev.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
+    stops[i < 0 ? (ev.shiftKey ? stops.length - 1 : 0) : (i + (ev.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
   }
 
   function onKey(ev) {
@@ -98,13 +122,12 @@ window.Keys = (function () {
     if ((ev.metaKey || ev.ctrlKey) && k === 'z') { ev.preventDefault(); Moves.undo(); return; }
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     if (Help.isOpen() && (k === 'Escape' || k === '?')) { ev.preventDefault(); Help.toggle(); return; }
-    if (Tray.isOpen() && !Open.isOpen()) {
-      if (k === 'Escape') { ev.preventDefault(); Tray.hide(); }
-      return;
-    }
+    if (Tray.isOpen() && !Open.isOpen()) { Tray.onKey(ev); return; }
     if (Open.isOpen()) { onKeyInOpenCard(ev, k); return; }
     if (Pages.current() === 'intake') { Pages.onKey(ev); return; }
     if (Pages.current() !== 'inbox') return;
+    // The page's keys belong to the page. A control elsewhere, such as the sidebar, keeps its own.
+    if (ev.target !== document.body && !ev.target.closest('#page, #main')) return;
     // A real control keeps its own keys.
     if ((k === 'Enter' || k === ' ') && ev.target.closest('button, a, [role="menuitem"]')) return;
     // A held key must never run through the stack.
@@ -118,8 +141,8 @@ window.Keys = (function () {
     else if (k === 'k') walk(-1);
     else if ((k === 'Enter' || k === ' ') && current) {
       var chosen = readEl(current);
-      if (chosen.classList.contains('is-pile')) Tray.show(chosen);
-      else Open.show(current, null, true);
+      if (chosen && chosen.classList.contains('is-pile')) Tray.show(chosen);
+      else if (chosen) Open.show(current, null, true);
     }
     else if (k === 'Escape') { var was = current; if (was) { setCurrent(null, 'keys'); } }
     else if (k === 'h' && current) act('hand');
@@ -135,10 +158,13 @@ window.Keys = (function () {
   function onKeyInOpenCard(ev, k) {
     if (k === 'Escape') { ev.preventDefault(); Open.hide(); return; }
     if (ev.repeat) return;
-    var id = Open.current(), flat = readFlat(), i = flat.indexOf(id);
+    var id = Open.current();
+    // A card opened from a tray has no neighbours on the page to walk to.
+    var inTray = Open.isFromTray();
+    var flat = readFlat().filter(function (x) { return !!App.findEntity(x); }), i = flat.indexOf(id);
     if (k === 'j' || k === 'k') {
       ev.preventDefault();
-      var to = flat[i + (k === 'j' ? 1 : -1)];
+      var to = !inTray && flat[i + (k === 'j' ? 1 : -1)];
       if (to) { Open.walk(to); current = to; }
       return;
     }
@@ -146,11 +172,14 @@ window.Keys = (function () {
     var name = k === 't' ? 'take' : k === 'e' ? 'dismiss' : k === 'g' ? 'go' : (k === 'h' || n >= 1) ? 'hand' : null;
     if (!name) return;
     ev.preventDefault();
+    // Check first: a move that does not apply stays on the card and says why.
+    var why = Moves.refuse(name, e);
+    if (why) { Moves.showToast(why); return; }
     if (name === 'hand' && k === 'h' && flows.length > 1) { Open.focusFirstMove(); return; }
     if (name === 'hand' && n > flows.length) return;
     var pick = name === 'hand' ? flows[n >= 1 ? n - 1 : 0] : null;
-    var next = readNextWaiting(id);
     if (name === 'go') { Open.hide(true); Moves.perform('go', id); return; }
+    var next = !inTray && readNextWaiting(id);
     // The next card opens in the same place, and the move plays on the card behind it.
     if (next && App.findEntity(next)) { Open.walk(next); current = next; }
     else Open.hide(true);
@@ -176,7 +205,18 @@ window.Keys = (function () {
   }
   var usingKeyboardFocus = false;
 
-  return { start: start, focus: focus, setCurrent: setCurrent, current: function () { return current; }, isUsingKeys: function () { return usingKeys; } };
+  /** Forgets the current card, when the page it lay on has gone. */
+  function clear() { current = null; marked = null; usingKeys = false; }
+
+  /** Gives an element focus without the ring, for focus that comes back after a pointer move. */
+  function focusQuietly(el) {
+    var was = usingKeyboardFocus;
+    usingKeyboardFocus = false;
+    el.focus({ preventScroll: true });
+    usingKeyboardFocus = was;
+  }
+
+  return { start: start, focus: focus, focusQuietly: focusQuietly, clear: clear, setCurrent: setCurrent, readBelow: readBelow, current: function () { return current; }, isUsingKeys: function () { return usingKeys; } };
 })();
 
 // The sheet of keys, on ?.
@@ -187,6 +227,8 @@ window.Help = (function () {
     if (!el) {
       el = document.createElement('aside');
       el.className = 'keys';
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-label', 'Keys');
       el.innerHTML = '<h2>Keys</h2>' + KEYS.map(function (k) { return '<div><kbd>' + k[0] + '</kbd><span>' + k[1] + '</span></div>'; }).join('');
       document.getElementById('main').appendChild(el);
       return;

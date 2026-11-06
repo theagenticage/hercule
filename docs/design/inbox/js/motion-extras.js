@@ -48,13 +48,24 @@
     var frames = [], n = 24;
     for (var i = 0; i <= n; i++) {
       var t = i / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t - Math.sin(t * Math.PI) * lift;
-      frames.push({ transform: 'translate3d(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px,0) scale(' + (1 - 0.45 * t * t).toFixed(3) + ')', opacity: t > 0.92 ? (1 - t) / 0.08 : 1 });
+      // A mark going home grows back to its size; one leaving shrinks towards where it lands. It stays solid until contact.
+      var scale = options.grow ? 0.55 + 0.45 * t * t : 1 - 0.45 * t * t;
+      frames.push({ transform: 'translate3d(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px,0) scale(' + scale.toFixed(3) + ')', opacity: t > 0.97 ? (1 - t) / 0.03 : 1 });
     }
     var ms = options.ms || Math.max(420, Math.min(760, dist * 0.75));
-    return el.animate(frames, { duration: ms, easing: 'cubic-bezier(.45,.05,.2,1)', fill: 'forwards' }).finished.then(function () { el.remove(); });
+    return el.animate(frames, { duration: ms, easing: 'cubic-bezier(.3,0,.8,.7)', fill: 'forwards' }).finished.then(function () { el.remove(); });
+  }
+
+  /** Gives a body one knock: it is sent downward at this speed and comes back to rest by itself, so the move peaks at once. */
+  function knock(el, speed) {
+    if (M.isReduced()) return;
+    var b = M.body(el);
+    b.to({ y: 0 }, 'hand');
+    b.speed.y = speed;
   }
 
   M.curve = function (name) { return curves[name]; };
+  M.knock = knock;
   M.animate = animate;
   M.fly = fly;
 })();

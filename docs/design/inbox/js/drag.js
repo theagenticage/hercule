@@ -4,7 +4,7 @@ window.Drag = (function () {
   var START = 6;       // px of travel before a press turns into a drag
   var REACH = 96;      // px around a target where its pull begins
   var rail, ghost = null, source = null, entity = null, targets = [], pressed = null;
-  var grip = { x: 0, y: 0 }, active = null, last = 0;
+  var grip = { x: 0, y: 0 }, active = null, last = 0, cancelled = false, fling = { x: 0, y: 0 }, rest = 0;
 
   function drawRail(e) {
     var flows = Card.readWorkflows(e);
@@ -41,22 +41,29 @@ window.Drag = (function () {
     drawRail(entity);
     rail.hidden = false;
     targets = [].map.call(rail.querySelectorAll('.rail-t'), function (t) { return { el: t, r: null }; });
-    rail.classList.remove('is-on');
-    void rail.offsetWidth;
-    rail.classList.add('is-on');
     targets.forEach(function (t, i) { t.el.style.setProperty('--i', i); });
-    ghost.classList.add('is-rising');
-    // The rail is measured at rest, because it rises as it appears.
-    setTimeout(function () { targets.forEach(function (t) { t.r = t.el.getBoundingClientRect(); }); }, 380);
+    // The rail is measured where it will rest, because it rises as it appears.
+    rail.style.transition = 'none';
+    rail.style.transform = 'translate(-50%, 0)';
+    targets.forEach(function (t) { t.r = t.el.getBoundingClientRect(); });
+    rail.style.transform = '';
+    void rail.offsetWidth;
+    rail.style.transition = '';
   }
 
-  /** Puts the ghost under the pointer this frame, one to one, and leans it by its speed. Only scale and lean ride a spring. */
+  /** Puts the ghost under the pointer this frame, one to one. Only its scale and its lean ride a spring. */
   function place(x, y) {
     var b = Motion.body(ghost);
-    var lean = Math.max(-3.5, Math.min(3.5, (x - last) * 0.28));
+    var lean = Motion.isReduced() ? 0 : Math.max(-3.5, Math.min(3.5, (x - last) * 0.28));
     last = x;
     b.follow(x, y);
-    b.to({ r: lean, s: active ? 0.62 : 1.03 }, 'hand');
+    // follow leaves a speed behind, for a throw. While carried the card goes exactly where the pointer is.
+    fling = { x: b.speed.x, y: b.speed.y };
+    b.speed.x = 0;
+    b.speed.y = 0;
+    b.to({ r: lean, s: active ? 0.62 : 1.03, l: 1 }, 'hand');
+    clearTimeout(rest);
+    rest = setTimeout(function () { if (ghost) Motion.body(ghost).to({ r: 0 }, 'hand'); }, 48);
   }
 
   function track(ev) {
@@ -76,7 +83,8 @@ window.Drag = (function () {
     if (active) {
       var pull = 1 - dist / REACH, w = ghost.offsetWidth, h = ghost.offsetHeight;
       var cx = active.r.left + active.r.width / 2 - w / 2, cy = active.r.top + active.r.height / 2 - h / 2;
-      place(x + (cx - x) * (0.35 + pull * 0.65), y + (cy - y) * (0.35 + pull * 0.65));
+      var k = pull * pull * (3 - 2 * pull);
+      place(x + (cx - x) * k, y + (cy - y) * k);
     } else place(x, y);
   }
 
@@ -85,24 +93,40 @@ window.Drag = (function () {
     var g = ghost, s = source, e = entity, t = active;
     ghost = null; source = null; entity = null; active = null; pressed = null;
     var chosen = t && !cancel;
+    if (t) t.el.classList.remove('is-near');
     // The rail stays long enough for the card to be seen to arrive, and only then goes.
     setTimeout(function () { rail.classList.remove('is-on'); }, chosen ? 340 : 0);
     setTimeout(function () { if (!rail.classList.contains('is-on')) rail.hidden = true; }, chosen ? 720 : 380);
     var body = Motion.body(g);
     var home = s.getBoundingClientRect();
     if (chosen) Motion.animate(t.el.firstElementChild, [{ transform: 'scale(1.16)' }, { transform: 'scale(1.26)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: 340, easing: 'ease-out' });
+    // A card dropped on Dismiss leaves from the rail. Going home first would be the gesture backwards.
+    if (chosen && t.el.dataset.target === 'dismiss') {
+      body.to({ s: 0.3, o: 0 }, 'hand', { done: function () { g.remove(); } });
+      s.style.transition = 'none';
+      s.classList.remove('is-lifted');
+      s.style.transition = '';
+      Moves.perform('dismiss', e.id);
+      return;
+    }
     // One object, one place: the card goes home, and what was chosen comes to it there.
     g.style.height = (s._plan ? s._plan.show : home.height) + 'px';
-    body.to({ x: home.left, y: home.top, s: 1, r: 0 }, 'travel', { done: function () {
+    var land = function () {
+      var what = t.el.dataset.target;
+      if (what === 'hand') Moves.hand(e, Card.readWorkflows(e)[Number(t.el.dataset.i)]);
+      else Moves.perform(what, e.id);
+    };
+    // The chain starts as the card comes in to land, so a drop is answered at once.
+    if (chosen) setTimeout(land, 200);
+    body.speed.x = fling.x;
+    body.speed.y = fling.y;
+    clearTimeout(rest);
+    body.to({ x: home.left, y: home.top, s: 1, r: 0, l: 0 }, 'travel', { done: function () {
       g.remove();
       s.style.transition = 'none';
       s.classList.remove('is-lifted');
       void s.offsetWidth;
       s.style.transition = '';
-      if (!chosen) return;
-      var what = t.el.dataset.target;
-      if (what === 'hand') Moves.hand(e, Card.readWorkflows(e)[Number(t.el.dataset.i)]);
-      else Moves.perform(what, e.id);
     } });
   }
 
@@ -122,9 +146,10 @@ window.Drag = (function () {
     });
     window.addEventListener('pointerup', function (ev) {
       if (ghost) { finish(false); swallowClick(); }
+      if (cancelled) { cancelled = false; swallowClick(); }
       pressed = null;
     });
-    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && ghost) { ev.stopPropagation(); finish(true); swallowClick(1500); } }, true);
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && ghost) { ev.stopPropagation(); finish(true); cancelled = true; } }, true);
   }
 
   /** Stops the click that ends a drag from opening the card. */
