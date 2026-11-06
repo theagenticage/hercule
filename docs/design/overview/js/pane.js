@@ -86,7 +86,7 @@ window.Pane = (function () {
       drawNextMove(t) +
       (t.left && !/^(nothing|everything)$/i.test(t.left) ? '<section class="pn-sec"><h4>What is left</h4><p class="pn-left">' + esc(t.left) + "</p></section>" : "") +
       drawBlockers(t) + drawThreads(t) + drawLinks(t) + "</div>" +
-      '<footer class="pn-foot"><button class="pn-btn" data-act="done">' + Crew.icon("check", 14) + 'Done<kbd>D</kbd></button><button class="pn-btn" data-act="hand">Drop<kbd>⌫</kbd></button><button class="pn-btn" data-act="merge">Merge<kbd>M</kbd></button><button class="pn-btn" data-act="thread">' + Crew.icon("compose", 14) + 'Start a thread<kbd>T</kbd></button></footer>';
+      '<footer class="pn-foot"><button class="pn-btn" data-act="done">' + Crew.icon("check", 14) + 'Done<kbd>D</kbd></button><button class="pn-btn" data-act="thread">' + Crew.icon("compose", 14) + 'Start a thread<kbd>T</kbd></button><button class="pn-btn" data-act="merge">Merge<kbd>M</kbd></button><button class="pn-btn pn-btn--end" data-act="drop">Drop<kbd>⌫</kbd></button></footer>';
   }
 
   function drawHolderOnSheet(t) {

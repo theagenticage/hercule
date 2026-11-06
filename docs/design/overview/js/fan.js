@@ -33,7 +33,7 @@ window.Fan = (function () {
     var top = Math.max(main.top + 64, Math.min(from.top - 44, main.bottom - 24 - h));
 
     var fan = document.createElement("div");
-    fan.className = "travel";
+    fan.className = "fan";
     fan.style.left = left - main.left + "px";
     fan.style.top = top - main.top + "px";
     fan.style.width = (stages[cols - 1].right - left) + "px";
