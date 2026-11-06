@@ -3,11 +3,11 @@
 window.Keys = (function () {
   var current = null, usingKeys = false, marked = null;
 
-  /** Returns the cards of the page as columns of ids, in the order the eye reads them, with or without the plate on top. */
-  function readGrid(withPlate) {
+  /** Returns the cards of the page as columns of ids, in the order the eye reads them, with or without the noticed card on top. */
+  function readGrid(withNoticed) {
     var columns = App.readColumns();
     var cols = columns.map(function () { return []; });
-    if (withPlate) readPlaques().forEach(function (p) { cols[Math.min(Number(p.dataset.slot), cols.length - 1)].push(p.dataset.id); });
+    if (withNoticed) readPlaques().forEach(function (p) { cols[Math.min(Number(p.dataset.slot), cols.length - 1)].push(p.dataset.id); });
     columns.forEach(function (names, c) {
       names.forEach(function (n) {
         var host = document.querySelector('[data-stack="' + n + '"]');
@@ -20,7 +20,7 @@ window.Keys = (function () {
     return cols;
   }
 
-  /** Returns the parts of the plate that can be seen. */
+  /** Returns the parts of the noticed card that can be seen. */
   function readPlaques() {
     return [].filter.call(document.querySelectorAll('.plaque'), function (p) { return p.offsetParent !== null; });
   }
@@ -63,7 +63,7 @@ window.Keys = (function () {
     return { here: ids(lying.slice(i + 1).filter(isWaiting).concat(lying.slice(0, Math.max(0, i)).reverse().filter(isWaiting))), elsewhere: ids(others), stack: name };
   }
 
-  /** Returns whether a card or a part of the plate can be seen on the page. */
+  /** Returns whether a card or a part of the noticed card can be seen on the page. */
   function isInView(id) {
     var el = readEl(id);
     return !!(el && (el._plan || el.classList.contains('plaque')));

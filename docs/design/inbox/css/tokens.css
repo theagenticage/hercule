@@ -33,9 +33,6 @@
   --wait-due: var(--muted);
   --wait-over: var(--ink);
 
-  /* The stack counts and the rule under them. Brass that can be read, and that still looks like brass. */
-  --count-ink: oklch(0.52 0.095 80);
-  --rule-ink: oklch(0.72 0.09 82);
 
 }
 
@@ -53,8 +50,6 @@
   --stock-sage: color-mix(in oklab, var(--stock) 91%, oklch(0.6 0.08 150));
   --h-stack-shade: oklch(0 0 0 / 0.34);
   --h-stack: inset 0 1px 0 color-mix(in oklab, white 11%, transparent), inset 0 0 0 1px var(--stock-rim), 0 -1px 0 oklch(0 0 0 / 0.5), 0 -7px 12px -6px oklch(0 0 0 / 0.55);
-  --count-ink: oklch(0.76 0.09 82);
-  --rule-ink: oklch(0.62 0.075 82);
   --mark-l: 0.8;
   --mark-c: 0.14;
   --recede: oklch(0.74 0.016 70);

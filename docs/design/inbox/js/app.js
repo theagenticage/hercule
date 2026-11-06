@@ -167,7 +167,7 @@ window.App = (function () {
       }).join('');
   }
 
-  /** Gives each noticed thing a column of the plate. It keeps that column, so one leaving never moves the others. */
+  /** Gives each noticed thing a column of the noticed card. It keeps that column, so one leaving never moves the others. */
   function assignSlots() {
     var used = {};
     state.clusters.forEach(function (c) {
@@ -179,7 +179,7 @@ window.App = (function () {
       // With all three columns taken, a thing waits for one to come free.
       for (var i = 0; i < 3; i++) if (!used[i]) { c.slot = i; used[i] = true; return; }
     });
-    // A thing also takes the free columns after it, so a lone reason is never cut beside an empty plate.
+    // A thing also takes the free columns after it, so a lone reason is never cut beside an empty column.
     state.clusters.forEach(function (c) {
       c.span = 1;
       while (c.slot !== undefined && c.slot + c.span < 3 && !used[c.slot + c.span]) c.span++;
@@ -286,8 +286,8 @@ window.App = (function () {
       var col = page.querySelectorAll('.col')[ci];
       // The last row of every column is kept for the foot line and the undo line, so neither ever covers a card.
       // Never less than a card and a pile per stack: in a very small window the page scrolls, and no card is ever out of reach.
-      var plate = document.getElementById('noticed');
-      var room = page.clientHeight - 14 - (plate && !plate.hidden ? plate.offsetHeight + 22 : 0);
+      var noticed = document.getElementById('noticed');
+      var room = page.clientHeight - 14 - (noticed && !noticed.hidden ? noticed.offsetHeight + 22 : 0);
       var depth = Math.max(room - names.length * HEAD - (names.length - 1) * BETWEEN - FOOT, names.length * 220);
       var clock = names.filter(function (n) { return n !== 'shelf'; });
       var budgets = {};
@@ -505,14 +505,14 @@ window.App = (function () {
     checkZero();
   }
 
-  /** Redraws the plate after it changed, and lets the stacks glide to where the page now puts them. */
+  /** Redraws the noticed card after it changed, and lets the stacks glide to where the page now puts them. */
   function reflowNoticed() {
-    var plate = document.getElementById('noticed');
+    var noticed = document.getElementById('noticed');
     var cols = [].slice.call(page.querySelectorAll('.col'));
-    // The last thing leaving takes the whole plate with it: a copy fades where it stood while the columns rise.
-    if (!plate.hidden && !state.clusters.length && !Motion.isReduced()) {
-      var main = document.getElementById('main').getBoundingClientRect(), r = plate.getBoundingClientRect();
-      var copy = plate.cloneNode(true);
+    // The last thing leaving takes the whole noticed card with it: a copy fades where it stood while the columns rise.
+    if (!noticed.hidden && !state.clusters.length && !Motion.isReduced()) {
+      var main = document.getElementById('main').getBoundingClientRect(), r = noticed.getBoundingClientRect();
+      var copy = noticed.cloneNode(true);
       copy.removeAttribute('id');
       copy.style.cssText = 'position:absolute;margin:0;z-index:5;left:' + (r.left - main.left) + 'px;top:' + (r.top - main.top) + 'px;width:' + r.width + 'px;display:flex';
       document.getElementById('main').appendChild(copy);

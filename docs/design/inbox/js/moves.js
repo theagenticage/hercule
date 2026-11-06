@@ -128,7 +128,7 @@ window.Moves = (function () {
     setTimeout(function () { if (!App.countLeft() && !Open.isOpen()) App.checkZero(); }, 1500);
   }
 
-  /** Hands on what Hercule noticed. Its segment of the plate steps back, and leaves at the next visit. */
+  /** Hands on what Hercule noticed. Its part of the noticed card steps back, and leaves at the next visit. */
   function assignPlaque(e, by) {
     var el = document.querySelector('.plaque[data-id="' + e.id + '"]');
     App.drawNoticed();

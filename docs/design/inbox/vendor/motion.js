@@ -307,7 +307,7 @@ window.Motion = (function () {
     copy.removeAttribute("id");
     copy.removeAttribute("tabindex");
     copy.classList.add("is-ghost");
-    copy.classList.remove("is-moving");
+    copy.classList.remove("is-moving", "is-focus");
     copy.style.position = "absolute";
     copy.style.margin = "0";
     copy.style.left = r.left - host.left + "px";

@@ -10,7 +10,7 @@ window.Live = (function () {
     { to: 'se-1', s: function () { return W.signal('cameBack', 0.01); } },
     { arrive: function () { return { id: 'pr-6270', kind: 'github/pull-request', concern: 'reviewRequested', title: 'Show the delivery window on the order page', since: W.hoursAgo(0.02), fields: { number: 6270, repo: 'storefront-web', author: 'ines-carvalho', state: 'running', diff: [64, 8], files: 3 }, signals: [W.signal('reviewRequested', 0.02, 'ines-carvalho')], task: null, project: 'storefront-web' }; } },
   ];
-  // Something Hercule notices later in the morning, once the plate has room for it.
+  // Something Hercule notices later in the morning, once the noticed card has room for it.
   var LATER = { id: 'c-scanners', kind: 'hercule/cluster', title: 'Depot scanners drop off at night', why: 'Twelve reports, one firmware version', sources: ['slack', 'sentry'], figures: '12 reports · 3 depots', detail: 'Three depots report scanners going offline between two and four. Every report names the same firmware.', parts: [], since: W.hoursAgo(0.05), signals: [], fields: {}, concern: 'noticed' };
   var i = 0, timer = 0, noticedLater = false;
 

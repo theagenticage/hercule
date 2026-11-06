@@ -57,7 +57,7 @@
     var card = Frames.drawLooseCard(e);
     host.appendChild(card);
     // Each pin sits beside its slot, in the card's own margins, so it covers no word.
-    var pins = [['.c-mark', 'top'], ['.c-title', 'top'], ['.c-pace', 'top'], ['.c-roll', 'left'], ['.c-more', 'right'], ['.c-status', 'right'], ['.c-id', 'left'], ['.c-facts', 'bottom']];
+    var pins = [['.c-mark', 'top'], ['.c-title', 'top'], ['.c-pace', 'top'], ['.c-shape', 'left'], ['.c-roll', 'bottom-line'], ['.c-more', 'right'], ['.c-id', 'left'], ['.c-facts', 'bottom']];
     var base = card.getBoundingClientRect();
     var zoom = base.width / card.offsetWidth;
     pins.forEach(function (p, i) {
@@ -69,6 +69,7 @@
       if (p[1] === 'bottom') y = base.height / zoom + 2;
       if (p[1] === 'left') x = (r.left - base.left) / zoom - 12;
       if (p[1] === 'right') x = (r.right - base.left) / zoom + 12;
+      if (p[1] === 'bottom-line') x = (r.right - base.left) / zoom + 34;
       var pin = document.createElement('i');
       pin.className = 'anat-pin';
       pin.textContent = i + 1;

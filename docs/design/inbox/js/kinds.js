@@ -206,7 +206,7 @@
     'hercule/cluster': {
       noun: 'Noticed',
       plugin: { name: 'Hercule', mark: 'hercule', hue: null },
-      paper: 'lacquer',
+      paper: 'bond',
       density: 'open',
       pace: 'noticed',
       patience: 0,
