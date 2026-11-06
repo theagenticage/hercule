@@ -328,7 +328,7 @@ window.Drag = (function () {
     setTimeout(function () { target.classList.remove("has-merged"); }, 520);
     var b = Motion.body(target);
     b.set({ s: 1.035 }).to({ s: 1 }, "bump");
-    Toast.show("Merged into " + into.name + ". It now holds " + (into.threads.length) + " threads.", true);
+    Toast.show("Merged into " + into.name + ".", true);
   }
 
   function cancel() {

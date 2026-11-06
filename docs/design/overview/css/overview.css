@@ -1,0 +1,65 @@
+/* PROTOTYPE - the Overview: its switcher, the Office beside Work, the later views, the tray. */
+.switch { position: relative; display: inline-flex; gap: 2px; }
+.puck { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 8px; background: var(--selected); pointer-events: none; }
+.switch-tab.ptab { position: relative; gap: 6px; padding: 0 10px 0 8px; }
+.switch-tab.ptab.is-on { background: none; }
+.switch-tab .ic { color: var(--faint); transition: color var(--m-quick); }
+.switch-tab.is-on .ic { color: var(--muted); }
+
+.office-view { position: absolute; inset: 0; transition: opacity var(--m-slow) var(--m-ease), transform var(--m-slow) var(--m-ease); }
+.office-view.is-arriving { opacity: 0; transform: scale(1.025); }
+.office-view.is-going { opacity: 0; transform: scale(1.025); }
+.view.work { transition: opacity var(--m-base) var(--m-ease), transform var(--m-slow) var(--m-ease); }
+.view.work.is-leaving { opacity: 0; transform: scale(0.985); pointer-events: none; }
+.traveller { position: fixed; width: 26px; height: 26px; line-height: 0; z-index: 70; }
+.app[data-view="office"] .top-end { opacity: 0; pointer-events: none; }
+.top-end { transition: opacity var(--m-quick); }
+
+.later-view { position: absolute; inset: 0; padding: 66px 32px 32px; overflow: auto; background: var(--desk); }
+.later-note { margin-bottom: 16px; color: var(--faint); font: var(--type-summary); }
+.later-list { max-width: 980px; }
+.later-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) minmax(0, 1fr) 44px; align-items: center; height: 36px; border-bottom: 1px solid var(--divider); }
+.later-row b { font: var(--type-card); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 16px; }
+.later-row span { color: var(--muted); font: var(--type-summary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.later-row time { color: var(--faint); font: var(--type-meta); text-align: right; }
+.later-mark { display: inline-flex; align-items: center; }
+.later-mark .card-tab { border-radius: 2px; height: 6px; }
+.later-surface { position: absolute; inset: 0; width: 100%; height: 100%; }
+.later-surface line { stroke: color-mix(in oklab, var(--ink) 22%, transparent); }
+.later-dot { position: absolute; width: 9px; height: 9px; margin: -4px; border-radius: 50%; background: var(--faint); }
+.later-dot[data-mine="1"] { background: var(--you); }
+.later-tracks { position: relative; }
+.later-track { position: relative; display: grid; grid-template-columns: 300px 1fr; align-items: center; height: 28px; color: var(--muted); font: var(--type-summary); }
+.later-track span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 16px; }
+.later-track i { position: absolute; margin-left: 300px; height: 6px; border-radius: 3px; background: var(--muted); max-width: calc(100% - 300px); }
+
+/* ---------- The Display menu ---------- */
+.menu { position: absolute; z-index: 45; right: 0; top: 44px; width: 264px; padding: 6px; border-radius: var(--r-md); background: var(--glass-fill-raised); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-2); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity var(--m-quick), transform var(--m-base) var(--m-ease); }
+.menu.is-on { opacity: 1; transform: none; pointer-events: auto; }
+.menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 32px; padding: 6px 8px; border-radius: var(--r-xs); text-align: left; font-weight: var(--w-medium); }
+.menu-row:hover { background: var(--hover); }
+.menu-row--switch { position: relative; }
+.menu-row small { display: block; color: var(--muted); font: var(--type-summary); }
+.menu-row b { font-weight: var(--w-medium); }
+.menu-row input { position: absolute; opacity: 0; }
+.switch-track { flex: none; position: relative; width: 30px; height: 18px; border-radius: 9px; background: color-mix(in oklab, var(--ink) 16%, transparent); transition: background var(--m-quick); }
+.switch-track::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--raised); box-shadow: var(--shadow-1); transition: transform var(--m-base) var(--m-settle); }
+input:checked + .switch-track { background: var(--accent); }
+input:checked + .switch-track::after { transform: translateX(12px); }
+input:focus-visible + .switch-track { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* ---------- Prototype tray: not part of the design ---------- */
+.tray { position: absolute; z-index: 50; right: 14px; bottom: 14px; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 6px; font: var(--type-summary); }
+.tray-toggle { height: 24px; padding: 0 9px; border-radius: 7px; color: var(--faint); background: var(--glass-fill); box-shadow: inset 0 0 0 1px var(--glass-rim); }
+.tray-toggle:hover { color: var(--ink); }
+.tray-body { display: none; width: 200px; max-height: calc(100vh - 80px); overflow: auto; padding: 8px; border-radius: var(--r-md); background: var(--glass-fill-raised); backdrop-filter: var(--glass-filter); box-shadow: inset 0 0 0 1px var(--glass-rim), var(--shadow-3); }
+.tray.is-open .tray-body { display: block; }
+.tray h4 { margin: 8px 6px 4px; color: var(--faint); font: var(--type-meta); }
+.tray h4:first-child { margin-top: 2px; }
+.tray-row { display: block; width: 100%; padding: 4px 6px; border-radius: 5px; text-align: left; color: var(--muted); }
+.tray-row:hover { background: var(--hover); color: var(--ink); }
+.tray-row.is-on { color: var(--ink); font-weight: var(--w-medium); }
+.tray-swatches { display: flex; gap: 6px; padding: 0 6px; }
+.tray-swatch { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--rim); }
+.tray-swatch i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.tray-swatch.is-on { outline: 2px solid var(--focus); outline-offset: 1px; }

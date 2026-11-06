@@ -12,7 +12,8 @@
 .flight { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
 
 /* ---------- The sentence ---------- */
-.lead { padding-bottom: 20px; }
+.lead-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 20px; }
+.since { color: var(--muted); font: var(--type-summary); white-space: nowrap; min-height: 16px; }
 .lead h2 { margin: 0; font: var(--type-lead); letter-spacing: -0.012em; color: var(--ink); }
 .lead-sub { display: flex; align-items: center; gap: 10px; margin: 4px 0 0; color: var(--muted); font: var(--type-summary); }
 .lead-sub b { color: var(--ink); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
@@ -193,3 +194,46 @@
 .toast.is-on { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
 .toast-undo { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 7px; font-weight: var(--w-medium); }
 .toast-undo:hover { background: var(--hover); }
+
+/* ---------- A pile's foot ---------- */
+.pile-foot { margin-top: auto; }
+.pile-faces { display: inline-flex; align-items: center; }
+.pile-face { display: inline-flex; margin-right: -4px; }
+.pile-foot .card-src { margin-left: auto; }
+.pile-foot .card-src + .card-src { margin-left: 4px; }
+.pile-foot .card-src + time { margin-left: 2px; }
+.pile-foot time { margin-left: auto; }
+
+/* ---------- The board alive ---------- */
+.card.is-new .card-stock { animation: card-new 3.2s var(--m-ease) both; }
+@keyframes card-new { 0%, 30% { box-shadow: var(--h-flat), 0 0 0 1px color-mix(in oklab, var(--brass) 80%, transparent); } 100% { box-shadow: var(--h-flat); } }
+.card-signal { position: absolute; z-index: 3; left: 8px; bottom: 6px; padding: 0 7px; height: 18px; display: inline-flex; align-items: center; border-radius: 6px; background: var(--stock); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 60%, transparent); font: var(--type-meta); font-weight: var(--w-medium); color: var(--ink); white-space: nowrap; }
+.card.has-signal .card-foot .card-need { visibility: hidden; }
+.slot.dent { background: none; box-shadow: var(--h-etch); opacity: 0.8; }
+.card-pending { color: var(--faint); animation: pending 1.8s ease-in-out infinite; }
+@keyframes pending { 50% { opacity: 0.55; } }
+
+.since-item { display: inline-block; }
+
+/* ---------- The empty desk ---------- */
+.welcome-grid { padding-top: 26px; }
+.card--ghost .card-stock { box-shadow: none; outline: 1px dashed color-mix(in oklab, var(--faint) 60%, transparent); outline-offset: -1px; }
+.card--ghost .card-title { color: var(--ink); font-weight: var(--w-medium); }
+.welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding-top: 22px; }
+.welcome--clear { align-items: center; padding-top: 96px; }
+.welcome-line { margin: 0; color: var(--muted); }
+.welcome-btn { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: var(--r-btn); background: var(--accent); color: var(--accent-fg); font-weight: var(--w-medium); }
+.welcome-btn kbd { background: color-mix(in oklab, var(--accent-fg) 16%, transparent); color: inherit; }
+
+/* ---------- Loading: the layout is already right, only the words are missing ---------- */
+.card.is-skeleton > *:not(.card-stock) { opacity: 0; }
+.card.is-skeleton .card-stock { background: var(--stock-flat); box-shadow: var(--h-flat); }
+.card.is-skeleton::after { content: ""; position: absolute; left: 12px; top: 13px; width: 66%; height: 42px; border-radius: 4px; background: linear-gradient(color-mix(in oklab, var(--ink) 9%, transparent) 0 11px, transparent 11px 19px, color-mix(in oklab, var(--ink) 6%, transparent) 19px 28px, transparent 28px); animation: pending 1.8s ease-in-out infinite; }
+.card > * { transition: opacity var(--m-base) var(--m-ease); }
+.is-loading .lane-need, .is-loading .bullet-words { opacity: 0.4; }
+
+/* ---------- Offline ---------- */
+.is-offline .card-head, .is-offline .card-tab { filter: saturate(0.25); opacity: 0.8; }
+.lead-offline { color: var(--ink); }
+
+.proj--none { background: none; box-shadow: inset 0 0 0 1.5px var(--faint); }

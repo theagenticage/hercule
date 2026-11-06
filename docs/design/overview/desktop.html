@@ -9,23 +9,32 @@
 <link rel="stylesheet" href="system/primitives.css">
 <link rel="stylesheet" href="css/work.css">
 <link rel="stylesheet" href="css/pane.css">
+<link rel="stylesheet" href="css/overview.css">
 </head>
 <body>
-<div class="app" id="app">
+<div class="app" id="app" data-view="work">
   <aside data-side></aside>
   <main class="main">
     <div class="top">
       <div class="pill" id="switcher"></div>
       <div class="top-end">
         <label class="find" id="find" title="Find (/)"><span id="find-icon"></span><input placeholder="Find on the board" aria-label="Find on the board"></label>
-        <button class="icon-pill" id="keys-btn" title="Keys (?)"></button>
+        <button class="icon-pill" id="display-btn" title="Display"></button>
+      </div>
+      <div class="menu" id="display">
+        <label class="menu-row menu-row--switch" data-display="wear"><span><b>Wear</b><small>Neglected work ages, slowly.</small></span><input type="checkbox" id="wear-switch"><i class="switch-track"></i></label>
+        <button class="menu-row" data-display="fold">Fold everything<kbd>⇧F</kbd></button>
+        <button class="menu-row" data-display="keys">Keys<kbd>?</kbd></button>
       </div>
     </div>
+    <div class="office-view" id="office" hidden></div>
+    <div class="later-view" id="later" hidden></div>
     <section class="view work" id="work">
       <div class="work-scroll" id="scroll">
         <div class="work-canvas" id="canvas">
-          <header class="lead" id="lead"></header>
+          <header class="lead-row"><div class="lead" id="lead"></div><div class="since" id="since-line"></div></header>
           <div class="rule-wrap"><div class="rule" id="rule"></div><i class="rule-mark" id="rule-mark"></i></div>
+          <div id="welcome"></div>
           <div id="lanes"></div>
           <div class="flight" id="flight"></div>
         </div>
@@ -35,6 +44,7 @@
       <div class="toast" id="toast" role="status"></div>
       <div class="help" id="help"></div>
     </section>
+    <div class="tray" id="tray"></div>
   </main>
 </div>
 <div class="carry" id="carry"></div>
@@ -45,6 +55,7 @@
 <script src="js/shell.js"></script>
 <script src="js/motion.js"></script>
 <script src="js/store.js"></script>
+<script src="js/scenes.js"></script>
 <script src="js/board.js"></script>
 <script src="js/fold.js"></script>
 <script src="js/fan.js"></script>
@@ -53,46 +64,12 @@
 <script src="js/pane.js"></script>
 <script src="js/actions.js"></script>
 <script src="js/keys.js"></script>
-<script>
-  Shell.drawSidebar(document.querySelector("[data-side]"), { inboxCount: 6 });
-  document.getElementById("switcher").innerHTML = '<h1 class="pill-title">Overview</h1><button class="ptab">Office</button><button class="ptab is-on">Work</button>';
-  Store.loadWorld(NW.buildToday());
-  Board.mount();
-  Drag.mount();
-  Pane.mount();
-  Keys.mount();
-  Find.mount();
-  document.getElementById("find-icon").innerHTML = Crew.icon("search", 16);
-  document.getElementById("keys-btn").innerHTML = Crew.icon("question", 16);
-  document.getElementById("keys-btn").addEventListener("click", Help.toggle);
-  var scroll = document.getElementById("scroll");
-  scroll.addEventListener("scroll", function () {
-    document.querySelector(".rule-wrap").classList.toggle("is-stuck", scroll.scrollTop > 72);
-  }, { passive: true });
-  document.getElementById("work").addEventListener("click", function (e) {
-    var lane = e.target.closest("[data-fold-lane]");
-    if (lane) return Fold.toggleLane(lane.dataset.foldLane);
-    var plan = e.target.closest("[data-fold-plan]");
-    if (plan) return Fold.togglePlan(plan.dataset.foldPlan);
-    var pile = e.target.closest(".pile");
-    if (pile) return Fan.show(pile);
-    if (Fan.isOpen() && !e.target.closest(".card")) return Fan.hide();
-    var lens = e.target.closest(".lens[data-lens]");
-    if (lens) return Lens.toggle(lens.dataset.lens);
-    var card = e.target.closest(".card[data-id]");
-    if (card) {
-      if (MergePick.isActive()) return MergePick.finish(card.dataset.id);
-      Keys.focusCard(card);
-      Pane.show(card.dataset.id);
-      return;
-    }
-    if (Pane.currentId() && !e.target.closest(".pn-sheet")) Pane.hide();
-  });
-  document.getElementById("lead").addEventListener("pointerover", function (e) {
-    var lens = e.target.closest(".lens[data-lens]");
-    if (lens) Lens.preview(lens.dataset.lens);
-  });
-  document.getElementById("lead").addEventListener("pointerleave", function () { Lens.preview(null); });
-</script>
+<script src="js/live.js"></script>
+<script src="js/welcome.js"></script>
+<script src="vendor/office-kit.js"></script>
+<script src="js/office.js"></script>
+<script src="js/overview.js"></script>
+<script src="js/tray.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

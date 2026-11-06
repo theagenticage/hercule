@@ -131,7 +131,7 @@ window.Store = (function () {
     if (p.kind === "landed") return "This week";
     if (mine && agents) return mine + (mine === 1 ? " wants" : " want") + " you, " + agents + " with agents";
     if (mine) return mine + (mine === 1 ? " wants" : " want") + " you";
-    if (agents) return agents === 1 ? "With an agent" : "With agents";
+    if (agents) return agents === 1 ? "With an agent" : agents + " with agents";
     return "With others";
   }
 
@@ -213,6 +213,14 @@ window.Store = (function () {
     state.tasks = state.tasks.filter(function (x) { return x !== t; });
   }
 
+  /** Moves a Task because a fact arrived. A person's drag holds until then; a fact overrides it. */
+  function moveByFact(id, stage, apply) {
+    var t = task(id);
+    t.stage = stage;
+    t.movedBy = "fact";
+    if (apply) apply(t);
+  }
+
   /** Adds a Task that started by itself, at the end of its cell. */
   function addTask(t) {
     t.rank = state.tasks.reduce(function (m, x) { return Math.max(m, x.rank); }, 0) + 1;
@@ -242,6 +250,7 @@ window.Store = (function () {
     mergeTasks: mergeTasks,
     endTask: endTask,
     addTask: addTask,
+    moveByFact: moveByFact,
     undo: undo,
     canUndo: function () { return undoStack.length > 0; },
   };

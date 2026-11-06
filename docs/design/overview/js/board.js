@@ -31,7 +31,7 @@ window.Board = (function () {
     }
     while (cur) {
       var next = cur.nextElementSibling;
-      if (!cur.classList.contains("slot")) cur.remove();
+      if (!cur.classList.contains("slot") || cur.classList.contains("dent")) cur.remove();
       cur = next;
     }
   }
@@ -72,7 +72,7 @@ window.Board = (function () {
     var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 12) + "</span>" : "";
     var ask = t.ask && t.move === "you" ? '<div class="card-text card-text--ask"><span class="card-title">' + esc(t.name) + '</span><br><span class="card-ask">' + esc(t.ask) + "</span></div>" : "";
     return drawHolder(holder) + '<i class="card-stock"></i>' +
-      '<div class="card-text card-text--rest"><span class="card-title">' + esc(t.name) + "</span><br>" + esc(t.now || "") + "</div>" + ask +
+      '<div class="card-text card-text--rest"><span class="card-title">' + esc(t.name) + "</span><br>" + (t.summaryPending ? '<span class="card-pending">Writing a summary</span>' : esc(t.now || "")) + "</div>" + ask +
       '<footer class="card-foot"><span class="card-need">' + esc(need) + "</span>" + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></footer>";
   }
 
@@ -107,6 +107,18 @@ window.Board = (function () {
     return out ? '<span class="card-holder pile-flags">' + out + "</span>" : "";
   }
 
+  /** Draws the foot of a pile: the colleagues inside it, and how old its newest Task is. */
+  function drawPileFoot(p) {
+    var faces = p.tasks.filter(function (t) { return t.agent; }).slice(0, 4).map(function (t) {
+      return '<span class="pile-face">' + Crew.face(t.agent, { pose: "working", size: 16 }) + "</span>";
+    }).join("");
+    var sources = {};
+    p.tasks.forEach(function (t) { if (t.source) sources[t.source] = true; });
+    var mark = Object.keys(sources).slice(0, 2).map(function (s) { return '<span class="card-src">' + Crew.brand(s, 12) + "</span>"; }).join("");
+    var fresh = p.tasks.reduce(function (m, t) { return Math.min(m, t.age); }, 1e4);
+    return '<footer class="card-foot pile-foot"><span class="pile-faces">' + faces + "</span>" + mark + "<time>" + NW.formatAge(fresh) + "</time></footer>";
+  }
+
   function drawPile(p) {
     var el = node("pile:" + p.key, "button", "card pile");
     var n = p.tasks.length;
@@ -122,12 +134,21 @@ window.Board = (function () {
     var line = Store.isFiltering() && hidden ? hidden + " of " + n + " match" : Store.describePile(p);
     var html = drawFlags(p);
     for (var i = sheets; i >= 1; i--) html += '<i class="pile-sheet" style="--n:' + i + '"></i>';
-    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + "</span>";
+    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + "</span>" + drawPileFoot(p);
     setHTML(el, html);
     return el;
   }
 
   /* ---------- Cells ---------- */
+
+  // A cell keeps a dent open for a moment after a card leaves it by itself, so that what you are
+  // looking at does not jump. The dent is drawn at the row the card left.
+  function holdOpen(cell, index, dent) {
+    cell._hold = { index: index, dent: dent };
+  }
+  function releaseHold(cell) {
+    cell._hold = null;
+  }
 
   function drawCell(key, stage, tasks) {
     var cell = node("cell:" + key + ":" + stage, "div", "cell");
@@ -136,6 +157,7 @@ window.Board = (function () {
     var arranged = Store.arrangeCell(tasks, stage, key);
     var kids = arranged.cards.map(drawCard).concat(arranged.piles.map(drawPile));
     cell._piles = arranged.piles;
+    if (cell._hold) kids.splice(cell._hold.index, 0, cell._hold.dent);
     place(cell, kids);
     return cell;
   }
@@ -293,6 +315,15 @@ window.Board = (function () {
       return '<button class="lens' + (st.lens === key ? " is-on" : "") + '" data-lens="' + key + '">' + html + "</button>";
     }
     var line = "";
+    var scene = document.getElementById("work").dataset.scene;
+    if (scene === "first") {
+      setHTML(leadEl, '<h2>Nothing on the desk yet.</h2><p class="lead-sub">Work you take on lands here, by stage. Start a thread, and its Task appears by itself.</p>');
+      return;
+    }
+    if (scene === "empty") {
+      setHTML(leadEl, '<h2>The desk is clear.</h2><p class="lead-sub"><span><b>12</b> things landed this week.</span></p>');
+      return;
+    }
     if (c.quick && c.think) line = lens("quick", '<span class="lens-n">' + say(c.quick) + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ", " + lens("think", '<span class="lens-n">' + say(c.think, true) + "</span> that need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
     else if (c.quick) line = lens("quick", '<span class="lens-n">' + say(c.quick) + "</span> quick call" + (c.quick === 1 ? "" : "s")) + ".";
     else if (c.think) line = lens("think", '<span class="lens-n">' + say(c.think) + "</span> need" + (c.think === 1 ? "s" : "") + " real thinking") + ".";
@@ -301,6 +332,7 @@ window.Board = (function () {
     if (c.agents) sub.push(lens("agents", "<b>" + c.agents + "</b> with agents"));
     if (c.stalled) sub.push(lens("stalled", "<b>" + c.stalled + "</b> stalled"));
     if (c.blocked) sub.push("<span><b>" + c.blocked + "</b> blocked</span>");
+    if (scene === "offline") sub.unshift('<span class="lead-offline">Offline since 09:12. Moves wait until you are back.</span>');
     setHTML(leadEl, "<h2>" + line + '</h2><p class="lead-sub">' + sub.join('<i class="sep"></i>') + "</p>");
   }
 
@@ -308,8 +340,14 @@ window.Board = (function () {
   function draw() {
     drawLead();
     drawRule();
-    place(lanesEl, Store.state.projects.map(drawLane));
     var work = document.getElementById("work");
+    var emptyWorld = !Store.state.tasks.length;
+    var welcome = document.getElementById("welcome");
+    if (emptyWorld) setHTML(welcome, Welcome.drawEmpty(work.dataset.scene));
+    else setHTML(welcome, "");
+    place(lanesEl, emptyWorld ? [] : Store.state.projects.filter(function (p) {
+      return p.id !== "" || Store.state.tasks.some(function (t) { return t.project === ""; });
+    }).map(drawLane));
     work.dataset.lens = Store.state.lens || "";
     work.classList.toggle("is-filtering", Store.isFiltering());
     work.classList.toggle("has-wear", Store.state.wear);
@@ -337,5 +375,5 @@ window.Board = (function () {
     draw();
   }
 
-  return { mount: mount, draw: draw, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc };
+  return { mount: mount, draw: draw, change: change, movables: movables, node: node, drawCard: drawCard, esc: esc, holdOpen: holdOpen, releaseHold: releaseHold };
 })();
