@@ -4,7 +4,7 @@ window.Drag = (function () {
   var START = 6;       // px of travel before a press turns into a drag
   var REACH = 96;      // px around a target where its pull begins
   var rail, ghost = null, source = null, entity = null, targets = [], pressed = null;
-  var pos = { x: 0, y: 0, vx: 0, vy: 0 }, aim = { x: 0, y: 0 }, grip = { x: 0, y: 0 }, active = null, raf = 0;
+  var grip = { x: 0, y: 0 }, active = null, last = 0;
 
   function drawRail(e) {
     var flows = Card.readWorkflows(e);
@@ -29,11 +29,11 @@ window.Drag = (function () {
     ghost.classList.add('ghost', 'is-whole');
     ghost.classList.remove('is-hover', 'is-focus', 'is-peek');
     ghost.dataset.level = 'full';
-    ghost.style.cssText = 'width:' + r.width + 'px;height:' + whole + 'px;left:0;top:0;right:auto;transform:none;z-index:80';
+    ghost.style.cssText = 'width:' + r.width + 'px;height:' + whole + 'px;left:0;top:0;right:auto;z-index:80';
     document.body.appendChild(ghost);
     grip = { x: pressed.x - r.left, y: pressed.y - r.top };
-    pos = { x: r.left, y: r.top, vx: 0, vy: 0 };
-    aim = { x: r.left, y: r.top };
+    last = r.left;
+    Motion.body(ghost).set({ x: r.left, y: r.top, s: 1 });
     source.classList.add('is-lifted');
     document.documentElement.dataset.dragging = '1';
     drawRail(entity);
@@ -44,22 +44,15 @@ window.Drag = (function () {
     rail.classList.add('is-on');
     targets.forEach(function (t, i) { t.el.style.setProperty('--i', i); });
     setTimeout(function () { targets.forEach(function (t) { t.r = t.el.getBoundingClientRect(); }); }, 40);
-    cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(step);
   }
 
-  /** Moves the ghost one frame towards its aim on the `carry` spring, and leans it by its speed. */
-  function step() {
-    if (!ghost) return;
-    var k = 900 / 3600, c = 48 / 60;
-    var ax = (aim.x - pos.x) * k - pos.vx * c, ay = (aim.y - pos.y) * k - pos.vy * c;
-    pos.vx += ax; pos.vy += ay;
-    pos.x += pos.vx; pos.y += pos.vy;
-    var lean = Math.max(-3.5, Math.min(3.5, pos.vx * 0.22));
-    var scale = active ? 0.62 : 1.03;
-    ghost._scale = (ghost._scale || 1) + (scale - (ghost._scale || 1)) * 0.2;
-    ghost.style.transform = 'translate3d(' + pos.x.toFixed(1) + 'px,' + pos.y.toFixed(1) + 'px,0) rotate(' + lean.toFixed(2) + 'deg) scale(' + ghost._scale.toFixed(3) + ')';
-    raf = requestAnimationFrame(step);
+  /** Puts the ghost under the pointer this frame, one to one, and leans it by its speed. Only scale and lean ride a spring. */
+  function place(x, y) {
+    var b = Motion.body(ghost);
+    var lean = Math.max(-3.5, Math.min(3.5, (x - last) * 0.28));
+    last = x;
+    b.follow(x, y);
+    b.to({ r: lean, s: active ? 0.62 : 1.03 }, 'hand');
   }
 
   function track(ev) {
@@ -79,37 +72,34 @@ window.Drag = (function () {
     if (active) {
       var pull = 1 - dist / REACH, w = ghost.offsetWidth, h = ghost.offsetHeight;
       var cx = active.r.left + active.r.width / 2 - w / 2, cy = active.r.top + active.r.height / 2 - h / 2;
-      aim = { x: x + (cx - x) * (0.35 + pull * 0.65), y: y + (cy - y) * (0.35 + pull * 0.65) };
-    } else aim = { x: x, y: y };
+      place(x + (cx - x) * (0.35 + pull * 0.65), y + (cy - y) * (0.35 + pull * 0.65));
+    } else place(x, y);
   }
 
   function finish(cancel) {
-    cancelAnimationFrame(raf);
     delete document.documentElement.dataset.dragging;
     var g = ghost, s = source, e = entity, t = active;
     ghost = null; source = null; entity = null; active = null; pressed = null;
     rail.classList.remove('is-on');
     setTimeout(function () { if (!rail.classList.contains('is-on')) rail.hidden = true; }, 260);
-    var current = g.style.transform;
+    var body = Motion.body(g);
     if (t && !cancel) {
       var r = t.el.getBoundingClientRect(), w = g.offsetWidth, h = g.offsetHeight;
-      var x = r.left + r.width / 2 - w / 2, y = r.top + r.height / 2 - h / 2;
-      g.animate([{ transform: current, opacity: 1 }, { transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(.12)', opacity: 0.2 }], { duration: 220, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'forwards' }).finished.then(function () {
+      body.to({ x: r.left + r.width / 2 - w / 2, y: r.top + r.height / 2 - h / 2, s: 0.12, o: 0, r: 0 }, 'hand', { done: function () {
         g.remove();
         s.classList.remove('is-lifted');
         var what = t.el.dataset.target;
         if (what === 'hand') Moves.hand(e, Card.readWorkflows(e)[Number(t.el.dataset.i)]);
         else Moves.perform(what, e.id);
-      });
-      Motion.animate(t.el.firstElementChild, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: Motion.curve('bump').ms + 120, delay: 170 });
+      } });
+      Motion.animate(t.el.firstElementChild, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: 420, delay: 170 });
       return;
     }
     var home = s.getBoundingClientRect();
-    if (Motion.isReduced()) { g.remove(); s.classList.remove('is-lifted'); return; }
-    g.animate([{ transform: current }, { transform: 'translate3d(' + home.left + 'px,' + home.top + 'px,0) scale(1)' }], { duration: Motion.curve('back').ms, easing: Motion.curve('back').ease, fill: 'forwards' }).finished.then(function () {
+    body.to({ x: home.left, y: home.top, s: 1, r: 0 }, 'travel', { done: function () {
       g.remove();
       s.classList.remove('is-lifted');
-    });
+    } });
   }
 
   function start() {

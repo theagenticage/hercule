@@ -131,7 +131,7 @@ window.Work = (function () {
     var to = el.getBoundingClientRect();
     if (from) {
       var dx = from.left - to.left, dy = from.top - to.top;
-      el.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)', opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('open').ms, easing: Motion.curve('open').ease });
+      el.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)', opacity: 0.4 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('travel').ms, easing: Motion.curve('travel').ease });
     }
     el.querySelector('.card-stock').animate([{ outline: '0 solid transparent' }, { outline: '3px solid color-mix(in oklab, var(--accent) 34%, transparent)', offset: 0.2 }, { outline: '0 solid transparent' }], { duration: 1400, delay: 200 });
   }

@@ -7,18 +7,12 @@
 window.Motion = (function () {
   "use strict";
 
-  // Stiffness and damping at mass 1. Damping ratio is c / (2 * sqrt(k)).
+  // Three springs, stiffness and damping at mass 1. Overshoot is never built in: a slight overshoot
+  // appears only where a thing lands with the speed of your hand.
   var SPRINGS = {
-    carry: { k: 900, c: 48 }, // follows the pointer, a hair behind (0.80)
-    glide: { k: 420, c: 36 }, // neighbours moving aside (0.88)
-    drop: { k: 520, c: 30 }, // settling into a slot, a slight overshoot (0.66)
-    back: { k: 300, c: 30 }, // going home after a cancel, no bounce (0.87)
-    open: { k: 260, c: 28 }, // a card opening into its details (0.87)
-    fan: { k: 340, c: 26 }, // a pile opening (0.70)
-    fold: { k: 300, c: 32 }, // a lane or plan folding (0.92)
-    bump: { k: 900, c: 28 }, // a small acknowledgement (0.47)
-    drift: { k: 90, c: 19 }, // something moving by itself, slow and unhurried (1.00)
-    puck: { k: 620, c: 40 }, // the switcher's selection (0.80)
+    hand: { k: 632, c: 43 }, // under your hand, or answering it at once (ratio 0.86)
+    travel: { k: 305, c: 31 }, // crossing the screen because you asked (0.89)
+    self: { k: 90, c: 19 }, // moving by itself, slow and unhurried (1.00)
   };
 
   var params = new URLSearchParams(location.search);
@@ -57,9 +51,10 @@ window.Motion = (function () {
   }
 
   var bodies = new WeakMap();
-  var CHANNELS = ["x", "y", "s", "r", "o"];
-  var REST = { x: 0, y: 0, s: 1, r: 0, o: 1 };
-  var SETTLED = { x: 0.08, y: 0.08, s: 0.0006, r: 0.02, o: 0.004 };
+  // Position, scale, tilt, opacity and lift. Lift is a card's height while it is in your hand,
+  // from 0 to 1. It rides the same spring as everything else, so a card visibly rises and settles.
+  var CHANNELS = ["x", "y", "s", "r", "o", "l"];
+  var SETTLED = { x: 0.08, y: 0.08, s: 0.0006, r: 0.02, o: 0.004, l: 0.004 };
 
   /**
    * A thing on screen with a position offset, a scale, a tilt and an opacity, each on its own
@@ -68,10 +63,11 @@ window.Motion = (function () {
    */
   function Body(el) {
     this.el = el;
-    this.value = { x: 0, y: 0, s: 1, r: 0, o: 1 };
-    this.speed = { x: 0, y: 0, s: 0, r: 0, o: 0 };
-    this.goal = { x: 0, y: 0, s: 1, r: 0, o: 1 };
-    this.spring = { x: SPRINGS.glide, y: SPRINGS.glide, s: SPRINGS.glide, r: SPRINGS.glide, o: SPRINGS.glide };
+    this.value = { x: 0, y: 0, s: 1, r: 0, o: 1, l: 0 };
+    this.speed = { x: 0, y: 0, s: 0, r: 0, o: 0, l: 0 };
+    this.goal = { x: 0, y: 0, s: 1, r: 0, o: 1, l: 0 };
+    this.spring = { x: SPRINGS.hand, y: SPRINGS.hand, s: SPRINGS.hand, r: SPRINGS.hand, o: SPRINGS.hand, l: SPRINGS.hand };
+    this.tolerance = SETTLED;
     this.wait = 0;
     this.pending = null;
     this.onRest = null;
@@ -82,6 +78,10 @@ window.Motion = (function () {
     var moved = v.x !== 0 || v.y !== 0 || v.s !== 1 || v.r !== 0;
     this.el.style.transform = moved ? "translate3d(" + v.x.toFixed(2) + "px," + v.y.toFixed(2) + "px,0) scale(" + v.s.toFixed(4) + ") rotate(" + v.r.toFixed(3) + "deg)" : "";
     this.el.style.opacity = v.o === 1 ? "" : v.o.toFixed(3);
+    if (v.l !== 0 || this.lifted) {
+      this.el.style.setProperty("--lift", v.l.toFixed(3));
+      this.lifted = v.l !== 0;
+    }
   };
 
   Body.prototype.step = function (dt) {
@@ -108,7 +108,7 @@ window.Motion = (function () {
         v += (-k * (x - g) - d * v) * h;
         x += v * h;
       }
-      if (Math.abs(x - g) < SETTLED[c] && Math.abs(v) < SETTLED[c] * 12) {
+      if (Math.abs(x - g) < this.tolerance[c] && Math.abs(v) < this.tolerance[c] * 12) {
         x = g;
         v = 0;
       } else {
@@ -145,10 +145,14 @@ window.Motion = (function () {
     return this;
   };
 
-  /** Adds an offset to where the body looks, keeping its velocity. FLIP is built on this. */
-  Body.prototype.shift = function (dx, dy) {
-    this.value.x += dx;
-    this.value.y += dy;
+  /** Puts the body exactly here, this frame. A carried card follows the pointer one to one. */
+  Body.prototype.follow = function (x, y) {
+    this.speed.x = (x - this.value.x) * 60;
+    this.speed.y = (y - this.value.y) * 60;
+    this.value.x = x;
+    this.value.y = y;
+    this.goal.x = x;
+    this.goal.y = y;
     this.write();
     return this;
   };
@@ -159,14 +163,14 @@ window.Motion = (function () {
    */
   Body.prototype.to = function (goal, name, opts) {
     opts = opts || {};
-    var spring = SPRINGS[name || "glide"];
+    var spring = SPRINGS[name || "hand"];
     if (isReduced()) {
       var fade = "o" in goal ? { o: goal.o } : null;
       var jump = {};
       for (var c in goal) if (c !== "o") jump[c] = goal[c];
       this.set(jump);
       if (fade) {
-        this.apply(fade, SPRINGS.back);
+        this.apply(fade, SPRINGS.travel);
         this.wait = 0;
       } else {
         if (opts.done) opts.done();
@@ -189,14 +193,15 @@ window.Motion = (function () {
   /** Hands the element back to the style sheet. */
   Body.prototype.clear = function () {
     active.delete(this);
-    this.value = { x: 0, y: 0, s: 1, r: 0, o: 1 };
-    this.goal = { x: 0, y: 0, s: 1, r: 0, o: 1 };
-    this.speed = { x: 0, y: 0, s: 0, r: 0, o: 0 };
+    this.value = { x: 0, y: 0, s: 1, r: 0, o: 1, l: 0 };
+    this.goal = { x: 0, y: 0, s: 1, r: 0, o: 1, l: 0 };
+    this.speed = { x: 0, y: 0, s: 0, r: 0, o: 0, l: 0 };
     this.wait = 0;
     this.pending = null;
     this.onRest = null;
     this.el.style.transform = "";
     this.el.style.opacity = "";
+    this.el.style.removeProperty("--lift");
     this.el.classList.remove("is-moving");
   };
 
@@ -216,6 +221,7 @@ window.Motion = (function () {
    */
   function value(start, onChange) {
     var b = new Body(document.createElement("i"));
+    b.tolerance = { x: 0.0005, y: 1, s: 1, r: 1, o: 1, l: 1 };
     b.write = function () {
       onChange(this.value.x);
     };
@@ -231,7 +237,7 @@ window.Motion = (function () {
           if (done) done();
           return;
         }
-        b.apply({ x: goal }, SPRINGS[name || "open"]);
+        b.apply({ x: goal }, SPRINGS[name || "travel"]);
         b.onRest = done || null;
         wake(b);
       },
@@ -271,7 +277,7 @@ window.Motion = (function () {
       var dx = r0.left - r1.left;
       var dy = r0.top - r1.top;
       if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
-        if (b.value.x !== 0 || b.value.y !== 0) b.to({ x: 0, y: 0 }, opts.spring || "glide");
+        if (b.value.x !== 0 || b.value.y !== 0) b.to({ x: 0, y: 0 }, opts.spring || "hand");
         return;
       }
       if (isReduced()) {
@@ -282,21 +288,24 @@ window.Motion = (function () {
       b.value.y = dy;
       b.write();
       var delay = opts.stagger ? opts.stagger(el, r0, r1) : 0;
-      b.to({ x: 0, y: 0 }, opts.spring || "glide", { delay: delay });
+      b.to({ x: 0, y: 0 }, opts.spring || "hand", { delay: delay });
     });
     return before;
   }
 
   /**
-   * Draws a copy of an element at its place on screen, in the flight layer, so it can keep moving
-   * after the original has left the page. Returns the copy, which removes itself when told to.
+   * Draws a copy of an element in the flight layer, exactly as it looks now, so it can keep moving
+   * after the original has left the page. Returns the copy. The caller removes it.
    */
   function ghost(el, layer) {
-    var r = el.getBoundingClientRect();
+    var r = layoutRect(el);
     var host = layer.getBoundingClientRect();
+    var from = bodies.get(el);
     var copy = el.cloneNode(true);
     copy.removeAttribute("id");
+    copy.removeAttribute("tabindex");
     copy.classList.add("is-ghost");
+    copy.classList.remove("is-moving");
     copy.style.position = "absolute";
     copy.style.margin = "0";
     copy.style.left = r.left - host.left + "px";
@@ -306,6 +315,7 @@ window.Motion = (function () {
     copy.style.transform = "";
     copy.style.opacity = "";
     layer.appendChild(copy);
+    if (from) body(copy).set({ x: from.value.x, y: from.value.y, s: from.value.s, r: from.value.r, o: from.value.o });
     return copy;
   }
 

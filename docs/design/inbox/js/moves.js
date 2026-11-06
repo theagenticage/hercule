@@ -45,9 +45,9 @@ window.Moves = (function () {
     Landing.rollLine(el, old);
     // The colleague comes up from behind the card, then puts its paws on the edge.
     var who = el.querySelector('.card-holder');
-    if (who) Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'drop', { delay: 90 });
+    if (who) Motion.body(who).set({ y: 26 }).to({ y: 0 }, 'hand', { delay: 90 });
     var paws = el.querySelector('.card-paws');
-    if (paws) Motion.body(paws).set({ o: 0, y: 3 }).to({ o: 1, y: 0 }, 'bump', { delay: 300 });
+    if (paws) Motion.body(paws).set({ o: 0, y: 3 }).to({ o: 1, y: 0 }, 'hand', { delay: 300 });
     setTimeout(function () { el.classList.remove('is-handing'); }, 700);
     setTimeout(function () { flyToWork(el, e); }, 120);
     App.layOut();

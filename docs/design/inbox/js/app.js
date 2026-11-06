@@ -156,7 +156,7 @@ window.App = (function () {
    */
   function layOut(still) {
     if (still || !hasDrawn) { placeStacks(); hasDrawn = true; return; }
-    Motion.flip([].slice.call(page.querySelectorAll('.stack .card, .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'glide' });
+    Motion.flip([].slice.call(page.querySelectorAll('.stack .card, .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'hand' });
   }
 
   function placeStacks() {

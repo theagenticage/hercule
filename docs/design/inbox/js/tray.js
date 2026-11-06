@@ -37,10 +37,10 @@ window.Tray = (function () {
     if (!Motion.isReduced()) {
       var ox = r.left + r.width / 2 - left, oy = r.top - top;
       host.style.transformOrigin = ox + 'px ' + oy + 'px';
-      host.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: Motion.curve('fan').ms * 0.7, easing: Motion.curve('fan').ease });
+      host.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: Motion.curve('travel').ms * 0.7, easing: Motion.curve('travel').ease });
       [].forEach.call(host.querySelectorAll('.tray-cell'), function (cell, i) {
         if (i > 12) return;
-        cell.animate([{ opacity: 0, transform: 'translateY(' + (oy > 80 ? 22 : -22) + 'px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: Motion.curve('fan').ms * 0.8, delay: i * 18, fill: 'backwards', easing: Motion.curve('fan').ease });
+        cell.animate([{ opacity: 0, transform: 'translateY(' + (oy > 80 ? 22 : -22) + 'px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: Motion.curve('travel').ms * 0.8, delay: i * 18, fill: 'backwards', easing: Motion.curve('travel').ease });
       });
     }
   }

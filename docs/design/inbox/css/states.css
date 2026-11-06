@@ -96,12 +96,12 @@
   box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry);
   transform: translate(-50%, 24px);
   opacity: 0;
-  transition: transform var(--m-slow) var(--spring-fan, var(--m-ease)), opacity var(--m-base) var(--m-ease);
+  transition: transform var(--m-slow) var(--spring-travel, var(--m-ease)), opacity var(--m-base) var(--m-ease);
 }
 .rail.is-on { transform: translate(-50%, 0); opacity: 1; }
 .rail[hidden] { display: none; }
 .rail-t { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 96px; padding: 6px 8px 4px; border-radius: 12px; color: var(--muted); font: var(--type-summary); transition: background var(--m-quick), color var(--m-quick); }
-.rail-t > :first-child { transition: transform var(--m-base) var(--spring-drop, var(--m-ease)); }
+.rail-t > :first-child { transition: transform var(--m-base) var(--spring-hand, var(--m-ease)); }
 .rail-t.is-near { background: var(--hover); color: var(--ink); }
 .rail-t.is-near > :first-child { transform: scale(1.16); }
 .rail-rule { width: 1px; height: 44px; background: var(--divider); margin: 0 4px; }

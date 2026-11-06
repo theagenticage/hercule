@@ -98,7 +98,7 @@ window.Open = (function () {
     sourceEl.classList.add('is-source');
     App.state.open = id;
     if (!Motion.isReduced()) {
-      var ease = Motion.curve('open').ease, ms = Math.min(Motion.curve('open').ms, 520);
+      var ease = Motion.curve('travel').ease, ms = Math.min(Motion.curve('travel').ms, 520);
       var clipFrom = 'inset(' + Math.max(0, r.top - top) + 'px ' + Math.max(0, w - (r.left - left) - r.width) + 'px ' + Math.max(0, top + h - r.top - Math.min(r.height, 64)) + 'px ' + Math.max(0, r.left - left) + 'px round 12px)';
       host.animate([{ clipPath: clipFrom }, { clipPath: 'inset(-40px -40px -60px -40px round 14px)' }], { duration: ms, easing: ease });
       // The title is the same object in both places: it grows from where it lay, so the eye never loses it.

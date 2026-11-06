@@ -21,7 +21,7 @@ window.Pointer = (function () {
     void el.offsetHeight;
     el.style.transition = '';
     el.style.height = height + 'px';
-    if (over > 0) Motion.body(el).to({ y: -over }, 'glide');
+    if (over > 0) Motion.body(el).to({ y: -over }, 'hand');
   }
 
   /** Returns how tall a card stands in a peek: its whole face at strip size. */
@@ -48,7 +48,7 @@ window.Pointer = (function () {
     peeked = null;
     if (el._plan) {
       el.style.height = el._plan.show + 'px';
-      Motion.body(el).to({ y: 0 }, 'glide');
+      Motion.body(el).to({ y: 0 }, 'hand');
       [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
     }
     var done = function () {

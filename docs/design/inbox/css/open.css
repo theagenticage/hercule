@@ -224,7 +224,7 @@
 .stack .card.is-pile { width: auto; text-align: left; cursor: pointer; }
 .stack .card.is-pile > .card-stock { box-shadow: var(--h-stand); }
 .stack .card.is-pile:hover > .card-stock { box-shadow: var(--h-hover); }
-.pile-back { position: absolute; left: 7px; right: 7px; bottom: -4px; height: 14px; border-radius: 0 0 10px 10px; background: var(--stock); box-shadow: var(--h-flat), 0 1px 2px var(--h-stack-shade); z-index: -2; transition: transform var(--m-base) var(--spring-fan, var(--m-ease)); }
+.pile-back { position: absolute; left: 7px; right: 7px; bottom: -4px; height: 14px; border-radius: 0 0 10px 10px; background: var(--stock); box-shadow: var(--h-flat), 0 1px 2px var(--h-stack-shade); z-index: -2; transition: transform var(--m-base) var(--spring-travel, var(--m-ease)); }
 .pile-back + .pile-back { left: 14px; right: 14px; bottom: -8px; z-index: -3; }
 .card.is-pile:hover .pile-back { transform: translateY(1px); }
 .card.is-pile:hover .pile-back + .pile-back { transform: translateY(3px); }

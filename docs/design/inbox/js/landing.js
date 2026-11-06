@@ -11,7 +11,7 @@ window.Landing = (function () {
     old.style.gridRow = window.getComputedStyle(line).gridRowStart;
     line.parentNode.insertBefore(old, line);
     Motion.animate(old, [{ transform: 'none', opacity: 1 }, { transform: 'translateY(-14px)', opacity: 0 }], { duration: 240, easing: 'cubic-bezier(.5,0,.8,.4)' }).then(function () { old.remove(); });
-    Motion.animate(line, [{ transform: 'translateY(14px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('glide').ms, delay: 80, fill: 'backwards', easing: Motion.curve('glide').ease });
+    Motion.animate(line, [{ transform: 'translateY(14px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: Motion.curve('hand').ms, delay: 80, fill: 'backwards', easing: Motion.curve('hand').ease });
   }
 
   /** Tells a screen reader what just happened, without taking focus. */
@@ -30,7 +30,7 @@ window.Landing = (function () {
     void el.offsetWidth;
     el.classList.add('is-landed');
     setTimeout(function () { el.classList.remove('is-landed'); }, 1300);
-    Motion.body(el).to({ y: 2, s: 0.996 }, 'bump', { done: function () { Motion.body(el).to({ y: 0, s: 1 }, 'bump'); } });
+    Motion.body(el).to({ y: 2, s: 0.996 }, 'hand', { done: function () { Motion.body(el).to({ y: 0, s: 1 }, 'hand'); } });
     var n = el.querySelector('.c-more');
     if (n && !n.hidden) Motion.animate(n, [{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, delay: 160, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
     App.layOut();

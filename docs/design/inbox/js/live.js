@@ -29,7 +29,7 @@ window.Live = (function () {
       var el = App.els()[e.id];
       if (el) {
         el.classList.remove('is-new');
-        Motion.body(el).set({ y: 18, o: 0 }).to({ y: 0, o: 1 }, 'drop');
+        Motion.body(el).set({ y: 18, o: 0 }).to({ y: 0, o: 1 }, 'self');
       }
       return true;
     }
