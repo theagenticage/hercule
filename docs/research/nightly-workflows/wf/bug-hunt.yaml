@@ -1,0 +1,229 @@
+# Hunts one area of the Hercule repository for real bugs, proves each with a test that
+# fails on the current code, fixes it, and opens one pull request with the proof.
+# The hunter is Opus (high effort) and hands each bug to a Sonnet subagent to prove
+# and fix. A fresh Opus reviewer (extra-high effort) checks every claim and blocks
+# only on real problems; the work goes back to the hunter at most 4 times. A hunt
+# that proves nothing ends with a notification instead of a pull request.
+name: Bug hunt
+description: Find, prove and fix up to 3 real bugs in one area of the Hercule repository, and open a pull request with the proof.
+inputs:
+  - name: area
+    schema: { type: string }
+    required: true
+  - name: scope
+    schema: { type: string }
+    required: true
+workspace:
+  kind: ephemeral
+  checkouts:
+    - resourceId: 01a11895-1bb8-70f5-b877-330bc92fdd49
+      startingRevision: { kind: remote }
+steps:
+  - id: hunt
+    name: Hunt, prove and fix
+    kind: agent
+    entry: true
+    agent: 01a12f1d-9409-749d-b147-0bc293cece26
+    model: opus
+    options: { effort: high }
+    prompt: |
+      {{ has(steps.review) ? "The reviewer did not approve your last round. Fix every finding that is valid. Drop a bug the reviewer showed is not real or not proven. For each finding you decline, give a short reason in your summary. Then run the checks again and return the full structured result again, describing the bugs as they stand now.\n\nReviewer findings:\n" + steps.review.output.findings + "\n\n---\n\nYour original task, for reference:\n\n" : "" }}You lead tonight's bug hunt in one area of the Hercule repository, which is checked out in your working directory.
+
+      Area: {{ inputs.area }}
+
+      Scope:
+      {{ inputs.scope }}
+
+      Goal: find real bugs in this area, prove each one with a test that fails on the current code, and fix it. Keep at most 3 bugs, the ones that would hurt a user most. A bug you cannot prove with a failing test is not a finding.
+
+      Setup
+      1. Run `pnpm install`: the worktree has no node_modules yet. Record the base commit with `git rev-parse HEAD`.
+      2. Read AGENTS.md and GLOSSARY.md, then the spec sections and ADRs that own this area (docs/spec/README.md maps them). Never read a large spec file whole: spec 17 is about 900 KB, so grep for the sections you need.
+
+      Hunt
+      3. Read the code of the area. Look first for the kinds of bugs that have escaped review in this repository before:
+         - Races and stale reads: a live push that arrives during a read; an optimistic update overwritten by an older answer; two reads of one record that can disagree; an effect or a lock that outlives its component; a second action that resets the first one's state.
+         - Unbounded work: a read with no limit; a parser that goes quadratic on a big input; work repeated on every push or every token.
+         - Missed cases: an error that is swallowed; a state the code assumes cannot happen but the types allow; a cancel, restart or reconnect in the middle of an operation; timezones and daylight saving time; empty and very large lists.
+         - Broken rules: behaviour that contradicts the spec or an ADR; a mutation without an actor; a permission check outside the service method.
+      4. For each candidate, decide whether it is real by reading its callers and the spec. Drop anything that is only style or taste, or a scenario you cannot trigger through the code's real entry points.
+
+      Prove and fix, with Sonnet subagents
+      5. For each bug you keep, launch a subagent with the Agent tool and the model "sonnet". Give it one bug: the files and lines, the scenario, the spec rule if any, and what the test must show. Its job:
+         a. Write a test that fails on the current code for exactly that reason. Use the repository's test style, and put the test next to the code it tests.
+         b. Run it and keep the failure output.
+         c. Make the smallest fix that removes the cause.
+         d. Run the test again, and the tests of the touched package.
+         Run independent subagents in parallel, but never two on the same files.
+      6. Check each subagent's work yourself. Confirm the test fails without the fix: save the fix to the source files as a patch outside the checkout (`git diff -- <source files> > /tmp/<unique>.patch`), reverse it with `git apply -R`, run the test, and apply the patch again. Never use `git stash`: the stash is shared with other worktrees.
+      7. Run `pnpm typecheck`, `pnpm lint`, `pnpm dep-lint`, and the tests of every package you touched.
+
+      Rules
+      - Stay inside your area. Other hunts run in parallel tonight on other areas. A bug whose fix lies mostly outside your area goes in `unproven`, with what you know; do not fix it.
+      - Never touch ~/.hercule. A test or tool that needs a Hercule Home gets a throwaway one: HERCULE_HOME=<scratch dir>.
+      - Never kill processes by pattern. Stop only what you started, by its PID.
+      - Write no new migrations, edit no generated files, and edit no spec or ADR text. If the spec itself is wrong, or two documents disagree, report it in `unproven`.
+      - Leave known flaky tests alone, unless the flake is the bug you are proving. The machine is shared tonight, so a timing test that fails once under load is not your bug: run it again.
+      - Do not ask the user anything; nobody is awake to answer. Decide what the code and the docs let you decide, and put open questions in your summary.
+      - Leave all changes uncommitted. A later step commits them.
+
+      Finish with the structured result:
+      - `found`: true when at least one bug is proven and fixed.
+      - `baseSha`: the base commit.
+      - `bugs`: Markdown, one section per bug, with a title; what goes wrong for a user, in one plain paragraph; how to trigger it; the files; the test's path and name; the failure output on the base code, trimmed to what matters; and the fix in two sentences. Write "none" when `found` is false.
+      - `checks`: the exact commands you ran and how each ended.
+      - `unproven`: suspicions you could not prove, and problems outside your area, one line each with file and line. Write "none" when there are none.
+      - `summary`: what you did, in plain language, and the review findings you declined and why.
+    outputSchema:
+      type: object
+      additionalProperties: false
+      required: [found, baseSha, bugs, checks, unproven, summary]
+      properties:
+        found: { type: boolean }
+        baseSha: { type: string }
+        bugs: { type: string }
+        checks: { type: string }
+        unproven: { type: string }
+        summary: { type: string }
+  - id: review
+    name: Review
+    kind: agent
+    agent: 01a16b6e-35eb-7568-a3f2-d4cbb3fe2841
+    model: opus
+    options: { effort: xhigh }
+    freshSession: true
+    prompt: |
+      You review tonight's bug hunt in one area of the Hercule repository. The changes are uncommitted in the checkout in your working directory. Do not modify, stage or commit anything in the checkout.
+
+      Area: {{ inputs.area }}
+      Base commit: {{ steps.hunt.output.baseSha }}
+
+      The hunter's report:
+
+      {{ steps.hunt.output.bugs }}
+
+      Checks the hunter says it ran:
+      {{ steps.hunt.output.checks }}
+
+      The hunter's summary:
+      {{ steps.hunt.output.summary }}
+
+      {{ has(steps.review) ? "In your previous round you reported the findings below. Check that each one is fixed, or declined with a valid reason, and look for problems the fixes introduced.\n\nPrevious findings:\n" + steps.review.output.findings + "\n\n" : "" }}For each bug, decide two things. Be strict about these two, and lenient about everything else.
+
+      1. Is the bug real? Do not trust the report. Read the code, and the spec the bug cites. Then prove it yourself. Make a throwaway worktree of the base commit outside the checkout (`git worktree add /tmp/review-<unique> <base commit>`), run `pnpm install` in it, copy only the new or changed test files into it, and run them. Each test must fail there for the reason the report gives. A typo, a missing import, or a mock of a situation that cannot happen in real use does not count. Remove the worktree when you are done (`git worktree remove --force <path>`). A test that cannot fail on real code, or that checks how the code is written instead of what it does, leaves its bug unproven.
+      2. Is the fix right? It must remove the cause, not hide the symptom. It must not break another caller. It must be the smallest change that works. Run the new tests and the tests of the touched packages in the checkout, plus `pnpm typecheck` and `pnpm lint`.
+
+      Also block on a broken hard rule of AGENTS.md (for example Zod, a mutation without an actor, anything written to ~/.hercule, a generated file edited by hand), and on a change outside the area that the fix does not need.
+
+      Block on nothing else. Naming taste, comment wording, another way to write the same thing, extra test cases you would like: list them under "Minor, not blocking" and approve anyway. The hunter may take them or leave them. Each round of back and forth costs an hour, so spend one only on a real problem.
+
+      Your verdict:
+      - `approve`: every remaining bug is proven and correctly fixed. Minor notes are fine.
+      - `revise`: a bug is not proven, a fix is wrong or incomplete, or a hard rule is broken, and the hunter can repair it. Say which bugs to drop.
+      - `escalate`: something only Rogier can decide blocks a bug: what the product should do, or how to read the spec. Use it only when every bug that is not part of the question is approved. The work ships as a draft pull request with your question at the top.
+
+      Do not ask the user anything; nobody is awake to answer.
+
+      `findings` is Markdown. Each blocking finding gives its severity (blocker or major), the file and line, what is wrong, and a scenario that shows it. Then come the minor notes. For `escalate`, the question comes first, written so that Rogier can answer it from the pull request alone.
+    outputSchema:
+      type: object
+      additionalProperties: false
+      required: [verdict, findings]
+      properties:
+        verdict: { type: string, enum: [approve, revise, escalate] }
+        findings: { type: string }
+  - id: ship
+    name: Commit and write the pull request
+    kind: agent
+    agent: 01a13f5a-e2fa-7563-b322-6a4b8ce8f9f7
+    model: sonnet
+    options: { effort: high }
+    freshSession: true
+    prompt: |
+      Tonight's bug hunt in the area "{{ inputs.area }}" found and fixed bugs in the Hercule repository. {{ steps.review.output.verdict == "escalate" ? "The reviewer approved the fixes but raised a question only Rogier can answer." : "The reviewer approved them." }} The changes are uncommitted in the checkout in your working directory. Your job: commit them, and write a pull request text that lets Rogier judge each bug from the pull request alone. Do not change the code. Do not push, and do not open the pull request: the next steps do both.
+
+      Base commit: {{ steps.hunt.output.baseSha }}
+
+      The hunter's report:
+
+      {{ steps.hunt.output.bugs }}
+
+      Not proven, or outside the area:
+      {{ steps.hunt.output.unproven }}
+
+      Checks the hunter ran:
+      {{ steps.hunt.output.checks }}
+
+      The reviewer's last findings:
+      {{ steps.review.output.findings }}
+
+      1. Create the branch: `git switch -c bughunt/<area as a short slug>-<today's date, YYYY-MM-DD>`.
+      2. Commit. Make one commit per bug where the files allow it, staging the files by name; otherwise make one commit. Follow the message style of `git log`. The first line says what was fixed.
+      3. Collect the proof again yourself, so the pull request shows real output and not copied claims. For each bug, run its test on the base code and on your branch, and keep the trimmed output of both. For the base code, make a throwaway worktree outside the checkout (`git worktree add /tmp/ship-<unique> <base commit>`), run `pnpm install` in it, copy in only the test files, run them, and remove the worktree afterwards. Never use `git stash`.
+      4. Look for an open issue about each bug: `gh issue list --search "<key words>" --state open`. When one matches, add "Fixes #N" to that bug's section.
+      5. Write the pull request text. The title is "Bug hunt ({{ inputs.area }}): <the most important fix>", with "and N more" if there are more, in at most 72 characters. The body, in this order:
+         - {{ steps.review.output.verdict == "escalate" ? "First, a section \"Needs your decision\" with the reviewer's question." : "No decision section: the reviewer approved." }}
+         - One short paragraph in plain language: what this pull request fixes.
+         - One section per bug:
+           - What goes wrong for a user, in one plain paragraph.
+           - How to trigger it.
+           - For a race, a small Mermaid sequence diagram of the interleaving.
+           - Proof: the test's name, the command, and two short code blocks, "On main (fails)" and "On this branch (passes)", with the real output.
+           - The fix, in two or three sentences.
+         - "Not proven, or outside the area": the hunter's list, so nothing is lost.
+         - "Minor review notes not taken", if any.
+         - The checks that ran, and how each ended. Name every check that did not run, and why. The Mac-only checks (`pnpm test:desktop`, `pnpm compare:bureau`, the desktop perf scenarios) cannot run on this Linux runner: say so when the change touches apps/desktop.
+         - A last line: "Found by the nightly Bug hunt workflow."
+      6. If the proof shows that a fix does not work, do not hide it: put it at the top of the body, under "Proof failed".
+
+      Do not ask the user anything; nobody is awake to answer.
+
+      Finish with the structured result: `branch` (the branch you created), `title` and `body`.
+    outputSchema:
+      type: object
+      additionalProperties: false
+      required: [branch, title, body]
+      properties:
+        branch: { type: string }
+        title: { type: string }
+        body: { type: string }
+  - id: push
+    name: Push the branch
+    kind: action
+    action: git.push
+    params:
+      branch: "{{ steps.ship.output.branch }}"
+  - id: open_pr
+    name: Open the pull request
+    kind: action
+    terminal: true
+    action: github/pr.create
+    params:
+      connection: 01a11894-0c40-741f-a871-3753fa6eb7cc
+      repo: theagenticage/hercule
+      head: "{{ steps.ship.output.branch }}"
+      base: main
+      title: "{{ steps.ship.output.title }}"
+      body: "{{ steps.ship.output.body }}"
+      draft: "{{ steps.review.output.verdict == 'escalate' }}"
+  - id: nothing_found
+    name: Report that nothing was proven
+    kind: action
+    terminal: true
+    action: notification.create
+    params:
+      kind: bughunt.nothing-proven
+      title: "Bug hunt ({{ inputs.area }}): nothing proven"
+      body: |
+        {{ steps.hunt.output.summary }}
+
+        **Not proven, or outside the area:**
+
+        {{ steps.hunt.output.unproven }}
+edges:
+  - { from: hunt, to: review, condition: "steps.hunt.output.found" }
+  - { from: hunt, to: nothing_found, condition: "!steps.hunt.output.found" }
+  - { from: review, to: hunt, condition: "steps.review.output.verdict == 'revise'", maxTraversals: 4 }
+  - { from: review, to: ship, condition: "steps.review.output.verdict != 'revise'" }
+  - { from: ship, to: push }
+  - { from: push, to: open_pr }

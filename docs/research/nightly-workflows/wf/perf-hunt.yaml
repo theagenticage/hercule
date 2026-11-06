@@ -1,0 +1,231 @@
+# Hunts one area of the Hercule repository for real performance problems, proves each
+# with a measurement on the current code, fixes it, and opens one pull request with the
+# numbers before and after. The hunter is Opus (high effort) and hands each problem to
+# a Sonnet subagent to measure and fix. A fresh Opus reviewer (extra-high effort) checks
+# every measurement and blocks only on real problems; the work goes back to the hunter
+# at most 4 times. A hunt that proves nothing ends with a notification instead of a
+# pull request.
+name: Performance hunt
+description: Find, measure and fix up to 3 real performance problems in one area of the Hercule repository, and open a pull request with the numbers.
+inputs:
+  - name: area
+    schema: { type: string }
+    required: true
+  - name: scope
+    schema: { type: string }
+    required: true
+workspace:
+  kind: ephemeral
+  checkouts:
+    - resourceId: 01a11895-1bb8-70f5-b877-330bc92fdd49
+      startingRevision: { kind: remote }
+steps:
+  - id: hunt
+    name: Hunt, measure and fix
+    kind: agent
+    entry: true
+    agent: 01a12f1d-9409-749d-b147-0bc293cece26
+    model: opus
+    options: { effort: high }
+    prompt: |
+      {{ has(steps.review) ? "The reviewer did not approve your last round. Fix every finding that is valid. Drop a problem the reviewer showed is not real or not material. For each finding you decline, give a short reason in your summary. Then run the checks again and return the full structured result again, describing the problems as they stand now.\n\nReviewer findings:\n" + steps.review.output.findings + "\n\n---\n\nYour original task, for reference:\n\n" : "" }}You lead tonight's performance hunt in one area of the Hercule repository, which is checked out in your working directory.
+
+      Area: {{ inputs.area }}
+
+      Scope:
+      {{ inputs.scope }}
+
+      Goal: find real performance problems in this area, prove each one with a measurement on the current code, and fix it. Keep at most 3 problems, the ones a user would feel most: a frozen window, a slow screen, a controller or runner that slows down as data grows, memory that keeps growing. A problem you cannot measure is not a finding.
+
+      Setup
+      1. Run `pnpm install`: the worktree has no node_modules yet. Record the base commit with `git rev-parse HEAD`.
+      2. Read AGENTS.md and GLOSSARY.md, then the spec sections and ADRs that own this area (docs/spec/README.md maps them). For the desktop app, read ADR 0037 and the performance section of spec 17. Never read a large spec file whole: spec 17 is about 900 KB, so grep for the sections you need.
+
+      Hunt
+      3. Read the code of the area, following the paths real use takes. Look first for the kinds of problems this repository has had before:
+         - Work that grows faster than its input: a parser or a diff that goes quadratic; a list scanned inside a loop over the same list.
+         - Unbounded work: a read with no limit; a whole table or transcript loaded to show one page; history that is never trimmed.
+         - Repeated work: the same record read again on every live push; a full re-render or re-parse on every streamed token; a query run once per row (N+1).
+         - Leaks: listeners, timers, subscriptions or caches that outlive what they serve.
+      4. For each candidate, check that real use reaches it with realistic sizes: a transcript of thousands of events, hundreds of sessions, a large diff. Drop anything that saves little on a path that rarely runs. AGENTS.md says never to trade clarity for speed without a measurement, and the measurement must show a gain a user would notice.
+
+      Measure and fix, with Sonnet subagents
+      5. For each problem you keep, launch a subagent with the Agent tool and the model "sonnet". Give it one problem: the files and lines, the path that reaches it, and what the measurement must show. Its job:
+         a. Measure the problem on the current code. Prefer counts that do not depend on the machine: queries run, renders, parses, items scanned, bytes read or sent, calls per token. For time, compare sizes (for example n and 10n, to show growth that is faster than linear) and take the median of at least 5 runs. The machine is shared with other agents tonight, so a single timing is worthless.
+         b. Turn the measurement into a test that fails on the current code where that can be done reliably: a count, a bound, or a growth ratio. The `*.speed.test.ts` files (packages/client-core/src/markdown.speed.test.ts, apps/controller/src/tasks/tracking.speed.test.ts, apps/controller/src/signals/your-work.speed.test.ts, run by `pnpm test:speed`) are the style for a timing test. Otherwise keep the measurement as a small script outside the repository, and record its exact command and output.
+         c. Make the smallest fix that removes the cause, without changing behaviour.
+         d. Measure again the same way, run the test again, and run the tests of the touched package.
+         Run independent subagents in parallel, but never two on the same files. Never run two timing measurements at the same time.
+      6. Check each subagent's work yourself. Confirm the numbers before the fix: save the fix to the source files as a patch outside the checkout (`git diff -- <source files> > /tmp/<unique>.patch`), reverse it with `git apply -R`, measure, and apply the patch again. Never use `git stash`: the stash is shared with other worktrees.
+      7. Run `pnpm typecheck`, `pnpm lint`, `pnpm dep-lint`, and the tests of every package you touched.
+
+      Rules
+      - Stay inside your area. Other hunts run in parallel tonight on other areas. A problem whose fix lies mostly outside your area goes in `unproven`, with what you know; do not fix it.
+      - For a change to the desktop app, state its cost as AGENTS.md asks: processes, memory, work while idle, work per streamed token, and bundle bytes. The desktop perf scenarios need a Mac and cannot run on this Linux runner, so do not edit spec 17's performance log; say in your summary that the Mac measurement is still to do.
+      - Never touch ~/.hercule. A test or tool that needs a Hercule Home gets a throwaway one: HERCULE_HOME=<scratch dir>.
+      - Never kill processes by pattern. Stop only what you started, by its PID.
+      - Write no new migrations, edit no generated files, and edit no spec or ADR text. An index that needs a migration goes in `unproven`, with the numbers.
+      - Do not ask the user anything; nobody is awake to answer. Decide what the code and the docs let you decide, and put open questions in your summary.
+      - Leave all changes uncommitted. A later step commits them.
+
+      Finish with the structured result:
+      - `found`: true when at least one problem is measured and fixed.
+      - `baseSha`: the base commit.
+      - `problems`: Markdown, one section per problem, with a title; what a user feels, in one plain paragraph; the path that reaches it; the files; how it was measured (the exact command or test); a table of the numbers before and after; and the fix in two sentences. Write "none" when `found` is false.
+      - `checks`: the exact commands you ran and how each ended.
+      - `unproven`: suspicions you could not measure, and problems outside your area, one line each with file and line. Write "none" when there are none.
+      - `summary`: what you did, in plain language, and the review findings you declined and why.
+    outputSchema:
+      type: object
+      additionalProperties: false
+      required: [found, baseSha, problems, checks, unproven, summary]
+      properties:
+        found: { type: boolean }
+        baseSha: { type: string }
+        problems: { type: string }
+        checks: { type: string }
+        unproven: { type: string }
+        summary: { type: string }
+  - id: review
+    name: Review
+    kind: agent
+    agent: 01a16b6e-35eb-7568-a3f2-d4cbb3fe2841
+    model: opus
+    options: { effort: xhigh }
+    freshSession: true
+    prompt: |
+      You review tonight's performance hunt in one area of the Hercule repository. The changes are uncommitted in the checkout in your working directory. Do not modify, stage or commit anything in the checkout.
+
+      Area: {{ inputs.area }}
+      Base commit: {{ steps.hunt.output.baseSha }}
+
+      The hunter's report:
+
+      {{ steps.hunt.output.problems }}
+
+      Checks the hunter says it ran:
+      {{ steps.hunt.output.checks }}
+
+      The hunter's summary:
+      {{ steps.hunt.output.summary }}
+
+      {{ has(steps.review) ? "In your previous round you reported the findings below. Check that each one is fixed, or declined with a valid reason, and look for problems the fixes introduced.\n\nPrevious findings:\n" + steps.review.output.findings + "\n\n" : "" }}For each problem, decide three things. Be strict about these three, and lenient about everything else.
+
+      1. Is the problem real, and does a user feel it? Do not trust the numbers in the report. Read the code and check that real use reaches this path with sizes like the ones measured. Then measure it yourself on the base code. Make a throwaway worktree of the base commit outside the checkout (`git worktree add /tmp/review-<unique> <base commit>`), run `pnpm install` in it, and run the same test or script there and in the checkout. Remove the worktree when you are done (`git worktree remove --force <path>`). The machine is shared tonight: trust counts and growth ratios over single timings, and rerun a timing before you believe it. A gain only a benchmark can see, on a path that rarely runs, is not worth the code.
+      2. Is behaviour unchanged? Look for results that are now stale, order that changed, error paths that were dropped, and caches that never empty. Run the tests of the touched packages, plus `pnpm typecheck` and `pnpm lint`.
+      3. Is the fix as simple as it can be? AGENTS.md says never to trade clarity for speed without a measurement. A fix that adds a lot of code for a small gain is a blocker.
+
+      Also block on a broken hard rule of AGENTS.md (for example Zod, a mutation without an actor, anything written to ~/.hercule, a generated file edited by hand), and on a change outside the area that the fix does not need. A desktop change must state its cost: processes, memory, work while idle, work per streamed token, and bundle bytes.
+
+      Block on nothing else. Naming taste, comment wording, another way to write the same thing, extra measurements you would like: list them under "Minor, not blocking" and approve anyway. The hunter may take them or leave them. Each round of back and forth costs an hour, so spend one only on a real problem.
+
+      Your verdict:
+      - `approve`: every remaining problem is real, measured, and correctly fixed. Minor notes are fine.
+      - `revise`: a problem is not real or not material, a measurement is wrong, a fix changes behaviour or costs too much code, or a hard rule is broken, and the hunter can repair it. Say which problems to drop.
+      - `escalate`: something only Rogier can decide blocks a problem: a trade-off between speed and behaviour, or how to read the spec. Use it only when every problem that is not part of the question is approved. The work ships as a draft pull request with your question at the top.
+
+      Do not ask the user anything; nobody is awake to answer.
+
+      `findings` is Markdown. Each blocking finding gives its severity (blocker or major), the file and line, what is wrong, and the numbers or scenario that show it. Then come the minor notes. For `escalate`, the question comes first, written so that Rogier can answer it from the pull request alone.
+    outputSchema:
+      type: object
+      additionalProperties: false
+      required: [verdict, findings]
+      properties:
+        verdict: { type: string, enum: [approve, revise, escalate] }
+        findings: { type: string }
+  - id: ship
+    name: Commit and write the pull request
+    kind: agent
+    agent: 01a13f5a-e2fa-7563-b322-6a4b8ce8f9f7
+    model: sonnet
+    options: { effort: high }
+    freshSession: true
+    prompt: |
+      Tonight's performance hunt in the area "{{ inputs.area }}" found and fixed performance problems in the Hercule repository. {{ steps.review.output.verdict == "escalate" ? "The reviewer approved the fixes but raised a question only Rogier can answer." : "The reviewer approved them." }} The changes are uncommitted in the checkout in your working directory. Your job: commit them, and write a pull request text that lets Rogier judge each problem from the pull request alone. Do not change the code. Do not push, and do not open the pull request: the next steps do both.
+
+      Base commit: {{ steps.hunt.output.baseSha }}
+
+      The hunter's report:
+
+      {{ steps.hunt.output.problems }}
+
+      Not proven, or outside the area:
+      {{ steps.hunt.output.unproven }}
+
+      Checks the hunter ran:
+      {{ steps.hunt.output.checks }}
+
+      The reviewer's last findings:
+      {{ steps.review.output.findings }}
+
+      1. Create the branch: `git switch -c perfhunt/<area as a short slug>-<today's date, YYYY-MM-DD>`.
+      2. Commit. Make one commit per problem where the files allow it, staging the files by name; otherwise make one commit. Follow the message style of `git log`. The first line says what got faster or lighter.
+      3. Measure again yourself, so the pull request shows real numbers and not copied claims. For each problem, run its test or measurement on the base code and on your branch. For the base code, make a throwaway worktree outside the checkout (`git worktree add /tmp/ship-<unique> <base commit>`), run `pnpm install` in it, run the measurement there, and remove the worktree afterwards. Never use `git stash`. The machine is shared: take the median of at least 5 runs for any timing, and never run two timings at once.
+      4. Look for an open issue about each problem: `gh issue list --search "<key words>" --state open`. When one matches, add "Fixes #N" to that problem's section.
+      5. Write the pull request text. The title is "Performance hunt ({{ inputs.area }}): <the biggest gain>", with "and N more" if there are more, in at most 72 characters. The body, in this order:
+         - {{ steps.review.output.verdict == "escalate" ? "First, a section \"Needs your decision\" with the reviewer's question." : "No decision section: the reviewer approved." }}
+         - One short paragraph in plain language: what gets faster or lighter, and when a user would notice.
+         - One section per problem:
+           - What a user feels, in one plain paragraph.
+           - The path that reaches it.
+           - Proof: the command or test, and a table of the numbers on main and on this branch, with the sizes measured and the number of runs.
+           - The fix, in two or three sentences.
+           - For a desktop change, its cost: processes, memory, work while idle, work per streamed token, and bundle bytes.
+         - "Not proven, or outside the area": the hunter's list, so nothing is lost.
+         - "Minor review notes not taken", if any.
+         - The checks that ran, and how each ended. Name every check that did not run, and why. The Mac-only checks (`pnpm test:desktop`, `pnpm compare:bureau`, the desktop perf scenarios) cannot run on this Linux runner: say so when the change touches apps/desktop, and say that the spec 17 performance log still needs a Mac measurement.
+         - A last line: "Found by the nightly Performance hunt workflow."
+      6. If your numbers do not confirm a gain, do not hide it: put it at the top of the body, under "Measurement did not confirm".
+
+      Do not ask the user anything; nobody is awake to answer.
+
+      Finish with the structured result: `branch` (the branch you created), `title` and `body`.
+    outputSchema:
+      type: object
+      additionalProperties: false
+      required: [branch, title, body]
+      properties:
+        branch: { type: string }
+        title: { type: string }
+        body: { type: string }
+  - id: push
+    name: Push the branch
+    kind: action
+    action: git.push
+    params:
+      branch: "{{ steps.ship.output.branch }}"
+  - id: open_pr
+    name: Open the pull request
+    kind: action
+    terminal: true
+    action: github/pr.create
+    params:
+      connection: 01a11894-0c40-741f-a871-3753fa6eb7cc
+      repo: theagenticage/hercule
+      head: "{{ steps.ship.output.branch }}"
+      base: main
+      title: "{{ steps.ship.output.title }}"
+      body: "{{ steps.ship.output.body }}"
+      draft: "{{ steps.review.output.verdict == 'escalate' }}"
+  - id: nothing_found
+    name: Report that nothing was proven
+    kind: action
+    terminal: true
+    action: notification.create
+    params:
+      kind: perfhunt.nothing-proven
+      title: "Performance hunt ({{ inputs.area }}): nothing proven"
+      body: |
+        {{ steps.hunt.output.summary }}
+
+        **Not proven, or outside the area:**
+
+        {{ steps.hunt.output.unproven }}
+edges:
+  - { from: hunt, to: review, condition: "steps.hunt.output.found" }
+  - { from: hunt, to: nothing_found, condition: "!steps.hunt.output.found" }
+  - { from: review, to: hunt, condition: "steps.review.output.verdict == 'revise'", maxTraversals: 4 }
+  - { from: review, to: ship, condition: "steps.review.output.verdict != 'revise'" }
+  - { from: ship, to: push }
+  - { from: push, to: open_pr }
