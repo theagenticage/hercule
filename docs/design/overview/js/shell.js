@@ -32,7 +32,6 @@ window.Shell = (function () {
       '<section class="side-sec"><h3 class="side-h"><span>Work</span></h3>' +
       navRow("overview", "Overview", "office", selected) +
       navRow("inbox", "Inbox", "intake", selected, opts.inboxCount ? '<span class="count">' + opts.inboxCount + "</span>" : "") +
-      navRow("intake", "Intake", "filter", selected) +
       navRow("workflows", "Workflows", "workflows", selected) +
       navRow("discussions", "Discussions", "discussions", selected) +
       navRow("wiki", "Wiki", "wiki", selected) +
