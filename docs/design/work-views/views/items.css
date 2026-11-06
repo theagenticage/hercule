@@ -1,0 +1,238 @@
+/* Inbox: shelves of cards. There is one card, and each material gives it the surface of where it comes from, so a pull request can be told from a ticket before
+   a word is read. Brand colours have no shell variable, so they live here, with their dark values in the media query below. */
+.v-items {
+  --ib-gap:12px; --ib-columns:4;
+  --gh-canvas:#fff; --gh-subtle:#f6f8fa; --gh-border:#d1d9e0; --gh-ink:#1f2328; --gh-mute:#59636e; --gh-open:#1a7f37; --gh-fail:#d1242f; --gh-attention:#9a6700; --gh-focus:#0969da;
+  --ln-card:#fff; --ln-edge:rgba(20,20,40,.08); --ln-ink:#282a30; --ln-mute:#6f737b; --ln-brand:#5e6ad2; --ln-todo:#b9bcc2; --ln-chip:rgba(20,20,40,.1);
+  --sentry:#362d59;
+  --tr-card:#1f2e29; --tr-raised:#2b3d36; --tr-ink:#f4f1e8; --tr-mute:#a9b6ab; --tr-brass:#bda468; --tr-signal:#a88c4b;
+  max-width:1560px; margin:0 auto; font-size:13.5px; line-height:20px;
+}
+@media (prefers-color-scheme:dark) {
+  .v-items {
+    --gh-canvas:#0d1117; --gh-subtle:#151b23; --gh-border:#3d444d; --gh-ink:#f0f6fc; --gh-mute:#9198a1; --gh-open:#3fb950; --gh-fail:#f85149; --gh-attention:#d29922; --gh-focus:#4493f8;
+    --ln-card:#222329; --ln-edge:rgba(255,255,255,.07); --ln-ink:#e4e5e9; --ln-mute:#8d919a; --ln-brand:#8a92ec; --ln-todo:#6b6f78; --ln-chip:rgba(255,255,255,.1);
+    --tr-card:#26382f; --tr-raised:#32473d; --tr-ink:#f1eee5; --tr-mute:#a7b5a9; --tr-brass:#c6ae74; --tr-signal:#c6ae74;
+  }
+}
+.v-items button { padding:0; border:0; border-radius:0; background:none; text-align:left; }
+.v-items button:hover { background:none; }
+.v-items h2, .v-items h3, .v-items p, .v-items ol { margin:0; padding:0; font:inherit; }
+.v-items small { font-size:12px; }
+.v-items kbd { font:inherit; }
+.v-items svg { display:block; flex:none; fill:currentColor; }
+
+/* Shelves */
+.v-items .ib-shelf { margin-bottom:26px; }
+.v-items .ib-shelf-head { display:flex; align-items:baseline; gap:8px; margin-bottom:8px; }
+.v-items .ib-shelf-head h2 { font-size:14px; font-weight:600; }
+.v-items .ib-shelf-note { margin-left:auto; color:var(--mute); font-size:12px; }
+.v-items .ib-shelf-note button { color:inherit; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+.v-items .ib-badge { flex:none; padding:0 6px; border:1px dashed currentColor; border-radius:4px; color:var(--mute); font-size:11px; font-weight:400; line-height:15px; cursor:help; }
+.v-items .ib-group { margin:14px 0 6px; color:var(--mute); font-size:12.5px; font-weight:500; line-height:18px; }
+.v-items .ib-shelf-head + .ib-group { margin-top:0; }
+.v-items .ib-group span { margin-left:6px; opacity:.8; }
+/* The dense flow lets later cards fill the row of an opened card, so that its tray can sit right under that row. */
+.v-items .ib-grid { display:grid; grid-template-columns:repeat(var(--ib-columns), minmax(0,1fr)); grid-auto-flow:row dense; gap:var(--ib-gap); }
+
+/* The materials. Each sets the colours and sizes the one card reads. */
+.v-items .is-box { --c-card:var(--gh-canvas); --c-ink:var(--gh-ink); --c-mute:var(--gh-mute); --c-focus:var(--gh-focus); --ib-edge:1px; --ib-foot:35px; --ib-radius:6px; --ib-left:34px; --ib-dot-left:15px; }
+.v-items .is-soft { --c-card:var(--ln-card); --c-ink:var(--ln-ink); --c-mute:var(--ln-mute); --c-focus:var(--ln-brand); --ib-edge:0px; --ib-foot:33px; --ib-radius:8px; --ib-left:32px; --ib-dot-left:15px; }
+.v-items .is-lacquer { --c-card:var(--tr-card); --c-ink:var(--tr-ink); --c-mute:var(--tr-mute); --c-focus:var(--tr-brass); --ib-edge:0px; --ib-foot:45px; --ib-radius:10px; --ib-left:25px; --ib-dot-left:13px; }
+
+/* The one card */
+.v-items .ib-card { position:relative; min-width:0; display:flex; flex-direction:column; background:var(--c-card); border-radius:var(--ib-radius); color:var(--c-ink); cursor:pointer; scroll-margin:calc(var(--ib-top) + 10px) 0 70px; }
+/* The opener takes the focus for the whole card, and draws nothing itself. */
+.v-items .ib-opener { position:absolute; inset:0; opacity:0; pointer-events:none; }
+.v-items .ib-card:has(.ib-opener:focus-visible) { outline:2px solid var(--c-focus); outline-offset:-1px; }
+.v-items .ib-top { display:flex; align-items:center; gap:6px; min-width:0; color:var(--c-mute); font-size:12px; white-space:nowrap; }
+.v-items .ib-identifier { display:flex; gap:6px; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.v-items .ib-identifier b { color:var(--c-ink); font-weight:600; }
+.v-items .ib-top-side { display:flex; align-items:center; gap:8px; margin-left:auto; }
+.v-items .ib-age { font-variant-numeric:tabular-nums; }
+.v-items .ib-age.is-long { color:var(--gh-attention); font-weight:600; }
+.v-items .ib-body { display:flex; gap:8px; min-width:0; }
+.v-items .ib-title { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; color:inherit; font-weight:600; text-decoration:none; outline:0; }
+.v-items a.ib-title:hover { color:var(--c-focus); text-decoration:underline; text-underline-offset:2px; }
+.v-items .ib-foot { display:flex; align-items:center; gap:6px; margin-top:auto; color:var(--c-mute); font-size:12px; line-height:18px; }
+.v-items .ib-person { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-items .ib-facts { display:flex; align-items:center; gap:8px; min-width:0; margin-left:auto; }
+.v-items .ib-wordless { display:inline-flex; align-items:center; }
+.v-items .ib-avatar { display:inline-block; flex:none; width:18px; height:18px; border-radius:50%; background:hsl(var(--hue) 42% 44%); color:#fff; font-size:8.5px; font-weight:600; letter-spacing:.02em; line-height:18px; text-align:center; }
+.v-items .ib-octicon { width:16px; height:16px; }
+.v-items .ib-tone-good { color:var(--gh-open); }
+.v-items .ib-tone-bad { color:var(--gh-fail); }
+.v-items .ib-tone-attention { color:var(--gh-attention); }
+.v-items .ib-dot { display:block; flex:none; width:9px; height:9px; margin:5px 2px 0; border-radius:50%; background:currentColor; }
+.v-items .ib-approval { position:relative; display:inline-block; }
+.v-items .ib-approval .ib-octicon { position:absolute; right:-4px; bottom:-3px; width:11px; height:11px; padding:1.5px; border-radius:50%; background:var(--gh-open); color:#fff; box-shadow:0 0 0 1.5px var(--c-card); }
+.v-items .ib-chevron { flex:none; display:inline-block; width:0; height:0; border-left:5px solid currentColor; border-top:3.5px solid transparent; border-bottom:3.5px solid transparent; transition:transform .12s; }
+.v-items [aria-expanded="true"] .ib-chevron, .v-items .is-open .ib-chevron { transform:rotate(90deg); }
+/* The logo mark in one colour: the head takes the text colour, and the face is cut out in the colour of the card under it. */
+.v-items .ib-logo-head { fill:currentColor; }
+.v-items .ib-logo-face { fill:var(--c-card, var(--panel)); }
+.v-items .ib-has-task { display:inline-flex; align-items:center; gap:5px; color:var(--c-mute); font-size:12px; line-height:16px; cursor:pointer; white-space:nowrap; }
+.v-items span.ib-has-task { cursor:help; }
+.v-items .ib-has-task .ib-logo { width:14px; height:14px; }
+.v-items .ib-has-task span { display:none; }
+.v-items .ib-card:hover .ib-has-task span, .v-items .ib-card:has(:focus-visible) .ib-has-task span, .v-items .is-done .ib-has-task span { display:inline; }
+.v-items button.ib-has-task:hover { color:var(--c-ink); }
+.v-items .is-quiet .ib-title { font-weight:500; }
+.v-items .is-done { opacity:.66; }
+.v-items .is-done:hover, .v-items .is-done:has(:focus-visible) { opacity:1; }
+
+/* Signals are the product's notion, sitting on someone else's thing, so they carry its brass on every material. */
+.v-items .ib-signal-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--tr-signal); }
+/* The dot sits in the status column and the words start on the title's edge, so the reason reads as part of the title block. */
+.v-items .ib-reason { display:flex; align-items:center; gap:calc(var(--ib-left) - var(--ib-dot-left) - 6px); min-width:0; padding:3px 10px 0 var(--ib-dot-left); color:var(--c-mute); font-size:12px; line-height:16px; }
+.v-items .ib-reason span { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-items .ib-reason em { flex:none; margin-left:calc(6px - var(--ib-left) + var(--ib-dot-left) + 6px); font-style:normal; opacity:.75; }
+.v-items .ib-signals { display:grid; gap:3px; padding:6px 10px 2px var(--ib-dot-left); list-style:none; color:var(--c-mute); font-size:12px; line-height:16px; }
+.v-items .ib-signals li { display:grid; grid-template-columns:6px minmax(0,1fr) auto; align-items:center; column-gap:calc(var(--ib-left) - var(--ib-dot-left) - 6px); }
+.v-items .ib-signals li:not(.is-open) .ib-signal-dot { background:none; box-shadow:inset 0 0 0 1px var(--c-mute); opacity:.6; }
+.v-items .ib-signals li:not(.is-open) span, .v-items .ib-signals time { opacity:.75; }
+.v-items .ib-signals li.is-open span { color:var(--c-ink); }
+.v-items .ib-signals span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-items .ib-signals time { font-variant-numeric:tabular-nums; }
+.v-items .ib-signals small { grid-column:2 / -1; min-width:0; font-size:11.5px; opacity:.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-items .ib-spinner { flex:none; width:11px; height:11px; border:2px solid color-mix(in srgb, currentColor 28%, transparent); border-top-color:currentColor; border-radius:50%; animation:ib-spinner-turn 1s linear infinite; }
+@keyframes ib-spinner-turn { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .v-items .ib-spinner { animation:none; } }
+
+/* The offer stays out of sight until the card is hovered or focused, so that at rest a card is just the thing. It is the product's own strip on every material, because
+   the hand-off is the product's offer and not GitHub's or Linear's. It starts at the top of the card's foot and grows past the card when its choices wrap. */
+.v-items .ib-act { position:absolute; z-index:5; left:calc(-1 * var(--ib-edge)); right:calc(-1 * var(--ib-edge)); top:calc(100% + var(--ib-edge) - var(--ib-foot)); display:flex; flex-wrap:wrap; align-items:center; gap:3px 12px; min-height:var(--ib-foot); padding:5px 9px; background:var(--tr-card); border-radius:0 0 var(--ib-radius) var(--ib-radius); box-shadow:0 8px 16px rgba(0,0,0,.2); color:var(--tr-ink); font-size:12px; line-height:20px; white-space:nowrap; cursor:default; opacity:0; visibility:hidden; transition:opacity .1s, visibility .1s; }
+.v-items .ib-card:hover > .ib-act, .v-items .ib-card:has(:focus-visible) > .ib-act, .v-items .ib-card.has-menu > .ib-act { opacity:1; visibility:visible; }
+/* The short wait stops the strip flashing as the pointer crosses the grid. The keyboard gets no wait, because a hidden button cannot take focus. */
+.v-items .ib-card:hover > .ib-act { transition-delay:.1s; }
+.v-items .ib-card:has(:focus-visible) > .ib-act, .v-items .ib-card.has-menu > .ib-act { transition:none; }
+.v-items .ib-card:hover, .v-items .ib-card:has(:focus-visible), .v-items .ib-card.has-menu { z-index:5; }
+.v-items .ib-act button { color:inherit; cursor:pointer; outline:0; }
+.v-items .ib-act > button:not(.ib-primary):hover, .v-items .ib-act > button:not(.ib-primary):focus-visible { text-decoration:underline; text-underline-offset:3px; }
+.v-items .ib-act .ib-primary { display:inline-flex; align-items:center; gap:6px; padding:0 9px; border-radius:5px; background:var(--tr-brass); color:var(--tr-card); font-weight:600; line-height:22px; }
+.v-items .ib-act .ib-primary:hover, .v-items .ib-act .ib-primary:focus-visible { background:var(--tr-ink); }
+.v-items .ib-act .ib-dismiss { margin-left:auto; width:20px; height:20px; display:grid; place-items:center; border-radius:4px; color:var(--tr-mute); }
+.v-items .ib-act .ib-dismiss:hover, .v-items .ib-act .ib-dismiss:focus-visible { background:var(--tr-raised); color:var(--tr-ink); }
+.v-items .ib-dismiss .ib-octicon { width:13px; height:13px; }
+.v-items .ib-menu-anchor { position:relative; }
+.v-items .ib-menu { position:absolute; z-index:6; top:calc(100% + 5px); left:-3px; min-width:max-content; padding:4px; background:var(--tr-raised); border-radius:7px; box-shadow:0 8px 22px rgba(0,0,0,.3); }
+.v-items .ib-menu button { display:block; width:100%; padding:2px 9px; border-radius:4px; color:var(--tr-ink); line-height:22px; }
+.v-items .ib-menu button:hover, .v-items .ib-menu button:focus-visible { background:var(--tr-brass); color:var(--tr-card); }
+.v-items .ib-key { display:none; min-width:15px; height:15px; border:1px solid currentColor; border-radius:3px; font-size:10px; line-height:13px; text-align:center; opacity:.7; }
+.v-items .is-next .ib-key { display:inline-block; }
+
+/* The box: a hard edge and a grey header band, like a box on GitHub */
+.v-items .is-box.ib-card, .v-items .is-box .ib-pile { border:1px solid var(--gh-border); }
+.v-items .is-box.ib-card:hover, .v-items .is-box .ib-pile:hover { border-color:var(--gh-mute); }
+.v-items .is-box .ib-top { flex:none; height:30px; padding:0 10px; background:var(--gh-subtle); border-bottom:1px solid var(--gh-border); border-radius:5px 5px 0 0; }
+.v-items .is-box .ib-mark { width:16px; height:16px; }
+.v-items .is-box .ib-identifier span { color:var(--gh-mute); }
+.v-items .is-box .ib-body { padding:9px 10px 0; }
+.v-items .is-box .ib-body .ib-octicon { margin-top:2px; }
+.v-items .ib-body .ib-wordless { align-self:flex-start; }
+.v-items .is-box .ib-title { font-size:14px; line-height:20px; }
+.v-items .is-box .ib-foot { padding:7px 10px 9px; }
+.v-items .is-box .ib-spinner { color:var(--gh-attention); }
+
+/* The soft card: no hard edge, a soft shadow and small tight type */
+.v-items .is-soft.ib-card, .v-items .is-soft .ib-pile { box-shadow:0 0 0 1px var(--ln-edge), 0 1px 3px rgba(20,20,40,.07); }
+.v-items .is-soft.ib-card:hover, .v-items .is-soft .ib-pile:hover { box-shadow:0 0 0 1px var(--ln-edge), 0 3px 10px rgba(20,20,40,.12); }
+.v-items .is-soft.ib-card { padding:9px 0 9px; font-size:13px; line-height:18px; letter-spacing:-.005em; }
+.v-items .is-soft .ib-top { height:18px; padding:0 11px; }
+.v-items .is-soft .ib-mark { width:14px; height:14px; }
+.v-items .is-soft .ib-identifier b { color:var(--c-mute); font-weight:400; font-variant-numeric:tabular-nums; }
+.v-items .is-soft .ib-body { gap:7px; margin-top:5px; padding:0 11px; }
+.v-items .ib-circle { width:14px; height:14px; margin-top:2px; }
+.v-items .is-soft .ib-title { font-weight:500; }
+.v-items .is-soft .ib-foot { padding:7px 11px 0; }
+.v-items .is-soft .ib-facts { margin-left:0; gap:5px; }
+.v-items .is-soft .ib-person + .ib-facts { margin-left:auto; }
+.v-items .ib-chip { display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 6px; border:1px solid var(--ln-chip); border-radius:5px; color:var(--ln-mute); font-size:11.5px; line-height:18px; white-space:nowrap; }
+.v-items .ib-tag { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.v-items .ib-tag i { flex:none; width:7px; height:7px; border-radius:50%; background:var(--ln-brand); opacity:.75; }
+.v-items .ib-bars { width:12px; height:12px; }
+/* The note waits a moment before it shows, so that moving across the grid does not flash a popover on every card. */
+.v-items .ib-popover { position:absolute; z-index:4; bottom:calc(100% + 6px); left:0; right:0; padding:9px 11px; background:var(--c-card); border-radius:8px; box-shadow:0 0 0 1px var(--ln-edge), 0 8px 24px rgba(20,20,40,.18); color:var(--c-mute); font-size:12.5px; line-height:17px; cursor:default; opacity:0; visibility:hidden; pointer-events:none; transition:opacity .12s, visibility .12s; }
+.v-items .ib-popover p { display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; color:var(--c-ink); }
+.v-items .ib-popover p + small { display:block; margin-top:6px; }
+.v-items .ib-card:hover .ib-popover, .v-items .ib-card:has(.ib-opener:focus-visible) .ib-popover { opacity:1; visibility:visible; transition-delay:.45s; }
+
+/* Lacquer: nobody's plugin, so triage wears the product's own lacquer and brass */
+.v-items .is-lacquer.ib-card { padding:11px 0 10px; }
+.v-items .is-lacquer.ib-card:hover { box-shadow:inset 0 0 0 1px var(--tr-brass); }
+.v-items .is-lacquer .ib-top { min-height:22px; padding:0 13px; }
+.v-items .is-lacquer .ib-top .ib-logo { width:20px; height:20px; color:var(--tr-brass); }
+.v-items .is-lacquer .ib-has-task .ib-logo { display:none; }
+.v-items .is-lacquer .ib-body { margin-top:7px; padding:0 13px; }
+.v-items .is-lacquer .ib-title { font-size:15px; line-height:20px; letter-spacing:-.005em; }
+.v-items .is-lacquer .ib-reason { padding-top:2px; padding-right:13px; font-size:12.5px; line-height:17px; }
+.v-items .is-lacquer .ib-spinner { color:var(--tr-brass); }
+.v-items .is-lacquer .ib-foot { padding:10px 13px 0; }
+.v-items .is-lacquer .ib-facts { flex:1; align-items:flex-end; gap:14px; margin-left:0; color:var(--tr-mute); }
+.v-items .ib-figure { display:grid; grid-template-columns:auto auto; align-items:center; column-gap:4px; justify-content:start; font-size:10.5px; line-height:13px; }
+.v-items .ib-figure b { grid-column:1 / -1; color:var(--tr-ink); font-size:15px; font-weight:600; line-height:18px; font-variant-numeric:tabular-nums; }
+.v-items .is-lacquer .ib-fact-text { margin-left:auto; font-size:11.5px; line-height:13px; }
+.v-items .ib-initiative { width:8px; height:8px; margin-bottom:2px; border-radius:50% !important; cursor:pointer; }
+.v-items .ib-sources { display:flex; }
+/* A token sits on white in both colour schemes, so a mark drawn in the page's text colour is pinned back to its dark value here. */
+.v-items .ib-source { --gh-ink:#1f2328; --ln-brand:#5e6ad2; --sentry:#362d59; position:relative; display:grid; place-items:center; width:22px; height:22px; margin-left:-3px; border-radius:50%; background:#fff; box-shadow:0 0 0 2px var(--tr-card); }
+.v-items .ib-source .ib-mark { width:13px; height:13px; }
+/* An opened card and its tray are one shape. A bridge in the card's colour closes the gap, and reaches far enough into the tray to cover its rounded corner. */
+.v-items .is-lacquer.is-open { z-index:1; }
+.v-items .is-lacquer.is-open::after { content:""; position:absolute; left:0; right:0; top:calc(100% - 10px); height:calc(var(--ib-gap) + 20px); background:var(--tr-card); pointer-events:none; }
+.v-items .ib-tray { grid-column:1 / -1; padding:10px 14px; background:var(--tr-card); border-radius:10px; color:var(--tr-mute); }
+.v-items .ib-tray-note { position:relative; z-index:2; margin-bottom:6px; color:var(--tr-ink); font-size:12.5px; line-height:18px; }
+.v-items .ib-row { --gh-ink:var(--tr-mute); --ln-brand:var(--tr-mute); --sentry:var(--tr-mute); position:relative; z-index:2; display:grid; grid-template-columns:14px minmax(0,1fr) auto 72px 76px 60px 60px; align-items:center; gap:12px; padding:3px 0; font-size:12px; line-height:18px; font-variant-numeric:tabular-nums; }
+.v-items .ib-row .ib-mark { width:13px; height:13px; }
+.v-items .ib-row-title { color:var(--tr-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-items .ib-row-state { color:var(--tr-brass); }
+
+/* Piles: a folded group stays a thing on the shelf, with the edges of the cards under it showing */
+.v-items .ib-pile-cell { position:relative; min-width:0; display:flex; min-height:84px; margin-bottom:8px; color:var(--c-mute); }
+.v-items .ib-pile { position:relative; z-index:1; flex:1; min-width:0; display:flex; flex-direction:column; background:var(--c-card); border-radius:var(--ib-radius); cursor:pointer; outline:0; scroll-margin:calc(var(--ib-top) + 10px) 0 70px; }
+.v-items .ib-pile:focus-visible { outline:2px solid var(--c-focus); outline-offset:-1px; }
+.v-items .ib-pile-cell::before, .v-items .ib-pile-cell::after { content:""; position:absolute; height:12px; pointer-events:none; background:var(--c-card); border-radius:0 0 var(--ib-radius) var(--ib-radius); }
+.v-items .ib-pile-cell::before { left:6px; right:6px; bottom:-4px; }
+.v-items .ib-pile-cell::after { left:12px; right:12px; bottom:-8px; }
+.v-items .is-box.ib-pile-cell::before, .v-items .is-box.ib-pile-cell::after { background:var(--gh-subtle); border:1px solid var(--gh-border); border-top:0; }
+.v-items .is-soft.ib-pile-cell::before, .v-items .is-soft.ib-pile-cell::after { box-shadow:0 0 0 1px var(--ln-edge); }
+.v-items .ib-pile-cell:has(.ib-pile[aria-expanded="true"])::before, .v-items .ib-pile-cell:has(.ib-pile[aria-expanded="true"])::after, .v-items .ib-pile-cell:has(.ib-pile[disabled])::before, .v-items .ib-pile-cell:has(.ib-pile[disabled])::after { display:none; }
+.v-items .ib-pile .ib-top { width:100%; }
+.v-items .ib-pile-text { min-width:0; color:var(--c-ink); font-weight:600; overflow:hidden; text-overflow:ellipsis; }
+.v-items .is-soft .ib-pile { padding-top:9px; }
+.v-items .is-soft .ib-pile-text { font-size:13px; font-weight:500; }
+.v-items .ib-pile-body { flex:1; display:flex; flex-wrap:wrap; align-content:center; align-items:center; gap:2px 7px; min-width:0; padding:8px 10px; font-size:12px; }
+.v-items .is-soft .ib-pile-body { padding:4px 11px 9px; }
+.v-items .ib-pile-body b { color:var(--c-ink); font-size:15px; font-weight:600; line-height:20px; font-variant-numeric:tabular-nums; }
+.v-items .ib-pile-body em { font-style:normal; }
+.v-items .ib-pile-marks { flex:1 0 100%; display:flex; flex-wrap:wrap; gap:3px; min-width:0; }
+.v-items .ib-pile-marks svg { width:14px; height:14px; margin:0 !important; }
+/* In a pile the marks only count cards, so a pull request icon drops its colour rather than read as a state. */
+.v-items .ib-pile-marks .ib-octicon { color:var(--c-mute); }
+.v-items .ib-pile-cell > .ib-has-task { position:absolute; z-index:2; right:11px; bottom:11px; }
+
+/* A compact group: the same card, with only its mark, title, person and age, for what asks for no more than a glance. */
+.v-items .is-compact .ib-card { flex-direction:row; flex-wrap:wrap; align-items:center; gap:6px; min-height:26px; padding:2px 8px; background:none; border-color:var(--line); color:var(--mute); --ib-foot:0px; }
+.v-items .is-compact .ib-top { display:contents; }
+.v-items .is-compact .ib-mark { width:13px; height:13px; }
+.v-items .is-compact .ib-identifier, .v-items .is-compact .ib-reason, .v-items .is-compact .ib-body .ib-wordless, .v-items .is-compact .ib-person, .v-items .is-compact .ib-facts { display:none; }
+.v-items .is-compact .ib-body { order:1; flex:1 1 0; padding:0; }
+.v-items .is-compact .ib-foot { order:2; flex:none; margin:0; padding:0; }
+.v-items .is-compact .ib-top-side { order:3; margin:0; font-size:12px; }
+.v-items .is-compact .ib-signals { order:4; flex:1 0 100%; padding:2px 0 3px 19px; }
+.v-items .is-compact .ib-title { display:block; font-size:12px; font-weight:400; line-height:18px; white-space:nowrap; text-overflow:ellipsis; }
+.v-items .is-compact .ib-avatar { width:14px; height:14px; font-size:6.5px; line-height:14px; }
+
+/* Undo */
+.v-items .ib-undo-bar { position:fixed; left:18px; bottom:16px; z-index:7; display:flex; align-items:center; gap:10px; max-width:min(380px, calc(50vw - 170px)); padding:5px 12px; background:var(--ink); color:var(--bg); border-radius:7px; font-size:12.5px; line-height:18px; animation:ib-undo-bar-leave 10s forwards; }
+.v-items .ib-undo-bar span { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-items .ib-undo-bar:hover { animation-play-state:paused; }
+.v-items .ib-undo-bar button { color:inherit; font-weight:600; cursor:pointer; }
+.v-items .ib-undo-bar .ib-key { display:inline-block; border-color:color-mix(in srgb, var(--bg) 40%, transparent); color:inherit; opacity:1; }
+@keyframes ib-undo-bar-leave { 0%, 92% { opacity:1; visibility:visible; } 100% { opacity:0; visibility:hidden; } }
+
+.v-items .ib-empty { color:var(--mute); }
+
+@media (max-width:1180px) { .v-items { --ib-columns:3; } }
+@media (max-width:900px) { .v-items { --ib-columns:2; } }
+@media (max-width:620px) { .v-items { --ib-columns:1; } }

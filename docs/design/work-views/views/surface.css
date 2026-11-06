@@ -1,0 +1,201 @@
+/* One surface. The root is fixed under the top bar so the map fills the window. */
+@property --open { syntax:'<number>'; inherits:false; initial-value:0; }
+@property --shown { syntax:'<number>'; inherits:false; initial-value:0; }
+@property --land { syntax:'<number>'; inherits:false; initial-value:0; }
+@property --away { syntax:'<number>'; inherits:false; initial-value:1; }
+.v-surface { --route:var(--warm); --stage-wash:10%; --tint-l:46%; --text-l:32%; --trunk:color-mix(in srgb, var(--ink) 52%, var(--bg)); --twig:color-mix(in srgb, var(--ink) 40%, var(--bg));
+  --glass:color-mix(in srgb, var(--bg) 82%, transparent); --card-shadow:rgba(40,36,28,.10); --hair:1px; --board:0; --label-w:130px; --label-size:13px;
+  position:fixed; left:0; right:0; bottom:0; top:49px; z-index:1; overflow:hidden; background:var(--bg); cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none; }
+@media (prefers-color-scheme: dark) { .v-surface { --stage-wash:13%; --tint-l:64%; --text-l:80%; --card-shadow:rgba(0,0,0,.4); } }
+.v-surface.panning, .v-surface.panning * { cursor:grabbing !important; }
+
+/* What is open. A part of the map shows when the camera is close (--board) or when its branch is open (--shown, --open).
+   Those two are registered numbers so that a change of class can ease, and leaves can appear one after another.
+   --tone carries the filter and the wear, which the shell draws with an opacity of their own that this view would override. */
+.sf-shown { --shown:1; }
+.sf-open { --open:1; }
+.sf-slot, .sf-twig, .sf-link, .sf-tail, .sf-stub, .sf-fan, .sf-branch { --tone:1; transition:--open .22s ease, --shown .22s ease, --land .16s ease, --away .28s ease; }
+.sf-slot.sf-open { transition:--open .3s ease calc(min(var(--n), 12) * 16ms), --land .16s ease, --away .28s ease; }
+.v-surface .dim { --tone:.22; }
+.v-surface .wear2 { --tone:.8; }
+.v-surface .wear3 { --tone:.62; }
+/* A card a line lands on shows in its own slot, without opening its branch. A spotlight, which is a chain being followed or a Topic lit up, lowers --away on everything outside it. */
+.sf-landing { --land:1; }
+.sf-spot .sf-slot, .sf-spot .sf-lab { --away:.14; }
+.sf-spot .sf-ground path { --away:.34; }
+.sf-spot .sf-slot.sf-in-spot, .sf-spot .sf-lab.sf-in-spot, .sf-spot .sf-ground path.sf-in-spot { --away:1; }
+.sf-trunk, .sf-hub, .sf-project, .sf-hubname { transition:--away .28s ease; }
+/* When the branches themselves change, they fade in while the cards glide to their new places. */
+.sf-reshaped .sf-ground, .sf-reshaped .sf-labels { animation:sf-appear .46s ease both; }
+@media (prefers-reduced-motion: reduce) { .sf-slot, .sf-slot.sf-open, .sf-twig, .sf-link, .sf-tail, .sf-stub, .sf-fan, .sf-branch, .sf-trunk, .sf-hub, .sf-project, .sf-hubname { transition:none; } .sf-reshaped .sf-ground, .sf-reshaped .sf-labels { animation:none; } }
+
+/* The ground: every line is a ribbon redrawn for the zoom, so it keeps its fine width on screen */
+.v-surface .sf-ground { position:absolute; inset:0; width:100%; height:100%; }
+.v-surface .sf-hub { fill:var(--panel); stroke:var(--trunk); stroke-width:1.25; vector-effect:non-scaling-stroke; opacity:var(--away); }
+.v-surface .sf-trunk { fill:var(--trunk); opacity:var(--away); }
+.v-surface .sf-fan, .v-surface .sf-tail, .v-surface .sf-twig { fill:var(--twig); }
+.v-surface .sf-link { fill:var(--trunk); }
+.v-surface .sf-stub { fill:var(--trunk); opacity:calc(var(--tone) * (1 - var(--board)) * (1 - var(--shown)) * var(--away)); }
+.v-surface .sf-tint { fill:hsl(var(--h) 50% var(--tint-l)); }
+.v-surface .sf-fan { opacity:calc(var(--tone) * max(var(--board), var(--shown)) * var(--away)); }
+.v-surface .sf-twig, .v-surface .sf-link { opacity:calc(var(--tone) * max(var(--board), var(--open)) * var(--away)); }
+.v-surface .sf-tail { opacity:calc(var(--tone) * (1 - var(--board)) * var(--shown) * (1 - var(--open)) * var(--away)); }
+
+/* The sheet: cards in world units, scaled by the camera. A slot places a card and shows it; the card itself carries the filter and wear. */
+.v-surface .sf-sheet { position:absolute; left:0; top:0; width:0; height:0; transform-origin:0 0; }
+.sf-slot { position:absolute; width:600px; height:160px; opacity:calc(max(var(--board), var(--open), var(--land)) * var(--away)); transform:scale(calc(.97 + .03 * max(var(--board), var(--open), var(--land)))); }
+.v-surface.sf-far .sf-slot:not(.sf-open):not(.sf-landing) { pointer-events:none; }
+.sf-card { position:absolute; inset:0; border-radius:calc(var(--hair) * 5 + 8px); background:color-mix(in srgb, var(--stage) var(--stage-wash), var(--panel)); cursor:pointer;
+  box-shadow:0 0 0 var(--hair) var(--line), 0 calc(var(--hair) * 1) calc(var(--hair) * 3) var(--card-shadow); }
+.sf-card:hover { box-shadow:0 0 0 var(--hair) var(--mute), 0 calc(var(--hair) * 2) calc(var(--hair) * 8) var(--card-shadow); }
+.sf-card.sf-focus { box-shadow:0 0 0 calc(var(--hair) * 1.5) var(--route), 0 calc(var(--hair) * 2) calc(var(--hair) * 8) var(--card-shadow); }
+/* A card lit up keeps its place and glows there */
+.sf-card.sf-glow { box-shadow:0 0 0 var(--hair) var(--route), 0 0 calc(var(--hair) * 12) calc(var(--hair) * 1.5) color-mix(in srgb, var(--route) 38%, transparent); }
+.sf-face { position:absolute; inset:0; overflow:hidden; opacity:0; transition:opacity .2s; }
+.v-surface[data-face="leaf"] .sf-leaf, .v-surface[data-face="title"] .sf-title,
+.v-surface[data-face="card"] .sf-regular, .v-surface[data-face="close"] .sf-near { opacity:1; }
+.sf-face b { display:-webkit-box; -webkit-box-orient:vertical; overflow:hidden; font-weight:500; }
+.sf-leaf { display:flex; align-items:center; padding:0 28px; }
+.sf-leaf b { -webkit-line-clamp:2; font-size:max(54px, calc(var(--hair) * 11.5)); line-height:1.2; letter-spacing:-.01em; }
+.sf-title { display:flex; align-items:center; padding:0 28px; }
+.sf-title b { -webkit-line-clamp:2; font-size:42px; line-height:52px; letter-spacing:-.005em; }
+.sf-regular { display:flex; flex-direction:column; justify-content:center; gap:4px; padding:0 26px; }
+.sf-regular b { -webkit-line-clamp:2; font-size:32px; line-height:38px; font-weight:550; flex:none; }
+.sf-regular footer { display:flex; align-items:center; gap:10px; flex:none; color:var(--mute); font-size:25px; line-height:32px; white-space:nowrap; }
+.sf-regular footer p { flex:1; min-width:0; margin:0; overflow:hidden; text-overflow:ellipsis; }
+.sf-regular .mark { width:14px; height:14px; }
+.sf-near { display:flex; flex-direction:column; padding:13px 18px 10px; }
+.sf-near b { -webkit-line-clamp:2; flex:none; font-size:20px; line-height:25px; font-weight:600; letter-spacing:-.005em; }
+/* The body ends on a whole line of text and the end of that line fades, so a card never shows half a line and text that runs on says so. */
+.sf-body { flex:1; min-height:0; margin-top:3px; }
+.sf-body > div { --ends:linear-gradient(#000 0 0) 0 0 / 100% calc(100% - 20px) no-repeat, linear-gradient(90deg, #000 64%, transparent 97%) 0 100% / 100% 20px no-repeat;
+  height:round(down, 100%, 20px); overflow:hidden; -webkit-mask:var(--ends); mask:var(--ends); }
+.sf-body p { margin:0; font-size:15.5px; line-height:20px; }
+.sf-body .sf-where { font-size:14.5px; color:var(--mute); }
+.sf-body .sf-where:first-child { color:var(--ink); font-size:15.5px; }
+.sf-near footer { display:flex; align-items:center; gap:6px; margin-top:2px; flex:none; color:var(--mute); font-size:13px; line-height:17px; white-space:nowrap; }
+.sf-near footer span { overflow:hidden; text-overflow:ellipsis; }
+.sf-near .mark { width:7px; height:7px; }
+
+.sf-card.think .sf-leaf, .sf-card.think .sf-title { padding-right:56px; }
+/* Where a moved piece came from. It costs the name one line, and never adds to the card. */
+.sf-origin { display:flex; align-items:center; gap:.45em; min-width:0; color:var(--mute); font-weight:400; white-space:nowrap; }
+.sf-origin span { overflow:hidden; text-overflow:ellipsis; }
+.sf-origin i, .sf-sample { flex:none; color:var(--warm); font-style:normal; font-weight:550; }
+.sf-sample { margin-left:.6em; font-size:11px; }
+.sf-tagged .sf-leaf, .sf-tagged .sf-title { flex-direction:column; align-items:stretch; justify-content:center; }
+.sf-tagged .sf-leaf b, .sf-tagged .sf-title b, .sf-tagged .sf-regular b { -webkit-line-clamp:1; }
+.sf-leaf .sf-origin { font-size:max(40px, calc(var(--hair) * 9.5)); line-height:1.15; }
+.sf-title .sf-origin { font-size:32px; line-height:40px; }
+.sf-regular .sf-origin { font-size:24px; line-height:30px; }
+.sf-near .sf-origin { flex:none; font-size:14px; line-height:19px; }
+/* The stage of a run, on the top edge of its first card, as a legend sits on the edge of a fieldset. It needs no room of its own, and it waits until the camera is close enough to read it. */
+.sf-run { position:absolute; left:calc(var(--hair) * 8 + 14px); top:0; z-index:1; display:none; padding:0 calc(var(--hair) * 4); transform:translateY(-50%); border-radius:calc(var(--hair) * 3); color:color-mix(in srgb, var(--stage) 72%, var(--mute)); background:var(--bg); font-size:calc(var(--hair) * 10); font-style:normal; font-weight:550; line-height:calc(var(--hair) * 13); white-space:nowrap; }
+.v-surface[data-face="card"] .sf-run, .v-surface[data-face="close"] .sf-run { display:block; }
+.sf-flag { display:none; position:absolute; right:14px; top:14px; z-index:1; width:calc(var(--hair) * 6.5); height:calc(var(--hair) * 6.5); border-radius:50%; background:var(--hot); }
+.v-surface[data-face="leaf"] .think .sf-flag, .v-surface[data-face="title"] .think .sf-flag, .v-surface[data-face="card"] .think .sf-flag { display:block; }
+
+/* The one mark a piece carries at rest when it has a weak link: a short tab lying on its top edge. It lies on the edge so that it can never touch the card's text, and it steps aside once a line is drawn there. Strong links need no mark, because they are the structure. */
+.sf-port { position:absolute; left:50%; top:0; width:calc(var(--hair) * 12); height:calc(var(--hair) * 2); margin:calc(var(--hair) * -1) 0 0 calc(var(--hair) * -6); border-radius:calc(var(--hair) * 1); background:var(--route); opacity:.7; transition:opacity .16s; }
+.sf-landing .sf-port { opacity:0; }
+
+/* Weak links are the only lines that cross the map. They lie over the cards, like a route on a map, and their soft edge in the colour of the ground keeps them readable where they cross one. */
+.v-surface .sf-routes { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.sf-route path { fill:none; stroke-linecap:round; }
+.sf-route .sf-casing { stroke:var(--bg); stroke-width:3.5; opacity:.6; }
+.sf-route .sf-line { stroke:var(--route); stroke-width:1.3; stroke-dasharray:0 4; }
+.sf-route.sf-fresh { animation:sf-appear .2s ease both; }
+.sf-route.sf-leaving { opacity:0; transition:opacity .12s ease; }
+@keyframes sf-appear { from { opacity:0; } }
+@media (prefers-reduced-motion: reduce) { .sf-route, .sf-strip { animation:none !important; transition:none !important; } }
+
+/* Labels keep their pixel size, as on a map */
+.v-surface .sf-labels { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.sf-lab { position:absolute; left:0; top:0; pointer-events:none; opacity:var(--away); }
+.sf-lab small { color:var(--mute); font-size:.84em; font-weight:400; font-variant-numeric:tabular-nums; }
+.sf-hubname { font-size:15px; font-weight:600; letter-spacing:-.005em; white-space:nowrap; }
+.sf-project { font-size:16px; font-weight:600; line-height:22px; letter-spacing:-.005em; white-space:nowrap; padding-bottom:3px; pointer-events:auto; cursor:pointer; }
+.sf-branch { width:var(--label-w); font-size:var(--label-size); font-weight:500; line-height:calc(var(--label-size) + 2.5px); padding-bottom:3px; text-wrap:balance; opacity:calc(var(--tone) * max(var(--board), var(--shown)) * var(--away)); pointer-events:auto; cursor:pointer; }
+.sf-branch.sf-left { text-align:right; }
+.sf-branch[style*="--h"] { color:hsl(var(--h) 46% var(--text-l)); }
+.v-surface.sf-far .sf-branch:not(.sf-shown) { pointer-events:none; }
+.sf-project:hover, .sf-branch:hover { color:var(--ink); }
+/* The small mark that opens an initiative's details. It stays out of sight until the branch is looked at, because beside a long name it would touch the first card. */
+.sf-count { position:relative; white-space:nowrap; }
+.sf-about { position:absolute; left:100%; top:50%; width:13px; height:13px; margin:-7px 0 0 5px; border-radius:50%; box-shadow:inset 0 0 0 1px var(--mute); color:var(--mute); font:italic 500 10px/13px Georgia, serif; text-align:center; opacity:0; pointer-events:none; }
+.sf-branch:hover .sf-about, .v-surface.sf-close-in .sf-about { opacity:1; pointer-events:auto; }
+.sf-about:hover { color:var(--ink); box-shadow:inset 0 0 0 1px var(--ink); }
+.sf-hot { display:inline-block; vertical-align:1px; width:7px; height:7px; margin-left:5px; border-radius:50%; background:var(--hot); }
+
+/* The controls float over the map */
+.v-surface .sf-bar { position:absolute; left:0; right:0; top:0; z-index:3; display:flex; align-items:center; justify-content:space-between; gap:24px; height:34px; padding:0 18px; background:var(--glass); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); border-bottom:1px solid var(--line); }
+.v-surface .hint { flex:0 999 auto; min-width:0; margin:0 0 0 auto; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; pointer-events:none; }
+.sf-crumbs { display:flex; flex:0 1 auto; min-width:0; align-items:center; gap:7px; font-size:13px; white-space:nowrap; }
+.sf-crumbs b { font-weight:600; overflow:hidden; text-overflow:ellipsis; }
+.sf-crumbs button { border:0; padding:0; color:var(--mute); background:none; border-radius:0; }
+.sf-crumbs button:hover { color:var(--ink); background:none; }
+.sf-crumbs i { width:5px; height:5px; flex:none; border-right:1.2px solid var(--mute); border-top:1.2px solid var(--mute); transform:rotate(45deg); opacity:.7; }
+/* The relationship controls sit at the end of the bar, and step left of the details when those are open */
+.sf-actions { position:relative; display:flex; flex:none; align-items:center; gap:16px; margin-left:auto; }
+.sf-action { border:0; padding:0; color:var(--mute); background:none; border-radius:0; font-size:12.5px; line-height:18px; white-space:nowrap; }
+.sf-action:hover, .sf-action[aria-expanded="true"] { color:var(--ink); background:none; }
+.sf-action small { font-size:.92em; font-variant-numeric:tabular-nums; opacity:.8; }
+.sf-arrange { display:flex; align-items:center; gap:7px; color:var(--mute); font-size:12.5px; white-space:nowrap; }
+.sf-arrange .sf-action[aria-pressed="true"] { color:var(--ink); font-weight:550; }
+.sf-unlight { display:flex; align-items:center; gap:6px; max-width:210px; overflow:hidden; color:var(--route); font-weight:550; text-overflow:ellipsis; }
+.v-surface .sf-unlight:hover { color:var(--route); }
+.sf-unlight i { position:relative; flex:none; width:9px; height:9px; }
+.sf-unlight i::before, .sf-unlight i::after { content:''; position:absolute; left:4px; top:0; width:1.3px; height:9px; background:currentColor; transform:rotate(45deg); }
+.sf-unlight i::after { transform:rotate(-45deg); }
+.sf-deep .hint { display:none; }
+.sf-weak-button::before { content:''; display:inline-block; vertical-align:3px; width:13px; height:0; margin-right:6px; border-top:1.5px dotted currentColor; }
+.sf-weak-button[aria-pressed="true"] { color:var(--ink); }
+.v-surface .sf-follow { color:var(--route); font-weight:550; }
+.v-surface .sf-follow:hover { color:var(--route); text-decoration:underline; text-underline-offset:3px; }
+.sf-drawer .sf-bar { padding-right:calc(440px + 18px); }
+.sf-drawer .hint { display:none; }
+.v-surface.sf-drawer .sf-tools { right:calc(440px + 16px); bottom:62px; }
+.sf-list { position:absolute; top:calc(100% + 9px); right:-8px; width:384px; padding:5px; border-radius:12px; background:var(--panel); box-shadow:0 0 0 1px var(--line), 0 12px 32px var(--card-shadow); cursor:default; }
+.sf-list[hidden] { display:none; }
+.sf-list button { display:block; width:100%; padding:8px 10px; border:0; border-radius:8px; text-align:left; }
+.sf-list button:hover { background:var(--soft); }
+.sf-list b { display:block; font-size:13px; font-weight:550; line-height:18px; text-wrap:pretty; }
+.sf-list span { display:block; color:var(--mute); font-size:12.5px; line-height:17px; text-wrap:pretty; }
+.sf-lights { width:272px; max-height:calc(100vh - 170px); overflow:auto; }
+.sf-lights h3 { margin:8px 10px 3px; color:var(--mute); font-size:11px; font-weight:500; letter-spacing:.05em; text-transform:uppercase; }
+.sf-lights h3:first-child { margin-top:5px; }
+.sf-list .sf-light { display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:4px 10px; }
+.sf-light b { font-weight:450; }
+.sf-light small { flex:none; color:var(--mute); font-size:12px; font-variant-numeric:tabular-nums; }
+
+/* The strip: the order of a chain, while the map behind it shows where the pieces live */
+.v-surface .sf-strip { position:absolute; left:50%; bottom:62px; z-index:3; display:flex; align-items:center; gap:10px; max-width:calc(100% - 420px); padding:7px; transform:translateX(-50%); cursor:default; border-radius:14px; background:var(--glass); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); box-shadow:0 0 0 1px var(--line), 0 8px 26px var(--card-shadow); }
+.sf-strip.sf-rising { animation:sf-rise .24s cubic-bezier(.2,.7,.2,1) both; }
+/* With the details open, the strip sits in the middle of what is left between the overview and the details, and the map's tools make room for it. */
+.v-surface.sf-drawer .sf-strip { left:calc((100% - 440px + 204px) / 2); max-width:calc(100% - 440px - 220px); }
+.v-surface.sf-drawer.sf-spot .sf-tools { display:none; }
+@keyframes sf-rise { from { opacity:0; transform:translate(-50%, 8px); } }
+.sf-steps { display:flex; align-items:center; gap:6px; min-width:0; }
+.sf-step { display:flex; flex:0 1 232px; flex-direction:column; justify-content:space-between; min-width:0; height:66px; padding:7px 10px 6px; border-radius:9px; background:var(--panel); box-shadow:0 0 0 1px var(--line); cursor:pointer; }
+.sf-step:hover { box-shadow:0 0 0 1px var(--mute); }
+.sf-step.sf-focus { box-shadow:0 0 0 1.5px var(--route); }
+.sf-step b { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; font-size:12.5px; font-weight:550; line-height:16px; }
+.sf-step footer { display:flex; align-items:center; gap:5px; color:var(--mute); font-size:11.5px; line-height:15px; white-space:nowrap; }
+.sf-step footer span { overflow:hidden; text-overflow:ellipsis; }
+.sf-step .mark { width:6px; height:6px; }
+.sf-then { flex:none; fill:var(--panel); stroke:var(--route); stroke-width:1.4; }
+.sf-then .sf-tip { fill:var(--route); stroke:none; }
+.sf-and { flex:none; color:var(--mute); font-size:12px; }
+.sf-leave { flex:none; padding:3px 8px; font-size:12px; color:var(--mute); }
+
+.v-surface .sf-mini { position:absolute; left:16px; bottom:16px; z-index:3; padding:6px; line-height:0; cursor:pointer; border-radius:11px; background:var(--glass); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); box-shadow:0 0 0 1px var(--line); }
+.sf-mini g { fill:none; stroke:var(--twig); stroke-width:.75; }
+.sf-mini rect:not(.sf-view) { fill:color-mix(in srgb, var(--ink) 16%, transparent); stroke:none; }
+.sf-mini ellipse { fill:var(--panel); }
+.sf-mini g.here { stroke:var(--ink); }
+.sf-mini g.here rect { fill:color-mix(in srgb, var(--ink) 42%, transparent); }
+.sf-mini path, .sf-mini ellipse { vector-effect:non-scaling-stroke; }
+.sf-mini .sf-view { fill:color-mix(in srgb, var(--ink) 9%, transparent); stroke:var(--ink); stroke-width:1; vector-effect:non-scaling-stroke; rx:60; }
+.v-surface .sf-tools { position:absolute; right:16px; bottom:16px; z-index:3; display:flex; gap:6px; }
+.sf-tools button { padding:5px 11px; font-size:12.5px; background:var(--glass); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
+.sf-tools button:hover { background:var(--panel); }

@@ -1,0 +1,136 @@
+/* Home */
+.v-home { --hm-gut:clamp(264px, 19.5vw, 292px); --hm-cols:var(--hm-gut) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,2fr) minmax(0,.8fr); --hm-card-h:92px; --hm-axis-h:34px; --hm-line-h:26px; }
+.v-home .hm-frame { position:relative; }
+.v-home .hm-hint { display:flex; justify-content:space-between; gap:24px; margin-bottom:6px; }
+.v-home .hm-key { display:flex; align-items:center; gap:6px; white-space:nowrap; }
+.v-home .hm-key i { width:7px; height:7px; border-radius:50%; }
+.v-home .hm-key i.think { background:var(--hot); }
+.v-home .hm-key i.quick { margin-left:10px; background:var(--warm); }
+
+/* The stage columns: hairlines that run from the axis all the way down through the board */
+.v-home .hm-rules { position:absolute; inset:0; display:grid; grid-template-columns:var(--hm-cols); pointer-events:none; }
+.v-home .hm-rules i { border-left:1px solid var(--line); }
+.v-home .hm-rules i:first-child { border-left:0; }
+
+.v-home .hm-axis { position:sticky; top:var(--hm-top); z-index:3; display:grid; grid-template-columns:var(--hm-cols); align-items:center; height:var(--hm-axis-h); margin:0 -18px; padding:0 18px; background:var(--bg); border-bottom:1px solid var(--line); }
+.v-home .hm-stage { display:flex; align-items:center; gap:7px; padding-left:9px; font-size:12.5px; font-weight:600; }
+.v-home .hm-stage em { font-style:normal; font-weight:400; color:var(--mute); }
+.v-home .hm-fold-all { padding:0 0 0 22px; border:0; background:none; color:var(--mute); font-size:12px; }
+.v-home .hm-fold-all:hover { background:none; color:var(--ink); }
+
+/* A cell of any row sits in its stage column */
+.v-home .hm-cell { position:relative; min-width:0; padding:0 8px; }
+.v-home .hm-cell-exploring { grid-column:2; }
+.v-home .hm-cell-planned { grid-column:3; }
+.v-home .hm-cell-building { grid-column:4; }
+.v-home .hm-cell-reviewing { grid-column:5; }
+.v-home .hm-cell-landed { grid-column:6; }
+
+/* A ribbon at rest: one line. The bright line runs to the furthest stage the plan has reached, then fades. */
+.v-home .hm-ribbons { position:relative; padding:6px 0 8px; }
+.v-home .hm-ribbon { position:relative; display:grid; grid-template-columns:var(--hm-cols); min-height:var(--hm-line-h); cursor:pointer; }
+.v-home .hm-ribbon > * { grid-row:1; }
+.v-home .hm-ribbon.hm-next-project { margin-top:6px; }
+.v-home .hm-ribbon:not(.is-open):hover { background:color-mix(in srgb, var(--hm-c) 9%, transparent); }
+.v-home .hm-tail, .v-home .hm-reach { align-self:center; height:2px; pointer-events:none; }
+.v-home .hm-tail { grid-column:2 / -1; background:color-mix(in srgb, var(--hm-c) 16%, transparent); }
+.v-home .hm-reach { grid-column:2 / var(--hm-reach-end); background:color-mix(in srgb, var(--hm-c) 62%, var(--bg)); mask-image:linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+.v-home .hm-head { grid-column:1; display:flex; align-items:center; gap:6px; min-width:0; height:var(--hm-line-h); padding-right:8px; }
+.v-home .hm-head h3 { flex:1; min-width:0; margin:0; font-size:12.5px; font-weight:500; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-home .hm-fold { flex:none; display:grid; place-items:center; width:16px; height:16px; padding:0; border:0; border-radius:4px; background:none; }
+.v-home .hm-fold:hover { background:none; }
+.v-home .hm-fold i { width:0; height:0; border-left:6px solid var(--hm-c); border-top:4px solid transparent; border-bottom:4px solid transparent; transition:transform .12s; }
+.v-home .is-open .hm-fold i { transform:rotate(90deg); }
+
+/* The tiny bullet graph at rest. A plan with nothing measured keeps an empty outline, so the bullets stay in one column. */
+.v-home .hm-measure { flex:none; width:34px; }
+.v-home .hm-measure .prog { display:none; }
+.v-home .hm-measure .bullet { height:8px; margin:0; background:color-mix(in srgb, var(--hm-c) 12%, var(--bg)); }
+.v-home .hm-measure .bullet .band { background:color-mix(in srgb, var(--hm-c) 38%, var(--bg)); }
+.v-home .hm-measure .bullet .val { top:2px; bottom:2px; }
+.v-home .hm-measure:not(:has(.bullet))::before { content:''; display:block; height:8px; border:1px dashed color-mix(in srgb, var(--hm-c) 50%, var(--bg)); border-radius:2px; }
+
+/* A mark: one piece on the line. Work that needs the reader is a bright dot, and the rest are small knots in the plan's colour,
+   so a busy plan stays quiet. Its box is the whole height of the line so it is easy to hit, and boxes shrink when a cell is full. */
+.v-home .hm-ribbon:not(.is-open) .hm-cell { display:flex; align-items:center; padding:0 14px 0 7px; }
+.v-home .hm-mark { position:relative; flex:0 1 12px; min-width:0; height:var(--hm-line-h); }
+.v-home .hm-mark:last-child { flex:none; width:12px; }
+.v-home .hm-mark::before { content:''; position:absolute; left:6px; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; border-radius:50%; background:color-mix(in srgb, var(--hm-c) 80%, var(--ink)); transition:transform .1s; }
+.v-home .hm-mark.think::before, .v-home .hm-mark.quick::before { width:10px; height:10px; margin:-5px 0 0 -5px; outline:1.5px solid var(--bg); }
+.v-home .hm-mark.think::before { background:var(--hot); }
+.v-home .hm-mark.quick::before { background:var(--warm); }
+.v-home .hm-mark:hover { z-index:1; }
+.v-home .hm-mark:hover::before { transform:scale(1.4); }
+
+/* An open ribbon: the line widens into a band the cards sit on */
+.v-home .hm-ribbon.is-open { margin-top:4px; margin-bottom:6px; }
+.v-home .hm-ribbon.is-moving { overflow:hidden; }
+.v-home .is-open .hm-tail, .v-home .is-open .hm-reach { align-self:stretch; height:auto; grid-column-start:1; }
+.v-home .is-open .hm-tail { background:color-mix(in srgb, var(--hm-c) 5%, transparent); }
+.v-home .is-open .hm-reach { background:color-mix(in srgb, var(--hm-c) 15%, transparent); box-shadow:inset 3px 0 0 var(--hm-c); mask-image:linear-gradient(to right, #000 calc(100% - 120px), transparent); }
+.v-home .is-open .hm-head { flex-wrap:wrap; align-content:flex-start; height:auto; padding:17px 14px 12px 0; }
+.v-home .is-open .hm-head h3 { font-weight:650; font-size:13px; }
+.v-home .is-open .hm-head p { flex:0 0 100%; margin:2px 0 8px; padding-left:22px; color:color-mix(in srgb, var(--ink) 70%, var(--hm-c)); font-size:12px; line-height:1.3; }
+.v-home .is-open .hm-measure { flex:0 0 100%; width:100%; padding-left:22px; }
+.v-home .is-open .hm-measure .prog { display:block; margin-top:3px; color:color-mix(in srgb, var(--ink) 62%, var(--hm-c)); font-size:11px; line-height:1.25; }
+.v-home .is-open .hm-measure .bullet { height:10px; }
+.v-home .hm-details { flex:0 0 100%; margin-top:6px; padding-left:22px; color:color-mix(in srgb, var(--ink) 62%, var(--hm-c)); font-size:11.5px; line-height:1.25; cursor:pointer; }
+.v-home .hm-details:hover { color:var(--ink); text-decoration:underline; }
+.v-home .is-open .hm-measure:not(:has(.bullet))::before { display:none; }
+.v-home .is-open .hm-cell { padding-top:9px; padding-bottom:10px; }
+
+/* The line that stands for the plans past the first few */
+.v-home .hm-more { display:grid; grid-template-columns:var(--hm-cols); align-items:center; width:100%; height:var(--hm-line-h); padding:0; border:0; border-radius:0; color:var(--mute); text-align:left; }
+.v-home .hm-more:hover { color:var(--ink); }
+.v-home .hm-more-name { padding-left:22px; font-size:12.5px; }
+
+/* The board below */
+.v-home .hm-divider { position:relative; z-index:1; display:flex; align-items:center; height:28px; margin:0 -18px; padding:0 18px 0 40px; background:var(--bg); border-top:1px solid var(--line); border-bottom:1px solid var(--line); color:var(--mute); font-size:12px; }
+.v-home .hm-lane { position:relative; display:grid; grid-template-columns:var(--hm-cols); padding:10px 0 12px; border-bottom:1px solid var(--line); }
+.v-home .hm-lane-head { position:sticky; top:calc(var(--hm-top) + var(--hm-axis-h) + 10px); align-self:start; display:flex; align-items:center; gap:7px; height:22px; padding:0; border:0; border-radius:0; font-size:13px; text-align:left; }
+.v-home .hm-lane-head:hover { background:none; }
+.v-home .hm-lane-head b { font-weight:600; }
+.v-home .hm-lane-head em { font-style:normal; color:var(--mute); }
+.v-home .hm-chev { width:0; height:0; margin:0 5px 0 5px; border-left:6px solid var(--mute); border-top:4px solid transparent; border-bottom:4px solid transparent; transform:rotate(90deg); transition:transform .12s; }
+.v-home .is-folded .hm-chev { transform:none; }
+.v-home .hm-lane.is-folded { padding:3px 0; }
+.v-home .hm-count { color:var(--mute); font-size:12px; font-variant-numeric:tabular-nums; line-height:22px; padding-left:1px; }
+
+.v-home .hm-lane .hm-cell, .v-home .is-open .hm-cell { display:grid; grid-template-columns:minmax(0,1fr); align-content:start; align-items:start; gap:10px; }
+.v-home .hm-lane:not(.is-folded) .hm-cell-reviewing, .v-home .is-open .hm-cell-reviewing { grid-template-columns:repeat(2,minmax(0,1fr)); }
+
+/* A card */
+.v-home .hm-card { position:relative; display:flex; flex-direction:column; width:100%; height:var(--hm-card-h); padding:8px 11px 7px; background:var(--panel); border:1px solid var(--line); border-radius:9px; box-shadow:0 1px 2px rgba(0,0,0,.05); cursor:pointer; }
+.v-home .hm-card:hover { border-color:var(--mute); }
+.v-home .hm-card h4 { margin:0; font-size:13px; font-weight:550; line-height:1.28; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.v-home .hm-card p { margin:2px 0 0; color:var(--mute); font-size:11.5px; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-home .hm-card footer { display:flex; align-items:center; gap:5px; margin-top:auto; color:var(--mute); font-size:11px; line-height:1.3; }
+.v-home .hm-need { display:none; width:7px; height:7px; border-radius:50%; flex:none; }
+.v-home .think .hm-need { display:block; background:var(--hot); }
+.v-home .quick .hm-need { display:block; background:var(--warm); }
+
+/* A pile */
+.v-home .hm-pile { position:relative; display:block; width:100%; padding:0 0 calc(var(--hm-sheets) * 5px); background:none; border:0; border-radius:0; text-align:left; isolation:isolate; }
+.v-home .hm-pile:hover { background:none; }
+.v-home .hm-pile > span { position:relative; z-index:1; display:grid; grid-template-columns:1fr auto; grid-template-rows:auto auto 1fr; column-gap:8px; height:var(--hm-card-h); padding:8px 11px 7px; background:var(--panel); border:1px solid var(--line); border-radius:9px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+.v-home .hm-pile:hover > span { border-color:var(--mute); }
+.v-home .hm-pile.is-open { visibility:hidden; }
+.v-home .hm-pile b { font-size:13px; font-weight:550; line-height:1.28; }
+.v-home .hm-pile em { font-style:normal; font-size:15px; font-weight:600; line-height:1.1; color:var(--mute); font-variant-numeric:tabular-nums; }
+.v-home .hm-pile u { grid-column:1 / -1; margin-top:2px; color:var(--mute); font-size:11.5px; line-height:1.3; text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-home .hm-pile small { grid-column:1 / -1; grid-row:3; align-self:end; display:flex; align-items:center; gap:5px; color:var(--mute); font-size:11px; line-height:1.3; }
+.v-home .hm-pile > i { position:absolute; top:0; height:var(--hm-card-h); background:var(--panel); border:1px solid color-mix(in srgb, var(--line) 75%, var(--mute)); border-radius:9px; }
+.v-home .hm-pile > i:nth-of-type(1) { left:5px; right:5px; transform:translateY(5px); z-index:0; }
+.v-home .hm-pile > i:nth-of-type(2) { left:10px; right:10px; transform:translateY(10px); z-index:-1; }
+.v-home .hm-pile > i:nth-of-type(3) { left:15px; right:15px; transform:translateY(15px); z-index:-2; }
+.v-home .hm-landed > span, .v-home .hm-landed > i { background:var(--bg); box-shadow:none; }
+.v-home .hm-landed b { color:var(--mute); font-weight:500; }
+
+/* The fan: a pile's cards spread over the dimmed board. A fan too tall for the window scrolls. */
+.v-home .hm-scrim { position:fixed; inset:0; z-index:3; background:color-mix(in srgb, var(--bg) 88%, transparent); opacity:0; pointer-events:none; transition:opacity .18s; }
+.v-home .hm-scrim.on { opacity:1; pointer-events:auto; }
+.v-home .hm-fan { position:fixed; z-index:4; display:none; gap:10px; align-content:start; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; }
+.v-home .hm-fan:not(:empty) { display:grid; }
+.v-home .hm-fan.scrolls { padding-bottom:28px; mask-image:linear-gradient(to bottom, #000 calc(100% - 36px), transparent); }
+.v-home .hm-fan .hm-card { box-shadow:0 2px 8px rgba(0,0,0,.12); }
+

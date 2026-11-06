@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- PROTOTYPE, throwaway. Five views of one person's work, switchable with ?view=.
+     All data is invented: see generate-data.mjs. It tests layouts and words, not how the data gets here. Changes live in localStorage only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Work (prototype)</title>
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<div class="top">
+  <h1>Work</h1>
+  <span class="note">Throwaway. All data here is invented: Northwind Market and everyone in it are made up. Regroup anything in its details. Your changes stay in this browser.</span>
+  <label class="toggle" title="Neglected work fades and yellows, the longer it sits"><input type="checkbox" id="wear"> Wear</label>
+  <select id="filter" title="Dim everything else"><option value="">Show everything</option><option value="think">Only real thinking</option><option value="quick">Only quick calls</option><option value="stalled">Only stalled</option></select>
+  <div class="scribbles"><input id="scribble" placeholder="Scribble…" autocomplete="off"><div class="list" id="scribbleList"></div></div>
+  <input id="find" placeholder="Find…" autocomplete="off">
+  <button id="reset" title="Forget every change made here">Reset</button>
+</div>
+<main id="main"></main>
+<aside class="drawer" id="drawer" hidden></aside>
+<div class="switch"><button id="prev">←</button><select id="viewPick"></select><button id="next">→</button></div>
+<script src="data.js"></script>
+<script src="delivered.js"></script>
+<script src="inbox.js"></script>
+<script src="shell.js"></script>
+<script>
+  // Each view lives in its own file. A file that is missing just leaves its view out.
+  const FILES = ['home','surface','tracks','list','items'];
+  Promise.all(FILES.map(f => new Promise(done => {
+    const s = document.createElement('script'); s.src = `views/${f}.js`; s.onload = s.onerror = done; document.body.append(s);
+  }))).then(() => Shell.start(FILES));
+</script>
+</body>
+</html>

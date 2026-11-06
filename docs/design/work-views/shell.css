@@ -1,0 +1,70 @@
+
+  :root { --bg:#f6f5f2; --panel:#fff; --ink:#1d1d1b; --mute:#77756f; --line:#e3e1db; --soft:#efeee9;
+    --s-exploring:#7c3aed; --s-planned:#2563eb; --s-building:#c2410c; --s-reviewing:#15803d; --s-landed:#a8a59c;
+    --hot:#c2410c; --warm:#2563eb; --off:#d9d7d0; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --panel:#202024; --ink:#ecebe7; --mute:#94928b; --line:#323238; --soft:#28282d;
+    --s-exploring:#a78bfa; --s-planned:#60a5fa; --s-building:#fb923c; --s-reviewing:#4ade80; --s-landed:#6f6d68;
+    --hot:#fb923c; --warm:#60a5fa; --off:#3a3a40; } }
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body { min-height:100vh; }
+  body { background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; }
+  button,select,input,textarea { font:inherit; color:inherit; }
+  button { background:none; border:1px solid var(--line); border-radius:7px; padding:5px 10px; cursor:pointer; }
+  button:hover { background:var(--soft); }
+  select,input { background:var(--panel); border:1px solid var(--line); border-radius:7px; padding:5px 8px; }
+  .top { position:sticky; top:0; left:0; z-index:5; display:flex; gap:10px; align-items:center; padding:9px 18px; background:var(--bg); border-bottom:1px solid var(--line); }
+  .top h1 { font-size:15px; margin:0; font-weight:600; }
+  .top .note { color:var(--mute); font-size:12px; flex:1; line-height:1.3; }
+  .top input:not([type=checkbox]) { width:130px; }
+  main { padding:14px 18px 80px; }
+  .hint { color:var(--mute); font-size:12.5px; margin-bottom:12px; }
+  .dim { opacity:.22; }
+  .mark { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
+  .bar { height:4px; margin-top:4px; border-radius:2px; background:var(--soft); overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--s-reviewing); }
+  .prog { color:var(--mute); font-size:11.5px; }
+  .proj { font-size:12px; font-weight:600; color:var(--mute); text-transform:uppercase; letter-spacing:.05em; margin:18px 0 8px; }
+  .proj:first-child { margin-top:0; }
+
+.chip { display:block; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:3px 6px; margin-bottom:4px; font-size:12px; line-height:1.25; cursor:pointer; }
+.chip:hover { border-color:var(--mute); }
+.chip.think { border-left:3px solid var(--hot); }
+.chip.quick { border-left:3px solid var(--warm); }
+  /* Drawer */
+  .drawer { position:fixed; top:0; right:0; bottom:0; width:440px; max-width:100vw; background:var(--panel); border-left:1px solid var(--line); padding:18px 20px 80px; overflow:auto; z-index:9; box-shadow:-8px 0 24px rgba(0,0,0,.08); }
+  .drawer[hidden] { display:none; }
+  .drawer h2 { margin:0 44px 4px 0; font-size:17px; line-height:1.25; }
+  .drawer .x { position:absolute; right:14px; top:12px; }
+  .lbl2 { color:var(--mute); font-size:11px; text-transform:uppercase; letter-spacing:.05em; margin-top:13px; }
+  .words { display:grid; grid-template-columns:auto 1fr; gap:6px 10px; align-items:center; margin-top:6px; }
+  .link { display:block; color:inherit; font-size:13px; padding:1px 0; }
+  .link em { color:var(--mute); font-style:normal; }
+  .drow { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  textarea { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:7px; padding:6px 8px; min-height:52px; }
+  .up { cursor:pointer; color:var(--mute); font-size:12.5px; }
+  .up:hover { color:var(--ink); }
+
+  .scribbles { position:relative; }
+  .scribbles .list { display:none; position:absolute; top:34px; left:0; width:280px; background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:6px 10px; font-size:13px; box-shadow:0 6px 18px rgba(0,0,0,.12); }
+  .scribbles:focus-within .list { display:block; }
+  .scribbles .list div { padding:3px 0; border-top:1px solid var(--soft); }
+  .scribbles .list div:first-child { border-top:0; color:var(--mute); font-size:12px; }
+
+  /* Switcher: clearly not part of the design under test */
+  .switch { position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:8; display:flex; gap:8px; align-items:center; background:#111; color:#fff; padding:6px 12px; border-radius:999px; box-shadow:0 6px 20px rgba(0,0,0,.35); font-size:13px; white-space:nowrap; }
+  .switch button { border:0; color:#fff; padding:3px 9px; border-radius:999px; }
+  .switch button:hover { background:#333; }
+  .switch select { background:#222; color:#fff; border:0; border-radius:999px; padding:3px 8px; }
+
+/* Add-ons: they work on any element that carries api.cls(w). */
+.wear1 { filter:saturate(.75) sepia(.12); }
+.wear2 { filter:saturate(.5) sepia(.28); opacity:.8; }
+.wear3 { filter:saturate(.3) sepia(.45); opacity:.62; }
+.fog { filter:blur(1.6px) saturate(.6); opacity:.5; transition:filter .15s, opacity .15s; }
+.fog:hover { filter:none; opacity:1; }
+.toggle { display:flex; gap:4px; align-items:center; font-size:12.5px; color:var(--mute); cursor:pointer; white-space:nowrap; }
+.bullet { position:relative; height:12px; border-radius:2px; background:var(--soft); overflow:hidden; margin-top:4px; }
+.bullet .band { position:absolute; top:0; bottom:0; left:0; background:var(--line); }
+.bullet .val { position:absolute; left:0; top:3px; bottom:3px; background:var(--ink); }
+.bullet .tgt { position:absolute; top:1px; bottom:1px; width:2px; background:var(--hot); }

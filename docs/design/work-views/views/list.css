@@ -1,0 +1,58 @@
+/* List */
+.v-list { --lst-reading:720px; --lst-drawer:446px; --lst-filters-height:36px; --lst-heading-height:32px; --lst-gutter:16px; --lst-stage-width:68px; --lst-age-width:36px; --lst-inset:8px;
+  max-width:var(--lst-reading);
+  /* Centred, unless the details drawer would then cover the right of the rows. The column never moves when the drawer opens. */
+  margin-left:max(0px, min((100% - var(--lst-reading)) / 2, 100% - var(--lst-reading) - var(--lst-drawer))); }
+
+/* The filters: one line of plain words that stays in view. The chosen one changes colour, not weight, so its neighbours never shift. */
+.v-list .lst-filters { position:sticky; top:var(--lst-top); z-index:3; display:flex; gap:14px; align-items:center; height:var(--lst-filters-height); margin:-14px calc(-1 * var(--lst-inset)) 0; padding-left:calc(var(--lst-gutter) + var(--lst-inset)); overflow-x:auto; scrollbar-width:none; background:var(--bg); font-size:12.5px; white-space:nowrap; }
+.v-list .lst-filter { padding:0; border:0; border-radius:0; background:none; color:var(--mute); }
+.v-list .lst-filter:hover { background:none; color:var(--ink); }
+.v-list .lst-filter:focus-visible { outline:1px solid var(--mute); outline-offset:3px; }
+.v-list .lst-filter em { display:inline-block; margin-left:4px; font-style:normal; font-size:11.5px; font-variant-numeric:tabular-nums; opacity:.7; }
+.v-list .lst-filter.is-on { color:var(--ink); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:5px; }
+
+/* Every line shares one grid, so titles, stage words and ages each sit in one column down the whole page */
+.v-list .lst-row, .v-list .lst-line, .v-list .lst-heading { display:grid; grid-template-columns:var(--lst-gutter) minmax(0,1fr) var(--lst-stage-width) var(--lst-age-width); align-items:baseline; margin:0 calc(-1 * var(--lst-inset)); padding-inline:var(--lst-inset); border-radius:6px; outline:0; cursor:pointer; scroll-margin:calc(var(--lst-top) + var(--lst-filters-height) + var(--lst-heading-height) + 4px) 0 76px; }
+.v-list .lst-row:hover, .v-list .lst-line:hover, .v-list [data-fold].lst-heading:hover { background:color-mix(in srgb, var(--soft) 55%, var(--bg)); }
+.v-list [tabindex]:focus, body:has(#drawer:not([hidden])) .v-list .is-highlighted { background:var(--soft); }
+
+.v-list .lst-gutter { align-self:stretch; display:flex; align-items:center; }
+.v-list .lst-text { grid-column:2; min-width:0; padding-right:14px; }
+.v-list .lst-stage { grid-column:3; color:var(--mute); font-size:12px; }
+.v-list .lst-age { grid-column:4; color:var(--mute); font-size:12px; text-align:right; font-variant-numeric:tabular-nums; }
+
+/* A row at rest */
+.v-list .lst-row { padding-block:5px; }
+.v-list .lst-row .lst-gutter { align-self:start; height:20px; }
+.v-list .lst-row .lst-text > * { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-list .lst-row b { font-weight:450; font-size:14px; line-height:20px; }
+.v-list .lst-row small { color:var(--mute); font-size:12.5px; line-height:17px; }
+.v-list .lst-plan { width:6px; height:6px; border-radius:50%; background:var(--lst-plan-colour); }
+
+/* Stream and landed lines, and what they unfold */
+.v-list .lst-line { padding-block:5px; color:var(--mute); font-size:13px; line-height:18px; }
+.v-list .lst-line:hover { color:var(--ink); }
+.v-list .lst-line .lst-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.v-list .lst-nested { padding-left:calc(var(--lst-inset) + var(--lst-gutter)); }
+
+/* Headings */
+.v-list .lst-section { margin-top:12px; }
+.v-list .lst-section:first-child { margin-top:0; }
+.v-list .lst-project { position:sticky; top:calc(var(--lst-top) + var(--lst-filters-height)); z-index:2; height:var(--lst-heading-height); align-items:center; border-radius:0; background:var(--bg); font-size:13px; font-weight:600; box-shadow:0 1px 0 var(--line); }
+.v-list .lst-project .lst-gutter { align-self:center; }
+.v-list .lst-project .lst-age { font-weight:400; }
+.v-list .lst-heading em { margin-left:8px; color:var(--mute); font-size:12px; font-style:normal; font-weight:400; }
+.v-list .lst-group { margin-top:8px; }
+/* A run of folded plans reads as one short list, as tight as the fold lines below it */
+.v-list .lst-group:has(> [aria-expanded="false"]) + .lst-group:has(> [aria-expanded="false"]) { margin-top:0; }
+.v-list .lst-subheading { padding-block:5px; align-items:center; color:var(--mute); font-size:12.5px; font-weight:500; line-height:18px; }
+.v-list .lst-subheading:hover { color:var(--ink); }
+.v-list .lst-details { display:none; grid-column:3; font-size:12px; font-weight:400; color:var(--mute); white-space:nowrap; justify-self:end; padding-right:8px; }
+.v-list .lst-details:hover { color:var(--ink); text-decoration:underline; }
+.v-list .lst-heading:hover .lst-details, .v-list .lst-heading:focus .lst-details { display:block; }
+
+.v-list .lst-chevron { width:0; height:0; border-left:5px solid var(--lst-plan-colour, var(--mute)); border-top:3.5px solid transparent; border-bottom:3.5px solid transparent; transition:transform .12s; }
+.v-list [aria-expanded="true"] .lst-chevron { transform:rotate(90deg); }
+
+.v-list .lst-empty { margin:14px 0 0; padding-left:var(--lst-gutter); color:var(--mute); }

@@ -1,0 +1,120 @@
+/* Track arrangement. The scroller holds one wide sheet; track headers and the ruler stick to its edges. */
+.v-tracks { --clip-l:86%; --clip-s:42%; --edge-l:58%; --tail-l:74%; --done-l:92%; --pale-l:96%; --done-ink:color-mix(in srgb, var(--ink) 74%, var(--panel)); --weekend:rgba(0,0,0,.016); margin-bottom:-70px; }
+@media (prefers-color-scheme: dark) { .v-tracks { --clip-l:30%; --clip-s:32%; --edge-l:52%; --tail-l:38%; --done-l:23%; --pale-l:18%; --weekend:rgba(255,255,255,.016); } }
+
+/* The bar above the timeline: the key and the plain meaning of start on the left, zoom on the right */
+.v-tracks .tk-bar { display:flex; align-items:center; gap:18px; margin-bottom:10px; }
+.v-tracks .tk-legend { flex:1; min-width:0; }
+.v-tracks .tk-legend .hint { margin:2px 0 0; font-size:12px; line-height:1.35; }
+.v-tracks .key { display:flex; flex-wrap:wrap; gap:2px 16px; color:var(--mute); font-size:12px; line-height:1.35; }
+.v-tracks .key span { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.v-tracks .key i { display:inline-block; width:18px; height:10px; border-radius:2px; }
+.v-tracks .key .k-open { background:var(--off); }
+.v-tracks .key .k-tail { width:14px; height:1px; margin-left:-5px; border-radius:0; background:var(--mute); opacity:.5; }
+.v-tracks .key .k-delivered { background:color-mix(in srgb, var(--off) 55%, var(--panel)); box-shadow:inset -2px 0 0 color-mix(in srgb, var(--mute) 70%, var(--panel)); }
+.v-tracks .key .k-pale { background:color-mix(in srgb, var(--off) 30%, var(--panel)); box-shadow:inset 0 0 0 1px var(--off); }
+.v-tracks .key .k-ticks { width:15px; border-radius:0; background:repeating-linear-gradient(to right, color-mix(in srgb, var(--mute) 70%, var(--panel)) 0 3px, transparent 3px 6px); }
+.v-tracks .tk-zoom { display:flex; flex:none; align-items:center; gap:4px; }
+.v-tracks .tk-zoom .in-view { margin-right:6px; color:var(--mute); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.v-tracks .tk-zoom button { min-width:27px; height:24px; padding:0 7px; font-size:12.5px; line-height:1; color:var(--mute); }
+
+.v-tracks .scroller { position:relative; overflow-x:auto; overflow-y:scroll; background:var(--panel); border:1px solid var(--line); border-radius:9px; overscroll-behavior:contain; }
+.v-tracks .sheet { position:relative; }
+.v-tracks .sheet-end { display:flex; height:56px; }
+
+.v-tracks .head { position:sticky; left:0; z-index:3; flex:none; width:var(--head); background:var(--panel); border-right:1px solid var(--line); }
+/* Whatever scrolls under the header fades out, so a name cut by the edge does not end in half a letter */
+.v-tracks .track .head::after, .v-tracks .ruler .head::after { content:""; position:absolute; left:100%; top:0; bottom:0; width:16px; background:linear-gradient(to right, var(--panel), transparent); pointer-events:none; }
+
+/* The ruler has two lines: the day or month above, the finer marks below */
+.v-tracks .ruler { position:sticky; top:0; z-index:5; display:flex; height:38px; background:var(--panel); border-bottom:1px solid var(--line); }
+.v-tracks .ruler .head { display:flex; align-items:flex-end; padding:0 10px 5px 12px; z-index:6; }
+.v-tracks .ticks { position:relative; flex:1; color:var(--mute); font-size:11px; font-variant-numeric:tabular-nums; }
+.v-tracks .stretch { position:absolute; top:0; height:19px; padding-top:3px; border-left:1px solid var(--line); color:var(--ink); line-height:15px; }
+.v-tracks .stretch span { position:sticky; left:calc(var(--head) + 6px); display:inline-block; padding-left:5px; white-space:nowrap; }
+.v-tracks .mark { position:absolute; top:19px; height:19px; padding:2px 0 0 5px; border-left:1px solid var(--line); line-height:15px; white-space:nowrap; }
+.v-tracks .mark.strong { color:var(--ink); }
+.v-tracks .ticks .today { position:absolute; top:10px; padding:1px 7px; color:var(--panel); background:var(--ink); border-radius:4px; font-weight:600; line-height:15px; transform:translateX(-50%); }
+.v-tracks .ticks .today::after { content:""; position:absolute; left:50%; top:100%; width:1px; height:11px; background:var(--ink); }
+
+/* The three numbers share their columns between the ruler and every track */
+.v-tracks .numbers { display:grid; grid-template-columns:62px 78px 1fr; width:100%; color:var(--mute); font-size:11px; line-height:15px; font-variant-numeric:tabular-nums; }
+
+.v-tracks .grid { position:absolute; left:var(--head); top:38px; right:0; bottom:0; z-index:0; overflow:hidden; pointer-events:none; }
+.v-tracks .grid i { position:absolute; top:0; bottom:0; width:1px; background:var(--soft); }
+.v-tracks .grid i.strong { background:var(--line); }
+.v-tracks .grid b { position:absolute; top:0; bottom:0; background:var(--weekend); }
+
+.v-tracks .section { display:flex; height:21px; border-bottom:1px solid var(--line); }
+.v-tracks .section .head { padding:4px 10px 0; color:var(--mute); font-size:10.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; }
+.v-tracks .section .lane { flex:1; }
+
+.v-tracks .track { --h:40; display:flex; border-bottom:1px solid var(--line); }
+.v-tracks .track .head { padding:0 10px 0 12px; box-shadow:inset 3px 0 0 hsl(var(--h) var(--clip-s) var(--edge-l)); line-height:1.25; }
+.v-tracks .track.neutral .head { box-shadow:none; }
+.v-tracks .head-text { position:sticky; top:38px; padding:7px 0 6px; }
+.v-tracks .track .head b { display:block; overflow:hidden; font-size:12.5px; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+.v-tracks .track .head b[data-init] { cursor:pointer; }
+.v-tracks .track .head b[data-init]:hover { text-decoration:underline; text-underline-offset:2px; }
+.v-tracks .track .numbers { color:var(--ink); }
+
+.v-tracks .lane { position:relative; flex:1; }
+
+/* A piece reaches from its start to the end of its tail, so its name can stay on screen along the tail.
+   Each piece stacks on its own, so a clip drawn later covers the name of a clip it overlaps. */
+.v-tracks .piece { position:absolute; height:calc(var(--row) - 2px); margin-top:6px; color:inherit; cursor:pointer; font-size:11.5px; line-height:20px; text-decoration:none; isolation:isolate; }
+.v-tracks .clip { position:absolute; left:0; top:0; height:100%; border-radius:3px; background:hsl(var(--h) var(--clip-s) var(--clip-l)); }
+.v-tracks .neutral .clip { background:var(--off); }
+.v-tracks .piece.think .clip { box-shadow:inset 3px 0 0 var(--hot); }
+.v-tracks .piece.quick .clip { box-shadow:inset 3px 0 0 var(--warm); }
+.v-tracks .piece.landed .clip { background:none; box-shadow:inset 0 0 0 1px hsl(var(--h) var(--clip-s) var(--edge-l)); }
+.v-tracks .neutral .piece.landed .clip { box-shadow:inset 0 0 0 1px var(--mute); }
+.v-tracks .piece.landed .name { color:var(--mute); }
+.v-tracks .piece:hover .clip { filter:brightness(.95); }
+/* A name and its plate share one grid cell, so they scroll as one. The plate lies under the clip and over the tail:
+   it blanks the tail once the name rides past the clip, and the clip hides it until then. */
+.v-tracks .piece { display:grid; grid-template-columns:100%; }
+.v-tracks .name, .v-tracks .plate { position:sticky; left:calc(var(--head) + 6px); grid-area:1/1; justify-self:start; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.v-tracks .plate { padding-right:6px; color:transparent; background:var(--panel); }
+.v-tracks .name.right, .v-tracks .name.left { color:var(--mute); }
+.v-tracks .delivered .name.right { color:var(--done-ink); }
+.v-tracks .name.left { position:absolute; top:0; left:auto; right:calc(100% + 6px); text-align:right; }
+.v-tracks .piece:hover .name { color:var(--ink); }
+.v-tracks .tail { position:absolute; right:0; top:calc(50% - .5px); height:1px; background:hsl(var(--h) var(--clip-s) var(--tail-l)); }
+.v-tracks .neutral .tail { background:var(--line); }
+
+/* A delivered clip is complete: quieter than open work, with a hard edge at the moment it finished */
+.v-tracks .delivered { color:var(--done-ink); }
+.v-tracks .delivered .clip { background:hsl(var(--h) var(--clip-s) var(--done-l)); box-shadow:inset -2px 0 0 hsl(var(--h) var(--clip-s) var(--edge-l)); }
+.v-tracks .neutral .delivered .clip { background:color-mix(in srgb, var(--off) 55%, var(--panel)); box-shadow:inset -2px 0 0 color-mix(in srgb, var(--mute) 70%, var(--panel)); }
+/* A thread has nothing to open, so it only answers with its tooltip */
+.v-tracks div.delivered { cursor:default; }
+/* A pale clip has no hard edge at its end, because that end is a tidy-up. It has a thin one at its start, which is what is known. */
+.v-tracks .delivered.pale .clip { background:hsl(var(--h) var(--clip-s) var(--pale-l)); box-shadow:inset 1px 0 0 hsl(var(--h) var(--clip-s) var(--clip-l)); }
+.v-tracks .neutral .delivered.pale .clip { background:color-mix(in srgb, var(--off) 30%, var(--panel)); box-shadow:inset 1px 0 0 var(--off); }
+
+/* A pale name stays at its clip's start, the one place kept free for it. If it followed the scroll, a later clip would cut it. */
+.v-tracks .delivered.pale .name { position:static; }
+
+/* From far away a delivered clip is a thin bar: it shows a length, and its name waits for zooming in */
+.v-tracks .delivered.thin { height:8px; }
+.v-tracks .delivered.thin .clip { border-radius:2px; background:hsl(var(--h) var(--clip-s) var(--clip-l)); }
+.v-tracks .neutral .delivered.thin .clip { background:color-mix(in srgb, var(--off) 80%, var(--panel)); }
+
+/* The strip: every delivered item too short to be a clip at this zoom, as ticks at the moment it ended */
+.v-tracks .strip { position:absolute; left:0; right:0; bottom:4px; height:var(--strip); cursor:zoom-in; }
+.v-tracks .strip svg { position:absolute; left:0; top:0; display:block; }
+.v-tracks .strip .solid { fill:hsl(var(--h) var(--clip-s) var(--edge-l)); }
+.v-tracks .strip .pale { fill:hsl(var(--h) var(--clip-s) var(--clip-l)); }
+.v-tracks .neutral .strip .solid { fill:color-mix(in srgb, var(--mute) 70%, var(--panel)); }
+.v-tracks .neutral .strip .pale { fill:color-mix(in srgb, var(--off) 75%, var(--panel)); }
+.v-tracks .strip .dim { fill:var(--soft); }
+.v-tracks .strip-mark { position:absolute; top:0; bottom:-4px; width:5px; background:var(--ink); opacity:.1; pointer-events:none; }
+
+.v-tracks .playhead { position:absolute; top:38px; bottom:0; z-index:2; width:1px; background:var(--ink); pointer-events:none; }
+
+.v-tracks .tk-tip { position:fixed; z-index:7; max-width:340px; padding:6px 9px; background:var(--ink); color:var(--panel); border-radius:6px; font-size:12px; line-height:1.4; pointer-events:none; box-shadow:0 4px 14px rgba(0,0,0,.18); }
+.v-tracks .tk-tip[hidden] { display:none; }
+.v-tracks .tk-tip b { display:block; font-weight:600; }
+.v-tracks .tk-tip em { display:block; margin-top:3px; font-style:normal; opacity:.72; }
+.v-tracks .tip-name { display:block; overflow:hidden; opacity:.82; text-overflow:ellipsis; white-space:nowrap; }
