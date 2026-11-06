@@ -1,207 +1,60 @@
-/* The Inbox card: the shared .card and .card-stock of Work, laid out from the slots a kind declares.
-   Rows sit on a 2px grid inside the shared padding of 10, 12 and 8. */
+/* The two shapes of card. A rich card has room for status, place and what rides on it. A compact card is built to be dealt with fast.
+   Both are the shared .card and .card-stock of Work, so height means the same thing on both pages. */
 
-.stack .card {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: auto;
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  column-gap: 10px;
-  align-content: start;
-  padding: var(--card-pad-y) var(--card-pad-x) 0;
-  color: var(--ink);
-  cursor: default;
-  outline: none;
-  transition:
-    height var(--m-base) var(--m-ease),
-    opacity var(--m-base) var(--m-ease);
-}
+.card { display: block; min-height: 0; color: var(--ink); cursor: default; outline: none; }
 .card.paper-manila { --stock: var(--stock-manila); }
 .card.paper-ledger { --stock: var(--stock-ledger); }
 .card.paper-sage { --stock: var(--stock-sage); }
-
-/* A strip is shorter than a card on Work, so the shared minimum does not apply here. */
-.stack .card, .tray .card, .card.ghost, .card--loose { min-height: 0; }
-
-/* A card clips its own words, not what stands behind its top edge. */
-.c-clip { display: contents; }
-.stack .card > .card-stock { transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-long) var(--m-ease); }
-.stack .card:not([data-level="full"]) > .card-stock { box-shadow: var(--h-stack); }
-
-/* The first card of a stack stands apart: it is what has waited longest. */
-.card.is-whole.density-open .c-title { font-size: 15px; line-height: 21px; letter-spacing: -0.008em; }
-.stack .card.is-whole.density-open { padding-top: 12px; }
-.card.is-whole.density-open .c-mark { height: 21px; }
-.card.is-whole.density-open .c-pace { font-size: var(--t-14); line-height: 21px; height: 21px; }
-.card.is-whole.density-open .c-line { margin-top: 5px; }
+.card > .card-stock { transition: box-shadow var(--m-quick) var(--m-ease), background-color var(--m-long) var(--m-ease); }
+.card.is-hover > .card-stock { box-shadow: var(--h-hover); }
+.card.is-focus > .card-stock, .card:focus-visible > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
 
 .mark { display: inline-grid; place-items: center; color: var(--mark-ink); }
 .mark--hue { color: oklch(var(--mark-l) var(--mark-c) var(--mark-hue)); }
 
-.c-mark { grid-column: 1; grid-row: 1; height: 18px; display: flex; align-items: center; }
-.c-title {
-  grid-column: 2;
-  grid-row: 1;
-  margin: 0;
-  min-width: 0;
-  font: var(--type-card);
-  letter-spacing: -0.003em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.card.is-whole .c-title,
-.card.is-peek .c-title {
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  text-wrap: pretty;
-}
-.c-pace {
-  grid-column: 3;
-  grid-row: 1;
-  justify-self: end;
-  align-self: start;
-  height: 18px;
-  font: var(--type-card);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  transition: opacity var(--m-quick) var(--m-ease);
-}
-.c-pace:empty { display: none; }
+/* A rich card: status first, because on lasting work it is the point. */
+.card--rich { position: relative; padding: 12px 14px 12px; }
+.c-head { position: relative; display: flex; align-items: center; gap: 8px; min-height: 20px; transition: opacity var(--m-quick) var(--m-ease); }
+.c-mark { display: inline-grid; place-items: center; flex: none; }
+.c-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); color: var(--ink); white-space: nowrap; }
+.c-id { margin-left: auto; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.card--rich .c-title { margin: 7px 0 0; font: var(--w-medium) var(--t-14) / 20px var(--font-ui); letter-spacing: -0.005em; text-wrap: pretty; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.card--rich .c-line { margin-top: 5px; }
+.c-facts { margin-top: 4px; color: var(--faint); font: var(--type-summary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-facts i { margin: 0 6px; font-style: normal; }
+.c-head .f-bars { margin-left: 2px; }
+
+.c-line { display: flex; align-items: center; gap: 6px; min-width: 0; height: 16px; color: var(--muted); font: var(--type-summary); }
+.c-line.tone-you { color: var(--ink); }
+.c-line.tone-bad { color: var(--fail-ink); }
+.c-line.tone-good { color: var(--ok); }
+.c-roll { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.c-more { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.c-line-clip { position: absolute; overflow: hidden; pointer-events: none; }
+
+.c-pace { flex: none; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); font-variant-numeric: tabular-nums; }
 .c-pace[data-ramp="fresh"] { color: var(--wait-fresh); }
 .c-pace[data-ramp="recent"] { color: var(--wait-recent); }
 .c-pace[data-ramp="stale"] { color: var(--wait-due); }
 .c-pace[data-ramp="overdue"] { color: var(--wait-over); font-weight: var(--w-bold); }
 
-.c-line {
-  grid-column: 2;
-  grid-row: 2;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  height: 16px;
-  margin-top: 3px;
-  font: var(--type-summary);
-  color: var(--muted);
-}
-.c-line.tone-usual { color: var(--recede); }
-.card.is-whole .c-line.tone-usual, .card.is-peek .c-line.tone-usual { color: var(--muted); }
-.c-roll { position: relative; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.c-more { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+/* A compact card: logo, title, wait, and one line under it. */
+.card--compact { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; column-gap: 8px; padding: 9px 12px 9px 10px; }
+.card--compact .c-mark { grid-column: 1; grid-row: 1; height: 18px; }
+.card--compact .c-title { grid-column: 2; grid-row: 1; margin: 0; font: var(--type-card); letter-spacing: -0.003em; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.card--compact .c-pace { grid-column: 3; grid-row: 1; line-height: 18px; }
+.card--compact .c-under { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 2px; }
+.card--compact .c-shape { display: inline-flex; flex: none; }
+.card--compact .c-where { grid-column: 2 / -1; grid-row: 3; color: var(--faint); font: var(--type-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity var(--m-quick) var(--m-ease); }
 
-.shape { display: inline-grid; place-items: center; }
-.shape.tone-quiet { color: var(--faint); }
-.shape.tone-active { color: var(--accent-ink); }
-.shape.tone-you { color: var(--you-ink); }
-.shape.tone-good { color: var(--ok); }
-.shape.tone-bad { color: var(--fail-ink); }
+/* The moves: on a rich card they take the head line, on a compact card the foot line, so what it says stays readable. */
+.c-acts { position: absolute; display: flex; align-items: center; justify-content: flex-end; gap: 2px; opacity: 0; pointer-events: none; transition: opacity var(--m-quick) var(--m-ease); }
+.card--rich .c-acts { top: 8px; right: 8px; }
+.card--compact .c-acts { left: 34px; right: 6px; bottom: 4px; justify-content: flex-start; }
+.card.is-hover .c-acts, .card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
+.card--rich.is-hover .c-id, .card--rich.is-focus .c-id, .card--rich.is-hover .c-head > .c-pace, .card--rich.is-focus .c-head > .c-pace { opacity: 0; }
+.card--compact.is-hover .c-where, .card--compact.is-focus .c-where { opacity: 0; }
 
-.person {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  width: var(--person-size, 16px);
-  height: var(--person-size, 16px);
-  border-radius: 50%;
-  background: oklch(var(--char-tint-l) calc(var(--char-c) * 0.42) var(--person-hue));
-  box-shadow: inset 0 0 0 0.5px oklch(var(--char-ink-l) var(--char-c) var(--person-hue) / 0.25);
-  color: oklch(var(--char-ink-l) var(--char-c) var(--person-hue));
-  font-size: calc(var(--person-size, 16px) * 0.44);
-  font-weight: var(--w-bold);
-  letter-spacing: 0.01em;
-  line-height: 1;
-}
-.person--you { background: var(--you); color: var(--face-ink); box-shadow: none; }
-
-.c-foot {
-  grid-column: 2 / -1;
-  grid-row: 3;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  height: 16px;
-  margin-top: 5px;
-  padding-bottom: 0;
-  font: var(--type-meta);
-  color: var(--faint);
-  white-space: nowrap;
-  visibility: hidden;
-}
-.card.is-whole .c-foot,
-.card.is-peek .c-foot { visibility: visible; }
-.card.is-peek .c-foot { transition: opacity 120ms linear; }
-.card.is-rising .c-foot { opacity: 0; transition: none; }
-/* When the second line already says who and what, the facts sit at its end and need no row of their own. */
-.c-foot--facts { grid-column: 3; grid-row: 2; margin-top: 1px; }
-/* Hidden facts must not take room from a one-line title. */
-.card[data-level="one"]:not(.is-peek):not(.is-whole) .c-foot { display: none; }
-.card.is-hover .c-foot--facts, .card.is-focus .c-foot--facts { visibility: hidden; }
-.c-id { color: var(--muted); font-variant-numeric: tabular-nums; }
-.c-ctx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.c-facts { margin-left: auto; display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
-.fact { display: inline-flex; align-items: center; gap: 3px; }
-.f-plus { color: var(--ok); }
-.f-minus { color: var(--fail-ink); }
-.f-bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; }
-.f-bars i { width: 2.5px; border-radius: 0.5px; background: var(--line); }
-.f-bars i:nth-child(1) { height: 5px; }
-.f-bars i:nth-child(2) { height: 7.5px; }
-.f-bars i:nth-child(3) { height: 10px; }
-.f-bars i.on { background: var(--muted); }
-
-/* At one line a card shows its title and nothing else. */
-.card[data-level="one"]:not(.is-peek) .c-line,
-.card[data-level="one"]:not(.is-peek) 
-/* A slow kind shows no wait, so its status takes the place of the wait. */
-.card.pace-slow 
-/* Tight: a Linear issue. A little closer, and the mark a little smaller. */
-.stack .card.density-tight { padding-top: 8px; }
-.card.density-tight .mark svg { width: 17px; height: 17px; }
-.card.density-tight .c-line { margin-top: 1px; }
-.card.density-tight .c-line .person { display: none; }
-
-/* Hover: the actions take the place of the figures. */
-.c-acts {
-  grid-column: 3;
-  grid-row: 2;
-  position: relative;
-  z-index: 3;
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
-  width: 0;
-  height: 16px;
-  margin-top: 3px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--m-quick) var(--m-ease);
-}
-.card.is-hover .c-acts,
-.card.is-focus .c-acts { opacity: 1; pointer-events: auto; }
-/* The actions take the end of the second line. The title and the wait never move, and the sentence ends before them. */
-.stack .card.is-hover .c-line, .stack .card.is-focus .c-line { grid-column: 2 / -1; margin-right: var(--acts-w, 90px); }
-.stack .card.is-hover .c-more, .stack .card.is-focus .c-more { display: none; }
-.card.is-whole.density-open .c-acts { margin-top: 5px; }
-.card.density-tight .c-acts { margin-top: 1px; }
-/* On a one-line row there is no second line, so the actions stand at its end. */
-.card[data-level="one"]:not(.is-peek) .c-acts { grid-row: 1; height: 18px; margin-top: 0; }
-.card[data-level="one"].is-hover:not(.is-peek) .c-title,
-.card[data-level="one"].is-focus:not(.is-peek) .c-title { margin-right: var(--acts-w, 90px); }
-.card[data-level="one"].is-hover:not(.is-peek) .c-pace,
-.card[data-level="one"].is-focus:not(.is-peek) .c-pace { visibility: hidden; }
-.card.is-closing .c-foot { opacity: 0; transition: opacity 100ms linear; }
-.c-act--go { animation: act-arrives var(--m-quick) var(--m-ease); }
-@keyframes act-arrives { from { opacity: 0; } }
 .c-act {
   flex: none;
   display: inline-flex;
@@ -233,48 +86,92 @@
 .stack .card.is-peek .c-title { -webkit-line-clamp: 3; }
 .stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
 .stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); background: color-mix(in oklab, var(--stock) 40%, var(--stock-carry)); }
-.card.is-peek .c-acts { z-index: 4; }
-.stack .card.is-hover:not(.is-peek) > .card-stock { box-shadow: var(--h-hover); }
-.stack .card.is-focus > .card-stock,
-.card:focus-visible > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
-/* A filter dims the paper and the logo, and leaves the words readable: a dimmed card can still be clicked. */
-.card.is-dim > .card-stock { opacity: 0.5; }
-.card.is-dim .mark, .plaque.is-dim .pl-marks { opacity: 0.4; }
-.card.is-dim .c-title { font-weight: var(--w-regular); }
 
 /* Someone holds it now: the card lies flat, and what holds it stands behind its top edge. */
-.stack .card[data-height="flat"] > .card-stock { box-shadow: inset 0 0 0 1px var(--stock-rim); background: var(--stock-flat); }
+.card[data-height="flat"] > .card-stock { box-shadow: inset 0 0 0 1px var(--stock-rim); background: var(--stock-flat); }
 .card[data-height="flat"] .c-title { color: color-mix(in oklab, var(--ink) 74%, var(--muted)); }
-.card[data-height="flat"] .mark { opacity: 0.6; }
 .card[data-height="flat"] .c-line { color: var(--muted); }
 .card[data-height="flat"] .c-pace { display: none; }
+.card--compact > .card-holder { top: auto; }
 
-/* Who holds a card now stands where the wait was. */
-.stack .card:not(.is-whole) > .card-holder, .stack .card:not(.is-whole) > .card-paws, .tray .card > .card-holder, .tray .card > .card-paws, .work-card > .c-holder { display: none; }
-.stack .card.is-whole > .c-holder { display: none; }
-.c-holder { position: absolute; top: 8px; right: 12px; width: 22px; height: 22px; overflow: hidden; }
-.stack .card:not(.is-whole):has(> .c-holder) .c-title { margin-right: 28px; }
-.c-holder-in { display: block; line-height: 0; }
-.c-holder .cr { filter: saturate(0.8); }
-.c-holder .person { margin: 2px 0 0 2px; }
+/* What rides on a card: a sheet tucked under it, one row for each linked thing. It is a stack with its reason showing: every row is
+   there to read, the card opens the card, and a row opens that row's thing. */
+.bundle { position: relative; min-width: 0; }
+.tucked { position: relative; z-index: 0; margin: -10px 8px 0; padding: 14px 4px 4px; border-radius: 0 0 var(--card-r) var(--card-r); background: var(--stock-flat); box-shadow: inset 0 0 0 1px var(--stock-rim); }
+.bundle .card { z-index: 1; }
+.part { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; column-gap: 6px; width: 100%; min-height: 28px; padding: 4px 8px 4px 6px; border-radius: var(--r-xs); text-align: left; color: var(--muted); font: var(--type-summary); outline: none; }
+button.part:hover, .part.is-hover { background: var(--hover); color: var(--ink); }
+.part.is-focus { box-shadow: inset 0 0 0 1.5px var(--focus); }
+.p-mark { display: inline-grid; place-items: center; }
+.p-title { min-width: 0; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.part--closed { color: var(--faint); }
+.part--closed .p-title { color: var(--faint); }
+.part--closed .p-mark { color: var(--faint); }
+.p-line { grid-column: 3; display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 170px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.p-said { overflow: hidden; text-overflow: ellipsis; }
+.part .c-fresh { position: absolute; left: 1px; top: 50%; margin-top: -3px; }
+.part.is-asking .p-said { color: var(--ink); }
+.part .c-pace { grid-column: 4; }
+.p-line.tone-bad .p-said { color: var(--fail-ink); }
 
+/* A reference found in text: only a hint, until a person says so. */
+.hint { display: flex; align-items: center; gap: 5px; margin: 4px 2px 0; color: var(--faint); font: var(--type-meta); }
+.hint b { font-weight: var(--w-medium); color: var(--muted); opacity: 0; transition: opacity var(--m-quick); }
+.hint:hover, .hint:focus-visible { color: var(--muted); }
+.hint:hover b, .hint:focus-visible b { opacity: 1; color: var(--ink); }
 
+/* A card held over another shows the two will be linked. */
+.card.is-link-target > .card-stock { box-shadow: inset 0 0 0 1.5px var(--accent), var(--h-hover); }
 
-/* What Hercule noticed: one wide card of the page's own stock, with him behind its top edge, handing it to you. Each thing on
-   it lies on one of the page's columns, so one grid runs from here to the foot. */
+.shape { display: inline-grid; place-items: center; }
+.shape.tone-quiet { color: var(--faint); }
+.shape.tone-active { color: var(--accent-ink); }
+.shape.tone-you { color: var(--you-ink); }
+.shape.tone-good { color: var(--ok); }
+.shape.tone-bad { color: var(--fail-ink); }
+
+.person {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--person-size, 16px);
+  height: var(--person-size, 16px);
+  border-radius: 50%;
+  background: oklch(var(--char-tint-l) calc(var(--char-c) * 0.42) var(--person-hue));
+  box-shadow: inset 0 0 0 0.5px oklch(var(--char-ink-l) var(--char-c) var(--person-hue) / 0.25);
+  color: oklch(var(--char-ink-l) var(--char-c) var(--person-hue));
+  font-size: calc(var(--person-size, 16px) * 0.44);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.person--you { background: var(--you); color: var(--face-ink); box-shadow: none; }
+
+.fact { display: inline-flex; align-items: center; gap: 3px; }
+.f-plus { color: var(--ok); }
+.f-minus { color: var(--fail-ink); }
+.f-bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 10px; }
+.f-bars i { width: 2.5px; border-radius: 0.5px; background: var(--line); }
+.f-bars i:nth-child(1) { height: 5px; }
+.f-bars i:nth-child(2) { height: 7.5px; }
+.f-bars i:nth-child(3) { height: 10px; }
+.f-bars i.on { background: var(--muted); }
+
+/* At one line a card shows its title and nothing else. */
+
+/* What Hercule noticed: one card of the page's own stock, with him behind its top edge, handing it to you. */
 .noticed {
-  grid-column: 1 / -1;
   position: relative;
   isolation: isolate;
   display: grid;
-  grid-template-columns: subgrid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
-  height: 60px;
-  margin: 14px 0 18px;
+  min-height: 60px;
+  grid-column: 1 / -1;
+  margin: 14px 0 24px;
   color: var(--ink);
 }
 .noticed[hidden] { display: none; }
-.noticed.is-empty { visibility: hidden; }
 .noticed .card-holder { right: 16px; }
 .noticed .card-paws { right: 19px; }
 .plaque {

@@ -47,52 +47,37 @@ window.Landing = (function () {
     Motion.knock(el, 145);
     var n = el.querySelector('.c-more');
     if (n && !n.hidden) Motion.animate(n, [{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, delay: 160, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
-    App.layOut();
   }
 
   /**
-   * Lands a signal on an entity. What caused the change shows first: a small drop falls onto the card, and only then does the
-   * card react. The card never changes place.
+   * Lands a signal on an entity. What caused the change shows first: a small drop falls onto the card, or onto its row on the card
+   * it rides on, and only then does it react. Nothing changes place, not even a part that now asks more than its lead.
    */
   function land(e, s) {
     var el = App.els()[e.id];
     announce(K[e.kind].noun + ' ' + Card.fill(K[e.kind].identifier, e.fields) + ': ' + Card.sayReason(K[e.kind], s).text);
     var tone = (K[e.kind].reasons[s.key] || {}).tone || 'plain';
-    if (!el || !el._plan) {
-      var pile = [].filter.call(document.querySelectorAll('.card.is-pile'), function (p) { return (p._members || []).indexOf(e) >= 0; })[0];
-      // In an open tray the card can be seen, so it shows the news itself, and nothing falls across the tray.
-      if (!pile || Motion.isReduced() || Tray.isOpen()) { applyToPile(e, s, pile, tone); return; }
-      var spot = (pile.querySelector('.pile-facts > *') || pile.querySelector('.c-line')).getBoundingClientRect();
-      dropOnto(spot.left + 3, pile.getBoundingClientRect().top - 24, spot.top + spot.height / 2, tone);
-      setTimeout(function () { applyToPile(e, s, pile, tone); }, 281);
-      return;
-    }
-    if (Motion.isReduced()) { apply(e, s, el); return; }
-    var line = el.querySelector('.c-line').getBoundingClientRect();
-    var r = el.getBoundingClientRect();
-    // A one-line row has its news at the end of the line, so the drop falls there.
-    var isRow = el.dataset.level === 'one';
-    dropOnto(isRow ? r.right - 24 : line.left + 3, r.top - 24, isRow ? r.top + 17 : line.top + line.height / 2, tone);
-    setTimeout(function () { apply(e, s, el); }, 281);
+    var row = !el && document.querySelector('.part[data-id="' + e.id + '"]');
+    if (Motion.isReduced() || (!el && !row)) { if (el) apply(e, s, el); else applyToRow(e, s, tone); return; }
+    var spot = (el ? el.querySelector('.c-line') : row.querySelector('.p-line')).getBoundingClientRect();
+    dropOnto(spot.left + 3, (el || row).getBoundingClientRect().top - 24, spot.top + spot.height / 2, tone);
+    setTimeout(function () { if (el) apply(e, s, el); else applyToRow(e, s, tone); }, 281);
   }
 
-  /** Applies a signal to a card folded in a pile. The pile says what it holds, so its face changes, with the knock and the rim, until it is opened. */
-  function applyToPile(e, s, pile, tone) {
+  /** Applies a signal to something riding on a card: its row changes its words and lights its rim. */
+  function applyToRow(e, s, tone) {
     e.signals.push(s);
     e.fresh = true;
     if (s.state) e.fields.state = s.state;
-    var face = pile && pile.querySelector('.pile-facts, .c-line');
-    var was = face && face.innerHTML;
+    if (Open.current() === e.id) Open.refresh();
     App.layOut(true);
-    Tray.drawNews(e);
-    if (!pile || !pile._plan) return;
-    Motion.knock(pile, 145);
-    pile.dataset.landed = tone;
-    pile.classList.remove('is-landed');
-    void pile.offsetWidth;
-    pile.classList.add('is-landed');
-    setTimeout(function () { pile.classList.remove('is-landed'); }, 1300);
-    if (face && face.innerHTML !== was) Motion.animate(face, [{ transform: 'translateY(5px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.22,.9,.24,1)' });
+    var row = document.querySelector('.part[data-id="' + e.id + '"]');
+    if (!row) return;
+    row.dataset.landed = tone;
+    row.classList.add('is-landed');
+    setTimeout(function () { row.classList.remove('is-landed'); }, 1300);
+    var said = row.querySelector('.p-line');
+    if (said && !Motion.isReduced()) Motion.animate(said, [{ transform: 'translateY(5px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 240, easing: 'cubic-bezier(.22,.9,.24,1)' });
   }
 
   /** Lets a small drop fall from `from` onto the point x, y. It falls long enough to be seen, stretching as it goes, and flattens on contact at 281ms. */
@@ -113,7 +98,7 @@ window.Landing = (function () {
   function settleArrival(el) {
     if (!el) return;
     el.classList.remove('is-new');
-    Motion.body(el).set({ y: -20, o: 0 }).to({ y: 0, o: 1 }, 'self');
+    Motion.body(el.parentNode).set({ y: -20, o: 0 }).to({ y: 0, o: 1 }, 'self');
     // The rim waits until the card can be seen.
     setTimeout(function () {
       el.dataset.landed = 'plain';

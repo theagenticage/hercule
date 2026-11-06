@@ -3,7 +3,7 @@
 window.Drag = (function () {
   var START = 6;       // px of travel before a press turns into a drag
   var REACH = 96;      // px around a target where its pull begins
-  var rail, ghost = null, source = null, entity = null, targets = [], pressed = null;
+  var rail, ghost = null, source = null, entity = null, targets = [], pressed = null, onto = null;
   var grip = { x: 0, y: 0 }, active = null, last = 0, cancelled = false, fling = { x: 0, y: 0 }, rest = 0;
 
   function drawRail(e) {
@@ -22,17 +22,12 @@ window.Drag = (function () {
     entity = App.findEntity(card.dataset.id);
     source = card;
     Pointer.setHover(null);
-    Pointer.unpeek();
     var r = card.getBoundingClientRect();
-    var whole = card._full || r.height;
     ghost = card.cloneNode(true);
-    ghost.classList.add('ghost', 'is-whole');
-    ghost.classList.remove('is-hover', 'is-focus', 'is-peek');
-    ghost.dataset.level = 'full';
-    ghost.style.cssText = 'width:' + r.width + 'px;height:' + (card._plan ? card._plan.show : r.height) + 'px;left:0;top:0;right:auto;z-index:80';
+    ghost.classList.add('ghost');
+    ghost.classList.remove('is-hover', 'is-focus');
+    ghost.style.cssText = 'width:' + r.width + 'px;height:' + r.height + 'px;left:0;top:0;right:auto;z-index:80';
     document.body.appendChild(ghost);
-    void ghost.offsetHeight;
-    ghost.style.height = whole + 'px';
     grip = { x: pressed.x - r.left, y: pressed.y - r.top };
     last = r.left;
     Motion.body(ghost).set({ x: r.left, y: r.top, s: 1 });
@@ -81,6 +76,15 @@ window.Drag = (function () {
       active = best;
       if (active) active.el.classList.add('is-near');
     }
+    // Over another card, letting go links the two.
+    var under = !best && document.elementFromPoint(ev.clientX, ev.clientY);
+    var card = under && under.closest && under.closest('#page .card[data-id]');
+    if (card === source) card = null;
+    if (card !== onto) {
+      if (onto) onto.classList.remove('is-link-target');
+      onto = card;
+      if (onto) onto.classList.add('is-link-target');
+    }
     if (active) {
       var pull = 1 - dist / REACH, w = ghost.offsetWidth, h = ghost.offsetHeight;
       var cx = active.r.left + active.r.width / 2 - w / 2, cy = active.r.top + active.r.height / 2 - h / 2;
@@ -91,8 +95,9 @@ window.Drag = (function () {
 
   function finish(cancel) {
     delete document.documentElement.dataset.dragging;
-    var g = ghost, s = source, e = entity, t = active;
-    ghost = null; source = null; entity = null; active = null; pressed = null;
+    var g = ghost, s = source, e = entity, t = active, target = onto;
+    ghost = null; source = null; entity = null; active = null; pressed = null; onto = null;
+    if (target) target.classList.remove('is-link-target');
     var chosen = t && !cancel;
     if (t) t.el.classList.remove('is-near');
     // The rail stays long enough for the card to be seen to arrive, and only then goes.
@@ -101,6 +106,14 @@ window.Drag = (function () {
     var body = Motion.body(g);
     var home = s.getBoundingClientRect();
     if (chosen) Motion.animate(t.el.firstElementChild, [{ transform: 'scale(1.16)' }, { transform: 'scale(1.26)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: 340, easing: 'ease-out' });
+    // A card dropped on another card joins it, and rides on whichever deserves the room.
+    if (target && !cancel) {
+      var to = target.getBoundingClientRect();
+      body.to({ x: to.left + 12, y: to.top + to.height - 24, s: 0.5, o: 0 }, 'travel', { done: function () { g.remove(); } });
+      s.classList.remove('is-lifted');
+      Moves.link(App.findEntity(target.dataset.id), e);
+      return;
+    }
     // A card dropped on Dismiss leaves from the rail. Going home first would be the gesture backwards.
     if (chosen && t.el.dataset.target === 'dismiss') {
       body.to({ s: 0.3, o: 0 }, 'hand', { done: function () { g.remove(); } });
@@ -109,7 +122,6 @@ window.Drag = (function () {
       return;
     }
     // One object, one place: the card goes home, and what was chosen comes to it there.
-    g.style.height = (s._plan ? s._plan.show : home.height) + 'px';
     g.classList.add('is-closing');
     var land = function () {
       // The real card takes over from the ghost in mid-air, so the chain plays on something that can be seen.
@@ -148,7 +160,7 @@ window.Drag = (function () {
     rail = document.getElementById('rail');
     var page = document.getElementById('page');
     page.addEventListener('pointerdown', function (ev) {
-      if (ev.button !== 0 || ev.target.closest('[data-act], .is-pile')) return;
+      if (ev.button !== 0 || ev.target.closest('[data-act], select, button.part, .b-open, .hint, .echo')) return;
       var card = ev.target.closest('.card');
       if (!card || card.dataset.height === 'flat') return;
       pressed = { card: card, x: ev.clientX, y: ev.clientY };

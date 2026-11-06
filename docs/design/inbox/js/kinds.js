@@ -30,17 +30,17 @@
 
   var KINDS = {
     'github/pull-request': {
+      card: 'compact',
       noun: 'Pull request',
       plugin: { name: 'GitHub', mark: 'github', hue: null, solid: true },
       paper: 'bond',
       density: 'open',
       pace: 'fast',
       patience: 24,
-      stacks: { reviewRequested: 'review', mentioned: 'answer', opened: 'finish' },
       identifier: '#{number}',
-      context: '{repo}',
-      group: 'repo',
       person: 'author',
+      owner: 'author',
+      home: 'github/repository',
       status: {
         passing: { shape: 'fork', tone: 'good', word: 'Open, checks passed', norm: true },
         running: { shape: 'fork', tone: 'quiet', word: 'Open, checks running' },
@@ -75,6 +75,7 @@
     },
 
     'linear/issue': {
+      card: 'rich',
       noun: 'Issue',
       plugin: { name: 'Linear', mark: 'linear', hue: 277 },
       paper: 'ledger',
@@ -82,11 +83,11 @@
       leadsWithIdentifier: true,
       pace: 'slow',
       patience: 336,
-      stacks: { assigned: 'shelf', mentioned: 'shelf' },
       identifier: '{key}',
-      context: '{team}',
-      group: 'project',
       person: 'assignee',
+      owner: 'assignee',
+      home: 'linear/project',
+      section: 'linear/milestone',
       status: {
         triage: { shape: 'dashed', tone: 'quiet', word: 'Triage', norm: true },
         backlog: { shape: 'dashed', tone: 'quiet', word: 'Backlog' },
@@ -109,17 +110,17 @@
     },
 
     'gmail/thread': {
+      card: 'compact',
       noun: 'Mail thread',
       plugin: { name: 'Gmail', mark: 'gmail', hue: 25 },
       paper: 'manila',
       density: 'open',
       pace: 'fast',
       patience: 48,
-      stacks: { addressed: 'answer' },
       identifier: '{messages} messages',
-      context: '{label}',
-      group: 'label',
       person: 'from',
+      owner: null,
+      home: 'gmail/label',
       status: null,
       facts: [{ field: 'deadline', form: 'date' }],
       reasons: {
@@ -130,17 +131,17 @@
     },
 
     'slack/thread': {
+      card: 'compact',
       noun: 'Slack thread',
       plugin: { name: 'Slack', mark: 'slack', hue: 330, solid: true },
       paper: 'bond',
       density: 'open',
       pace: 'fast',
       patience: 8,
-      stacks: { mentioned: 'answer' },
       identifier: '{channel}',
-      context: '{replies} replies',
-      group: 'channel',
       person: 'from',
+      owner: null,
+      home: 'slack/channel',
       status: null,
       facts: [],
       reasons: { mentioned: { say: '{person} tagged you', tone: 'plain' }, replied: { say: '{person} replied', tone: 'plain' } },
@@ -148,17 +149,17 @@
     },
 
     'sentry/issue': {
+      card: 'rich',
       noun: 'Error',
       plugin: { name: 'Sentry', mark: 'sentry', hue: 300 },
       paper: 'bond',
       density: 'open',
       pace: 'fast',
       patience: 12,
-      stacks: { assigned: 'finish' },
       identifier: '{key}',
-      context: '{project}',
-      group: 'project',
       person: null,
+      owner: 'assignee',
+      home: 'sentry/project',
       status: {
         unresolved: { shape: 'alert', tone: 'bad', word: 'Unresolved' },
         regressed: { shape: 'alert', tone: 'bad', word: 'Came back' },
@@ -178,6 +179,7 @@
 
     // An invented plugin. It ships this table and a mark, and no code: its cards are drawn by the same renderer.
     'quayside/purchase-order': {
+      card: 'rich',
       noun: 'Purchase order',
       plugin: { name: 'Quayside', mark: 'quayside', hue: 205 },
       paper: 'sage',
@@ -185,11 +187,10 @@
       leadsWithIdentifier: true,
       pace: 'slow',
       patience: 120,
-      stacks: { signOff: 'shelf' },
       identifier: '{key}',
-      context: '{supplier}',
-      group: 'site',
       person: null,
+      owner: 'assignee',
+      home: 'quayside/round',
       status: {
         waiting: { shape: 'ring', tone: 'quiet', word: 'Waiting for your sign-off', norm: true },
         held: { shape: 'dashed', tone: 'quiet', word: 'Held at the quay' },
@@ -210,17 +211,39 @@
       density: 'open',
       pace: 'noticed',
       patience: 0,
-      stacks: {},
       identifier: '',
-      context: '',
-      group: null,
       person: null,
+      owner: null,
       status: null,
       facts: [],
       reasons: {},
       workflows: { noticed: [INVESTIGATE, SECOND] },
     },
   };
+
+  /**
+   * Adds the kinds that give context: a repository, a project, a team. They are ordinary entities that nothing has made a card of.
+   * A plugin declares them like any kind, so a new hierarchy needs a table and no new code.
+   */
+  function addContextKind(id, plugin, noun, status, reasons) {
+    KINDS[id] = { noun: noun, plugin: plugin, paper: 'bond', density: 'open', pace: 'context', patience: 0, identifier: '', person: null, owner: null, status: status || null, facts: [], reasons: reasons || {}, workflows: {} };
+  }
+  var HEALTH = {
+    onTrack: { shape: 'check', tone: 'good', word: 'On track' },
+    atRisk: { shape: 'hold', tone: 'you', word: 'At risk' },
+    offTrack: { shape: 'cross', tone: 'bad', word: 'Off track' },
+  };
+  var UPDATES = { update: { say: '{person} posted an update', tone: 'plain' }, target: { say: 'Target moved to {value}', tone: 'plain' }, health: { say: 'Marked {value}', tone: 'plain' } };
+  addContextKind('github/repository', KINDS['github/pull-request'].plugin, 'Repository');
+  addContextKind('linear/milestone', KINDS['linear/issue'].plugin, 'Milestone', null, UPDATES);
+  addContextKind('linear/project', KINDS['linear/issue'].plugin, 'Project', HEALTH, UPDATES);
+  addContextKind('linear/initiative', KINDS['linear/issue'].plugin, 'Initiative', HEALTH, UPDATES);
+  addContextKind('linear/team', KINDS['linear/issue'].plugin, 'Team');
+  addContextKind('gmail/label', KINDS['gmail/thread'].plugin, 'Label');
+  addContextKind('slack/channel', KINDS['slack/thread'].plugin, 'Channel');
+  addContextKind('sentry/project', KINDS['sentry/issue'].plugin, 'Project');
+  addContextKind('quayside/round', KINDS['quayside/purchase-order'].plugin, 'Delivery round', { open: { shape: 'half', tone: 'active', word: 'Receiving' } }, { update: { say: 'Two pallets booked in', tone: 'plain' } });
+  addContextKind('quayside/site', KINDS['quayside/purchase-order'].plugin, 'Site');
 
   // A mark an invented plugin declares: four bollard-and-rope strokes on the 24-unit brand grid.
   window.CREW_BRANDS.quayside = 'M2 15.5C5 15.5 5 18 8 18s3-2.5 6-2.5 3 2.5 6 2.5c.8 0 1.4-.2 2-.4V21c-.6.2-1.2.4-2 .4-3 0-3-2.5-6-2.5s-3 2.5-6 2.5-3-2.5-6-2.5v-3.4ZM7 3h10v2.6l-3.4 3v3.9H10.4V8.6L7 5.6V3Z';

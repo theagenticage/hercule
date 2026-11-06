@@ -23,15 +23,6 @@ const point = (p, id, where = "title") => p.evaluate(([id, where]) => {
 const hover = async (p, id) => { const a = await point(p, id); await p.mouse.move(a.x, a.y, { steps: 3 }); };
 const count = (p) => p.evaluate(() => App.state.entities.length);
 const has = (p, id) => p.evaluate((id) => !!App.findEntity(id), id);
-const allReachable = (p) => p.evaluate(() => {
-  const shown = new Set();
-  document.querySelectorAll(".stack .card").forEach((c) => {
-    if (c.style.display === "none") return;
-    if (c.dataset.id) shown.add(c.dataset.id);
-    (c._members || []).forEach((e) => shown.add(e.id));
-  });
-  return App.state.entities.filter((e) => !e.settled && !shown.has(e.id)).map((e) => e.id);
-});
 async function check(name, fn) {
   let page;
   try { page = await fn(); } catch (e) { failures.push(`${name}: ${e.message}`); console.log("FAIL", name, e.message.split("\n")[0]); return; }
@@ -40,282 +31,161 @@ async function check(name, fn) {
 }
 const assert = (c, m) => { if (!c) throw new Error(m); };
 
-await check("a click on a title opens the card and starts nothing", async () => {
+const THEMES = ["whitehaven", "styles", "orient-express", "nile", "end-house", "blue-train"];
+const SCENES = ["morning", "light", "volume", "handed", "edge", "loading", "offline", "error", "zero", "firstrun"];
+
+await check("every scene opens in every theme", async () => {
   const p = await open("");
-  const a = await point(p, "pr-6209");
-  await p.mouse.move(a.x, a.y); await p.waitForTimeout(120); await p.mouse.click(a.x + 40, a.y);
-  await p.waitForTimeout(500);
-  assert(await p.evaluate(() => Open.isOpen()), "the card did not open");
-  assert(!(await p.evaluate(() => App.findEntity("pr-6209").task)), "a click on the title handed the card on");
+  for (const scene of SCENES) await p.evaluate((s) => Scenes.play(s), scene);
+  for (const theme of THEMES) await p.evaluate((t) => { document.documentElement.dataset.theme = t; Scenes.play("morning"); }, theme);
   return p;
 });
-await check("Enter Enter never starts an agent", async () => {
+await check("the display font is nowhere on the page, and no rule is doubled", async () => {
   const p = await open("");
-  await p.keyboard.press("j"); await p.keyboard.press("j"); await p.keyboard.press("Enter"); await p.waitForTimeout(300); await p.keyboard.press("Enter"); await p.waitForTimeout(300);
-  assert(!(await p.evaluate(() => App.state.entities.some((e) => e.task && !e.settled))), "Enter started an agent");
+  const bad = await p.evaluate(() => [...document.querySelectorAll("#main *")].filter((el) => /deco/i.test(getComputedStyle(el).fontFamily) || (el.textContent.trim() && parseFloat(getComputedStyle(el).fontSize) > 20)).map((el) => el.className));
+  assert(!bad.length, `too loud: ${bad.slice(0, 4)}`);
   return p;
 });
-await check("the same spot dismisses card after card", async () => {
+await check("no view knows a system by name", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const f of ["app.js", "card.js", "relations.js", "open.js", "pointer.js", "keys.js", "moves.js", "landing.js", "drag.js"]) {
+    const code = readFileSync(resolve(root, "js", f), "utf8").replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "").replace(/\blinear'/g, "").replace(/\d+ms linear/g, "");
+    const hit = code.match(/\b(github|linear|sentry|gmail|slack|quayside)\b/i);
+    assert(!hit, `${f} says ${hit && hit[0]}`);
+  }
+  return null;
+});
+await check("a pull request linked to a ticket rides on the ticket, not in the column", async () => {
   const p = await open("");
-  await hover(p, "pr-6209");
-  const before = await count(p);
-  await p.waitForTimeout(80);
-  const x = await p.evaluate(() => { const r = document.querySelector('[data-id="pr-6209"] [data-act="dismiss"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
-  await p.mouse.move(x.x, x.y, { steps: 3 }); await p.waitForTimeout(60);
-  for (let i = 0; i < 4; i++) { await p.mouse.click(x.x, x.y); await p.waitForTimeout(180); }
-  assert((await count(p)) === before - 4, `dismissed ${before - (await count(p))} of 4`);
-  assert(!(await p.evaluate(() => Open.isOpen())), "a click opened a card");
+  const where = await p.evaluate(() => ({ part: !!document.querySelector('.bundle .part[data-id="pr-6238"]'), card: !!document.querySelector('#requests .card[data-id="pr-6238"]'), lead: !!document.querySelector('#work .card[data-id="ln-SHOP-371"]') }));
+  assert(where.part && !where.card && where.lead, JSON.stringify(where));
   return p;
 });
-await check("E works through by keys without touching the parked pointer's card", async () => {
+await check("a reference in text never groups, until a person confirms it", async () => {
   const p = await open("");
-  await hover(p, "pr-6209");
-  await p.mouse.move(120, 700);
-  await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown"); await p.keyboard.press("ArrowDown");
-  const first = await p.evaluate(() => Keys.current());
-  await p.keyboard.press("e"); await p.waitForTimeout(100);
-  const second = await p.evaluate(() => Keys.current());
-  await p.keyboard.press("e"); await p.waitForTimeout(100);
-  assert(!(await has(p, first)) && !(await has(p, second)), "the wrong cards were dismissed");
-  return p;
-});
-await check("undo goes five deep, from another view", async () => {
-  const p = await open("");
-  const before = await p.evaluate(() => App.state.entities.map((e) => e.id).join());
-  await p.keyboard.press("j"); await p.keyboard.press("j"); await p.keyboard.press("j"); await p.keyboard.press("j");
-  for (const k of ["e", "e", "t", "e", "t"]) { await p.keyboard.press(k); await p.waitForTimeout(240); }
-  await p.evaluate(() => Pages.setView("intake")); await p.waitForTimeout(100);
-  for (let i = 0; i < 5; i++) { await p.keyboard.press("Control+z"); await p.waitForTimeout(600); }
-  const after = await p.evaluate(() => App.state.entities.map((e) => e.id).join());
-  assert(before === after, "the order did not come back");
-  assert(await p.evaluate(() => !App.state.entities.some((e) => e.task && !e.settled)), "a Task stayed behind");
-  return p;
-});
-await check("undo from the sunrise brings the card back", async () => {
-  const p = await open("scene=light");
-  await p.evaluate(() => { App.state.clusters.length = 0; App.drawNoticed(); App.state.entities.slice(1).forEach((e) => { e.settled = true; e.task = { by: "you" }; }); App.layOut(true); });
-  const id = await p.evaluate(() => App.state.entities[0].id);
-  await p.evaluate((id) => Moves.dismiss(App.findEntity(id)), id);
-  await p.waitForTimeout(900);
-  assert((await p.evaluate(() => App.state.mode)) === "zero", "the sunrise did not come");
+  assert(await p.evaluate(() => !!document.querySelector('#requests .card[data-id="pr-6263"]')), "a hint pulled the card onto the ticket");
+  await p.evaluate(() => Moves.link(App.findEntity("pr-6263"), App.findEntity("ln-OPS-47"))); await p.waitForTimeout(500);
+  assert(await p.evaluate(() => !!document.querySelector('#work .part[data-id="pr-6263"]')), "the confirmed link did not join them");
   await p.keyboard.press("Control+z"); await p.waitForTimeout(500);
-  assert(await has(p, id), "the card did not come back");
-  assert((await p.evaluate(() => App.state.mode)) === "stacks", "the page stayed on the sunrise");
+  assert(await p.evaluate(() => !!document.querySelector('#requests .card[data-id="pr-6263"]')), "undo left the link");
   return p;
 });
-await check("Hand all and Dismiss all undo exactly", async () => {
-  const p = await open("scene=volume");
-  const before = await p.evaluate(() => App.state.entities.map((e) => e.id).join());
-  await p.evaluate(() => document.querySelector('.card.is-pile').click()); await p.waitForTimeout(500);
-  await p.evaluate(() => document.querySelector('[data-all="dismiss"]').click()); await p.waitForTimeout(500);
-  await p.keyboard.press("Control+z"); await p.waitForTimeout(600);
-  assert((await p.evaluate(() => App.state.entities.map((e) => e.id).join())) === before, "Dismiss all did not undo exactly");
-  return p;
-});
-await check("a page-locking double tap cannot lock the page", async () => {
+await check("only direct links join: a chain never pulls in the neighbourhood", async () => {
   const p = await open("");
-  await p.keyboard.press("j"); await p.keyboard.press("j"); await p.keyboard.press("Enter"); await p.waitForTimeout(300);
-  for (const gap of [40, 120, 240, 420]) { await p.keyboard.press("Escape"); await p.waitForTimeout(gap); await p.keyboard.press("Enter"); await p.waitForTimeout(300); }
-  await p.keyboard.press("Escape"); await p.waitForTimeout(700);
-  assert(!(await p.evaluate(() => Open.isOpen())), "the sheet stayed open");
-  assert(await p.evaluate(() => document.getElementById("open").hidden), "the sheet stayed on screen");
-  assert(await p.evaluate(() => document.getElementById("scrim").hidden), "the veil stayed");
+  const n = await p.evaluate(() => Relations.buildBundles(App.readLying()).filter((b) => b.lead.id === "ln-OPS-41")[0].parts.length);
+  assert(n === 2, `${n} parts`);
   return p;
 });
-await check("every card is reachable at every window size", async () => {
-  for (const [w, h, q] of [[1440, 900, ""], [1280, 800, ""], [1160, 900, ""], [1000, 900, ""], [800, 900, ""], [720, 450, ""], [1440, 900, "scene=volume"], [1000, 700, "scene=volume"]]) {
-    const p = await open(q, w, h);
-    const lost = await allReachable(p);
-    assert(!lost.length, `${w}x${h} ${q}: ${lost.length} cards out of reach`);
-    await p.context().close();
-  }
-});
-await check("a held card refuses another hand-off in the sheet", async () => {
-  const p = await open("scene=handed");
-  await p.evaluate(() => Open.show("pr-6204", null, true)); await p.waitForTimeout(500);
-  await p.keyboard.press("h"); await p.waitForTimeout(300);
-  assert((await p.evaluate(() => Open.current())) === "pr-6204", "the sheet walked on");
-  return p;
-});
-await check("views can be left and clicks still work", async () => {
+await check("a thing in two places shows under both and counts once", async () => {
   const p = await open("");
-  await p.click('[data-view="intake"]'); await p.waitForTimeout(200);
-  await p.click('[data-view="cards"]'); await p.waitForTimeout(300);
-  const a = await point(p, "pr-6209");
-  await p.mouse.click(a.x, a.y); await p.waitForTimeout(500);
-  assert(await p.evaluate(() => Open.isOpen()), "the card did not open after visiting Intake");
+  const r = await p.evaluate(() => ({ cards: document.querySelectorAll('.card[data-id="ln-SHOP-360"]').length, echoes: document.querySelectorAll('.echo[data-id="ln-SHOP-360"]').length }));
+  assert(r.cards === 1 && r.echoes === 1, JSON.stringify(r));
   return p;
 });
-await check("a card can be carried, dropped and cancelled", async () => {
+await check("progress shows only where the source reports it", async () => {
+  const p = await open("");
+  const r = await p.evaluate(() => ({ reported: !!document.querySelector('[data-place="prj-depot"] .b-progress'), silent: !!document.querySelector('[data-place="prj-browsers"] .b-progress') }));
+  assert(r.reported && !r.silent, JSON.stringify(r));
+  return p;
+});
+await check("every grouping draws, and the sidebar's number never moves", async () => {
+  const p = await open("");
+  const before = await p.evaluate(() => App.countOverdue());
+  const options = await p.evaluate(() => [...document.querySelector("[data-grouping]").options].map((o) => o.value));
+  for (const o of options) { await p.selectOption("[data-grouping]", o); await p.waitForTimeout(250); }
+  assert((await p.evaluate(() => App.countOverdue())) === before, "a grouping changed the count");
+  return p;
+});
+await check("a click on a title never makes a move", async () => {
   const p = await open("");
   const a = await point(p, "pr-6213");
-  await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x + 30, a.y + 40, { steps: 4 });
-  const t = await p.evaluate(() => { const r = document.querySelector('.rail-t[data-target="take"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
-  await p.mouse.move(t.x, t.y, { steps: 10 }); await p.waitForTimeout(120); await p.mouse.up(); await p.waitForTimeout(900);
-  assert(await p.evaluate(() => !!App.findEntity("pr-6213").task), "the drop did nothing");
-  const b = await point(p, "pr-6209");
-  await p.mouse.move(b.x, b.y); await p.mouse.down(); await p.mouse.move(b.x + 30, b.y + 60, { steps: 4 }); await p.keyboard.press("Escape"); await p.mouse.up(); await p.waitForTimeout(600);
-  assert(!(await p.evaluate(() => Open.isOpen())), "a cancelled drag opened the card");
-  assert(!(await p.evaluate(() => App.findEntity("pr-6209").task)), "a cancelled drag handed the card on");
+  await p.mouse.move(a.x, a.y); await p.mouse.click(a.x, a.y); await p.waitForTimeout(500);
+  assert(!(await p.evaluate(() => App.findEntity("pr-6213").task)), "a click handed the card on");
+  assert(await p.evaluate(() => Open.isOpen()), "the card did not open");
   return p;
 });
-
-await check("a stack can be worked through to its end by keys, and a card comes out of the pile", async () => {
-  const p = await open("");
-  await p.evaluate(() => Keys.focus("pr-6204"));
-  const n = () => p.evaluate(() => App.state.entities.filter((e) => App.readStack(e) === "review" && !e.task && !e.settled).length);
-  const before = await n();
-  for (let i = 0; i < before; i++) {
-    await p.keyboard.press("t");
-    await p.waitForTimeout(260);
-    // When the last card in view is taken, the stack turns over and the keys move on to what it deals.
-    if (!(await p.evaluate(() => Keys.current()))) await p.waitForTimeout(1600);
-    if ((await n()) === 0) break;
-  }
-  assert((await n()) === 0, `${await n()} cards left in To review`);
-  return p;
-});
-await check("stacks never cover each other, at any height", async () => {
-  for (const [w, h] of [[1440, 900], [1280, 800], [1280, 720], [1000, 700]]) {
-    const p = await open("", w, h);
-    const bad = await p.evaluate(() => {
-      // Whatever the layout, the last card of a stack on the clock ends above any heading under it in the same part of the page.
-      const headings = [].slice.call(document.querySelectorAll('.stack-h'));
-      return [].map.call(document.querySelectorAll('[data-wrap="review"], [data-wrap="answer"], [data-wrap="finish"]'), (wrap) => {
-        const box = wrap.getBoundingClientRect();
-        const last = Math.max.apply(null, [].map.call(wrap.querySelectorAll('.card'), (c) => c._plan ? c.getBoundingClientRect().top + c._plan.show : 0));
-        const under = headings.filter((h) => { const r = h.getBoundingClientRect(); return r.top > box.top + 10 && r.left < box.right && r.right > box.left; });
-        return under.some((h) => last > h.getBoundingClientRect().top + 2) ? wrap.dataset.wrap : null;
-      }).filter(Boolean).join();
-    });
-    assert(!bad, `${w}x${h}: ${bad} runs into the heading under it`);
-    await p.context().close();
-  }
-});
-await check("a new card held back is never lost", async () => {
-  const p = await open("scene=light");
-  await p.evaluate(() => { App.state.entities.filter((e) => e.id !== "pr-6204").forEach((e) => { e.settled = true; e.task = { by: "you" }; }); App.state.clusters.length = 0; App.drawNoticed(); App.layOut(true); });
-  await hover(p, "pr-6204");
-  await p.evaluate(() => App.arrive({ id: "pr-6270", kind: "github/pull-request", concern: "reviewRequested", title: "New", since: World.hoursAgo(0.02), fields: { number: 6270, repo: "storefront-web", author: "ines-carvalho", state: "running", diff: [1, 1], files: 1 }, signals: [World.signal("reviewRequested", 0.02, "ines-carvalho")], task: null, project: "storefront-web" }));
-  await p.evaluate(() => Moves.dismiss(App.findEntity("pr-6204")));
-  await p.waitForTimeout(800);
-  assert(await has(p, "pr-6270"), "the card that waited was lost");
-  assert((await p.evaluate(() => App.state.mode)) === "stacks", "the sunrise came with a card waiting");
-  return p;
-});
-await check("a stack turns over: held cards settle, nothing is lost, keys carry on", async () => {
-  const p = await open("");
-  await p.evaluate(() => Keys.focus("pr-6204"));
-  for (let i = 0; i < 4; i++) { await p.keyboard.press("t"); await p.waitForTimeout(90); }
-  await p.keyboard.press("t"); await p.waitForTimeout(400);
-  const taken = await p.evaluate(() => App.state.entities.filter((e) => App.readStack(e) === "review" && e.task && e.signals.length >= 0 && !["pr-6199"].includes(e.id)).length);
-  assert(taken === 5, `a key was lost: ${taken} of 5 taken`);
-  await p.waitForTimeout(900);
-  const held = await p.evaluate(() => [].slice.call(document.querySelectorAll('[data-stack="review"] .card.is-folding')).length);
-  assert(held === 0, "held cards are still on their way");
-  return p;
-});
-await check("a slow second click at the same spot dismisses the next card", async () => {
-  const p = await open("");
-  await hover(p, "pr-6209"); await p.waitForTimeout(80);
-  const x = await p.evaluate(() => { const r = document.querySelector('[data-id="pr-6209"] [data-act="dismiss"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
-  await p.mouse.move(x.x, x.y, { steps: 3 }); await p.waitForTimeout(700);
-  const before = await count(p);
-  await p.mouse.click(x.x, x.y); await p.waitForTimeout(800); await p.mouse.click(x.x, x.y); await p.waitForTimeout(300);
-  assert((await count(p)) === before - 2, `dismissed ${before - (await count(p))} of 2`);
-  assert(!(await p.evaluate(() => Open.isOpen())), "the second click opened a card");
-  return p;
-});
-await check("undo keeps what Hercule noticed since", async () => {
-  const p = await open("");
-  await p.evaluate(() => { Keys.focus("c-coupons"); });
-  await p.keyboard.press("e"); await p.waitForTimeout(300);
-  await p.evaluate(() => Live.next()); await p.waitForTimeout(300);
-  await p.keyboard.press("Control+z"); await p.waitForTimeout(400);
-  const ids = await p.evaluate(() => App.state.clusters.map((c) => c.id));
-  assert(ids.includes("c-scanners") && ids.includes("c-coupons"), `the plate holds ${ids}`);
-  const slots = await p.evaluate(() => [].map.call(document.querySelectorAll(".plaque"), (e) => e.dataset.slot));
-  assert(new Set(slots).size === slots.length, "two things share a column of the plate");
-  return p;
-});
-await check("a carry raises the rail", async () => {
-  const p = await open("");
-  const a = await point(p, "pr-6213");
-  await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x + 30, a.y + 40, { steps: 4 }); await p.waitForTimeout(450);
-  const o = await p.evaluate(() => getComputedStyle(document.getElementById("rail")).opacity);
-  assert(Number(o) > 0.9, `the rail is at opacity ${o}`);
-  await p.mouse.up();
-  return p;
-});
-
 await check("the second click of a double click never starts a run", async () => {
   const p = await open("");
-  const a = await point(p, "pr-3318");
+  const a = await point(p, "pr-6213");
   await p.mouse.move(a.x, a.y); await p.waitForTimeout(30);
   await p.mouse.click(a.x, a.y); await p.waitForTimeout(180); await p.mouse.click(a.x, a.y); await p.waitForTimeout(700);
-  assert(!(await p.evaluate(() => App.findEntity("pr-3318").task)), "a double click handed the card on");
+  assert(!(await p.evaluate(() => App.findEntity("pr-6213").task)), "a double click handed the card on");
   return p;
 });
-await check("an undo during the fade to the sunrise keeps the card", async () => {
-  const p = await open("scene=light");
-  await p.evaluate(() => { App.state.clusters.length = 0; App.drawNoticed(); App.state.entities.slice(1).forEach((e) => { e.settled = true; e.task = { by: "you" }; }); App.layOut(true); });
-  await p.evaluate(() => Keys.focus(App.state.entities[0].id));
-  await p.keyboard.press("e"); await p.waitForTimeout(400); await p.keyboard.press("Control+z"); await p.waitForTimeout(900);
-  assert(!(await p.evaluate(() => !!document.querySelector(".zero"))), "the sunrise covers a card that came back");
+await check("dismiss and undo keep every card, by pointer at the same spot", async () => {
+  const p = await open("");
+  await hover(p, "pr-6204"); await p.waitForTimeout(120);
+  const x = await p.evaluate(() => { const r = document.querySelector('[data-id="pr-6204"] [data-act="dismiss"]').getBoundingClientRect(); return { x: r.left + 8, y: r.top + 8 }; });
+  await p.mouse.move(x.x, x.y); await p.waitForTimeout(80);
+  const n = await count(p);
+  for (let i = 0; i < 3; i++) { await p.mouse.click(x.x, x.y); await p.waitForTimeout(420); }
+  assert((await count(p)) === n - 3, "three clicks at one spot did not dismiss three cards");
+  for (let i = 0; i < 3; i++) { await p.keyboard.press("Control+z"); await p.waitForTimeout(300); }
+  await p.waitForTimeout(400);
+  assert((await count(p)) === n, "undo lost a card");
   return p;
 });
 await check("fast moves and fast undos leave every card visible", async () => {
   const p = await open("");
   await p.evaluate(() => Keys.focus("pr-6204"));
   for (let i = 0; i < 5; i++) { await p.keyboard.press("t"); await p.waitForTimeout(140); }
-  await p.waitForTimeout(1500);
-  for (let i = 0; i < 5; i++) { await p.keyboard.press("Control+z"); await p.waitForTimeout(500); }
+  await p.waitForTimeout(800);
+  for (let i = 0; i < 5; i++) { await p.keyboard.press("Control+z"); await p.waitForTimeout(450); }
   await p.waitForTimeout(600);
-  const hidden = await p.evaluate(() => [].filter.call(document.querySelectorAll(".stack .card"), (c) => c._plan && c.style.display !== "none" && getComputedStyle(c).opacity !== "1").map((c) => c.dataset.id));
+  const hidden = await p.evaluate(() => [...document.querySelectorAll("#page .bundle, #page .card")].filter((c) => getComputedStyle(c).opacity !== "1").map((c) => c.dataset.id || c.className));
   assert(!hidden.length, `invisible: ${hidden}`);
-  return p;
-});
-await check("a card stepping up to lead after an undo stands whole", async () => {
-  const p = await open("");
-  await p.evaluate(() => Moves.dismiss(App.findEntity("pr-6209"))); await p.waitForTimeout(700);
-  await p.keyboard.press("Control+z"); await p.waitForTimeout(800);
-  await p.evaluate(() => Moves.dismiss(App.findEntity("pr-6204"))); await p.waitForTimeout(900);
-  const [height, full] = await p.evaluate(() => { const c = App.els()["pr-6209"]; return [c.getBoundingClientRect().height, c._full]; });
-  assert(height >= full, `the lead is ${height}px, not ${full}px`);
+  assert((await p.evaluate(() => App.state.entities.filter((e) => e.task && !e.settled).length)) === 0, "a task survived the undos");
   return p;
 });
 await check("taking a card again during an undo keeps who holds it", async () => {
   const p = await open("");
   await p.evaluate(() => Keys.focus("pr-6204"));
-  await p.keyboard.press("t"); await p.waitForTimeout(200); await p.keyboard.press("Control+z"); await p.waitForTimeout(200); await p.keyboard.press("t"); await p.waitForTimeout(1200);
-  const holders = await p.evaluate(() => App.els()["pr-6204"].querySelectorAll(".card-holder").length);
+  await p.keyboard.press("t"); await p.waitForTimeout(200); await p.keyboard.press("Control+z"); await p.waitForTimeout(150); await p.keyboard.press("t"); await p.waitForTimeout(1200);
+  const holders = await p.evaluate(() => document.querySelectorAll('.card[data-id="pr-6204"] .card-holder').length);
   assert(holders === 1, `${holders} holders drawn`);
   return p;
 });
 await check("the same arrival never lands twice", async () => {
   const p = await open("");
-  await hover(p, "pr-6204");
-  const e = `({ id: "pr-9000", kind: "github/pull-request", concern: "reviewRequested", title: "New", since: World.hoursAgo(0.02), fields: { number: 9000, repo: "storefront-web", author: "ines-carvalho", state: "running", diff: [1, 1], files: 1 }, signals: [World.signal("reviewRequested", 0.02, "ines-carvalho")], task: null, project: "storefront-web" })`;
+  const e = `({ id: "pr-9000", kind: "github/pull-request", concern: "reviewRequested", title: "New", since: World.hoursAgo(0.02), fields: { number: 9000, repo: "storefront-web", author: "ines-carvalho", state: "running", diff: [1, 1], files: 1 }, signals: [World.signal("reviewRequested", 0.02, "ines-carvalho")], task: null })`;
   await p.evaluate((e) => { App.arrive(eval(e)); App.arrive(eval(e)); }, e);
-  await p.mouse.move(120, 700, { steps: 3 }); await p.waitForTimeout(800);
+  await p.waitForTimeout(500);
   assert((await p.evaluate(() => App.state.entities.filter((x) => x.id === "pr-9000").length)) === 1, "the card landed twice");
   return p;
 });
-
+await check("a signal on a part changes its row and moves nothing", async () => {
+  const p = await open("");
+  const y0 = await p.evaluate(() => document.querySelector('.part[data-id="pr-6238"]').getBoundingClientRect().top);
+  await p.evaluate(() => Landing.land(App.findEntity("pr-6238"), World.signal("commented", 0.02, "omar-haddad"))); await p.waitForTimeout(600);
+  const r = await p.evaluate(() => { const e = document.querySelector('.part[data-id="pr-6238"]'); return { y: e.getBoundingClientRect().top, said: e.textContent }; });
+  assert(r.said.includes("Omar commented"), r.said);
+  assert(Math.abs(r.y - y0) < 1, `the row moved ${r.y - y0}px`);
+  return p;
+});
 await check("every move of an open card stays on one line", async () => {
   const p = await open("");
   const wrapped = await p.evaluate(() => {
     const out = [];
-    App.state.entities.concat(App.state.clusters).forEach((e) => {
-      if (!App.els()[e.id] && e.kind !== "hercule/cluster") return;
-      if (App.els()[e.id] && !App.els()[e.id]._plan) return;
+    App.state.entities.filter((e) => e.concern && !e.settled).concat(App.state.clusters).forEach((e) => {
       Open.show(e.id);
-      document.querySelectorAll("#open .o-label, #open .o-says").forEach((el) => { if (el.getClientRects().length > 1 || el.scrollHeight > 34 || (el.matches(".o-says") && el.offsetHeight > 17)) out.push(e.id + ": " + el.textContent); });
+      document.querySelectorAll("#open .o-label, #open .o-says").forEach((el) => { if (el.getClientRects().length > 1 || (el.matches(".o-says") && el.offsetHeight > 17)) out.push(e.id + ": " + el.textContent); });
       Open.hide(true);
     });
     return out;
   });
   assert(!wrapped.length, `wrapped: ${wrapped.join(" | ")}`);
+  return p;
+});
+await check("a carry raises the rail, and a drop on a card links the two", async () => {
+  const p = await open("");
+  const a = await point(p, "pr-6213");
+  await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x - 30, a.y + 40, { steps: 4 }); await p.waitForTimeout(450);
+  const o = await p.evaluate(() => getComputedStyle(document.getElementById("rail")).opacity);
+  assert(Number(o) > 0.9, `the rail is at opacity ${o}`);
+  const t = await p.evaluate(() => { const r = document.querySelector('.card[data-id="ln-OPS-44"]').getBoundingClientRect(); return { x: r.left + 90, y: r.top + 20 }; });
+  await p.mouse.move(t.x, t.y, { steps: 8 }); await p.waitForTimeout(200);
+  await p.mouse.up(); await p.waitForTimeout(700);
+  assert(await p.evaluate(() => !!document.querySelector('.bundle .part[data-id="pr-6213"]')), "the drop did not link them");
   return p;
 });
 

@@ -4,7 +4,7 @@ window.Open = (function () {
   var K = Kinds.KINDS, W = World;
   var host, inner, scrim, openId = null, sourceEl = null, keyed = false;
   var motion = null, progress = null, generation = 0;
-  var REST = '.o-meta, .o-note, .o-parts, .o-facts, .o-ledger, .o-row';
+  var REST = '.o-meta, .o-note, .o-parts, .o-facts, .o-places, .o-progress, .o-links, .o-ledger, .o-row';
   var OLDER = '.o-signal:not(.is-latest)';
 
   function saySince(d, now) {
@@ -15,15 +15,74 @@ window.Open = (function () {
     return days === 1 ? 'Yesterday' : days + ' days ago';
   }
 
+  /**
+   * Returns the timeline: what happened to this thing, with what happened to the things linked to it woven in, each with its logo,
+   * so a ticket and its pull request read as one history.
+   */
   function drawSignals(e, now) {
-    var kind = K[e.kind];
-    return '<ol class="o-signals">' + e.signals.map(function (s, i) {
-      var r = Card.sayReason(kind, s);
-      var latest = i === e.signals.length - 1;
-      return '<li class="o-signal' + (latest ? ' is-latest' : '') + ' tone-' + r.tone + '"><span class="o-dot"></span>' +
-        '<span class="o-text">' + Card.esc(r.text) + (s.note ? '<q>' + Card.esc(s.note) + '</q>' : '') + '</span>' +
-        '<time>' + saySince(s.at, now) + '</time></li>';
+    var mine = e.signals.map(function (s) { return { s: s, e: e }; });
+    var linked = [].concat.apply([], Relations.readConfirmed(e).filter(function (l) { return l.other; }).map(function (l) { return l.other.signals.map(function (s) { return { s: s, e: l.other }; }); }));
+    var all = mine.concat(linked).sort(function (a, b) { return a.s.at - b.s.at; });
+    var latest = mine[mine.length - 1];
+    return '<ol class="o-signals">' + all.map(function (x) {
+      var r = Card.sayReason(K[x.e.kind], x.s);
+      var other = x.e !== e;
+      return '<li class="o-signal' + (x === latest ? ' is-latest' : '') + (other ? ' is-linked' : '') + ' tone-' + r.tone + '">' + (other ? '<span class="o-from" title="' + Card.esc(x.e.title) + '">' + Card.drawMark(K[x.e.kind].plugin, 12) + '</span>' : '<span class="o-dot"></span>') +
+        '<span class="o-text">' + Card.esc(r.text) + (x.s.note ? '<q>' + Card.esc(x.s.note) + '</q>' : '') + '</span>' +
+        '<time>' + saySince(x.s.at, now) + '</time></li>';
     }).join('') + '</ol>';
+  }
+
+  /** Returns where a thing sits: every place above it, by the name its kind gives that level. A thing can have several of each, and all are named. */
+  function drawPlaces(e) {
+    var byNoun = {}, order = [];
+    Relations.readAncestors(e).forEach(function (p) {
+      var noun = K[p.kind].noun;
+      if (!byNoun[noun]) { byNoun[noun] = []; order.push(noun); }
+      byNoun[noun].push(p);
+    });
+    if (!order.length) return '';
+    return '<dl class="o-places">' + order.map(function (noun) {
+      return '<dt>' + Card.esc(noun) + '</dt><dd>' + byNoun[noun].map(function (p) {
+        return '<button class="o-place" data-walk="' + p.id + '">' + Card.esc(p.title) + '</button>' + (p.fields.target ? '<small>' + Card.esc(p.fields.target) + '</small>' : '');
+      }).join('<i>·</i>') + '</dd>';
+    }).join('') + '</dl>';
+  }
+
+  /** Returns how far along the source says this place is, when it says. */
+  function drawReported(e) {
+    if (!e.progress) return '';
+    var p = e.progress;
+    return '<div class="o-progress"><div class="b-progress" role="img" aria-label="' + p.done + ' of ' + p.total + ' done"><i style="width:' + Math.round((p.done / p.total) * 100) + '%"></i></div><span>' + p.done + ' of ' + p.total + ' done, as reported by ' + Card.esc(K[e.kind].plugin.name) + '</span></div>';
+  }
+
+  /** Returns one linked thing as a row. Who claims the link stays quiet until the row is reached for. */
+  function drawLinkRow(l) {
+    if (!l.other) return '<li class="o-link o-link--closed">' + Crew.icon('lock', 13) + '<span class="o-link-t">Something you do not have access to</span><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small></li>';
+    var kind = K[l.other.kind], status = kind.status && kind.status[l.other.fields.state];
+    return '<li class="o-link"><button class="o-link-go" data-walk="' + l.other.id + '">' + Card.drawMark(kind.plugin, 14) + '<span class="o-link-t">' + Card.esc(l.other.title) + '</span>' +
+      (status ? '<span class="o-link-s">' + Card.drawShape(status, 13) + Card.esc(status.word) + '</span>' : '') + '</button><small class="o-claim">' + Card.esc(Relations.sayClaim(l.claim)) + '</small>' +
+      (l.claim.type === 'person' ? '<button class="o-unlink" data-unlink="' + l.otherId + '" title="Remove this link. The source is not told.">' + Crew.icon('close', 12) + '</button>' : '') + '</li>';
+  }
+
+  /** Returns what this thing links to, the hints found in text, and the way to link something by hand. */
+  function drawLinks(e) {
+    var firm = Relations.readConfirmed(e), hints = Relations.readHints(e);
+    return '<section class="o-sec o-links"><h3 class="o-h">Linked</h3>' + (firm.length ? '<ul>' + firm.map(drawLinkRow).join('') + '</ul>' : '') +
+      (hints.length ? '<ul class="o-hints">' + hints.map(function (h) {
+        return '<li class="o-link o-link--hint"><span class="o-link-go">' + Crew.icon('link', 13) + '<span class="o-link-t">' + Card.esc(h.other.title) + '</span></span><small class="o-why">' + Card.esc(Relations.sayClaim(h.claim)) + '</small><button class="btn btn--sm" data-confirm="' + h.otherId + '">Link</button></li>';
+      }).join('') + '</ul>' : '') +
+      '<div class="o-add"><input class="o-find" data-find placeholder="Link something: search by title or number" aria-label="Link something"><ul class="o-found" data-found hidden></ul></div></section>';
+  }
+
+  /** Returns the things under a place that concern the person, for the bigger picture. */
+  function drawConcerns(e) {
+    var list = Relations.readChildren(e);
+    if (!list.length) return '';
+    return '<section class="o-sec o-links"><h3 class="o-h">What concerns you here</h3><ul>' + list.map(function (c) {
+      var kind = K[c.kind], status = kind.status && kind.status[c.fields.state];
+      return '<li class="o-link"><button class="o-link-go" data-walk="' + c.id + '">' + Card.drawMark(kind.plugin, 14) + '<span class="o-link-t">' + Card.esc(c.title) + '</span>' + (status ? '<span class="o-link-s">' + Card.drawShape(status, 13) + Card.esc(status.word) + '</span>' : '') + '</button></li>';
+    }).join('') + '</ul></section>';
   }
 
   function drawLedger(e) {
@@ -44,16 +103,20 @@ window.Open = (function () {
     var now = App.state.now, kind = K[e.kind], f = e.fields;
     var status = kind.status && kind.status[f.state];
     var who = kind.person && W.PEOPLE[f[kind.person]];
-    var id = Card.fill(kind.identifier, f), ctx = Card.fill(kind.context, f);
+    var id = Card.fill(kind.identifier, f);
+    var isPlace = !e.concern && kind.pace === 'context';
     return '<div class="o-head">' +
       '<div class="c-mark">' + Card.drawMark(kind.plugin) + '</div>' +
       '<h2 class="o-title">' + Card.esc(e.title) + '</h2>' +
       '<button class="icon-btn icon-btn--sm o-close" data-close title="Close (Esc)">' + Crew.icon('close', 13) + '</button>' +
-      '<div class="o-meta"><span>' + Card.esc(kind.noun) + '</span>' + [id, ctx].filter(Boolean).map(function (x) { return '<i>·</i><span>' + Card.esc(x) + '</span>'; }).join('') + (who ? '<i>·</i><span>' + Card.esc(who.name) + '</span>' : '') + '</div>' +
+      '<div class="o-meta"><span>' + Card.esc(kind.noun) + '</span>' + (id ? '<i>·</i><span>' + Card.esc(id) + '</span>' : '') + (who ? '<i>·</i><span>' + Card.esc(who.name) + '</span>' : '') + '</div>' +
       '</div>' +
-      (e.signals.length ? '<section class="o-sec">' + drawSignals(e, now) + '</section>' : '') +
+      (e.about ? '<p class="o-note">' + Card.esc(e.about) + '</p>' : '') +
       '<div class="o-facts">' + (status ? '<span class="o-status">' + Card.drawShape(status, 15) + Card.esc(status.word) + '</span>' : '') + Card.drawFacts(kind, f) + '<button class="o-source" data-source>Open in ' + Card.esc(kind.plugin.name) + ' ' + Crew.icon('external', 12) + '</button></div>' +
-      drawLedger(e);
+      drawReported(e) + drawPlaces(e) +
+      (e.signals.length ? '<section class="o-sec">' + drawSignals(e, now) + '</section>' : '') +
+      (isPlace ? drawConcerns(e) : drawLinks(e)) +
+      (isPlace ? '' : drawLedger(e));
   }
 
   function drawOpenPlaque(c) {
@@ -82,7 +145,6 @@ window.Open = (function () {
 
   /** Fades the veil out, and takes it away once it has gone. */
   function hideVeil() {
-    if (Tray.isOpen()) return;
     scrim.classList.remove('is-on');
     var gone = function () { if (!scrim.classList.contains('is-on')) scrim.hidden = true; };
     if (Motion.isReduced()) gone(); else setTimeout(gone, 370);
@@ -91,8 +153,7 @@ window.Open = (function () {
   /** Returns where the sheet starts: the part of the card that can be seen where it lies. */
   function readFrom(el) {
     var r = el.getBoundingClientRect();
-    var shown = el._plan ? el._plan.show : r.height;
-    return { left: r.left, top: r.top, width: r.width, height: Math.min(r.height, shown) };
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
   }
 
   /** Draws one frame of the sheet, at `t` from where the card lies (0) to where it stands open (1). */
@@ -161,10 +222,9 @@ window.Open = (function () {
     }
     if (openId || motion) finish();
     Pointer.setHover(null);
-    Pointer.unpeek();
-    if (App.els()[id]) Pointer.clearFresh(App.els()[id]);
+    if (anchor && anchor.dataset.id) Pointer.clearFresh(anchor);
     var plaque = e.kind === 'hercule/cluster';
-    sourceEl = anchor || (plaque ? document.querySelector('.plaque[data-id="' + id + '"]') : App.els()[id]);
+    sourceEl = anchor || document.querySelector('#page [data-id="' + id + '"]');
     openId = id;
     keyed = !!byKeyboard;
     var from = readFrom(sourceEl);
@@ -208,7 +268,7 @@ window.Open = (function () {
   /** Returns the parts of the sheet that are the same objects as parts of the card: the title, the mark and the latest line. */
   function measureParts(source) {
     var parts = [];
-    [['.c-title, .pl-title', '.o-title'], ['.c-mark, .pl-marks', '.c-mark'], ['.c-line', '.o-signal.is-latest']].forEach(function (pair) {
+    [['.c-title, .pl-title, .p-title, .b-title', '.o-title'], ['.c-mark, .pl-marks, .p-mark, .b-mark', '.c-mark'], ['.c-line', '.o-signal.is-latest']].forEach(function (pair) {
       var a = source.querySelector(pair[0]), b = inner.querySelector(pair[1]);
       if (!a || !b || !a.getClientRects().length) return;
       b.style.transform = '';
@@ -218,7 +278,7 @@ window.Open = (function () {
       parts.push({ el: b, dx: ra.left - rb.left, dy: ra.top - rb.top, scale: scale });
     });
     // A title that wraps in the sheet starts over the line under it, so that line waits until the title has made room.
-    var title = source.querySelector('.c-title, .pl-title'), sheetTitle = inner.querySelector('.o-title');
+    var title = source.querySelector('.c-title, .pl-title, .p-title, .b-title'), sheetTitle = inner.querySelector('.o-title');
     if (title && sheetTitle && sheetTitle.offsetHeight > title.offsetHeight * 1.4) parts.filter(function (p) { return p.el.classList.contains('o-signal'); }).forEach(function (p) { p.waits = true; });
     return parts;
   }
@@ -233,8 +293,8 @@ window.Open = (function () {
     var plaque = e.kind === 'hercule/cluster';
     if (sourceEl) restoreSource();
     keyed = true;
-    sourceEl = plaque ? document.querySelector('.plaque[data-id="' + id + '"]') : App.els()[id];
-    sourceEl.classList.add('is-source');
+    sourceEl = document.querySelector('#page [data-id="' + id + '"]');
+    if (sourceEl) sourceEl.classList.add('is-source');
     var down = readOrder(id) > readOrder(openId);
     openId = id;
     App.state.open = id;
@@ -242,7 +302,7 @@ window.Open = (function () {
     inner.innerHTML = plaque ? drawOpenPlaque(e) : drawOpen(e);
     var h = inner.offsetHeight;
     motion.to.height = h;
-    motion.from = readFrom(sourceEl);
+    if (sourceEl) motion.from = readFrom(sourceEl);
     // A walk holds its place, unless a taller card would run off the window. The sheet's new size follows on a transition.
     motion.to.top = Math.max(document.getElementById('main').getBoundingClientRect().top + 12, Math.min(motion.to.top, innerHeight - h - 16));
     host.classList.add('is-walking');
@@ -250,7 +310,7 @@ window.Open = (function () {
     host.style.height = h + 'px';
     host.setAttribute('aria-label', K[e.kind].noun + ': ' + e.title);
     motion.id = id;
-    motion.parts = measureParts(sourceEl);
+    motion.parts = sourceEl ? measureParts(sourceEl) : [];
     Motion.animate(inner, [{ opacity: 0.2, transform: 'translateY(' + (down ? 8 : -8) + 'px)' }, { opacity: 1, transform: 'none' }], { duration: 160, easing: 'cubic-bezier(.22,.9,.24,1)' });
     Landing.announce(Card.sayCard(e));
     host.focus({ preventScroll: true });
@@ -317,8 +377,7 @@ window.Open = (function () {
 
   /** Gives focus back to the card. The ring and the peek come back only for someone working by keyboard. */
   function refocus(src, id, wasKeyed) {
-    if (src && src.isConnected && src.closest('#tray')) src.focus({ preventScroll: true });
-    else if (wasKeyed && App.findEntity(id)) Keys.focus(id);
+    if (wasKeyed && App.findEntity(id)) Keys.focus(id);
     else if (src && src.isConnected) Keys.focusQuietly(src);
   }
 
@@ -337,8 +396,6 @@ window.Open = (function () {
     host.focus({ preventScroll: true });
   }
 
-  function isFromTray() { return !!(sourceEl && sourceEl.closest && sourceEl.closest('#tray')); }
-
   function isOpen() { return !!openId; }
   function current() { return openId; }
 
@@ -353,16 +410,38 @@ window.Open = (function () {
     });
   }
 
+  /** Lists what a person might link this card to, as they type. Anything already linked is left out. */
+  function drawFound(input) {
+    var words = input.value.trim().toLowerCase(), list = host.querySelector('[data-found]');
+    var e = App.findEntity(openId);
+    var linked = Relations.readLinks(e).map(function (l) { return l.otherId; });
+    var found = !words ? [] : App.state.entities.filter(function (x) {
+      return x !== e && linked.indexOf(x.id) < 0 && (x.title + ' ' + Card.fill(K[x.kind].identifier, x.fields)).toLowerCase().indexOf(words) >= 0;
+    }).slice(0, 5);
+    list.hidden = !found.length;
+    list.innerHTML = found.map(function (x) {
+      return '<li><button class="o-link-go" data-pick="' + x.id + '">' + Card.drawMark(K[x.kind].plugin, 14) + '<span class="o-link-t">' + Card.esc(x.title) + '</span><small>' + Card.esc(Card.fill(K[x.kind].identifier, x.fields)) + '</small></button></li>';
+    }).join('');
+  }
+
   function start() {
     host = document.getElementById('open');
     scrim = document.getElementById('scrim');
     scrim.addEventListener('click', function () { if (openId && !host.classList.contains('is-arming')) hide(); });
     host.addEventListener('click', function (ev) {
       if (ev.target.closest('[data-close]')) { hide(); return; }
+      var to = ev.target.closest('[data-walk]');
+      if (to) { walk(to.dataset.walk); return; }
+      var e = App.findEntity(openId);
+      var yes = ev.target.closest('[data-confirm], [data-pick]');
+      if (yes) { Moves.link(e, App.findEntity(yes.dataset.confirm || yes.dataset.pick)); return; }
+      var off = ev.target.closest('[data-unlink]');
+      if (off) { Moves.unlink(e, off.dataset.unlink); return; }
       var b = ev.target.closest('[data-act]');
       if (b) act(b);
     });
+    host.addEventListener('input', function (ev) { if (ev.target.matches('[data-find]')) drawFound(ev.target); });
   }
 
-  return { show: show, hide: hide, walk: walk, refresh: refresh, isFromTray: isFromTray, focusFirstMove: focusFirstMove, isOpen: isOpen, current: current, act: act, start: start };
+  return { show: show, hide: hide, walk: walk, refresh: refresh, focusFirstMove: focusFirstMove, isOpen: isOpen, current: current, act: act, start: start };
 })();

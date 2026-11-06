@@ -158,113 +158,70 @@
 .c-fresh { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you-ink); }
 .card.is-source { opacity: 0; }
 /* The rim follows the strip that can be seen, at the card's own corner, and prints over nothing else. */
-.card.is-peek.is-landed::after { height: 100%; }
-.card.is-landed::after {
+.card.is-landed::after, .part.is-landed::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
-  height: var(--shown, 100%);
+  bottom: 0;
   border-radius: var(--card-r);
   pointer-events: none;
   box-shadow: inset 0 0 0 1.5px var(--land), inset 0 0 14px -6px var(--land);
   animation: land-rim 1100ms var(--m-ease) forwards;
 }
-.card { --land: var(--you); }
-.card[data-landed="bad"] { --land: var(--fail); }
-.card[data-landed="good"] { --land: var(--ok); }
+.card, .part { --land: var(--you); }
+[data-landed="bad"] { --land: var(--fail); }
+[data-landed="good"] { --land: var(--ok); }
 @keyframes land-rim { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
 .card.is-leaving { pointer-events: none; }
 .nav-wash { position: absolute; inset: 0; border-radius: inherit; background: color-mix(in oklab, var(--accent) 16%, transparent); pointer-events: none; }
 .c-line-clip { position: absolute; overflow: hidden; pointer-events: none; }
 .c-line--old { margin: 0; }
-.card.is-moving { transition: height var(--m-base) var(--m-ease); }
-.card.is-new { opacity: 0; }
 @media (forced-colors: active) {
   .card-stock { border: 1px solid CanvasText; }
-  .stack-wrap[data-slow="true"] .card:not(.is-peek):not(.is-focus):not(.is-hover) > .card-stock { border-color: transparent; }
   .card.is-focus, .plaque.is-focus, .o-row:focus-visible { outline: 2px solid Highlight; }
-  .ib-src.is-on, .ptab.is-on { outline: 2px solid CanvasText; outline-offset: -2px; }
+  .ptab.is-on { outline: 2px solid CanvasText; outline-offset: -2px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .stack .card { transition: none !important; }
   .scrim, .rail { transition: opacity 200ms linear !important; }
-  .card.is-landed::after { animation: land-fade 900ms linear forwards; }
+  .card.is-landed::after, .part.is-landed::after { animation: land-fade 900ms linear forwards; }
   .rail, .rail.is-on { transform: translate(-50%, 0); transition: opacity var(--m-base) linear; }
 }
 @keyframes land-fade { from { opacity: 1; } to { opacity: 0; } }
 
-/* The tray: a pile fanned open. */
-.tray {
-  position: fixed;
-  z-index: 55;
-  overflow: auto;
-  padding: 12px 14px 14px;
-  border-radius: 14px;
-  background: var(--glass-fill);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
-  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--h-carry);
-}
-.tray[hidden] { display: none; }
-/* On the way out the panel goes first, so only the cards travel home. */
-.tray.is-closing { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; transition: background var(--m-quick), box-shadow var(--m-quick); }
-.tray.is-closing .tray-h, .tray.is-closing .tray-none { opacity: 0; transition: opacity var(--m-quick); }
-.tray .card { cursor: pointer; }
-.tray .card:hover > .card-stock { box-shadow: var(--h-hover); }
-.tray-h { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 10px; }
-.tray-h h2 { margin: 0; font: var(--type-lane); }
-.tray-h small { color: var(--faint); font: var(--type-summary); }
-.tray-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
-.tray-cell { position: relative; min-height: 80px; }
-.tray-cell .c-foot--facts { margin-top: 3px; }
-.tray-cell .c-foot { align-self: end; }
-.tray-cell .card { position: relative; top: auto; height: 100%; display: grid; grid-template-rows: auto 1fr; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 8px; }
-
-.tray-h { gap: 10px; }
-.tray-h h2 { margin-right: auto; }
-.tray-all { display: inline-flex; gap: 4px; }
-.tray-find::placeholder { color: var(--faint); }
-.tray-find { width: 150px; height: 26px; padding: 0 8px; border: 0; border-radius: var(--r-xs); background: var(--field); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--ink); font: var(--type-summary); }
-.tray .card:hover .c-acts { opacity: 1; pointer-events: auto; }
-.tray .card:hover .c-foot--facts { visibility: hidden; }
-.tray .card:hover .c-ctx { visibility: hidden; }
-.tray-cell[hidden], .tray-none[hidden], .tray-all[hidden] { display: none; }
-.tray-none { margin: 8px 2px; color: var(--muted); font: var(--type-summary); }
-
-/* The reviewer's dock. Not part of the product. */
-.dock { position: fixed; right: 12px; bottom: 10px; z-index: 95; display: flex; gap: 4px; opacity: 0.45; transition: opacity var(--m-quick); }
-.dock:hover, .dock:focus-within { opacity: 1; }
-.dock select, .dock-btn { height: 26px; padding: 0 6px; border-radius: var(--r-xs); border: 0; background: var(--glass-fill-raised); box-shadow: inset 0 0 0 1px var(--glass-rim); color: var(--muted); font: var(--type-summary); }
-.dock-btn { padding: 0 8px; }
-
-.ib-notice { display: flex; align-items: center; gap: 6px; padding: 0 10px; height: 26px; border-radius: var(--r-sm); background: var(--you-tint); color: var(--ink); font: var(--type-summary); white-space: nowrap; }
-.ib-notice[hidden] { display: none; }
-.ib-notice b { font-weight: var(--w-medium); }
-.ib-notice a { text-decoration: underline; cursor: pointer; }
-.notice-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
-
-/* The pile: sheets under a card. It says how many it holds, the worst thing inside and how fresh it is, because a stack may fold
-   things but may never hide them. It lies under the strips, with their height and no more. */
-.stack .card.is-pile { width: 100%; text-align: left; cursor: pointer; grid-template-columns: 22px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; align-content: center; padding: 0 var(--card-pad-x) 12px; }
-.stack .card.is-pile > .card-stock { box-shadow: var(--h-stack); bottom: 12px; }
-.stack .card.is-pile:hover > .card-stock { box-shadow: var(--h-hover); }
-.stack .card.is-pile.is-focus > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-hover); }
-.card.is-pile .c-mark { height: auto; justify-content: center; }
-.pile-n { -webkit-text-stroke: 0.25px currentColor; font-family: var(--font-deco); font-feature-settings: normal; font-size: 20px; line-height: 22px; color: var(--count-ink); white-space: nowrap; }
-.card.is-pile .c-title { color: var(--muted); font: var(--type-summary); }
-.pile-facts { grid-column: 3; display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font: var(--type-summary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pile-worst { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); font-weight: var(--w-medium); }
-.pile-sheet { position: absolute; z-index: -2; top: 0; left: 0; right: 0; bottom: 12px; border-radius: var(--card-r); background: color-mix(in oklab, var(--stock), var(--desk) calc(var(--n) * 16%)); box-shadow: inset 0 0 0 1px var(--stock-rim), 0 1px 2px oklch(0 0 0 / 0.14); transform: translateY(calc(var(--n) * 4px)) scaleX(calc(1 - var(--n) * 0.03)); transition: transform var(--m-base) var(--m-ease); }
-.card.is-pile:hover .pile-sheet { transform: translateY(calc(var(--n) * 5.5px)) scaleX(calc(1 - var(--n) * 0.02)); }
-.card.is-pile[data-depth="0"] .pile-sheet { display: none; }
-.card.is-pile[data-depth="1"] .pile-sheet[style*="--n:3"], .card.is-pile[data-depth="1"] .pile-sheet[style*="--n:2"], .card.is-pile[data-depth="2"] .pile-sheet[style*="--n:3"] { display: none; }
-
-/* A project on the shelf: one card, however much it holds. */
-.stack .card.is-project { grid-template-columns: 22px minmax(0, 1fr) auto; align-content: start; padding-top: 10px; }
-.stack .card.is-project > .card-stock { box-shadow: var(--h-stack); }
-.card.is-project .c-mark { grid-row: 1; height: 18px; }
-.card.is-project .c-title { color: var(--ink); font: var(--type-card); }
-.pile-count { grid-column: 3; grid-row: 1; color: var(--faint); font: var(--type-summary); font-variant-numeric: tabular-nums; }
-.card.is-project .c-line { display: flex; grid-column: 2 / -1; grid-row: 2; }
+/* Where a thing sits: every place above it, under the name its kind gives that level. */
+.o-places { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; margin: 2px 0 8px; padding: 0 16px 0 45px; font: var(--type-summary); }
+.o-places dt { color: var(--faint); }
+.o-places dd { margin: 0; color: var(--muted); }
+.o-places dd i { margin: 0 6px; font-style: normal; color: var(--faint); }
+.o-places small { margin-left: 5px; color: var(--faint); font: inherit; }
+.o-place { color: var(--ink); text-align: left; font: inherit; }
+.o-place:hover { text-decoration: underline; text-underline-offset: 2px; }
+.o-progress { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 0 16px 0 45px; color: var(--faint); font: var(--type-summary); }
+.o-signal.is-linked { color: var(--muted); }
+.o-from { position: absolute; left: -18px; top: 6px; display: grid; place-items: center; width: 13px; height: 13px; background: var(--stock); }
+.o-h { margin: 0 0 4px; font: var(--w-medium) var(--t-12) / 16px var(--font-ui); color: var(--muted); }
+.o-links { padding: 0 12px 8px 41px; }
+.o-links ul { list-style: none; margin: 0; padding: 0; }
+.o-link { position: relative; display: flex; align-items: center; gap: 8px; min-height: 28px; border-radius: var(--r-xs); font: var(--type-summary); }
+.o-link-go { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; min-height: 28px; padding: 0 4px; border-radius: var(--r-xs); text-align: left; color: inherit; }
+button.o-link-go:hover { background: var(--hover); }
+.o-link-t { min-width: 0; flex: 1; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.o-link-s { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--muted); }
+.o-link small { flex: none; color: var(--faint); font: var(--type-meta); }
+/* Who claims a link stays quiet until the row is reached for. */
+.o-claim { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 0 6px; border-radius: var(--r-xs); background: var(--stock); opacity: 0; pointer-events: none; transition: opacity var(--m-quick); }
+.o-link:hover .o-claim, .o-link:focus-within .o-claim { opacity: 1; }
+.o-link--closed { padding: 0 4px; color: var(--faint); }
+.o-link--closed .o-link-t { color: var(--faint); }
+.o-link--hint .o-link-t { color: var(--muted); }
+.o-why { color: var(--faint); }
+.o-unlink { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--r-xs); color: var(--faint); opacity: 0; }
+.o-link:hover .o-unlink, .o-unlink:focus-visible { opacity: 1; }
+.o-unlink:hover { color: var(--ink); background: var(--hover); }
+.o-add { position: relative; margin-top: 6px; }
+.o-find { width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-xs); background: var(--field); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--ink); font: var(--type-summary); }
+.o-find::placeholder { color: var(--faint); }
+.o-found { margin-top: 4px !important; }
+.o-found[hidden] { display: none; }

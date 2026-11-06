@@ -2,7 +2,7 @@
 window.Scenes = (function () {
   var W = World;
   var K = Kinds.KINDS;
-  var ONLY = ['pr-6238', 'pr-6252', 'pr-6204', 'mail-1', 'pr-6195', 'ln-OPS-47', 'ln-SHOP-360', 'qs-1'];
+  var ONLY = ['ln-SHOP-371', 'pr-6238', 'se-1', 'pr-6252', 'pr-6204', 'mail-1', 'ln-OPS-47', 'ln-SHOP-360', 'qs-1'];
 
   /** Returns fresh copies of what Hercule noticed, so a scene never inherits moves from the last one. */
   function readClusters() { return W.CLUSTERS.map(function (c) { return Object.assign({}, c); }); }
@@ -17,7 +17,7 @@ window.Scenes = (function () {
     volume: function () { return { name: 'volume', entities: W.buildVolume(), clusters: readClusters() }; },
     handed: function () {
       var s = morning();
-      ['pr-6204', 'pr-6209', 'pr-6213'].forEach(function (id, i) {
+      ['ln-OPS-44', 'pr-6209', 'ln-SHOP-342'].forEach(function (id, i) {
         var e = s.entities.filter(function (x) { return x.id === id; })[0];
         e.task = { by: i === 1 ? 'you' : 'Agent review' };
       });
@@ -27,7 +27,7 @@ window.Scenes = (function () {
       var s = morning();
       var e = s.entities.filter(function (x) { return x.id === 'pr-6209'; })[0];
       e.title = 'Split the basket summary into smaller components so that the delivery estimate, the loyalty points and the multi-buy savings can each be tested on their own without mounting the whole checkout';
-      var f = s.entities.filter(function (x) { return x.id === 'se-1'; })[0];
+      var f = s.entities.filter(function (x) { return x.id === 'se-2'; })[0];
       f.fields.events = 1284093;
       f.fields.users = 48211;
       return s;
@@ -84,13 +84,6 @@ window.Scenes = (function () {
 
   function drawZero(page) { page.innerHTML = drawSunrise('zero'); }
 
-  /** Raises the sunrise where the stacks were, over what still rests on the shelf. */
-  function showClockClear(page) {
-    page.insertAdjacentHTML('afterbegin', drawSunrise('zero zero--clock'));
-    page.classList.add('is-clock-clear');
-    Landing.announce('All clear. Nothing on the clock needs you.');
-  }
-
   /** Lets the page go quiet, then brings up the sunrise. */
   function showZero() {
     var page = document.getElementById('page');
@@ -108,17 +101,14 @@ window.Scenes = (function () {
     var connect = function (mark, name, hue, line) {
       return '<button class="fr-card">' + Card.drawMark({ name: name, mark: mark, hue: hue, solid: mark === 'github' }, 20) + '<div><b>' + name + '</b><small>' + line + '</small></div><span class="fr-go">Connect ' + Crew.icon('arrow', 12) + '</span></button>';
     };
-    var next = '<i class="fr-next"></i>';
-    var head = function (t) { return '<h2 class="stack-h"><span class="stack-n"></span><span class="stack-t">' + t + '</span></h2>'; };
     // On a first run nothing has happened yet, so the sidebar says so too.
     var waitingNow = document.querySelector('.side-scroll .side-sec');
     if (waitingNow) waitingNow.hidden = true;
     document.querySelector('.side-sum').textContent = 'Nothing running';
-    page.innerHTML = '<div class="noticed">' + '<span class="card-holder"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34 }) + '</span></span><span class="card-paws" style="--hue:var(--hue-' + Crew.lookFor('Hercule').hue + ')"><i></i><i></i></span><i class="card-stock"></i>' + '<div class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></div></div>' +
-      '<div class="col"><section class="stack-wrap">' + head('To review') + connect('github', 'GitHub', null, 'Pull requests and reviews') + next + '</section></div>' +
-      '<div class="col"><section class="stack-wrap">' + head('To answer') + connect('gmail', 'Gmail', 25, 'Threads that ask something of you') + next + '</section></div>' +
-      '<div class="col"><section class="stack-wrap">' + head('To finish') + '<p class="fr-note">Your own work, once GitHub is connected.</p>' + next + '</section></div>' +
-      '<div class="col col--shelf"><section class="stack-wrap">' + head('On the shelf') + '<div class="fr-row">' + connect('linear', 'Linear', 277, 'Issues assigned to you') + '</div></section></div>';
+    page.innerHTML = '<div class="ib-wide"><div class="noticed"><span class="card-holder"><span class="card-head">' + Crew.peek('Hercule', { pose: 'idle', size: 30, crop: 34 }) + '</span></span><span class="card-paws" style="--hue:var(--hue-' + Crew.lookFor('Hercule').hue + ')"><i></i><i></i></span><i class="card-stock"></i>' +
+      '<p class="fr-welcome">This is where the outside world reaches you.<small>Connect what you work in. What concerns you lands here as cards, each with its history inside it.</small></p></div>' +
+      '<header class="sec"><h2>Ongoing</h2></header><div class="fr-grid">' + connect('linear', 'Linear', 277, 'Tickets, with their projects and milestones') + connect('sentry', 'Sentry', 300, 'Errors assigned to you') + '</div></div>' +
+      '<aside class="ib-narrow"><header class="sec"><h2>Requests</h2></header><div class="fr-list">' + connect('github', 'GitHub', null, 'Reviews people ask of you') + connect('gmail', 'Gmail', 25, 'Threads that ask something of you') + '</div></aside>';
   }
 
   /** Returns the card of something raised from Intake. */
@@ -126,7 +116,7 @@ window.Scenes = (function () {
     var kinds = { sentry: 'sentry/issue', slack: 'slack/thread' };
     var kind = kinds[r.mark] || 'sentry/issue';
     if (kind === 'slack/thread') return { id: 'raised-' + r.id, kind: kind, concern: 'mentioned', title: r.title, since: W.hoursAgo(3), fields: { from: 'kofi-mensah', channel: r.ref, replies: r.n }, signals: [W.signal('mentioned', 3, 'kofi-mensah')], task: null, project: null };
-    return { id: 'raised-' + r.id, kind: kind, concern: 'assigned', title: r.title, since: W.hoursAgo(1), fields: { key: r.ref, project: 'checkout-api', state: 'unresolved', events: r.n, users: 3 }, signals: [W.signal('assigned', 1)], task: null, project: 'checkout-api' };
+    return { id: 'raised-' + r.id, kind: kind, concern: 'assigned', title: r.title, since: W.hoursAgo(1), fields: { key: r.ref, assignee: 'you', state: 'unresolved', events: r.n, users: 3 }, signals: [W.signal('assigned', 1)], task: null, project: 'checkout-api' };
   }
 
   function play(name) {
@@ -134,11 +124,10 @@ window.Scenes = (function () {
     Moves.reset();
     if (window.Pages && Pages.current() !== 'inbox') Pages.setView('inbox', true);
     Open.hide(true);
-    Tray.hide();
     Menu.hide();
     Keys.clear();
     App.load((defs[name] || defs.morning)());
     if (name === 'loading') Skeleton.run();
   }
-  return { play: play, defs: defs, list: list, showZero: showZero, showClockClear: showClockClear, raisedEntity: raisedEntity };
+  return { play: play, defs: defs, list: list, showZero: showZero, drawSunrise: drawSunrise, raisedEntity: raisedEntity };
 })();

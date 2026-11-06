@@ -16,25 +16,29 @@ const inPlace = async (page, id) => page.evaluate((id) => { const r = document.q
 const hover = async (page, id) => { const p = await inPlace(page, id); await page.mouse.move(p.x, p.y, { steps: 3 }); };
 const click = async (page, id) => { const p = await inPlace(page, id); await page.mouse.move(p.x, p.y); await page.mouse.click(p.x, p.y); };
 
+const box = (p, sel) => p.evaluate((s) => { const e = document.querySelector(s); const g = document.getElementById("page"); const r0 = e.getBoundingClientRect(); g.scrollTop += r0.top - 300; const r = e.getBoundingClientRect(); return { x: r.left + r.width * 0.5, y: r.top + 14 }; }, sel);
+const clickOn = async (p, sel) => { const c = await box(p, sel); await p.waitForTimeout(60); await p.mouse.move(c.x, c.y); await p.mouse.click(c.x, c.y); };
 const STATES = {
   "01-morning": { q: "" },
-  "02-peek": { q: "", run: async (p) => { await hover(p, "pr-6209"); await p.waitForTimeout(650); } },
-  "03-open": { q: "", run: async (p) => { await click(p, "pr-6213"); await p.waitForTimeout(800); } },
+  "02-hover": { q: "", run: async (p) => { await hover(p, "pr-6204"); await p.waitForTimeout(300); } },
+  "03-open": { q: "", run: async (p) => { await clickOn(p, '.card[data-id="ln-SHOP-371"]'); await p.waitForTimeout(800); } },
   "04-open-noticed": { q: "", run: async (p) => { await click(p, "c-search"); await p.waitForTimeout(800); } },
-  "05-menu": { q: "", run: async (p) => { await hover(p, "pr-6118"); await p.waitForTimeout(120); const b = await p.evaluate(() => { const r = document.querySelector('[data-id="pr-6118"] [data-act="hand"]').getBoundingClientRect(); return { x: r.left + 8, y: r.top + 10 }; }); await p.mouse.move(b.x, b.y); await p.mouse.click(b.x, b.y); await p.waitForTimeout(400); } },
+  "05-menu": { q: "", run: async (p) => { await hover(p, "ln-SHOP-371"); await p.waitForTimeout(160); const b = await p.evaluate(() => { const r = document.querySelector('.card[data-id="ln-SHOP-371"] [data-act="hand"]').getBoundingClientRect(); return { x: r.left + 8, y: r.top + 10 }; }); await p.mouse.move(b.x, b.y); await p.mouse.click(b.x, b.y); await p.waitForTimeout(400); } },
   "06-handed": { q: "scene=handed" },
-  "07-signal-landing": { q: "", run: async (p) => { await p.evaluate(() => Landing.land(App.findEntity("pr-6213"), World.signal("commented", 0.02, "omar-haddad"))); await p.waitForTimeout(430); } },
-  "08-carrying": { q: "", run: async (p) => { const a = await inPlace(p, "pr-6213"); await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x + 40, a.y + 20, { steps: 4 }); await p.mouse.move(760, 760, { steps: 12 }); await p.waitForTimeout(500); } },
+  "07-signal-landing": { q: "", run: async (p) => { await p.evaluate(() => Landing.land(App.findEntity("pr-6238"), World.signal("commented", 0.02, "omar-haddad"))); await p.waitForTimeout(430); } },
+  "08-carrying": { q: "", run: async (p) => { const a = await inPlace(p, "pr-6213"); await p.mouse.move(a.x, a.y); await p.mouse.down(); await p.mouse.move(a.x - 40, a.y + 20, { steps: 4 }); await p.mouse.move(520, 300, { steps: 12 }); await p.waitForTimeout(500); } },
   "09-light-day": { q: "scene=light" },
   "10-300-cards": { q: "scene=volume" },
-  "11-tray": { q: "", run: async (p) => { await p.click('[data-foot="finish"]'); await p.waitForTimeout(800); } },
-  "12-long-and-huge": { q: "scene=edge", run: async (p) => { await hover(p, "pr-6209"); await p.waitForTimeout(650); } },
+  "11-open-project": { q: "", run: async (p) => { await clickOn(p, '.b-open[data-id="prj-retries"]'); await p.waitForTimeout(800); } },
+  "12-long-and-huge": { q: "scene=edge" },
   "13-loading": { q: "scene=loading&hold=9000" },
   "14-offline": { q: "scene=offline" },
   "15-github-failing": { q: "scene=error" },
   "16-inbox-zero": { q: "scene=zero", wait: 1800 },
   "17-first-run": { q: "scene=firstrun" },
-  "19-clock-clear": { q: "scene=light", wait: 900, run: async (p) => { await p.evaluate(() => { App.state.clusters.splice(0); App.reflowNoticed(); App.state.entities.filter((e) => App.readStack(e) !== "shelf").forEach((e) => { e.settled = true; e.task = { by: "Agent review" }; }); App.layOut(true); App.checkZero(); }); await p.waitForTimeout(1900); } },
+  "19-requests-clear": { q: "scene=light", run: async (p) => { await p.evaluate(() => { App.state.entities.filter((e) => !App.isRich(e) && !["pr-6238"].includes(e.id)).forEach((e) => { e.settled = true; }); App.layOut(true); }); await p.waitForTimeout(1900); } },
+  "20-link-hint": { q: "", run: async (p) => { await clickOn(p, '.card[data-id="pr-6263"]'); await p.waitForTimeout(800); } },
+  "21-by-initiative": { q: "", run: async (p) => { await p.selectOption("[data-grouping]", "linear/initiative"); await p.waitForTimeout(700); } },
   "18-intake": { q: "", run: async (p) => { await p.click('[data-view="intake"]'); await p.waitForTimeout(400); } },
 };
 const only = pos[2] ? pos[2].split(",") : null;

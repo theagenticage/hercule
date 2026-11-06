@@ -16,15 +16,26 @@
   };
 
   var uid = 0;
+  var relations = [];   // the claims of this world, rebuilt with its entities
+  var contexts = [];    // the things that give context, rebuilt with them
+
+  /** Records that a plugin reports one thing as part of another. A thing can have many parents, and a team is one path among them. */
+  function partOf(from) {
+    [].slice.call(arguments, 1).forEach(function (to) { if (to) relations.push({ from: from, rel: 'part-of', to: to, claim: { type: 'source' } }); });
+  }
+  /** Records a link between two peers, and who claims it. */
+  function link(from, to, claim) { relations.push({ from: from, rel: 'linked', to: to, claim: claim }); }
+
   function signal(key, h, who, value, note) { return { id: 's' + ++uid, key: key, at: hoursAgo(h), who: who || null, value: value || null, note: note || null, open: true }; }
 
   function pr(number, repo, title, author, h, state, extra) {
     extra = extra || {};
     var signals = extra.signals || [signal('reviewRequested', h, author)];
+    partOf('pr-' + number, 'repo-' + repo);
     return {
-      id: 'pr-' + number, kind: 'github/pull-request', concern: extra.concern || 'reviewRequested', title: title, since: hoursAgo(h),
+      id: 'pr-' + number, kind: 'github/pull-request', concern: extra.concern === undefined ? 'reviewRequested' : extra.concern, title: title, since: hoursAgo(h),
       fields: { number: number, repo: repo, author: author, state: state, diff: extra.diff || [12 + (number * 7) % 180, (number * 3) % 64], files: extra.files || 1 + (number % 9) },
-      signals: signals, task: extra.task || null, project: extra.project || repo,
+      signals: signals, task: extra.task || null,
     };
   }
   function mine(number, repo, title, days, state, signals, extra) {
@@ -33,18 +44,91 @@
   function parked(number, repo, title, days) {
     return Object.assign(mine(number, repo, title, days, 'passing', [signal('waiting', days * 24)]), { settled: true, parked: 'with reviewers' });
   }
-  function issue(key, title, team, project, state, h, extra) {
+  /** Returns a ticket. `parents` are the ids of everything it is part of: its projects, its milestone, its team. */
+  function issue(key, title, parents, state, h, extra) {
     extra = extra || {};
+    partOf.apply(null, ['ln-' + key].concat(parents));
     return {
       id: 'ln-' + key, kind: 'linear/issue', concern: 'assigned', title: title, since: hoursAgo(h),
-      fields: { key: key, team: team, project: project, state: state, assignee: 'you', priority: extra.priority || 0, milestone: extra.milestone || null },
-      signals: extra.signals || [signal('assigned', h)], task: null, project: project || team,
+      fields: { key: key, state: state, assignee: 'you', priority: extra.priority || 0 },
+      signals: extra.signals || [signal('assigned', h)], task: null,
     };
   }
 
+  /** Returns a thing that gives context. Progress is here only when the source reports it: the page never works it out from what it can see. */
+  function context(id, kind, title, extra) {
+    extra = extra || {};
+    return { id: id, kind: kind, concern: null, title: title, since: hoursAgo(extra.age || 2000), fields: { state: extra.state || null, target: extra.target || null }, progress: extra.progress || null, signals: extra.signals || [], task: null, about: extra.about || null };
+  }
+
+  /** Returns the things that give context, and records how they sit in each other. */
+  function buildContexts() {
+    var list = [
+      context('repo-storefront-web', 'github/repository', 'storefront-web'),
+      context('repo-platform-core', 'github/repository', 'platform-core'),
+      context('repo-insights-jobs', 'github/repository', 'insights-jobs'),
+      context('label-spring', 'gmail/label', 'Spring sale'),
+      context('chan-checkout', 'slack/channel', '#checkout'),
+      context('sproj-checkout-api', 'sentry/project', 'checkout-api'),
+      context('team-depot', 'linear/team', 'Depot'),
+      context('team-shop', 'linear/team', 'Shop'),
+      context('team-platform', 'linear/team', 'Platform'),
+      context('ini-returns', 'linear/initiative', 'Returns without a phone call', { state: 'onTrack' }),
+      context('ini-spring', 'linear/initiative', 'Ready for the spring sale', { state: 'onTrack' }),
+      context('ini-checkout', 'linear/initiative', 'A checkout that never drops a basket', { state: 'atRisk' }),
+      context('prj-retries', 'linear/project', 'Payment retries', { state: 'atRisk', progress: { done: 4, total: 9 }, target: '14 Nov', about: 'One retry on a gateway timeout, and a clear message when it fails too.', signals: [signal('update', 90, 'tessa-lindqvist', null, 'The gateway team cannot give us a timeout figure until Friday.'), signal('health', 26, 'tessa-lindqvist', 'at risk')] }),
+      context('prj-depot', 'linear/project', 'Returns at the depot', { state: 'onTrack', progress: { done: 8, total: 13 }, target: '28 Nov', about: 'A returned crate is scanned at the door, and the refund starts when the depot confirms it.', signals: [signal('update', 120, 'omar-haddad', null, 'Scanners are on the Rotterdam dock. Refunds next.'), signal('target', 44, null, '28 Nov')] }),
+      context('prj-slots', 'linear/project', 'Delivery slots', { state: 'onTrack', progress: { done: 3, total: 6 }, target: '5 Dec', about: 'Slots that hold while you check out.', signals: [signal('update', 70, 'juno-park')] }),
+      context('prj-polish', 'linear/project', 'Basket and search polish', { state: 'onTrack', progress: { done: 11, total: 18 }, about: 'Small things people keep telling us about.' }),
+      context('prj-browsers', 'linear/project', 'Browser test reliability', { about: 'No more re-runs before a release.' }),
+      context('ms-door', 'linear/milestone', 'Door scanning', { target: '14 Nov', progress: { done: 5, total: 7 } }),
+      context('ms-refund', 'linear/milestone', 'Refund on receipt', { target: '28 Nov', progress: { done: 3, total: 6 } }),
+      context('ms-timeouts', 'linear/milestone', 'Gateway timeouts', { target: '7 Nov', progress: { done: 2, total: 4 } }),
+      context('round-rotterdam', 'quayside/round', 'Rotterdam winter stock', { state: 'open', progress: { done: 3, total: 5 }, target: '21 Nov', signals: [signal('update', 8)] }),
+      context('site-rotterdam', 'quayside/site', 'Rotterdam depot'),
+    ];
+    partOf('prj-depot', 'ini-returns', 'ini-spring', 'team-depot');
+    partOf('prj-retries', 'ini-checkout', 'team-shop');
+    partOf('prj-slots', 'ini-spring', 'team-shop', 'team-depot');
+    partOf('prj-polish', 'ini-checkout', 'team-shop');
+    partOf('prj-browsers', 'team-platform');
+    partOf('ms-door', 'prj-depot');
+    partOf('ms-refund', 'prj-depot');
+    partOf('ms-timeouts', 'prj-retries');
+    partOf('round-rotterdam', 'site-rotterdam');
+    return list;
+  }
+
+  /** Records the links of the morning: some reported by a source, some made by a person, and references found in text, which stay hints. */
+  function buildLinks() {
+    link('ln-SHOP-371', 'pr-6238', { type: 'source', by: 'Linear', at: hoursAgo(60) });
+    link('ln-SHOP-371', 'se-1', { type: 'person', by: 'you', at: hoursAgo(13) });
+    link('ln-SHOP-380', 'pr-6118', { type: 'source', by: 'Linear', at: hoursAgo(470) });
+    link('ln-SHOP-380', 'restricted-1', { type: 'source', by: 'Linear', at: hoursAgo(200) });
+    link('pr-6263', 'ln-OPS-47', { type: 'text', by: 'GitHub', evidence: 'the description of #6263', at: hoursAgo(40) });
+    link('pr-6126', 'ln-SHOP-318', { type: 'text', by: 'GitHub', evidence: 'a comment on #6126', at: hoursAgo(28) });
+    link('ln-PLAT-131', 'pr-3299', { type: 'source', by: 'Linear', at: hoursAgo(300) });
+    link('ln-PLAT-127', 'pr-3318', { type: 'source', by: 'Linear', at: hoursAgo(150) });
+    link('ln-SHOP-349', 'pr-6195', { type: 'source', by: 'Linear', at: hoursAgo(125) });
+    link('ln-SHOP-351', 'pr-6189', { type: 'source', by: 'Linear', at: hoursAgo(137) });
+    link('ln-OPS-41', 'pr-6271', { type: 'source', by: 'Linear', at: hoursAgo(30) });
+    link('ln-OPS-41', 'qs-2', { type: 'person', by: 'omar-haddad', at: hoursAgo(26) });
+  }
+
+
   function buildEntities() {
     uid = 0;
+    relations = [];
+    contexts = buildContexts();
     var list = buildList();
+    partOf('mail-1', 'label-spring');
+    partOf('sl-1', 'chan-checkout');
+    partOf('se-1', 'sproj-checkout-api');
+    partOf('se-2', 'sproj-checkout-api');
+    partOf('qs-1', 'round-rotterdam');
+    partOf('qs-2', 'round-rotterdam');
+    list.push(pr(6271, 'storefront-web', 'Read the door scanner over the local network', 'theo-brandt', 30, 'running', { concern: null, signals: [signal('checksPassed', 30)] }));
+    buildLinks();
     // What arrived since the last look carries a small mark, so a night's news can be found without anything moving.
     list.forEach(function (e) { if (e.id === 'mail-1' || e.id === 'pr-6255') e.fresh = true; });
     return list;
@@ -70,15 +154,14 @@
       {
         id: 'mail-1', kind: 'gmail/thread', concern: 'addressed', title: 'Decision needed: freeze dates for the spring sale', since: hoursAgo(50),
         fields: { from: 'tessa-lindqvist', messages: 5, label: 'Spring sale', deadline: 'Thursday' },
-        signals: [signal('asked', 50, 'tessa-lindqvist'), signal('replied', 22, 'omar-haddad')], task: null, project: 'Spring sale',
+        signals: [signal('asked', 50, 'tessa-lindqvist'), signal('replied', 22, 'omar-haddad')], task: null,
       },
       {
         id: 'sl-1', kind: 'slack/thread', concern: 'mentioned', title: 'Can someone check the coupon banner on the tablet layout?', since: hoursAgo(3.3),
         fields: { from: 'wren-adeyemi', channel: '#checkout', replies: 4 },
-        signals: [signal('mentioned', 3.3, 'wren-adeyemi')], task: null, project: null,
+        signals: [signal('mentioned', 3.3, 'wren-adeyemi')], task: null,
       },
       pr(6126, 'storefront-web', 'Move the order schema to the shared package', 'tessa-lindqvist', 30, 'passing', { concern: 'mentioned', signals: [signal('mentioned', 30, 'tessa-lindqvist')] }),
-      pr(6088, 'storefront-web', 'Agree a naming rule for feature flags', 'omar-haddad', 20, 'passing', { concern: 'mentioned', signals: [signal('mentioned', 20, 'omar-haddad')] }),
 
       // To finish: your own, where the next move is yours.
       mine(6118, 'storefront-web', 'Move multi-buy rules into the price engine', 19.6, 'failing', [signal('checksFailed', 20)]),
@@ -88,8 +171,14 @@
       mine(6189, 'storefront-web', 'Label the quantity buttons for screen readers', 5.7, 'approved', [signal('approved', 18, 'ines-carvalho'), signal('readyToMerge', 18)]),
       {
         id: 'se-1', kind: 'sentry/issue', concern: 'assigned', title: 'Payment webhook times out at peak', since: hoursAgo(14),
-        fields: { key: 'CHECKOUT-API-4B2', project: 'checkout-api', state: 'unresolved', events: 86, users: 41 },
-        signals: [signal('assigned', 14), signal('spiked', 1.6)], task: null, project: 'checkout-api',
+        fields: { key: 'CHECKOUT-API-4B2', state: 'unresolved', events: 86, users: 41, assignee: 'you' },
+        signals: [signal('assigned', 14), signal('spiked', 1.6)], task: null,
+      },
+
+      {
+        id: 'se-2', kind: 'sentry/issue', concern: 'assigned', title: 'Tax band lookup fails for a new market', since: hoursAgo(40),
+        fields: { key: 'CHECKOUT-API-4D1', state: 'regressed', events: 212, users: 19, assignee: 'you' },
+        signals: [signal('assigned', 40), signal('cameBack', 9)], task: null,
       },
 
       // Yours, with someone else: they settle at the foot of the stack, because the next move is not yours.
@@ -110,25 +199,31 @@
       Object.assign(pr(6201, 'storefront-web', 'Add the photo carousel', 'wren-adeyemi', 90, 'merged', { signals: [signal('merged', 40, 'omar-haddad')] }), { settled: true, quiet: true }),
 
       // On the shelf: slow things, by project.
-      issue('OPS-41', 'Scan a returned crate at the depot door', 'Depot', 'Returns', 'triage', 400),
-      issue('OPS-44', 'Print a return label without a print queue', 'Depot', 'Returns', 'triage', 390),
-      issue('OPS-47', 'Start the refund when the depot confirms', 'Depot', 'Returns', 'triage', 320, { milestone: 'Spring sale', priority: 2 }),
-      issue('OPS-58', 'Add depot opening hours to the returns page', 'Depot', 'Returns', 'triage', 140),
-      issue('SHOP-318', 'Basket drawer traps focus in one browser', 'Shop', 'Shop', 'started', 500, { priority: 2 }),
-      issue('SHOP-342', 'Typo tolerance for short search words', 'Shop', 'Shop', 'todo', 460),
-      issue('SHOP-355', 'Order history hides cancelled items', 'Shop', 'Shop', 'triage', 300),
-      issue('SHOP-360', 'Slot picker jumps when a slot sells out', 'Shop', 'Shop', 'triage', 260, { priority: 3 }),
-      issue('SHOP-364', 'Coupon box accepts spaces and then fails', 'Shop', 'Shop', 'triage', 200),
-      issue('PLAT-118', 'Agree a retry rule for browser tests', 'Platform', 'Platform', 'triage', 180, { priority: 2 }),
+      issue('OPS-41', 'Scan a returned crate at the depot door', ['prj-depot', 'ms-door', 'team-depot'], 'started', 400, { priority: 2 }),
+      issue('OPS-44', 'Print a return label without a print queue', ['prj-depot', 'ms-door', 'team-depot'], 'todo', 390),
+      issue('OPS-47', 'Start the refund when the depot confirms', ['prj-depot', 'ms-refund', 'team-depot'], 'review', 320, { priority: 2 }),
+      issue('OPS-58', 'Add depot opening hours to the returns page', ['prj-depot', 'ms-refund', 'team-depot'], 'triage', 140),
+      issue('SHOP-371', 'Retry a payment once on a gateway timeout', ['prj-retries', 'ms-timeouts', 'team-shop'], 'review', 150, { priority: 3 }),
+      issue('SHOP-380', 'Keep multi-buy rules in one place', ['prj-polish', 'team-shop'], 'review', 480, { priority: 1 }),
+      issue('SHOP-318', 'Basket drawer traps focus in one browser', ['prj-polish', 'team-shop'], 'started', 500, { priority: 2 }),
+      issue('SHOP-342', 'Typo tolerance for short search words', ['prj-polish', 'team-shop'], 'todo', 460),
+      issue('SHOP-355', 'Order history hides cancelled items', ['prj-polish', 'team-shop'], 'triage', 300),
+      issue('SHOP-360', 'Slot picker jumps when a slot sells out', ['prj-polish', 'prj-slots', 'team-shop'], 'todo', 260, { priority: 3 }),
+      issue('SHOP-364', 'Coupon box accepts spaces and then fails', ['prj-polish', 'team-shop'], 'triage', 200),
+      issue('PLAT-118', 'Agree a retry rule for browser tests', ['prj-browsers', 'team-platform'], 'triage', 180, { priority: 2 }),
+      issue('PLAT-131', 'Keep card numbers out of the gateway debug log', ['prj-retries', 'ms-timeouts', 'team-platform'], 'review', 300, { priority: 3 }),
+      issue('PLAT-127', 'Run the invoice export on the job runner', ['prj-browsers', 'team-platform'], 'review', 160),
+      issue('SHOP-349', 'A shorter address form on small screens', ['prj-polish', 'team-shop'], 'review', 130),
+      issue('SHOP-351', 'Label the basket for screen readers', ['prj-polish', 'team-shop'], 'review', 140, { priority: 1 }),
       {
         id: 'qs-1', kind: 'quayside/purchase-order', concern: 'signOff', title: 'Chilled crates for the Rotterdam depot', since: hoursAgo(70),
-        fields: { key: 'PO-2291', supplier: 'Oakline Foods', state: 'waiting', amount: '€4,120', due: 'Friday', site: 'Depots' },
-        signals: [signal('signOff', 70)], task: null, project: 'Depots',
+        fields: { key: 'PO-2291', supplier: 'Oakline Foods', state: 'waiting', amount: '€4,120', due: 'Friday', assignee: 'you' },
+        signals: [signal('signOff', 70)], task: null,
       },
       {
         id: 'qs-2', kind: 'quayside/purchase-order', concern: 'signOff', title: 'Spare scanners for returns', since: hoursAgo(30),
-        fields: { key: 'PO-2304', supplier: 'Marlow Supply', state: 'waiting', amount: '€860', due: 'next week', site: 'Depots' },
-        signals: [signal('signOff', 30), signal('delayed', 6, null, 'Monday')], task: null, project: 'Depots',
+        fields: { key: 'PO-2304', supplier: 'Marlow Supply', state: 'waiting', amount: '€860', due: 'next week', assignee: 'you' },
+        signals: [signal('signOff', 30), signal('delayed', 6, null, 'Monday')], task: null,
       },
     ];
   }
@@ -158,13 +253,13 @@
       bump.stream = 'Dependency updates';
       list.push(bump);
     }
-    var teams = [['Depot', 'Returns'], ['Shop', 'Shop'], ['Platform', 'Platform'], ['Shop', 'Search'], ['Depot', 'Depots'], ['Platform', 'Observability']];
+    var teams = [['Depot', 'prj-depot'], ['Shop', 'prj-polish'], ['Platform', 'prj-browsers'], ['Shop', 'prj-retries'], ['Depot', 'prj-slots'], ['Shop', 'prj-slots']];
     for (var t = 0; t < 120; t++) {
       var g = teams[t % teams.length];
-      list.push(issue(g[0].slice(0, 4).toUpperCase() + '-' + (900 + t), verbs[(t * 5) % verbs.length] + ' ' + things[(t * 3) % things.length], g[0], g[1], ['triage', 'todo', 'backlog', 'started'][t % 4], 200 + t * 7));
+      list.push(issue(g[0].slice(0, 4).toUpperCase() + '-' + (900 + t), verbs[(t * 5) % verbs.length] + ' ' + things[(t * 3) % things.length], [g[1], 'team-' + g[0].toLowerCase()], ['triage', 'todo', 'backlog', 'started'][t % 4], 200 + t * 7));
     }
     return list;
   }
 
-  window.World = { NOW: NOW, hoursAgo: hoursAgo, PEOPLE: PEOPLE, signal: signal, buildEntities: buildEntities, buildVolume: buildVolume, CLUSTERS: CLUSTERS };
+  window.World = { NOW: NOW, hoursAgo: hoursAgo, PEOPLE: PEOPLE, signal: signal, buildEntities: buildEntities, buildVolume: buildVolume, CLUSTERS: CLUSTERS, readContexts: function () { return contexts; }, readRelations: function () { return relations; } };
 })();

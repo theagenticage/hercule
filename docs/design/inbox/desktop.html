@@ -26,7 +26,7 @@
     <div class="ib-bar">
       <div class="pill" id="pill"><h1 class="pill-title">Inbox</h1><button class="ptab is-on" data-view="cards" aria-current="page">Cards</button><button class="ptab" data-view="intake">Intake</button></div>
       <div class="ib-notice" id="notice" role="status" hidden></div>
-      <div class="ib-end"><div class="ib-sources" id="sources"></div><button class="icon-pill" data-help title="Keys (?)" aria-label="Show the keys">?</button></div>
+      <div class="ib-end"><button class="icon-pill" data-help title="Keys (?)" aria-label="Show the keys">?</button></div>
     </div>
     <div class="ib-page" id="page"></div>
     <div class="rail" id="rail" hidden></div>
@@ -36,15 +36,14 @@
 </div>
 <section class="open" id="open" role="dialog" aria-modal="true" aria-label="Open card" hidden></section>
 <div class="menu" id="menu" role="menu" aria-label="Hand to" hidden></div>
-<section class="tray" id="tray" role="dialog" aria-modal="true" aria-label="Folded cards" hidden></section>
 <div class="sr" id="announcer" role="status" aria-live="polite"></div>
 <script src="vendor/brands.js"></script>
 <script src="vendor/faces.js"></script>
 <script src="js/logo.js"></script>
 <script src="js/kinds.js"></script>
 <script src="js/world.js"></script>
+<script src="js/relations.js"></script>
 <script src="js/card.js"></script>
-<script src="js/stacks.js"></script>
 <script src="vendor/motion.js"></script>
 <script src="js/motion-extras.js"></script>
 <script src="js/nav.js"></script>
@@ -53,7 +52,6 @@
 <script src="js/landing.js"></script>
 <script src="js/moves.js"></script>
 <script src="js/open.js"></script>
-<script src="js/tray.js"></script>
 <script src="js/drag.js"></script>
 <script src="js/skeleton.js"></script>
 <script src="js/keys.js"></script>
@@ -61,6 +59,6 @@
 <script src="js/live.js"></script>
 <script src="js/scenes.js"></script>
 <script src="js/director.js"></script>
-<script>Nav.draw(); Pointer.start(); Moves.start(); Open.start(); Tray.start(); Keys.start(); Pages.start(); Drag.start(); App.start(); Director.start(); Live.start();</script>
+<script>Nav.draw(); Pointer.start(); Moves.start(); Open.start(); Keys.start(); Pages.start(); Drag.start(); App.start(); Director.start(); Live.start();</script>
 </body>
 </html>

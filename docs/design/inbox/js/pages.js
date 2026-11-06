@@ -38,7 +38,7 @@ window.Pages = (function () {
   function drawIntake() {
     var page = document.getElementById('page');
     page.dataset.mode = 'intake';
-    page.innerHTML = '<div class="in-wrap"><h2 class="in-head"><b>214</b><span>Signals about 61 things</span></h2>' +
+    page.innerHTML = '<div class="in-wrap"><header class="sec"><h2>Intake</h2><span class="sec-note">214 signals about 61 things</span></header>' +
       '<ul class="in-list">' + ROWS.map(drawRow).join('') + '</ul><div class="in-more">49 more things, all quiet</div></div>';
   }
 
@@ -47,17 +47,15 @@ window.Pages = (function () {
     if (Open.isOpen()) Open.hide(true);
     Menu.hide();
     Keys.clear();
-    Pointer.unpeek();
     current = name;
     document.querySelectorAll('[data-nav]').forEach(function (r) { r.classList.toggle('is-on', r.dataset.nav === (name === 'work' ? 'overview' : 'inbox')); });
     document.getElementById('main').dataset.page = name;
-    Tray.hide();
     drawPill(name);
     if (name === 'intake') { at = -1; drawIntake(); App.state.mode = 'intake'; return; }
     if (name === 'work') { Work.draw(); App.state.mode = 'work'; return; }
     Nav.setNew(false);
-    App.state.mode = 'stacks';
-    page().dataset.mode = 'stacks';
+    App.state.mode = 'cards';
+    page().dataset.mode = 'cards';
     if (keepState) return;
     App.settle();
     App.redraw();

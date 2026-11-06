@@ -1,34 +1,25 @@
 /* The states around the page: loading, the empty Inbox, first run, Intake, the stand-in for Work, and the rail of a drag. */
 
 /* Loading: the real cards, with their words held back. */
-.stack-wrap.is-loading .card .c-title,
-.stack-wrap.is-loading .card .c-line,
-.is-loading .pl-title,
-.is-loading .pl-why { width: 52%; height: 10px; color: transparent !important; background: color-mix(in oklab, var(--ink) 6%, transparent); }
-.is-loading .c-title { width: 72%; height: 11px; margin-top: 4px; }
-.is-loading .card:not(.is-whole) .c-line, .is-loading .stack-foot, .is-loading .card.is-pile .c-title { visibility: hidden; }
-.is-loading .c-title { white-space: nowrap; -webkit-line-clamp: 1; }
-.is-loading .c-line { width: 38%; height: 10px; margin-top: 8px; }
+.is-loading .c-title, .is-loading .c-line, .is-loading .pl-title, .is-loading .pl-why { color: transparent !important; background: color-mix(in oklab, var(--ink) 6%, transparent); border-radius: 4px; }
+.is-loading .c-title { -webkit-line-clamp: 1; width: 72%; }
+.is-loading .c-line { width: 44%; height: 10px; }
 .is-loading .c-line * { visibility: hidden; }
-.is-loading .pl-title { width: 70%; height: 12px; margin-bottom: 8px; color: transparent !important; background: color-mix(in oklab, var(--ink) 7%, transparent); }
-.is-loading .pl-why { width: 52%; height: 10px; color: transparent !important; background: color-mix(in oklab, var(--ink) 6%, transparent); }
-.is-loading .pl-marks, .is-loading .pile-facts, .is-loading .pile-count { visibility: hidden; }
-.is-loading .c-pace,
-.is-loading .card .c-foot,
-.is-loading .card.is-whole .c-foot,
-.is-loading .mark,
-.is-loading .pile-n { visibility: hidden; }
-.is-loading .c-mark::before { content: ""; width: 20px; height: 20px; border-radius: 50%; background: color-mix(in oklab, var(--ink) 7%, transparent); position: absolute; }
+.is-loading .pl-title { width: 70%; height: 12px; margin-bottom: 8px; }
+.is-loading .pl-why { width: 52%; height: 10px; }
+.is-loading .pl-marks, .is-loading .c-pace, .is-loading .mark, .is-loading .c-status, .is-loading .c-id, .is-loading .c-where, .is-loading .c-facts, .is-loading .part > *, .is-loading .b-head > * { visibility: hidden; }
 .sk { display: inline-block; vertical-align: middle; border-radius: 4px; background: color-mix(in oklab, var(--ink) 8%, transparent); }
 .sk--title { width: 68%; height: 11px; }
 
 /* The empty Inbox: a sunrise, and the numeral as its sun. */
 .ib-page[data-mode="zero"] { display: block; padding: 0; }
+.zero--small { padding-top: 18px; }
+.zero--small .zero-sun { width: 240px; }
+.zero--small .zero-n { width: 52px; height: 41px; margin-top: -45px; }
+.zero--small .zero-n .cr { width: 52px; height: 52px; }
+.zero--small .zero-t { margin-top: 14px; font-size: var(--t-14); }
+.zero--small .zero-s { font-size: var(--t-12); text-align: center; }
 .zero { position: relative; display: flex; flex-direction: column; align-items: center; padding-top: 17vh; }
-/* The clock cleared with things still on the shelf: the sunrise stands over the shelf, where the stacks were. */
-.ib-page.is-clock-clear { position: relative; }
-.zero.zero--clock { position: absolute; left: 32px; right: 32px; top: 26px; padding-top: 0; }
-.ib-page.is-clock-clear .col:not(.col--shelf), .ib-page.is-clock-clear .noticed { visibility: hidden; }
 .zero-sun { position: relative; width: 440px; max-width: 70%; height: auto; overflow: visible; }
 .zero-sun .ray { stroke: var(--brass); stroke-width: 1.6; stroke-linecap: round; opacity: 0.8; stroke-dasharray: 1; stroke-dashoffset: 0; }
 .zero-sun .ray-h { stroke: var(--brass); stroke-width: 1.5; opacity: 0.85; }
@@ -54,24 +45,14 @@
 .fr-card:hover .fr-go { color: var(--ink); }
 .fr-card b { display: block; font: var(--type-card); font-size: 15px; line-height: 21px; }
 .fr-card small { color: var(--muted); font: var(--type-summary); }
-.fr-next { display: block; height: 52px; margin-top: -1px; border-radius: var(--card-r); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--rim) 70%, transparent); }
-.fr-card + .fr-next, .fr-note + .fr-next { margin-top: 12px; }
-.ib-page[data-mode="firstrun"] { grid-template-rows: auto auto auto; }
-.ib-page[data-mode="firstrun"] .noticed { align-items: center; padding-left: 0; }
-.ib-page[data-mode="firstrun"] .stack-n { display: none; }
-.ib-page[data-mode="firstrun"] .stack-h { grid-template-columns: minmax(0, 1fr); }
-.fr-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 24px; }
-.fr-note { display: flex; align-items: center; min-height: 84px; margin: 0; padding: 0 12px; color: var(--muted); font: var(--type-summary); }
+.fr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fr-list { display: flex; flex-direction: column; gap: 8px; }
 .fr-welcome { font: var(--type-card); font-size: var(--t-14); }
 .fr-welcome { grid-column: 1 / -1; align-self: center; padding: 0 56px 0 16px; color: var(--ink); }
 .fr-welcome small { display: block; color: var(--muted); font: var(--type-summary); }
 
 /* Intake, grouped by entity: the noisy layer, kept plain, and still not a table. */
-.ib-page[data-mode="intake"], .ib-page[data-mode="work"] { display: block; overflow: auto; padding: 6px 32px 24px; }
-.in-head { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: end; height: 46px; margin: 4px 0 12px; padding-bottom: 8px; color: var(--muted); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.09em; line-height: 15px; text-transform: uppercase; }
-.in-head::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 5px; border-top: 2px solid var(--rule-ink); border-bottom: 1px solid var(--rule-ink); }
-.in-head b { font-family: var(--font-deco); font-feature-settings: normal; font-size: 36px; font-weight: 400; line-height: 34px; letter-spacing: -0.01em; color: var(--count-ink); }
-.in-head span { padding-bottom: 2px; }
+.ib-page[data-mode="intake"], .ib-page[data-mode="work"] { display: block; overflow: auto; padding: 16px 32px 24px; }
 .in-list { list-style: none; margin: 0; padding: 0; }
 .in-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; min-height: 38px; column-gap: 8px; padding: 0; border-bottom: 1px solid color-mix(in oklab, var(--ink) 6%, transparent); transition: background var(--m-quick); }
 .in-row:hover, .in-row.is-at { background: var(--hover); }
@@ -130,9 +111,8 @@
 .card.ghost { transition: height var(--m-base) var(--m-ease); position: fixed; pointer-events: none; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 0; will-change: transform; }
 .card.ghost > .card-stock { box-shadow: var(--h-carry); }
 .card.ghost .c-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.card.ghost .c-foot { visibility: visible; }
 .card.ghost .c-acts { display: none; }
-.stack .card.is-lifted { opacity: 0; }
+.card.is-lifted { opacity: 0; }
 html[data-dragging] { cursor: grabbing; }
 html[data-dragging] * { cursor: grabbing !important; }
 

@@ -86,79 +86,123 @@
     return (kind.workflows[e.concern] || []).slice();
   }
 
-  /** Returns what the second line of a card says: who or what brought the card here, and how many signals sit behind it. */
-  function describeLine(e, usualReason) {
-    var kind = K.KINDS[e.kind], f = e.fields;
-    if (e.task) {
-      var by = e.task.by === 'you'
-        ? { face: '', text: 'You took it on', tone: 'plain' }
-        : { face: '', text: e.task.by + ' has it', tone: 'plain' };
-      return { lead: by.face, text: by.text, tone: by.tone, more: 0 };
-    }
+  /** Returns the sentence a card says: who or what brought it here, and how many signals sit behind it. */
+  function describeLine(e) {
+    var kind = K.KINDS[e.kind];
+    if (e.task) return { text: e.task.by === 'you' ? 'You took it on' : e.task.by + ' has it', tone: 'plain', more: 0 };
     var latest = e.signals[e.signals.length - 1];
-    var rest = Math.max(0, e.signals.length - 1);
-    if (!latest) return { lead: '', text: '', tone: 'plain', more: 0 };
+    if (!latest) return { text: '', tone: 'plain', more: 0 };
+    // A lasting thing that has only been assigned has nothing to say yet, and saying so on every card is noise.
+    if (kind.card === 'rich' && e.signals.length === 1 && latest.key === e.concern) return { text: '', tone: 'plain', more: 0 };
     var reason = sayReason(kind, latest);
-    var who = latest.who || (kind.person && f[kind.person] !== 'you' ? f[kind.person] : null);
-    var usual = latest.key === (usualReason === 'concern' ? e.concern : usualReason);
-    var text = reason.text;
-    if (usual && who) text = W.PEOPLE[who].name;
-    if (usual && !who) text = [fill(kind.identifier, f), fill(kind.context, f)].filter(Boolean).join(' · ');
-    return { lead: who ? drawPerson(who) : '', text: text, tone: usual ? 'usual' : reason.tone, more: rest, isIdentity: usual && !who };
+    return { text: reason.text, tone: reason.tone, more: Math.max(0, e.signals.length - 1) };
   }
 
-  /** Returns the HTML inside a card. `ctx` holds the world's clock and the reason the stack takes for granted. */
-  function drawCardBody(e, ctx) {
-    var kind = K.KINDS[e.kind], f = e.fields;
-    var line = describeLine(e, ctx.usual);
-    var status = kind.status && kind.status[f.state];
-    // The status stands with the words it belongs to, at the start of the second line. The right edge holds only the wait.
-    var shape = status && !status.norm ? '<span class="c-shape">' + drawShape(status, 14) + '</span>' : '';
-    var pace = kind.pace === 'fast' && !e.task ? sayWait(e.since, ctx.now) : '';
+  /** Returns the moves of a card, by name. They take the place of its head line while the pointer is on the card. */
+  function drawActs(e) {
+    if (e.task) return '<button class="c-act c-act--go" tabindex="-1" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>';
     var flows = readWorkflows(e);
     var handName = flows.length === 1 ? flows[0].name : 'Hand to…';
     var hand = flows.length
-      ? '<button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="' + esc(flows.length === 1 ? 'Hand to ' + flows[0].name : 'Hand to an agent') + ' (H)" aria-label="' + esc(flows.length === 1 ? 'Hand to ' + flows[0].name : 'Hand to an agent') + '"' + (flows.length > 1 ? ' aria-haspopup="menu"' : '') + '>' +
+      ? '<button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="' + esc(flows.length === 1 ? 'Hand to ' + flows[0].name : 'Hand to an agent') + ' (H)">' +
         flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 18 }); }).join('') + '<span>' + esc(handName) + '</span></button>'
       : '';
-    var acts = e.task
-      ? '<button class="c-act c-act--go" tabindex="-1" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>'
-      : hand +
-        '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">Take it</button>' +
-        '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
-    return '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 18 : 20) + '</div>' +
-      '<h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
-      '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '">' + (kind.pace === 'fast' && pace ? '<span aria-hidden="true">' + pace + '</span><span class="sr">Waiting ' + sayWaitInWords(e.since, ctx.now) + '</span>' : pace) + '</div>' +
-      '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') + shape + '<span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
-      '<div class="c-foot' + (line.isIdentity ? ' c-foot--facts' : '') + '">' + (line.isIdentity ? '' : '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span>') + '<span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
-      '<div class="c-hit"></div>' +
-      '<div class="c-acts">' + acts + '</div>';
+    return hand + '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it on myself (T)">Take it</button>' +
+      '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
   }
 
-  /**
-   * Returns who holds the card now, in both of the places they can stand, and the layout shows one. On a whole card a colleague
-   * stands behind the top edge with its paws on it, as on Work. A strip has no free edge, so there it stands where the wait was.
-   */
+  /** Returns the sentence of a card with its news mark, and the count of what sits behind it. */
+  function drawLine(e) {
+    var line = describeLine(e);
+    if (!line.text) return '';
+    return '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') +
+      '<span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + (line.more ? '<span class="c-more">+' + line.more + '</span>' : '') + '</div>';
+  }
+
+  /** Returns the wait of a card that has one. */
+  function drawWait(e, now) {
+    var kind = K.KINDS[e.kind];
+    if (kind.pace !== 'fast' || e.task) return '';
+    return '<div class="c-pace" data-ramp="' + rampWait(e.since, now, kind.patience) + '"><span aria-hidden="true">' + sayWait(e.since, now) + '</span><span class="sr">Waiting ' + sayWaitInWords(e.since, now) + '</span></div>';
+  }
+
+  /** Returns the status of a thing as shape and word, or nothing when its state is the usual one. */
+  function drawStatus(e, size) {
+    var kind = K.KINDS[e.kind], status = kind.status && kind.status[e.fields.state];
+    return status ? '<span class="c-status">' + drawShape(status, size || 15) + '<span>' + esc(status.word) + '</span></span>' : '';
+  }
+
+  /** Returns whether a thing belongs to the person rather than to a colleague. */
+  function isMine(e) {
+    var kind = K.KINDS[e.kind];
+    return !!kind.owner && e.fields[kind.owner] === 'you';
+  }
+
+  /** Returns a compact card: everything a person needs to deal with a small thing fast, in four words and a name. */
+  function drawCompactBody(e, ctx) {
+    var kind = K.KINDS[e.kind], f = e.fields;
+    var status = kind.status && kind.status[f.state];
+    var where = (Relations.readHomes(e)[0] || {}).title;
+    var id = fill(kind.identifier, f);
+    return '<div class="c-mark">' + drawMark(kind.plugin, 16) + '</div>' +
+      '<h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
+      drawWait(e, ctx.now) +
+      '<div class="c-under">' + (status && !status.norm ? '<span class="c-shape">' + drawShape(status, 13) + '</span>' : '') + drawLine(e) + '</div>' +
+      '<div class="c-where">' + esc(id) + (where && where !== id ? ' · ' + esc(where) : '') + (isMine(e) ? ' · yours' : '') + '</div>' +
+      '<div class="c-acts">' + drawActs(e) + '</div>';
+  }
+
+  /** Returns a rich card: status first, then the title, then what it is part of and its facts. */
+  function drawRichBody(e, ctx) {
+    var kind = K.KINDS[e.kind], f = e.fields;
+    var bars = kind.facts.filter(function (x) { return x.form === 'bars' && f[x.field]; }).map(function (x) { return FORMS.bars(f[x.field]); }).join('');
+    var facts = kind.facts.filter(function (x) { return x.form !== 'bars' && f[x.field]; }).map(function (x) { return '<span class="fact">' + FORMS[x.form](f[x.field], x) + '</span>'; });
+    // What the card is part of, below the place it is shown under, so the block's head is never repeated on every card.
+    var section = kind.section && Relations.readParents(e).filter(function (p) { return p.kind === kind.section; }).map(function (p) { return esc(p.title) + (p.fields.target ? ', ' + esc(p.fields.target) : ''); });
+    var under = (section || []).concat(facts);
+    return '<div class="c-head"><span class="c-mark">' + drawMark(kind.plugin, 16) + '</span>' + drawStatus(e, 15) + bars + '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span>' + drawWait(e, ctx.now) + '</div>' +
+      '<h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
+      drawLine(e) +
+      (under.length ? '<div class="c-facts">' + under.join('<i>·</i>') + '</div>' : '') +
+      '<div class="c-acts">' + drawActs(e) + '</div>';
+  }
+
+  /** Returns the HTML inside a card, in the shape its kind declares. `ctx` holds the world's clock. */
+  function drawCardBody(e, ctx) { return K.KINDS[e.kind].card === 'compact' ? drawCompactBody(e, ctx) : drawRichBody(e, ctx); }
+
+  /** Returns a thing that rides on a card, as one row of the sheet tucked under it. The row says what the part asks, if it asks anything. */
+  function drawPart(part, ctx) {
+    if (part.restricted) {
+      return '<div class="part part--closed" title="' + esc(Relations.sayClaim(part.link.claim)) + '"><span class="p-mark">' + Crew.icon('lock', 13) + '</span><span class="p-title">Something you do not have access to</span></div>';
+    }
+    var e = part.e, kind = K.KINDS[e.kind], line = describeLine(e);
+    var status = kind.status && kind.status[e.fields.state];
+    var who = e.concern ? line.text : (status ? status.word : '');
+    return '<button class="part' + (e.concern && !e.task ? ' is-asking' : '') + '" data-id="' + e.id + '" tabindex="-1" title="' + esc(Relations.sayClaim(part.link.claim)) + '">' +
+      '<span class="p-mark">' + drawMark(kind.plugin, 14) + '</span>' +
+      '<span class="p-title">' + esc(e.title) + '</span>' +
+      (e.fresh ? '<i class="c-fresh"><span class="sr">New</span></i>' : '') +
+      '<span class="p-line tone-' + line.tone + '">' + (status && !status.norm ? drawShape(status, 12) : '') + '<span class="p-said">' + esc(who) + '</span></span>' +
+      drawWait(e, ctx.now) + '</button>';
+  }
+
+  /** Returns who holds the card now: a colleague behind the top edge with its paws on it, as on Work, or the person's own tab. */
   function drawHolder(e) {
     if (!e.task) return '';
-    var title = esc(e.task.by === 'you' ? 'You have it' : e.task.by + ' has it');
-    var inSlot = e.task.by === 'you' ? drawPerson('you', 18) : Crew.face(e.task.by, { pose: 'working', size: 22 });
-    var slot = '<span class="c-holder" title="' + title + '"><span class="c-holder-in">' + inSlot + '</span></span>';
-    if (e.task.by === 'you') return '<span class="card-holder"><i class="card-tab" data-need="quick"></i></span>' + slot;
+    if (e.task.by === 'you') return '<span class="card-holder"><i class="card-tab"></i></span>';
     return '<span class="card-holder"><span class="card-head" data-pose="working">' + Crew.peek(e.task.by, { pose: 'working', size: 30, crop: 34 }) + '</span></span>' +
-      '<span class="card-paws" data-pose="working" style="--hue:var(--hue-' + Crew.lookFor(e.task.by).hue + ')"><i></i><i></i></span>' + slot;
+      '<span class="card-paws" data-pose="working" style="--hue:var(--hue-' + Crew.lookFor(e.task.by).hue + ')"><i></i><i></i></span>';
   }
 
   /** Returns the class list of a card for its kind and its state. */
   function cardClasses(e) {
     var kind = K.KINDS[e.kind];
-    var c = ['card', 'paper-' + kind.paper, 'density-' + kind.density, 'pace-' + kind.pace];
-    return c.join(' ');
+    return ['card', 'card--' + kind.card, 'paper-' + kind.paper].join(' ');
   }
 
   /** Returns what a screen reader says for a card: the kind, the title, why it is here, and how long it has waited. */
   function sayCard(e) {
-    var kind = K.KINDS[e.kind], line = describeLine(e, null);
+    var kind = K.KINDS[e.kind], line = describeLine(e);
     var status = kind.status && kind.status[e.fields.state];
     return [kind.noun, fill(kind.identifier, e.fields), e.title, line.text, status ? status.word : '', kind.pace === 'fast' && !e.task ? 'waiting ' + sayWaitInWords(e.since, W.NOW) : '', line.more ? line.more + ' earlier signals' : ''].filter(Boolean).join(', ');
   }
@@ -169,10 +213,10 @@
    */
   function redrawBody(el, e, ctx) {
     [].slice.call(el.children).forEach(function (c) {
-      if (!c.matches('.card-stock, .c-holder, .card-holder, .card-paws')) c.remove();
+      if (!c.matches('.card-stock, .card-holder, .card-paws')) c.remove();
     });
     el.insertAdjacentHTML('beforeend', drawCardBody(e, ctx));
-    if (!e.task) [].forEach.call(el.querySelectorAll('.c-holder, .card-holder, .card-paws'), function (c) { c.remove(); });
+    if (!e.task) [].forEach.call(el.querySelectorAll('.card-holder, .card-paws'), function (c) { c.remove(); });
     if (e.task || e.quiet) el.dataset.height = 'flat'; else delete el.dataset.height;
   }
 
@@ -204,7 +248,7 @@
   function drawPlaque(c) {
     var flows = readWorkflows(c);
     var why = c.task ? (c.task.by === 'you' ? 'You took it on' : c.task.by + ' has it') : c.why;
-    return '<div class="plaque' + (c.task ? ' is-handed' : '') + '" role="listitem" data-id="' + c.id + '" data-slot="' + c.slot + '"  style="grid-column:' + (c.slot + 1) + '" tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(why) + '">' +
+    return '<div class="plaque' + (c.task ? ' is-handed' : '') + '" role="listitem" data-id="' + c.id + '"  tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(why) + '">' +
       '<div class="pl-marks">' + drawSources(c.sources) + '</div>' +
       '<h3 class="pl-title">' + esc(c.title) + '</h3>' +
       '<div class="pl-why">' + esc(why) + '</div>' +
@@ -217,7 +261,7 @@
   }
 
   window.Card = {
-    createCard: createCard, readPlugin: readPlugin, redrawBody: redrawBody, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
+    createCard: createCard, drawPart: drawPart, drawStatus: drawStatus, drawLine: drawLine, isMine: isMine, readPlugin: readPlugin, redrawBody: redrawBody, sayCard: sayCard, drawHolder: drawHolder, drawCardBody: drawCardBody, cardClasses: cardClasses, drawPlaque: drawPlaque, drawMark: drawMark, drawPerson: drawPerson, drawShape: drawShape,
     describeLine: describeLine, sayReason: sayReason, sayWait: sayWait, rampWait: rampWait, readWorkflows: readWorkflows, fill: fill, esc: esc, drawFacts: drawFacts,
   };
 })();
