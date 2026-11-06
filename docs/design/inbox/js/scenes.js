@@ -17,7 +17,7 @@ window.Scenes = (function () {
     volume: function () { return { name: 'volume', entities: W.buildVolume(), clusters: readClusters() }; },
     handed: function () {
       var s = morning();
-      ['pr-6204', 'pr-6213', 'pr-6241'].forEach(function (id, i) {
+      ['pr-6204', 'pr-6213', 'pr-6238'].forEach(function (id, i) {
         var e = s.entities.filter(function (x) { return x.id === id; })[0];
         e.task = { by: i === 1 ? 'you' : 'Agent review' };
       });
