@@ -147,6 +147,7 @@ window.Board = (function () {
    * wants you, and one head if agents are on it.
    */
   function drawPileHolder(p) {
+    if (p.kind === "landed") return "";
     var mine = p.tasks.filter(function (t) { return t.move === "you" && !t.agent && !Store.isBlocked(t) && t.stage !== "landed"; }).length;
     var agent = p.tasks.filter(function (t) { return t.agent && t.move !== "you"; })[0];
     var out = "";

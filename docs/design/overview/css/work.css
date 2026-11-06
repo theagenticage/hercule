@@ -360,14 +360,14 @@ html[data-motion="reduced"] .card.is-skeleton::after { animation: none; }
 .sunrise { position: absolute; left: 50%; bottom: 100%; width: 720px; height: 240px; margin-left: -360px; margin-bottom: -5px; pointer-events: none; }
 .sunrise svg { position: absolute; inset: 0; overflow: visible; }
 .sunrise .ray { stroke: var(--rule-ink); stroke-width: 1.5; stroke-linecap: round; opacity: 0.8; stroke-dasharray: 1; stroke-dashoffset: 0; }
-.sunrise-head { position: absolute; left: 50%; bottom: 0; width: 96px; height: 62px; margin-left: -48px; overflow: hidden; line-height: 0; }
+.sunrise-head { position: absolute; left: 50%; bottom: 0; width: 96px; height: 76px; margin-left: -48px; overflow: hidden; line-height: 0; }
 .sunrise-head .cr { display: block; }
 @media (prefers-reduced-motion: no-preference) {
   html:not([data-motion="reduced"]) .sunrise .ray { animation: ray-draw 700ms var(--m-ease) calc(420ms + var(--d)) backwards; }
   html:not([data-motion="reduced"]) .sunrise-head .cr { animation: sun-rise 1400ms cubic-bezier(0.3, 0, 0.2, 1) backwards; }
 }
 @keyframes ray-draw { from { stroke-dashoffset: 1; } }
-@keyframes sun-rise { from { transform: translateY(62px); } }
+@keyframes sun-rise { from { transform: translateY(76px); } }
 
 /* Over a stack: the top card slips down to take the one in your hand. */
 .is-carrying .cell { position: relative; }
