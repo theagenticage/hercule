@@ -25,7 +25,7 @@ const SCRIPTS = {
     await page.mouse.up(); for (let i = 0; i < 6; i++) await snap(220);
   },
   open: async () => { await page.click('.card[data-id="substitutions"]'); for (let i = 0; i < 8; i++) await snap(i ? 260 : 60); await page.keyboard.press("Escape"); for (let i = 0; i < 6; i++) await snap(300); },
-  fan: async () => { await page.click('.pile[data-kind="streams"]'); for (let i = 0; i < 8; i++) await snap(i ? 300 : 60); await page.keyboard.press("Escape"); for (let i = 0; i < 6; i++) await snap(320); },
+  fan: async () => { await page.click('.card[data-id="basket-restore"] .card-more'); for (let i = 0; i < 8; i++) await snap(i ? 300 : 60); await page.keyboard.press("Escape"); for (let i = 0; i < 6; i++) await snap(320); },
   fold: async () => { await page.click('.lane-btn[data-fold-lane="storefront"]'); for (let i = 0; i < 7; i++) await snap(i ? 300 : 60); await page.click('.lane-btn[data-fold-lane="storefront"]'); for (let i = 0; i < 7; i++) await snap(i ? 300 : 60); },
   plan: async () => { await page.click('.plan-head[data-fold-plan="priceengine"]'); for (let i = 0; i < 7; i++) await snap(i ? 300 : 60); },
   fact: async () => { await page.evaluate(() => Tray.mergeNext()); for (let i = 0; i < 10; i++) await snap(i ? 450 : 100); },

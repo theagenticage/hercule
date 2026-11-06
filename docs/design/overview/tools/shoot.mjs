@@ -21,7 +21,8 @@ const STATES = {
   lens: { q: "replay=off", run: async (p) => { await p.click('.lens[data-lens="think"]'); await p.mouse.move(700, 880); await p.waitForTimeout(450); } },
   plan: { q: "replay=off", run: async (p) => { await p.click('.plan-head[data-fold-plan="priceengine"]'); await p.mouse.move(700, 880); await p.waitForTimeout(1100); } },
   folded: { q: "replay=off", run: async (p) => { await p.keyboard.press("Shift+F"); await p.waitForTimeout(1200); } },
-  pile: { q: "replay=off", run: async (p) => { await p.click('.pile[data-kind="streams"]'); await p.mouse.move(700, 120); await p.waitForTimeout(1200); } },
+  pile: { q: "replay=off", run: async (p) => { await p.click('.card[data-id="basket-restore"] .card-more'); await p.mouse.move(700, 120); await p.waitForTimeout(1200); } },
+  full: { q: "replay=off", run: async (p) => { await p.click('.lane-btn[data-fold-lane="storefront"]'); await p.mouse.move(700, 890); await p.waitForTimeout(1000); } },
   drag: { q: "replay=off", run: async (p) => {
     const c = await card(p, "substitutions");
     await p.mouse.move(c.x + 60, c.y + 40); await p.mouse.down();
@@ -30,7 +31,7 @@ const STATES = {
   merge: { q: "replay=off", run: async (p) => {
     const a = await card(p, "image-sizes"); const b = await card(p, "substitutions");
     await p.mouse.move(b.x + 60, b.y + 40); await p.mouse.down();
-    await p.mouse.move(a.x + 110, a.y + 50, { steps: 12 }); await p.waitForTimeout(1000);
+    await p.mouse.move(a.x + 110, a.y + 44, { steps: 12 }); await p.waitForTimeout(1500);
   }, after: async (p) => { await p.keyboard.press("Escape"); await p.mouse.up(); } },
   pane: { q: "replay=off", run: async (p) => { await p.click('.card[data-id="substitutions"]'); await p.mouse.move(400, 880); await p.waitForTimeout(1200); } },
   "pane-agent": { q: "replay=off", run: async (p) => { await p.evaluate(() => Pane.show("t-cancelled")); await p.waitForTimeout(1200); } },

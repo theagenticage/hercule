@@ -124,10 +124,12 @@ window.Store = (function () {
    */
   function arrangeOneRow(tasks, stage, owner, held) {
     var memoKey = owner + "/" + stage + "/one";
-    if (stage === "landed" && tasks.length > 1) {
-      return { cards: [], piles: [{ key: owner + "/" + stage + "/landed", kind: "landed", title: "Landed", tasks: tasks }], behind: [], held: held };
+    if (stage === "landed" && tasks.length + held.length > 1) {
+      return { cards: [], piles: [{ key: owner + "/" + stage + "/landed", kind: "landed", title: "Landed", tasks: tasks.concat(held) }], behind: [], held: [] };
     }
     if (!tasks.length) return { cards: [], piles: [], behind: [], held: held };
+    // A card you just put down lies on top of the stack. Nothing moves to make room for it.
+    if (held.length) return { cards: [], piles: [], behind: tasks, held: held };
     var shown = tasks.filter(function (t) { return t.id === cellMemo[memoKey]; })[0];
     if (!shown) {
       shown = pickTop(tasks);

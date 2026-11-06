@@ -73,8 +73,39 @@ window.Drag = (function () {
     return null;
   }
 
+  /** Checks whether a cell shows one row: a card dropped there lies on top of the stack. */
+  function isOneRow(cell) {
+    var owner = cell.dataset.owner;
+    var project = owner.indexOf("lane-") === 0 ? owner.slice(5) : Store.state.plans.filter(function (p) { return "plan-" + p.id === owner; })[0].project;
+    return !Store.state.full[project];
+  }
+
+  function clearUnder() {
+    if (carry && carry.under) carry.under.classList.remove("is-under");
+    if (carry) carry.under = null;
+  }
+
   /** Puts the slot at the row the pointer is over. Everything below moves aside, and nothing jumps. */
   function moveSlot(cell, y, middle) {
+    var top = isOneRow(cell) ? cell.querySelector(".card") : null;
+    if (top) {
+      // On a stack the card lands on top. The top card slips down a little to take it, and nothing
+      // else on the desk moves: a lane at one row never changes height.
+      if (carry.under !== top) clearUnder();
+      var was = carry.slot.parentElement;
+      if (was !== cell) {
+        Motion.flip(Board.movables(), function () {
+          carry.slot.classList.add("is-over");
+          cell.insertBefore(carry.slot, cell.firstChild);
+        }, { spring: "hand" });
+        carry.zones = readDropZones();
+      }
+      top.classList.add("is-under");
+      carry.under = top;
+      return;
+    }
+    clearUnder();
+    carry.slot.classList.remove("is-over");
     var kids = Array.prototype.filter.call(cell.children, function (c) { return !c.classList.contains("slot"); });
     var before = null;
     // Arriving on a card's middle, the slot opens after it, so the card stays under the pointer.
@@ -119,6 +150,7 @@ window.Drag = (function () {
     }
     carry.merge = target;
     carry.slot.classList.toggle("is-shut", !!target);
+    if (target) clearUnder();
     if (target) {
       var name = Store.task(target.dataset.id).name;
       target.dataset.mergeLabel = "Merge into " + (name.length > 22 ? name.slice(0, 21) + "…" : name);
@@ -169,6 +201,7 @@ window.Drag = (function () {
       setMerge(null);
       c.hoverCard = null;
       c.zone = zone;
+      clearUnder();
       if (c.slot.parentElement) {
         Motion.flip(Board.movables(), function () { c.slot.remove(); }, { spring: "hand" });
         c.zones = readDropZones();
@@ -210,6 +243,13 @@ window.Drag = (function () {
     var fromRow = fromCell ? Array.prototype.indexOf.call(fromCell.children, slot) : -1;
     var fromFan = !!el.closest(".fan");
     Motion.body(el).clear();
+    // What lay behind this card stays behind: only the one card is in the hand.
+    if (el._sheets) {
+      el._sheets.innerHTML = "";
+      el._sheets._html = "";
+    }
+    var moreChip = el.querySelector(".card-more");
+    if (moreChip) moreChip.remove();
     layer().appendChild(el);
     el.classList.add("is-carried");
     el.style.left = home.left + "px";
@@ -308,6 +348,7 @@ window.Drag = (function () {
 
   /** Ends the carry. Keeps how the card looks right now, because the landing starts from there. */
   function finish() {
+    clearUnder();
     var c = carry;
     var b = Motion.body(c.el);
     // The landing starts with the speed of the hand, in pixels a second, so a thrown card lands thrown.

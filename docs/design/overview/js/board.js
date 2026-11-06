@@ -206,7 +206,7 @@ window.Board = (function () {
     var stack = behind.length ? { count: behind.length, wants: behind.filter(Store.wantsYou).length } : null;
     var kids = arranged.cards.map(function (t) { return drawCard(t, stack); }).concat(arranged.piles.map(drawPile));
     // A card you just put down stays on the row you chose, and nothing is pushed out to make room.
-    arranged.held.forEach(function (t) { kids.splice(Math.min(t.heldRow || 0, kids.length), 0, drawCard(t)); });
+    arranged.held.forEach(function (t, i) { kids.splice(Math.min(t.heldRow || 0, kids.length), 0, drawCard(t, i === 0 && !arranged.cards.length ? stack : null)); });
     cell._piles = arranged.piles;
     cell._behind = behind;
     cell._stage = stage;
