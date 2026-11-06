@@ -104,18 +104,18 @@ Rules: motion explains cause. Everything is interruptible, because every change 
 
 **Open surfaces.** Title 20/26, corner 16, one key style. Work's opens over the board; the Inbox's docks in place. Both for good reasons.
 
-**Stacks.** On Work a stack is a real card with a sheet under it that says its reason, and it exists only for a direct confirmed link. The Inbox tucks a sheet under a card, one row per link, in the same spirit. Overflow opens in place on both, never in a small box.
+**Stacks.** On Work a stack is a real card with a sheet under it that says its reason, and it exists only for a direct confirmed link. On the Inbox the linked things are rows set in under the lasting thing's title. Only a small thing rides, and on one lead. Two lasting things stay in their own places and show each other as a quiet row.
 
 **Keys.** The current card follows pointer and keys, on both. An arrow key takes over from a resting pointer until the pointer moves.
 
-**Marks.** On Work a mark is secondary: 13px, `--muted`. In the Inbox a mark is the identity: 20px, in ink at 84%, or in a plugin's hue through the theme-owned `--mark-l` and `--mark-c`. Solid marks are drawn at 90% size, so a heavy logo and a line logo look the same size. Every logo has one strength.
+**Marks.** On Work a mark is secondary: 13px, `--muted`. In the Inbox a mark is identity: 16px in the column at `--muted` strength unless the plugin declares a hue, and left out of a row when the place above it already shows it. Solid marks are drawn at 90% size.
 
-**The colleague.** A whole card keeps head and paws behind the top edge, at the right. An Inbox strip has no free edge, so there the colleague stands where the wait was, in the working pose. Use `Crew.peek`, `.card-head` and `.card-paws`, so a hand-off in the Inbox and a head on Work are the same object.
+**The colleague.** On Work a whole card keeps head and paws behind the top edge. Inbox rows and requests have no free edge, so there the colleague stands at the end of the first line, in the wait's place. Hercule keeps his head and paws on the card he hands you.
 
 **A failed run.** Failed runs reach you on Work, but the sidebar is shared, so both pages draw the same dot: 7px, `--failed-dot` (`--you` mixed 45% into `--you-ink`, which reaches 3:1 on every sidebar), no number, at the end of the Overview row, and on the Hercule segment in the Threads face. One click opens Work filtered to Failed. The failed mark is the Inbox's `cross` shape in its `bad` tone (`--fail-ink`), so the two pages say failed the same way. The words beside it are ink. DESIGN.md has the rest, under A failed run.
 
 **Ages and waits.** On Work ages are neutral, because a Task's age is not the point of the card. In the Inbox an overdue wait goes to full ink and bold, with no colour: the wait is the point there, and colour is the status shape's job. The two pages are never on screen together.
 
-**Inbox page.** Three clock stacks stand side by side, each a lead, two strips and a pile, with the shelf in a row under them, one card per project. The gap under a stage heading is 18px there, so a colleague's head clears the rule. The top bar's right end sits 14px from the window on both pages, so its button never jumps between them.
+**Inbox page.** Lasting work lies wide, as rows on one raised surface per place, status first. Requests lie in a narrow 320px column of outlined cards, with no shadow at rest. What Hercule noticed is one card of one-line items over the wide side. Nothing folds, and the page scrolls.
 
-**Inbox tokens.** `--h-stack` and the stock variants stay in the Inbox's own tokens file. `js/motion-extras.js` on the Inbox adds `curve`, `animate`, `fly` and `knock` on top of the kernel, with no new springs.
+**Inbox tokens.** `--attention-ink` is a status that wants watching, so plugins never reach `--you-ink`. `js/motion-extras.js` adds `curve`, `animate`, `fly` and `knock` on top of the kernel, with no new springs. `--h-stack` and the stock variants are gone.
