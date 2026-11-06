@@ -57,7 +57,7 @@ window.Fan = (function () {
     document.getElementById("scroll").inert = true;
     if (cards[0]) {
       cards[0].tabIndex = 0;
-      Keys.focusCard(cards[0]);
+      Keys.focusCard(cards[0], true);
     }
 
     var cx = from.left + from.width / 2;
