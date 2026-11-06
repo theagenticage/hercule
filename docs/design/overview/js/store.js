@@ -218,6 +218,8 @@ window.Store = (function () {
     var t = task(id);
     t.stage = stage;
     t.movedBy = "fact";
+    // It lands at the end of its new cell, so nothing already there has to move.
+    t.rank = state.tasks.reduce(function (m, x) { return Math.max(m, x.rank); }, 0) + 1;
     if (apply) apply(t);
   }
 

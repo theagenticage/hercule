@@ -47,7 +47,10 @@ window.Board = (function () {
 
   function drawHolder(h) {
     if (h.kind === "you") return '<span class="card-holder"><i class="card-tab" data-need="' + h.need + '"></i></span>';
-    if (h.kind === "agent") return '<span class="card-holder"><span class="card-head" data-pose="' + h.pose + '">' + Crew.peek(h.name, { pose: h.pose, size: 26, crop: 33 }) + "</span></span>";
+    if (h.kind === "agent") {
+      var hue = Crew.lookFor(h.name).hue;
+      return '<span class="card-holder"><span class="card-head" data-pose="' + h.pose + '">' + Crew.peek(h.name, { pose: h.pose, size: 30, crop: 34 }) + '</span></span><span class="card-paws" data-pose="' + h.pose + '" style="--hue:var(--hue-' + hue + ')"><i></i><i></i></span>';
+    }
     if (h.kind === "person") return '<span class="card-holder"><i class="card-tab card-tab--person" title="' + esc(h.name) + '">' + esc(h.name.charAt(0).toUpperCase()) + "</i></span>";
     return "";
   }
@@ -115,8 +118,7 @@ window.Board = (function () {
     var sources = {};
     p.tasks.forEach(function (t) { if (t.source) sources[t.source] = true; });
     var mark = Object.keys(sources).slice(0, 2).map(function (s) { return '<span class="card-src">' + Crew.brand(s, 12) + "</span>"; }).join("");
-    var fresh = p.tasks.reduce(function (m, t) { return Math.min(m, t.age); }, 1e4);
-    return '<footer class="card-foot pile-foot"><span class="pile-faces">' + faces + "</span>" + mark + "<time>" + NW.formatAge(fresh) + "</time></footer>";
+    return '<span class="pile-faces">' + faces + "</span>" + (faces ? "" : mark);
   }
 
   function drawPile(p) {
@@ -134,7 +136,7 @@ window.Board = (function () {
     var line = Store.isFiltering() && hidden ? hidden + " of " + n + " match" : Store.describePile(p);
     var html = drawFlags(p);
     for (var i = sheets; i >= 1; i--) html += '<i class="pile-sheet" style="--n:' + i + '"></i>';
-    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-line">' + esc(line) + "</span>" + drawPileFoot(p);
+    html += '<i class="card-stock"></i><span class="pile-text"><b>' + esc(title) + "</b>" + count + '</span><span class="pile-row"><span class="pile-line">' + esc(line) + "</span>" + drawPileFoot(p) + "</span>";
     setHTML(el, html);
     return el;
   }

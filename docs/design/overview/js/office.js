@@ -27,26 +27,26 @@ window.Office = (function () {
     stage.add(plaque);
 
     var working = Store.state.tasks.filter(function (t) { return t.agent && t.kind !== "review"; }).slice(0, 8);
-    var deskX = [-3.9, -2.62, -1.34, -0.06, 1.22, 2.5, 3.78];
+    var deskX = [-2.4, -1.12, 0.16, 1.44];
     working.forEach(function (t, i) {
       var desk = K.buildDesk();
       desk.object.rotation.y = Math.PI;
-      var row = i < 7 ? 0 : 1;
-      desk.object.position.set(deskX[i % 7], 0, row ? 1.4 : -1.5);
+      var row = i < 4 ? 0 : 1;
+      desk.object.position.set(deskX[i % 4], 0, row ? 1.5 : -1.5);
       stage.add(desk.object);
       var look = Crew.lookFor(t.agent);
       var bean = K.colleague({ id: t.agent, pose: t.move === "you" ? "waiting" : "working", look: { hue: look.hue } });
       bean.sitAt(desk);
       stage.add(bean);
-      stage.label(bean, K.tag({ name: t.name, state: t.move === "you" ? "Asks you" : "typing", hue: bean.look.hue, waiting: t.move === "you" }));
+      stage.label(bean, K.tag({ name: t.name.length > 26 ? t.name.slice(0, 25) + "…" : t.name, state: t.move === "you" ? "Asks you" : "", hue: bean.look.hue, waiting: t.move === "you" }));
       beans[t.id] = bean;
     });
     var rug = K.buildRug(2.6, 1.9);
-    rug.position.set(-3.6, 0, 2);
+    rug.position.set(-4.3, 0, 2.2);
     stage.add(rug);
     var chair = K.buildArmchair();
     chair.object.rotation.y = Math.PI / 3;
-    chair.object.position.set(-3.8, 0, 1.8);
+    chair.object.position.set(-4.5, 0, 2);
     stage.add(chair.object);
     var palm = K.buildPlant("tall");
     palm.position.set(W / 2 - 0.6, 0, -D / 2 + 0.6);

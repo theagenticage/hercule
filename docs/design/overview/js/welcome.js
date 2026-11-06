@@ -6,7 +6,7 @@ window.Welcome = (function () {
   /** Returns the markup under the rule for an empty world, or an empty string. */
   function drawEmpty(scene) {
     if (scene === "first") {
-      return '<div class="grid welcome-grid"><div class="cell"><article class="card card--ghost" data-height="etch"><span class="card-holder"><span class="card-head">' + Crew.peek("Hercule", { pose: "idle", size: 26, crop: 33 }) + '</span></span><i class="card-stock"></i><div class="card-text"><span class="card-title">Your first Task lands here</span><br>Every thread you start joins one by itself.</div></article></div></div>' +
+      return '<div class="grid welcome-grid"><div class="cell"><article class="card card--ghost" data-height="etch"><span class="card-holder"><span class="card-head">' + Crew.peek("Hercule", { pose: "idle", size: 30, crop: 34 }) + '</span></span><i class="card-stock"></i><div class="card-text"><span class="card-title">Your first Task lands here</span><br>Every thread you start joins one by itself.</div></article></div></div>' +
         '<div class="welcome"><button class="welcome-btn" data-first-thread>' + Crew.icon("compose", 14) + 'Start a thread<kbd>⌘N</kbd></button></div>';
     }
     return '<div class="welcome welcome--clear">' + Crew.face("Hercule", { pose: "idle", size: 84 }) + '<p class="welcome-line">Nothing wants you. The crew is at rest.</p></div>';

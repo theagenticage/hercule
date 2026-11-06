@@ -7,6 +7,8 @@
 /* ---------- The desk ---------- */
 .view { position: absolute; inset: 0; }
 .work { background: var(--desk); -webkit-user-select: none; user-select: none; }
+/* The desk is lit from above and a little to the left, like a lamp over a blotter. The light never moves. */
+.work-canvas::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 760px; pointer-events: none; background: radial-gradient(1100px 620px at 26% -8%, var(--lamp, transparent), transparent 72%); }
 .work-scroll { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; overflow-anchor: none; }
 .work-canvas { position: relative; min-height: 100%; padding: 66px 32px 72px; --col-gap: 14px; --cols: repeat(4, minmax(0, 1fr)) minmax(0, 0.72fr); }
 .flight { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
@@ -14,8 +16,8 @@
 /* ---------- The sentence ---------- */
 .lead-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 20px; }
 .since { color: var(--muted); font: var(--type-summary); white-space: nowrap; min-height: 16px; }
-.lead h2 { margin: 0; font: var(--type-lead); letter-spacing: -0.012em; color: var(--ink); }
-.lead-sub { display: flex; align-items: center; gap: 10px; margin: 4px 0 0; color: var(--muted); font: var(--type-summary); }
+.lead h2 { margin: 0; font: var(--type-lead); letter-spacing: -0.016em; color: var(--ink); }
+.lead-sub { display: flex; align-items: center; gap: 10px; margin: 5px 0 0; color: var(--muted); font: var(--type-summary); }
 .lead-sub b { color: var(--ink); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
 .sep { width: 2px; height: 2px; border-radius: 50%; background: var(--faint); }
 .lens { position: relative; font: inherit; color: inherit; letter-spacing: inherit; text-align: left; transition: color var(--m-quick); }
@@ -117,7 +119,7 @@
 .card:focus-visible .card-stock, .card.is-focus .card-stock { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* ---------- Piles ---------- */
-.pile { display: flex; flex-direction: column; text-align: left; }
+.pile { display: flex; flex-direction: column; justify-content: center; height: 62px; padding: 0 var(--card-pad-x); text-align: left; margin-bottom: calc(var(--sheets) * 4px); }
 .pile-text { display: flex; align-items: baseline; gap: 8px; font: var(--type-card); color: var(--ink); }
 .pile-text b { font-weight: var(--w-medium); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pile-text em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: var(--w-regular); }
@@ -196,13 +198,10 @@
 .toast-undo:hover { background: var(--hover); }
 
 /* ---------- A pile's foot ---------- */
-.pile-foot { margin-top: auto; }
-.pile-faces { display: inline-flex; align-items: center; }
-.pile-face { display: inline-flex; margin-right: -4px; }
-.pile-foot .card-src { margin-left: auto; }
-.pile-foot .card-src + .card-src { margin-left: 4px; }
-.pile-foot .card-src + time { margin-left: 2px; }
-.pile-foot time { margin-left: auto; }
+.pile-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 3px; min-height: 16px; }
+.pile-line { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pile-faces { display: inline-flex; align-items: center; flex: none; }
+.pile-face { display: inline-flex; margin-left: -5px; }
 
 /* ---------- The board alive ---------- */
 .card.is-new .card-stock { animation: card-new 3.2s var(--m-ease) both; }

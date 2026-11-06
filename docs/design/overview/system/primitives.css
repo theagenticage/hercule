@@ -11,6 +11,9 @@
      read as objects lying on it. */
   --desk: color-mix(in oklab, var(--bg) 70%, var(--surface));
 
+  /* ---- The lamp over the desk: a little warmth in the dark themes, a little daylight in the light. */
+  --lamp: color-mix(in oklab, var(--brass) 7%, transparent);
+
   /* ---- Card stock. --stock is the sheet itself; the rest are its edges. */
   --stock: var(--raised);
   --stock-flat: color-mix(in oklab, var(--raised) 42%, var(--desk));
@@ -28,7 +31,7 @@
   --h-etch: inset 0 0 0 1px color-mix(in oklab, var(--rim) 42%, transparent);
 
   /* ---- Type roles, on the app's scale. */
-  --type-lead: var(--w-bold) var(--t-18) / 24px var(--font-ui);
+  --type-lead: var(--w-medium) var(--t-20) / 28px var(--font-ui);
   --type-lane: var(--w-bold) var(--t-14) / 20px var(--font-ui);
   --type-card: var(--w-medium) var(--t-13) / 18px var(--font-ui);
   --type-summary: var(--w-regular) var(--t-12) / 16px var(--font-ui);
@@ -40,7 +43,7 @@
   --card-pad-x: 12px;
   --card-pad-y: 10px;
   --card-h: 96px;
-  --card-gap: 14px;
+  --card-gap: 16px;
 
   /* ---- Motion. MOTION.md says where each is used. */
   --m-press: 80ms;
@@ -59,6 +62,7 @@
 [data-theme="styles"],
 :root:not([data-theme]) {
   --desk: var(--bg);
+  --lamp: oklch(1 0 0 / 0.5);
   --stock-flat: color-mix(in oklab, var(--raised) 34%, var(--desk));
   --stock-rim: color-mix(in oklab, var(--rim) 72%, transparent);
   --stock-rim-flat: color-mix(in oklab, var(--rim) 88%, transparent);
@@ -143,5 +147,13 @@
 .card-tab { display: block; width: 14px; height: 9px; border-radius: 3px 3px 0 0; background: var(--you); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.28); }
 .card-tab[data-need="think"] { width: 30px; }
 .card-tab--person { display: grid; place-items: start center; width: 17px; height: 15px; padding-top: 1px; background: color-mix(in oklab, var(--faint) 46%, var(--desk)); box-shadow: none; color: var(--ink); font-size: 9px; font-weight: var(--w-bold); line-height: 11px; }
-.card-head { display: block; width: 26px; line-height: 0; margin-bottom: -2px; }
+/* A colleague behind the card: the head clears the edge to just under the eyes, and two paws rest
+   on the edge in front of the sheet. While it works, the paws type on the card itself. */
+.card-head { display: block; width: 30px; height: 23px; line-height: 0; overflow: hidden; }
 .card-head .cr { display: block; overflow: visible; }
+.card-paws { position: absolute; z-index: 1; right: 17px; top: -2.5px; display: flex; gap: 10px; pointer-events: none; }
+.card-paws i { display: block; width: 7px; height: 5px; border-radius: 50%; background: oklch(var(--char-l) var(--char-c) var(--hue, var(--hue-iris))); box-shadow: inset 0 -1px 0 oklch(calc(var(--char-l) - var(--char-shade)) calc(var(--char-c) * 1.05) var(--hue, var(--hue-iris))), 0 0 0 0.5px oklch(0 0 0 / 0.18); }
+.card-paws[data-pose="working"] i { animation: paw-tap 0.52s ease-in-out infinite alternate; }
+.card-paws[data-pose="working"] i + i { animation-delay: 0.26s; }
+@keyframes paw-tap { to { transform: translateY(-1.2px); } }
+@media (prefers-reduced-motion: reduce) { .card-paws i { animation: none !important; } }

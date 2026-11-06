@@ -198,7 +198,7 @@ html[data-motion="off"] .cr * {
 .side-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .side-actions .icon-btn { width: 30px; height: 30px; }
 .nav-row { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px 0 10px; border-radius: var(--r-sm); color: var(--muted); font-weight: var(--w-medium); transition: background var(--dur-1); width: 100%; text-align: left; }
-.nav-row > span { flex: 1; min-width: 0; }
+.nav-row > span:not(.count) { flex: 1; min-width: 0; }
 .nav-row:hover { background: var(--hover); color: var(--ink); }
 .nav-row.is-on { background: var(--selected); color: var(--ink); }
 .nav-row .ic { color: var(--muted); }

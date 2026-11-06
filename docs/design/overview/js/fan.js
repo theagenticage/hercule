@@ -30,7 +30,7 @@ window.Fan = (function () {
     var rows = Math.ceil(pile.tasks.length / cols);
     var gapX = 12, gapY = 16, head = 34;
     var w = cols * cardWidth + (cols - 1) * gapX;
-    var hFull = rows * 96 + (rows - 1) * gapY + head;
+    var hFull = rows * 96 + (rows - 1) * gapY + head + 8;
     var maxH = main.height - 96;
     var h = Math.min(hFull, maxH);
     // The fan opens around the pile, then moves only as far as it must to stay in the window.
