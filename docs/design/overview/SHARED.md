@@ -25,9 +25,9 @@ For the Inbox: a card that needs you stands. A card you are only following lies 
 
 The top edge of a card is one slot. What stands behind it tells who has the next move, before a word is read, the way a metal signal tab did on a card in a 1930s card file:
 
-- a marigold tab: you. Short for a quick call, long for real thinking. 18 or 40px wide, 9px showing
+- a marigold tab: you. Short for a quick call, long for real thinking. 18 or 40px wide, 9px showing. With a number on it, it counts everything there that wants you
 - a colleague's head, cut off by the card: an agent
-- a grey tab with an initial: a person
+- a round monogram: a person
 - nothing: nobody
 
 Markup: `<div class="card"><i class="card-stock"></i><span class="card-body"><span class="card-holder">…</span>…words…</span></div>`. The sheet is its own element so it can hide the lower part of what stands behind it, and it stays the same element for the card's whole life, so a change of height can animate. Only `.card-body` redraws.
@@ -36,7 +36,7 @@ Markup: `<div class="card"><i class="card-stock"></i><span class="card-body"><sp
 
 | Role | Token | Value |
 |---|---|---|
-| Page sentence | `--type-lead` | 26/32, medium (Work) |
+| Page sentence | `--type-lead` | 26/32, medium (Work only; the Inbox has none) |
 | Lane or section name | `--type-lane` | 15/20, bold |
 | Card title | `--type-card` | 13/18, medium |
 | Card summary | `--type-summary` | 12/16, regular, `--muted`, about six words |
@@ -55,7 +55,7 @@ Words follow height. On a dark desk what lies lower is written dimmer, so a flat
 
 ## Colour
 
-The book's doctrine holds. Colour means who. On Work, `--you` marigold appears only on tabs and as the underline of the sentence's numbers, and `--you-ink` on a question while it is read. Ages and counts are neutral, so marigold stays a signal. A colleague's head rests at 62% saturation for the same reason.
+The book's doctrine holds. Colour means who. On Work, marigold appears only on tabs and as the underline of the sentence's numbers, and `--you-ink` on a question while it is read. Ages and counts are neutral, so marigold stays a signal. A colleague's head rests at 62% saturation for the same reason.
 
 ## Motion tokens
 
@@ -86,12 +86,28 @@ Rules: motion explains cause. Everything is interruptible, because every change 
 
 ## Settled with the Inbox session
 
-- Intake leaves the sidebar and sits behind the Inbox, as the Office sits behind the Overview: `Inbox | Intake` in the pill. The sidebar reads Overview, Inbox, Workflows, Discussions, Wiki.
-- Marks. On Work a mark is secondary: 11px, `--faint`. In the Inbox a mark is the identity: 20px, in ink at 84%, or in a plugin's hue through the theme-owned `--mark-l` and `--mark-c`. Solid marks are drawn at 90% size, so a heavy logo and a line logo look the same size.
-- The Inbox's sidebar count is a plain grey number, not marigold: it counts what has outlasted its patience plus what Hercule noticed, and a count that is always marigold nags. If something is new since the last visit, one 6px marigold dot stands before the number. Waiting on you keeps its marigold, because that really is addressed to you now.
-- In an Inbox stack a colleague does not peek over the top edge, because strips have no free edge. The colleague stands where the wait was, in the working pose. A whole card with air around it, as on Work, keeps its head and paws at the right.
-- Stage and stack counts are Deco numerals in `--numeral`, and they come first: `13 EXPLORING`, `12 TO REVIEW`. 20px on Work, which has a sentence above it; 26px in the Inbox, which has none and lets the numerals carry the voice.
-- The plate (`--plate-*`, in the Inbox's tokens) is the one object opposite the page: lacquer on light themes, polished brass on dark ones. It is Hercule's own. Work would take those names if it ever needs one.
-- `--h-stack` and the stock variants stay in the Inbox's own tokens.
-- The Inbox keeps the page sentence on the pill's row at 14px, because that page never scrolls. Same voice, different size.
-- The user is Noa, in both drawings.
+**One window.** Both open on Whitehaven, the app's real default, and cross-page links carry `?theme=`. One sidebar fixture: Overview, Inbox, Workflows, Discussions, Wiki, then Fleet, Connections. Waiting on you shows two rows. The Inbox count is a plain grey `<b class="count">22</b>`, with one 6px marigold dot before it when something is new. The foot reads `16 working · 2 waiting · 2 idle`, and the user is Noa. `.count` is plain, as in the app; `.count--you` is marigold and means addressed to you.
+
+**Intake** leaves the sidebar and sits behind the Inbox, as the Office sits behind the Overview. No icons in the pill's tabs. One 36px glass button style at the right end, `.icon-pill`.
+
+**One primary colour.** `--answer` and `--answer-fg`, on both pages. Nile keeps green through that token, because its `--accent` is cream.
+
+**One heading.** Counts come first and are Deco numerals in `--count-ink`, over a double rule in `--rule-ink` (2px over 1px, 5px tall): `13 EXPLORING`, `12 TO REVIEW`. 20px on Work, which has a sentence above it. 36px on the Inbox, which has no sentence, so its numerals carry the voice.
+
+**One material.** On dark desks standing cards have a warm stock per theme, a lit top edge at 13% white and `--stock-sheen`. The Inbox inherits it.
+
+**One figure.** Hercule is the real head over an edge. On the Inbox he stands behind the top edge of what he noticed, a wide card of the page's own stock, not a plate. When all is clear, a sunrise: on Work the stage rule is its horizon.
+
+**Open surfaces.** Title 20/26, corner 16, one key style. Work's opens over the board; the Inbox's docks in place. Both for good reasons.
+
+**Pile grammar.** Count, then what in it wants you. On Work a pile is a real card with sheets and `+3`, and one tab whose number counts what there wants you. In the Inbox the pile's face reads `8 more  ⊗ 3  newest 2h`.
+
+**Keys.** The current card follows pointer and keys, on both. An arrow key takes over from a resting pointer until the pointer moves.
+
+**Marks.** On Work a mark is secondary: 13px, `--muted`. In the Inbox a mark is the identity: 20px, in ink at 84%, or in a plugin's hue through the theme-owned `--mark-l` and `--mark-c`. Solid marks are drawn at 90% size, so a heavy logo and a line logo look the same size. Every logo has one strength.
+
+**The colleague.** A whole card keeps head and paws behind the top edge, at the right. An Inbox strip has no free edge, so there the colleague stands where the wait was, in the working pose. Use `Crew.peek`, `.card-head` and `.card-paws`, so a hand-off in the Inbox and a head on Work are the same object.
+
+**Ages and waits.** On Work ages are neutral, because a Task's age is not the point of the card. In the Inbox an overdue wait stays marigold: the wait is the point there. The two pages are never on screen together.
+
+**Inbox tokens.** `--h-stack` and the stock variants stay in the Inbox's own tokens file.

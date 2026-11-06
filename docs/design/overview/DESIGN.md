@@ -73,7 +73,7 @@ The three counts a person sees mean different things, on purpose. The sidebar's 
 
 ### The morning's walk
 
-`N` opens the first thing that wants you, in reading order, and walks on with the details open: "4 of 23" in the pane's head. It goes through piles and folded lanes, lighting where each thing sits. Answering moves on by itself. A lens narrows the walk: press `R`, then `N`, and you walk only what needs real thinking. This is the path for a person sitting down with coffee: read, answer, next.
+`N`, or the small keycap after the sentence, opens the first thing that wants you and walks on with the details open: "4 of 23" in the pane's head. It is one pass down the board, lane by lane: loose work, then each plan. It goes through stacks and wires, and says so ("in a stack, 5 of 33", "in One price engine, 10 of 33"). Answering moves on by itself. A lens narrows the walk: press `R`, then `N`, and you walk only what needs real thinking. This is the path for a person sitting down with coffee: read, answer, next.
 
 ### The card
 
@@ -106,7 +106,7 @@ Words at the card's hover: after 160ms the summary becomes the need and the ques
 | Standing (wants you) | `--stock`, `--h-stand`, a marigold tab, ink title. On dark desks shadows say little, so a standing card has a material: a warm stock per theme, a lit top edge and a sheen falling from above (`--stock-sheen`) |
 | Flat (someone else) | `--stock-flat`, no rim, no shadow, a head or person tab, words in `--word-flat` |
 | Pressed (blocked) | `--stock-press`, `--h-press`, no holder, words in `--word-press`, summary reads "Waits on *blocker*" |
-| Etched (landed) | only words: no sheet, faint regular title, set on the column's left edge under the stage name |
+| Etched (landed) | only words: no sheet, faint regular title. On the board Landed is one line; a landed card shows only inside its fan |
 | Hover | standing rises to `--h-hover`; flat comes up to `--h-stand`. After 160ms the summary becomes the question, in `--you-ink`. Heads return to full colour |
 | Focused | a 2px `--focus` ring, 2px out. The question shows, as on hover |
 | Dragging | lifts 3%, `--h-carry` and `--stock-carry` crossfade in on the same spring. A slot stays behind |
@@ -120,7 +120,7 @@ Words at the card's hover: after 160ms the summary becomes the need and the ques
 
 ### The top edge
 
-One slot, 14px from the right edge, drawn behind the sheet. The tab shows 9px above the edge, 18px wide for a quick call and 40px for real thinking. On a light desk it takes a 1px `--you-ink` ring, so it reaches 5:1. A head is 30px wide, cropped below the mouth, with two 7 by 5 paws on the edge in front of the sheet. A person is an 18px round monogram in `--faint`, so it can never be read as a key. Heads and paws are the same everywhere: on piles, on the open sheet and on the first-run card.
+One slot, 14px from the right edge, drawn behind the sheet. The tab shows 9px above the edge, 18px wide for a quick call and 40px for real thinking. On a light desk the fill is a step deeper (`--tab-fill`). An outline was tried, for contrast, and read as a sticker. A head is 30px wide, cropped below the mouth, with two 7 by 5 paws on the edge in front of the sheet. A person is an 18px round monogram in `--faint`, so it can never be read as a key. Heads and paws are the same everywhere: on piles, on the open sheet and on the first-run card.
 
 ### `blockedBy`
 
@@ -132,7 +132,7 @@ Off by default. Display menu, or `W`. Neglected work ages from 6 days to 30: the
 
 ### One row, and stacks
 
-At rest a lane shows one row. Per stage, one real card lies on top: the oldest that wants you, otherwise the oldest. What lies behind it shows as sheets under that same card, with `+3` beside the age. If something behind it wants you, a small marigold tab with that count stands beside its own tab.
+At rest a lane shows one row. Per stage, one real card lies on top, in this order: the oldest that wants you, then an agent's, then a person's, then the oldest, and a blocked card only if nothing else is there. What lies behind it shows as sheets under that same card, with `+3` beside the age. The card has one tab: when more than one thing here wants you, the tab carries that number. A stack with agents on it shows one head beside the tab, so the crew is always on the board.
 
 - The top card stays the same for the visit. Under a lens, a card that matches comes to the top, so a lens never lights an empty row.
 - `+3`, or `E`, fans out what lies behind.
@@ -144,7 +144,7 @@ At rest a lane shows one row. Per stage, one real card lies on top: the oldest t
 
 ### Plans
 
-The name row: a chevron on hover, the name, a bullet graph, "7 of 12". The wire: a hairline across all stages, darker between the first and last bead.
+The name row: a chevron on hover, the name, a bullet graph, "7 of 12 landed" on approach. The wire starts at its first bead and ends 24px past its last. It says how far a plan has come, not how wide the page is. Full-width lines read as the metro map he rejected. Opening every busy plan by default was tried and rejected too: the bands crowded the page, and a thin horizontal line is what he asked for.
 
 **The bullet graph** is 40 by 4: landed in `--muted`, in motion at 42% of that, the rest empty. "7 of 12 landed" shows on hover.
 
@@ -158,12 +158,12 @@ Lanes keep their order. A folded lane is a name row and a wire holding all its T
 
 ### Piles
 
-When a lane shows all its rows, a pile is a stream of similar work (Reviews, Pull requests, Tickets) or the overflow of a cell ("3 more"). It follows the card's rules: the same height, the same top edge. One tab counts what in it wants you, and one head shows agents are on it. Its words are only a name, a count and one short line. Landed is the quietest of all: "2 this week", with no sheet.
+Every pile is a stack: a real card with sheets under it and `+13` beside the age. There are no title-only tiles. When a lane shows all its rows, a stack gathers a stream of similar work (Reviews, Pull requests, Tickets) or the overflow of a cell. The fan names it: "Reviews, 14, 6 want you". Landed is the one exception and the quietest thing on the board: always one line, "2 this week", with no sheet.
 
 Rules:
 
-- A cell shows at most three rows, plus a fourth when only one card is over. Past that, the rest wait in "more". A lane has the same height at 60 Tasks as at 300.
-- Three or more of a kind fold. Landed folds from two. Two streams beside two or more cards share one pile, "Reviews and PRs", so they do not need a fourth row.
+- A cell in a full lane shows at most three rows, plus a fourth when only one card is over. Past that, the rest wait on the last stack. A lane has the same height at 60 Tasks as at 300.
+- Three or more of a kind fold. Two streams beside two or more cards share one stack, "Reviews and PRs", so they do not need a fourth row.
 - **A pile keeps its identity and its place for the visit.** A card leaving can only take something away. It can never split a pile or grow a lane. Regrouping happens on the next visit.
 - Cards already showing stay. What arrives waits in the last row, so an arrival never swallows the card you are looking at.
 - A card you just put down stays a card, on the row you chose, until the next visit. Nothing is pushed out to make room for it.
@@ -211,7 +211,7 @@ Single keys work only with focus on the board, never with a modifier, and can be
 
 Measured in all six themes.
 
-- Text passes 4.5:1 everywhere, including pressed and dimmed cards. The tab reaches 5:1 on light desks, through its ring, and 8:1 or more on dark ones.
+- Text passes 4.5:1 everywhere, including pressed and dimmed cards. The tab reaches 8:1 or more on dark desks. On light desks it is about 2:1, a known miss, which we accepted because an outline looked worse, the tab is never the only signal (the card also stands, and its name says so), and a number on it reads at full contrast.
 - The sheets themselves are not 3:1 against the desk, on purpose: a card is identified by its words, and height is a second channel, not the only one.
 - A card's name reads in the order a person needs: title, who holds it, stage, summary, question, age.
 - One tab stop leads onto the board, and from there the arrows walk it. A wire is one tab stop too.
@@ -239,7 +239,7 @@ Measured in all six themes.
 
 ## What would change in the design system
 
-**New tokens**, in `system/primitives.css`: `--desk`, `--lamp`, `--numeral`, `--underline`, `--tab-ring`, `--paper`, `--count-ink`, `--rule-ink`, `--stock-sheen`, `--answer`, `--answer-fg`, `--word-flat`, `--word-flat-2`, `--word-press`, `--stock`, `--stock-carry`, `--stock-flat`, `--stock-rim`, `--stock-rim-flat`, `--stock-lit`, `--stock-press`, `--h-stand`, `--h-hover`, `--h-carry`, `--h-flat`, `--h-press`, `--h-etch`, the `--type-*` roles, `--card-*`, the `--m-*` motion tokens.
+**New tokens**, in `system/primitives.css`: `--desk`, `--lamp`, `--numeral`, `--underline`, `--tab-fill`, `--paper`, `--count-ink`, `--rule-ink`, `--stock-sheen`, `--answer`, `--answer-fg`, `--word-flat`, `--word-flat-2`, `--word-press`, `--stock`, `--stock-carry`, `--stock-flat`, `--stock-rim`, `--stock-rim-flat`, `--stock-lit`, `--stock-press`, `--h-stand`, `--h-hover`, `--h-carry`, `--h-flat`, `--h-press`, `--h-etch`, the `--type-*` roles, `--card-*`, the `--m-*` motion tokens.
 
 **New components:** card, top edge (tab, head and paws, monogram), stack, wire and bead, pile, lens sentence, stage rule, the walk, the sunrise.
 
