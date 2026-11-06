@@ -152,6 +152,13 @@ window.Pane = (function () {
       return;
     }
     closingId = null;
+    // A sheet that had almost closed on another card lets that card go first.
+    if (awayEl && awayEl !== el) {
+      awayEl.classList.remove("is-away");
+      awayEl = null;
+      if (ghost) ghost.remove();
+      ghost = null;
+    }
     openId = id;
     awayEl = el;
     pane.hidden = false;

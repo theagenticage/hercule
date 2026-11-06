@@ -192,6 +192,27 @@ window.Blocker = (function () {
     lit = null;
   }
 
+  /** Returns an SVG path through these corners, each rounded by r. */
+  function drawRoundedPath(points, r) {
+    var d = "M" + points[0][0] + " " + points[0][1];
+    for (var i = 1; i < points.length - 1; i++) {
+      var p = points[i];
+      var a = points[i - 1];
+      var b = points[i + 1];
+      var inLen = Math.hypot(p[0] - a[0], p[1] - a[1]) || 1;
+      var outLen = Math.hypot(b[0] - p[0], b[1] - p[1]) || 1;
+      var rin = Math.min(r, inLen / 2);
+      var rout = Math.min(r, outLen / 2);
+      var sx = p[0] + ((a[0] - p[0]) / inLen) * rin;
+      var sy = p[1] + ((a[1] - p[1]) / inLen) * rin;
+      var ex = p[0] + ((b[0] - p[0]) / outLen) * rout;
+      var ey = p[1] + ((b[1] - p[1]) / outLen) * rout;
+      d += "L" + sx + " " + sy + "Q" + p[0] + " " + p[1] + " " + ex + " " + ey;
+    }
+    var last = points[points.length - 1];
+    return d + "L" + last[0] + " " + last[1];
+  }
+
   function show(card) {
     hide();
     var t = Store.task(card.dataset.id);
@@ -202,20 +223,20 @@ window.Blocker = (function () {
     var h = host.getBoundingClientRect();
     var a = card.getBoundingClientRect();
     var b = target.getBoundingClientRect();
+    // The line keeps to the gaps between cards, so it never runs through anyone's words: down into
+    // the row gap, along it, up the gutter beside the blocker, and in at its side.
+    var goRight = b.left >= a.right - 1;
+    var goLeft = b.right <= a.left + 1;
+    var below = b.top > a.bottom;
     var ax = a.left + a.width / 2 - h.left;
-    var ay = a.top - h.top;
-    var bx = b.left + b.width / 2 - h.left;
-    var by = (b.bottom < a.top ? b.bottom : b.top) - h.top;
-    if (Math.abs(a.left - b.left) > 40) {
-      ax = (b.left > a.left ? a.right : a.left) - h.left;
-      ay = a.top + a.height / 2 - h.top;
-      bx = (b.left > a.left ? b.left : b.right) - h.left;
-      by = b.top + b.height / 2 - h.top;
-    }
-    var mid = (ax + bx) / 2;
+    var ay = (below ? a.bottom : a.top) - h.top;
+    var rowY = ay + (below ? 11 : -11);
+    var gutterX = (goLeft ? b.right + 7 : b.left - 7) - h.left;
+    var endX = (goLeft ? b.right : b.left) - h.left;
+    var endY = b.top + b.height / 2 - h.top;
     svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("class", "blocker-line");
-    svg.innerHTML = '<path d="M' + ax + " " + ay + "C" + mid + " " + ay + " " + mid + " " + by + " " + bx + " " + by + '"/><circle cx="' + bx + '" cy="' + by + '" r="2.5"/>';
+    svg.innerHTML = '<path d="' + drawRoundedPath([[ax, ay], [ax, rowY], [gutterX, rowY], [gutterX, endY], [endX, endY]], 6) + '"/><circle cx="' + endX + '" cy="' + endY + '" r="2.5"/>';
     host.appendChild(svg);
     var path = svg.querySelector("path");
     var len = path.getTotalLength();

@@ -298,14 +298,15 @@ window.Store = (function () {
   /** Records your answer: the agent carries on with it, and the card lies down. */
   function answerTask(id, answer) {
     var t = task(id);
-    var was = { move: t.move, agent: t.agent, now: t.now, ask: t.ask, need: t.need, age: t.age };
-    remember(t.name, function () { Object.assign(t, was); });
+    var was = { move: t.move, agent: t.agent, now: t.now, ask: t.ask, need: t.need, age: t.age, pendingSync: t.pendingSync };
+    remember(t.name, function () { Object.assign(t, was); }, { id: id, reopen: true });
     t.move = "agent";
     t.agent = t.agent || "Carry on with " + t.name;
     t.now = "You said: " + answer + ".";
     t.ask = "";
     t.need = "look";
     t.age = 0;
+    if (state.offline) t.pendingSync = true;
   }
 
   /** Starts a thread on a Task: its colleague takes the card. */
@@ -319,6 +320,7 @@ window.Store = (function () {
     t.move = "agent";
     t.need = "look";
     t.now = "A thread just started.";
+    if (state.offline) t.pendingSync = true;
   }
 
   /** Moves a Task because a fact arrived. A person's drag holds until then; a fact overrides it. */

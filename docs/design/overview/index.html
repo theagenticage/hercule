@@ -46,7 +46,7 @@
 
   <section>
     <h2>A card says a lot without words</h2>
-    <p>Two things are new, and both work before you read a word.</p>
+    <p>Two things are new, and both work before you read a word. The words are few on purpose: a title, about six words on where it stands, and an age.</p>
     <p><b>Height means whose move it is.</b> A card that wants you stands up off the desk. A card someone else holds lies flat. A blocked card is pressed in. A landed card is only an outline. Nothing else on the page has a shadow, so the eye goes to what stands.</p>
     <p><b>The top edge shows who holds it.</b> Card files in the 1930s used small metal signal tabs clipped to the top edge, so a clerk could read a whole drawer at a glance. Here a marigold tab means it is your move: short for a quick call, long for real thinking. A colleague's head peeks over the edge, paws typing on the card, when an agent has it. A grey tab holds a person's initial. Nothing means nobody.</p>
     <figure class="st-frame st-frame--low" data-src="sheet.html" data-w="1000" data-h="420"><figcaption>All card states at rest, in the theme you picked above.</figcaption></figure>
@@ -63,7 +63,7 @@
 
   <section>
     <h2>Plans are wires, and beads are Tasks</h2>
-    <p>A plan is a thin wire across the stages, with a bead per piece of work at its stage. You read its shape at a glance, like an abacus. Click its name and the wire opens: each bead grows into its card, in place, in a band. Fold it and the cards shrink back into their beads. Most Tasks have no plan, and nothing about the page apologises for that.</p>
+    <p>A plan is a thin wire across the stages, under its project's cards, with a bead per piece of work at its stage. You read its shape at a glance, like an abacus, and a small bullet graph says how far along it is. Click its name and the wire opens: each bead grows into its card, in place, in a band. Fold it and the cards shrink back into their beads. Most Tasks have no plan, and nothing about the page apologises for that.</p>
     <p>Beads are real objects. Rest on one to see what it is. Drag one along its wire to change its stage. Drop a card on a folded lane and it shrinks into a bead there.</p>
   </section>
 
@@ -94,7 +94,7 @@
 
   <section>
     <h2>Calm at 300 cards</h2>
-    <p>A cell holds at most three rows. Past that, streams fold into piles, and the rest wait in "more". Tabs stick out of a pile, so you can see how much in it wants you. Clicking a pile fans it open beside itself, like a hand of cards. At full volume, Shift F folds everything: ten projects fit on one screen as lines of beads, and dense cells turn into tally marks.</p>
+    <p>A cell shows at most three rows. Past that, streams fold into piles, and the rest wait in "more". A pile has the same top edge as a card: one tab counts what in it wants you, and one head says agents are on it. Clicking a pile fans it open on the board's own columns, like a hand of cards laid flat. A first visit opens one lane and folds the rest, so every project is on the first screen. At full volume, Shift F folds everything: ten projects fit on one screen as lines of beads, and dense cells turn into tally marks.</p>
     <div class="st-two">
       <figure><img src="screens/many--orient-express.jpg" alt="300 cards"><figcaption>300 cards, one project open.</figcaption></figure>
       <figure><img src="screens/many-folded--orient-express.jpg" alt="300 cards folded"><figcaption>All 300 on one screen.</figcaption></figure>
@@ -104,6 +104,7 @@
   <section>
     <h2>The Overview: Office and Work side by side</h2>
     <p>The Office stays exactly as it is. A puck slides in the switcher, and the change of view carries the one thing the two views share: the colleagues. Switch from Work to the Office and each head on a card leaves it and walks into the room. Switch back and they return to their cards. It says what the two views are: the same crew, seen two ways.</p>
+    <p>The Office itself is untouched, and it loads only when you ask for it: the kit starts loading when the pointer reaches the tab.</p>
     <p>The switcher draws Office and Work today. List, One surface and Tracks slot in beside them, in the same pill, with no change of design. The tray at the bottom right can show them at sketch level.</p>
     <div class="st-two">
       <figure><img src="screens/office--orient-express.jpg" alt="The Office"><figcaption>The real Office.</figcaption></figure>
@@ -130,6 +131,7 @@
       <li><b>Beads and wires</b>, as the folded form of anything.</li>
       <li><b>Piles</b>, with flags.</li>
       <li><b>The lens sentence</b>: a page's first line as its filter.</li>
+      <li><b>Words follow height</b>: on a dark desk, what lies lower is written dimmer.</li>
       <li><b>Deco numerals in brass</b> for the five stage counts. This changes one doctrine line: brass may be read here, and nowhere else.</li>
       <li><b>Three springs</b>, on one clock, in <code>js/motion.js</code>: <code>hand</code>, <code>travel</code> and <code>self</code>, chosen by who caused the change.</li>
       <li><b>The walk</b>: N through everything that wants you.</li>
@@ -139,7 +141,17 @@
 
   <section id="honest">
     <h2>What is weakest</h2>
-    <div id="weakest"></div>
+    <p>Three rounds of harsh critics and a final check found a lot, and most of it is fixed. This is what I still doubt.</p>
+    <ul>
+      <li><b>The change of view has not been judged at real speed.</b> This machine draws the 3D Office at a few frames a second. The heads walking between cards and room are built and measured for position, but nobody has watched them at full speed. Please look at this first on your Mac.</li>
+      <li><b>It has only been looked at on Linux, at 1x.</b> Font smoothing on a Retina screen will change how the small type feels, and shadows will look finer.</li>
+      <li><b>The six-word summary is a bet.</b> Every summary here is written by hand. The design depends on a cheap model holding that length, and real output may run long.</li>
+      <li><b>A walk can stop on a card hidden behind the sheet.</b> The details cover the right of the board, so about half the stops in a walk land under it. The crumb says where it lives, but you do not see the card move. I do not have a good answer yet.</li>
+      <li><b>Heads in the light themes are below 3:1 against the desk.</b> Tabs now pass, through a thin ring that one critic found sticker-like. Heads carry no information that the card's accessible name lacks, so I left them, but it is a known miss.</li>
+      <li><b>Folding on first visit hides cards.</b> One open lane and four lines put every project on the first screen, and it is the calmest picture. You may want more cards at once. That is one line to change.</li>
+      <li><b>Folding everything looks busy for a moment.</b> With many cards in view, the flight to the beads is the least elegant motion here.</li>
+      <li><b>The 300-card world is generated.</b> It proves the structure, not the feel of 300 real things.</li>
+    </ul>
   </section>
 </main>
 <script src="js/story.js"></script>

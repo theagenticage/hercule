@@ -48,6 +48,8 @@
   var scroll = document.getElementById("scroll");
   scroll.addEventListener("scroll", function () {
     document.querySelector(".rule-wrap").classList.toggle("is-stuck", scroll.scrollTop > 72);
+    // The sentence fades before it reaches the pill, so the pill never cuts it in half.
+    document.querySelector(".lead-row").style.opacity = Math.max(0, 1 - scroll.scrollTop / 40).toFixed(2);
   }, { passive: true });
 
   work.addEventListener("click", function (e) {

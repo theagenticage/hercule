@@ -31,8 +31,8 @@ window.Actions = (function () {
       animateLeaving(id, how);
       Board.change(function () { Store.endTask(id, how); }, { spring: "hand" });
       Fan.dropCard(id);
-      if (!quiet) Toast.show(how + ". " + t.name + " has left the board.", true);
-      if (next && next.isConnected && next.classList.contains("card")) Keys.focusCard(next);
+      if (!quiet) Toast.show(how + (Store.state.offline ? ". It will sync when you are back." : ". " + t.name + " has left the board."), true);
+      if (next && next.isConnected && next.classList.contains("card") && !Pane.currentId()) Keys.focusCard(next);
     };
     // In the middle of a walk the details stay open and move on: Done is an answer too.
     if (Pane.currentId() === id && Pane.isWalking()) {
@@ -80,7 +80,7 @@ window.Actions = (function () {
   function startThread(id, prompt) {
     Board.change(function () { Store.startThread(id, prompt); });
     handOff(id);
-    Toast.show("A thread started on this Task.", true);
+    Toast.show(Store.state.offline ? "This thread starts when you are back." : "A thread started on this Task.", true);
   }
 
   /** Answers a Task's question. The card lies down, and the walk moves on to the next thing. */
@@ -164,7 +164,15 @@ window.Walk = (function () {
       var at = list.findIndex(function (t) { return t.id === open; });
       if (at >= 0) return go(at + by);
     }
-    go(by > 0 ? 0 : -1);
+    // Closed in the middle of a walk, the walk picks up where it stopped.
+    go(index >= 0 ? index + by : by > 0 ? 0 : -1);
+  }
+
+  /** Reopens a Task in the walk: what Undo does after an answer. */
+  function resume(id) {
+    list = readList();
+    var at = list.findIndex(function (t) { return t.id === id; });
+    if (at >= 0) go(at);
   }
 
   /** Remembers where a Task stands in the walk, just before it leaves the list. */
@@ -182,7 +190,7 @@ window.Walk = (function () {
     go(Math.min(index, list.length - 1));
   }
 
-  return { step: step, notePlace: notePlace, afterAnswer: afterAnswer };
+  return { step: step, resume: resume, notePlace: notePlace, afterAnswer: afterAnswer };
 })();
 
 // PROTOTYPE - merging without a pointer: pick the card to merge into with the arrows and Return.

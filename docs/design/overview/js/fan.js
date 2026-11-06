@@ -161,12 +161,23 @@ window.Fan = (function () {
     open.cards.splice(i, 1);
     open.pile.tasks = open.pile.tasks.filter(function (t) { return t.id !== id; });
     Motion.flip(open.cards, function () { gone.remove(); }, { spring: "hand" });
-    var count = open.fan.querySelector(".fan-head span");
-    if (count) count.textContent = open.cards.length;
+    refreshHead();
     if (!open.cards.length) hide();
+    // When too few are left, the pile itself is gone, and so is what this fan was a view of.
+    else if (!open.pileEl.isConnected) hide(true);
+  }
+
+  /** Keeps the fan's own words true after a change. */
+  function refreshHead() {
+    if (!open) return;
+    var count = open.fan.querySelector(".fan-head span");
+    var line = open.fan.querySelector(".fan-head small");
+    if (count) count.textContent = open.cards.length;
+    if (line) line.textContent = Store.describePile(open.pile);
   }
 
   return {
+    refreshHead: refreshHead,
     dropCard: dropCard,
     pileEl: function () { return open ? open.pileEl : null; },
     show: show,

@@ -190,12 +190,12 @@ window.Keys = (function () {
     }
     if (key === "n") return Walk.step(1);
     if (key === "N") return Walk.step(-1);
-    if (key === "[") return jumpLane(-1);
-    if (key === "]") return jumpLane(1);
+    if ((key === "[" || key === "]") && !Fan.isOpen()) return jumpLane(key === "[" ? -1 : 1);
     if ((key === "f" || key === "F") && Fan.isOpen()) return;
     if (key === "f" && focused) {
       var lane = focused.closest(".lane");
       var plan = focused.closest(".plan");
+      if (!lane && !plan) return;
       if (plan) Fold.togglePlan(plan.dataset.plan);
       else if (lane) Fold.toggleLane(lane.dataset.lane);
       // The card may have folded away. Focus stays on its plan or lane, so a second F opens it again.
@@ -216,6 +216,8 @@ window.Keys = (function () {
     if (key === "o") return Overview.show("office");
     var id3 = Pane.currentId() || currentCardId();
     if (!id3) return;
+    // With a fan open, a key can only mean a card in that fan.
+    if (Fan.isOpen() && !Pane.currentId() && !(focused && focused.closest(".fan"))) return;
     if (key === "x") return Select.toggle(id3);
     if (key === "d") return Actions.run("done", id3);
     if (key === "Backspace") return Actions.run("drop", id3);

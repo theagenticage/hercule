@@ -6,13 +6,17 @@ window.Welcome = (function () {
   /** Returns the markup under the rule for an empty world, or an empty string. */
   function drawEmpty(scene) {
     if (scene === "first") {
-      return '<div class="grid welcome-grid"><div class="cell"><article class="card welcome-card" data-height="stand"><span class="card-holder">' + Board.drawHead("Hercule", "idle").head + "</span>" + Board.drawHead("Hercule", "idle").paws + '<i class="card-stock"></i><div class="card-words"><p class="card-title">Start your first thread</p><p class="card-now">Its Task will land here by itself, and you can drag it along as it grows.</p></div></article></div></div>' +
+      return '<div class="grid welcome-grid"><div class="cell"><article class="card welcome-card" data-height="stand"><span class="card-holder">' + Board.drawHead("Hercule", "idle").head + "</span>" + Board.drawHead("Hercule", "idle").paws + '<i class="card-stock"></i><div class="card-words"><p class="card-title">Start your first thread</p><p class="card-now">Its Task lands here.</p></div></article></div></div>' +
         '<div class="welcome"><button class="welcome-btn" data-first-thread>' + Crew.icon("compose", 14) + 'Start a thread<kbd>⌘N</kbd></button></div>';
     }
     return '<div class="welcome-landed"><span>12 this week</span></div><div class="welcome welcome--clear">' + Crew.face("Hercule", { pose: "idle", size: 84 }) + '<p class="welcome-line">Nothing wants you. The crew is at rest.</p></div>';
   }
 
+  var started = false;
+
   function startFirst() {
+    if (started) return;
+    started = true;
     var ghost = document.querySelector(".welcome-card");
     var name = "Fix the basket total rounding";
     var host = document.getElementById("welcome");

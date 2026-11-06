@@ -44,5 +44,29 @@ window.Shell = (function () {
       '<div class="side-me">' + Crew.you(24) + '<span class="side-name">Noa</span><a class="icon-btn" style="width:24px;height:24px" href="#" title="Settings">' + I("sliders", 14) + "</a></div></div>";
   }
 
-  return { drawSidebar: drawSidebar };
+  /**
+   * Keeps the sidebar true to the board: a waiting row goes when its Task no longer waits, and the
+   * foot counts what is on the board.
+   */
+  function syncWithBoard() {
+    var waiting = 0;
+    document.querySelectorAll("[data-side] .side-row[data-task]").forEach(function (row) {
+      var t = Store.task(row.dataset.task);
+      var waits = t && t.move === "you" && !t.ended;
+      row.hidden = !waits;
+      if (waits) waiting++;
+    });
+    var count = document.querySelector("[data-side] .side-h .count--you");
+    if (count) {
+      count.textContent = waiting;
+      count.closest(".side-sec").hidden = waiting === 0;
+    }
+    var working = Store.state.tasks.filter(function (t) { return t.agent && t.move !== "you" && t.stage !== "landed"; }).length;
+    var sum = document.querySelector("[data-side] .side-sum");
+    if (!sum) return;
+    if (!working && !waiting) sum.textContent = "Nothing running";
+    else sum.innerHTML = "<b>" + working + '</b> working · <b class="you-ink">' + waiting + "</b> waiting";
+  }
+
+  return { drawSidebar: drawSidebar, syncWithBoard: syncWithBoard };
 })();

@@ -48,8 +48,8 @@
 @keyframes roll-in { from { transform: translateY(var(--to, -6px)); opacity: 0; } }
 
 /* ---------- Lanes ---------- */
-.lane { padding-bottom: 30px; }
-.lane.is-folded { padding-bottom: 26px; }
+.lane { padding-bottom: 26px; }
+.lane.is-folded { padding-bottom: 16px; }
 .lane.is-folded > .lane-head { margin-bottom: -4px; }
 .lane-head { margin: 0 0 10px; font: inherit; }
 .lane-btn { display: flex; align-items: baseline; gap: 10px; height: 28px; width: 100%; text-align: left; border-radius: var(--r-xs); }
@@ -71,9 +71,9 @@
 .cell { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0; min-height: 1px; }
 
 /* ---------- Plans ---------- */
-.plans { margin-top: 22px; }
-.plan { margin-bottom: 6px; }
-.plan-head { display: flex; align-items: center; gap: 8px; height: 22px; width: calc(100% + 18px); margin-left: -18px; text-align: left; color: var(--muted); font: var(--type-card); }
+.plans { margin-top: 20px; }
+.plan { margin-bottom: 2px; }
+.plan-head { display: flex; align-items: center; gap: 8px; height: 20px; width: calc(100% + 18px); margin-left: -18px; text-align: left; color: var(--muted); font: var(--type-card); }
 .plan-head .chev { width: 14px; height: 14px; margin-right: -4px; }
 .plan-name { font-weight: var(--w-medium); color: var(--ink); white-space: nowrap; }
 .plan-intent { color: var(--muted); margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -86,10 +86,10 @@
 .plan-band { position: relative; margin: 8px -14px 10px; padding: 18px 14px 16px; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); background: color-mix(in oklab, var(--stock-flat) 55%, transparent); }
 
 /* ---------- The wire and its beads ---------- */
-.wire { position: relative; display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); align-items: center; height: 16px; }
+.wire { position: relative; display: grid; grid-template-columns: var(--cols); column-gap: var(--col-gap); align-items: center; height: 14px; }
 .wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: color-mix(in oklab, var(--ink) 8%, transparent); }
 .wire-reach { position: absolute; top: 50%; height: 1px; background: color-mix(in oklab, var(--ink) 32%, transparent); }
-.wire-cell { grid-row: 1; display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px; }
+.wire-cell { grid-row: 1; display: flex; align-items: center; gap: 5px; min-width: 0; height: 14px; }
 .wire-cell:nth-of-type(1) { grid-column: 1; }
 .wire-cell:nth-of-type(2) { grid-column: 2; }
 .wire-cell:nth-of-type(3) { grid-column: 3; }
@@ -133,7 +133,7 @@
 /* Hover: a standing card rises a little; a flat one only gains an edge. */
 .card:not(.is-carried):not(.pile):hover { z-index: 2; }
 .card[data-height="stand"]:hover .card-stock { box-shadow: var(--h-hover); }
-.card[data-height="flat"]:hover .card-stock, .card[data-height="press"]:hover .card-stock { background: var(--stock); box-shadow: var(--h-stand); }
+.card[data-height="flat"]:hover .card-stock { background: var(--stock); box-shadow: var(--h-stand); }
 .card[data-height="etch"]:hover .card-title { color: var(--ink); }
 .card:focus-visible .card-stock, .card.is-focus .card-stock { outline: 2px solid var(--focus); outline-offset: 2px; }
 
@@ -304,7 +304,7 @@
 
 /* ---------- The line to a blocker ---------- */
 .blocker-line { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.blocker-line path { fill: none; stroke: var(--brass); stroke-width: 1.25; transition: stroke-dashoffset var(--m-slow) var(--m-ease); }
+.blocker-line path { fill: none; stroke-linejoin: round; stroke: var(--brass); stroke-width: 1.25; transition: stroke-dashoffset var(--m-slow) var(--m-ease); }
 .blocker-line circle { fill: var(--brass); }
 .card.is-blocker .card-stock { box-shadow: var(--h-hover), 0 0 0 1px var(--brass); }
 

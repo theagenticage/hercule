@@ -41,6 +41,7 @@ window.Toast = (function () {
       else if (hint.ended) b.set({ y: 12, r: -1.6, o: 0 }).to({ y: 0, r: 0, o: 1 }, "travel");
     }
     show(done ? "Put back: " + done.label : "Nothing to undo.", false);
+    if (hint && hint.reopen && Pane.currentId()) Walk.resume(hint.id);
   }
 
   return { show: show, hide: hide, undo: doUndo };

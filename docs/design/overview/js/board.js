@@ -91,7 +91,7 @@ window.Board = (function () {
     var src = t.source ? '<span class="card-src" title="' + t.source + '">' + Crew.brand(t.source, 11) + "</span>" : "";
     var sync = t.pendingSync ? '<span class="card-sync" title="Waits to sync">' + Crew.icon("clock", 11) + "</span>" : "";
     var meta = '<span class="card-meta">' + sync + src + '<time data-tone="' + decideAgeTone(t) + '">' + NW.formatAge(t.age) + "</time></span>";
-    var ask = t.ask && t.move === "you" ? '<div class="card-words card-words--ask" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
+    var ask = t.ask && t.move === "you" && !Store.isBlocked(t) ? '<div class="card-words card-words--ask" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now"><span class="card-need">' + (t.need === "think" ? "Real thinking." : "Quick call.") + '</span> <span class="card-ask">' + esc(t.ask) + "</span></p></div>" : "";
     return drawHolder(holder) + '<i class="card-check">' + Crew.icon("check", 12) + "</i>" +
       '<div class="card-words card-words--rest" aria-hidden="true"><p class="card-title">' + esc(t.name) + '</p><p class="card-now">' + describeNow(t) + "</p></div>" + meta + ask;
   }
@@ -390,8 +390,15 @@ window.Board = (function () {
     place(lanesEl, emptyWorld ? [] : Store.state.projects.filter(function (p) {
       return p.id !== "" || Store.state.tasks.some(function (t) { return t.project === ""; });
     }).map(drawLane));
+    // Cards in an open fan are outside the lanes, and just as real.
+    Fan.openCards().forEach(function (c) {
+      var t = Store.task(c.dataset.id);
+      if (t) drawCard(t);
+    });
+    Fan.refreshHead();
     markLongTitles();
     drawReaches();
+    if (window.Shell) Shell.syncWithBoard();
     work.dataset.lens = Store.state.lens || "";
     work.classList.toggle("is-filtering", Store.isFiltering());
     var status = document.getElementById("board-status");

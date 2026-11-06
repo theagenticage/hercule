@@ -54,9 +54,9 @@ The switcher is built for five tabs. Each is an icon and a word, so five read as
 | Stage name | 11px bold, 0.09em tracking, uppercase |
 | Columns | four at 1fr and Landed at 0.72fr, 14px apart: 222px and 160px at 1440; 188px and 135px at 1280. Minimum 168px and 120px; below that the board scrolls sideways, so summaries never clip at high zoom |
 | Lane name | 15/20 bold, 28px row. "18 want you" beside it in `--muted`, the total on hover. No project mark: a name is enough, and ten tints would mean nothing |
-| Space after a lane | 30px. A folded lane has 22px from name to wire and 44px to the next name, so a name clearly owns its wire |
-| Plans | under the lane's cards, 22px below them, so the cards come first |
-| Plan | 22px name row, 13/18 medium, then a 16px wire, 6px to the next plan |
+| Space after a lane | 26px. A folded lane has 22px from name to wire and 32px to the next name, so a name clearly owns its wire |
+| Plans | under the lane's cards, 20px below them, so the cards come first |
+| Plan | 20px name row, 13/18 medium, then a 14px wire, 2px to the next plan |
 | Card | 88px tall, 12px corner, padding 10/12 |
 | Pile | same height as a card, with 1 to 3 sheets showing 3px each below it |
 | Row gap | 22px, which leaves room for what stands behind the top edge |
@@ -112,7 +112,7 @@ Words at the card's hover: after 160ms the summary becomes the need and the ques
 | Dragging | lifts 3%, `--h-carry` and `--stock-carry` crossfade in on the same spring. A slot stays behind |
 | Selected | a 1.5px ink ring and a check in the top-left corner |
 | Stalled | the age in ink at weight 500. Wear, when on, adds more. Under a lens it can be seen at once |
-| Blocked, on hover | a thin brass line draws to the blocker, which lights |
+| Blocked, on hover | stays down; a thin brass line draws to the blocker through the gaps, and the blocker lights |
 | Running agent | a head behind the top edge, paws on the edge, typing in short bursts. Heads rest at 62% saturation, so they never outshout a tab |
 | Agent asks you | the head with a raised marigold palm; the card stands |
 | Summary pending | "Writing a summary", in `--faint` |
@@ -124,7 +124,7 @@ One slot, 14px from the right edge, drawn behind the sheet. The tab shows 9px ab
 
 ### `blockedBy`
 
-A blocked card is pressed into the desk. Its tab is gone because nobody can move it. Its summary names the blocker. When the blocker lands, the card rises by itself. Hover draws the link.
+A blocked card is pressed into the desk. Its tab is gone because nobody can move it. It does not rise on hover and it asks nothing, because there is nothing to do yet. Its summary names the blocker. When the blocker lands, the card rises by itself. Hover draws a thin brass line to the blocker, through the gaps between cards, so it never crosses anyone's words.
 
 ### Wear
 
