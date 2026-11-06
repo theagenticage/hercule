@@ -9,9 +9,10 @@ The Inbox builds on the primitives shared with Work: `SHARED.md` and `system/pri
 1. **The Inbox never scrolls.** The page is one screen at any volume. The tray, which you open on purpose, is the only thing that scrolls.
 2. **A stack has a fixed depth, and its cards share it.** With room each card is whole. With less room cards overlap. With too little they fold into piles. There is no compact mode.
 3. **Things stay where they are.** A signal never moves a card. Order is oldest first, so a new card joins at the end. A card someone holds keeps its place until your next visit. Filtering dims, it never reflows.
-4. **Nothing moves under the pointer.** Hover and peek raise one card over the others. No neighbour moves. A dismissed card keeps its place while the pointer is near.
-5. **What is usual says nothing.** A stack's heading says why most cards are in it. A healthy state draws no shape. Only what differs gets words and colour.
-6. **One card, one table.** `js/card.js` has no branch on a kind. A kind only fills in the table below.
+4. **Nothing moves under the pointer by itself.** Hover and peek raise one card over the others, and no neighbour moves. A new card waits at the stack's heading while the pointer is in that stack. Only your own move changes what is under the pointer: dismiss a card and the next rises into its place, the way closing a tab brings the next tab under the pointer.
+5. **One current card.** The pointer and the keys share one current card, and every move moves on to the next card that waits.
+6. **What is usual says nothing.** A stack's heading says why most cards are in it. A healthy state draws no shape. Only what differs gets words and colour.
+7. **One card, one table.** `js/card.js` has no branch on a kind. A kind only fills in the table below.
 
 ## The page
 
@@ -55,7 +56,7 @@ A kind maps how an entity concerns you to a stack, in its `stacks` field: `revie
 1. If every card fits whole, with a gap of 12 (8 when tight), each is whole.
 2. Otherwise the first card stands whole, 12px apart from the rest, because it has waited longest. The others get two lines, oldest first, and the newest get one line if the depth runs out. What depth is left is shared out, up to the `most` height, so a full stack ends at its foot.
 3. The shelf has no clock, so nothing there leads: every card is a strip.
-4. One-line strips are only for a small overflow, up to 30% more cards than fit at two lines. Past that a wall of titles is worse than a pile, so the newest fold into one pile. On the shelf, past what fits, a project is one pile.
+4. One-line strips are only for a small overflow, up to 30% more cards than fit at two lines. Past that a wall of titles is worse than a pile, so the newest fold into one pile. On the shelf the largest project folds first, then the next, until the rest fit.
 5. Like things from one stream, such as dependency updates, fold into one pile at the place of the oldest, at any volume.
 
 Cards in a stack stand like cards in a file drawer. Each later card lies over the one before it, so each card shows its top. `--h-stack` casts its shadow upward onto the card behind.
@@ -144,12 +145,15 @@ Customization can grow later by adding to these sets. A kind never gets a branch
 |---|---|---|---|
 | Hand to an agent | The faces on hover; the rail while carrying | H, then 1 to 3 with several | One workflow: at once. Several: a small menu, each with a face, a name and a line. The card lies flat, the head rises behind its top edge, the sentence rolls to "Agent review has it", a token flies to Overview |
 | Take it on myself | Your monogram | T | Creates a Task with no run. The marigold tab stands behind the top edge |
-| Dismiss | The close | E | The card fades and its place stays open until the pointer leaves, or for 2.6 seconds, so a second click lands on the next card. Plugins are not told |
-| Undo | The toast | ⌘Z | Puts the card back in its place |
-| Open | Click | Space, Enter | Opens where it lies. Esc folds it back |
+| Dismiss | The close | E | The card steps aside and the next rises into its place, so the same click at the same spot dismisses the next. Plugins are not told |
+| Undo | The undo line, in the foot of the column where you acted | ⌘Z | As far back as you like, from any view. A hand-off plays backwards, and the line says the run stops |
+| Open | Click | Space, Enter | Opens where it lies. Esc folds it back. Focus goes to the sheet, not to a move, so Enter never starts an agent. J and K walk to the next card in the same place |
 | See its Task | On Work | G | Goes through to the Task on Work |
 | Carry | Drag | | Lifting a card raises the rail. Esc or letting go elsewhere sends it home |
-| Move | | Arrows, J and K | Arrows follow the page. J and K read through it |
+| Move | | Arrows, J and K | Arrows follow the page. J and K read through it. A pile is a stop, and Enter fans it |
+| A whole pile | The tray | | Hand all to one workflow, or dismiss all, as one move with one Undo. Past 12 cards the tray can be searched |
+
+Moves refuse with a reason where they do not apply: a held card says who has it, and G with no Task says so. An open menu owns the keyboard. A held key never runs through a stack.
 
 A card with a Task stays where it is for the rest of the visit. On the next visit it has settled at the foot of its stack, counted in the foot line, as does a card with nothing open.
 
@@ -178,6 +182,7 @@ The row shows a plain grey number, not a badge. It counts what has outlasted its
 
 - **Cuts.** A letter's fold and a ticket's notches on whole cards. At full size they read as glitches, and they could not show on a strip, where cards spend most of their time. Mark, stock and density carry the identity.
 - **The riffle.** Cards parting under the pointer like a fisheye. It moved targets under the pointer. The peek gives the same reading with nothing moving.
+- **The kept hole.** A dismissed card's place stayed open for 2.6 seconds, so nothing moved. In practice the next card's close was 50px away, and rapid dismissing stumbled. The tab rule replaced it.
 - **Three separate triage cards.** They read as a row of KPI tiles, and each seemed to belong to the column under it.
 - **A heavy logo in full ink on every row.** At 19 rows it was the heaviest thing on the page. Solid marks are now drawn at 90% and in `--mark-ink`.
 
@@ -197,6 +202,5 @@ The row shows a plain grey number, not a badge. It counts what has outlasted its
 | Receding text | `--recede`, for what a heading has already said | `css/tokens.css` |
 | The veil | `--veil`: paper in the light themes, the scrim in the dark | `css/tokens.css` |
 | The drop | What falls onto a card before it reacts to a signal | `js/landing.js` |
-| Kept hole | A dismissed card's place, kept while the pointer is near | `js/moves.js` |
 | The rail | Who can take a carried card | `js/drag.js` |
 | Tray | A pile fanned open, the one thing that scrolls | `js/tray.js` |

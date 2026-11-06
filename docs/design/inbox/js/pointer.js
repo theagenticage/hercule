@@ -1,39 +1,21 @@
-// Hover and peek. A card under the pointer shows its actions. After a short rest it shows its whole face, over the cards
-// in front of it. No other card moves, so the pointer's target never shifts.
+// The pointer. The card under it is the current card, the same one the keys act on. It shows its actions at once, and after a
+// short rest its whole face, over the cards in front of it. No other card moves, so the pointer's target never shifts.
 window.Pointer = (function () {
   var PEEK_DELAY = 260;  // ms of rest before the first peek
-  var LEAVE_DELAY = 140; // ms before a peek closes when the pointer has left the stack
   var HAND_OVER = 70;    // ms of rest before a showing peek moves to another card
+  var LEAVE_DELAY = 140; // ms before a peek closes when the pointer has left the stack
   var hover = null, peeked = null, timer = 0, leaveTimer = 0;
-  var speed = 0, lastX = 0, lastY = 0, lastT = 0;
+  var speed = 0, lastX = 0, lastY = 0, lastT = 0, overWrap = null;
 
-  /** Shows the whole face of a card. Its lower part takes no pointer, so the cards under it can still be reached. */
-  function peek(el) {
-    if (peeked === el) return;
-    unpeek();
-    if (!el._plan || el.dataset.level === 'full') return;
-    peeked = el;
-    var host = el.parentNode;
-    el.querySelector('.c-hit').style.height = el._plan.show + 'px';
-    el.classList.add('is-peek');
-    var height = measurePeek(el);
-    var over = el._plan.y + height - Number(host.dataset.depth || 0) - 8;
-    markUnder(el, host, height);
-    el.style.height = el._plan.show + 'px';
-    void el.offsetHeight;
-    el.style.transition = '';
-    el.style.height = height + 'px';
-    if (over > 0) Motion.body(el).to({ y: -over }, 'hand');
-  }
-
-  /** Returns how tall a card stands in a peek: its whole face at strip size. */
+  /** Returns how tall a card stands in a peek: its whole face at strip size, kept inside the window. */
   function measurePeek(el) {
     var was = el.style.height;
     el.style.transition = 'none';
     el.style.height = 'auto';
     var whole = el.offsetHeight + 10;
+    var room = innerHeight - el.getBoundingClientRect().top - 8;
     el.style.height = was;
-    return whole;
+    return Math.min(whole, room);
   }
 
   /** Hides the second line of the strip a peek ends on, so no sliver of a hidden card shows under it. */
@@ -44,21 +26,36 @@ window.Pointer = (function () {
     });
   }
 
+  /** Shows the whole face of a card. Its lower part takes no pointer, so the cards under it can still be reached. */
+  function peek(el) {
+    if (peeked === el) return;
+    unpeek();
+    if (!el._plan || el.dataset.level === 'full' || el.classList.contains('is-pile') || el.classList.contains('is-leaving')) return;
+    peeked = el;
+    var host = el.parentNode;
+    el.querySelector('.c-hit').style.height = el._plan.show + 'px';
+    el.classList.add('is-peek');
+    var height = measurePeek(el);
+    markUnder(el, host, height);
+    el.style.height = el._plan.show + 'px';
+    void el.offsetHeight;
+    el.style.transition = '';
+    el.style.height = height + 'px';
+  }
+
   function unpeek() {
     var el = peeked;
     if (!el) return;
     peeked = null;
     if (el._plan) {
       el.style.height = el._plan.show + 'px';
-      Motion.body(el).to({ y: 0 }, 'hand');
       [].forEach.call(el.parentNode.children, function (c) { c.classList.remove('is-under'); });
     }
-    var done = function () {
+    setTimeout(function () {
       if (el === peeked) return;
       el.classList.remove('is-peek');
       if (el._rest) el.style.height = el._rest + 'px';
-    };
-    setTimeout(done, Motion.isReduced() ? 0 : 230);
+    }, Motion.isReduced() ? 0 : 230);
   }
 
   /** Tells a card how wide its actions are, so its title can end before them. */
@@ -78,13 +75,32 @@ window.Pointer = (function () {
     if (hover) hover.classList.remove('is-hover');
     hover = el;
     clearTimeout(timer);
-    if (!el) { leaveTimer = setTimeout(unpeek, LEAVE_DELAY); return; }
+    if (!el) {
+      leaveTimer = setTimeout(unpeek, LEAVE_DELAY);
+      Keys.setCurrent(null, 'pointer');
+      return;
+    }
     clearTimeout(leaveTimer);
     el.classList.add('is-hover');
     measureActs(el);
     clearFresh(el);
+    Keys.setCurrent(el.dataset.id, 'pointer');
     // A peek hands over at once only to a pointer that has slowed down, so a quick exit does not ripple through the stack.
     timer = setTimeout(function () { if (hover === el) peek(el); }, peeked ? (speed > 0.8 ? 220 : HAND_OVER) : PEEK_DELAY);
+  }
+
+  /** Forgets the hover without touching the keys' current card. */
+  function clearHover() {
+    clearTimeout(timer);
+    if (hover) hover.classList.remove('is-hover');
+    hover = null;
+  }
+
+  /** Reads what is under the pointer again, after a move changed the page beneath it. */
+  function refresh() {
+    var el = document.elementFromPoint(lastX, lastY);
+    if (!el || !lastT) return;
+    setHover(el.closest('.stack .card:not(.is-pile):not(.is-leaving)'));
   }
 
   function start() {
@@ -93,18 +109,21 @@ window.Pointer = (function () {
       if (document.documentElement.dataset.dragging) return;
       speed = Math.hypot(ev.clientX - lastX, ev.clientY - lastY) / Math.max(1, ev.timeStamp - lastT);
       lastX = ev.clientX; lastY = ev.clientY; lastT = ev.timeStamp;
-      setHover(ev.target.closest('.card:not(.is-pile)'));
+      setHover(ev.target.closest('.card:not(.is-pile):not(.is-leaving)'));
       var plaque = ev.target.closest('.plaque');
       document.querySelectorAll('.plaque.is-hover').forEach(function (p) { if (p !== plaque) p.classList.remove('is-hover'); });
-      if (plaque) plaque.classList.add('is-hover');
+      if (plaque) { plaque.classList.add('is-hover'); Keys.setCurrent(plaque.dataset.id, 'pointer'); }
+      var wrap = ev.target.closest('[data-wrap]');
+      if (wrap !== overWrap) { overWrap = wrap; App.releaseArrivals(wrap && wrap.dataset.wrap); }
     });
     page.addEventListener('pointerleave', function () {
       setHover(null);
+      overWrap = null;
+      App.releaseArrivals(null);
       document.querySelectorAll('.plaque.is-hover').forEach(function (p) { p.classList.remove('is-hover'); });
-      Moves.closeHoles();
     });
     page.addEventListener('click', function (ev) {
-      var folded = ev.target.closest('.pile, .card.is-pile, .stack-foot');
+      var folded = ev.target.closest('.card.is-pile, .stack-foot');
       if (folded) { Tray.show(folded); return; }
       var act = ev.target.closest('[data-act]');
       var card = ev.target.closest('.card, .plaque');
@@ -114,5 +133,5 @@ window.Pointer = (function () {
     });
   }
 
-  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, measureActs: measureActs, peeked: function () { return peeked; } };
+  return { start: start, peek: peek, unpeek: unpeek, setHover: setHover, clearHover: clearHover, refresh: refresh, measureActs: measureActs, stackUnderPointer: function () { return overWrap && overWrap.dataset.wrap; } };
 })();

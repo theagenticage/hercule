@@ -10,7 +10,13 @@ window.App = (function () {
     finish: { title: 'To finish', usual: null, empty: 'Nothing of yours needs a move.' },
     shelf: { title: 'On the shelf', usual: 'assigned', empty: 'The shelf is clear.' },
   };
-  var COLUMNS = [['review'], ['answer', 'finish'], ['shelf']];
+  // Three columns where they fit, then two, then one. At high zoom the window is small, and the stacks still share their depth.
+  var LAYOUTS = { 3: [['review'], ['answer', 'finish'], ['shelf']], 2: [['review'], ['answer', 'finish', 'shelf']], 1: [['review', 'answer', 'finish', 'shelf']] };
+  function readColumns() {
+    var w = document.getElementById('main').clientWidth;
+    return LAYOUTS[w >= 900 ? 3 : w >= 620 ? 2 : 1];
+  }
+  var COLUMNS = LAYOUTS[3];
   var HEAD = 36;       // a stack's heading, with the space under it
   var BETWEEN = 16;    // the space between two stacks of one column
   var FOOT = 26;       // the line under a stack that counts what settled
@@ -19,6 +25,7 @@ window.App = (function () {
   var els = {};        // card elements by entity id
   var measured = {};   // whole heights by entity id, for the current width
   var page, sum, hasDrawn = false;
+  var waiting = [];    // new cards held back while the pointer is in their stack
 
   function readStack(e) { return K[e.kind].stacks[e.concern]; }
   function findEntity(id) { return state.entities.filter(function (e) { return e.id === id; })[0] || state.clusters.filter(function (c) { return c.id === id; })[0]; }
@@ -64,21 +71,28 @@ window.App = (function () {
         if (!groups[g]) { groups[g] = []; order.push(g); }
         groups[g].push(e);
       });
-      var fits = lying.length * tight.two + order.length * 28 + 40 <= depth;
+      // The shelf can fall back on one-line strips. Past that the largest project folds first, then the next, until the rest fit.
+      var need = function (g) { return 28 + groups[g].length * tight.one; };
+      var total = order.reduce(function (a, g) { return a + need(g); }, 0);
+      var folded = {};
+      order.slice().sort(function (a, b) { return groups[b].length - groups[a].length; }).forEach(function (g) {
+        if (total <= depth || groups[g].length < 2) return;
+        folded[g] = true;
+        total += 62 + 8 - need(g);
+      });
       order.forEach(function (g) {
         var list = groups[g];
-        // Past what the shelf can show, a project is one pile, so the shelf reads as a list of projects.
-        if (!fits && list.length > 1) { items.push(buildPile('fold-' + g, g, list, list[0].title)); return; }
-        items.push({ tab: 28, label: g, count: list.filter(function (e) { return !e.leaving; }).length });
+        if (folded[g]) { items.push(buildPile('fold-' + g, g, list, list[0].title)); return; }
+        items.push({ tab: 28, label: g, count: list.length });
         list.forEach(function (e) { items.push({ e: e }); });
       });
       return items;
     }
-    var folded = foldStreams(lying);
-    var kept = Stacks.countKept(folded.length, depth, open, 104);
-    if (kept >= folded.length) return folded.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
-    var head = folded.slice(0, Math.max(1, kept - 1));
-    var rest = [].concat.apply([], folded.slice(head.length).map(function (e) { return e.members || [e]; }));
+    var stream = foldStreams(lying);
+    var kept = Stacks.countKept(stream.length, depth, open, 104);
+    if (kept >= stream.length) return stream.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
+    var head = stream.slice(0, Math.max(1, kept - 1));
+    var rest = [].concat.apply([], stream.slice(head.length).map(function (e) { return e.members || [e]; }));
     if (!rest.length) return head.map(function (e) { return e.pile ? { pile: e } : { e: e }; });
     var byGroup = {};
     rest.forEach(function (e) { var g = readGroup(e); byGroup[g] = (byGroup[g] || 0) + 1; });
@@ -131,8 +145,10 @@ window.App = (function () {
   }
 
   function drawFrame() {
+    COLUMNS = readColumns();
+    page.dataset.cols = COLUMNS.length;
     page.innerHTML =
-      '<div class="noticed" id="noticed"></div>' +
+      '<h2 class="sr">Hercule noticed</h2><div class="noticed" id="noticed" role="list"></div>' +
       COLUMNS.map(function (names) {
         return '<div class="col">' + names.map(function (n) {
           return '<section class="stack-wrap" data-wrap="' + n + '" aria-label="' + STACKS[n].title + '">' +
@@ -158,13 +174,14 @@ window.App = (function () {
   function layOut(still, stagger) {
     if (state.mode !== 'stacks') return;
     if (still || !hasDrawn) { placeStacks(); hasDrawn = true; return; }
-    Motion.flip([].slice.call(page.querySelectorAll('.stack .card, .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'hand', stagger: stagger });
+    Motion.flip([].slice.call(page.querySelectorAll('.stack .card:not(.is-leaving), .stack .tab')).filter(function (el) { return el._plan; }), placeStacks, { spring: 'hand', stagger: stagger });
   }
 
   function placeStacks() {
     COLUMNS.forEach(function (names, ci) {
       var col = page.querySelectorAll('.col')[ci];
-      var depth = col.clientHeight - names.length * HEAD - (names.length - 1) * BETWEEN;
+      // The last row of every column is kept for the foot line and the undo line, so neither ever covers a card.
+      var depth = col.clientHeight - names.length * HEAD - (names.length - 1) * BETWEEN - FOOT;
       var built = names.map(function (n) {
         var host = page.querySelector('[data-stack="' + n + '"]');
         var parts = readStackEntities(n);
@@ -187,6 +204,7 @@ window.App = (function () {
             pe.querySelector('.c-title').textContent = it.pile.title;
             pe.querySelector('.pile-n').textContent = /newer$/.test(it.pile.title) ? '' : it.pile.members.length;
             pe.dataset.depth = it.pile.members.length > 40 ? 3 : it.pile.members.length > 8 ? 2 : 1;
+            pe.setAttribute('aria-label', it.pile.title + ', ' + it.pile.members.length + ' cards');
             pe.querySelector('.c-roll').textContent = it.pile.note;
             pe._members = it.pile.members;
             it.el = pe; it.full = 62; it.two = 62; it.one = 62; it.gap = 8; it.most = 62; it.isPile = true;
@@ -205,7 +223,7 @@ window.App = (function () {
         tabs.forEach(function (t) { if (!kept[t.dataset.tab]) t.remove(); });
         var wanted = {};
         items.forEach(function (it) { if (it.pile) wanted[it.pile.id] = true; else if (it.e) wanted[it.e.id] = true; });
-        [].forEach.call(host.querySelectorAll('.card'), function (c) {
+        [].forEach.call(host.querySelectorAll('.card:not(.is-leaving)'), function (c) {
           var id = c.dataset.id || c.dataset.pile;
           if (!wanted[id]) { c.style.display = 'none'; c._plan = null; }
         });
@@ -213,7 +231,7 @@ window.App = (function () {
         var firstCard = n === 'shelf' ? -1 : items[0] && items[0].tab ? 1 : 0;
         var least = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : j === firstCard ? m.full + 12 : m.one); }, 0);
         var comfy = items.reduce(function (a, m, j) { return a + (m.tab ? m.tab : j === firstCard ? m.full + 12 : m.two); }, 0);
-        var footNeeded = parts.settled.length ? FOOT : 0;
+        var footNeeded = parts.settled.length && n !== names[names.length - 1] ? FOOT : 0;
         return { name: n, host: host, items: items, parts: parts, whole: whole + footNeeded, comfy: comfy + footNeeded, least: least + footNeeded, foot: footNeeded };
       });
       var depths = Stacks.shareDepth(built, depth);
@@ -227,7 +245,7 @@ window.App = (function () {
         // A stack closes up on what it holds, so its foot line stays with it. Its depth for a peek is all the room below.
         var height = Math.min(d, used);
         leftover += d - height;
-        b.host.parentNode.style.height = height + HEAD + b.foot + 'px';
+        b.host.parentNode.style.height = height + HEAD + (isLast ? FOOT : b.foot) + 'px';
         b.host.dataset.depth = height + (isLast ? leftover : 0);
         var shown = plan.items.length;
         b.items.forEach(function (it, i) {
@@ -251,7 +269,7 @@ window.App = (function () {
           el.dataset.level = p.level;
           el.classList.toggle('is-run-end', !!endOfRun);
         });
-        var lying = b.parts.lying.filter(function (e) { return !e.leaving; }).length;
+        var lying = b.parts.lying.length;
         page.querySelector('[data-count="' + b.name + '"]').textContent = lying || '';
         drawFoot(b, plan);
         drawEmpty(b, lying);
@@ -259,7 +277,7 @@ window.App = (function () {
     });
     drawBar();
     // One stop for Tab: from there the arrow keys move through the page.
-    var entry = page.querySelector('.plaque, .stack .card[data-id]');
+    var entry = page.querySelector('.plaque, .stack .card');
     if (entry) entry.tabIndex = 0;
     requestAnimationFrame(function () {
       page.querySelectorAll('.card.is-new').forEach(function (c) { c.classList.remove('is-new'); });
@@ -279,9 +297,11 @@ window.App = (function () {
 
   /** Returns a stream's pile: one strip with the edges of the cards behind it, and how many there are. */
   function drawStreamPile(pile) {
-    var el = document.createElement('button');
+    var el = document.createElement('div');
     el.className = 'card is-pile';
     el.dataset.pile = pile.id;
+    el.tabIndex = -1;
+    el.setAttribute('role', 'listitem');
     el.innerHTML = '<span class="pile-back"></span><span class="pile-back"></span><i class="card-stock"></i><div class="c-mark">' + Card.drawMark(K[pile.kind].plugin, K[pile.kind].density === 'tight' ? 17 : 20) + '</div><h3 class="c-title"></h3><div class="c-pace"><span class="pile-n"></span></div><div class="c-line"><span class="c-roll"></span></div>';
     return el;
   }
@@ -356,6 +376,48 @@ window.App = (function () {
     drawBar();
   }
 
+  /**
+   * Adds a new card to its stack. Nothing moves under the pointer by itself: while the pointer is in that stack the card waits,
+   * the foot says so, and it joins when the pointer leaves.
+   */
+  function arrive(e) {
+    var name = readStack(e);
+    if (Pointer.stackUnderPointer() === name) {
+      waiting.push(e);
+      drawWaiting(name);
+      return false;
+    }
+    state.entities.push(e);
+    layOut();
+    return true;
+  }
+
+  function drawWaiting(name) {
+    var n = waiting.filter(function (e) { return readStack(e) === name; }).length;
+    var wrap = page.querySelector('[data-wrap="' + name + '"]');
+    if (!wrap) return;
+    var note = wrap.querySelector('.stack-new');
+    if (!n) { if (note) note.remove(); return; }
+    if (!note) { note = document.createElement('span'); note.className = 'stack-new'; wrap.querySelector('.stack-h').appendChild(note); }
+    note.textContent = n + ' new';
+  }
+
+  /** Lets in the cards that waited for the pointer to leave their stack. */
+  function releaseArrivals(stillOver) {
+    var keep = [];
+    var names = {};
+    waiting.forEach(function (e) {
+      var name = readStack(e);
+      if (name === stillOver) { keep.push(e); return; }
+      state.entities.push(e);
+      names[name] = true;
+    });
+    if (!Object.keys(names).length) return;
+    waiting = keep;
+    layOut();
+    Object.keys(names).forEach(drawWaiting);
+  }
+
   /** Clears the page and draws a scene from scratch. */
   function load(scene) {
     state.entities = scene.entities;
@@ -381,6 +443,7 @@ window.App = (function () {
     n.hidden = !state.notice;
     n.innerHTML = state.notice || '';
     sum.hidden = !!state.notice;
+    if (state.notice) Landing.announce(n.textContent);
   }
 
   function start() {
@@ -389,7 +452,11 @@ window.App = (function () {
     var timer;
     window.addEventListener('resize', function () {
       clearTimeout(timer);
-      timer = setTimeout(function () { measured = {}; if (state.mode === 'stacks') layOut(true); }, 60);
+      timer = setTimeout(function () {
+        measured = {};
+        if (state.mode !== 'stacks') return;
+        if (readColumns() !== COLUMNS) redraw(); else layOut(true);
+      }, 60);
     });
     document.addEventListener('click', function (ev) {
       var d = ev.target.closest('[data-dim]');
@@ -400,7 +467,7 @@ window.App = (function () {
   }
 
   return {
-    state: state, els: function () { return els; }, STACKS: STACKS, COLUMNS: COLUMNS, findEntity: findEntity, readStack: readStack, readStackEntities: readStackEntities, layOut: layOut, redrawCard: redrawCard, drawNoticed: drawNoticed, drawBar: drawBar,
-    load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, checkZero: checkZero, countLeft: countLeft, countOverdue: countOverdue, start: start, measured: function () { return measured; }, removeEl: function (id) { if (els[id]) { els[id].remove(); delete els[id]; } },
+    state: state, els: function () { return els; }, STACKS: STACKS, readColumns: function () { return COLUMNS; }, findEntity: findEntity, readStack: readStack, readStackEntities: readStackEntities, layOut: layOut, redrawCard: redrawCard, drawNoticed: drawNoticed, drawBar: drawBar,
+    load: load, setDim: setDim, drawNotice: drawNotice, settle: settle, redraw: redraw, checkZero: checkZero, countLeft: countLeft, countOverdue: countOverdue, start: start, measured: function () { return measured; }, forgetEl: function (id) { delete els[id]; }, arrive: arrive, releaseArrivals: releaseArrivals,
   };
 })();

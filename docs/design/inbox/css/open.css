@@ -66,7 +66,7 @@
 
 .o-facts { display: flex; align-items: center; gap: 12px; min-height: 26px; padding: 8px 14px 8px 42px; color: var(--muted); font-size: var(--t-12); font-variant-numeric: tabular-nums; }
 .o-status { display: inline-flex; align-items: center; gap: 5px; }
-.o-source { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-weight: var(--w-medium); }
+.o-source { margin-left: auto; font-size: inherit; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-weight: var(--w-medium); }
 .o-source:hover { color: var(--ink); }
 
 .o-note { margin: 10px 16px 6px 42px; color: var(--lacquer-sub); font-size: var(--t-13); line-height: 20px; }
@@ -92,6 +92,7 @@
   transition: background var(--m-quick);
 }
 .o-row:hover, .o-row:focus-visible { background: var(--hover); }
+.o-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .open--plaque .o-row:hover, .open--plaque .o-row:focus-visible { background: color-mix(in oklab, white 9%, transparent); }
 .o-label { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: var(--w-medium); font-size: var(--t-13); }
 .o-says { min-width: 0; color: var(--muted); font-size: var(--t-12); line-height: 16px; }
@@ -131,17 +132,14 @@
 /* The undo line, at the foot of the page. */
 .toast {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 18px;
+  left: 32px;
+  bottom: 12px;
   z-index: 35;
   display: flex;
   align-items: center;
-  gap: 14px;
-  width: fit-content;
-  height: 36px;
-  margin: 0 auto;
-  padding: 0 6px 0 14px;
+  gap: 12px;
+  height: 30px;
+  padding: 0 4px 0 12px;
   border-radius: var(--r-md);
   background: var(--glass-fill-raised);
   -webkit-backdrop-filter: var(--glass-filter);
@@ -150,7 +148,7 @@
   font-size: var(--t-13);
 }
 .toast[hidden] { display: none; }
-.toast button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: var(--r-xs); color: var(--ink); font-weight: var(--w-medium); }
+.toast button { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: var(--r-xs); color: var(--ink); font-weight: var(--w-medium); }
 .toast button:hover { background: var(--hover); }
 
 /* A small token of a card, in flight to where its Task went. */
@@ -163,7 +161,7 @@
 .drop { position: fixed; left: 0; top: 0; z-index: 90; width: 7px; height: 7px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--you); pointer-events: none; }
 .drop--bad { background: var(--fail); }
 .drop--good { background: var(--ok); }
-.c-fresh { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you); }
+.c-fresh { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--you-ink); }
 .card.is-source { opacity: 0; }
 .card.is-landed::after {
   content: "";
@@ -179,9 +177,6 @@
 .card[data-landed="good"] { --land: var(--ok); }
 @keyframes land-rim { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
 .card.is-leaving { pointer-events: none; }
-/* The place a dismissed card left, fading over the time it is kept. */
-.hole { position: absolute; left: 0; right: 0; border-radius: var(--card-r); box-shadow: inset 0 0 0 1px var(--stock-rim); background: var(--desk); animation: hole-fade 2600ms linear forwards; }
-@keyframes hole-fade { 0% { box-shadow: inset 0 0 0 1px var(--line); } 100% { box-shadow: inset 0 0 0 1px transparent; } }
 .nav-wash { position: absolute; inset: 0; border-radius: inherit; background: color-mix(in oklab, var(--accent) 16%, transparent); pointer-events: none; }
 .c-line--old { position: absolute; margin: 0; pointer-events: none; }
 .card.is-moving { transition: height var(--m-base) var(--m-ease); }
@@ -189,7 +184,6 @@
 @media (prefers-reduced-motion: reduce) {
   .stack .card { transition: none !important; }
   .card.is-landed::after { animation: land-fade 900ms linear forwards; }
-  .hole { animation: none; }
   .rail, .rail.is-on { transform: translate(-50%, 0); transition: opacity var(--m-base) linear; }
 }
 @keyframes land-fade { from { opacity: 1; } to { opacity: 0; } }
@@ -215,6 +209,13 @@
 .tray-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .tray-cell { position: relative; min-height: 76px; }
 .tray-cell .card { position: relative; top: auto; height: auto; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding: var(--card-pad-y) var(--card-pad-x) 8px; }
+
+.tray-h { gap: 10px; }
+.tray-h h2 { margin-right: auto; }
+.tray-all { display: inline-flex; gap: 4px; }
+.tray-find { width: 150px; height: 26px; padding: 0 8px; border: 0; border-radius: var(--r-xs); background: var(--field); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--ink); font: var(--type-summary); }
+.tray .card:hover .c-acts { opacity: 1; pointer-events: auto; }
+.tray-cell[hidden] { display: none; }
 
 /* The reviewer's dock. Not part of the product. */
 .dock { position: fixed; right: 12px; bottom: 10px; z-index: 95; display: flex; gap: 4px; opacity: 0.45; transition: opacity var(--m-quick); }

@@ -50,7 +50,7 @@ window.Open = (function () {
       '<div class="o-meta"><span>' + Card.esc(kind.noun) + '</span>' + [id, ctx].filter(Boolean).map(function (x) { return '<i>·</i><span>' + Card.esc(x) + '</span>'; }).join('') + (who ? '<i>·</i><span>' + Card.esc(who.name) + '</span>' : '') + '</div>' +
       '</div>' +
       (e.signals.length ? '<section class="o-sec">' + drawSignals(e, now) + '</section>' : '') +
-      '<div class="o-facts">' + (status ? '<span class="o-status">' + Card.drawShape(status, 15) + Card.esc(status.word) + '</span>' : '') + Card.drawFacts(kind, f) + '<a class="o-source" data-source>Open in ' + Card.esc(kind.plugin.name) + ' ' + Crew.icon('external', 12) + '</a></div>' +
+      '<div class="o-facts">' + (status ? '<span class="o-status">' + Card.drawShape(status, 15) + Card.esc(status.word) + '</span>' : '') + Card.drawFacts(kind, f) + '<button class="o-source" data-source>Open in ' + Card.esc(kind.plugin.name) + ' ' + Crew.icon('external', 12) + '</button></div>' +
       drawLedger(e);
   }
 
@@ -165,14 +165,49 @@ window.Open = (function () {
       b.style.transformOrigin = '0 0';
       motion.parts.push({ el: b, dx: ra.left - rb.left, dy: ra.top - rb.top, scale: scale });
     });
-    var first = host.querySelector('.o-row');
-    if (Motion.isReduced()) { drawFrame(1); if (first) first.focus({ preventScroll: true }); return; }
+    // Focus goes to the sheet, not to a move: Enter must never start an agent by accident.
+    host.tabIndex = -1;
+    if (Motion.isReduced()) { drawFrame(1); host.focus({ preventScroll: true }); return; }
     drawFrame(0);
     progress = Motion.value(0, drawFrame);
     progress.to(1, 'travel');
     [].forEach.call(inner.querySelectorAll('.o-meta, .o-sec, .o-note, .o-parts, .o-facts, .o-ledger, .o-row'), function (el, i) {
       el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: 70 + i * 20, fill: 'backwards', easing: 'cubic-bezier(.22,.9,.24,1)' });
     });
+    host.focus({ preventScroll: true });
+  }
+
+  /**
+   * Moves the open card to another card without leaving the place: the sheet stays where it stands, the words change, and the
+   * height follows. A walk through a stack keeps one place on the screen.
+   */
+  function walk(id) {
+    var e = App.findEntity(id);
+    if (!e || !openId) return;
+    var plaque = e.kind === 'hercule/cluster';
+    if (sourceEl) restoreSource();
+    sourceEl = plaque ? document.querySelector('.plaque[data-id="' + id + '"]') : App.els()[id];
+    sourceEl.classList.add('is-source');
+    var down = readOrder(id) > readOrder(openId);
+    openId = id;
+    App.state.open = id;
+    host.className = 'open' + (plaque ? ' open--plaque' : ' paper-' + K[e.kind].paper);
+    inner.innerHTML = plaque ? drawOpenPlaque(e) : drawOpen(e);
+    var h = inner.offsetHeight;
+    motion.to.height = h;
+    motion.parts = [];
+    motion.from = readFrom(sourceEl);
+    host.style.height = h + 'px';
+    host.setAttribute('aria-label', K[e.kind].noun + ': ' + e.title);
+    Motion.animate(inner, [{ opacity: 0.2, transform: 'translateY(' + (down ? 8 : -8) + 'px)' }, { opacity: 1, transform: 'none' }], { duration: 160, easing: 'cubic-bezier(.22,.9,.24,1)' });
+    host.focus({ preventScroll: true });
+  }
+
+  function readOrder(id) { var e = App.findEntity(id); return App.state.entities.indexOf(e); }
+
+  /** Puts focus on the first move, for H when several workflows fit: the choice is shown, not made. */
+  function focusFirstMove() {
+    var first = host.querySelector('.o-row');
     if (first) first.focus({ preventScroll: true });
   }
 
@@ -215,8 +250,8 @@ window.Open = (function () {
 
   /** Gives focus back to the card. The ring and the peek come back only for someone working by keyboard. */
   function refocus(src, id, wasKeyed) {
-    if (wasKeyed) Keys.focus(id);
-    else if (src) src.focus({ preventScroll: true });
+    if (wasKeyed && App.findEntity(id)) Keys.focus(id);
+    else if (src && src.isConnected) src.focus({ preventScroll: true });
   }
 
   function isOpen() { return !!openId; }
@@ -244,5 +279,5 @@ window.Open = (function () {
     });
   }
 
-  return { show: show, hide: hide, isOpen: isOpen, current: current, act: act, start: start };
+  return { show: show, hide: hide, walk: walk, focusFirstMove: focusFirstMove, isOpen: isOpen, current: current, act: act, start: start };
 })();

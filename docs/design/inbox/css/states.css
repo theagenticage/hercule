@@ -60,7 +60,8 @@
 .in-sub { margin: 0 0 16px; color: var(--muted); font: var(--type-summary); font-size: var(--t-13); }
 .in-list { list-style: none; margin: 0 -8px; padding: 0; }
 .in-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; min-height: 38px; column-gap: 8px; padding: 0 8px; border-radius: var(--r-sm); transition: background var(--m-quick); }
-.in-row:hover { background: var(--hover); }
+.in-row:hover, .in-row.is-at { background: var(--hover); }
+.in-row.is-at { box-shadow: inset 0 0 0 1.5px var(--focus); }
 .in-mark { color: var(--muted); display: inline-grid; place-items: center; }
 .in-t { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .in-t b { font: var(--type-card); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

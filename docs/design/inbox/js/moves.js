@@ -1,8 +1,7 @@
 // What a person can do with a card: hand it to an agent, take it on, dismiss it, undo. Every move shows where the card went.
 window.Moves = (function () {
   var K = Kinds.KINDS;
-  var holes = [];       // entities dismissed while the pointer stays near, so their place is kept for one more click
-  var undoable = null;  // the last move, for Undo
+  var history = [];     // every move of this visit, newest last, so Undo goes as far back as the person likes
   var toastTimer = 0;
 
   /** Finds the sidebar row a Task flies to. */
@@ -35,16 +34,18 @@ window.Moves = (function () {
    */
   function assign(e, by) {
     var el = App.els()[e.id];
-    undoable = { type: 'assign', id: e.id };
+    history.push({ type: 'assign', e: e });
     e.task = { by: by, startedAt: App.state.now };
     var said = by === 'you' ? 'You took it on' : 'Handed to ' + by;
+    var undoWord = by === 'you' ? 'Undo' : 'Undo, stop the run';
+    placeToast(el);
     if (e.kind === 'hercule/cluster') { assignPlaque(e, by); return; }
     if (!el || !el._plan) {
       // A card from a tray has no place in a stack: it says what happened where it is seen.
       var seen = document.querySelector('#tray .card[data-id="' + e.id + '"]');
       if (seen) Card.redrawBody(seen, e, { now: App.state.now, usual: null });
       App.layOut();
-      showToast(said, true);
+      showToast(said, undoWord);
       return;
     }
     Pointer.setHover(null);
@@ -65,8 +66,7 @@ window.Moves = (function () {
       if (!reduced) Motion.body(el).to({ y: 1.5 }, 'hand', { done: function () { Motion.body(el).to({ y: 0 }, 'hand'); } });
       flyToWork(el);
       App.layOut();
-      showToast(said, true);
-      Landing.announce(said);
+      showToast(said, undoWord);
       noteLast();
     }, reduced ? 0 : 170);
   }
@@ -83,7 +83,7 @@ window.Moves = (function () {
     el.classList.add('is-handed');
     el.querySelector('.pl-why').textContent = by === 'you' ? 'You took it on' : by + ' has it';
     flyToWork(el);
-    showToast(by === 'you' ? 'You took it on' : 'Handed to ' + by, true);
+    showToast(by === 'you' ? 'You took it on' : 'Handed to ' + by, by === 'you' ? 'Undo' : 'Undo, stop the run');
     App.drawBar();
     noteLast();
   }
@@ -91,72 +91,59 @@ window.Moves = (function () {
   function hand(e, workflow, anchor) {
     var flows = Card.readWorkflows(e);
     if (workflow) return assign(e, workflow.name);
-    if (!flows.length) { showToast('No workflow takes a ' + K[e.kind].noun.toLowerCase() + ' yet', false); return; }
+    if (!flows.length) { showToast('No workflow takes a ' + K[e.kind].noun.toLowerCase() + ' yet'); return false; }
     if (flows.length === 1) return assign(e, flows[0].name);
     Menu.show(anchor || App.els()[e.id], flows, function (w) { assign(e, w.name); });
   }
   function take(e) { assign(e, 'you'); }
 
-  /** Draws the etched place a dismissed card left. It fades over the time the place is kept, so the wait can be seen. */
-  function drawHole(el) {
-    var hole = document.createElement('i');
-    hole.className = 'hole';
-    hole.style.top = el.style.top;
-    hole.style.height = el._plan.show + 'px';
-    hole.style.zIndex = el.style.zIndex;
-    hole.dataset.for = el.dataset.id;
-    el.parentNode.appendChild(hole);
-  }
-
-  /** Dismisses a card. Its place stays open while the pointer is near, so a second click lands on the next card, not on a moved one. */
+  /**
+   * Dismisses a card. It steps aside, and the next card rises into its place at once, the way closing a tab brings the next
+   * tab under the pointer: the same click at the same spot dismisses the next one.
+   */
   function dismiss(e) {
     var el = App.els()[e.id];
-    undoable = { type: 'dismiss', id: e.id };
-    e.leaving = true;
-    holes.push(e);
-    if (el) {
-      el.classList.remove('is-hover', 'is-focus');
-      el.classList.add('is-leaving');
-      if (el._plan) drawHole(el);
-      Motion.body(el).to({ x: 14, o: 0 }, 'travel');
-    }
+    placeToast(el);
+    var index = App.state.entities.indexOf(e);
+    history.push({ type: 'dismiss', e: e, index: index });
+    App.state.entities.splice(index, 1);
+    Pointer.clearHover();
     Pointer.unpeek();
-    App.drawBar();
-    showToast('Dismissed', true);
-    clearTimeout(dismiss.t);
-    // With nothing left there is nothing to keep a place for, and the sunrise should not wait.
-    dismiss.t = setTimeout(closeHoles, App.countLeft() ? 2600 : 320);
+    if (el) {
+      var first = Number(el.style.zIndex);
+      el.classList.remove('is-hover', 'is-focus', 'is-peek');
+      el.classList.add('is-leaving');
+      App.forgetEl(e.id);
+      Motion.body(el).to({ x: 14, o: 0 }, 'travel', { done: function () { el.remove(); } });
+      App.layOut(false, function (c) { return Math.min(120, Math.max(0, Number(c.style.zIndex) - first) * 14); });
+      setTimeout(Pointer.refresh, 40);
+    } else App.layOut();
+    showToast('Dismissed', 'Undo');
+    if (!App.countLeft()) setTimeout(function () { if (!App.countLeft()) App.checkZero(); }, 320);
   }
 
-  /** Closes the places dismissed cards left. The neighbours nearest the hole move first, so the stack closes in a ripple. */
-  function closeHoles() {
-    if (!holes.length) return;
-    var first = Infinity;
-    holes.forEach(function (e) {
-      if (!e.leaving) return;
-      var el = App.els()[e.id];
-      if (el) first = Math.min(first, Number(el.style.zIndex));
-      document.querySelectorAll('.hole[data-for="' + e.id + '"]').forEach(function (h) { h.remove(); });
-      App.removeEl(e.id);
-      var i = App.state.entities.indexOf(e);
-      if (i >= 0) App.state.entities.splice(i, 1);
-      e.gone = i;
-    });
-    var left = holes.filter(function (e) { return e.gone >= 0; });
-    holes = [];
-    if (!left.length) return;
-    undoableGone = left;
-    App.layOut(false, function (el) { return Math.min(120, Math.max(0, Number(el.style.zIndex) - first) * 14); });
-    App.checkZero();
+  /** Sends something Hercule noticed back to Intake. */
+  function sendBack(e) {
+    var i = App.state.clusters.indexOf(e);
+    history.push({ type: 'noticed', e: e, index: i });
+    App.state.clusters.splice(i, 1);
+    var plaque = document.querySelector('.plaque[data-id="' + e.id + '"]');
+    showToast('Back in Intake', 'Undo');
+    if (!plaque) { App.drawNoticed(); return; }
+    Motion.animate(plaque, [{ opacity: 1 }, { opacity: 0 }], { duration: 180, easing: 'ease-in' }).then(function () { App.drawNoticed(); App.layOut(true); App.checkZero(); });
   }
-  var undoableGone = [];
 
   /** Plays a hand-off backwards: the mark flies home from Overview, the card stands up, and the colleague sinks away. */
   function undoAssign(e) {
     e.task = null;
+    e.settled = false;
     if (e.kind === 'hercule/cluster') { App.drawNoticed(); App.drawBar(); return; }
+    var seen = document.querySelector('#tray .card[data-id="' + e.id + '"]');
+    if (seen) Card.redrawBody(seen, e, { now: App.state.now, usual: null });
+    App.layOut();
     var el = App.els()[e.id];
     var stand = function () {
+      if (!el) return;
       var who = el.querySelector('.card-holder'), paws = el.querySelector('.card-paws');
       var line = el.querySelector('.c-line');
       var old = line && line.cloneNode(true);
@@ -170,43 +157,73 @@ window.Moves = (function () {
       if (old) Landing.rollLine(el, old);
       Nav.setCount('inbox', App.countOverdue());
       App.layOut();
+      if (Keys.isUsingKeys()) Keys.focus(e.id);
     };
     var row = readWorkRow(), mark = el && el.querySelector('.c-mark .mark');
-    if (!el || !row || !mark || Motion.isReduced()) { if (el) stand(); return; }
+    if (!el || !row || !mark || Motion.isReduced()) { stand(); return; }
     Motion.fly('<span class="token">' + mark.outerHTML + '</span>', row.querySelector('.ic').getBoundingClientRect(), mark.getBoundingClientRect(), { ms: 420 }).then(stand);
   }
 
+  /** Undoes the last move, wherever you are, and takes you back to the Inbox to see it undone. */
   function undo() {
-    if (!undoable) return;
-    var u = undoable;
-    undoable = null;
+    var u = history.pop();
+    if (!u) return;
     hideToast();
-    var e = App.findEntity(u.id);
-    if (u.type === 'assign' && e) { undoAssign(e); return; }
-    if (u.type !== 'dismiss') return;
-    if (e && e.leaving) {
-      e.leaving = false;
-      holes = holes.filter(function (x) { return x !== e; });
-      document.querySelectorAll('.hole[data-for="' + e.id + '"]').forEach(function (h) { h.remove(); });
-      App.els()[e.id].classList.remove('is-leaving');
-      Motion.body(App.els()[e.id]).to({ x: 0, o: 1 }, 'travel');
-      App.drawBar();
+    if (Pages.current() !== 'inbox') Pages.setView('inbox');
+    if (App.state.mode !== 'stacks') { App.state.mode = 'stacks'; App.redraw(); }
+    if (u.type === 'assign') { undoAssign(u.e); return; }
+    if (u.type === 'batch') {
+      u.items.forEach(function (e) { e.task = null; e.settled = false; if (u.gone) App.state.entities.push(e); });
+      Tray.hide();
+      App.redraw();
       return;
     }
-    var back = undoableGone.filter(function (x) { return x.id === u.id; })[0];
-    if (!back) return;
-    back.leaving = false;
-    App.state.entities.splice(Math.min(back.gone, App.state.entities.length), 0, back);
-    // The sunrise has nothing to lay out: the page comes back first, and the card with it.
-    if (App.state.mode !== 'stacks') { App.state.mode = 'stacks'; App.redraw(); return; }
+    if (u.type === 'noticed') {
+      App.state.clusters.splice(u.index, 0, u.e);
+      App.drawNoticed();
+      App.layOut(true);
+      return;
+    }
+    App.state.entities.splice(Math.min(u.index, App.state.entities.length), 0, u.e);
     App.layOut();
-    var el = App.els()[back.id];
-    if (el) { el.classList.remove('is-new'); Motion.body(el).set({ x: 14, o: 0 }).to({ x: 0, o: 1 }, 'travel'); }
+    var el = App.els()[u.e.id];
+    if (el) {
+      el.classList.remove('is-new');
+      Motion.body(el).set({ x: 14, o: 0 }).to({ x: 0, o: 1 }, 'travel');
+      if (Keys.isUsingKeys()) Keys.focus(u.e.id);
+    }
   }
 
-  function showToast(text, withUndo) {
+  /** Hands a whole pile to one colleague, or dismisses it, as one move with one Undo. */
+  function handAll(members, workflow) {
+    var open = members.filter(function (e) { return !e.task; });
+    open.forEach(function (e) { e.task = { by: workflow, startedAt: App.state.now }; e.settled = true; });
+    history.push({ type: 'batch', items: open });
+    Tray.hide();
+    App.layOut();
+    showToast('Handed ' + open.length + ' to ' + workflow, 'Undo, stop the runs');
+  }
+  function dismissAll(members) {
+    members.forEach(function (e) { var i = App.state.entities.indexOf(e); if (i >= 0) App.state.entities.splice(i, 1); });
+    history.push({ type: 'batch', items: members, gone: true });
+    Tray.hide();
+    App.layOut();
+    showToast('Dismissed ' + members.length, 'Undo');
+  }
+
+  /** Puts the undo line in the foot of the column where the move was made, so it is near the hand and covers no card. */
+  function placeToast(el) {
     var t = document.getElementById('toast');
-    t.innerHTML = '<span>' + Card.esc(text) + '</span>' + (withUndo ? '<button data-undo>Undo <kbd>⌘Z</kbd></button>' : '');
+    var col = (el && el.closest && el.closest('.col')) || document.querySelector('.col');
+    if (!col) return;
+    var main = document.getElementById('main').getBoundingClientRect();
+    t.style.left = col.getBoundingClientRect().left - main.left + 'px';
+  }
+
+  function showToast(text, undoWord) {
+    var t = document.getElementById('toast');
+    t.innerHTML = '<span>' + Card.esc(text) + '</span>' + (undoWord ? '<button data-undo>' + Card.esc(undoWord) + ' <kbd>⌘Z</kbd></button>' : '');
+    Landing.announce(text);
     var wasHidden = t.hidden;
     t.hidden = false;
     t.classList.remove('is-gone');
@@ -221,21 +238,25 @@ window.Moves = (function () {
     Motion.body(t).to({ y: 6, o: 0 }, 'hand', { done: function () { if (t.classList.contains('is-gone')) { t.hidden = true; Motion.body(t).clear(); } } });
   }
 
+  /** Runs a move on a card. Returns false when the move does not apply, after saying why. */
   function perform(act, id, anchor) {
     var e = App.findEntity(id);
-    if (!e) return;
-    if (e.kind === 'hercule/cluster' && act === 'dismiss') {
-      var i = App.state.clusters.indexOf(e);
-      App.state.clusters.splice(i, 1);
-      var plaque = document.querySelector('.plaque[data-id="' + id + '"]');
-      Motion.animate(plaque, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-6px) scale(.98)' }], { duration: 200, easing: 'ease-in' }).then(function () { App.drawNoticed(); App.layOut(); App.checkZero(); });
-      showToast('Back in Intake', false);
-      return;
+    if (!e) return false;
+    Menu.hide();
+    if (act === 'go') {
+      if (!e.task) { showToast('No Task yet. Hand it on or take it first.'); return false; }
+      Pages.goToWork(e);
+      return true;
     }
-    if (act === 'hand') hand(e, null, anchor);
-    else if (act === 'take') take(e);
-    else if (act === 'dismiss') dismiss(e);
-    else if (act === 'go') Pages.goToWork(e);
+    if (e.task) {
+      showToast((e.task.by === 'you' ? 'You already have this.' : e.task.by + ' already has this.') + ' G goes to its Task.');
+      return false;
+    }
+    if (e.kind === 'hercule/cluster' && act === 'dismiss') { sendBack(e); return true; }
+    if (act === 'hand') return hand(e, null, anchor) !== false;
+    if (act === 'take') { take(e); return true; }
+    if (act === 'dismiss') { dismiss(e); return true; }
+    return false;
   }
 
   function start() {
@@ -244,7 +265,7 @@ window.Moves = (function () {
     document.getElementById('toast').addEventListener('pointerleave', function () { toastTimer = setTimeout(hideToast, 2000); });
   }
 
-  return { perform: perform, hand: hand, take: take, dismiss: dismiss, undo: undo, closeHoles: closeHoles, assign: assign, showToast: showToast, hideToast: hideToast, start: start };
+  return { perform: perform, hand: hand, take: take, dismiss: dismiss, undo: undo, assign: assign, handAll: handAll, dismissAll: dismissAll, showToast: showToast, hideToast: hideToast, start: start };
 })();
 
 // The small menu of workflows, when more than one fits.
@@ -266,19 +287,31 @@ window.Menu = (function () {
     host.style.left = x + 'px';
     host.style.top = y + 'px';
     Motion.animate(host, [{ opacity: 0, transform: 'translateY(-4px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: 160, easing: 'cubic-bezier(.22,.9,.24,1)' });
+    focusActive();
   }
-  function hide() { if (host) host.hidden = true; }
+  function focusActive() { var row = host.querySelector('.menu-row.is-on'); if (row) row.focus({ preventScroll: true }); }
+  function hide() {
+    if (!host || host.hidden) return;
+    host.hidden = true;
+    if (opener && opener.closest) { var card = opener.closest('.card, .plaque'); if (card) card.focus({ preventScroll: true }); }
+  }
   function isOpen() { return host && !host.hidden; }
+  /** The open menu owns the keyboard: nothing reaches the page behind it. */
   function key(ev) {
     if (!isOpen()) return false;
+    if (ev.repeat) return true;
     if (ev.key === 'Escape') { hide(); return true; }
-    if (ev.key === 'ArrowDown' || ev.key === 'j') { active = (active + 1) % flows.length; draw(); return true; }
-    if (ev.key === 'ArrowUp' || ev.key === 'k') { active = (active + flows.length - 1) % flows.length; draw(); return true; }
+    if (ev.key === 'ArrowDown' || ev.key === 'j') { active = (active + 1) % flows.length; draw(); focusActive(); return true; }
+    if (ev.key === 'ArrowUp' || ev.key === 'k') { active = (active + flows.length - 1) % flows.length; draw(); focusActive(); return true; }
     var n = Number(ev.key);
     if (n >= 1 && n <= flows.length) active = n - 1;
     if (ev.key === 'Enter' || (n >= 1 && n <= flows.length)) { hide(); onPick(flows[active]); return true; }
-    return false;
+    return true;
   }
+  document.addEventListener('pointerover', function (ev) {
+    var row = isOpen() && ev.target.closest('.menu-row');
+    if (row && Number(row.dataset.i) !== active) { active = Number(row.dataset.i); draw(); }
+  });
   document.addEventListener('click', function (ev) {
     if (!isOpen()) return;
     var row = ev.target.closest('.menu-row');

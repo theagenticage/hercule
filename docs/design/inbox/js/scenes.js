@@ -41,7 +41,7 @@ window.Scenes = (function () {
     error: function () {
       var s = morning();
       s.name = 'error';
-      s.notice = Crew.brand('github', 13) + ' <b>GitHub stopped answering 12 minutes ago.</b> Its cards may be out of date. <a data-reconnect>Reconnect</a>';
+      s.notice = Crew.brand('github', 13) + ' <b>GitHub stopped answering 12 minutes ago.</b> Its cards may be out of date. <button class="ib-fix" data-reconnect>Reconnect</button>';
       return s;
     },
   };

@@ -14,6 +14,7 @@
     join: '<circle cx="4.5" cy="3.9" r="1.5"/><circle cx="4.5" cy="12.1" r="1.5"/><circle cx="11.5" cy="8" r="1.5"/><path d="M4.5 5.4v5.2M4.5 5.4C5 7.2 7 8 10 8"/>',
     check: ring + '<path d="M5.4 8.2l1.8 1.8 3.4-3.7"/>',
     cross: ring + '<path d="M6 6l4 4M10 6l-4 4"/>',
+    hold: ring + '<path d="M5.2 8h5.6"/>',
     alert: '<path d="M8 2.6 13.9 13H2.1Z"/><path d="M8 6.6v3"/><circle cx="8" cy="11.2" r=".55" fill="currentColor" stroke="none"/>',
   };
 
@@ -44,7 +45,7 @@
         passing: { shape: 'fork', tone: 'good', word: 'Open, checks passed', norm: true },
         running: { shape: 'fork', tone: 'quiet', word: 'Open, checks running' },
         failing: { shape: 'cross', tone: 'bad', word: 'Checks failed' },
-        changes: { shape: 'fork', tone: 'you', word: 'Changes requested' },
+        changes: { shape: 'hold', tone: 'you', word: 'Changes requested' },
         approved: { shape: 'check', tone: 'good', word: 'Approved' },
         draft: { shape: 'dashed', tone: 'quiet', word: 'Draft' },
         merged: { shape: 'join', tone: 'quiet', word: 'Merged' },

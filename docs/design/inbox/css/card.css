@@ -76,7 +76,7 @@
 .c-pace[data-ramp="fresh"] { color: var(--wait-fresh); }
 .c-pace[data-ramp="recent"] { color: var(--wait-recent); }
 .c-pace[data-ramp="stale"] { color: var(--wait-due); }
-.c-pace[data-ramp="overdue"] { color: var(--wait-over); }
+.c-pace[data-ramp="overdue"] { color: var(--wait-over); font-weight: var(--w-bold); }
 
 .c-line {
   grid-column: 2;
@@ -190,8 +190,8 @@
 .card.is-hover .c-pace,
 .card.is-focus .c-pace { display: none; }
 /* The title gives way to the actions with an ellipsis, so no word is cut in half. */
-.stack .card.is-hover .c-title,
-.stack .card.is-focus .c-title { margin-right: var(--acts-w, 90px); }
+.stack .card.is-hover:not(.is-whole) .c-title,
+.stack .card.is-focus:not(.is-whole) .c-title { margin-right: var(--acts-w, 90px); }
 .c-act {
   display: inline-flex;
   align-items: center;
@@ -208,20 +208,26 @@
 .c-act:active { transform: scale(0.94); }
 .c-act--hand { gap: 5px; padding: 0 7px 0 4px; color: var(--ink); font-size: var(--t-12); font-weight: var(--w-medium); white-space: nowrap; }
 .c-act--hand .cr + .cr { margin-left: -13px; }
+.c-act--take { gap: 5px; padding: 0 7px 0 4px; margin-right: 6px; color: var(--ink); font-size: var(--t-12); font-weight: var(--w-medium); }
 .c-act--go { padding: 0 8px; gap: 5px; font-size: var(--t-12); font-weight: var(--w-medium); }
 
 .c-hit { position: absolute; left: 0; right: 0; top: 0; height: 48px; z-index: 1; display: none; }
 .card.is-peek .c-hit { display: block; pointer-events: auto; }
 .card.is-under .c-line, .card.is-under .c-status { visibility: hidden; }
-/* In a peek the title reads in full: the actions take the end of its first line, and the rest wraps under them. */
-.stack .card.is-peek .c-title { display: block; grid-column: 2 / -1; margin-right: 0; max-height: 54px; overflow: hidden; white-space: normal; }
-.stack .card.is-peek .c-title::before { content: ""; float: right; width: var(--acts-w, 90px); height: 18px; }
+/* In a peek, and on a whole card with its actions out, the title reads in full: the actions take the end of its first line. */
+.stack .card.is-peek .c-title,
+.stack .card.is-whole.is-hover .c-title,
+.stack .card.is-whole.is-focus .c-title { display: block; grid-column: 2 / -1; margin-right: 0; max-height: 63px; overflow: hidden; white-space: normal; }
+.stack .card.is-peek .c-title::before,
+.stack .card.is-whole.is-hover .c-title::before,
+.stack .card.is-whole.is-focus .c-title::before { content: ""; float: right; width: var(--acts-w, 90px); height: 18px; }
 .stack .card.is-peek { pointer-events: none; z-index: 500 !important; }
 .stack .card.is-peek > .card-stock { box-shadow: var(--h-carry); }
 .card.is-peek .c-acts { z-index: 4; }
 .stack .card.is-hover:not(.is-peek) > .card-stock { box-shadow: var(--h-hover); }
 .stack .card.is-focus > .card-stock { box-shadow: inset 0 0 0 1.5px var(--focus), var(--h-carry); }
-.card.is-dim, .plaque.is-dim { opacity: 0.3; }
+.card.is-dim, .plaque.is-dim { opacity: 0.5; }
+.card.is-dim .mark, .plaque.is-dim .pl-marks { opacity: 0.5; }
 
 /* Someone holds it now: the card lies flat, and what holds it stands behind its top edge. */
 .stack .card[data-height="flat"] > .card-stock { box-shadow: var(--h-flat); background: var(--stock-flat); }
@@ -238,6 +244,8 @@
 
 /* The shelf is quieter than the clock: the same cards, a step back. */
 .stack-wrap[data-slow="true"] .card:not(.is-peek):not(.is-focus) .c-title { color: color-mix(in oklab, var(--ink) 72%, var(--muted)); }
+
+.noticed, .open--plaque { --focus: var(--lacquer-ink); }
 
 /* The plate: one lacquer band across the page, Hercule's own. What it noticed sits on it in segments. */
 .noticed {

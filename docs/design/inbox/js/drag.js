@@ -124,14 +124,14 @@ window.Drag = (function () {
       if (ghost) { finish(false); swallowClick(); }
       pressed = null;
     });
-    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && ghost) { ev.stopPropagation(); finish(true); } }, true);
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && ghost) { ev.stopPropagation(); finish(true); swallowClick(1500); } }, true);
   }
 
   /** Stops the click that ends a drag from opening the card. */
-  function swallowClick() {
+  function swallowClick(ms) {
     var stop = function (ev) { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener('click', stop, true); };
     window.addEventListener('click', stop, true);
-    setTimeout(function () { window.removeEventListener('click', stop, true); }, 50);
+    setTimeout(function () { window.removeEventListener('click', stop, true); }, ms || 50);
   }
 
   return { start: start };

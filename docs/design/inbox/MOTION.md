@@ -5,7 +5,7 @@ The language is shared with Work: `MOTION.md` and `SHARED.md` on `prototype/over
 ## What the Inbox adds to the shared principles
 
 1. **The Inbox is still at rest.** The only thing that moves on its own is a working colleague's paws. Everything else moves because something happened.
-2. **Nothing moves under the pointer by itself.** The card you are on responds. Its neighbours do not. A dismissed card's place stays open until the pointer leaves.
+2. **Nothing moves under the pointer by itself.** The card you are on responds, and its neighbours do not. A new card waits until the pointer leaves its stack. Only your own move changes what is under the pointer.
 3. **The cause shows first.** A signal is seen arriving before the card reacts to it. A Task is seen leaving for Work.
 4. **A card keeps its place through every change of state.** Hand-off, signal and peek all happen where the card lies.
 
@@ -74,11 +74,9 @@ Taking it on yourself is the same with a marigold tab in place of the head.
 | Part | Motion |
 |---|---|
 | The card | Moves 14px to the right and fades on `travel`: a small gesture of putting it aside |
-| The hole | An etched outline in its place, fading over the 2.6 seconds it is kept: the wait made visible |
-| Closing | When the pointer leaves the page, or the time is up. Neighbours move on `hand`, nearest first, 14ms apart: a ripple, not a block |
-| With nothing left | The hole closes at once, so the sunrise does not wait |
-| Undo, hole still open | The card comes back from 14px on `travel` |
-| Undo, hole closed | The neighbours part on `hand` and the card comes back on `travel` |
+| The next card | Rises into its place at once on `hand`, with the rest of the stack behind it, nearest first, 14ms apart: a ripple, not a block. Its close is now under the pointer |
+| The last card | The sunrise follows at 320ms |
+| Undo | The stack parts on `hand`, and the card comes back from 14px on `travel` |
 
 ### Opening and closing a card
 
@@ -90,6 +88,7 @@ The sheet is one object on one number, from 0 where the card lies to 1 where it 
 | The title and mark | The same objects: they grow from where they lay, by transform, on the same number |
 | The rest | Meta, signals, facts and rows rise 6px and fade in, 240ms, 20ms apart from 70ms |
 | The veil | Fades over `--m-slow`, and is taken away when it has gone |
+| Walking | J and K keep the sheet where it stands. The words change with a 160ms rise of 8px in the direction of travel, and the height follows |
 | Closing | The same number going home. The rest fades in 100ms. Near home the card comes back under the sheet, and the sheet dissolves into it over 80ms. Focus returns to the card; the ring returns only for the keyboard |
 
 ### Carrying a card

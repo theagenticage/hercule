@@ -3,6 +3,7 @@ window.Pages = (function () {
   var K = Kinds.KINDS, W = World;
   var current = 'inbox';
   var raised = {};
+  var at = -1; // the row of Intake the keys are on
 
   // Intake's rows: every outside thing that sent a signal, most of which never needed anyone.
   var ROWS = [
@@ -42,11 +43,11 @@ window.Pages = (function () {
   function setView(name) {
     if (Open.isOpen()) Open.hide(true);
     current = name;
-    document.querySelectorAll('[data-view]').forEach(function (b) { b.classList.toggle('is-on', b.dataset.view === (name === 'intake' ? 'intake' : 'cards')); });
     document.querySelectorAll('[data-nav]').forEach(function (r) { r.classList.toggle('is-on', r.dataset.nav === (name === 'work' ? 'overview' : 'inbox')); });
-    document.getElementById('main').dataset.view = name;
+    document.getElementById('main').dataset.page = name;
+    Tray.hide();
     drawPill(name);
-    if (name === 'intake') { drawIntake(); App.state.mode = 'intake'; return; }
+    if (name === 'intake') { at = -1; drawIntake(); App.state.mode = 'intake'; return; }
     if (name === 'work') { Work.draw(); App.state.mode = 'work'; return; }
     Nav.setNew(false);
     App.state.mode = 'stacks';
@@ -61,7 +62,7 @@ window.Pages = (function () {
     var pill = document.getElementById('pill');
     pill.innerHTML = name === 'work'
       ? '<h1 class="pill-title">Overview</h1><button class="ptab">' + Crew.icon('office', 14) + 'Office</button><button class="ptab is-on">' + Crew.icon('tasks', 14) + 'Work</button>'
-      : '<h1 class="pill-title">Inbox</h1><button class="ptab' + (name === 'intake' ? '' : ' is-on') + '" data-view="cards">Cards</button><button class="ptab' + (name === 'intake' ? ' is-on' : '') + '" data-view="intake">Intake <small>214</small></button>';
+      : '<h1 class="pill-title">Inbox</h1><button class="ptab' + (name === 'intake' ? '' : ' is-on') + '" data-view="cards"' + (name === 'intake' ? '' : ' aria-current="page"') + '>Cards</button><button class="ptab' + (name === 'intake' ? ' is-on' : '') + '" data-view="intake"' + (name === 'intake' ? ' aria-current="page"' : '') + '>Intake <small>214</small></button>';
     document.querySelector('.ib-end').hidden = name !== 'inbox';
     document.getElementById('sum').hidden = name !== 'inbox';
   }
@@ -92,6 +93,7 @@ window.Pages = (function () {
 
   function start() {
     document.addEventListener('click', function (ev) {
+      if (ev.target.closest('a[href="#"]')) ev.preventDefault();
       var v = ev.target.closest('[data-view]');
       if (v) { setView(v.dataset.view === 'intake' ? 'intake' : 'inbox'); return; }
       var n = ev.target.closest('[data-nav]');
@@ -100,11 +102,24 @@ window.Pages = (function () {
       var b = ev.target.closest('[data-raise]');
       if (b) { raise(b.dataset.raise); return; }
       var row = ev.target.closest('.in-row');
-      if (row) row.classList.toggle('is-open');
+      if (row) { row.classList.toggle('is-open'); at = [].indexOf.call(row.parentNode.children, row); }
     });
   }
 
-  return { current: function () { return current; }, goToWork: goToWork, setView: setView, start: start };
+  /** The keys of Intake: J and K move, Enter opens a row, R raises it, Esc goes back to the cards. */
+  function onKey(ev) {
+    var rows = document.querySelectorAll('.in-row'), k = ev.key;
+    if (k === 'Escape') { ev.preventDefault(); setView('inbox'); return; }
+    if (k === 'j' || k === 'ArrowDown') at = Math.min(rows.length - 1, at + 1);
+    else if (k === 'k' || k === 'ArrowUp') at = Math.max(0, at - 1);
+    else if (k === 'Enter' && rows[at] && !ev.target.closest('button')) rows[at].classList.toggle('is-open');
+    else if (k === 'r' && rows[at]) { var b = rows[at].querySelector('[data-raise]'); if (b) raise(b.dataset.raise); }
+    else return;
+    ev.preventDefault();
+    [].forEach.call(rows, function (r, i) { r.classList.toggle('is-at', i === at); });
+  }
+
+  return { current: function () { return current; }, goToWork: goToWork, setView: setView, onKey: onKey, start: start };
 })();
 
 // A stand-in for Work, so that the way through can be walked. The Overview design owns the real board.

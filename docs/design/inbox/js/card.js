@@ -27,7 +27,7 @@
     size = size || 16;
     var letters = p.name.split(' ').map(function (w) { return w[0]; }).join('').slice(0, 2);
     var cls = key === 'you' ? 'person person--you' : 'person';
-    return '<span class="' + cls + '" style="--person-hue:' + p.hue + ';--person-size:' + size + 'px" title="' + esc(p.name) + '">' + letters + '</span>';
+    return '<span class="' + cls + '" style="--person-hue:' + p.hue + ';--person-size:' + size + 'px" title="' + esc(p.name) + '" aria-hidden="true">' + letters + '</span>';
   }
 
   /** Fills a declared template such as "#{number}" from an entity's fields. */
@@ -48,6 +48,13 @@
     if (h < 1) return Math.max(1, Math.round(h * 60)) + 'm';
     if (h < 48) return Math.round(h) + 'h';
     return Math.round(h / 24) + 'd';
+  }
+
+  /** Returns a wait in words, for a screen reader. */
+  function sayWaitInWords(since, now) {
+    var h = (now - since) / 36e5;
+    var n = h < 48 ? Math.max(1, Math.round(h)) : Math.round(h / 24);
+    return n + (h < 48 ? ' hour' : ' day') + (n === 1 ? '' : 's');
   }
 
   /** Returns the ramp step of a wait, measured against the patience the kind declares. */
@@ -110,18 +117,18 @@
     var pace = kind.pace === 'fast' && !e.task ? sayWait(e.since, ctx.now) : '';
     var flows = readWorkflows(e);
     var hand = flows.length
-      ? '<button class="c-act c-act--hand" data-act="hand" title="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + ' (H)" aria-label="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + '"' + (flows.length > 1 ? ' aria-haspopup="menu"' : '') + '>' +
+      ? '<button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + ' (H)" aria-label="Hand to ' + esc(flows.length === 1 ? flows[0].name : 'an agent') + '"' + (flows.length > 1 ? ' aria-haspopup="menu"' : '') + '>' +
         flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 20 }); }).join('') + '<span>' + esc(flows.length === 1 ? flows[0].name : 'Hand to…') + '</span></button>'
       : '';
     var acts = e.task
-      ? '<button class="c-act c-act--go" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>'
+      ? '<button class="c-act c-act--go" tabindex="-1" data-act="go" title="See its Task on Work (G)">On Work ' + Crew.icon('arrow', 12) + '</button>'
       : hand +
-        '<button class="c-act" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
-        '<button class="c-act c-act--plain" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
+        '<button class="c-act c-act--take" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 18) + '<span>Take</span></button>' +
+        '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Dismiss (E)" aria-label="Dismiss">' + Crew.icon('close', 14) + '</button>';
     return '<div class="c-mark">' + drawMark(kind.plugin, kind.density === 'tight' ? 18 : 20) + '</div>' +
-      '<h3 class="c-title">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
-      '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '">' + pace + '</div>' +
-      '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"></i>' : '') + '<span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
+      '<h3 class="c-title" title="' + esc(e.title) + '">' + (e.partial ? '<i class="sk sk--title"></i>' : esc(e.title)) + '</h3>' +
+      '<div class="c-pace" data-ramp="' + rampWait(e.since, ctx.now, kind.patience) + '"' + (pace ? ' aria-label="Waiting ' + sayWaitInWords(e.since, ctx.now) + '"' : '') + '>' + pace + '</div>' +
+      '<div class="c-line tone-' + line.tone + '">' + (e.fresh ? '<i class="c-fresh" title="New since you last looked"><span class="sr">New</span></i>' : '') + '<span class="c-who">' + line.lead + '</span><span class="c-roll"><span class="c-said">' + esc(line.text) + '</span></span>' + '<span class="c-more"' + (line.more ? '' : ' hidden') + '>+<span class="c-more-n">' + line.more + '</span></span></div>' +
       '<div class="c-status' + (status && (status.norm || isSaid) ? ' is-norm' : '') + '">' + (status ? drawShape(status) : '') + '</div>' +
       '<div class="c-foot">' + (line.isIdentity ? '' : '<span class="c-id">' + esc(fill(kind.identifier, f)) + '</span><span class="c-ctx">' + esc(fill(kind.context, f)) + '</span>') + '<span class="c-facts">' + drawFacts(kind, f) + '</span></div>' +
       '<div class="c-hit"></div>' +
@@ -148,7 +155,7 @@
   function sayCard(e) {
     var kind = K.KINDS[e.kind], line = describeLine(e, null);
     var status = kind.status && kind.status[e.fields.state];
-    return [kind.noun, fill(kind.identifier, e.fields), e.title, line.text, status ? status.word : '', kind.pace === 'fast' && !e.task ? 'waiting ' + sayWait(e.since, W.NOW) : '', line.more ? line.more + ' earlier signals' : ''].filter(Boolean).join(', ');
+    return [kind.noun, fill(kind.identifier, e.fields), e.title, line.text, status ? status.word : '', kind.pace === 'fast' && !e.task ? 'waiting ' + sayWaitInWords(e.since, W.NOW) : '', line.more ? line.more + ' earlier signals' : ''].filter(Boolean).join(', ');
   }
 
   /**
@@ -166,7 +173,7 @@
 
   /** Returns a new card element for an entity. */
   function createCard(e, ctx) {
-    var el = document.createElement('article');
+    var el = document.createElement('div');
     el.className = cardClasses(e);
     if (e.task || e.quiet) el.dataset.height = 'flat';
     el.dataset.id = e.id;
@@ -186,14 +193,14 @@
   /** Returns the HTML of a plaque: one thing Hercule noticed, on the lacquer plate. */
   function drawPlaque(c) {
     var flows = readWorkflows(c);
-    return '<article class="plaque" data-id="' + c.id + '" tabindex="-1" aria-label="Hercule noticed: ' + esc(c.title) + '. ' + esc(c.why) + '">' +
+    return '<div class="plaque" role="listitem" data-id="' + c.id + '" tabindex="-1" aria-label="' + esc(c.title) + '. ' + esc(c.why) + '">' +
       '<div class="pl-marks">' + drawSources(c.sources) + '</div>' +
       '<h3 class="pl-title">' + esc(c.title) + '</h3>' +
       '<div class="pl-why">' + esc(c.why) + '</div>' +
-      '<div class="c-acts pl-acts"><button class="c-act c-act--hand" data-act="hand" title="Hand to an agent (H)" aria-label="Hand to an agent">' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>' +
-      '<button class="c-act" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
-      '<button class="c-act c-act--plain" data-act="dismiss" title="Back to Intake (E)" aria-label="Back to Intake">' + Crew.icon('close', 14) + '</button></div>' +
-      '</article>';
+      '<div class="c-acts pl-acts"><button class="c-act c-act--hand" tabindex="-1" data-act="hand" title="Hand to an agent (H)" aria-label="Hand to an agent">' + flows.slice(0, 2).map(function (w) { return Crew.face(w.name, { pose: 'idle', size: 21 }); }).join('') + '</button>' +
+      '<button class="c-act" tabindex="-1" data-act="take" title="Take it on myself (T)" aria-label="Take it on myself">' + drawPerson('you', 20) + '</button>' +
+      '<button class="c-act c-act--plain" tabindex="-1" data-act="dismiss" title="Back to Intake (E)" aria-label="Back to Intake">' + Crew.icon('close', 14) + '</button></div>' +
+      '</div>';
   }
 
   window.Card = {
