@@ -5,13 +5,13 @@ window.Overview = (function () {
   "use strict";
 
   var VIEWS = [
-    { id: "office", name: "Office", icon: "office" },
-    { id: "work", name: "Work", icon: "tasks" },
+    { id: "office", name: "Office" },
+    { id: "work", name: "Work" },
   ];
   var LATER = [
-    { id: "list", name: "List", icon: "list" },
-    { id: "surface", name: "One surface", icon: "overlap" },
-    { id: "tracks", name: "Tracks", icon: "calendar" },
+    { id: "list", name: "List" },
+    { id: "surface", name: "One surface" },
+    { id: "tracks", name: "Tracks" },
   ];
   var current = "work";
   var puck = null;

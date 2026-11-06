@@ -35,7 +35,7 @@ Three real sketches on the same 69 Tasks, in `sketches/` (`index.html?d=a|b|c`):
 
 ### Later views
 
-The switcher is built for five tabs. Each is an icon and a word, so five read as naturally as two, and two do not look empty. `?later=1` shows them, with a sketch of each on the same Tasks: List (a title, a muted line, a mark), One surface (a place per Task, with blockers as structure) and Tracks (a calendar).
+The switcher is built for five tabs. Each is a word, with no icon, so five read as naturally as two, and two do not look empty. `?later=1` shows them, with a sketch of each on the same Tasks: List (a title, a muted line, a mark), One surface (a place per Task, with blockers as structure) and Tracks (a calendar).
 
 ## The Work view
 

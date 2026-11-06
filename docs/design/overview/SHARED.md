@@ -108,7 +108,7 @@ Rules: motion explains cause. Everything is interruptible, because every change 
 
 **The colleague.** A whole card keeps head and paws behind the top edge, at the right. An Inbox strip has no free edge, so there the colleague stands where the wait was, in the working pose. Use `Crew.peek`, `.card-head` and `.card-paws`, so a hand-off in the Inbox and a head on Work are the same object.
 
-**Ages and waits.** On Work ages are neutral, because a Task's age is not the point of the card. In the Inbox an overdue wait stays marigold: the wait is the point there. The two pages are never on screen together.
+**Ages and waits.** On Work ages are neutral, because a Task's age is not the point of the card: the oldest go to ink at medium weight, with no colour. In the Inbox an overdue wait goes to full ink and bold, with no colour: the wait is the point there, and colour is the status shape's job. The two pages are never on screen together.
 
 **Inbox page.** Three clock stacks stand side by side, each a lead, two strips and a pile, with the shelf in a row under them, one card per project. The gap under a stage heading is 18px there, so a colleague's head clears the rule. The top bar's right end sits 14px from the window on both pages, so its button never jumps between them.
 
