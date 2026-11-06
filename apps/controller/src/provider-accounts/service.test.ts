@@ -49,7 +49,13 @@ const pinIdentity = (accountId: string) =>
     const accounts = yield* providerAccountRepository;
     yield* withTransaction(
       sql,
-      accounts.setIdentityIfUnset(accountId, "old@work.com", "Max", "2026-10-31T00:00:00.000Z"),
+      accounts.setIdentityIfUnset(
+        accountId,
+        "old@work.com",
+        "Max",
+        "2026-10-31T00:00:00.000Z",
+        "2026-10-31T00:00:00.000Z",
+      ),
     );
   });
 

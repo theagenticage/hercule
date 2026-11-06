@@ -176,9 +176,45 @@ describe("what the Codex adapter reports about a machine", () => {
     expect(probed.auth).toMatchObject({
       status: "ok",
       identity: "rogier@example.com",
-      planLabel: "pro",
+      planLabel: "Pro 200",
       backend: "chatgpt",
     });
+  });
+
+  it("reports the plan by its display name, not by the id Codex sends", async () => {
+    const { result } = runProbe({
+      "account/read": () => ({
+        account: { ...CHATGPT.account, planType: "self_serve_business_prolite" },
+        requiresOpenaiAuth: false,
+      }),
+    });
+
+    expect((await result).auth.planLabel).toBe("Business Premium");
+  });
+
+  it("reports no plan and logs a warning naming the id when the plan has no display name", async () => {
+    const logged: Array<string> = [];
+    const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") logged.push(String(message));
+    });
+    const { seam } = buildScriptedSeam({
+      "account/read": () => ({
+        account: { ...CHATGPT.account, planType: "future_plan" },
+        requiresOpenaiAuth: false,
+      }),
+    });
+
+    const probed = await Effect.runPromise(
+      Effect.provide(
+        makeCodexAdapter(seam).probe(buildContext(createCodexHome()), { readUsage: false }),
+        Logger.layer([collecting]),
+      ),
+    );
+
+    expect(probed.auth.status).toBe("ok");
+    expect(probed.auth.planLabel).toBeUndefined();
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("future_plan");
   });
 
   it("reports an account with a key as ok with no identity, and keeps the model list", async () => {

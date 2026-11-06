@@ -6,10 +6,11 @@ import {
   buildProviderAccountName,
   decideAccountState,
   describeAccountUsage,
+  decideProviderAccountReach,
   describeProviderAccountIdentity,
+  describeProviderAccountReach,
   findProviderPluginId,
   listAccountModelProfiles,
-  listProviderAccountMachines,
   readErrorMessage,
   resolveBrowserTimezone,
   type AccountFix,
@@ -30,7 +31,7 @@ import { useOpenModelProfile } from "./-open-model-profile";
  * It exists apart from `ProviderAccountCard`, which only draws, so that each
  * card reads its own lists and a push redraws only the card whose account
  * changed. It reads what it needs to name the account and to work out its
- * machines, usage and state. The `provider` live topic reads the accounts
+ * where it works, its usage and its state. The `provider` live topic reads the accounts
  * again when any account's usage moves, and the cache keeps the record of an
  * account that did not change as it was, so the cards of the others stay as
  * they are. It also reads the Model Profiles, for the faces of the ones that
@@ -81,7 +82,9 @@ export function AccountCard({
       }
       name={name}
       identity={describeProviderAccountIdentity(providers, account)}
-      machines={listProviderAccountMachines(account, runners, providers, harnesses)}
+      reach={describeProviderAccountReach(
+        decideProviderAccountReach(account, runners, providers, harnesses),
+      )}
       usage={describeAccountUsage(account, timezone, now)}
       state={decideAccountState(providers, account, timezone, now)}
       profileUse={

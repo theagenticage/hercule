@@ -1,6 +1,6 @@
 /**
  * Tests Settings > Providers: one card per Provider Account with its mark,
- * name, identity line and machine pips, the reads the section makes as it
+ * name, identity lines and where it works, the reads the section makes as it
  * opens, the account sheet, renaming an account, choosing its default
  * harness, a delete the controller refuses, a delete it accepts, a
  * sign-in started from a machine's row, and the usage, expiry and failure of
@@ -155,23 +155,32 @@ describe("Settings > Providers", () => {
       "Anthropic · work",
       "Z.ai",
     ]);
-    // The identity, then the plan; an account that knows no identity shows its kind.
-    expect(cards.map((card) => card.querySelector(".pa-identity")!.textContent)).toEqual([
-      "rogier@example.com · Claude Max",
-      "Claude subscription",
-      "API key",
-    ]);
-    // One pip per machine that is not retired: filled where it is signed in.
-    const pips = (card: HTMLElement) => card.querySelector('[role="img"]');
-    expect(pips(cards[0]!)?.getAttribute("aria-label")).toBe("moss: ready · atlas: not signed in");
-    expect(pips(cards[1]!)?.getAttribute("aria-label")).toBe(
-      "moss: not signed in · atlas: not signed in",
+    // The identity, then the plan, each on a line of its own; an account that
+    // knows no identity shows its kind.
+    const lines = (card: HTMLElement) =>
+      [...card.querySelectorAll(".pa-card-line")].map(
+        (line) => (line.querySelector(".pa-card-last-text") ?? line).textContent,
+      );
+    expect(lines(cards[0]!)).toEqual(["rogier@example.com", "Claude Max"]);
+    expect(lines(cards[1]!)).toEqual(["Claude subscription"]);
+    expect(lines(cards[2]!)).toEqual(["API key"]);
+    // One pip per machine that is not retired: filled where it is ready. The
+    // reach is at the right end of the last line.
+    const reach = (card: HTMLElement) => card.querySelector('.pa-card-last > [role="img"]');
+    expect(reach(cards[0]!)?.getAttribute("aria-label")).toBe(
+      "Ready on 1 of 2 machines. moss: ready · atlas: not ready",
+    );
+    expect(reach(cards[1]!)?.getAttribute("aria-label")).toBe(
+      "Ready on 0 of 2 machines. moss: not ready · atlas: not ready",
     );
     expect(cards[0]!.querySelectorAll(".pa-pip:not(.is-you)")).toHaveLength(1);
     expect(cards[0]!.querySelectorAll(".pa-pip.is-you")).toHaveLength(1);
     // A key account has no pips: every machine uses it.
-    expect(pips(cards[2]!)).toBeNull();
-    expect(cards[2]!.textContent).toContain("Every machine");
+    expect(reach(cards[2]!)?.textContent).toBe("All");
+    expect(reach(cards[2]!)?.getAttribute("aria-label")).toBe(
+      "Shared credential: works on every machine",
+    );
+    expect(cards[2]!.querySelector(".pa-pip")).toBeNull();
     expect(screen.getByText("Who pays for the models in your menu.")).toBeTruthy();
   });
 

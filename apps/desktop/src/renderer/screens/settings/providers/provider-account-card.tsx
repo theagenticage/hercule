@@ -4,22 +4,15 @@ import type {
   AccountState,
   AccountUsageGauge,
   ProviderAccountIdentityLine,
+  ProviderAccountReachView,
 } from "@hercule/client-core";
 import { CheckIcon } from "../../../icons/check";
-import { FleetIcon } from "../../../icons/fleet";
 import { PlusIcon } from "../../../icons/plus";
+import { AccountReach } from "./account-reach";
 import { AccountStateLine } from "./account-state-line";
-import { IdentityLine } from "./identity-line";
 import { ProfileFace } from "../../profile-face";
 import { UsageGauge } from "./usage-gauge";
 import "./providers.css";
-
-/** One machine of a per-machine account, as its card draws it. */
-export interface MachinePip {
-  readonly runnerName: string;
-  /** Whether the account is signed in on the machine. */
-  readonly signedIn: boolean;
-}
 
 /** How an account stands with the Model Profiles, as its card draws it. */
 export interface ProfileUse {
@@ -37,36 +30,11 @@ export interface ProfileUse {
   readonly error: string | null;
 }
 
-/** Returns what a pip says, such as "moss: ready", for its tooltip and its accessible name. */
-const describePip = ({ runnerName, signedIn }: MachinePip): string =>
-  `${runnerName}: ${signedIn ? "ready" : "not signed in"}`;
-
-/**
- * Renders the fleet icon and one pip for each machine: filled where the
- * account is signed in, a ring where it is not. Renders nothing when there
- * is no machine to show.
- */
-function MachinePips({
-  machines,
-}: {
-  readonly machines: ReadonlyArray<MachinePip>;
-}): JSX.Element | null {
-  if (machines.length === 0) return null;
-  const description = machines.map(describePip).join(" · ");
-  return (
-    <span className="pa-pips" role="img" aria-label={description} title={description}>
-      <FleetIcon size={11} />
-      {machines.map((machine) => (
-        <i key={machine.runnerName} className={machine.signedIn ? "pa-pip" : "pa-pip is-you"} />
-      ))}
-    </span>
-  );
-}
-
 /**
  * Renders the card of one Provider Account: a button that opens its sheet,
- * holding the provider's `mark`, the account's `name`, the `identity` line
- * under it, where the account works, and then one of two things:
+ * holding the provider's `mark` and the account's `name`; under them the
+ * `identity` (who is signed in, then the plan, each on a line of its own, or
+ * the kind's title alone); and then one of two things:
  *
  * - the account's `state`, when it needs the user: what is wrong, and a
  *   second button under the card that fixes it, which calls `onFix`. The card
@@ -84,16 +52,16 @@ function MachinePips({
  * the open profile does not hold is drawn dimmed. The button is a sibling of
  * the card's button, so pressing it never opens the sheet.
  *
- * `machines` lists the machines of an account that signs in on each one,
- * drawn as pips beside the name. It is `null` for an account whose
- * credential every machine uses, which the card says in words under the
- * identity line.
+ * `reach` is where the account works. It sits at the right end of the last
+ * line of the identity, which gives way to it, so the reach never shrinks.
+ * It is `null` when it is not known where the account works, and the card
+ * then draws no reach.
  */
 export function ProviderAccountCard({
   mark,
   name,
   identity,
-  machines,
+  reach,
   usage,
   state,
   profileUse,
@@ -104,7 +72,7 @@ export function ProviderAccountCard({
   readonly mark: ReactNode;
   readonly name: string;
   readonly identity: ProviderAccountIdentityLine;
-  readonly machines: ReadonlyArray<MachinePip> | null;
+  readonly reach: ProviderAccountReachView | null;
   readonly usage: AccountUsageGauge | null;
   readonly state: AccountState;
   readonly profileUse: ProfileUse | null;
@@ -131,15 +99,8 @@ export function ProviderAccountCard({
         <span className="pa-card-top">
           {mark}
           <b>{name}</b>
-          {machines !== null && <MachinePips machines={machines} />}
         </span>
-        <IdentityLine line={identity} className="pa-card-identity" />
-        {machines === null && (
-          <span className="pa-card-reach">
-            <FleetIcon size={11} />
-            Every machine
-          </span>
-        )}
+        <CardIdentity identity={identity} reach={reach} />
         {state.kind !== "ok" ? (
           <AccountStateLine state={state} />
         ) : (
@@ -155,6 +116,57 @@ export function ProviderAccountCard({
       )}
       {profileUse !== null && hasProfileFoot && <ProfileFoot use={profileUse} onUse={onUse} />}
     </div>
+  );
+}
+
+/**
+ * Renders the identity of a card on a line for each part: who is signed in,
+ * then the plan. An account with no identity has one line, the kind's title.
+ * The account's `reach` is at the right end of the last line.
+ */
+function CardIdentity({
+  identity,
+  reach,
+}: {
+  readonly identity: ProviderAccountIdentityLine;
+  readonly reach: ProviderAccountReachView | null;
+}): JSX.Element {
+  const { text, plan } = identity;
+  return (
+    <>
+      <CardLine text={text} reach={plan === null ? reach : null} />
+      {plan !== null && <CardLine text={plan} reach={reach} />}
+    </>
+  );
+}
+
+/**
+ * Renders one line of a card's identity. The text ends in an ellipsis when it
+ * is too long and has its full text as its tooltip. When the line has a
+ * `reach`, the reach is at its right end and the text gives way to it first,
+ * so the reach never shrinks.
+ */
+function CardLine({
+  text,
+  reach,
+}: {
+  readonly text: string;
+  readonly reach: ProviderAccountReachView | null;
+}): JSX.Element {
+  if (reach === null) {
+    return (
+      <span className="pa-card-line" title={text}>
+        {text}
+      </span>
+    );
+  }
+  return (
+    <span className="pa-card-line pa-card-last">
+      <span className="pa-card-last-text" title={text}>
+        {text}
+      </span>
+      <AccountReach reach={reach} />
+    </span>
   );
 }
 

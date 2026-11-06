@@ -861,6 +861,13 @@ const ZAI_API_KEY = "zai-upgrade-fixture-key-7d41";
 /** The person, and the plan, that the labelled Anthropic account is signed in as. */
 const WORK_IDENTITY = { identity: "ada@example.com", planLabel: "Max" } as const;
 
+/**
+ * The plan the stand-in `claude` reports for `WORK_IDENTITY`. It differs from
+ * the stored plan in case, so a test can tell that the probe after the upgrade
+ * replaced the stored plan with the one it reported.
+ */
+const PROBED_PLAN_LABEL = WORK_IDENTITY.planLabel.toLowerCase();
+
 /** The native session id of the exited Claude Code thread that the upgraded binary resumes. */
 const RESUMABLE_NATIVE_SESSION_ID = "upgrade-fixture-resumable";
 
@@ -1053,7 +1060,8 @@ interface StandIns {
  *   when `ZAI_API_KEY` is set (and records that key and `PI_CODING_AGENT_DIR`),
  *   `update`, and one `get_available_models` request over RPC.
  * - `claude` answers `--version` and the SDK's `initialize` request, so the
- *   probe reports a signed-in `WORK_IDENTITY`. Any other start is a session:
+ *   probe reports a signed-in `WORK_IDENTITY.identity` on the plan
+ *   `PROBED_PLAN_LABEL`. Any other start is a session:
  *   it records `CLAUDE_CONFIG_DIR` and its arguments (which hold `--resume=<id>`)
  *   and then reads its input until it closes.
  * - `codex` fails, so a machine that has a real, signed-in Codex cannot
@@ -1092,7 +1100,7 @@ function writeStandIns(folder: string): StandIns {
     `if [ "$1" = "--version" ]; then echo "${CLAUDE_CODE_VERSION} (Claude Code)"; exit 0; fi`,
     "read -r first",
     `id=$(printf '%s' "$first" | sed -n 's/.*"request_id":"\\([^"]*\\)".*/\\1/p')`,
-    `printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"commands":[],"agents":[],"output_style":"default","available_output_styles":["default"],"models":[],"account":{"email":"${WORK_IDENTITY.identity}","subscriptionType":"${WORK_IDENTITY.planLabel.toLowerCase()}"}}}}\\n' "$id"`,
+    `printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"commands":[],"agents":[],"output_style":"default","available_output_styles":["default"],"models":[],"account":{"email":"${WORK_IDENTITY.identity}","subscriptionType":"${PROBED_PLAN_LABEL}"}}}}\\n' "$id"`,
     'for argument in "$@"; do',
     '  case "$argument" in',
     "    --resume=*)",
@@ -2325,11 +2333,16 @@ describe("upgrading from the previous edge release", () => {
       }
       // The person on the labelled account is the one the fixture stored, and
       // the stand-in `claude` reports the same one when the runner probes it.
+      // The plan is the one that probe reported, not the one the fixture
+      // stored: every matching probe sets the plan, and migration 109 leaves
+      // the time of the last such probe empty, so the first probe after the
+      // upgrade does.
       expect(findAccount(claudeAccount.id)).toMatchObject({
         providerId: "anthropic/anthropic",
         kind: "subscription-per-machine",
         label: ACCOUNT_LABEL,
-        ...WORK_IDENTITY,
+        identity: WORK_IDENTITY.identity,
+        planLabel: PROBED_PLAN_LABEL,
         defaultHarnessId: "claude-code/claude-code",
       });
       expect(findAccount(codexAccount.id)).toMatchObject({

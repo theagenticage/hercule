@@ -546,10 +546,17 @@ export {
   type ProviderAccountHarnessChoice,
 } from "./provider-account-harnesses";
 export {
+  decideProviderAccountReach,
   listProviderAccountMachines,
   type ProviderAccountMachine,
   type ProviderAccountMachineAction,
+  type ProviderAccountReach,
 } from "./provider-account-machines";
+export {
+  describeProviderAccountReach,
+  type ProviderAccountReachView,
+  type ReachPip,
+} from "./provider-account-reach";
 export {
   asksForAccountLabel,
   buildProviderAccountCreateInput,

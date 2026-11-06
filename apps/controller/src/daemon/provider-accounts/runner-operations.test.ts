@@ -409,6 +409,7 @@ describe("a sign-in checked while the account changes", () => {
         "alice@example.com",
         undefined,
         "2026-10-31T00:00:00.000Z",
+        "2026-10-31T00:00:00.000Z",
       ),
     );
     yield* addSnapshot(added.id, ALPHA_HARNESS_ID, runner, {

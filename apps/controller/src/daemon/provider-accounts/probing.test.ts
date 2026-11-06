@@ -549,6 +549,7 @@ describe("a probe that reads usage", () => {
             "someone@example.com",
             undefined,
             "2026-10-31T00:00:00.000Z",
+            "2026-10-31T00:00:00.000Z",
           ),
         );
         const runner = yield* addRunner("laptop");

@@ -3,8 +3,10 @@
  * controller (spec 17 §Settings, Providers):
  *
  * - the Accounts section draws one card for each Provider Account, with the
- *   account's name, the identity line under it, and either a pip for each
- *   machine or "Every machine";
+ *   account's name, under it a line for who is signed in and a line for the
+ *   plan (or the kind's title alone), and at the right end of the last line
+ *   where the account works, which the card describes in words as its
+ *   accessible name;
  * - Sign in on a machine opens the sign-in dialog with the page the runner's
  *   login printed, and Cancel leaves the account as it was;
  * - the Name field renames an account, on its card at once and after a reload;
@@ -109,6 +111,24 @@ function findCard(page: Page, name: string): Locator {
   return page.getByTitle(`Open ${name}`, { exact: true });
 }
 
+/**
+ * Returns the lines of identity on the card named `name`: who is signed in
+ * then the plan, or the kind's title alone. The words of where the account
+ * works, which end the last line, are left out.
+ */
+function readIdentityLines(page: Page, name: string): Promise<string[]> {
+  return findCard(page, name)
+    .locator(".pa-card-line")
+    .evaluateAll((lines) =>
+      lines.map((line) => (line.querySelector(".pa-card-last-text") ?? line).textContent ?? ""),
+    );
+}
+
+/** Returns the words that describe where the account on the card named `name` works. */
+function readReach(page: Page, name: string): Promise<string | null> {
+  return findCard(page, name).getByRole("img").getAttribute("aria-label");
+}
+
 /** Returns every Provider Account, read through the API. */
 function readAccounts(arranged: ArrangedFleet): Promise<ReadonlyArray<ProviderAccount>> {
   return arranged.client.providerAccount.query();
@@ -143,23 +163,19 @@ describe("Settings > Providers", () => {
     // The accounts are written a millisecond apart, in the order of `FIXTURES`.
     expect(await readCardNames(page)).toEqual(["Anthropic", "OpenAI", "Z.ai", "Anthropic · Work"]);
 
-    const identities = async (name: string) =>
-      findCard(page, name).locator(".pa-card-identity").textContent();
-    expect(await identities("Anthropic")).toBe("rogier@example.com · Max");
-    expect(await identities("Anthropic · Work")).toBe("rogier@acme.test · Team");
+    // Who is signed in and the plan each have a line.
+    expect(await readIdentityLines(page, "Anthropic")).toEqual(["rogier@example.com", "Max"]);
+    expect(await readIdentityLines(page, "Anthropic · Work")).toEqual(["rogier@acme.test", "Team"]);
     // An account nobody is known to be signed in as shows its kind's title.
-    expect(await identities("OpenAI")).toBe("ChatGPT subscription, signed in on each machine");
-    expect(await identities("Z.ai")).toBe("API key");
+    expect(await readIdentityLines(page, "OpenAI")).toEqual([
+      "ChatGPT subscription, signed in on each machine",
+    ]);
+    expect(await readIdentityLines(page, "Z.ai")).toEqual(["API key"]);
 
-    // An account that signs in on each machine has a pip for each machine,
-    // filled where it is signed in; a key works on every machine.
-    expect(await findCard(page, "Anthropic").getByRole("img").getAttribute("aria-label")).toBe(
-      "moss: ready",
-    );
-    expect(await findCard(page, "Z.ai").locator(".pa-card-reach").textContent()).toBe(
-      "Every machine",
-    );
-    expect(await findCard(page, "Z.ai").getByRole("img").count()).toBe(0);
+    // An account that signs in on each machine says on how many machines it is
+    // ready and which; a key works on every machine.
+    expect(await readReach(page, "Anthropic")).toBe("Ready on 1 of 1 machine. moss: ready");
+    expect(await readReach(page, "Z.ai")).toBe("Shared credential: works on every machine");
   });
 
   it("opens the sign-in on a machine, and Cancel leaves the account as it was", async () => {
@@ -174,8 +190,8 @@ describe("Settings > Providers", () => {
     const { page } = await openSignedIn(arranged.url);
     await openProviders(page);
     await expect
-      .poll(() => findCard(page, "Anthropic").getByRole("img").getAttribute("aria-label"))
-      .toBe("moss: not signed in");
+      .poll(() => readReach(page, "Anthropic"))
+      .toBe("Ready on 0 of 1 machine. moss: not ready");
 
     // What the controller stores for the account on moss, to compare after Cancel.
     const readSnapshot = async () =>
@@ -209,9 +225,7 @@ describe("Settings > Providers", () => {
     expect(await machine.innerText()).toContain("Not signed in");
     await sheet.getByRole("button", { name: "Done", exact: true }).click();
     await sheet.waitFor({ state: "detached" });
-    expect(await findCard(page, "Anthropic").getByRole("img").getAttribute("aria-label")).toBe(
-      "moss: not signed in",
-    );
+    expect(await readReach(page, "Anthropic")).toBe("Ready on 0 of 1 machine. moss: not ready");
     expect(await readSnapshot()).toEqual(before);
   });
 

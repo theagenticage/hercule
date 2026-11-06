@@ -7,6 +7,7 @@
 import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contract";
 import {
   findDefaultHarnessSnapshot,
+  findProviderAccountKind,
   findProviderAccountReadiness,
   signsInPerMachine,
 } from "./provider-accounts";
@@ -69,23 +70,39 @@ export const decideMachineAction = (
 };
 
 /**
- * Returns one entry for each runner that is not retired, in the order of
- * `runners`, for an account that signs in on each machine
- * (`signsInPerMachine`). Returns `null` for any other account, whose
- * credential every machine uses, and for one whose default harness is not
- * registered. A retired runner is gone for good, so it holds no sign-in the
- * user could act on.
+ * Where a Provider Account works:
+ *
+ * - `shared`: its credential is a key or token the controller keeps, so every
+ *   machine uses it;
+ * - `per-machine`: its login lives on each machine, so it works only where it
+ *   is signed in. `machines` has one entry for each runner that is not retired,
+ *   in the order of the runners;
+ * - `unknown`: nothing says where its login lives, because its default harness
+ *   is not registered or its provider no longer declares its kind.
  */
-export const listProviderAccountMachines = (
+export type ProviderAccountReach =
+  | { readonly kind: "shared" }
+  | { readonly kind: "per-machine"; readonly machines: ReadonlyArray<ProviderAccountMachine> }
+  | { readonly kind: "unknown" };
+
+/**
+ * Decides where the account works: see `ProviderAccountReach`. A retired runner
+ * is gone for good, so it holds no sign-in the user could act on and is left
+ * out of `machines`.
+ */
+export const decideProviderAccountReach = (
   account: ProviderAccount,
   runners: ReadonlyArray<Runner>,
   providers: ReadonlyArray<Provider>,
   harnesses: ReadonlyArray<Harness>,
-): ReadonlyArray<ProviderAccountMachine> | null => {
+): ProviderAccountReach => {
   const harness = harnesses.find(({ id }) => id === account.defaultHarnessId);
-  if (harness === undefined || !signsInPerMachine(providers, account)) return null;
+  if (harness === undefined || findProviderAccountKind(providers, account) === undefined) {
+    return { kind: "unknown" };
+  }
+  if (!signsInPerMachine(providers, account)) return { kind: "shared" };
   const harnessName = harness.displayName;
-  return runners
+  const machines = runners
     .filter((runner) => runner.lifecycle !== "retired")
     .map((runner) => {
       const row = buildProviderRows(runner, [account], providers, harnesses)[0];
@@ -100,4 +117,22 @@ export const listProviderAccountMachines = (
         action: signedIn ? null : decideMachineAction(runner, row, harnessName),
       };
     });
+  return { kind: "per-machine", machines };
+};
+
+/**
+ * Returns one entry for each runner that is not retired, in the order of
+ * `runners`, for an account that signs in on each machine
+ * (`signsInPerMachine`). Returns `null` for any other account, whose
+ * credential every machine uses, and for one whose default harness is not
+ * registered (see `decideProviderAccountReach`, which tells these apart).
+ */
+export const listProviderAccountMachines = (
+  account: ProviderAccount,
+  runners: ReadonlyArray<Runner>,
+  providers: ReadonlyArray<Provider>,
+  harnesses: ReadonlyArray<Harness>,
+): ReadonlyArray<ProviderAccountMachine> | null => {
+  const reach = decideProviderAccountReach(account, runners, providers, harnesses);
+  return reach.kind === "per-machine" ? reach.machines : null;
 };
